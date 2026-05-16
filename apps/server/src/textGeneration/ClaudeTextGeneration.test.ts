@@ -1,7 +1,7 @@
-import { ClaudeSettings, ProviderInstanceId } from "@ryco/contracts";
+import { ClaudeSettings, ProviderInstanceId, TextGenerationError } from "@ryco/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { Effect, FileSystem, Layer, Path, Schema } from "effect";
+import { Effect, FileSystem, Layer, Path, Result, Schema } from "effect";
 import { createModelSelection } from "@ryco/shared/model";
 import { expect } from "vitest";
 
@@ -335,5 +335,97 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
           expect(generated.title).toBe("New thread");
         }),
     ),
+  );
+
+  it.effect("generateIssueContent polish mode returns title and body via Claude", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: {
+            title: "Fix session expiry bug",
+            body: "## Steps to reproduce\n- Log in\n- Wait 10 min",
+          },
+        }),
+        stdinMustContain: "rewrite rough notes into a clear GitHub issue",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateIssueContent({
+            cwd: process.cwd(),
+            mode: "polish",
+            rough: "session expires too early after idle",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: "claude-sonnet-4-6",
+            },
+          });
+
+          expect(generated.title).toBe("Fix session expiry bug");
+          expect(generated.body).toBe("## Steps to reproduce\n- Log in\n- Wait 10 min");
+        }),
+    ),
+  );
+
+  it.effect("generateIssueContent title mode returns title only via Claude", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: {
+            title: "Support markdown export",
+          },
+        }),
+        stdinMustContain: "concise GitHub issue titles from an existing body",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateIssueContent({
+            cwd: process.cwd(),
+            mode: "title",
+            body: "Users want to export notes as markdown files.",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: "claude-sonnet-4-6",
+            },
+          });
+
+          expect(generated.title).toBe("Support markdown export");
+          expect(generated.body).toBeUndefined();
+        }),
+    ),
+  );
+
+  it.effect(
+    "generateIssueContent fails with TextGenerationError when Claude exits non-zero",
+    () =>
+      withFakeClaudeEnv(
+        {
+          output: "",
+          exitCode: 1,
+          stderr: "claude issue generation failed",
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const result = yield* textGeneration
+              .generateIssueContent({
+                cwd: process.cwd(),
+                mode: "polish",
+                rough: "some notes",
+                modelSelection: {
+                  instanceId: ProviderInstanceId.make("claudeAgent"),
+                  model: "claude-sonnet-4-6",
+                },
+              })
+              .pipe(Effect.result);
+
+            expect(Result.isFailure(result)).toBe(true);
+            if (Result.isFailure(result)) {
+              expect(result.failure).toBeInstanceOf(TextGenerationError);
+              expect(result.failure.operation).toBe("generateIssueContent");
+              expect(result.failure.message).toContain(
+                "Claude CLI command failed: claude issue generation failed",
+              );
+            }
+          }),
+      ),
   );
 });

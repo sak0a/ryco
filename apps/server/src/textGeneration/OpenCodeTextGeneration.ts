@@ -15,6 +15,8 @@ import { resolveAttachmentPath } from "../attachmentStore.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
+  buildIssueContentPolishPrompt,
+  buildIssueContentTitlePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
@@ -156,7 +158,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateIssueContent";
   }) =>
     sharedServerMutex.withPermit(
       Effect.gen(function* () {
@@ -266,7 +269,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateIssueContent";
     readonly cwd: string;
     readonly prompt: string;
     readonly outputSchemaJson: S;
@@ -468,12 +472,42 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     };
   });
 
+  const generateIssueContent: TextGenerationShape["generateIssueContent"] = Effect.fn(
+    "OpenCodeTextGeneration.generateIssueContent",
+  )(function* (input) {
+    if (input.mode === "polish") {
+      const { prompt, outputSchema } = buildIssueContentPolishPrompt({
+        rough: input.rough ?? "",
+        ...(input.currentTitle ? { currentTitle: input.currentTitle } : {}),
+      });
+      const decoded = yield* runOpenCodeJson({
+        operation: "generateIssueContent",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      return { title: decoded.title, body: decoded.body };
+    } else {
+      const { prompt, outputSchema } = buildIssueContentTitlePrompt({
+        body: input.body ?? "",
+      });
+      const decoded = yield* runOpenCodeJson({
+        operation: "generateIssueContent",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      return { title: decoded.title };
+    }
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
-    generateIssueContent: () =>
-      Effect.die("generateIssueContent not yet implemented for OpenCode provider"),
+    generateIssueContent,
   } satisfies TextGenerationShape;
 });

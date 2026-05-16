@@ -589,4 +589,76 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         }),
     ),
   );
+
+  it.effect("generateIssueContent polish mode returns title and body", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ title: "Fix login timeout", body: "## Steps\n- log in\n- wait" }),
+        stdinMustContain: "rewrite rough notes into a clear GitHub issue",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateIssueContent({
+            cwd: process.cwd(),
+            mode: "polish",
+            rough: "login times out after 5 minutes of idle",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+
+          expect(generated.title).toBe("Fix login timeout");
+          expect(generated.body).toBe("## Steps\n- log in\n- wait");
+        }),
+    ),
+  );
+
+  it.effect("generateIssueContent title mode returns title only", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ title: "Add dark mode support" }),
+        stdinMustContain: "concise GitHub issue titles from an existing body",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateIssueContent({
+            cwd: process.cwd(),
+            mode: "title",
+            body: "## Summary\nUsers want a dark mode toggle in settings.",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+
+          expect(generated.title).toBe("Add dark mode support");
+          expect(generated.body).toBeUndefined();
+        }),
+    ),
+  );
+
+  it.effect("generateIssueContent fails with TextGenerationError when codex exits non-zero", () =>
+    withFakeCodexEnv(
+      {
+        output: "",
+        exitCode: 1,
+        stderr: "codex issue generation failed",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration
+            .generateIssueContent({
+              cwd: process.cwd(),
+              mode: "polish",
+              rough: "some rough notes",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.result);
+
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isFailure(result)) {
+            expect(result.failure).toBeInstanceOf(TextGenerationError);
+            expect(result.failure.operation).toBe("generateIssueContent");
+            expect(result.failure.message).toContain(
+              "Codex CLI command failed: codex issue generation failed",
+            );
+          }
+        }),
+    ),
+  );
 });

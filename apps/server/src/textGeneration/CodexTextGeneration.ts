@@ -16,6 +16,8 @@ import {
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
+  buildIssueContentPolishPrompt,
+  buildIssueContentTitlePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
@@ -97,7 +99,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateIssueContent",
     attachments: BranchNameGenerationInput["attachments"],
   ): Effect.fn.Return<MaterializedImageAttachments, TextGenerationError> {
     if (!attachments || attachments.length === 0) {
@@ -141,7 +144,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateIssueContent";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -379,13 +383,36 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     } satisfies ThreadTitleGenerationResult;
   });
 
-  const generateIssueContent: TextGenerationShape["generateIssueContent"] = () =>
-    Effect.fail(
-      new TextGenerationError({
+  const generateIssueContent: TextGenerationShape["generateIssueContent"] = Effect.fn(
+    "CodexTextGeneration.generateIssueContent",
+  )(function* (input) {
+    if (input.mode === "polish") {
+      const { prompt, outputSchema } = buildIssueContentPolishPrompt({
+        rough: input.rough ?? "",
+        ...(input.currentTitle ? { currentTitle: input.currentTitle } : {}),
+      });
+      const decoded = yield* runCodexJson({
         operation: "generateIssueContent",
-        detail: "Not implemented (Task 6)",
-      }),
-    );
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      return { title: decoded.title, body: decoded.body };
+    } else {
+      const { prompt, outputSchema } = buildIssueContentTitlePrompt({
+        body: input.body ?? "",
+      });
+      const decoded = yield* runCodexJson({
+        operation: "generateIssueContent",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      return { title: decoded.title };
+    }
+  });
 
   return {
     generateCommitMessage,

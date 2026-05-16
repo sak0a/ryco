@@ -5,11 +5,11 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Result, Schema } from "effect";
 import { createModelSelection } from "@ryco/shared/model";
 import { expect } from "vitest";
 
-import { CursorSettings, ProviderInstanceId } from "@ryco/contracts";
+import { CursorSettings, ProviderInstanceId, TextGenerationError } from "@ryco/contracts";
 
 import { ServerConfig } from "../config.ts";
 import { type TextGenerationShape } from "./TextGeneration.ts";
@@ -224,6 +224,87 @@ it.layer(CursorTextGenerationTestLayer)("CursorTextGeneration", (it) => {
           expect(generated.title).toBe("Trim reconnect spinner status after resume.");
         }),
     ),
+  );
+
+  it.effect("generateIssueContent polish mode returns title and body via Cursor ACP", () =>
+    withFakeAcpAgent(
+      {
+        S3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+          title: "Fix null pointer in parser",
+          body: "## Steps to reproduce\n- Parse an empty file",
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateIssueContent({
+            cwd: process.cwd(),
+            mode: "polish",
+            rough: "null pointer when parsing empty file",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("cursor"),
+              model: "composer-2",
+            },
+          });
+
+          expect(generated.title).toBe("Fix null pointer in parser");
+          expect(generated.body).toBe("## Steps to reproduce\n- Parse an empty file");
+        }),
+    ),
+  );
+
+  it.effect("generateIssueContent title mode returns title only via Cursor ACP", () =>
+    withFakeAcpAgent(
+      {
+        S3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+          title: "Add keyboard shortcut for search",
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateIssueContent({
+            cwd: process.cwd(),
+            mode: "title",
+            body: "Users want a keyboard shortcut to open the search panel.",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("cursor"),
+              model: "composer-2",
+            },
+          });
+
+          expect(generated.title).toBe("Add keyboard shortcut for search");
+          expect(generated.body).toBeUndefined();
+        }),
+    ),
+  );
+
+  it.effect(
+    "generateIssueContent fails with TextGenerationError when Cursor returns invalid JSON",
+    () =>
+      withFakeAcpAgent(
+        {
+          S3_ACP_PROMPT_RESPONSE_TEXT: "not valid json at all",
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const result = yield* textGeneration
+              .generateIssueContent({
+                cwd: process.cwd(),
+                mode: "polish",
+                rough: "some rough notes",
+                modelSelection: {
+                  instanceId: ProviderInstanceId.make("cursor"),
+                  model: "composer-2",
+                },
+              })
+              .pipe(Effect.result);
+
+            expect(Result.isFailure(result)).toBe(true);
+            if (Result.isFailure(result)) {
+              expect(result.failure).toBeInstanceOf(TextGenerationError);
+              expect(result.failure.operation).toBe("generateIssueContent");
+            }
+          }),
+      ),
   );
 
   it.effect("closes the ACP child process after text generation completes", () => {
