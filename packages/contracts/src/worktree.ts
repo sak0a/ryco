@@ -35,7 +35,11 @@ export type Worktree = typeof Worktree.Type;
 export const CreateWorktreeIntent = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("branch"), branchName: TrimmedNonEmptyString }),
   Schema.Struct({ kind: Schema.Literal("pr"), number: Schema.Number }),
-  Schema.Struct({ kind: Schema.Literal("issue"), number: Schema.Number }),
+  Schema.Struct({
+    kind: Schema.Literal("issue"),
+    number: Schema.Number,
+    branchName: Schema.optional(TrimmedNonEmptyString),
+  }),
   Schema.Struct({
     kind: Schema.Literal("newBranch"),
     branchName: Schema.optional(TrimmedNonEmptyString),
