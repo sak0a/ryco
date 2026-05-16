@@ -269,6 +269,31 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
       github
         .getPullRequestDiff({ cwd: input.cwd, reference: input.reference })
         .pipe(Effect.mapError((error) => providerError("getChangeRequestDiff", error))),
+    // TODO Task 8: replace these stubs with real implementations
+    createIssue: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "github",
+          operation: "createIssue",
+          detail: "Not implemented (Task 8)",
+        }),
+      ),
+    listLabels: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "github",
+          operation: "listLabels",
+          detail: "Not implemented (Task 8)",
+        }),
+      ),
+    listAssignees: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "github",
+          operation: "listAssignees",
+          detail: "Not implemented (Task 8)",
+        }),
+      ),
   });
 });
 

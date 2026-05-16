@@ -1,4 +1,4 @@
-import { assert, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { DateTime, Effect, Layer, Option } from "effect";
 import { SOURCE_CONTROL_DETAIL_BODY_MAX_BYTES } from "@ryco/contracts";
 
@@ -215,3 +215,32 @@ it.effect("getChangeRequestDetail returns body and comments", () =>
     assert.strictEqual(detail.truncated, false);
   }),
 );
+
+describe("GitLabSourceControlProvider stubs (Phase 1 of issue creation)", () => {
+  it.effect("createIssue fails with 'Not implemented' SourceControlProviderError", () =>
+    Effect.gen(function* () {
+      const provider = yield* makeProvider({});
+      const result = yield* provider
+        .createIssue({ cwd: "/repo", title: "x", body: "" })
+        .pipe(Effect.flip);
+      assert.strictEqual(result.operation, "createIssue");
+      assert.include(result.detail, "Not implemented");
+    }),
+  );
+
+  it.effect("listLabels fails with 'Not implemented'", () =>
+    Effect.gen(function* () {
+      const provider = yield* makeProvider({});
+      const result = yield* provider.listLabels({ cwd: "/repo" }).pipe(Effect.flip);
+      assert.include(result.detail, "Not implemented");
+    }),
+  );
+
+  it.effect("listAssignees fails with 'Not implemented'", () =>
+    Effect.gen(function* () {
+      const provider = yield* makeProvider({});
+      const result = yield* provider.listAssignees({ cwd: "/repo" }).pipe(Effect.flip);
+      assert.include(result.detail, "Not implemented");
+    }),
+  );
+});

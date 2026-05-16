@@ -200,6 +200,30 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
         Effect.mapError((error) => providerError("getChangeRequestDetail", error)),
       ),
     getChangeRequestDiff: (_input) => Effect.succeed(""),
+    createIssue: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "gitlab",
+          operation: "createIssue",
+          detail: "Not implemented in Phase 1",
+        }),
+      ),
+    listLabels: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "gitlab",
+          operation: "listLabels",
+          detail: "Not implemented in Phase 1",
+        }),
+      ),
+    listAssignees: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "gitlab",
+          operation: "listAssignees",
+          detail: "Not implemented in Phase 1",
+        }),
+      ),
   });
 });
 

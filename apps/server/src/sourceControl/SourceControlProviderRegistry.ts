@@ -86,6 +86,9 @@ function unsupportedProvider(
     searchChangeRequests: () => unsupported("searchChangeRequests"),
     getChangeRequestDetail: () => unsupported("getChangeRequestDetail"),
     getChangeRequestDiff: () => unsupported("getChangeRequestDiff"),
+    createIssue: () => unsupported("createIssue"),
+    listLabels: () => unsupported("listLabels"),
+    listAssignees: () => unsupported("listAssignees"),
   });
 }
 
@@ -138,6 +141,12 @@ const makeLazyProvider = Effect.fn("makeLazySourceControlProvider")(function* (
       provider.pipe(Effect.flatMap((loaded) => loaded.getChangeRequestDetail(input))),
     getChangeRequestDiff: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.getChangeRequestDiff(input))),
+    createIssue: (input) =>
+      provider.pipe(Effect.flatMap((loaded) => loaded.createIssue(input))),
+    listLabels: (input) =>
+      provider.pipe(Effect.flatMap((loaded) => loaded.listLabels(input))),
+    listAssignees: (input) =>
+      provider.pipe(Effect.flatMap((loaded) => loaded.listAssignees(input))),
   });
 });
 
@@ -237,6 +246,21 @@ function bindProviderContext(
       }),
     getChangeRequestDiff: (input) =>
       provider.getChangeRequestDiff({
+        ...input,
+        context: input.context ?? context,
+      }),
+    createIssue: (input) =>
+      provider.createIssue({
+        ...input,
+        context: input.context ?? context,
+      }),
+    listLabels: (input) =>
+      provider.listLabels({
+        ...input,
+        context: input.context ?? context,
+      }),
+    listAssignees: (input) =>
+      provider.listAssignees({
         ...input,
         context: input.context ?? context,
       }),

@@ -2,9 +2,11 @@ import { Context, Effect } from "effect";
 import type {
   ChangeRequest,
   ChangeRequestState,
+  SourceControlAssigneeCandidate,
   SourceControlChangeRequestDetail,
   SourceControlIssueDetail,
   SourceControlIssueSummary,
+  SourceControlLabel,
   SourceControlProviderError,
   SourceControlProviderInfo,
   SourceControlProviderKind,
@@ -131,6 +133,22 @@ export interface SourceControlProviderShape {
     readonly context?: SourceControlProviderContext;
     readonly reference: string;
   }) => Effect.Effect<string, SourceControlProviderError>;
+  readonly createIssue: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
+    readonly title: string;
+    readonly body: string;
+    readonly labels?: ReadonlyArray<string>;
+    readonly assignees?: ReadonlyArray<string>;
+  }) => Effect.Effect<SourceControlIssueSummary, SourceControlProviderError>;
+  readonly listLabels: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
+  }) => Effect.Effect<ReadonlyArray<SourceControlLabel>, SourceControlProviderError>;
+  readonly listAssignees: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
+  }) => Effect.Effect<ReadonlyArray<SourceControlAssigneeCandidate>, SourceControlProviderError>;
 }
 
 export class SourceControlProvider extends Context.Service<
