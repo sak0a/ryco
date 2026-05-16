@@ -78,7 +78,7 @@ export interface IssueContentGenerationInput {
 }
 
 export interface IssueContentGenerationResult {
-  title?: string;
+  title: string;
   body?: string;
 }
 

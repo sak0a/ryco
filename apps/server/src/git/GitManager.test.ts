@@ -105,7 +105,7 @@ interface FakeGitTextGeneration {
     body?: string;
     currentTitle?: string;
     modelSelection: ModelSelection;
-  }) => Effect.Effect<{ title?: string; body?: string }, TextGenerationError>;
+  }) => Effect.Effect<{ title: string; body?: string }, TextGenerationError>;
 }
 
 type FakePullRequest = NonNullable<FakeGhScenario["pullRequest"]>;
