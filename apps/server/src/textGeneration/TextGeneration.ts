@@ -68,6 +68,20 @@ export interface ThreadTitleGenerationResult {
   title: string;
 }
 
+export interface IssueContentGenerationInput {
+  cwd: string;
+  mode: "polish" | "title";
+  rough?: string;
+  body?: string;
+  currentTitle?: string;
+  modelSelection: ModelSelection;
+}
+
+export interface IssueContentGenerationResult {
+  title?: string;
+  body?: string;
+}
+
 export interface TextGenerationService {
   generateCommitMessage(
     input: CommitMessageGenerationInput,
@@ -75,6 +89,7 @@ export interface TextGenerationService {
   generatePrContent(input: PrContentGenerationInput): Promise<PrContentGenerationResult>;
   generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
   generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
+  generateIssueContent(input: IssueContentGenerationInput): Promise<IssueContentGenerationResult>;
 }
 
 /**
@@ -108,6 +123,13 @@ export interface TextGenerationShape {
   readonly generateThreadTitle: (
     input: ThreadTitleGenerationInput,
   ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+  /**
+   * Generate or polish issue title/body content.
+   */
+  readonly generateIssueContent: (
+    input: IssueContentGenerationInput,
+  ) => Effect.Effect<IssueContentGenerationResult, TextGenerationError>;
 }
 
 /**
@@ -121,7 +143,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "generateIssueContent";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistryShape,
@@ -159,6 +182,10 @@ export const makeTextGenerationFromRegistry = (
   generateThreadTitle: (input) =>
     resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
       Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+    ),
+  generateIssueContent: (input) =>
+    resolveInstance(registry, "generateIssueContent", input.modelSelection.instanceId).pipe(
+      Effect.flatMap((textGeneration) => textGeneration.generateIssueContent(input)),
     ),
 });
 

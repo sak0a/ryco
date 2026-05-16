@@ -473,5 +473,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateIssueContent: () =>
+      Effect.die("generateIssueContent not yet implemented for OpenCode provider"),
   } satisfies TextGenerationShape;
 });

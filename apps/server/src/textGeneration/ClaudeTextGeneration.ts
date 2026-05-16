@@ -315,10 +315,19 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     };
   });
 
+  const generateIssueContent: TextGenerationShape["generateIssueContent"] = () =>
+    Effect.fail(
+      new TextGenerationError({
+        operation: "generateIssueContent",
+        detail: "Not implemented (Task 6)",
+      }),
+    );
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateIssueContent,
   } satisfies TextGenerationShape;
 });

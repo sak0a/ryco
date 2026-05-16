@@ -4,6 +4,7 @@ import { describe, expect } from "vitest";
 
 import { ProviderInstanceId } from "@ryco/contracts";
 import { createModelSelection } from "@ryco/shared/model";
+import type { IssueContentGenerationResult } from "./TextGeneration.ts";
 
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import type { ProviderInstanceRegistryShape } from "../provider/Services/ProviderInstanceRegistry.ts";
@@ -17,6 +18,7 @@ const makeStubTextGeneration = (overrides: Partial<TextGenerationShape>): TextGe
   generatePrContent: () => Effect.die("generatePrContent stub not configured for this test"),
   generateBranchName: () => Effect.die("generateBranchName stub not configured for this test"),
   generateThreadTitle: () => Effect.die("generateThreadTitle stub not configured for this test"),
+  generateIssueContent: () => Effect.die("generateIssueContent stub not configured for this test"),
   ...overrides,
 });
 
@@ -113,5 +115,106 @@ describe("makeTextGenerationFromRegistry", () => {
         expect(result.failure.detail).toContain("missing_instance");
       }
     }),
+  );
+
+  it.effect(
+    "generateIssueContent: delegates to the matching instance's textGeneration closure",
+    () =>
+      Effect.gen(function* () {
+        const personalId = ProviderInstanceId.make("codex_personal");
+        const personalCalls: string[] = [];
+        const polishResult: IssueContentGenerationResult = {
+          title: "Polish: Implement stacked git actions",
+          body: "Polished body content",
+        };
+        const personal = makeStubInstance(
+          personalId,
+          makeStubTextGeneration({
+            generateIssueContent: (input) => {
+              personalCalls.push(input.mode);
+              return Effect.succeed(polishResult);
+            },
+          }),
+        );
+
+        const workId = ProviderInstanceId.make("codex_work");
+        const work = makeStubInstance(
+          workId,
+          makeStubTextGeneration({
+            generateIssueContent: () => Effect.succeed({ title: "work title" }),
+          }),
+        );
+
+        const tg = makeTextGenerationFromRegistry(makeStubRegistry([personal, work]));
+
+        const result = yield* tg.generateIssueContent({
+          cwd: process.cwd(),
+          mode: "polish",
+          rough: "Implement stacked git actions",
+          modelSelection: createModelSelection(ProviderInstanceId.make("codex_personal"), "gpt-5"),
+        });
+
+        expect(result.title).toBe(polishResult.title);
+        expect(result.body).toBe(polishResult.body);
+        expect(personalCalls).toEqual(["polish"]);
+      }),
+  );
+
+  it.effect(
+    "generateIssueContent: title mode returns only title from provider",
+    () =>
+      Effect.gen(function* () {
+        const instanceId = ProviderInstanceId.make("codex_personal");
+        const titleResult: IssueContentGenerationResult = { title: "Generated Title" };
+        const instance = makeStubInstance(
+          instanceId,
+          makeStubTextGeneration({
+            generateIssueContent: (input) => {
+              if (input.mode === "title") {
+                return Effect.succeed(titleResult);
+              }
+              return Effect.succeed({ title: "unexpected", body: "unexpected" });
+            },
+          }),
+        );
+
+        const tg = makeTextGenerationFromRegistry(makeStubRegistry([instance]));
+
+        const result = yield* tg.generateIssueContent({
+          cwd: process.cwd(),
+          mode: "title",
+          currentTitle: "old title",
+          modelSelection: createModelSelection(instanceId, "gpt-5"),
+        });
+
+        expect(result.title).toBe("Generated Title");
+        expect(result.body).toBeUndefined();
+      }),
+  );
+
+  it.effect(
+    "generateIssueContent: fails with TextGenerationError when the instance is unknown",
+    () =>
+      Effect.gen(function* () {
+        const tg = makeTextGenerationFromRegistry(makeStubRegistry([]));
+
+        const result = yield* tg
+          .generateIssueContent({
+            cwd: process.cwd(),
+            mode: "polish",
+            modelSelection: createModelSelection(
+              ProviderInstanceId.make("missing_instance"),
+              "gpt-5",
+            ),
+          })
+          .pipe(Effect.result);
+
+        expect(Result.isFailure(result)).toBe(true);
+        if (Result.isFailure(result)) {
+          expect(result.failure._tag).toBe("TextGenerationError");
+          expect(result.failure.operation).toBe("generateIssueContent");
+          expect(result.failure.detail).toContain("missing_instance");
+        }
+      }),
   );
 });
