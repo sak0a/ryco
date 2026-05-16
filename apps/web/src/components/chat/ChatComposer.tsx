@@ -61,7 +61,7 @@ import {
   issueListQueryOptions,
   changeRequestListQueryOptions,
 } from "../../lib/sourceControlContextRpc";
-import { searchSourceControlSummaries } from "./composerSourceControlContextSearch";
+import { buildScopedSourceControlComposerItems } from "./composerSourceControlItems";
 import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
 import { ContextPickerButton } from "./ContextPickerButton";
 import {
@@ -1076,35 +1076,12 @@ export const ChatComposer = memo(
         }));
       }
       if (composerTrigger.kind === "source-control") {
-        const query = composerTrigger.query;
-        const issues = issueListQuery.data ?? [];
-        const prs = changeRequestListQuery.data ?? [];
-        const filteredIssues = searchSourceControlSummaries(issues, query);
-        // ChangeRequest has number/title but is a different type; filter manually
-        const q = query.trim().toLowerCase();
-        const filteredPrs =
-          q.length === 0
-            ? prs
-            : prs.filter((pr) => {
-                const num = String(pr.number);
-                const title = pr.title.toLowerCase();
-                return num === q || num.startsWith(q) || title.includes(q);
-              });
-        const issueItems: ComposerCommandItem[] = filteredIssues.map((issue) => ({
-          id: `source-control-issue:${issue.provider}:${issue.number}`,
-          type: "source-control-issue" as const,
-          summary: issue,
-          label: `#${issue.number}`,
-          description: issue.title,
-        }));
-        const prItems: ComposerCommandItem[] = filteredPrs.map((pr) => ({
-          id: `source-control-pr:${pr.provider}:${pr.number}`,
-          type: "source-control-pr" as const,
-          summary: pr,
-          label: `#${pr.number}`,
-          description: pr.title,
-        }));
-        return [...issueItems, ...prItems];
+        return [
+          ...buildScopedSourceControlComposerItems(composerTrigger.query, {
+            issues: issueListQuery.data ?? [],
+            prs: changeRequestListQuery.data ?? [],
+          }),
+        ];
       }
       return [];
     }, [
