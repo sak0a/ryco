@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
+  buildIssueContentPolishPrompt,
+  buildIssueContentTitlePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
@@ -189,5 +191,48 @@ describe("normalizeCliError", () => {
 
     expect(result).toBeInstanceOf(TextGenerationError);
     expect(result.detail).toBe("fallback");
+  });
+});
+
+describe("buildIssueContentPolishPrompt", () => {
+  it("requests a JSON object with title and body", () => {
+    const { prompt, outputSchema } = buildIssueContentPolishPrompt({
+      rough: "login broken on safari 17",
+    });
+    expect(prompt).toContain('"title"');
+    expect(prompt).toContain('"body"');
+    expect(prompt).toContain("login broken on safari 17");
+    expect(outputSchema).toBeDefined();
+  });
+
+  it("includes currentTitle context when provided", () => {
+    const { prompt } = buildIssueContentPolishPrompt({
+      rough: "details",
+      currentTitle: "Existing title",
+    });
+    expect(prompt).toContain("Existing title");
+  });
+
+  it("injects issueInstructions when policy is given", () => {
+    const { prompt } = buildIssueContentPolishPrompt({
+      rough: "details",
+      policy: {
+        kind: "custom",
+        inferRepositoryConventions: false,
+        issueInstructions: "Always use British English.",
+      },
+    });
+    expect(prompt).toContain("British English");
+  });
+});
+
+describe("buildIssueContentTitlePrompt", () => {
+  it("requests a JSON object with title only, derived from body", () => {
+    const { prompt } = buildIssueContentTitlePrompt({
+      body: "Safari 17 CORS error on /api/auth/session",
+    });
+    expect(prompt).toContain('"title"');
+    expect(prompt).toContain("Safari 17 CORS error");
+    expect(prompt).toContain("72");
   });
 });
