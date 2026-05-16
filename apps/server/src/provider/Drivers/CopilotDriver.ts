@@ -19,6 +19,7 @@ import {
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("copilot");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
@@ -81,7 +82,13 @@ export const CopilotDriver: ProviderDriver<CopilotSettings, CopilotDriverEnv> = 
         Effect.map(stampIdentity),
       );
 
+      const maintenanceCapabilities = makeManualOnlyProviderMaintenanceCapabilities({
+        provider: DRIVER_KIND,
+        packageName: null,
+      });
+
       const snapshot = yield* makeManagedServerProvider<CopilotSettings>({
+        maintenanceCapabilities,
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,

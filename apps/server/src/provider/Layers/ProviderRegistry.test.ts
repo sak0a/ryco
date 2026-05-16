@@ -847,6 +847,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             displayName: undefined,
             enabled: true,
             snapshot: {
+              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
+                provider: codexDriver,
+                packageName: null,
+              }),
               getSnapshot: Effect.succeed(initialProvider),
               refresh: Deferred.await(releaseRefresh).pipe(Effect.as(refreshedProvider)),
               streamChanges: Stream.empty,

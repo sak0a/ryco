@@ -1246,7 +1246,7 @@ describe("GeneralSettingsPanel observability", () => {
 
     mounted = await render(
       <AppAtomRegistryProvider>
-        <ProviderSettingsPanel />
+        <ProvidersSettingsPanel />
       </AppAtomRegistryProvider>,
     );
 
