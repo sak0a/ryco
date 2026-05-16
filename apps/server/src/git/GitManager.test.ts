@@ -627,6 +627,12 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
         Effect.fail(new GitHubCliError({ operation: "getPullRequestDetail", detail: "stub" })),
       getPullRequestDiff: () =>
         Effect.fail(new GitHubCliError({ operation: "getPullRequestDiff", detail: "stub" })),
+      createIssue: () =>
+        Effect.fail(new GitHubCliError({ operation: "createIssue", detail: "stub" })),
+      listLabels: () =>
+        Effect.fail(new GitHubCliError({ operation: "listLabels", detail: "stub" })),
+      listAssignees: () =>
+        Effect.fail(new GitHubCliError({ operation: "listAssignees", detail: "stub" })),
     },
     ghCalls,
   };

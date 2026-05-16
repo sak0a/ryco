@@ -1,3 +1,4 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { DateTime, Effect, Layer, Option } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -18,6 +19,7 @@ const processResult = (stdout: string): VcsProcess.VcsProcessOutput => ({
 function makeProvider(github: Partial<GitHubCli.GitHubCliShape>) {
   return GitHubSourceControlProvider.make().pipe(
     Effect.provide(Layer.mock(GitHubCli.GitHubCli)(github)),
+    Effect.provide(NodeServices.layer),
   );
 }
 
@@ -289,5 +291,162 @@ it.effect("getChangeRequestDetail returns body and comments", () =>
     assert.strictEqual(detail.comments[0]?.author, "reviewer");
     assert.strictEqual(detail.comments[0]?.body, "Looks good!");
     assert.strictEqual(detail.truncated, false);
+  }),
+);
+
+it.effect("createIssue writes body to temp file and returns issue summary", () =>
+  Effect.gen(function* () {
+    let capturedCwd: string | null = null;
+    let capturedTitle: string | null = null;
+    let capturedBodyFile: string | null = null;
+    let capturedLabels: ReadonlyArray<string> | null = null;
+    let capturedAssignees: ReadonlyArray<string> | null = null;
+    let capturedGetIssueRef: string | null = null;
+
+    const provider = yield* makeProvider({
+      createIssue: (input) => {
+        capturedCwd = input.cwd;
+        capturedTitle = input.title;
+        capturedBodyFile = input.bodyFile;
+        capturedLabels = input.labels ?? null;
+        capturedAssignees = input.assignees ?? null;
+        return Effect.succeed({ url: "https://github.com/owner/repo/issues/55", number: 55 });
+      },
+      getIssue: (input) => {
+        capturedGetIssueRef = input.reference;
+        return Effect.succeed({
+          number: 55,
+          title: "New bug",
+          url: "https://github.com/owner/repo/issues/55",
+          state: "open" as const,
+          author: "carol",
+          updatedAt: Option.none(),
+          labels: [{ name: "bug" }],
+          assignees: ["dave"],
+          commentsCount: 0,
+          body: "Bug description",
+          comments: [],
+        });
+      },
+    });
+
+    const summary = yield* provider.createIssue({
+      cwd: "/repo",
+      title: "New bug",
+      body: "Bug description",
+      labels: ["bug"],
+      assignees: ["dave"],
+    });
+
+    assert.strictEqual(capturedCwd, "/repo");
+    assert.strictEqual(capturedTitle, "New bug");
+    assert.ok(capturedBodyFile !== null && capturedBodyFile !== "");
+    assert.deepStrictEqual(capturedLabels, ["bug"]);
+    assert.deepStrictEqual(capturedAssignees, ["dave"]);
+    assert.strictEqual(capturedGetIssueRef, "55");
+    assert.strictEqual(summary.provider, "github");
+    assert.strictEqual(summary.number, 55);
+    assert.strictEqual(summary.title, "New bug");
+  }),
+);
+
+it.effect("createIssue maps GitHubCliError to SourceControlProviderError", () =>
+  Effect.gen(function* () {
+    const provider = yield* makeProvider({
+      createIssue: () =>
+        Effect.fail(
+          new GitHubCli.GitHubCliError({
+            operation: "createIssue",
+            detail: "gh: unauthorized",
+          }),
+        ),
+    });
+
+    const result = yield* provider
+      .createIssue({ cwd: "/repo", title: "Bug", body: "desc" })
+      .pipe(Effect.flip);
+
+    assert.strictEqual(result.operation, "createIssue");
+    assert.strictEqual(result.provider, "github");
+    assert.ok(result.detail.includes("gh: unauthorized"));
+  }),
+);
+
+it.effect("listLabels returns labels from cli", () =>
+  Effect.gen(function* () {
+    const provider = yield* makeProvider({
+      listLabels: () =>
+        Effect.succeed([
+          { name: "bug", color: "d73a4a" },
+          { name: "enhancement", color: "a2eeef", description: "New feature" },
+        ]),
+    });
+
+    const labels = yield* provider.listLabels({ cwd: "/repo" });
+
+    assert.strictEqual(labels.length, 2);
+    assert.strictEqual(labels[0]?.name, "bug");
+    assert.strictEqual(labels[0]?.color, "d73a4a");
+    assert.strictEqual(labels[1]?.name, "enhancement");
+    assert.strictEqual(labels[1]?.description, "New feature");
+  }),
+);
+
+it.effect("listLabels maps GitHubCliError to SourceControlProviderError", () =>
+  Effect.gen(function* () {
+    const provider = yield* makeProvider({
+      listLabels: () =>
+        Effect.fail(
+          new GitHubCli.GitHubCliError({
+            operation: "listLabels",
+            detail: "network error",
+          }),
+        ),
+    });
+
+    const result = yield* provider.listLabels({ cwd: "/repo" }).pipe(Effect.flip);
+
+    assert.strictEqual(result.operation, "listLabels");
+    assert.strictEqual(result.provider, "github");
+  }),
+);
+
+it.effect("listAssignees returns candidates from cli", () =>
+  Effect.gen(function* () {
+    const provider = yield* makeProvider({
+      listAssignees: () =>
+        Effect.succeed([
+          { login: "alice", name: "Alice Smith", avatarUrl: "https://example.com/alice.png" },
+          { login: "bob" },
+        ]),
+    });
+
+    const assignees = yield* provider.listAssignees({ cwd: "/repo" });
+
+    assert.strictEqual(assignees.length, 2);
+    assert.strictEqual(assignees[0]?.login, "alice");
+    assert.strictEqual(assignees[0]?.displayName, "Alice Smith");
+    assert.strictEqual(assignees[0]?.avatarUrl, "https://example.com/alice.png");
+    assert.strictEqual(assignees[1]?.login, "bob");
+    assert.strictEqual(assignees[1]?.displayName, undefined);
+  }),
+);
+
+it.effect("listAssignees maps GitHubCliError to SourceControlProviderError", () =>
+  Effect.gen(function* () {
+    const provider = yield* makeProvider({
+      listAssignees: () =>
+        Effect.fail(
+          new GitHubCli.GitHubCliError({
+            operation: "listAssignees",
+            detail: "api rate limit",
+          }),
+        ),
+    });
+
+    const result = yield* provider.listAssignees({ cwd: "/repo" }).pipe(Effect.flip);
+
+    assert.strictEqual(result.operation, "listAssignees");
+    assert.strictEqual(result.provider, "github");
   }),
 );

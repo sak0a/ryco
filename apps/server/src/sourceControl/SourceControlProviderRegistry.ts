@@ -1,4 +1,4 @@
-import { Cache, Context, Duration, Effect, Exit, Layer } from "effect";
+import { Cache, Context, Duration, Effect, Exit, FileSystem, Layer } from "effect";
 import {
   SourceControlProviderError,
   type SourceControlProviderDiscoveryItem,
@@ -363,6 +363,7 @@ export const make = Effect.fn("makeSourceControlProviderRegistry")(function* () 
   const bitbucketApi = yield* BitbucketApi.BitbucketApi;
   const forgejoApi = yield* ForgejoApi.ForgejoApi;
   const azureDevOpsCli = yield* AzureDevOpsCli.AzureDevOpsCli;
+  const fileSystem = yield* FileSystem.FileSystem;
 
   const github = yield* makeLazyProvider(
     "github",
@@ -372,6 +373,7 @@ export const make = Effect.fn("makeSourceControlProviderRegistry")(function* () 
     }).pipe(
       Effect.flatMap((module) => module.make()),
       Effect.provideService(GitHubCli.GitHubCli, githubCli),
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
     ),
   );
 
