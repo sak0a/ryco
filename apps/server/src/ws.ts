@@ -985,7 +985,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             }
             case "issue": {
               const number = input.intent.number ?? 0;
-              branch = `issue/${number}-${randomShortId(6)}`;
+              branch = input.intent.branchName ?? `issue/${number}-${randomShortId(6)}`;
               refName = "HEAD";
               newRefName = branch;
               title = `Issue #${number}`;
