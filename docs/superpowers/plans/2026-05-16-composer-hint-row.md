@@ -14,24 +14,25 @@
 
 ## File Structure
 
-| File | Op | Purpose |
-| --- | --- | --- |
-| `apps/web/src/components/chat/composerSourceControlContextSearch.ts` | modify | Add `scopeSourceControlQuery` pure helper. |
-| `apps/web/src/components/chat/composerSourceControlContextSearch.test.ts` | modify | Add table-driven tests for `scopeSourceControlQuery`. |
-| `apps/web/src/components/chat/composerSourceControlItems.ts` | create | New: `buildScopedSourceControlComposerItems` — turns query + lists into `ComposerCommandItem[]`, applying scope. |
-| `apps/web/src/components/chat/composerSourceControlItems.test.ts` | create | New: tests covering each scope path. |
-| `apps/web/src/components/chat/ChatComposer.tsx` | modify | Replace inline source-control filter with `buildScopedSourceControlComposerItems`. Add `insertTriggerAtCursor` to the handle. |
-| `apps/web/src/components/chat/ComposerHintRow.tsx` | create | New: the pill row component. |
-| `apps/web/src/components/chat/ComposerHintRow.test.tsx` | create | New: markup tests for conditional pill rendering. |
-| `apps/web/src/components/chat/ComposerHintRow.logic.ts` | create | New: pure `resolveHintRowPills` returning which pills should render given the flags. Easy to unit-test. |
-| `apps/web/src/components/chat/ComposerHintRow.logic.test.ts` | create | New: tests for `resolveHintRowPills`. |
-| `apps/web/src/components/ChatView.tsx` | modify | Mount `ComposerHintRow` between `ComposerBannerStack` and `ChatComposer`. |
+| File                                                                      | Op     | Purpose                                                                                                                       |
+| ------------------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/components/chat/composerSourceControlContextSearch.ts`      | modify | Add `scopeSourceControlQuery` pure helper.                                                                                    |
+| `apps/web/src/components/chat/composerSourceControlContextSearch.test.ts` | modify | Add table-driven tests for `scopeSourceControlQuery`.                                                                         |
+| `apps/web/src/components/chat/composerSourceControlItems.ts`              | create | New: `buildScopedSourceControlComposerItems` — turns query + lists into `ComposerCommandItem[]`, applying scope.              |
+| `apps/web/src/components/chat/composerSourceControlItems.test.ts`         | create | New: tests covering each scope path.                                                                                          |
+| `apps/web/src/components/chat/ChatComposer.tsx`                           | modify | Replace inline source-control filter with `buildScopedSourceControlComposerItems`. Add `insertTriggerAtCursor` to the handle. |
+| `apps/web/src/components/chat/ComposerHintRow.tsx`                        | create | New: the pill row component.                                                                                                  |
+| `apps/web/src/components/chat/ComposerHintRow.test.tsx`                   | create | New: markup tests for conditional pill rendering.                                                                             |
+| `apps/web/src/components/chat/ComposerHintRow.logic.ts`                   | create | New: pure `resolveHintRowPills` returning which pills should render given the flags. Easy to unit-test.                       |
+| `apps/web/src/components/chat/ComposerHintRow.logic.test.ts`              | create | New: tests for `resolveHintRowPills`.                                                                                         |
+| `apps/web/src/components/ChatView.tsx`                                    | modify | Mount `ComposerHintRow` between `ComposerBannerStack` and `ChatComposer`.                                                     |
 
 ---
 
 ## Task 1: `scopeSourceControlQuery` pure helper
 
 **Files:**
+
 - Modify: `apps/web/src/components/chat/composerSourceControlContextSearch.ts`
 - Modify: `apps/web/src/components/chat/composerSourceControlContextSearch.test.ts`
 
@@ -143,6 +144,7 @@ git commit -m "Add scopeSourceControlQuery for composer prefix routing"
 This extracts the existing inline filter logic from `ChatComposer.tsx` lines 1078-1107 into a pure, unit-testable function.
 
 **Files:**
+
 - Create: `apps/web/src/components/chat/composerSourceControlItems.ts`
 - Create: `apps/web/src/components/chat/composerSourceControlItems.test.ts`
 
@@ -313,7 +315,10 @@ export function buildScopedSourceControlComposerItems(
   return [...issueItems, ...prItems];
 }
 
-function filterPrs(prs: ReadonlyArray<ChangeRequest>, search: string): ReadonlyArray<ChangeRequest> {
+function filterPrs(
+  prs: ReadonlyArray<ChangeRequest>,
+  search: string,
+): ReadonlyArray<ChangeRequest> {
   const q = search.trim().toLowerCase();
   if (q.length === 0) return prs;
   return prs.filter((pr) => {
@@ -347,6 +352,7 @@ git commit -m "Add buildScopedSourceControlComposerItems helper"
 ## Task 3: Replace inline source-control filter in `ChatComposer.tsx`
 
 **Files:**
+
 - Modify: `apps/web/src/components/chat/ChatComposer.tsx`
 
 - [ ] **Step 1: Locate the existing inline filter**
@@ -379,12 +385,12 @@ If the only remaining reference is on the import line, drop it.
 Replace the entire `if (composerTrigger.kind === "source-control")` block (the body from `const query = composerTrigger.query;` through `return [...issueItems, ...prItems];`) with:
 
 ```ts
-      if (composerTrigger.kind === "source-control") {
-        return buildScopedSourceControlComposerItems(composerTrigger.query, {
-          issues: issueListQuery.data ?? [],
-          prs: changeRequestListQuery.data ?? [],
-        });
-      }
+if (composerTrigger.kind === "source-control") {
+  return buildScopedSourceControlComposerItems(composerTrigger.query, {
+    issues: issueListQuery.data ?? [],
+    prs: changeRequestListQuery.data ?? [],
+  });
+}
 ```
 
 - [ ] **Step 4: Run typecheck + tests**
@@ -407,6 +413,7 @@ git commit -m "Route composer #-trigger items through scoped builder"
 ## Task 4: Add `insertTriggerAtCursor` to `ChatComposerHandle`
 
 **Files:**
+
 - Modify: `apps/web/src/components/chat/ChatComposer.tsx`
 
 - [ ] **Step 1: Extend the handle interface**
@@ -487,6 +494,7 @@ git commit -m "Add insertTriggerAtCursor imperative method to ChatComposer"
 Encapsulate the conditional-pill logic in a pure function so it can be unit-tested without rendering.
 
 **Files:**
+
 - Create: `apps/web/src/components/chat/ComposerHintRow.logic.ts`
 - Create: `apps/web/src/components/chat/ComposerHintRow.logic.test.ts`
 
@@ -518,11 +526,7 @@ describe("resolveHintRowPills", () => {
 
   it("hides Jira when no Jira provider is configured", () => {
     const pills = resolveHintRowPills({ hasSourceControlRemote: true, hasJiraProvider: false });
-    expect(pills.map((p) => p.id)).toEqual([
-      "reference-issue",
-      "reference-pr",
-      "browse-commands",
-    ]);
+    expect(pills.map((p) => p.id)).toEqual(["reference-issue", "reference-pr", "browse-commands"]);
   });
 
   it("returns only browse-commands when both providers are absent", () => {
@@ -634,6 +638,7 @@ git commit -m "Add ComposerHintRow.logic for conditional pill resolution"
 ## Task 6: `ComposerHintRow` component
 
 **Files:**
+
 - Create: `apps/web/src/components/chat/ComposerHintRow.tsx`
 - Create: `apps/web/src/components/chat/ComposerHintRow.test.tsx`
 
@@ -736,13 +741,7 @@ Create `ComposerHintRow.tsx`:
 
 ```tsx
 import { memo } from "react";
-import {
-  BugIcon,
-  GitPullRequestIcon,
-  SlashIcon,
-  TicketIcon,
-  type LucideIcon,
-} from "lucide-react";
+import { BugIcon, GitPullRequestIcon, SlashIcon, TicketIcon, type LucideIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -781,10 +780,7 @@ export const ComposerHintRow = memo(function ComposerHintRow(props: ComposerHint
 
   return (
     <div
-      className={cn(
-        "mx-auto mb-2 flex max-w-208 flex-wrap items-center gap-1.5",
-        props.className,
-      )}
+      className={cn("mx-auto mb-2 flex max-w-208 flex-wrap items-center gap-1.5", props.className)}
       data-testid="composer-hint-row"
     >
       {pills.map((pill) => {
@@ -836,6 +832,7 @@ git commit -m "Add ComposerHintRow component"
 ## Task 7: Mount `ComposerHintRow` in `ChatView.tsx`
 
 **Files:**
+
 - Modify: `apps/web/src/components/ChatView.tsx`
 
 - [ ] **Step 1: Add the imports**
@@ -967,6 +964,7 @@ Wait for the URL to print.
 - [ ] **Step 2: Open a fresh thread in a workspace that has a configured source-control remote**
 
 Verify:
+
 1. Three pills appear above the composer: **Reference issue**, **Reference PR**, **Browse commands**. (Jira is absent because no Atlassian provider exists.)
 2. Click **Reference PR** → composer focuses, `#pr ` appears in the input, and the inline picker opens showing only PRs.
 3. Type more text after `#pr ` and confirm the list filters to PRs matching the search.

@@ -151,9 +151,9 @@ direct-attach behavior keeps working unchanged, and adding new prefixes later
 
 ```ts
 interface ComposerHintRowProps {
-  readonly visible: boolean;             // gate on thread.messages.length === 0
+  readonly visible: boolean; // gate on thread.messages.length === 0
   readonly hasSourceControlRemote: boolean;
-  readonly hasJiraProvider: boolean;     // false until Atlassian provider ships
+  readonly hasJiraProvider: boolean; // false until Atlassian provider ships
   readonly onInsertTrigger: (trigger: "#i " | "#pr " | "#jira " | "/") => void;
   readonly className?: string;
 }
@@ -199,7 +199,7 @@ export type SourceControlScope = "issues" | "prs" | "jira" | "mixed";
 
 export interface ScopedSourceControlQuery {
   scope: SourceControlScope;
-  search: string;          // query with the prefix stripped
+  search: string; // query with the prefix stripped
 }
 
 export function scopeSourceControlQuery(query: string): ScopedSourceControlQuery;
@@ -207,13 +207,13 @@ export function scopeSourceControlQuery(query: string): ScopedSourceControlQuery
 
 Rules:
 
-| Raw `query` | `scope` | `search` |
-|---|---|---|
-| `""` | `"mixed"` | `""` |
-| `"i"` or `"i …"` | `"issues"` | rest after `i` (trimmed leading whitespace) |
-| `"pr"` or `"pr …"` | `"prs"` | rest after `pr` |
-| `"jira"` or `"jira …"` | `"jira"` | rest after `jira` |
-| anything else | `"mixed"` | unchanged |
+| Raw `query`            | `scope`    | `search`                                    |
+| ---------------------- | ---------- | ------------------------------------------- |
+| `""`                   | `"mixed"`  | `""`                                        |
+| `"i"` or `"i …"`       | `"issues"` | rest after `i` (trimmed leading whitespace) |
+| `"pr"` or `"pr …"`     | `"prs"`    | rest after `pr`                             |
+| `"jira"` or `"jira …"` | `"jira"`   | rest after `jira`                           |
+| anything else          | `"mixed"`  | unchanged                                   |
 
 The picker reads `scope` to decide which list/tab to render and uses `search`
 to filter. When `scope === "jira"` and the Jira provider isn't configured,

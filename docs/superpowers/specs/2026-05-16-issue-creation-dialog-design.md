@@ -102,25 +102,27 @@ SourceControlAssigneeCandidate = Schema.Struct({
   login: TrimmedNonEmptyString,
   displayName: Schema.optional(TrimmedNonEmptyString),
   avatarUrl: Schema.optional(Schema.String),
-})
+});
 
 SourceControlCreateIssueInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   title: TrimmedNonEmptyString,
-  body: Schema.String,                         // markdown, may be ""
+  body: Schema.String, // markdown, may be ""
   labels: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   assignees: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  worktree: Schema.optional(Schema.Struct({
-    enabled: Schema.Boolean,
-    branchName: TrimmedNonEmptyString,
-  })),
-})
+  worktree: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.Boolean,
+      branchName: TrimmedNonEmptyString,
+    }),
+  ),
+});
 
 SourceControlCreateIssueResult = Schema.Struct({
   issue: SourceControlIssueSummary,
   worktree: Schema.optional(GitCreateWorktreeForProjectOutput),
   worktreeError: Schema.optional(Schema.String),
-})
+});
 ```
 
 ### `SourceControlProviderShape` additions
@@ -237,21 +239,21 @@ existing `gitHubPullRequests.ts` / `gitHubIssues.ts` split.
 
 ```ts
 type State = {
-  title: string
-  body: string
-  labels: string[]                  // names
-  assignees: string[]               // logins
-  worktreeEnabled: boolean          // initial: true
-  worktreeBranchName: string | null // null = not yet generated
+  title: string;
+  body: string;
+  labels: string[]; // names
+  assignees: string[]; // logins
+  worktreeEnabled: boolean; // initial: true
+  worktreeBranchName: string | null; // null = not yet generated
   ai: {
-    polishStatus: "idle" | "running" | "error"
-    titleStatus:  "idle" | "running" | "error"
-    branchStatus: "idle" | "running" | "error"
-    lastError: string | null
-  }
-  submitStatus: "idle" | "submitting" | "error"
-  submitError: string | null
-}
+    polishStatus: "idle" | "running" | "error";
+    titleStatus: "idle" | "running" | "error";
+    branchStatus: "idle" | "running" | "error";
+    lastError: string | null;
+  };
+  submitStatus: "idle" | "submitting" | "error";
+  submitError: string | null;
+};
 ```
 
 ### Interaction rules
@@ -370,7 +372,7 @@ insurance against future regressions.
   `TextGenerationError`. Mirrors the existing `generateBranchName`
   pattern.
 - Per-driver tests (`CodexTextGeneration.test.ts`, `ClaudeTextGeneration.
-  test.ts`, etc.) — one happy-path case per driver confirming wire-up and
+test.ts`, etc.) — one happy-path case per driver confirming wire-up and
   JSON parsing.
 - `wsServer` test — RPC routing for the four new methods, input
   validation, error pass-through.
