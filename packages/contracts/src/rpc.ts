@@ -49,6 +49,7 @@ import {
   VcsStatusInput,
   VcsStatusResult,
   VcsStatusStreamEvent,
+  TextGenerationError,
 } from "./git.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
@@ -133,6 +134,9 @@ import {
   SourceControlIssueDetail,
   SourceControlIssueSummary,
   SourceControlProviderError,
+  SourceControlAssigneeCandidate,
+  SourceControlCreateIssueInput,
+  SourceControlLabel,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
 import {
@@ -235,6 +239,13 @@ export const WS_METHODS = {
   sourceControlSearchChangeRequests: "sourceControl.searchChangeRequests",
   sourceControlGetChangeRequestDetail: "sourceControl.getChangeRequestDetail",
   sourceControlGetChangeRequestDiff: "sourceControl.getChangeRequestDiff",
+  sourceControlCreateIssue: "sourceControl.createIssue",
+  sourceControlListIssueLabels: "sourceControl.listIssueLabels",
+  sourceControlListIssueAssignees: "sourceControl.listIssueAssignees",
+
+  // Text generation methods
+  textGenerationGenerateIssueContent: "textGeneration.generateIssueContent",
+  textGenerationGenerateBranchName: "textGeneration.generateBranchName",
 
   // Atlassian connection methods
   atlassianListConnections: "atlassian.listConnections",
@@ -277,6 +288,43 @@ export const GitCreateWorktreeForProjectOutput = Schema.Struct({
   sessionId: ThreadId,
 });
 export type GitCreateWorktreeForProjectOutput = typeof GitCreateWorktreeForProjectOutput.Type;
+
+export const SourceControlCreateIssueWithWorktreeResult = Schema.Struct({
+  issue: SourceControlIssueSummary,
+  worktree: Schema.optional(GitCreateWorktreeForProjectOutput),
+  worktreeError: Schema.optional(Schema.String),
+});
+export type SourceControlCreateIssueWithWorktreeResult =
+  typeof SourceControlCreateIssueWithWorktreeResult.Type;
+
+export const TextGenerationIssueContentMode = Schema.Literals(["polish", "title"]);
+export type TextGenerationIssueContentMode = typeof TextGenerationIssueContentMode.Type;
+
+export const TextGenerationIssueContentInput = Schema.Struct({
+  cwd: Schema.String,
+  mode: TextGenerationIssueContentMode,
+  rough: Schema.optional(Schema.String),
+  body: Schema.optional(Schema.String),
+  currentTitle: Schema.optional(Schema.String),
+});
+export type TextGenerationIssueContentInput = typeof TextGenerationIssueContentInput.Type;
+
+export const TextGenerationIssueContentResult = Schema.Struct({
+  title: Schema.optional(Schema.String),
+  body: Schema.optional(Schema.String),
+});
+export type TextGenerationIssueContentResult = typeof TextGenerationIssueContentResult.Type;
+
+export const TextGenerationBranchNameInput = Schema.Struct({
+  cwd: Schema.String,
+  message: Schema.String,
+});
+export type TextGenerationBranchNameInput = typeof TextGenerationBranchNameInput.Type;
+
+export const TextGenerationBranchNameResult = Schema.Struct({
+  branch: Schema.String,
+});
+export type TextGenerationBranchNameResult = typeof TextGenerationBranchNameResult.Type;
 
 export const GitFindWorktreeForOriginInput = Schema.Struct({
   projectId: ProjectId,
@@ -545,6 +593,48 @@ export const WsSourceControlGetChangeRequestDiffRpc = Rpc.make(
     }),
     success: Schema.String,
     error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  },
+);
+
+export const WsSourceControlCreateIssueRpc = Rpc.make(WS_METHODS.sourceControlCreateIssue, {
+  payload: SourceControlCreateIssueInput,
+  success: SourceControlCreateIssueWithWorktreeResult,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError, GitManagerServiceError]),
+});
+
+export const WsSourceControlListIssueLabelsRpc = Rpc.make(
+  WS_METHODS.sourceControlListIssueLabels,
+  {
+    payload: Schema.Struct({ cwd: Schema.String }),
+    success: Schema.Array(SourceControlLabel),
+    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  },
+);
+
+export const WsSourceControlListIssueAssigneesRpc = Rpc.make(
+  WS_METHODS.sourceControlListIssueAssignees,
+  {
+    payload: Schema.Struct({ cwd: Schema.String }),
+    success: Schema.Array(SourceControlAssigneeCandidate),
+    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  },
+);
+
+export const WsTextGenerationGenerateIssueContentRpc = Rpc.make(
+  WS_METHODS.textGenerationGenerateIssueContent,
+  {
+    payload: TextGenerationIssueContentInput,
+    success: TextGenerationIssueContentResult,
+    error: Schema.Union([AuthRpcError, TextGenerationError]),
+  },
+);
+
+export const WsTextGenerationGenerateBranchNameRpc = Rpc.make(
+  WS_METHODS.textGenerationGenerateBranchName,
+  {
+    payload: TextGenerationBranchNameInput,
+    success: TextGenerationBranchNameResult,
+    error: Schema.Union([AuthRpcError, TextGenerationError]),
   },
 );
 
@@ -935,6 +1025,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlSearchChangeRequestsRpc,
   WsSourceControlGetChangeRequestDetailRpc,
   WsSourceControlGetChangeRequestDiffRpc,
+  WsSourceControlCreateIssueRpc,
+  WsSourceControlListIssueLabelsRpc,
+  WsSourceControlListIssueAssigneesRpc,
+  WsTextGenerationGenerateIssueContentRpc,
+  WsTextGenerationGenerateBranchNameRpc,
   WsAtlassianListConnectionsRpc,
   WsAtlassianStartOAuthRpc,
   WsAtlassianDisconnectRpc,
