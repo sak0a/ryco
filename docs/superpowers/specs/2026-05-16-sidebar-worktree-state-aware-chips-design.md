@@ -45,16 +45,16 @@ when something is actually happening.
 render zero, one, or two chips per worktree. Each chip is now styled per
 `(kind, state)`:
 
-| Kind / state           | Icon                    | Color tone | Tooltip                       |
-| ---------------------- | ----------------------- | ---------- | ----------------------------- |
-| Issue — open           | `CircleDotIcon`         | emerald    | `Issue #N — Open`             |
-| Issue — closed         | `CheckCircle2Icon`      | violet     | `Issue #N — Closed`           |
-| Issue — unknown state  | `CircleDotIcon`         | emerald    | `Issue #N`                    |
-| PR — draft             | `GitPullRequestDraftIcon` | zinc     | `Pull request #N — Draft`     |
-| PR — open              | `GitPullRequestIcon`    | emerald    | `Pull request #N — Open`      |
-| PR — merged            | `GitMergeIcon`          | violet     | `Pull request #N — Merged`    |
-| PR — closed (unmerged) | `XCircleIcon`           | rose       | `Pull request #N — Closed`    |
-| PR — unknown state     | `GitPullRequestIcon`    | blue       | `Pull request #N`             |
+| Kind / state           | Icon                      | Color tone | Tooltip                    |
+| ---------------------- | ------------------------- | ---------- | -------------------------- |
+| Issue — open           | `CircleDotIcon`           | emerald    | `Issue #N — Open`          |
+| Issue — closed         | `CheckCircle2Icon`        | violet     | `Issue #N — Closed`        |
+| Issue — unknown state  | `CircleDotIcon`           | emerald    | `Issue #N`                 |
+| PR — draft             | `GitPullRequestDraftIcon` | zinc       | `Pull request #N — Draft`  |
+| PR — open              | `GitPullRequestIcon`      | emerald    | `Pull request #N — Open`   |
+| PR — merged            | `GitMergeIcon`            | violet     | `Pull request #N — Merged` |
+| PR — closed (unmerged) | `XCircleIcon`             | rose       | `Pull request #N — Closed` |
+| PR — unknown state     | `GitPullRequestIcon`      | blue       | `Pull request #N`          |
 
 `unknown state` is the fallback when:
 
@@ -142,8 +142,8 @@ Migration adds three columns to `projection_worktrees`:
 - `pr_is_draft INTEGER NULL` — `0 | 1 | NULL`
 - `issue_state TEXT NULL` — one of `"open" | "closed" | NULL`
 
-Existing rows default to `NULL` for all three. The next migration number
-in the sequence (current head is `031_WorktreeTitles.ts`) is used.
+Existing rows default to `NULL` for all three. The next free migration
+number is `037` (current head is `036_AtlassianConnections.ts`).
 
 `ProjectionWorktreeRepository.upsert` and `getById` / `listByProjectId`
 SQL is updated to read/write the new columns.
@@ -223,7 +223,7 @@ the sidebar.
 
 - `apps/server/src/sourceControl/refreshWorktreeSourceControlState.ts` —
   the shared helper described above.
-- `apps/server/src/persistence/Migrations/032_WorktreeSourceControlState.ts`
+- `apps/server/src/persistence/Migrations/037_WorktreeSourceControlState.ts`
   (+ test) — adds the three columns.
 
 ### Files modified
@@ -283,7 +283,7 @@ the sidebar.
 
 ### Backend
 
-- `032_WorktreeSourceControlState.test.ts` — migration adds columns,
+- `037_WorktreeSourceControlState.test.ts` — migration adds columns,
   existing rows are left at `NULL`, round-trip insert/read works.
 - `GitHubSourceControlProvider.test.ts` — link-time path persists state
   alongside title.
