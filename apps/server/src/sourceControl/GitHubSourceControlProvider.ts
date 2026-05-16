@@ -285,33 +285,37 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
                 }),
             ),
           );
-        yield* fileSystem.writeFileString(bodyFile, input.body).pipe(
-          Effect.mapError(
-            (cause) =>
-              new SourceControlProviderError({
-                provider: "github",
-                operation: "createIssue",
-                detail: "Failed to write issue body temp file.",
-                cause,
-              }),
+        const work = Effect.gen(function* () {
+          yield* fileSystem.writeFileString(bodyFile, input.body).pipe(
+            Effect.mapError(
+              (cause) =>
+                new SourceControlProviderError({
+                  provider: "github",
+                  operation: "createIssue",
+                  detail: "Failed to write issue body temp file.",
+                  cause,
+                }),
+            ),
+          );
+          const created = yield* github
+            .createIssue({
+              cwd: input.cwd,
+              title: input.title,
+              bodyFile,
+              ...(input.labels ? { labels: input.labels } : {}),
+              ...(input.assignees ? { assignees: input.assignees } : {}),
+            })
+            .pipe(Effect.mapError((cause) => providerError("createIssue", cause)));
+          const detail = yield* github
+            .getIssue({ cwd: input.cwd, reference: String(created.number) })
+            .pipe(Effect.mapError((cause) => providerError("createIssue", cause)));
+          return toIssueSummary(detail);
+        });
+        return yield* work.pipe(
+          Effect.ensuring(
+            fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void)),
           ),
         );
-        const created = yield* github
-          .createIssue({
-            cwd: input.cwd,
-            title: input.title,
-            bodyFile,
-            ...(input.labels ? { labels: input.labels } : {}),
-            ...(input.assignees ? { assignees: input.assignees } : {}),
-          })
-          .pipe(Effect.mapError((cause) => providerError("createIssue", cause)));
-        const detail = yield* github
-          .getIssue({ cwd: input.cwd, reference: String(created.number) })
-          .pipe(Effect.mapError((cause) => providerError("createIssue", cause)));
-        yield* fileSystem
-          .remove(bodyFile)
-          .pipe(Effect.catch(() => Effect.void));
-        return toIssueSummary(detail);
       }),
     listLabels: (input) =>
       github.listLabels({ cwd: input.cwd }).pipe(

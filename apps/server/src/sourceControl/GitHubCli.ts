@@ -695,7 +695,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
     listAssignees: (input) =>
       execute({
         cwd: input.cwd,
-        args: ["api", "repos/{owner}/{repo}/assignees", "--paginate"],
+        args: ["api", "repos/{owner}/{repo}/assignees", "-F", "per_page=100"],
       }).pipe(
         Effect.map((r) => r.stdout.trim()),
         Effect.flatMap((raw) =>
