@@ -333,7 +333,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         outputSchemaJson: outputSchema,
         modelSelection: input.modelSelection,
       });
-      return { title: decoded.title, body: decoded.body };
+      return { title: decoded.title.trim(), body: decoded.body.trim() };
     } else {
       const { prompt, outputSchema } = buildIssueContentTitlePrompt({
         body: input.body ?? "",
@@ -345,7 +345,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         outputSchemaJson: outputSchema,
         modelSelection: input.modelSelection,
       });
-      return { title: decoded.title };
+      return { title: decoded.title.trim() };
     }
   });
 
