@@ -76,6 +76,7 @@ import { resolveWorktreeCheckoutPath } from "./project/worktreeCheckoutPaths.ts"
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { ServerAuth, type AuthenticatedSession } from "./auth/Services/ServerAuth.ts";
 import { ProjectionWorktreeRepository } from "./persistence/Services/ProjectionWorktrees.ts";
+import { refreshWorktreeSourceControlState } from "./sourceControl/refreshWorktreeSourceControlState.ts";
 import * as SourceControlDiscoveryLayer from "./sourceControl/SourceControlDiscovery.ts";
 import { SourceControlRepositoryService } from "./sourceControl/SourceControlRepositoryService.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
@@ -1080,6 +1081,14 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
               },
               operation,
             );
+
+            if (origin === "pr" || origin === "issue") {
+              yield* refreshWorktreeSourceControlState({ worktreeId }).pipe(
+                Effect.ignoreCause({ log: true }),
+                Effect.forkDetach,
+                Effect.asVoid,
+              );
+            }
 
             yield* dispatchWorktreeCommand(
               {
