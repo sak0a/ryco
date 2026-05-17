@@ -18,8 +18,7 @@ const processResult = (stdout: string): VcsProcess.VcsProcessOutput => ({
 
 function makeProvider(github: Partial<GitHubCli.GitHubCliShape>) {
   return GitHubSourceControlProvider.make().pipe(
-    Effect.provide(Layer.mock(GitHubCli.GitHubCli)(github)),
-    Effect.provide(NodeServices.layer),
+    Effect.provide(Layer.mergeAll(Layer.mock(GitHubCli.GitHubCli)(github), NodeServices.layer)),
   );
 }
 

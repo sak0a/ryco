@@ -68,15 +68,22 @@ export interface ThreadTitleGenerationResult {
   title: string;
 }
 
-export interface IssueContentGenerationInput {
+interface IssueContentGenerationInputBase {
   cwd: string;
-  mode: "polish" | "title";
-  rough?: string;
-  body?: string;
-  currentTitle?: string;
-  customInstructions?: string;
   modelSelection: ModelSelection;
 }
+
+export type IssueContentGenerationInput =
+  | (IssueContentGenerationInputBase & {
+      mode: "polish";
+      rough: string;
+      currentTitle?: string;
+      customInstructions?: string;
+    })
+  | (IssueContentGenerationInputBase & {
+      mode: "title";
+      body: string;
+    });
 
 export interface IssueContentGenerationResult {
   title: string;

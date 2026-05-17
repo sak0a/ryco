@@ -510,6 +510,9 @@ function sidebarWorktreesEqual(
     left.issueNumber === right.issueNumber &&
     left.prTitle === right.prTitle &&
     left.issueTitle === right.issueTitle &&
+    left.prState === right.prState &&
+    left.prIsDraft === right.prIsDraft &&
+    left.issueState === right.issueState &&
     left.createdAt === right.createdAt &&
     left.updatedAt === right.updatedAt &&
     left.archivedAt === right.archivedAt &&

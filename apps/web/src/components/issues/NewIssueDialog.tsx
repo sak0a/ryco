@@ -52,7 +52,7 @@ export function NewIssueDialog(props: NewIssueDialogProps) {
     if (!state.worktreeEnabled) return;
     if (state.worktreeBranchName !== null) return;
     if (state.body.trim().length < 10) return;
-    if (state.ai.branchStatus === "running") return;
+    if (state.ai.branchStatus !== "idle") return;
     dispatch({ type: "aiBranchStarted" });
     branchGen
       .mutateAsync({ cwd: props.cwd, message: `${state.title}\n\n${state.body}` })

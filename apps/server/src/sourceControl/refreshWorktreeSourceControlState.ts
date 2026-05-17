@@ -22,8 +22,8 @@ export const refreshWorktreeSourceControlState = Effect.fn("refreshWorktreeSourc
     const cwd = existing.worktreePath;
     const provider = yield* registry.resolve({ cwd });
 
-    let nextPrState = existing.prState;
-    let nextPrIsDraft = existing.prIsDraft;
+    let nextPrState = existing.prState ?? null;
+    let nextPrIsDraft = existing.prIsDraft ?? null;
     if (existing.prNumber !== null) {
       const pr = yield* provider
         .getPullRequestState({ number: existing.prNumber, cwd })
@@ -38,7 +38,7 @@ export const refreshWorktreeSourceControlState = Effect.fn("refreshWorktreeSourc
       }
     }
 
-    let nextIssueState = existing.issueState;
+    let nextIssueState = existing.issueState ?? null;
     if (existing.issueNumber !== null) {
       const issue = yield* provider
         .getIssueState({ number: existing.issueNumber, cwd })
@@ -53,9 +53,9 @@ export const refreshWorktreeSourceControlState = Effect.fn("refreshWorktreeSourc
     }
 
     const changed =
-      nextPrState !== existing.prState ||
-      nextPrIsDraft !== existing.prIsDraft ||
-      nextIssueState !== existing.issueState;
+      nextPrState !== (existing.prState ?? null) ||
+      nextPrIsDraft !== (existing.prIsDraft ?? null) ||
+      nextIssueState !== (existing.issueState ?? null);
     if (!changed) return;
 
     const engine = yield* OrchestrationEngineService;

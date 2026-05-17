@@ -660,7 +660,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
     listLabels: (input) =>
       execute({
         cwd: input.cwd,
-        args: ["label", "list", "--json", "name,color,description", "--limit", "100"],
+        args: ["label", "list", "--json", "name,color,description", "--limit", "1000"],
       }).pipe(
         Effect.map((r) => r.stdout.trim()),
         Effect.flatMap((raw) =>
@@ -690,7 +690,15 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
     listAssignees: (input) =>
       execute({
         cwd: input.cwd,
-        args: ["api", "-X", "GET", "repos/{owner}/{repo}/assignees", "-F", "per_page=100"],
+        args: [
+          "api",
+          "-X",
+          "GET",
+          "repos/{owner}/{repo}/assignees",
+          "-F",
+          "per_page=100",
+          "--paginate",
+        ],
       }).pipe(
         Effect.map((r) => r.stdout.trim()),
         Effect.flatMap((raw) =>

@@ -268,8 +268,16 @@ function bindProviderContext(
         ...input,
         context: input.context ?? context,
       }),
-    getPullRequestState: (input) => provider.getPullRequestState(input),
-    getIssueState: (input) => provider.getIssueState(input),
+    getPullRequestState: (input) =>
+      provider.getPullRequestState({
+        ...input,
+        context: input.context ?? context,
+      }),
+    getIssueState: (input) =>
+      provider.getIssueState({
+        ...input,
+        context: input.context ?? context,
+      }),
   });
 }
 

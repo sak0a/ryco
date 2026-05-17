@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 import { IsoDateTime, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -31,9 +31,15 @@ export const Worktree = Schema.Struct({
   issueNumber: Schema.NullOr(Schema.Number),
   prTitle: Schema.NullOr(TrimmedNonEmptyString),
   issueTitle: Schema.NullOr(TrimmedNonEmptyString),
-  prState: Schema.NullOr(PullRequestState),
-  prIsDraft: Schema.NullOr(Schema.Boolean),
-  issueState: Schema.NullOr(IssueState),
+  prState: Schema.optional(Schema.NullOr(PullRequestState)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  prIsDraft: Schema.optional(Schema.NullOr(Schema.Boolean)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  issueState: Schema.optional(Schema.NullOr(IssueState)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),

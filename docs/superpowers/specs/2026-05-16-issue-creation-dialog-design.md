@@ -45,7 +45,7 @@ intentionally out of scope and tracked separately.
 
 ## Architecture
 
-```
+```text
 +-------------------+    +-------------------+    +---------------------------+
 | IssuesTab (+ btn) | -> | NewIssueDialog    | -> | issueCreationRpc          |
 | (existing,        |    | (new)             |    | (new)                     |
@@ -204,11 +204,11 @@ as data, not instructions, matching the existing commit/PR prompt pattern.
 `apps/server/src/sourceControl/gitHubIssueCreate.ts` (new):
 
 - `createIssue`:
-  `gh issue create --title <title> --body-file - [--label NAME...] [--assignee LOGIN...]`
-  with the body sent via stdin to avoid argv injection and handle large
-  markdown. Parses the returned issue URL, then fetches the summary via
+  `gh issue create --title <title> --body-file <path> [--label NAME...] [--assignee LOGIN...]`
+  with the body written to a temporary file, matching the pull-request
+  creation flow. Parses the returned issue URL, then fetches the summary via
   the existing `getIssue` flow to produce `SourceControlIssueSummary`.
-- `listLabels`: `gh label list --json name,color,description --limit 100`.
+- `listLabels`: `gh label list --json name,color,description --limit 1000`.
 - `listAssignees`: `gh api repos/{owner}/{repo}/assignees --paginate`.
 
 Argv construction and parsing live in `gitHubIssueCreate.ts` mirroring the
@@ -340,8 +340,8 @@ insurance against future regressions.
 
 ## Security
 
-- `gh issue create --body-file -` (stdin) avoids argv injection and handles
-  large markdown bodies.
+- `gh issue create --body-file <path>` keeps markdown bodies out of argv and
+  mirrors the existing pull-request creation flow.
 - Label and assignee names are validated by `gh` against the repo; client
   trims whitespace only.
 - AI prompt content is treated as data — the system prompt is fixed and
@@ -364,7 +364,7 @@ insurance against future regressions.
   - `listLabels` / `listAssignees` — happy path, empty result, auth
     failure.
 - `gitHubIssueCreate.test.ts` (new) — argv builder unit tests, including
-  the body-via-stdin path.
+  the temp-file body path.
 - `TextGenerationPrompts.test.ts` (extended) — `polish` and `title` cases:
   JSON output schema, title length rule, policy instruction injection.
 - `TextGeneration.test.ts` (extended) — `generateIssueContent` delegates

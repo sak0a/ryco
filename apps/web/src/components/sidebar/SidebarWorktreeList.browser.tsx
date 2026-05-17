@@ -64,13 +64,13 @@ describe("SidebarWorktreeList", () => {
       />,
     );
 
-    await expect.element(page.getByLabel("Issue #101 — Open")).toBeInTheDocument();
-    await expect.element(page.getByLabel("Issue #102 — Closed")).toBeInTheDocument();
-    await expect.element(page.getByLabel("Pull request #201 — Draft")).toBeInTheDocument();
-    await expect.element(page.getByLabel("Pull request #202 — Open")).toBeInTheDocument();
-    await expect.element(page.getByLabel("Pull request #203 — Merged")).toBeInTheDocument();
-    await expect.element(page.getByLabel("Pull request #204 — Closed")).toBeInTheDocument();
-    await expect.element(page.getByLabel("Pull request #205", { exact: true })).toBeInTheDocument();
+    await expect.element(page.getByLabelText("Issue #101 — Open")).toBeInTheDocument();
+    await expect.element(page.getByLabelText("Issue #102 — Closed")).toBeInTheDocument();
+    await expect.element(page.getByLabelText("Pull request #201 — Draft")).toBeInTheDocument();
+    await expect.element(page.getByLabelText("Pull request #202 — Open")).toBeInTheDocument();
+    await expect.element(page.getByLabelText("Pull request #203 — Merged")).toBeInTheDocument();
+    await expect.element(page.getByLabelText("Pull request #204 — Closed")).toBeInTheDocument();
+    await expect.element(page.getByLabelText("Pull request #205")).toBeInTheDocument();
   });
 
   it("hides the chat-activity dot when the worktree is idle and shows it for active states", async () => {
@@ -93,10 +93,13 @@ describe("SidebarWorktreeList", () => {
       />,
     );
 
-    // Status dot is the inner span with `rounded-full`; idle worktrees have none.
-    const idleRow = document.querySelector('[aria-label*="idle-feat"]');
-    expect(idleRow).toBeNull();
-    const inProgressDots = document.querySelectorAll(".bg-sky-500, .dark\\:bg-sky-300\\/80");
+    const idleToggle = page.getByRole("button", { name: "Expand idle-feat", exact: true });
+    const idleRow = idleToggle.element().closest(".group\\/worktree");
+    expect(idleRow?.querySelector("span.rounded-full")).toBeNull();
+
+    const inProgressDots = document.querySelectorAll(
+      "span.rounded-full.bg-sky-500, span.rounded-full.dark\\:bg-sky-300\\/80",
+    );
     expect(inProgressDots.length).toBeGreaterThan(0);
   });
 });

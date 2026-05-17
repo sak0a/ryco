@@ -181,7 +181,7 @@ describe("makeTextGenerationFromRegistry", () => {
       const result = yield* tg.generateIssueContent({
         cwd: process.cwd(),
         mode: "title",
-        currentTitle: "old title",
+        body: "old title",
         modelSelection: createModelSelection(instanceId, "gpt-5"),
       });
 
@@ -200,6 +200,7 @@ describe("makeTextGenerationFromRegistry", () => {
           .generateIssueContent({
             cwd: process.cwd(),
             mode: "polish",
+            rough: "rough issue notes",
             modelSelection: createModelSelection(
               ProviderInstanceId.make("missing_instance"),
               "gpt-5",

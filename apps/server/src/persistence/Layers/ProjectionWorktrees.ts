@@ -259,13 +259,15 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
           ? yield* sql<{ readonly worktreeId: string }>`
               SELECT worktree_id AS "worktreeId"
               FROM projection_worktrees
-              WHERE pr_number = ${input.number}
+              WHERE project_id = ${input.projectId}
+                AND pr_number = ${input.number}
                 AND archived_at IS NULL
             `
           : yield* sql<{ readonly worktreeId: string }>`
               SELECT worktree_id AS "worktreeId"
               FROM projection_worktrees
-              WHERE issue_number = ${input.number}
+              WHERE project_id = ${input.projectId}
+                AND issue_number = ${input.number}
                 AND archived_at IS NULL
             `;
       return rows.map((row) => WorktreeId.make(row.worktreeId));

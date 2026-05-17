@@ -269,13 +269,19 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
         withAccess("owner", method, effect);
 
       const refreshStateForLinkedReference = (input: {
+        readonly cwd: string;
         readonly kind: "pr" | "issue";
         readonly reference: string;
       }) =>
         Effect.gen(function* () {
           const parsed = Number.parseInt(input.reference, 10);
           if (!Number.isInteger(parsed) || parsed <= 0) return;
+          const projectOpt = yield* projectionSnapshotQuery
+            .getActiveProjectByWorkspaceRoot(input.cwd)
+            .pipe(Effect.catch(() => Effect.succeed(Option.none())));
+          if (Option.isNone(projectOpt)) return;
           const linked = yield* projectionWorktrees.findActiveByLinkedNumber({
+            projectId: projectOpt.value.id,
             kind: input.kind,
             number: parsed,
           });
@@ -1785,7 +1791,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                     ...(fullContent !== undefined ? { fullContent } : {}),
                   }),
                 ),
-                Effect.tap(() => refreshStateForLinkedReference({ kind: "issue", reference })),
+                Effect.tap(() => refreshStateForLinkedReference({ cwd, kind: "issue", reference })),
               ),
             ),
             {
@@ -1868,7 +1874,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                     ...(fullContent !== undefined ? { fullContent } : {}),
                   }),
                 ),
-                Effect.tap(() => refreshStateForLinkedReference({ kind: "pr", reference })),
+                Effect.tap(() => refreshStateForLinkedReference({ cwd, kind: "pr", reference })),
               ),
             ),
             {
@@ -1997,17 +2003,27 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                       }),
                   ),
                 );
-                return yield* textGeneration.generateIssueContent({
-                  cwd: input.cwd,
-                  mode: input.mode,
-                  ...(input.rough !== undefined ? { rough: input.rough } : {}),
-                  ...(input.body !== undefined ? { body: input.body } : {}),
-                  ...(input.currentTitle !== undefined ? { currentTitle: input.currentTitle } : {}),
-                  ...(input.customInstructions !== undefined
-                    ? { customInstructions: input.customInstructions }
-                    : {}),
-                  modelSelection: settings.textGenerationModelSelection,
-                });
+                return yield* textGeneration.generateIssueContent(
+                  input.mode === "polish"
+                    ? {
+                        cwd: input.cwd,
+                        mode: "polish",
+                        rough: input.rough ?? input.body ?? "",
+                        ...(input.currentTitle !== undefined
+                          ? { currentTitle: input.currentTitle }
+                          : {}),
+                        ...(input.customInstructions !== undefined
+                          ? { customInstructions: input.customInstructions }
+                          : {}),
+                        modelSelection: settings.textGenerationModelSelection,
+                      }
+                    : {
+                        cwd: input.cwd,
+                        mode: "title",
+                        body: input.body ?? input.rough ?? "",
+                        modelSelection: settings.textGenerationModelSelection,
+                      },
+                );
               }),
             ),
             {

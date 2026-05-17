@@ -131,6 +131,10 @@ export function canSubmit(state: NewIssueState): boolean {
     state.ai.branchStatus === "running"
   )
     return false;
-  if (state.worktreeEnabled && state.worktreeBranchName === null) return false;
+  if (
+    state.worktreeEnabled &&
+    (!state.worktreeBranchName || state.worktreeBranchName.trim() === "")
+  )
+    return false;
   return true;
 }

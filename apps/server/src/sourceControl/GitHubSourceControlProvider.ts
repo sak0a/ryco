@@ -308,8 +308,23 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
             .pipe(Effect.mapError((cause) => providerError("createIssue", cause)));
           const detail = yield* github
             .getIssue({ cwd: input.cwd, reference: String(created.number) })
-            .pipe(Effect.mapError((cause) => providerError("createIssue", cause)));
-          return toIssueSummary(detail);
+            .pipe(
+              Effect.mapError((cause) => providerError("createIssue", cause)),
+              Effect.catch(() =>
+                Effect.succeed({
+                  provider: "github",
+                  number: created.number,
+                  title: input.title,
+                  url: created.url,
+                  state: "open" as const,
+                  updatedAt: Option.none(),
+                } satisfies SourceControlIssueSummary),
+              ),
+            );
+          if ("body" in detail) {
+            return toIssueSummary(detail);
+          }
+          return detail;
         });
         return yield* work.pipe(
           Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void))),

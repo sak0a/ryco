@@ -305,7 +305,11 @@ layer("ProjectionWorktreeRepository", (it) => {
         manualPosition: 0,
       });
 
-      const ids = yield* repo.findActiveByLinkedNumber({ kind: "pr", number: 999 });
+      const ids = yield* repo.findActiveByLinkedNumber({
+        projectId: ProjectId.make("proj-a"),
+        kind: "pr",
+        number: 999,
+      });
       assert.equal(ids.length, 1);
       assert.equal(ids[0], "w-pr-active");
     }),
@@ -316,7 +320,11 @@ layer("ProjectionWorktreeRepository", (it) => {
       yield* runMigrations({ toMigrationInclusive: 37 });
       const repo = yield* ProjectionWorktreeRepository;
 
-      const ids = yield* repo.findActiveByLinkedNumber({ kind: "issue", number: 12345 });
+      const ids = yield* repo.findActiveByLinkedNumber({
+        projectId: ProjectId.make("proj-a"),
+        kind: "issue",
+        number: 12345,
+      });
       assert.equal(ids.length, 0);
     }),
   );

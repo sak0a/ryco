@@ -34,6 +34,7 @@ export const FindProjectionWorktreeByOriginInput = Schema.Struct({
 export type FindProjectionWorktreeByOriginInput = typeof FindProjectionWorktreeByOriginInput.Type;
 
 export const FindActiveProjectionWorktreesByLinkedNumberInput = Schema.Struct({
+  projectId: ProjectId,
   kind: Schema.Literals(["pr", "issue"]),
   number: Schema.Number,
 });
