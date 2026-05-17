@@ -28,7 +28,7 @@ function toProjectionWorktree(
   return {
     worktreeId: row.worktreeId,
     projectId: row.projectId,
-    title: row.title ?? null,
+    title: row.title,
     branch: row.branch,
     worktreePath: row.worktreePath,
     origin: row.origin,

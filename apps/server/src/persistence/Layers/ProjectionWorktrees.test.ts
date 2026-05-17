@@ -191,6 +191,40 @@ layer("ProjectionWorktreeRepository", (it) => {
     }),
   );
 
+  it.effect("round-trips prIsDraft true", () =>
+    Effect.gen(function* () {
+      yield* runMigrations({ toMigrationInclusive: 37 });
+      const repo = yield* ProjectionWorktreeRepository;
+
+      yield* repo.upsert({
+        worktreeId: WorktreeId.make("w-draft"),
+        projectId: ProjectId.make("proj"),
+        title: "Draft PR",
+        branch: "feature/draft",
+        worktreePath: "/tmp/draft",
+        origin: "pr",
+        prNumber: 99,
+        issueNumber: null,
+        prTitle: "Draft PR",
+        issueTitle: null,
+        prState: "open",
+        prIsDraft: true,
+        issueState: null,
+        createdAt: "2026-05-17T00:00:00.000Z",
+        updatedAt: "2026-05-17T00:00:00.000Z",
+        archivedAt: null,
+        manualPosition: 0,
+      });
+
+      const round = yield* repo.getById({ worktreeId: WorktreeId.make("w-draft") });
+      assert.isTrue(Option.isSome(round));
+      if (Option.isSome(round)) {
+        assert.equal(round.value.prState, "open");
+        assert.equal(round.value.prIsDraft, true);
+      }
+    }),
+  );
+
   it.effect("round-trips null state fields", () =>
     Effect.gen(function* () {
       yield* runMigrations({ toMigrationInclusive: 37 });
