@@ -467,6 +467,13 @@ export interface ChatComposerHandle {
   }) => void;
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
+  /**
+   * Inserts trigger text (e.g. "#i ", "#pr ", "#jira ", "/") at the current
+   * cursor position, focuses the editor, and lets detectComposerTrigger pick
+   * up the new trigger so the inline picker opens as if the user had typed
+   * the same keys.
+   */
+  insertTriggerAtCursor: (text: string) => void;
   /** Get the current prompt/effort/model state for use in send. */
   getSendContext: () => {
     prompt: string;
@@ -2201,6 +2208,31 @@ export const ChatComposer = memo(
             composerEditorRef.current?.focusAt(nextCollapsedCursor);
           });
         },
+        insertTriggerAtCursor: (text: string) => {
+          const snapshot = composerEditorRef.current?.readSnapshot() ?? {
+            value: promptRef.current,
+            cursor: composerCursor,
+            expandedCursor: expandCollapsedComposerCursor(promptRef.current, composerCursor),
+            terminalContextIds: composerTerminalContexts.map((context) => context.id),
+          };
+          const { text: nextPrompt, cursor: nextExpandedCursor } = replaceTextRange(
+            snapshot.value,
+            snapshot.expandedCursor,
+            snapshot.expandedCursor,
+            text,
+          );
+          const nextCollapsedCursor = collapseExpandedComposerCursor(
+            nextPrompt,
+            nextExpandedCursor,
+          );
+          promptRef.current = nextPrompt;
+          setComposerDraftPrompt(composerDraftTarget, nextPrompt);
+          setComposerCursor(nextCollapsedCursor);
+          setComposerTrigger(detectComposerTrigger(nextPrompt, nextExpandedCursor));
+          window.requestAnimationFrame(() => {
+            composerEditorRef.current?.focusAt(nextCollapsedCursor);
+          });
+        },
         getSendContext: () => ({
           prompt: promptRef.current,
           images: composerImagesRef.current,
@@ -2232,6 +2264,7 @@ export const ChatComposer = memo(
         selectedPromptEffort,
         selectedProvider,
         selectedProviderModels,
+        setComposerDraftPrompt,
       ],
     );
 
