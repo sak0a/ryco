@@ -1,6 +1,7 @@
 export interface NewIssueState {
   title: string;
   body: string;
+  polishInstructions: string;
   labels: string[];
   assignees: string[];
   worktreeEnabled: boolean;
@@ -18,6 +19,7 @@ export interface NewIssueState {
 export const initialNewIssueState: NewIssueState = {
   title: "",
   body: "",
+  polishInstructions: "",
   labels: [],
   assignees: [],
   worktreeEnabled: true,
@@ -35,6 +37,7 @@ export const initialNewIssueState: NewIssueState = {
 export type NewIssueAction =
   | { type: "setTitle"; value: string }
   | { type: "setBody"; value: string }
+  | { type: "setPolishInstructions"; value: string }
   | { type: "setLabels"; labels: ReadonlyArray<string> }
   | { type: "setAssignees"; assignees: ReadonlyArray<string> }
   | { type: "setWorktreeEnabled"; value: boolean }
@@ -54,15 +57,14 @@ export type NewIssueAction =
   | { type: "submitStarted" }
   | { type: "submitFailed"; error: string };
 
-export function newIssueDialogReducer(
-  state: NewIssueState,
-  action: NewIssueAction,
-): NewIssueState {
+export function newIssueDialogReducer(state: NewIssueState, action: NewIssueAction): NewIssueState {
   switch (action.type) {
     case "setTitle":
       return { ...state, title: action.value };
     case "setBody":
       return { ...state, body: action.value };
+    case "setPolishInstructions":
+      return { ...state, polishInstructions: action.value };
     case "setLabels":
       return { ...state, labels: [...action.labels] };
     case "setAssignees":

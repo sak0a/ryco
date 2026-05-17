@@ -306,6 +306,7 @@ export const TextGenerationIssueContentInput = Schema.Struct({
   rough: Schema.optional(Schema.String),
   body: Schema.optional(Schema.String),
   currentTitle: Schema.optional(Schema.String),
+  customInstructions: Schema.optional(Schema.String),
 });
 export type TextGenerationIssueContentInput = typeof TextGenerationIssueContentInput.Type;
 

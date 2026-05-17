@@ -390,6 +390,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       const { prompt, outputSchema } = buildIssueContentPolishPrompt({
         rough: input.rough ?? "",
         ...(input.currentTitle ? { currentTitle: input.currentTitle } : {}),
+        ...(input.customInstructions ? { customInstructions: input.customInstructions } : {}),
       });
       const decoded = yield* runCodexJson({
         operation: "generateIssueContent",

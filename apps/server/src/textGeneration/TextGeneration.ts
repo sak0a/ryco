@@ -74,6 +74,7 @@ export interface IssueContentGenerationInput {
   rough?: string;
   body?: string;
   currentTitle?: string;
+  customInstructions?: string;
   modelSelection: ModelSelection;
 }
 

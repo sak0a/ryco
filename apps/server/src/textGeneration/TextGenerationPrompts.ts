@@ -224,10 +224,12 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 export interface IssueContentPolishPromptInput {
   rough: string;
   currentTitle?: string;
+  customInstructions?: string;
   policy?: TextGenerationPolicy | undefined;
 }
 
 export function buildIssueContentPolishPrompt(input: IssueContentPolishPromptInput) {
+  const customInstructions = input.customInstructions?.trim();
   const prompt = [
     "You rewrite rough notes into a clear GitHub issue.",
     'Return a JSON object with keys: "title", "body".',
@@ -240,6 +242,9 @@ export function buildIssueContentPolishPrompt(input: IssueContentPolishPromptInp
     "- otherwise use a one-line summary followed by bullet points",
     "- preserve any code, command output, or error text from the rough notes verbatim",
     ...(input.currentTitle ? ["", `Current title hint: ${input.currentTitle}`] : []),
+    ...(customInstructions
+      ? ["", "User guidance for this polish (apply in addition to the rules above):", limitSection(customInstructions, 2_000)]
+      : []),
     ...policyInstruction(input.policy?.issueInstructions),
     "",
     "Rough notes:",

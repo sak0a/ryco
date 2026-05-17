@@ -1973,6 +1973,9 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                   ...(input.rough !== undefined ? { rough: input.rough } : {}),
                   ...(input.body !== undefined ? { body: input.body } : {}),
                   ...(input.currentTitle !== undefined ? { currentTitle: input.currentTitle } : {}),
+                  ...(input.customInstructions !== undefined
+                    ? { customInstructions: input.customInstructions }
+                    : {}),
                   modelSelection: settings.textGenerationModelSelection,
                 });
               }),

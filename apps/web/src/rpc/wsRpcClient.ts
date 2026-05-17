@@ -101,9 +101,7 @@ export interface WsRpcClient {
     readonly generateIssueContent: RpcUnaryMethod<
       typeof WS_METHODS.textGenerationGenerateIssueContent
     >;
-    readonly generateBranchName: RpcUnaryMethod<
-      typeof WS_METHODS.textGenerationGenerateBranchName
-    >;
+    readonly generateBranchName: RpcUnaryMethod<typeof WS_METHODS.textGenerationGenerateBranchName>;
   };
   readonly atlassian: {
     readonly listConnections: RpcUnaryNoArgMethod<typeof WS_METHODS.atlassianListConnections>;
@@ -289,9 +287,7 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
     },
     textGeneration: {
       generateIssueContent: (input) =>
-        transport.request((client) =>
-          client[WS_METHODS.textGenerationGenerateIssueContent](input),
-        ),
+        transport.request((client) => client[WS_METHODS.textGenerationGenerateIssueContent](input)),
       generateBranchName: (input) =>
         transport.request((client) => client[WS_METHODS.textGenerationGenerateBranchName](input)),
     },

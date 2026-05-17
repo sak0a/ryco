@@ -325,6 +325,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       const { prompt, outputSchema } = buildIssueContentPolishPrompt({
         rough: input.rough ?? "",
         ...(input.currentTitle ? { currentTitle: input.currentTitle } : {}),
+        ...(input.customInstructions ? { customInstructions: input.customInstructions } : {}),
       });
       const decoded = yield* runClaudeJson({
         operation: "generateIssueContent",

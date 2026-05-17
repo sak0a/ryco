@@ -479,6 +479,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       const { prompt, outputSchema } = buildIssueContentPolishPrompt({
         rough: input.rough ?? "",
         ...(input.currentTitle ? { currentTitle: input.currentTitle } : {}),
+        ...(input.customInstructions ? { customInstructions: input.customInstructions } : {}),
       });
       const decoded = yield* runOpenCodeJson({
         operation: "generateIssueContent",

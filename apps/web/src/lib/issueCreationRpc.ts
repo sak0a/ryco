@@ -72,6 +72,7 @@ export interface GenerateIssueContentPayload {
   readonly rough?: string;
   readonly body?: string;
   readonly currentTitle?: string;
+  readonly customInstructions?: string;
 }
 
 export function useGenerateIssueContentMutation(input: { environmentId: EnvironmentId }) {

@@ -7,6 +7,8 @@ interface IssueAssigneePickerProps {
   available: ReadonlyArray<SourceControlAssigneeCandidate>;
   selected: ReadonlyArray<string>;
   onChange: (next: ReadonlyArray<string>) => void;
+  isLoading?: boolean;
+  error?: string | null;
 }
 
 export function IssueAssigneePicker(props: IssueAssigneePickerProps) {
@@ -46,27 +48,38 @@ export function IssueAssigneePicker(props: IssueAssigneePickerProps) {
             className="m-2 h-8 text-sm"
           />
           <div className="max-h-60 overflow-y-auto">
-            {visible.map((a) => (
-              <button
-                key={a.login}
-                type="button"
-                onClick={() => toggle(a.login)}
-                className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-muted/60 ${
-                  props.selected.includes(a.login) ? "bg-muted/80" : ""
-                }`}
-              >
-                <span>
-                  @{a.login}
-                  {a.displayName ? (
-                    <span className="text-muted-foreground"> — {a.displayName}</span>
-                  ) : null}
-                </span>
-                {props.selected.includes(a.login) ? <span className="text-xs">✓</span> : null}
-              </button>
-            ))}
-            {visible.length === 0 ? (
-              <p className="px-3 py-2 text-muted-foreground text-xs">No matching people.</p>
-            ) : null}
+            {props.isLoading ? (
+              <p className="px-3 py-2 text-muted-foreground text-xs">Loading assignees…</p>
+            ) : props.error ? (
+              <p className="px-3 py-2 text-destructive text-xs">
+                Failed to load assignees: {props.error}
+              </p>
+            ) : visible.length === 0 ? (
+              <p className="px-3 py-2 text-muted-foreground text-xs">
+                {query
+                  ? "No matching people."
+                  : "No assignable users for this repository."}
+              </p>
+            ) : (
+              visible.map((a) => (
+                <button
+                  key={a.login}
+                  type="button"
+                  onClick={() => toggle(a.login)}
+                  className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-muted/60 ${
+                    props.selected.includes(a.login) ? "bg-muted/80" : ""
+                  }`}
+                >
+                  <span>
+                    @{a.login}
+                    {a.displayName ? (
+                      <span className="text-muted-foreground"> — {a.displayName}</span>
+                    ) : null}
+                  </span>
+                  {props.selected.includes(a.login) ? <span className="text-xs">✓</span> : null}
+                </button>
+              ))
+            )}
           </div>
         </PopoverContent>
       </Popover>

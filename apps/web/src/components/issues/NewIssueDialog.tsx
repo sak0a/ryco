@@ -23,11 +23,7 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { IssueAssigneePicker } from "./IssueAssigneePicker";
 import { IssueLabelPicker } from "./IssueLabelPicker";
-import {
-  canSubmit,
-  initialNewIssueState,
-  newIssueDialogReducer,
-} from "./newIssueDialogReducer";
+import { canSubmit, initialNewIssueState, newIssueDialogReducer } from "./newIssueDialogReducer";
 
 export interface NewIssueDialogProps {
   open: boolean;
@@ -81,11 +77,13 @@ export function NewIssueDialog(props: NewIssueDialogProps) {
   const onPolish = async () => {
     dispatch({ type: "aiPolishStarted" });
     try {
+      const trimmedInstructions = state.polishInstructions.trim();
       const r = await polish.mutateAsync({
         cwd: props.cwd,
         mode: "polish",
         rough: state.body,
         ...(state.title ? { currentTitle: state.title } : {}),
+        ...(trimmedInstructions ? { customInstructions: trimmedInstructions } : {}),
       });
       dispatch({ type: "aiPolishSucceeded", result: r });
     } catch (e) {
@@ -203,6 +201,14 @@ export function NewIssueDialog(props: NewIssueDialogProps) {
             {state.ai.polishStatus === "error" && state.ai.lastError ? (
               <p className="text-destructive text-xs">Polish failed: {state.ai.lastError}</p>
             ) : null}
+            <Input
+              value={state.polishInstructions}
+              onChange={(e) =>
+                dispatch({ type: "setPolishInstructions", value: e.target.value })
+              }
+              placeholder='Polish guidance (optional) — e.g. "make it more detailed", "add use cases"'
+              className="mt-2 h-8 text-xs"
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -214,6 +220,14 @@ export function NewIssueDialog(props: NewIssueDialogProps) {
                 available={labelsQuery.data ?? []}
                 selected={state.labels}
                 onChange={(next) => dispatch({ type: "setLabels", labels: next })}
+                isLoading={labelsQuery.isLoading}
+                error={
+                  labelsQuery.error instanceof Error
+                    ? labelsQuery.error.message
+                    : labelsQuery.error
+                      ? String(labelsQuery.error)
+                      : null
+                }
               />
             </div>
             <div className="space-y-1.5">
@@ -224,6 +238,14 @@ export function NewIssueDialog(props: NewIssueDialogProps) {
                 available={assigneesQuery.data ?? []}
                 selected={state.assignees}
                 onChange={(next) => dispatch({ type: "setAssignees", assignees: next })}
+                isLoading={assigneesQuery.isLoading}
+                error={
+                  assigneesQuery.error instanceof Error
+                    ? assigneesQuery.error.message
+                    : assigneesQuery.error
+                      ? String(assigneesQuery.error)
+                      : null
+                }
               />
             </div>
           </div>
@@ -233,9 +255,7 @@ export function NewIssueDialog(props: NewIssueDialogProps) {
               <input
                 type="checkbox"
                 checked={state.worktreeEnabled}
-                onChange={(e) =>
-                  dispatch({ type: "setWorktreeEnabled", value: e.target.checked })
-                }
+                onChange={(e) => dispatch({ type: "setWorktreeEnabled", value: e.target.checked })}
               />
               Create worktree on submit
             </label>

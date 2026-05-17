@@ -7,13 +7,13 @@ interface IssueLabelPickerProps {
   available: ReadonlyArray<SourceControlLabel>;
   selected: ReadonlyArray<string>;
   onChange: (next: ReadonlyArray<string>) => void;
+  isLoading?: boolean;
+  error?: string | null;
 }
 
 export function IssueLabelPicker(props: IssueLabelPickerProps) {
   const [query, setQuery] = useState("");
-  const visible = props.available.filter((l) =>
-    l.name.toLowerCase().includes(query.toLowerCase()),
-  );
+  const visible = props.available.filter((l) => l.name.toLowerCase().includes(query.toLowerCase()));
   const toggle = (name: string) => {
     const has = props.selected.includes(name);
     props.onChange(has ? props.selected.filter((n) => n !== name) : [...props.selected, name]);
@@ -47,22 +47,31 @@ export function IssueLabelPicker(props: IssueLabelPickerProps) {
             className="m-2 h-8 text-sm"
           />
           <div className="max-h-60 overflow-y-auto">
-            {visible.map((label) => (
-              <button
-                key={label.name}
-                type="button"
-                onClick={() => toggle(label.name)}
-                className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-muted/60 ${
-                  props.selected.includes(label.name) ? "bg-muted/80" : ""
-                }`}
-              >
-                <span>{label.name}</span>
-                {props.selected.includes(label.name) ? <span className="text-xs">✓</span> : null}
-              </button>
-            ))}
-            {visible.length === 0 ? (
-              <p className="px-3 py-2 text-muted-foreground text-xs">No matching labels.</p>
-            ) : null}
+            {props.isLoading ? (
+              <p className="px-3 py-2 text-muted-foreground text-xs">Loading labels…</p>
+            ) : props.error ? (
+              <p className="px-3 py-2 text-destructive text-xs">
+                Failed to load labels: {props.error}
+              </p>
+            ) : visible.length === 0 ? (
+              <p className="px-3 py-2 text-muted-foreground text-xs">
+                {query ? "No matching labels." : "No labels defined in this repository."}
+              </p>
+            ) : (
+              visible.map((label) => (
+                <button
+                  key={label.name}
+                  type="button"
+                  onClick={() => toggle(label.name)}
+                  className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-muted/60 ${
+                    props.selected.includes(label.name) ? "bg-muted/80" : ""
+                  }`}
+                >
+                  <span>{label.name}</span>
+                  {props.selected.includes(label.name) ? <span className="text-xs">✓</span> : null}
+                </button>
+              ))
+            )}
           </div>
         </PopoverContent>
       </Popover>

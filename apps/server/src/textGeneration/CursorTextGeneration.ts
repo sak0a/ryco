@@ -278,6 +278,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       const { prompt, outputSchema } = buildIssueContentPolishPrompt({
         rough: input.rough ?? "",
         ...(input.currentTitle ? { currentTitle: input.currentTitle } : {}),
+        ...(input.customInstructions ? { customInstructions: input.customInstructions } : {}),
       });
       const decoded = yield* runCursorJson({
         operation: "generateIssueContent",
