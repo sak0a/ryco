@@ -19,6 +19,7 @@ import type {
 import {
   ProviderDriverKind,
   ProviderInstanceId,
+  PROJECT_STAGE_FILE_MAX_BYTES,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@ryco/contracts";
@@ -43,7 +44,9 @@ import {
   collapseExpandedComposerCursor,
   detectComposerTrigger,
   expandCollapsedComposerCursor,
+  formatComposerFileReference,
   replaceTextRange,
+  shouldUseNativeComposerFileReference,
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
@@ -95,6 +98,9 @@ import { buildExpandedImagePreview, type ExpandedImagePreview } from "./Expanded
 import { SourceControlContextChip } from "./SourceControlContextChip";
 import { basenameOfPath } from "../../pathEntry";
 import { cn, randomUUID } from "~/lib/utils";
+import { readEnvironmentApi } from "~/environmentApi";
+import { getPrimaryKnownEnvironment } from "~/environments/primary";
+import { readLocalApi } from "~/localApi";
 import { Separator } from "../ui/separator";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -133,6 +139,18 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useUiStateStore } from "../../uiStateStore";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
+const STAGED_FILE_SIZE_LIMIT_LABEL = `${Math.round(PROJECT_STAGE_FILE_MAX_BYTES / (1024 * 1024))}MB`;
+const COMPOSER_FILE_REFERENCE_SEPARATOR = " ";
+
+async function readFileAsBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
 
 const runtimeModeConfig: Record<
   RuntimeMode,
@@ -1996,50 +2014,187 @@ export const ChatComposer = memo(
     // ------------------------------------------------------------------
     // Callbacks: images
     // ------------------------------------------------------------------
-    const addComposerImages = (files: File[]) => {
-      if (!activeThreadId || files.length === 0) return;
-      if (pendingUserInputs.length > 0) {
-        toastManager.add({
-          type: "error",
-          title: "Attach images after answering plan questions.",
-        });
-        return;
-      }
-      const nextImages: ComposerImageAttachment[] = [];
-      let nextImageCount = composerImagesRef.current.length;
-      let error: string | null = null;
-      for (const file of files) {
-        if (!file.type.startsWith("image/")) {
-          error = `Unsupported file type for '${file.name}'. Please attach image files only.`;
-          continue;
+    const addComposerImages = useCallback(
+      (files: File[]) => {
+        if (!activeThreadId || files.length === 0) return;
+        if (pendingUserInputs.length > 0) {
+          toastManager.add({
+            type: "error",
+            title: "Attach images after answering plan questions.",
+          });
+          return;
         }
-        if (file.size > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
-          error = `'${file.name}' exceeds the ${IMAGE_SIZE_LIMIT_LABEL} attachment limit.`;
-          continue;
+        const nextImages: ComposerImageAttachment[] = [];
+        let nextImageCount = composerImagesRef.current.length;
+        let error: string | null = null;
+        for (const file of files) {
+          if (!file.type.startsWith("image/")) {
+            error = `Unsupported file type for '${file.name}'. Please attach image files only.`;
+            continue;
+          }
+          if (file.size > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
+            error = `'${file.name}' exceeds the ${IMAGE_SIZE_LIMIT_LABEL} attachment limit.`;
+            continue;
+          }
+          if (nextImageCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
+            error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`;
+            break;
+          }
+          const previewUrl = URL.createObjectURL(file);
+          nextImages.push({
+            type: "image",
+            id: randomUUID(),
+            name: file.name || "image",
+            mimeType: file.type,
+            sizeBytes: file.size,
+            previewUrl,
+            file,
+          });
+          nextImageCount += 1;
         }
-        if (nextImageCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
-          error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`;
-          break;
+        if (nextImages.length === 1 && nextImages[0]) {
+          addComposerImage(nextImages[0]);
+        } else if (nextImages.length > 1) {
+          addComposerImagesToDraft(nextImages);
         }
-        const previewUrl = URL.createObjectURL(file);
-        nextImages.push({
-          type: "image",
-          id: randomUUID(),
-          name: file.name || "image",
-          mimeType: file.type,
-          sizeBytes: file.size,
-          previewUrl,
-          file,
-        });
-        nextImageCount += 1;
-      }
-      if (nextImages.length === 1 && nextImages[0]) {
-        addComposerImage(nextImages[0]);
-      } else if (nextImages.length > 1) {
-        addComposerImagesToDraft(nextImages);
-      }
-      setThreadError(activeThreadId, error);
-    };
+        setThreadError(activeThreadId, error);
+      },
+      [
+        activeThreadId,
+        addComposerImage,
+        addComposerImagesToDraft,
+        composerImagesRef,
+        pendingUserInputs.length,
+        setThreadError,
+      ],
+    );
+
+    const insertComposerFileReferences = useCallback((references: readonly string[]) => {
+      if (references.length === 0) return;
+      const editor = composerEditorRef.current;
+      if (!editor) return;
+
+      const snapshot = editor.readSnapshot();
+      const insertion = references.join(COMPOSER_FILE_REFERENCE_SEPARATOR);
+      const left = snapshot.value[snapshot.cursor - 1] ?? "";
+      const right = snapshot.value[snapshot.cursor] ?? "";
+      const needsLeadingSpace = left.length > 0 && !/\s/.test(left);
+      const needsTrailingSpace = right.length > 0 && !/\s/.test(right);
+      editor.insertTextAndFocus(
+        `${needsLeadingSpace ? COMPOSER_FILE_REFERENCE_SEPARATOR : ""}${insertion}${needsTrailingSpace ? COMPOSER_FILE_REFERENCE_SEPARATOR : ""}`,
+      );
+    }, []);
+
+    const isLocalDesktopEnvironment = useCallback(() => {
+      const primaryEnvironment = getPrimaryKnownEnvironment();
+      return (
+        window.desktopBridge !== undefined &&
+        primaryEnvironment?.source === "desktop-managed" &&
+        primaryEnvironment.environmentId === environmentId
+      );
+    }, [environmentId]);
+
+    const stageComposerFileReference = useCallback(
+      async (file: File): Promise<string | null> => {
+        if (!gitCwd) {
+          toastManager.add({
+            type: "error",
+            title: `Couldn't stage '${file.name || "file"}'.`,
+            description: "No active workspace is available for this composer.",
+          });
+          return null;
+        }
+        if (file.size > PROJECT_STAGE_FILE_MAX_BYTES) {
+          toastManager.add({
+            type: "error",
+            title: `'${file.name || "file"}' exceeds the ${STAGED_FILE_SIZE_LIMIT_LABEL} file staging limit.`,
+          });
+          return null;
+        }
+        const environmentApi = readEnvironmentApi(environmentId);
+        if (!environmentApi) {
+          toastManager.add({
+            type: "error",
+            title: `Couldn't stage '${file.name || "file"}'.`,
+            description: "The active environment is not connected.",
+          });
+          return null;
+        }
+
+        try {
+          const result = await environmentApi.projects.stageFileReference({
+            cwd: gitCwd,
+            scopeId: String(activeThreadId ?? draftId ?? routeThreadRef.threadId),
+            name: file.name || "file",
+            ...(file.type ? { mimeType: file.type } : {}),
+            sizeBytes: file.size,
+            dataBase64: await readFileAsBase64(file),
+          });
+          return result.relativePath;
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: `Couldn't stage '${file.name || "file"}'.`,
+            description: error instanceof Error ? error.message : "File staging failed.",
+          });
+          return null;
+        }
+      },
+      [activeThreadId, draftId, environmentId, gitCwd, routeThreadRef.threadId],
+    );
+
+    const resolveComposerFileReference = useCallback(
+      async (file: File): Promise<string | null> => {
+        let resolvedPath: string | null = null;
+        try {
+          resolvedPath = (await readLocalApi()?.shell.getPathForFile?.(file)) ?? null;
+        } catch {
+          resolvedPath = null;
+        }
+
+        if (
+          shouldUseNativeComposerFileReference({
+            resolvedPath,
+            cwd: gitCwd,
+            runtimeMode,
+            isLocalDesktopEnvironment: isLocalDesktopEnvironment(),
+          })
+        ) {
+          return resolvedPath;
+        }
+
+        return stageComposerFileReference(file);
+      },
+      [gitCwd, isLocalDesktopEnvironment, runtimeMode, stageComposerFileReference],
+    );
+
+    const addComposerAttachments = useCallback(
+      async (files: File[]) => {
+        if (files.length === 0) return;
+
+        const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+        const nonImageFiles = files.filter((file) => !file.type.startsWith("image/"));
+
+        if (imageFiles.length > 0) {
+          addComposerImages(imageFiles);
+        }
+
+        if (nonImageFiles.length === 0) {
+          return;
+        }
+
+        const references = (
+          await Promise.all(
+            nonImageFiles.map(async (file) => {
+              const reference = await resolveComposerFileReference(file);
+              return reference ? formatComposerFileReference(reference) : null;
+            }),
+          )
+        ).filter((reference): reference is string => reference !== null);
+        insertComposerFileReferences(references);
+      },
+      [addComposerImages, insertComposerFileReferences, resolveComposerFileReference],
+    );
 
     const removeComposerImage = (imageId: string) => {
       removeComposerImageFromDraft(imageId);
@@ -2058,10 +2213,8 @@ export const ChatComposer = memo(
     const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
       const files = Array.from(event.clipboardData.files);
       if (files.length === 0) return;
-      const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-      if (imageFiles.length === 0) return;
       event.preventDefault();
-      addComposerImages(imageFiles);
+      void addComposerAttachments(files);
     };
 
     const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
@@ -2095,8 +2248,11 @@ export const ChatComposer = memo(
       dragDepthRef.current = 0;
       setIsDragOverComposer(false);
       const files = Array.from(event.dataTransfer.files);
-      addComposerImages(files);
-      focusComposer();
+      const hasNonImageFiles = files.some((file) => !file.type.startsWith("image/"));
+      void addComposerAttachments(files);
+      if (!hasNonImageFiles) {
+        focusComposer();
+      }
     };
     const handleInterruptPrimaryAction = useCallback(() => {
       void onInterrupt();
@@ -2659,7 +2815,9 @@ export const ChatComposer = memo(
                     hasSourceControlRemote={hasSourceControlRemote}
                     onSelectIssue={handleSelectIssue}
                     onSelectChangeRequest={handleSelectChangeRequest}
-                    onAttachFile={(file) => addComposerImages([file])}
+                    onAttachFile={(file) => {
+                      void addComposerAttachments([file]);
+                    }}
                   />
                   <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
                   <ProviderModelPicker

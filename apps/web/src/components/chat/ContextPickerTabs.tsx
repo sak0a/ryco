@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "~/lib/utils";
 
 export type ContextPickerTab = {
@@ -12,19 +12,55 @@ export const ContextPickerTabs = memo(function ContextPickerTabs(props: {
   activeId: string;
   onSelect: (id: string) => void;
 }) {
+  const tablistRef = useRef<HTMLDivElement>(null);
+  const [indicatorStyle, setIndicatorStyle] = useState({ width: 0, x: 0, visible: false });
+
+  useLayoutEffect(() => {
+    const tablist = tablistRef.current;
+    if (!tablist) return;
+    const activeTab = tablist.querySelector<HTMLElement>(
+      `[data-context-picker-tab-id="${CSS.escape(props.activeId)}"]`,
+    );
+    if (!activeTab) {
+      setIndicatorStyle((current) => ({ ...current, visible: false }));
+      return;
+    }
+    setIndicatorStyle({
+      width: activeTab.offsetWidth,
+      x: activeTab.offsetLeft,
+      visible: true,
+    });
+  }, [props.activeId, props.tabs]);
+
   return (
-    <div role="tablist" className="flex gap-1 px-3 py-1.5 border-b border-border">
+    <div
+      ref={tablistRef}
+      role="tablist"
+      className="relative isolate flex gap-1 border-border border-b px-3 py-1.5"
+    >
+      <span
+        className={cn(
+          "pointer-events-none absolute top-1.5 bottom-1.5 left-0 z-0 rounded-md bg-accent transition-[transform,width,opacity] duration-[240ms] ease-out",
+          indicatorStyle.visible ? "opacity-100" : "opacity-0",
+        )}
+        style={{
+          width: indicatorStyle.width,
+          transform: `translateX(${indicatorStyle.x}px)`,
+        }}
+        aria-hidden
+      />
       {props.tabs.map((tab) => (
         <button
           key={tab.id}
           type="button"
           role="tab"
           aria-selected={props.activeId === tab.id}
+          data-context-picker-tab-id={tab.id}
           onClick={() => props.onSelect(tab.id)}
           className={cn(
-            "rounded-md px-2 py-1 text-xs",
+            "relative z-10 rounded-md px-2 py-1 text-xs transition-colors duration-150",
             props.activeId === tab.id
-              ? "bg-accent text-accent-foreground"
+              ? "text-accent-foreground"
               : "text-muted-foreground hover:text-foreground",
           )}
         >

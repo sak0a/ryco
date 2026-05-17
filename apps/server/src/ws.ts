@@ -23,6 +23,7 @@ import {
   ProjectListEntriesError,
   ProjectReadFileError,
   ProjectSearchEntriesError,
+  ProjectStageFileReferenceError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
   OpinionatedPluginError,
@@ -2194,6 +2195,25 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                     ? "Workspace file path must stay within the project root."
                     : "Failed to write workspace file";
                   return new ProjectWriteFileError({
+                    message,
+                    cause,
+                  });
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsStageFileReference]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsStageFileReference,
+            ownerEffect(
+              WS_METHODS.projectsStageFileReference,
+              workspaceFileSystem.stageFileReference(input).pipe(
+                Effect.mapError((cause) => {
+                  const message = Schema.is(WorkspacePathOutsideRootError)(cause)
+                    ? "Workspace file path must stay within the project root."
+                    : cause.detail;
+                  return new ProjectStageFileReferenceError({
                     message,
                     cause,
                   });

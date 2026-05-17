@@ -54,6 +54,7 @@ const rpcClientMock = {
     readFile: vi.fn(),
     searchEntries: vi.fn(),
     writeFile: vi.fn(),
+    stageFileReference: vi.fn(),
   },
   filesystem: {
     browse: vi.fn(),
@@ -559,6 +560,18 @@ describe("wsApi", () => {
       "/tmp/project",
     );
     expect(pickFolder).toHaveBeenCalledWith({ initialPath: "/tmp/workspace" });
+  });
+
+  it("forwards dropped-file path resolution to the desktop bridge", async () => {
+    const getPathForFile = vi.fn().mockReturnValue("/tmp/workspace/data/input.json");
+    getWindowForTest().desktopBridge = makeDesktopBridge({ getPathForFile });
+
+    const { createLocalApi } = await import("./localApi");
+    const api = createLocalApi(rpcClientMock as never);
+    const file = new File(["{}"], "input.json", { type: "application/json" });
+
+    await expect(api.shell.getPathForFile?.(file)).resolves.toBe("/tmp/workspace/data/input.json");
+    expect(getPathForFile).toHaveBeenCalledWith(file);
   });
 
   it("falls back to the browser context menu helper when the desktop bridge is missing", async () => {

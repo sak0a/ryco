@@ -48,6 +48,61 @@ function tokenStartForCursor(text: string, cursor: number): number {
   return index + 1;
 }
 
+export function formatComposerFileReference(path: string): string {
+  if (!/[\s"'`]/.test(path)) {
+    return path;
+  }
+  if (!path.includes('"')) {
+    return `"${path}"`;
+  }
+  if (!path.includes("'")) {
+    return `'${path}'`;
+  }
+  return JSON.stringify(path);
+}
+
+function normalizeComparableLocalPath(input: string): string {
+  const slashNormalized = input.replaceAll("\\", "/");
+  const isWindowsDrivePath = /^[a-z]:/i.test(slashNormalized);
+  const isWindowsUncPath = /^\/\/[^/]/.test(slashNormalized);
+  const normalized = slashNormalized.replace(/\/+/g, "/").replace(/\/$/g, "");
+  return isWindowsDrivePath || isWindowsUncPath ? normalized.toLowerCase() : normalized;
+}
+
+export function isAbsoluteLocalFilePath(path: string): boolean {
+  return path.startsWith("/") || /^[a-z]:[\\/]/i.test(path) || /^\\\\[^\\]/.test(path);
+}
+
+export function isLocalFilePathInsideDirectory(filePath: string, directoryPath: string): boolean {
+  if (!isAbsoluteLocalFilePath(filePath) || !isAbsoluteLocalFilePath(directoryPath)) {
+    return false;
+  }
+  const normalizedFilePath = normalizeComparableLocalPath(filePath);
+  const normalizedDirectoryPath = normalizeComparableLocalPath(directoryPath);
+  return (
+    normalizedFilePath === normalizedDirectoryPath ||
+    normalizedFilePath.startsWith(`${normalizedDirectoryPath}/`)
+  );
+}
+
+export function shouldUseNativeComposerFileReference(input: {
+  resolvedPath: string | null;
+  cwd: string | null;
+  runtimeMode: string;
+  isLocalDesktopEnvironment: boolean;
+}): boolean {
+  if (!input.isLocalDesktopEnvironment || !input.resolvedPath) {
+    return false;
+  }
+  if (!isAbsoluteLocalFilePath(input.resolvedPath)) {
+    return false;
+  }
+  if (input.runtimeMode === "full-access") {
+    return true;
+  }
+  return input.cwd ? isLocalFilePathInsideDirectory(input.resolvedPath, input.cwd) : false;
+}
+
 export function expandCollapsedComposerCursor(text: string, cursorInput: number): number {
   const collapsedCursor = clampCursor(text, cursorInput);
   const segments = splitPromptIntoComposerSegments(text);

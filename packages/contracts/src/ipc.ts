@@ -56,6 +56,8 @@ import type {
   ProjectListEntriesResult,
   ProjectReadFileInput,
   ProjectReadFileResult,
+  ProjectStageFileReferenceInput,
+  ProjectStageFileReferenceResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
   ProjectWriteFileInput,
@@ -269,6 +271,7 @@ export interface DesktopBridge {
     readonly port?: number;
   }) => Promise<DesktopServerExposureState>;
   getAdvertisedEndpoints: () => Promise<readonly AdvertisedEndpoint[]>;
+  getPathForFile?: (file: File) => string;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
@@ -304,6 +307,7 @@ export interface LocalApi {
   shell: {
     openInEditor: (cwd: string, editor: EditorId) => Promise<void>;
     openExternal: (url: string) => Promise<void>;
+    getPathForFile?: (file: File) => Promise<string | null>;
   };
   contextMenu: {
     show: <T extends string>(
@@ -379,6 +383,9 @@ export interface EnvironmentApi {
     readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
+    stageFileReference: (
+      input: ProjectStageFileReferenceInput,
+    ) => Promise<ProjectStageFileReferenceResult>;
     initializeGit?: (input: ProjectsInitializeGitInput) => Promise<EmptyRpcResult>;
   };
   filesystem: {
