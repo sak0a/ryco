@@ -602,14 +602,11 @@ export const WsSourceControlCreateIssueRpc = Rpc.make(WS_METHODS.sourceControlCr
   error: Schema.Union([SourceControlProviderError, AuthRpcError, GitManagerServiceError]),
 });
 
-export const WsSourceControlListIssueLabelsRpc = Rpc.make(
-  WS_METHODS.sourceControlListIssueLabels,
-  {
-    payload: Schema.Struct({ cwd: Schema.String }),
-    success: Schema.Array(SourceControlLabel),
-    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
-  },
-);
+export const WsSourceControlListIssueLabelsRpc = Rpc.make(WS_METHODS.sourceControlListIssueLabels, {
+  payload: Schema.Struct({ cwd: Schema.String }),
+  success: Schema.Array(SourceControlLabel),
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+});
 
 export const WsSourceControlListIssueAssigneesRpc = Rpc.make(
   WS_METHODS.sourceControlListIssueAssignees,

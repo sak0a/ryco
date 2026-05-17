@@ -160,36 +160,34 @@ describe("makeTextGenerationFromRegistry", () => {
       }),
   );
 
-  it.effect(
-    "generateIssueContent: title mode returns only title from provider",
-    () =>
-      Effect.gen(function* () {
-        const instanceId = ProviderInstanceId.make("codex_personal");
-        const titleResult: IssueContentGenerationResult = { title: "Generated Title" };
-        const instance = makeStubInstance(
-          instanceId,
-          makeStubTextGeneration({
-            generateIssueContent: (input) => {
-              if (input.mode === "title") {
-                return Effect.succeed(titleResult);
-              }
-              return Effect.succeed({ title: "unexpected", body: "unexpected" });
-            },
-          }),
-        );
+  it.effect("generateIssueContent: title mode returns only title from provider", () =>
+    Effect.gen(function* () {
+      const instanceId = ProviderInstanceId.make("codex_personal");
+      const titleResult: IssueContentGenerationResult = { title: "Generated Title" };
+      const instance = makeStubInstance(
+        instanceId,
+        makeStubTextGeneration({
+          generateIssueContent: (input) => {
+            if (input.mode === "title") {
+              return Effect.succeed(titleResult);
+            }
+            return Effect.succeed({ title: "unexpected", body: "unexpected" });
+          },
+        }),
+      );
 
-        const tg = makeTextGenerationFromRegistry(makeStubRegistry([instance]));
+      const tg = makeTextGenerationFromRegistry(makeStubRegistry([instance]));
 
-        const result = yield* tg.generateIssueContent({
-          cwd: process.cwd(),
-          mode: "title",
-          currentTitle: "old title",
-          modelSelection: createModelSelection(instanceId, "gpt-5"),
-        });
+      const result = yield* tg.generateIssueContent({
+        cwd: process.cwd(),
+        mode: "title",
+        currentTitle: "old title",
+        modelSelection: createModelSelection(instanceId, "gpt-5"),
+      });
 
-        expect(result.title).toBe("Generated Title");
-        expect(result.body).toBeUndefined();
-      }),
+      expect(result.title).toBe("Generated Title");
+      expect(result.body).toBeUndefined();
+    }),
   );
 
   it.effect(

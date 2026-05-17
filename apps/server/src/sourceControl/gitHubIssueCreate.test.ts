@@ -56,8 +56,7 @@ describe("buildGitHubIssueCreateArgv", () => {
 
 describe("parseGitHubIssueCreateOutput", () => {
   it("extracts url and number from the last non-empty line", () => {
-    const stdout =
-      "Creating issue in owner/repo\nhttps://github.com/owner/repo/issues/42\n";
+    const stdout = "Creating issue in owner/repo\nhttps://github.com/owner/repo/issues/42\n";
     expect(parseGitHubIssueCreateOutput(stdout)).toEqual({
       url: "https://github.com/owner/repo/issues/42",
       number: 42,

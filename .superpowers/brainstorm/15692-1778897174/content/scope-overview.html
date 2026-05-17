@@ -1,0 +1,166 @@
+<h2>Feature surface — pick what's in the MVP</h2>
+<p class="subtitle">
+  You described a lot. Let's see what's in scope so the design stays focused. Click any blocks you
+  consider essential for v1 (you can also just reply in terminal).
+</p>
+
+<style>
+  .surface-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 24px;
+  }
+  .surface-card {
+    border: 1px solid var(--border, #2a2a2a);
+    border-radius: 12px;
+    padding: 18px 20px;
+    background: var(--surface, #1a1a1a);
+    cursor: pointer;
+    transition: all 150ms ease;
+  }
+  .surface-card:hover {
+    border-color: var(--accent, #5b8def);
+    transform: translateY(-1px);
+  }
+  .surface-card.selected {
+    border-color: var(--accent, #5b8def);
+    background: rgba(91, 141, 239, 0.08);
+  }
+  .surface-card .tag {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted, #888);
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+  .surface-card h3 {
+    margin: 0 0 6px 0;
+    font-size: 15px;
+  }
+  .surface-card p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted, #999);
+    line-height: 1.4;
+  }
+  .surface-card .badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(91, 141, 239, 0.15);
+    color: #5b8def;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .surface-card .badge.exists {
+    background: rgba(76, 175, 80, 0.15);
+    color: #66bb6a;
+  }
+  .layer-label {
+    grid-column: 1 / -1;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted, #777);
+    margin-top: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border, #2a2a2a);
+  }
+</style>
+
+<div class="options" data-multiselect>
+  <div class="surface-grid">
+    <div class="layer-label">Creation flow (new dialog)</div>
+
+    <div class="option surface-card" data-choice="a1" onclick="toggleSelect(this)">
+      <div class="tag">A1 · core</div>
+      <h3>Basic issue creation</h3>
+      <p>
+        Title, body, target repo. Calls provider's create-issue API. <span class="badge">new</span>
+      </p>
+    </div>
+
+    <div class="option surface-card" data-choice="a2" onclick="toggleSelect(this)">
+      <div class="tag">A2 · metadata</div>
+      <h3>Labels &amp; assignees pickers</h3>
+      <p>
+        Multi-select chips populated from the repo. Needs provider listLabels / listAssignees.
+        <span class="badge">new</span>
+      </p>
+    </div>
+
+    <div class="option surface-card" data-choice="a3" onclick="toggleSelect(this)">
+      <div class="tag">A3 · AI</div>
+      <h3>AI: rough text → polished body</h3>
+      <p>
+        User pastes a brain-dump, model rewrites into a clean issue (uses existing TextGeneration
+        service). <span class="badge exists">infra ready</span>
+      </p>
+    </div>
+
+    <div class="option surface-card" data-choice="a4" onclick="toggleSelect(this)">
+      <div class="tag">A4 · AI</div>
+      <h3>AI: title suggestion</h3>
+      <p>Generate a concise title from the body or rough description.</p>
+    </div>
+
+    <div class="option surface-card" data-choice="a5" onclick="toggleSelect(this)">
+      <div class="tag">A5 · branch</div>
+      <h3>AI branch name + worktree on submit</h3>
+      <p>
+        Generated branch name shown in the dialog; opt-in create-worktree checkbox.
+        <span class="badge exists">branch infra ready</span>
+      </p>
+    </div>
+
+    <div class="layer-label">Post-creation actions (Issues tab / IssueDetail)</div>
+
+    <div class="option surface-card" data-choice="b1" onclick="toggleSelect(this)">
+      <div class="tag">B1</div>
+      <h3>"Create worktree from this issue"</h3>
+      <p>
+        Button on existing IssueDetail — reuses NewWorktreeDialog with intent prefilled.
+        <span class="badge exists">already partly works via worktree dialog</span>
+      </p>
+    </div>
+
+    <div class="option surface-card" data-choice="b2" onclick="toggleSelect(this)">
+      <div class="tag">B2</div>
+      <h3>"Create branch" (no worktree)</h3>
+      <p>Just spin a branch off current/base, no worktree.</p>
+    </div>
+
+    <div class="option surface-card" data-choice="b3" onclick="toggleSelect(this)">
+      <div class="tag">B3</div>
+      <h3>"Link existing PR/branch to issue"</h3>
+      <p>Pick a PR or branch and have the provider associate it (GH closes-issue keyword, etc.).</p>
+    </div>
+
+    <div class="option surface-card" data-choice="b4" onclick="toggleSelect(this)">
+      <div class="tag">B4</div>
+      <h3>"Add comment" on existing issue</h3>
+      <p>Inline composer in IssueDetail, optionally AI-assisted.</p>
+    </div>
+
+    <div class="layer-label">Plumbing decisions</div>
+
+    <div class="option surface-card" data-choice="c1" onclick="toggleSelect(this)">
+      <div class="tag">C1</div>
+      <h3>GitHub-only v1</h3>
+      <p>Ship just the GitHub provider first; others later. Faster ship.</p>
+    </div>
+
+    <div class="option surface-card" data-choice="c2" onclick="toggleSelect(this)">
+      <div class="tag">C2</div>
+      <h3>All providers from day one</h3>
+      <p>GitHub, GitLab, Forgejo, Bitbucket, Azure DevOps. Slower but consistent.</p>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top: 32px">
+  Click everything you want in v1. I'll ask follow-ups in the terminal.
+</p>

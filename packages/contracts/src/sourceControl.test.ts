@@ -142,9 +142,11 @@ describe("SourceControlAssigneeCandidate", () => {
 describe("SourceControlCreateIssueInput", () => {
   it("requires cwd + title; body may be empty; worktree is optional", () => {
     const decode = Schema.decodeUnknownSync(SourceControlCreateIssueInput);
-    expect(
-      decode({ cwd: "/repo", title: "Bug", body: "" }),
-    ).toEqual({ cwd: "/repo", title: "Bug", body: "" });
+    expect(decode({ cwd: "/repo", title: "Bug", body: "" })).toEqual({
+      cwd: "/repo",
+      title: "Bug",
+      body: "",
+    });
     expect(
       decode({
         cwd: "/repo",

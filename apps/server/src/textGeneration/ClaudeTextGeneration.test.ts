@@ -394,38 +394,36 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
     ),
   );
 
-  it.effect(
-    "generateIssueContent fails with TextGenerationError when Claude exits non-zero",
-    () =>
-      withFakeClaudeEnv(
-        {
-          output: "",
-          exitCode: 1,
-          stderr: "claude issue generation failed",
-        },
-        (textGeneration) =>
-          Effect.gen(function* () {
-            const result = yield* textGeneration
-              .generateIssueContent({
-                cwd: process.cwd(),
-                mode: "polish",
-                rough: "some notes",
-                modelSelection: {
-                  instanceId: ProviderInstanceId.make("claudeAgent"),
-                  model: "claude-sonnet-4-6",
-                },
-              })
-              .pipe(Effect.result);
+  it.effect("generateIssueContent fails with TextGenerationError when Claude exits non-zero", () =>
+    withFakeClaudeEnv(
+      {
+        output: "",
+        exitCode: 1,
+        stderr: "claude issue generation failed",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration
+            .generateIssueContent({
+              cwd: process.cwd(),
+              mode: "polish",
+              rough: "some notes",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("claudeAgent"),
+                model: "claude-sonnet-4-6",
+              },
+            })
+            .pipe(Effect.result);
 
-            expect(Result.isFailure(result)).toBe(true);
-            if (Result.isFailure(result)) {
-              expect(result.failure).toBeInstanceOf(TextGenerationError);
-              expect(result.failure.operation).toBe("generateIssueContent");
-              expect(result.failure.message).toContain(
-                "Claude CLI command failed: claude issue generation failed",
-              );
-            }
-          }),
-      ),
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isFailure(result)) {
+            expect(result.failure).toBeInstanceOf(TextGenerationError);
+            expect(result.failure.operation).toBe("generateIssueContent");
+            expect(result.failure.message).toContain(
+              "Claude CLI command failed: claude issue generation failed",
+            );
+          }
+        }),
+    ),
   );
 });

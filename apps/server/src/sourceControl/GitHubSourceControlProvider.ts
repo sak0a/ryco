@@ -312,15 +312,13 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
           return toIssueSummary(detail);
         });
         return yield* work.pipe(
-          Effect.ensuring(
-            fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void)),
-          ),
+          Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void))),
         );
       }),
     listLabels: (input) =>
-      github.listLabels({ cwd: input.cwd }).pipe(
-        Effect.mapError((cause) => providerError("listLabels", cause)),
-      ),
+      github
+        .listLabels({ cwd: input.cwd })
+        .pipe(Effect.mapError((cause) => providerError("listLabels", cause))),
     listAssignees: (input) =>
       github.listAssignees({ cwd: input.cwd }).pipe(
         Effect.map((users) =>

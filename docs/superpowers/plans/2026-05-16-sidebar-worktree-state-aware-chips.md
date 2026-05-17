@@ -45,6 +45,7 @@
 ## Task 1: Shared variant map
 
 **Files:**
+
 - Create: `apps/web/src/components/sourceControl/stateBadgeVariants.ts`
 - Create: `apps/web/src/components/sourceControl/stateBadgeVariants.test.ts`
 
@@ -54,7 +55,14 @@
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { CheckCircle2Icon, CircleDotIcon, GitMergeIcon, GitPullRequestDraftIcon, GitPullRequestIcon, XCircleIcon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  CircleDotIcon,
+  GitMergeIcon,
+  GitPullRequestDraftIcon,
+  GitPullRequestIcon,
+  XCircleIcon,
+} from "lucide-react";
 import { resolveStateBadgeVariant } from "./stateBadgeVariants";
 
 describe("resolveStateBadgeVariant", () => {
@@ -252,6 +260,7 @@ git commit -m "Add shared state badge variant resolver"
 ## Task 2: Refactor StateBadge to consume the shared variant map
 
 **Files:**
+
 - Modify: `apps/web/src/components/projectExplorer/StateBadge.tsx`
 
 The existing `StateBadge` declares its own variants map and a `changeRequestStateKind` helper. After this task it consumes the shared resolver. No callers change.
@@ -268,10 +277,7 @@ Expected: Calls in `IssueList.tsx`, `IssueDetail.tsx`, `PullRequestDetail.tsx`, 
 ```tsx
 import { memo } from "react";
 import { cn } from "~/lib/utils";
-import {
-  resolveStateBadgeVariant,
-  type StateBadgeKind,
-} from "../sourceControl/stateBadgeVariants";
+import { resolveStateBadgeVariant, type StateBadgeKind } from "../sourceControl/stateBadgeVariants";
 
 export type { StateBadgeKind } from "../sourceControl/stateBadgeVariants";
 
@@ -348,6 +354,7 @@ git commit -m "Refactor StateBadge to consume shared variant resolver"
 ## Task 3: Extend the Worktree contract with state fields
 
 **Files:**
+
 - Modify: `packages/contracts/src/worktree.ts`
 
 - [ ] **Step 1: Add the new schemas**
@@ -393,6 +400,7 @@ git commit -m "Extend Worktree contract with PR/issue state fields"
 ## Task 4: Migration 037 — add columns to projection_worktrees
 
 **Files:**
+
 - Create: `apps/server/src/persistence/Migrations/037_WorktreeSourceControlState.ts`
 - Create: `apps/server/src/persistence/Migrations/037_WorktreeSourceControlState.test.ts`
 - Modify: `apps/server/src/persistence/Migrations.ts`
@@ -473,11 +481,13 @@ export default Effect.gen(function* () {
 Edit `apps/server/src/persistence/Migrations.ts`:
 
 Add the import after `Migration0036`:
+
 ```ts
 import Migration0037 from "./Migrations/037_WorktreeSourceControlState.ts";
 ```
 
 Append to `migrationEntries`:
+
 ```ts
 [37, "WorktreeSourceControlState", Migration0037],
 ```
@@ -499,6 +509,7 @@ git commit -m "Add migration 037 for worktree source-control state columns"
 ## Task 5: ProjectionWorktree SQL reads/writes new columns
 
 **Files:**
+
 - Modify: `apps/server/src/persistence/Layers/ProjectionWorktrees.ts`
 - Modify: `apps/server/src/persistence/Layers/ProjectionWorktrees.test.ts`
 
@@ -627,6 +638,7 @@ git commit -m "Persist worktree source-control state in projection rows"
 ## Task 6: Add WorktreeSourceControlStateUpdated event and projector handling
 
 **Files:**
+
 - Modify: `packages/contracts/src/orchestration.ts`
 - Modify: `apps/server/src/orchestration/projector.ts`
 - Modify: `apps/server/src/orchestration/decider.ts`
@@ -707,6 +719,7 @@ git commit -m "Add WorktreeSourceControlStateUpdated event + projector handling"
 ## Task 7: Server-side refresh helper
 
 **Files:**
+
 - Create: `apps/server/src/sourceControl/refreshWorktreeSourceControlState.ts`
 - Create: `apps/server/src/sourceControl/refreshWorktreeSourceControlState.test.ts`
 
@@ -797,25 +810,31 @@ export const refreshWorktreeSourceControlState = Effect.fn("refreshWorktreeSourc
     const registry = yield* SourceControlProviderRegistry;
     const provider = yield* registry.providerForProject({ projectId: existing.projectId });
 
-    const nextPr = existing.prNumber !== null
-      ? yield* provider.getPullRequestState({ number: existing.prNumber }).pipe(
-          Effect.catchAll((cause) =>
-            Effect.logWarning("Failed to refresh PR state", { cause }).pipe(
-              Effect.as(Option.none<{ state: PullRequestState; isDraft: boolean }>()),
-            ),
-          ),
-        )
-      : Option.none<{ state: PullRequestState; isDraft: boolean }>();
+    const nextPr =
+      existing.prNumber !== null
+        ? yield* provider
+            .getPullRequestState({ number: existing.prNumber })
+            .pipe(
+              Effect.catchAll((cause) =>
+                Effect.logWarning("Failed to refresh PR state", { cause }).pipe(
+                  Effect.as(Option.none<{ state: PullRequestState; isDraft: boolean }>()),
+                ),
+              ),
+            )
+        : Option.none<{ state: PullRequestState; isDraft: boolean }>();
 
-    const nextIssue = existing.issueNumber !== null
-      ? yield* provider.getIssueState({ number: existing.issueNumber }).pipe(
-          Effect.catchAll((cause) =>
-            Effect.logWarning("Failed to refresh issue state", { cause }).pipe(
-              Effect.as(Option.none<{ state: IssueState }>()),
-            ),
-          ),
-        )
-      : Option.none<{ state: IssueState }>();
+    const nextIssue =
+      existing.issueNumber !== null
+        ? yield* provider
+            .getIssueState({ number: existing.issueNumber })
+            .pipe(
+              Effect.catchAll((cause) =>
+                Effect.logWarning("Failed to refresh issue state", { cause }).pipe(
+                  Effect.as(Option.none<{ state: IssueState }>()),
+                ),
+              ),
+            )
+        : Option.none<{ state: IssueState }>();
 
     const nextPrState = Option.isSome(nextPr) ? nextPr.value.state : existing.prState;
     const nextPrIsDraft = Option.isSome(nextPr) ? nextPr.value.isDraft : existing.prIsDraft;
@@ -882,6 +901,7 @@ git commit -m "Add refreshWorktreeSourceControlState helper + provider methods"
 ## Task 8: Refresh source 1 — at link time
 
 **Files:**
+
 - Modify: `apps/server/src/sourceControl/GitHubSourceControlProvider.ts`
 
 When a worktree is created from a PR or issue (existing flow that already fetches `prTitle` / `issueTitle`), the same response carries `state` and `isDraft`. Persist it on the initial worktree row.
@@ -903,6 +923,7 @@ Expected: FAIL.
 - [ ] **Step 4: Update the link-time path**
 
 In the helper that builds the create payload, also extract `state` and `isDraft` from the same GitHub CLI response (`GitHubPullRequestSummary` already has these fields — see `apps/server/src/sourceControl/GitHubCli.ts:43-45`). Either:
+
 - Include them in `WorktreeCreatedPayload` (preferred — single event), or
 - Emit `WorktreeSourceControlStateUpdated` immediately after the create event.
 
@@ -925,6 +946,7 @@ git commit -m "Capture PR/issue state at worktree link time"
 ## Task 9: Refresh source 2 — on detail fetch (RPC handlers)
 
 **Files:**
+
 - Modify: `apps/server/src/ws.ts` (and any sub-module that owns `getPullRequest` / `getIssue` routing)
 
 - [ ] **Step 1: Find the RPC routes**
@@ -935,6 +957,7 @@ Expected: handlers that respond to the queries opened by `PullRequestDetail.tsx`
 - [ ] **Step 2: Add a failing test**
 
 Add a test (`apps/server/src/server.test.ts` or wherever the equivalent integration tests live) that:
+
 1. Seeds a projection row with `prNumber: 10`, `prState: null`.
 2. Calls the `getPullRequest` RPC for number 10 with a fake provider response `{ state: "open", isDraft: false }`.
 3. Asserts a `WorktreeSourceControlStateUpdated` event is emitted with `prState: "open"`.
@@ -966,6 +989,7 @@ git commit -m "Refresh worktree state on PR/issue detail RPC"
 ## Task 10: Refresh source 3 — on thread turn finished
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/Layers/ProviderCommandReactor.ts`
 
 A turn finishing on a thread attached to a worktree with a linked PR/issue triggers a single debounced refresh.
@@ -978,6 +1002,7 @@ Expected: a handler that fires after a turn terminates.
 - [ ] **Step 2: Add a failing test**
 
 In `ProviderCommandReactor.test.ts`, add a case that:
+
 1. Seeds a thread attached to a worktree with `prNumber: 42`.
 2. Emits a turn-finished event for that thread.
 3. Asserts `refreshWorktreeSourceControlState` is called once for the worktree (use a spy / fake).
@@ -1007,6 +1032,7 @@ git commit -m "Refresh worktree state after thread turn finishes"
 ## Task 11: Refresh source 4 — on app start
 
 **Files:**
+
 - Modify: `apps/server/src/ws.ts` (or whichever module owns the WebSocket connection lifecycle)
 
 - [ ] **Step 1: Locate the connection-open hook**
@@ -1017,6 +1043,7 @@ Expected: the handler that fires when a new WebSocket session is established (or
 - [ ] **Step 2: Add a failing test**
 
 Test that on connection:
+
 1. Two non-archived worktrees in the same project have linked PRs (`prNumber: 1`, `prNumber: 2`).
 2. The refresh helper is called twice (once per worktree), at most 4 in flight.
 3. A second connection in the same app session does **not** re-trigger the batch for already-refreshed projects.
@@ -1047,6 +1074,7 @@ git commit -m "Batched refresh of worktree state on app connection"
 ## Task 12: Extend SidebarWorktree + composeSidebarTree
 
 **Files:**
+
 - Modify: `apps/web/src/components/sidebar/hooks/useSidebarTree.ts`
 - Modify: `apps/web/src/components/sidebar/hooks/useSidebarTree.test.ts`
 
@@ -1182,6 +1210,7 @@ git commit -m "Propagate worktree source-control state into sidebar tree"
 ## Task 13: Sidebar chip uses the variant map
 
 **Files:**
+
 - Modify: `apps/web/src/components/sidebar/SidebarWorktreeList.tsx`
 
 - [ ] **Step 1: Replace WorktreeSourceControlBadges body**
@@ -1232,9 +1261,7 @@ function WorktreeSourceControlBadges({
           number={prNumber}
           kindLabel="Pull request"
           onClick={
-            onOpenLinkedItem
-              ? () => onOpenLinkedItem({ kind: "pr", number: prNumber })
-              : undefined
+            onOpenLinkedItem ? () => onOpenLinkedItem({ kind: "pr", number: prNumber }) : undefined
           }
         />
       ) : null}
@@ -1314,6 +1341,7 @@ git commit -m "Sidebar chip uses shared state badge variants"
 ## Task 14: Hide idle dot
 
 **Files:**
+
 - Modify: `apps/web/src/components/sidebar/SidebarWorktreeList.tsx`
 
 - [ ] **Step 1: Edit the status dot span**
@@ -1364,6 +1392,7 @@ Outer `<span>` keeps its `size-3` footprint so layout doesn't shift.
 - [ ] **Step 2: Smoke-test locally**
 
 Run the dev server and confirm:
+
 - An idle worktree row has no visible dot but its title is at the same horizontal position as before.
 - An `in_progress` worktree row still has the animated dot.
 
@@ -1379,6 +1408,7 @@ git commit -m "Hide chat-activity dot when worktree is idle"
 ## Task 15: Origin label dedup
 
 **Files:**
+
 - Modify: `apps/web/src/components/sidebar/SidebarWorktreeList.tsx`
 
 - [ ] **Step 1: Edit WorktreeOriginLabel**
@@ -1413,6 +1443,7 @@ function WorktreeOriginLabel({ worktree }: { worktree: SidebarTreeWorktree }) {
 - [ ] **Step 2: Smoke-test locally**
 
 Confirm:
+
 - A PR-origin worktree with a `#N` chip no longer shows the duplicate "PR" label.
 - A manual-origin worktree still shows "Manual".
 - A worktree where the PR number is missing on the projection (e.g., legacy) still shows the "PR" label.
@@ -1429,6 +1460,7 @@ git commit -m "Hide redundant PR/Issue origin label when chip is shown"
 ## Task 16: Browser snapshots for all variants
 
 **Files:**
+
 - Modify: `apps/web/src/components/sidebar/SidebarWorktreeList.browser.tsx`
 - Regenerate: `apps/web/src/components/sidebar/__screenshots__/SidebarWorktreeList.browser.tsx/*.png`
 
@@ -1440,13 +1472,13 @@ In `SidebarWorktreeList.browser.tsx`, add a story / test case that renders a sid
 it("renders every linked-state variant and the idle/active dot states", async () => {
   const project = makeProject("p");
   const worktrees: SidebarWorktree[] = [
-    mk({ worktreeId: "w-issue-open",  origin: "issue", issueNumber: 1,  issueState: "open" }),
-    mk({ worktreeId: "w-issue-closed",origin: "issue", issueNumber: 2,  issueState: "closed" }),
-    mk({ worktreeId: "w-pr-draft",    origin: "pr",    prNumber: 10,    prState: "open",   prIsDraft: true  }),
-    mk({ worktreeId: "w-pr-open",     origin: "pr",    prNumber: 11,    prState: "open",   prIsDraft: false }),
-    mk({ worktreeId: "w-pr-merged",   origin: "pr",    prNumber: 12,    prState: "merged" }),
-    mk({ worktreeId: "w-pr-closed",   origin: "pr",    prNumber: 13,    prState: "closed" }),
-    mk({ worktreeId: "w-unknown-pr",  origin: "pr",    prNumber: 14,    prState: null     }),
+    mk({ worktreeId: "w-issue-open", origin: "issue", issueNumber: 1, issueState: "open" }),
+    mk({ worktreeId: "w-issue-closed", origin: "issue", issueNumber: 2, issueState: "closed" }),
+    mk({ worktreeId: "w-pr-draft", origin: "pr", prNumber: 10, prState: "open", prIsDraft: true }),
+    mk({ worktreeId: "w-pr-open", origin: "pr", prNumber: 11, prState: "open", prIsDraft: false }),
+    mk({ worktreeId: "w-pr-merged", origin: "pr", prNumber: 12, prState: "merged" }),
+    mk({ worktreeId: "w-pr-closed", origin: "pr", prNumber: 13, prState: "closed" }),
+    mk({ worktreeId: "w-unknown-pr", origin: "pr", prNumber: 14, prState: null }),
   ];
 
   // render with a fixture that produces:
@@ -1460,7 +1492,9 @@ it("renders every linked-state variant and the idle/active dot states", async ()
   await expect(ui.container).toMatchScreenshot();
 });
 
-function mk(input: Partial<SidebarWorktree> & { worktreeId: string; origin: SidebarWorktreeOrigin }): SidebarWorktree {
+function mk(
+  input: Partial<SidebarWorktree> & { worktreeId: string; origin: SidebarWorktreeOrigin },
+): SidebarWorktree {
   return {
     branch: "feat",
     projectId: "p",
@@ -1486,6 +1520,7 @@ Expected: new PNG under `__screenshots__/SidebarWorktreeList.browser.tsx/` with 
 - [ ] **Step 3: Eyeball the snapshot**
 
 Open the generated PNG and confirm:
+
 - Issue open chip is emerald with `CircleDot` icon.
 - Issue closed chip is violet with `CheckCircle2` icon.
 - PR draft chip is zinc with `GitPullRequestDraft` icon.

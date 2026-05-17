@@ -1,0 +1,209 @@
+<h2>How should the AI generation work?</h2>
+<p class="subtitle">
+  The user described it as: "describe the issue → model generates a nice description." There are
+  three honest interpretations. Pick one — the rest of the dialog design follows from this.
+</p>
+
+<style>
+  .ai-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 18px;
+    margin-top: 18px;
+  }
+  .ai-card {
+    border: 1px solid var(--border, #2a2a2a);
+    border-radius: 12px;
+    padding: 22px;
+    background: var(--surface, #161616);
+    cursor: pointer;
+    transition: all 150ms ease;
+  }
+  .ai-card:hover {
+    border-color: var(--accent, #5b8def);
+  }
+  .ai-card.selected {
+    border-color: var(--accent, #5b8def);
+    background: rgba(91, 141, 239, 0.06);
+  }
+  .ai-card h3 {
+    margin: 0 0 4px 0;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .ai-card .pill {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(91, 141, 239, 0.15);
+    color: #6ea3ff;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .ai-card .pill.rec {
+    background: rgba(76, 175, 80, 0.15);
+    color: #66bb6a;
+  }
+  .ai-card .tag-line {
+    font-size: 13px;
+    color: var(--muted, #999);
+    margin: 0 0 16px 0;
+  }
+  .ai-card .wire {
+    background: #0d0d0f;
+    border: 1px solid #222;
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 12px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+  }
+  .ai-card .wire-row {
+    display: flex;
+    gap: 12px;
+  }
+  .ai-card .wire-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #666;
+    margin-bottom: 4px;
+  }
+  .ai-card .wire-field {
+    background: #19191c;
+    border: 1px solid #2a2a2e;
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: #aaa;
+    min-height: 38px;
+    flex: 1;
+    line-height: 1.4;
+  }
+  .ai-card .wire-field.tall {
+    min-height: 70px;
+  }
+  .ai-card .wire-field.generated {
+    background: rgba(91, 141, 239, 0.06);
+    border-color: rgba(91, 141, 239, 0.25);
+    color: #ccc;
+  }
+  .ai-card .wire-btn {
+    background: rgba(91, 141, 239, 0.18);
+    color: #6ea3ff;
+    border: 1px solid rgba(91, 141, 239, 0.3);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    display: inline-block;
+  }
+  .ai-card .wire-btn.ghost {
+    background: transparent;
+    color: #888;
+    border-color: #2a2a2e;
+  }
+  .ai-card .pros {
+    font-size: 12px;
+    color: #88c08a;
+    margin: 12px 0 4px 0;
+  }
+  .ai-card .cons {
+    font-size: 12px;
+    color: #d18a8a;
+    margin: 0 0 0 0;
+  }
+  .ai-card .row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .ai-card .row > div {
+    flex: 1;
+  }
+</style>
+
+<div class="options">
+  <div class="ai-grid">
+    <div class="option ai-card" data-choice="a" onclick="toggleSelect(this)">
+      <h3>A. Polish-in-place <span class="pill rec">recommended</span></h3>
+      <p class="tag-line">
+        One textarea. User types whatever — rough notes, bullets, stream-of-consciousness. Clicks
+        "✨ Polish with AI" → text is rewritten in the same field. User can edit the result, polish
+        again, or undo.
+      </p>
+      <div class="wire">
+        <div class="wire-label">Title <span style="float: right">✨ Suggest</span></div>
+        <div class="wire-field">login broken on safari</div>
+        <div class="wire-label" style="margin-top: 10px">
+          Description <span style="float: right">✨ Polish with AI</span>
+        </div>
+        <div class="wire-field tall">
+          login button doesnt work in safari 17, console says CORS error from /api/auth/session<br />only
+          on prod, dev works fine
+        </div>
+      </div>
+      <p class="pros">
+        + Minimal UI · one source of truth · easy to skip AI · familiar mental model
+      </p>
+      <p class="cons">– No "before/after" preview · destructive (must trust the rewrite)</p>
+    </div>
+
+    <div class="option ai-card" data-choice="b" onclick="toggleSelect(this)">
+      <h3>B. Two-pane (rough → polished) <span class="pill">side-by-side</span></h3>
+      <p class="tag-line">
+        Left pane: rough notes (always editable). Right pane: AI-generated markdown (regenerates on
+        demand). User can edit either; the right pane is what gets submitted.
+      </p>
+      <div class="wire">
+        <div class="row">
+          <div>
+            <div class="wire-label">Rough notes</div>
+            <div class="wire-field tall">
+              login broken on safari<br />17 prod, dev works<br />CORS /api/auth/session
+            </div>
+          </div>
+          <div>
+            <div class="wire-label">Generated <span style="float: right">↻ Regenerate</span></div>
+            <div class="wire-field tall generated">
+              ## Steps to reproduce<br />1. Open prod on Safari 17<br />2. Click "Sign in"…
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="pros">
+        + Preserves user's intent · easy to compare · can re-generate without losing input
+      </p>
+      <p class="cons">– Wider dialog · two textareas to manage · which one wins on save?</p>
+    </div>
+
+    <div class="option ai-card" data-choice="c" onclick="toggleSelect(this)">
+      <h3>C. Prompt-first <span class="pill">AI as primary</span></h3>
+      <p class="tag-line">
+        Dialog opens with a single prompt field ("Describe the issue…"). Click Generate → expands
+        into full Title/Body/Labels form pre-filled by AI. User edits and submits.
+      </p>
+      <div class="wire">
+        <div class="wire-label">Describe the issue</div>
+        <div class="wire-field tall">
+          login button broken on safari, only prod, CORS error from /api/auth/session
+        </div>
+        <div style="text-align: right; margin-top: 8px">
+          <span class="wire-btn">✨ Generate issue</span>
+        </div>
+      </div>
+      <p class="pros">
+        + AI-first framing matches "describe + model generates" literally · simplest input · least
+        typing
+      </p>
+      <p class="cons">
+        – Always uses AI (no quick "I just want a plain issue" path) · dialog shape changes after
+        generation (jarring) · forces a model selection up front
+      </p>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top: 24px">
+  Click your pick (or describe a 4th option in terminal).
+</p>

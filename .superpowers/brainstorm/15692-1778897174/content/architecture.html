@@ -1,0 +1,261 @@
+<h2>Section 1 — Architecture &amp; data flow</h2>
+<p class="subtitle">Phase 1, GitHub-only. Boxes are existing or new modules; arrows are calls.</p>
+
+<style>
+  .arch {
+    padding: 24px 0;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+  }
+  .lane {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 30px;
+    margin-bottom: 30px;
+    position: relative;
+  }
+  .lane-label {
+    position: absolute;
+    left: -8px;
+    top: -16px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #777;
+    background: var(--bg, #0e0e10);
+    padding: 0 6px;
+  }
+  .box {
+    background: #18181c;
+    border: 1px solid #2a2a2e;
+    border-radius: 9px;
+    padding: 12px 14px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .box.new {
+    border-color: #5b8def;
+    background: rgba(91, 141, 239, 0.06);
+  }
+  .box.exists {
+    border-color: #66bb6a44;
+    background: rgba(76, 175, 80, 0.05);
+  }
+  .box .name {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 4px;
+    color: #d0d0d2;
+  }
+  .box .file {
+    font-size: 10px;
+    color: #888;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .box .desc {
+    font-size: 11px;
+    color: #aaa;
+    margin-top: 6px;
+  }
+  .box .tag {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-left: 6px;
+  }
+  .box .tag.new {
+    background: rgba(91, 141, 239, 0.2);
+    color: #94b3ff;
+  }
+  .box .tag.exists {
+    background: rgba(76, 175, 80, 0.15);
+    color: #88c08a;
+  }
+  .arrow {
+    text-align: center;
+    color: #666;
+    font-size: 11px;
+    margin: 6px 0;
+  }
+  .flow-label {
+    font-size: 10px;
+    color: #888;
+    text-align: center;
+    padding: 2px 6px;
+    background: #18181c;
+    border: 1px solid #2a2a2e;
+    border-radius: 4px;
+    display: inline-block;
+    margin: 4px 0;
+  }
+  .legend {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    font-size: 11px;
+    color: #888;
+  }
+  .legend-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    margin-right: 6px;
+    vertical-align: -1px;
+  }
+  .step {
+    margin: 8px 0;
+    padding: 10px 14px;
+    background: #161618;
+    border-left: 3px solid #5b8def;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #c0c0c2;
+  }
+  .step b {
+    color: #94b3ff;
+  }
+</style>
+
+<div class="arch">
+  <div class="legend">
+    <div>
+      <span
+        class="legend-dot"
+        style="background: rgba(91, 141, 239, 0.4); border: 1px solid #5b8def"
+      ></span
+      >new module
+    </div>
+    <div>
+      <span
+        class="legend-dot"
+        style="background: rgba(76, 175, 80, 0.2); border: 1px solid #66bb6a"
+      ></span
+      >existing — reused
+    </div>
+    <div><span class="legend-dot" style="background: #2a2a2e"></span>existing — extended</div>
+  </div>
+
+  <div class="lane">
+    <div class="lane-label">Web (apps/web/src)</div>
+
+    <div class="box exists">
+      <div class="name">IssuesTab <span class="tag exists">extended</span></div>
+      <div class="file">components/projectExplorer/IssuesTab.tsx</div>
+      <div class="desc">Add "+" button in header → opens NewIssueDialog</div>
+    </div>
+
+    <div class="box new">
+      <div class="name">NewIssueDialog <span class="tag new">new</span></div>
+      <div class="file">components/issues/NewIssueDialog.tsx</div>
+      <div class="desc">Title/body fields, ✨ AI buttons, labels/assignees, worktree checkbox</div>
+    </div>
+
+    <div class="box new">
+      <div class="name">issueCreationRpc <span class="tag new">new</span></div>
+      <div class="file">lib/issueCreationRpc.ts</div>
+      <div class="desc">
+        React Query hooks: useCreateIssue, useLabels, useAssignees, useGenerateIssueContent
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">↓ WebSocket JSON-RPC ↓</div>
+
+  <div class="lane">
+    <div class="lane-label">Server (apps/server/src)</div>
+
+    <div class="box exists">
+      <div class="name">wsServer <span class="tag exists">extended</span></div>
+      <div class="file">wsServer.ts</div>
+      <div class="desc">
+        New RPC methods: createIssue, listIssueLabels, listIssueAssignees, generateIssueContent
+      </div>
+    </div>
+
+    <div class="box new">
+      <div class="name">SourceControlProvider <span class="tag new">extended</span></div>
+      <div class="file">sourceControl/SourceControlProvider.ts</div>
+      <div class="desc">Adds createIssue, listLabels, listAssignees to the shape</div>
+    </div>
+
+    <div class="box exists">
+      <div class="name">TextGeneration <span class="tag exists">extended</span></div>
+      <div class="file">textGeneration/TextGeneration.ts</div>
+      <div class="desc">
+        Adds generateIssueContent (title + body) — reuses existing per-driver text-gen
+        implementations
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">↓</div>
+
+  <div class="lane">
+    <div class="lane-label">Provider implementations (Phase 1: GitHub only)</div>
+
+    <div class="box new">
+      <div class="name">GitHubSourceControlProvider <span class="tag new">extended</span></div>
+      <div class="file">sourceControl/GitHubSourceControlProvider.ts</div>
+      <div class="desc">
+        Adds createIssue / listLabels / listAssignees via gh CLI (gh issue create, gh label list, gh
+        api …/assignable-users)
+      </div>
+    </div>
+
+    <div class="box new">
+      <div class="name">gitHubIssueCreate.ts <span class="tag new">new</span></div>
+      <div class="file">sourceControl/gitHubIssueCreate.ts</div>
+      <div class="desc">Argv builder + parser, mirrors existing gitHubPullRequests.ts pattern</div>
+    </div>
+
+    <div class="box exists">
+      <div class="name">GitManager <span class="tag exists">reused</span></div>
+      <div class="file">git/GitManager.ts</div>
+      <div class="desc">
+        createWorktreeForProject already accepts {kind:"issue", number} — wired up after issue
+        creation succeeds
+      </div>
+    </div>
+  </div>
+
+  <h3 style="margin-top: 32px; font-size: 14px">End-to-end flow on submit (worktree opted in)</h3>
+
+  <div class="step">
+    <b>1.</b> Client POSTs RPC <code>createIssue</code> with {title, body, labels, assignees,
+    repoRef}.
+  </div>
+  <div class="step">
+    <b>2.</b> Server resolves GitHub provider → <code>gh issue create</code> → parses returned issue
+    number.
+  </div>
+  <div class="step">
+    <b>3.</b> If <code>worktree.enabled</code> in payload: server calls
+    <code>git.createWorktreeForProject({intent:{kind:"issue",number,branchName?}})</code>. Branch
+    name was already generated client-side via <code>generateBranchName</code>.
+  </div>
+  <div class="step">
+    <b>4.</b> Response =
+    <code>{issue: SourceControlIssueSummary, worktree?: GitCreateWorktreeForProjectOutput}</code>.
+    Client invalidates the issues list query, selects the new issue in IssueDetail, opens the
+    worktree if present.
+  </div>
+
+  <h3 style="margin-top: 28px; font-size: 14px">AI generation flow (button clicks)</h3>
+
+  <div class="step">
+    <b>Polish body:</b> client →
+    <code>generateIssueContent({mode:"polish", rough, currentTitle?})</code> → server uses
+    <code>textGenerationModelSelection</code> from settings → returns <code>{title?, body}</code> →
+    client replaces textarea content.
+  </div>
+  <div class="step">
+    <b>Suggest title:</b> same endpoint with <code>mode:"title"</code>, input is the current body.
+    Returns <code>{title}</code>.
+  </div>
+  <div class="step">
+    <b>Regenerate branch:</b> reuses existing <code>generateBranchName</code> with the current
+    title+body as message.
+  </div>
+</div>

@@ -141,10 +141,8 @@ const makeLazyProvider = Effect.fn("makeLazySourceControlProvider")(function* (
       provider.pipe(Effect.flatMap((loaded) => loaded.getChangeRequestDetail(input))),
     getChangeRequestDiff: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.getChangeRequestDiff(input))),
-    createIssue: (input) =>
-      provider.pipe(Effect.flatMap((loaded) => loaded.createIssue(input))),
-    listLabels: (input) =>
-      provider.pipe(Effect.flatMap((loaded) => loaded.listLabels(input))),
+    createIssue: (input) => provider.pipe(Effect.flatMap((loaded) => loaded.createIssue(input))),
+    listLabels: (input) => provider.pipe(Effect.flatMap((loaded) => loaded.listLabels(input))),
     listAssignees: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.listAssignees(input))),
   });

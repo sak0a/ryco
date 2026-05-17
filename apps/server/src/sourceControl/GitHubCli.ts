@@ -10,10 +10,7 @@ import { formatSchemaError } from "@ryco/shared/schemaJson";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubIssues from "./gitHubIssues.ts";
 import type { NormalizedGitHubIssueDetail, NormalizedGitHubIssueRecord } from "./gitHubIssues.ts";
-import {
-  buildGitHubIssueCreateArgv,
-  parseGitHubIssueCreateOutput,
-} from "./gitHubIssueCreate.ts";
+import { buildGitHubIssueCreateArgv, parseGitHubIssueCreateOutput } from "./gitHubIssueCreate.ts";
 import * as GitHubPullRequests from "./gitHubPullRequests.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -669,9 +666,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         Effect.flatMap((raw) =>
           raw.length === 0
             ? Effect.succeed([])
-            : Effect.sync(() =>
-                GitHubIssues.decodeJsonLabelList(raw),
-              ).pipe(
+            : Effect.sync(() => GitHubIssues.decodeJsonLabelList(raw)).pipe(
                 Effect.flatMap((decoded) =>
                   Result.isSuccess(decoded)
                     ? Effect.succeed(
@@ -701,9 +696,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         Effect.flatMap((raw) =>
           raw.length === 0
             ? Effect.succeed([])
-            : Effect.sync(() =>
-                GitHubIssues.decodeJsonAssigneeList(raw),
-              ).pipe(
+            : Effect.sync(() => GitHubIssues.decodeJsonAssigneeList(raw)).pipe(
                 Effect.flatMap((decoded) =>
                   Result.isSuccess(decoded)
                     ? Effect.succeed(
