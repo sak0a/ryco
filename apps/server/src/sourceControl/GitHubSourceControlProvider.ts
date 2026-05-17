@@ -330,6 +330,19 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
         ),
         Effect.mapError((cause) => providerError("listAssignees", cause)),
       ),
+    getPullRequestState: (input) =>
+      github.getPullRequest({ cwd: input.cwd, reference: String(input.number) }).pipe(
+        Effect.map((summary) => ({
+          state: summary.state ?? "open",
+          isDraft: summary.isDraft ?? false,
+        })),
+        Effect.mapError((cause) => providerError("getPullRequestState", cause)),
+      ),
+    getIssueState: (input) =>
+      github.getIssue({ cwd: input.cwd, reference: String(input.number) }).pipe(
+        Effect.map((detail) => ({ state: detail.state })),
+        Effect.mapError((cause) => providerError("getIssueState", cause)),
+      ),
   });
 });
 

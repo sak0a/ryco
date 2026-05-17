@@ -2,6 +2,8 @@ import { Context, Effect } from "effect";
 import type {
   ChangeRequest,
   ChangeRequestState,
+  IssueState,
+  PullRequestState,
   SourceControlAssigneeCandidate,
   SourceControlChangeRequestDetail,
   SourceControlIssueDetail,
@@ -149,6 +151,17 @@ export interface SourceControlProviderShape {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;
   }) => Effect.Effect<ReadonlyArray<SourceControlAssigneeCandidate>, SourceControlProviderError>;
+  readonly getPullRequestState: (input: {
+    readonly number: number;
+    readonly cwd: string;
+  }) => Effect.Effect<
+    { readonly state: PullRequestState; readonly isDraft: boolean },
+    SourceControlProviderError
+  >;
+  readonly getIssueState: (input: {
+    readonly number: number;
+    readonly cwd: string;
+  }) => Effect.Effect<{ readonly state: IssueState }, SourceControlProviderError>;
 }
 
 export class SourceControlProvider extends Context.Service<

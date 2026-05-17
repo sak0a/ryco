@@ -270,6 +270,22 @@ export const make = Effect.fn("makeForgejoSourceControlProvider")(function* () {
           detail: "Not implemented in Phase 1",
         }),
       ),
+    getPullRequestState: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "forgejo",
+          operation: "getPullRequestState",
+          detail: "Not implemented for forgejo",
+        }),
+      ),
+    getIssueState: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "forgejo",
+          operation: "getIssueState",
+          detail: "Not implemented for forgejo",
+        }),
+      ),
   });
 });
 

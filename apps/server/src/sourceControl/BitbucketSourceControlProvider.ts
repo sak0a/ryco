@@ -266,6 +266,22 @@ export const make = Effect.fn("makeBitbucketSourceControlProvider")(function* ()
           detail: "Not implemented in Phase 1",
         }),
       ),
+    getPullRequestState: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "bitbucket",
+          operation: "getPullRequestState",
+          detail: "Not implemented for bitbucket",
+        }),
+      ),
+    getIssueState: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "bitbucket",
+          operation: "getIssueState",
+          detail: "Not implemented for bitbucket",
+        }),
+      ),
   });
 });
 

@@ -224,6 +224,22 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
           detail: "Not implemented in Phase 1",
         }),
       ),
+    getPullRequestState: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "gitlab",
+          operation: "getPullRequestState",
+          detail: "Not implemented for gitlab",
+        }),
+      ),
+    getIssueState: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "gitlab",
+          operation: "getIssueState",
+          detail: "Not implemented for gitlab",
+        }),
+      ),
   });
 });
 

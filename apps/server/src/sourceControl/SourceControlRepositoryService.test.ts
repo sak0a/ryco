@@ -44,6 +44,8 @@ function makeProvider(
     createIssue: () => unsupported("createIssue"),
     listLabels: () => unsupported("listLabels"),
     listAssignees: () => unsupported("listAssignees"),
+    getPullRequestState: () => unsupported("getPullRequestState"),
+    getIssueState: () => unsupported("getIssueState"),
     ...overrides,
   };
 }

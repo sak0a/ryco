@@ -89,6 +89,8 @@ function unsupportedProvider(
     createIssue: () => unsupported("createIssue"),
     listLabels: () => unsupported("listLabels"),
     listAssignees: () => unsupported("listAssignees"),
+    getPullRequestState: () => unsupported("getPullRequestState"),
+    getIssueState: () => unsupported("getIssueState"),
   });
 }
 
@@ -145,6 +147,10 @@ const makeLazyProvider = Effect.fn("makeLazySourceControlProvider")(function* (
     listLabels: (input) => provider.pipe(Effect.flatMap((loaded) => loaded.listLabels(input))),
     listAssignees: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.listAssignees(input))),
+    getPullRequestState: (input) =>
+      provider.pipe(Effect.flatMap((loaded) => loaded.getPullRequestState(input))),
+    getIssueState: (input) =>
+      provider.pipe(Effect.flatMap((loaded) => loaded.getIssueState(input))),
   });
 });
 
@@ -262,6 +268,8 @@ function bindProviderContext(
         ...input,
         context: input.context ?? context,
       }),
+    getPullRequestState: (input) => provider.getPullRequestState(input),
+    getIssueState: (input) => provider.getIssueState(input),
   });
 }
 

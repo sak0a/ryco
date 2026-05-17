@@ -230,6 +230,22 @@ export const make = Effect.fn("makeAzureDevOpsSourceControlProvider")(function* 
           detail: "Not implemented in Phase 1",
         }),
       ),
+    getPullRequestState: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "azure-devops",
+          operation: "getPullRequestState",
+          detail: "Not implemented for azure-devops",
+        }),
+      ),
+    getIssueState: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "azure-devops",
+          operation: "getIssueState",
+          detail: "Not implemented for azure-devops",
+        }),
+      ),
   });
 });
 
