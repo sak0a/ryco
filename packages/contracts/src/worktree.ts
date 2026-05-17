@@ -8,6 +8,12 @@ export type WorktreeId = typeof WorktreeId.Type;
 export const WorktreeOrigin = Schema.Literals(["main", "branch", "pr", "issue", "manual"]);
 export type WorktreeOrigin = typeof WorktreeOrigin.Type;
 
+export const PullRequestState = Schema.Literals(["open", "closed", "merged"]);
+export type PullRequestState = typeof PullRequestState.Type;
+
+export const IssueState = Schema.Literals(["open", "closed"]);
+export type IssueState = typeof IssueState.Type;
+
 export const StatusBucket = Schema.Literals(["idle", "in_progress", "review", "done"]);
 export type StatusBucket = typeof StatusBucket.Type;
 
@@ -25,6 +31,9 @@ export const Worktree = Schema.Struct({
   issueNumber: Schema.NullOr(Schema.Number),
   prTitle: Schema.NullOr(TrimmedNonEmptyString),
   issueTitle: Schema.NullOr(TrimmedNonEmptyString),
+  prState: Schema.NullOr(PullRequestState),
+  prIsDraft: Schema.NullOr(Schema.Boolean),
+  issueState: Schema.NullOr(IssueState),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),
