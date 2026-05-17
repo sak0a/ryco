@@ -33,6 +33,14 @@ export const FindProjectionWorktreeByOriginInput = Schema.Struct({
 });
 export type FindProjectionWorktreeByOriginInput = typeof FindProjectionWorktreeByOriginInput.Type;
 
+export const FindActiveProjectionWorktreesByLinkedNumberInput = Schema.Struct({
+  projectId: ProjectId,
+  kind: Schema.Literals(["pr", "issue"]),
+  number: Schema.Number,
+});
+export type FindActiveProjectionWorktreesByLinkedNumberInput =
+  typeof FindActiveProjectionWorktreesByLinkedNumberInput.Type;
+
 export const MarkProjectionWorktreeArchivedInput = Schema.Struct({
   worktreeId: WorktreeId,
   archivedAt: IsoDateTime,
@@ -73,6 +81,10 @@ export interface ProjectionWorktreeRepositoryShape {
   readonly findByOrigin: (
     input: FindProjectionWorktreeByOriginInput,
   ) => Effect.Effect<WorktreeId | null, ProjectionRepositoryError>;
+
+  readonly findActiveByLinkedNumber: (
+    input: FindActiveProjectionWorktreesByLinkedNumberInput,
+  ) => Effect.Effect<ReadonlyArray<WorktreeId>, ProjectionRepositoryError>;
 
   readonly markArchived: (
     input: MarkProjectionWorktreeArchivedInput,

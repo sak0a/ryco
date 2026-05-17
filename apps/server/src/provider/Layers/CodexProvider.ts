@@ -360,9 +360,9 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     ? client.request("account/rateLimits/read", undefined).pipe(
         Effect.timeout(Duration.millis(2_500)),
         Effect.map(parseCodexRateLimits),
-        Effect.catch(() => Effect.succeed<ServerProviderRateLimits | undefined>(undefined)),
+        Effect.catch(() => Effect.void.pipe(Effect.as(undefined))),
       )
-    : Effect.succeed<ServerProviderRateLimits | undefined>(undefined);
+    : Effect.void.pipe(Effect.as(undefined));
 
   const [skillsResponse, models, rateLimits] = yield* Effect.all(
     [

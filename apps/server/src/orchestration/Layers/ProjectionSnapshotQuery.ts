@@ -82,7 +82,19 @@ const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   }),
 );
 const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
-const ProjectionWorktreeDbRowSchema = Worktree;
+const ProjectionWorktreeDbRowSchema = Worktree.mapFields(
+  Struct.assign({
+    prIsDraft: Schema.NullOr(Schema.Number),
+  }),
+);
+function toWorktreeShell(
+  row: Schema.Schema.Type<typeof ProjectionWorktreeDbRowSchema>,
+): OrchestrationWorktreeShell {
+  return {
+    ...row,
+    prIsDraft: row.prIsDraft === null ? null : row.prIsDraft === 1,
+  };
+}
 const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
   Struct.assign({
     files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
@@ -361,6 +373,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           issue_number AS "issueNumber",
           pr_title AS "prTitle",
           issue_title AS "issueTitle",
+          pr_state AS "prState",
+          pr_is_draft AS "prIsDraft",
+          issue_state AS "issueState",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
@@ -386,6 +401,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           issue_number AS "issueNumber",
           pr_title AS "prTitle",
           issue_title AS "issueTitle",
+          pr_state AS "prState",
+          pr_is_draft AS "prIsDraft",
+          issue_state AS "issueState",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
@@ -1108,7 +1126,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               const snapshot = {
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
-                worktrees: worktreeRows,
+                worktrees: worktreeRows.map(toWorktreeShell),
                 threads,
                 updatedAt: updatedAt ?? new Date(0).toISOString(),
               };
@@ -1238,7 +1256,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   continue;
                 }
                 updatedAt = maxIso(updatedAt, row.updatedAt);
-                worktrees.push(row);
+                worktrees.push(toWorktreeShell(row));
               }
               for (let index = 0; index < proposedPlanRows.length; index += 1) {
                 const row = proposedPlanRows[index];
@@ -1458,7 +1476,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   .map((row) =>
                     mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
                   ),
-                worktrees: worktreeRows.filter((row) => activeProjectIds.has(row.projectId)),
+                worktrees: worktreeRows
+                  .filter((row) => activeProjectIds.has(row.projectId))
+                  .map(toWorktreeShell),
                 threads: threadRows
                   .filter((row) => row.deletedAt === null)
                   .map(
@@ -1719,7 +1739,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           "ProjectionSnapshotQuery.getWorktreeShellById:decodeRow",
         ),
       ),
-      Effect.map(Option.map((row): OrchestrationWorktreeShell => row)),
+      Effect.map(Option.map(toWorktreeShell)),
     );
 
   const getThreadDetailById: ProjectionSnapshotQueryShape["getThreadDetailById"] = (threadId) =>

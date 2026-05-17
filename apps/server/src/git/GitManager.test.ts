@@ -98,6 +98,14 @@ interface FakeGitTextGeneration {
     message: string;
     modelSelection: ModelSelection;
   }) => Effect.Effect<{ title: string }, TextGenerationError>;
+  generateIssueContent: (input: {
+    cwd: string;
+    mode: "polish" | "title";
+    rough?: string;
+    body?: string;
+    currentTitle?: string;
+    modelSelection: ModelSelection;
+  }) => Effect.Effect<{ title: string; body?: string }, TextGenerationError>;
 }
 
 type FakePullRequest = NonNullable<FakeGhScenario["pullRequest"]>;
@@ -315,6 +323,11 @@ function createTextGeneration(overrides: Partial<FakeGitTextGeneration> = {}): T
       Effect.succeed({
         title: "Update workflow",
       }),
+    generateIssueContent: () =>
+      Effect.succeed({
+        title: "Implement stacked git actions",
+        body: "## Summary",
+      }),
     ...overrides,
   };
 
@@ -358,6 +371,17 @@ function createTextGeneration(overrides: Partial<FakeGitTextGeneration> = {}): T
           (cause) =>
             new TextGenerationError({
               operation: "generateThreadTitle",
+              detail: "fake text generation failed",
+              ...(cause !== undefined ? { cause } : {}),
+            }),
+        ),
+      ),
+    generateIssueContent: (input) =>
+      implementation.generateIssueContent(input).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: "generateIssueContent",
               detail: "fake text generation failed",
               ...(cause !== undefined ? { cause } : {}),
             }),
@@ -603,6 +627,12 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
         Effect.fail(new GitHubCliError({ operation: "getPullRequestDetail", detail: "stub" })),
       getPullRequestDiff: () =>
         Effect.fail(new GitHubCliError({ operation: "getPullRequestDiff", detail: "stub" })),
+      createIssue: () =>
+        Effect.fail(new GitHubCliError({ operation: "createIssue", detail: "stub" })),
+      listLabels: () =>
+        Effect.fail(new GitHubCliError({ operation: "listLabels", detail: "stub" })),
+      listAssignees: () =>
+        Effect.fail(new GitHubCliError({ operation: "listAssignees", detail: "stub" })),
     },
     ghCalls,
   };

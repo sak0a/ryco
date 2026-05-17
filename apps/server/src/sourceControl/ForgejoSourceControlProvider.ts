@@ -246,6 +246,46 @@ export const make = Effect.fn("makeForgejoSourceControlProvider")(function* () {
           reference: input.reference,
         })
         .pipe(Effect.mapError((error) => providerError("getChangeRequestDiff", error))),
+    createIssue: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "forgejo",
+          operation: "createIssue",
+          detail: "Not implemented in Phase 1",
+        }),
+      ),
+    listLabels: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "forgejo",
+          operation: "listLabels",
+          detail: "Not implemented in Phase 1",
+        }),
+      ),
+    listAssignees: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "forgejo",
+          operation: "listAssignees",
+          detail: "Not implemented in Phase 1",
+        }),
+      ),
+    getPullRequestState: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "forgejo",
+          operation: "getPullRequestState",
+          detail: "Not implemented for forgejo",
+        }),
+      ),
+    getIssueState: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "forgejo",
+          operation: "getIssueState",
+          detail: "Not implemented for forgejo",
+        }),
+      ),
   });
 });
 

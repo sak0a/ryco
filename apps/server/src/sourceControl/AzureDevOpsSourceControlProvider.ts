@@ -206,6 +206,46 @@ export const make = Effect.fn("makeAzureDevOpsSourceControlProvider")(function* 
         Effect.mapError((error) => providerError("getChangeRequestDetail", error)),
       ),
     getChangeRequestDiff: (_input) => Effect.succeed(""),
+    createIssue: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "azure-devops",
+          operation: "createIssue",
+          detail: "Not implemented in Phase 1",
+        }),
+      ),
+    listLabels: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "azure-devops",
+          operation: "listLabels",
+          detail: "Not implemented in Phase 1",
+        }),
+      ),
+    listAssignees: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "azure-devops",
+          operation: "listAssignees",
+          detail: "Not implemented in Phase 1",
+        }),
+      ),
+    getPullRequestState: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "azure-devops",
+          operation: "getPullRequestState",
+          detail: "Not implemented for azure-devops",
+        }),
+      ),
+    getIssueState: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "azure-devops",
+          operation: "getIssueState",
+          detail: "Not implemented for azure-devops",
+        }),
+      ),
   });
 });
 

@@ -129,6 +129,7 @@ import {
   JiraWorkItemService,
   type JiraWorkItemServiceShape,
 } from "./atlassian/JiraWorkItemService.ts";
+import { TextGeneration, type TextGenerationShape } from "./textGeneration/TextGeneration.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -353,6 +354,7 @@ const buildAppUnderTest = (options?: {
     repositoryIdentityResolver?: Partial<RepositoryIdentityResolverShape>;
     atlassianConnectionService?: Partial<AtlassianConnectionServiceShape>;
     jiraWorkItemService?: Partial<JiraWorkItemServiceShape>;
+    textGeneration?: Partial<TextGenerationShape>;
   };
 }) =>
   Effect.gen(function* () {
@@ -596,6 +598,16 @@ const buildAppUnderTest = (options?: {
           listTransitions: () => Effect.succeed([]),
           transition: () => Effect.die("not implemented in test"),
           ...options?.layers?.jiraWorkItemService,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(TextGeneration)({
+          generateCommitMessage: () => Effect.die("not implemented in test"),
+          generatePrContent: () => Effect.die("not implemented in test"),
+          generateBranchName: () => Effect.die("not implemented in test"),
+          generateThreadTitle: () => Effect.die("not implemented in test"),
+          generateIssueContent: () => Effect.die("not implemented in test"),
+          ...options?.layers?.textGeneration,
         }),
       ),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
@@ -3183,6 +3195,181 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("uses branchName override when provided on issue intent", () =>
+    Effect.gen(function* () {
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const createWorktree = vi.fn(
+        (input: Parameters<GitVcsDriver.GitVcsDriverShape["createWorktree"]>[0]) =>
+          Effect.succeed({
+            worktree: {
+              refName: input.newRefName ?? input.refName,
+              path: "/tmp/project-issue-worktree-override",
+            },
+          }),
+      );
+
+      yield* buildAppUnderTest({
+        layers: {
+          gitVcsDriver: {
+            createWorktree,
+          },
+          vcsStatusBroadcaster: {
+            refreshStatus: () =>
+              Effect.succeed({
+                isRepo: true,
+                hasPrimaryRemote: true,
+                isDefaultRef: false,
+                refName: "custom/branch",
+                hasWorkingTreeChanges: false,
+                workingTree: { files: [], insertions: 0, deletions: 0 },
+                hasUpstream: false,
+                aheadCount: 0,
+                behindCount: 0,
+                aheadOfDefaultCount: 0,
+                pr: null,
+              }),
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+          },
+          projectionSnapshotQuery: {
+            getProjectShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: defaultProjectId,
+                  title: "Default Project",
+                  workspaceRoot: "/tmp/project",
+                  projectMetadataDir: ".ryco",
+                  repositoryIdentity: null,
+                  defaultModelSelection,
+                  customSystemPrompt: null,
+                  customAvatarContentHash: null,
+                  preferredRemoteName: null,
+                  scripts: [],
+                  createdAt: "2026-05-10T00:00:00.000Z",
+                  updatedAt: "2026-05-10T00:00:00.000Z",
+                }),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.gitCreateWorktreeForProject]({
+            projectId: defaultProjectId,
+            intent: { kind: "issue", number: 42, branchName: "custom/branch" },
+          }),
+        ),
+      );
+
+      const createdWorktreeInput = createWorktree.mock.calls[0]?.[0];
+      assert.equal(createdWorktreeInput?.refName, "HEAD");
+      assert.equal(createdWorktreeInput?.newRefName, "custom/branch");
+
+      const worktreeCreate = dispatchedCommands.find(
+        (command): command is Extract<OrchestrationCommand, { type: "worktree.create" }> =>
+          command.type === "worktree.create",
+      );
+      assert.equal(worktreeCreate?.origin, "issue");
+      assert.equal(worktreeCreate?.branch, "custom/branch");
+      assert.equal(worktreeCreate?.issueNumber, 42);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("falls back to generated branch name when branchName is omitted on issue intent", () =>
+    Effect.gen(function* () {
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const createWorktree = vi.fn(
+        (input: Parameters<GitVcsDriver.GitVcsDriverShape["createWorktree"]>[0]) =>
+          Effect.succeed({
+            worktree: {
+              refName: input.newRefName ?? input.refName,
+              path: "/tmp/project-issue-worktree-fallback",
+            },
+          }),
+      );
+
+      yield* buildAppUnderTest({
+        layers: {
+          gitVcsDriver: {
+            createWorktree,
+          },
+          vcsStatusBroadcaster: {
+            refreshStatus: () =>
+              Effect.succeed({
+                isRepo: true,
+                hasPrimaryRemote: true,
+                isDefaultRef: false,
+                refName: "issue/42-abc123",
+                hasWorkingTreeChanges: false,
+                workingTree: { files: [], insertions: 0, deletions: 0 },
+                hasUpstream: false,
+                aheadCount: 0,
+                behindCount: 0,
+                aheadOfDefaultCount: 0,
+                pr: null,
+              }),
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+          },
+          projectionSnapshotQuery: {
+            getProjectShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: defaultProjectId,
+                  title: "Default Project",
+                  workspaceRoot: "/tmp/project",
+                  projectMetadataDir: ".ryco",
+                  repositoryIdentity: null,
+                  defaultModelSelection,
+                  customSystemPrompt: null,
+                  customAvatarContentHash: null,
+                  preferredRemoteName: null,
+                  scripts: [],
+                  createdAt: "2026-05-10T00:00:00.000Z",
+                  updatedAt: "2026-05-10T00:00:00.000Z",
+                }),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.gitCreateWorktreeForProject]({
+            projectId: defaultProjectId,
+            intent: { kind: "issue", number: 42 },
+          }),
+        ),
+      );
+
+      const createdWorktreeInput = createWorktree.mock.calls[0]?.[0];
+      assert.equal(createdWorktreeInput?.refName, "HEAD");
+      assert.match(createdWorktreeInput?.newRefName ?? "", /^issue\/42-[a-z0-9]{6}$/);
+      assert.notEqual(createdWorktreeInput?.newRefName, "custom/branch");
+
+      const worktreeCreate = dispatchedCommands.find(
+        (command): command is Extract<OrchestrationCommand, { type: "worktree.create" }> =>
+          command.type === "worktree.create",
+      );
+      assert.equal(worktreeCreate?.origin, "issue");
+      assert.match(worktreeCreate?.branch ?? "", /^issue\/42-[a-z0-9]{6}$/);
+      assert.equal(worktreeCreate?.issueNumber, 42);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("cleans up branch worktrees when orchestration dispatch fails", () =>
     Effect.gen(function* () {
       const removeWorktree = vi.fn(
@@ -3503,6 +3690,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   issueNumber: null,
                   prTitle: null,
                   issueTitle: null,
+                  prState: null,
+                  prIsDraft: null,
+                  issueState: null,
                   createdAt: "2026-05-10T00:00:00.000Z",
                   updatedAt: "2026-05-10T00:00:00.000Z",
                   archivedAt: null,
@@ -3601,6 +3791,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   issueNumber: 34,
                   prTitle: null,
                   issueTitle: null,
+                  prState: null,
+                  prIsDraft: null,
+                  issueState: null,
                   createdAt: "2026-05-10T00:00:00.000Z",
                   updatedAt: "2026-05-10T00:00:00.000Z",
                   archivedAt: null,

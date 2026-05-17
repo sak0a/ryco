@@ -30,6 +30,7 @@ import {
   WorktreeManualPositionSetPayload as ContractsWorktreeManualPositionSetPayloadSchema,
   WorktreeMetaUpdatedPayload as ContractsWorktreeMetaUpdatedPayloadSchema,
   WorktreeRestoredPayload as ContractsWorktreeRestoredPayloadSchema,
+  WorktreeSourceControlStateUpdatedPayload as ContractsWorktreeSourceControlStateUpdatedPayloadSchema,
 } from "@ryco/contracts";
 
 // Server-internal alias surface, backed by contract schemas as the source of truth.
@@ -68,6 +69,8 @@ export const ThreadStatusBucketOverriddenPayload =
 export const WorktreeCreatedPayload = ContractsWorktreeCreatedPayloadSchema;
 export const WorktreeArchivedPayload = ContractsWorktreeArchivedPayloadSchema;
 export const WorktreeMetaUpdatedPayload = ContractsWorktreeMetaUpdatedPayloadSchema;
+export const WorktreeSourceControlStateUpdatedPayload =
+  ContractsWorktreeSourceControlStateUpdatedPayloadSchema;
 export const WorktreeRestoredPayload = ContractsWorktreeRestoredPayloadSchema;
 export const WorktreeDeletedPayload = ContractsWorktreeDeletedPayloadSchema;
 export const WorktreeManualPositionSetPayload = ContractsWorktreeManualPositionSetPayloadSchema;

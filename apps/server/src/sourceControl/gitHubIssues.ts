@@ -133,6 +133,21 @@ const decodeIssueList = decodeJsonResult(Schema.Array(Schema.Unknown));
 const decodeIssueDetail = decodeJsonResult(GitHubIssueSchema);
 const decodeIssueEntry = Schema.decodeUnknownExit(GitHubIssueSchema);
 
+const GitHubLabelSchema = Schema.Struct({
+  name: Schema.String,
+  color: Schema.optional(Schema.NullOr(Schema.String)),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+const GitHubAssigneeSchema = Schema.Struct({
+  login: Schema.String,
+  name: Schema.optional(Schema.NullOr(Schema.String)),
+  avatar_url: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+export const decodeJsonLabelList = decodeJsonResult(Schema.Array(GitHubLabelSchema));
+export const decodeJsonAssigneeList = decodeJsonResult(Schema.Array(GitHubAssigneeSchema));
+
 export const formatGitHubIssueDecodeError = formatSchemaError;
 
 export function decodeGitHubIssueListJson(

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 
-import { Worktree, WorktreeId, WorktreeOrigin } from "./worktree.ts";
+import { CreateWorktreeIntent, Worktree, WorktreeId, WorktreeOrigin } from "./worktree.ts";
 
 describe("WorktreeId", () => {
   it("is a branded string", () => {
@@ -16,6 +16,26 @@ describe("WorktreeOrigin", () => {
       expect(Schema.is(WorktreeOrigin)(kind)).toBe(true);
     }
     expect(Schema.is(WorktreeOrigin)("other")).toBe(false);
+  });
+});
+
+describe("CreateWorktreeIntent (issue variant)", () => {
+  const decode = Schema.decodeUnknownSync(CreateWorktreeIntent);
+
+  it("accepts issue intent without branchName (existing callers)", () => {
+    expect(decode({ kind: "issue", number: 42 })).toMatchObject({ kind: "issue", number: 42 });
+  });
+
+  it("accepts issue intent with branchName override", () => {
+    expect(decode({ kind: "issue", number: 42, branchName: "fix/bug" })).toMatchObject({
+      kind: "issue",
+      number: 42,
+      branchName: "fix/bug",
+    });
+  });
+
+  it("rejects empty branchName", () => {
+    expect(() => decode({ kind: "issue", number: 42, branchName: "" })).toThrow();
   });
 });
 

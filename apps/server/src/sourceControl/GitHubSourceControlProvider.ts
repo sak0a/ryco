@@ -1,4 +1,4 @@
-import { DateTime, Effect, Layer, Option, Result, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import {
   SourceControlProviderError,
   truncateSourceControlDetailContent,
@@ -119,6 +119,7 @@ function toChangeRequestDetail(
 
 export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
   const github = yield* GitHubCli.GitHubCli;
+  const fileSystem = yield* FileSystem.FileSystem;
 
   const listChangeRequests: SourceControlProvider.SourceControlProviderShape["listChangeRequests"] =
     (input) => {
@@ -269,6 +270,94 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
       github
         .getPullRequestDiff({ cwd: input.cwd, reference: input.reference })
         .pipe(Effect.mapError((error) => providerError("getChangeRequestDiff", error))),
+    createIssue: (input) =>
+      Effect.gen(function* () {
+        const bodyFile = yield* fileSystem
+          .makeTempFile({ prefix: "ryco-gh-issue-body-", suffix: ".md" })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new SourceControlProviderError({
+                  provider: "github",
+                  operation: "createIssue",
+                  detail: "Failed to create temp file for issue body.",
+                  cause,
+                }),
+            ),
+          );
+        const work = Effect.gen(function* () {
+          yield* fileSystem.writeFileString(bodyFile, input.body).pipe(
+            Effect.mapError(
+              (cause) =>
+                new SourceControlProviderError({
+                  provider: "github",
+                  operation: "createIssue",
+                  detail: "Failed to write issue body temp file.",
+                  cause,
+                }),
+            ),
+          );
+          const created = yield* github
+            .createIssue({
+              cwd: input.cwd,
+              title: input.title,
+              bodyFile,
+              ...(input.labels ? { labels: input.labels } : {}),
+              ...(input.assignees ? { assignees: input.assignees } : {}),
+            })
+            .pipe(Effect.mapError((cause) => providerError("createIssue", cause)));
+          const detail = yield* github
+            .getIssue({ cwd: input.cwd, reference: String(created.number) })
+            .pipe(
+              Effect.mapError((cause) => providerError("createIssue", cause)),
+              Effect.catch(() =>
+                Effect.succeed({
+                  provider: "github",
+                  number: created.number,
+                  title: input.title,
+                  url: created.url,
+                  state: "open" as const,
+                  updatedAt: Option.none(),
+                } satisfies SourceControlIssueSummary),
+              ),
+            );
+          if ("body" in detail) {
+            return toIssueSummary(detail);
+          }
+          return detail;
+        });
+        return yield* work.pipe(
+          Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void))),
+        );
+      }),
+    listLabels: (input) =>
+      github
+        .listLabels({ cwd: input.cwd })
+        .pipe(Effect.mapError((cause) => providerError("listLabels", cause))),
+    listAssignees: (input) =>
+      github.listAssignees({ cwd: input.cwd }).pipe(
+        Effect.map((users) =>
+          users.map((u) => ({
+            login: u.login,
+            ...(u.name ? { displayName: u.name } : {}),
+            ...(u.avatarUrl ? { avatarUrl: u.avatarUrl } : {}),
+          })),
+        ),
+        Effect.mapError((cause) => providerError("listAssignees", cause)),
+      ),
+    getPullRequestState: (input) =>
+      github.getPullRequest({ cwd: input.cwd, reference: String(input.number) }).pipe(
+        Effect.map((summary) => ({
+          state: summary.state ?? "open",
+          isDraft: summary.isDraft ?? false,
+        })),
+        Effect.mapError((cause) => providerError("getPullRequestState", cause)),
+      ),
+    getIssueState: (input) =>
+      github.getIssue({ cwd: input.cwd, reference: String(input.number) }).pipe(
+        Effect.map((detail) => ({ state: detail.state })),
+        Effect.mapError((cause) => providerError("getIssueState", cause)),
+      ),
   });
 });
 

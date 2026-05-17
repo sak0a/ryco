@@ -216,3 +216,77 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 
   return { prompt, outputSchema };
 }
+
+// ---------------------------------------------------------------------------
+// Issue content (polish + title)
+// ---------------------------------------------------------------------------
+
+export interface IssueContentPolishPromptInput {
+  rough: string;
+  currentTitle?: string;
+  customInstructions?: string;
+  policy?: TextGenerationPolicy | undefined;
+}
+
+export function buildIssueContentPolishPrompt(input: IssueContentPolishPromptInput) {
+  const customInstructions = input.customInstructions?.trim();
+  const prompt = [
+    "You rewrite rough notes into a clear GitHub issue.",
+    'Return a JSON object with keys: "title", "body".',
+    "Rules:",
+    "- title must be <= 72 chars, no trailing period",
+    "- title should read as a noun phrase or imperative",
+    "- body must be markdown",
+    "- if the rough text describes a bug, use sections: '## Steps to reproduce',",
+    "  '## Expected', '## Actual'",
+    "- otherwise use a one-line summary followed by bullet points",
+    "- preserve any code, command output, or error text from the rough notes verbatim",
+    ...(input.currentTitle ? ["", `Current title hint: ${input.currentTitle}`] : []),
+    ...(customInstructions
+      ? [
+          "",
+          "User guidance for this polish (apply in addition to the rules above):",
+          limitSection(customInstructions, 2_000),
+        ]
+      : []),
+    ...policyInstruction(input.policy?.issueInstructions),
+    "",
+    "Rough notes:",
+    limitSection(input.rough, 8_000),
+  ].join("\n");
+
+  return {
+    prompt,
+    outputSchema: Schema.Struct({
+      title: Schema.String,
+      body: Schema.String,
+    }),
+  };
+}
+
+export interface IssueContentTitlePromptInput {
+  body: string;
+  policy?: TextGenerationPolicy | undefined;
+}
+
+export function buildIssueContentTitlePrompt(input: IssueContentTitlePromptInput) {
+  const prompt = [
+    "You write concise GitHub issue titles from an existing body.",
+    'Return a JSON object with one key: "title".',
+    "Rules:",
+    "- title must be <= 72 chars, no trailing period",
+    "- title should read as a noun phrase or imperative",
+    "- title should capture the primary user-visible issue",
+    ...policyInstruction(input.policy?.issueInstructions),
+    "",
+    "Body:",
+    limitSection(input.body, 8_000),
+  ].join("\n");
+
+  return {
+    prompt,
+    outputSchema: Schema.Struct({
+      title: Schema.String,
+    }),
+  };
+}

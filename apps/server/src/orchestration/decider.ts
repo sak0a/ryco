@@ -702,6 +702,25 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "worktree.source-control-state.update": {
+      return {
+        ...withEventBase({
+          aggregateKind: "worktree",
+          aggregateId: command.worktreeId,
+          occurredAt: command.updatedAt,
+          commandId: command.commandId,
+        }),
+        type: "worktree.sourceControlStateUpdated",
+        payload: {
+          worktreeId: command.worktreeId,
+          prState: command.prState,
+          prIsDraft: command.prIsDraft,
+          issueState: command.issueState,
+          updatedAt: command.updatedAt,
+        },
+      };
+    }
+
     case "worktree.restore": {
       return {
         ...withEventBase({

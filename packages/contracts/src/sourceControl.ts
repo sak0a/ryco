@@ -100,6 +100,29 @@ export const SourceControlIssueDetail = Schema.Struct({
 });
 export type SourceControlIssueDetail = typeof SourceControlIssueDetail.Type;
 
+export const SourceControlAssigneeCandidate = Schema.Struct({
+  login: TrimmedNonEmptyString,
+  displayName: Schema.optional(TrimmedNonEmptyString),
+  avatarUrl: Schema.optional(Schema.String),
+});
+export type SourceControlAssigneeCandidate = typeof SourceControlAssigneeCandidate.Type;
+
+export const SourceControlCreateIssueWorktree = Schema.Struct({
+  enabled: Schema.Boolean,
+  branchName: TrimmedNonEmptyString,
+});
+export type SourceControlCreateIssueWorktree = typeof SourceControlCreateIssueWorktree.Type;
+
+export const SourceControlCreateIssueInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  body: Schema.String,
+  labels: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  assignees: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  worktree: Schema.optional(SourceControlCreateIssueWorktree),
+});
+export type SourceControlCreateIssueInput = typeof SourceControlCreateIssueInput.Type;
+
 export const SourceControlChangeRequestCommit = Schema.Struct({
   oid: TrimmedNonEmptyString,
   shortOid: TrimmedNonEmptyString,

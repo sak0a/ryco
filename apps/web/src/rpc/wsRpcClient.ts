@@ -94,6 +94,15 @@ export interface WsRpcClient {
     readonly getChangeRequestDiff: RpcUnaryMethod<
       typeof WS_METHODS.sourceControlGetChangeRequestDiff
     >;
+    readonly createIssue: RpcUnaryMethod<typeof WS_METHODS.sourceControlCreateIssue>;
+    readonly listIssueLabels: RpcUnaryMethod<typeof WS_METHODS.sourceControlListIssueLabels>;
+    readonly listIssueAssignees: RpcUnaryMethod<typeof WS_METHODS.sourceControlListIssueAssignees>;
+  };
+  readonly textGeneration: {
+    readonly generateIssueContent: RpcUnaryMethod<
+      typeof WS_METHODS.textGenerationGenerateIssueContent
+    >;
+    readonly generateBranchName: RpcUnaryMethod<typeof WS_METHODS.textGenerationGenerateBranchName>;
   };
   readonly atlassian: {
     readonly listConnections: RpcUnaryNoArgMethod<typeof WS_METHODS.atlassianListConnections>;
@@ -272,6 +281,18 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         ),
       getChangeRequestDiff: (input) =>
         transport.request((client) => client[WS_METHODS.sourceControlGetChangeRequestDiff](input)),
+      createIssue: (input) =>
+        transport.request((client) => client[WS_METHODS.sourceControlCreateIssue](input)),
+      listIssueLabels: (input) =>
+        transport.request((client) => client[WS_METHODS.sourceControlListIssueLabels](input)),
+      listIssueAssignees: (input) =>
+        transport.request((client) => client[WS_METHODS.sourceControlListIssueAssignees](input)),
+    },
+    textGeneration: {
+      generateIssueContent: (input) =>
+        transport.request((client) => client[WS_METHODS.textGenerationGenerateIssueContent](input)),
+      generateBranchName: (input) =>
+        transport.request((client) => client[WS_METHODS.textGenerationGenerateBranchName](input)),
     },
     atlassian: {
       listConnections: () =>
