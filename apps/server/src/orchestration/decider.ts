@@ -706,12 +706,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const existing = readModel.worktrees?.find(
         (w) => w.worktreeId === command.worktreeId,
       );
-      if (
+      const alreadyCurrent =
         existing !== undefined &&
         existing.prState === command.prState &&
         existing.prIsDraft === command.prIsDraft &&
-        existing.issueState === command.issueState
-      ) {
+        existing.issueState === command.issueState;
+      if (alreadyCurrent) {
         return [];
       }
       return {
