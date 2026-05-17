@@ -48,6 +48,7 @@ function makeWorktreeRepo(row: ProjectionWorktree | null): ProjectionWorktreeRep
     getById: (_input) => Effect.succeed(row === null ? Option.none() : Option.some(row)),
     listByProjectId: () => Effect.die("not used"),
     findByOrigin: () => Effect.die("not used"),
+    findActiveByLinkedNumber: () => Effect.die("not used"),
     markArchived: () => Effect.die("not used"),
     markRestored: () => Effect.die("not used"),
     updateMeta: () => Effect.die("not used"),

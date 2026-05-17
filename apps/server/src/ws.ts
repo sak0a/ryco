@@ -268,6 +268,25 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
       const ownerEffect = <A, E, R>(method: string, effect: Effect.Effect<A, E, R>) =>
         withAccess("owner", method, effect);
 
+      const refreshStateForLinkedReference = (input: {
+        readonly kind: "pr" | "issue";
+        readonly reference: string;
+      }) =>
+        Effect.gen(function* () {
+          const parsed = Number.parseInt(input.reference, 10);
+          if (!Number.isInteger(parsed) || parsed <= 0) return;
+          const linked = yield* projectionWorktrees.findActiveByLinkedNumber({
+            kind: input.kind,
+            number: parsed,
+          });
+          for (const worktreeId of linked) {
+            yield* refreshWorktreeSourceControlState({ worktreeId }).pipe(
+              Effect.ignoreCause({ log: true }),
+              Effect.forkDetach,
+            );
+          }
+        }).pipe(Effect.ignoreCause({ log: true }), Effect.asVoid);
+
       const ownerStreamEffect = <A, E, R>(
         method: string,
         effect: Effect.Effect<Stream.Stream<A, E, R>, E, R>,
@@ -1766,6 +1785,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                     ...(fullContent !== undefined ? { fullContent } : {}),
                   }),
                 ),
+                Effect.tap(() => refreshStateForLinkedReference({ kind: "issue", reference })),
               ),
             ),
             {
@@ -1848,6 +1868,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                     ...(fullContent !== undefined ? { fullContent } : {}),
                   }),
                 ),
+                Effect.tap(() => refreshStateForLinkedReference({ kind: "pr", reference })),
               ),
             ),
             {

@@ -259,4 +259,65 @@ layer("ProjectionWorktreeRepository", (it) => {
       }
     }),
   );
+
+  it.effect("findActiveByLinkedNumber finds non-archived worktrees by PR number", () =>
+    Effect.gen(function* () {
+      yield* runMigrations({ toMigrationInclusive: 37 });
+      const repo = yield* ProjectionWorktreeRepository;
+
+      yield* repo.upsert({
+        worktreeId: WorktreeId.make("w-pr-active"),
+        projectId: ProjectId.make("proj-a"),
+        title: null,
+        branch: "feature/pr",
+        worktreePath: "/tmp/pr",
+        origin: "pr",
+        prNumber: 999,
+        issueNumber: null,
+        prTitle: "PR",
+        issueTitle: null,
+        prState: "open",
+        prIsDraft: false,
+        issueState: null,
+        createdAt: "2026-05-17T00:00:00.000Z",
+        updatedAt: "2026-05-17T00:00:00.000Z",
+        archivedAt: null,
+        manualPosition: 0,
+      });
+
+      yield* repo.upsert({
+        worktreeId: WorktreeId.make("w-pr-archived"),
+        projectId: ProjectId.make("proj-b"),
+        title: null,
+        branch: "feature/pr-archived",
+        worktreePath: "/tmp/pr-archived",
+        origin: "pr",
+        prNumber: 999,
+        issueNumber: null,
+        prTitle: "PR archived",
+        issueTitle: null,
+        prState: "open",
+        prIsDraft: false,
+        issueState: null,
+        createdAt: "2026-05-17T00:00:00.000Z",
+        updatedAt: "2026-05-17T00:00:00.000Z",
+        archivedAt: "2026-05-17T01:00:00.000Z",
+        manualPosition: 0,
+      });
+
+      const ids = yield* repo.findActiveByLinkedNumber({ kind: "pr", number: 999 });
+      assert.equal(ids.length, 1);
+      assert.equal(ids[0], "w-pr-active");
+    }),
+  );
+
+  it.effect("findActiveByLinkedNumber returns empty when no match", () =>
+    Effect.gen(function* () {
+      yield* runMigrations({ toMigrationInclusive: 37 });
+      const repo = yield* ProjectionWorktreeRepository;
+
+      const ids = yield* repo.findActiveByLinkedNumber({ kind: "issue", number: 12345 });
+      assert.equal(ids.length, 0);
+    }),
+  );
 });

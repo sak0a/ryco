@@ -250,6 +250,31 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionWorktreeRepository.findByOrigin:query")),
     );
 
+  const findActiveByLinkedNumber: ProjectionWorktreeRepositoryShape["findActiveByLinkedNumber"] = (
+    input,
+  ) =>
+    Effect.gen(function* () {
+      const rows =
+        input.kind === "pr"
+          ? yield* sql<{ readonly worktreeId: string }>`
+              SELECT worktree_id AS "worktreeId"
+              FROM projection_worktrees
+              WHERE pr_number = ${input.number}
+                AND archived_at IS NULL
+            `
+          : yield* sql<{ readonly worktreeId: string }>`
+              SELECT worktree_id AS "worktreeId"
+              FROM projection_worktrees
+              WHERE issue_number = ${input.number}
+                AND archived_at IS NULL
+            `;
+      return rows.map((row) => WorktreeId.make(row.worktreeId));
+    }).pipe(
+      Effect.mapError(
+        toPersistenceSqlError("ProjectionWorktreeRepository.findActiveByLinkedNumber:query"),
+      ),
+    );
+
   const upsert: ProjectionWorktreeRepositoryShape["upsert"] = (row) =>
     upsertProjectionWorktreeRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionWorktreeRepository.upsert:query")),
@@ -299,6 +324,7 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
     getById,
     listByProjectId,
     findByOrigin,
+    findActiveByLinkedNumber,
     markArchived,
     markRestored,
     updateMeta,
