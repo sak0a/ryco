@@ -203,9 +203,7 @@ export function NewIssueDialog(props: NewIssueDialogProps) {
             ) : null}
             <Input
               value={state.polishInstructions}
-              onChange={(e) =>
-                dispatch({ type: "setPolishInstructions", value: e.target.value })
-              }
+              onChange={(e) => dispatch({ type: "setPolishInstructions", value: e.target.value })}
               placeholder='Polish guidance (optional) — e.g. "make it more detailed", "add use cases"'
               className="mt-2 h-8 text-xs"
             />

@@ -1,9 +1,6 @@
 import { memo } from "react";
 import { cn } from "~/lib/utils";
-import {
-  resolveStateBadgeVariant,
-  type StateBadgeKind,
-} from "../sourceControl/stateBadgeVariants";
+import { resolveStateBadgeVariant, type StateBadgeKind } from "../sourceControl/stateBadgeVariants";
 
 export type { StateBadgeKind } from "../sourceControl/stateBadgeVariants";
 

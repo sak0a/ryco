@@ -56,9 +56,7 @@ export function IssueAssigneePicker(props: IssueAssigneePickerProps) {
               </p>
             ) : visible.length === 0 ? (
               <p className="px-3 py-2 text-muted-foreground text-xs">
-                {query
-                  ? "No matching people."
-                  : "No assignable users for this repository."}
+                {query ? "No matching people." : "No assignable users for this repository."}
               </p>
             ) : (
               visible.map((a) => (

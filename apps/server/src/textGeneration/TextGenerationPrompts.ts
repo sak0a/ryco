@@ -243,7 +243,11 @@ export function buildIssueContentPolishPrompt(input: IssueContentPolishPromptInp
     "- preserve any code, command output, or error text from the rough notes verbatim",
     ...(input.currentTitle ? ["", `Current title hint: ${input.currentTitle}`] : []),
     ...(customInstructions
-      ? ["", "User guidance for this polish (apply in addition to the rules above):", limitSection(customInstructions, 2_000)]
+      ? [
+          "",
+          "User guidance for this polish (apply in addition to the rules above):",
+          limitSection(customInstructions, 2_000),
+        ]
       : []),
     ...policyInstruction(input.policy?.issueInstructions),
     "",

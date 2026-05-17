@@ -703,9 +703,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "worktree.source-control-state.update": {
-      const existing = readModel.worktrees?.find(
-        (w) => w.worktreeId === command.worktreeId,
-      );
+      const existing = readModel.worktrees?.find((w) => w.worktreeId === command.worktreeId);
       const alreadyCurrent =
         existing !== undefined &&
         existing.prState === command.prState &&
