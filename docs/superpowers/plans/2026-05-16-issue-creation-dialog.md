@@ -29,6 +29,7 @@
 ## Task 1: Add issue creation contract schemas
 
 **Files:**
+
 - Modify: `packages/contracts/src/sourceControl.ts`
 - Test: `packages/contracts/src/sourceControl.test.ts`
 
@@ -37,10 +38,7 @@
 Append to `packages/contracts/src/sourceControl.test.ts`:
 
 ```ts
-import {
-  SourceControlAssigneeCandidate,
-  SourceControlCreateIssueInput,
-} from "./sourceControl.ts";
+import { SourceControlAssigneeCandidate, SourceControlCreateIssueInput } from "./sourceControl.ts";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -60,9 +58,11 @@ describe("SourceControlAssigneeCandidate", () => {
 describe("SourceControlCreateIssueInput", () => {
   it("requires cwd + title; body may be empty; worktree is optional", () => {
     const decode = Schema.decodeUnknownSync(SourceControlCreateIssueInput);
-    expect(
-      decode({ cwd: "/repo", title: "Bug", body: "" }),
-    ).toEqual({ cwd: "/repo", title: "Bug", body: "" });
+    expect(decode({ cwd: "/repo", title: "Bug", body: "" })).toEqual({
+      cwd: "/repo",
+      title: "Bug",
+      body: "",
+    });
     expect(
       decode({
         cwd: "/repo",
@@ -150,6 +150,7 @@ git commit -m "Add issue creation contract schemas"
 ## Task 2: Extend CreateWorktreeIntent to carry an optional branch name for issues
 
 **Files:**
+
 - Modify: `packages/contracts/src/worktree.ts:35-45`
 - Test: `packages/contracts/src/worktree.test.ts`
 
@@ -240,6 +241,7 @@ git commit -m "Allow issue CreateWorktreeIntent to carry a branch name override"
 ## Task 3: Add `issueInstructions` to TextGenerationPolicy
 
 **Files:**
+
 - Modify: `apps/server/src/textGeneration/TextGenerationPolicy.ts`
 
 - [ ] **Step 1: Update the policy schema**
@@ -278,6 +280,7 @@ git commit -m "Add issueInstructions to TextGenerationPolicy"
 ## Task 4: Add `generateIssueContent` prompt builders
 
 **Files:**
+
 - Modify: `apps/server/src/textGeneration/TextGenerationPrompts.ts`
 - Test: `apps/server/src/textGeneration/TextGenerationPrompts.test.ts`
 
@@ -436,6 +439,7 @@ git commit -m "Add generateIssueContent prompt builders (polish + title modes)"
 ## Task 5: Extend `TextGenerationShape` with `generateIssueContent` and route from the registry
 
 **Files:**
+
 - Modify: `apps/server/src/textGeneration/TextGeneration.ts`
 - Test: `apps/server/src/textGeneration/TextGeneration.test.ts`
 
@@ -555,6 +559,7 @@ generateIssueContent: () =>
 ```
 
 Repeat the same addition in:
+
 - `apps/server/src/git/GitManager.test.ts` (search for the existing `generateBranchName` stub block)
 - `apps/server/integration/OrchestrationEngineHarness.integration.ts`
 - `apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts`
@@ -589,6 +594,7 @@ git commit -m "Add generateIssueContent to TextGeneration service"
 ## Task 6: Implement `generateIssueContent` in every TextGeneration driver
 
 **Files:**
+
 - Modify: `apps/server/src/textGeneration/CodexTextGeneration.ts`
 - Modify: `apps/server/src/textGeneration/ClaudeTextGeneration.ts`
 - Modify: `apps/server/src/textGeneration/CopilotTextGeneration.ts`
@@ -602,6 +608,7 @@ git commit -m "Add generateIssueContent to TextGeneration service"
 - [ ] **Step 1: Read the existing pattern**
 
 Open `apps/server/src/textGeneration/CodexTextGeneration.ts` and locate the existing `generateBranchName` method. Note how it:
+
 1. Builds a prompt via `buildBranchNamePrompt(...)`.
 2. Runs the CLI with that prompt and the `modelSelection`.
 3. Decodes the JSON output against the prompt's `outputSchema`.
@@ -694,6 +701,7 @@ Expected: pass.
 - [ ] **Step 6: Repeat steps 2–5 for Claude, OpenCode, and Cursor**
 
 For each driver:
+
 - Mirror the test pattern.
 - Implement `generateIssueContent` by following the existing `generateBranchName` shape in that driver.
 - Run the driver-specific test to verify.
@@ -736,6 +744,7 @@ git commit -m "Implement generateIssueContent in all TextGeneration drivers"
 ## Task 7: Extend `SourceControlProviderShape` and stub non-GitHub providers
 
 **Files:**
+
 - Modify: `apps/server/src/sourceControl/SourceControlProvider.ts`
 - Modify: `apps/server/src/sourceControl/GitLabSourceControlProvider.ts`
 - Modify: `apps/server/src/sourceControl/ForgejoSourceControlProvider.ts`
@@ -887,6 +896,7 @@ git commit -m "Add createIssue/listLabels/listAssignees to SourceControlProvider
 ## Task 8: GitHub CLI — `createIssue`, `listLabels`, `listAssignees`
 
 **Files:**
+
 - Create: `apps/server/src/sourceControl/gitHubIssueCreate.ts`
 - Modify: `apps/server/src/sourceControl/GitHubCli.ts`
 - Modify: `apps/server/src/sourceControl/GitHubSourceControlProvider.ts`
@@ -1008,8 +1018,7 @@ import { parseGitHubIssueCreateOutput } from "./gitHubIssueCreate.ts";
 
 describe("parseGitHubIssueCreateOutput", () => {
   it("extracts url and number from the last non-empty line", () => {
-    const stdout =
-      "Creating issue in owner/repo\nhttps://github.com/owner/repo/issues/42\n";
+    const stdout = "Creating issue in owner/repo\nhttps://github.com/owner/repo/issues/42\n";
     expect(parseGitHubIssueCreateOutput(stdout)).toEqual({
       url: "https://github.com/owner/repo/issues/42",
       number: 42,
@@ -1167,9 +1176,11 @@ describe("GitHubSourceControlProvider.createIssue", () => {
           expect(args.labels).toEqual(["bug"]);
           return { url: "https://github.com/owner/repo/issues/42", number: 42 };
         },
-        getIssue: () => ({ /* fake decoded issue */ }),
+        getIssue: () => ({
+          /* fake decoded issue */
+        }),
       });
-      const provider = makeGitHubSourceControlProvider({ cli, /* deps */ });
+      const provider = makeGitHubSourceControlProvider({ cli /* deps */ });
       const summary = yield* provider.createIssue({
         cwd: "/repo",
         title: "Bug",
@@ -1297,6 +1308,7 @@ git commit -m "Implement GitHub createIssue, listLabels, listAssignees"
 ## Task 9: Extend `git.createWorktreeForProject` to honor `branchName` for issue intent
 
 **Files:**
+
 - Modify: `apps/server/src/git/GitManager.ts`
 - Test: `apps/server/src/git/GitManager.test.ts`
 
@@ -1384,6 +1396,7 @@ git commit -m "Honor branchName override on issue-intent worktree creation"
 ## Task 10: Add RPC methods to contracts (`packages/contracts/src/rpc.ts`)
 
 **Files:**
+
 - Modify: `packages/contracts/src/rpc.ts`
 
 - [ ] **Step 1: Add the method-name constants**
@@ -1441,14 +1454,11 @@ export const WsSourceControlCreateIssueRpc = Rpc.make(WS_METHODS.sourceControlCr
   error: Schema.Union([SourceControlProviderError, AuthRpcError, GitManagerServiceError]),
 });
 
-export const WsSourceControlListIssueLabelsRpc = Rpc.make(
-  WS_METHODS.sourceControlListIssueLabels,
-  {
-    payload: Schema.Struct({ cwd: Schema.String }),
-    success: Schema.Array(SourceControlLabel),
-    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
-  },
-);
+export const WsSourceControlListIssueLabelsRpc = Rpc.make(WS_METHODS.sourceControlListIssueLabels, {
+  payload: Schema.Struct({ cwd: Schema.String }),
+  success: Schema.Array(SourceControlLabel),
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+});
 
 export const WsSourceControlListIssueAssigneesRpc = Rpc.make(
   WS_METHODS.sourceControlListIssueAssignees,
@@ -1529,12 +1539,14 @@ git commit -m "Declare RPC contracts for createIssue, listIssueLabels, listIssue
 ## Task 11: Route the five new RPC methods server-side
 
 **Files:**
+
 - Modify: `apps/server/src/ws.ts` (or wherever RPC handlers are registered — search for `sourceControl.listIssues` to find the routing block)
 - Test: existing `ws.ts` test file or a new one
 
 - [ ] **Step 1: Locate the existing source-control handler**
 
 ```bash
+
 ```
 
 Grep the server source for `sourceControlListIssues` to find where existing handlers are wired up.
@@ -1565,7 +1577,14 @@ describe("sourceControl.createIssue RPC", () => {
     Effect.gen(function* () {
       const harness = makeServerTestHarness({
         provider: { createIssue: () => Effect.succeed(fakeIssueSummary) },
-        git: { createWorktreeForProject: () => Effect.fail(new GitManagerServiceError({ /* … */ })) },
+        git: {
+          createWorktreeForProject: () =>
+            Effect.fail(
+              new GitManagerServiceError({
+                /* … */
+              }),
+            ),
+        },
       });
       const result = yield* harness.rpc.sourceControl.createIssue({
         cwd: "/repo",
@@ -1622,7 +1641,7 @@ WsSourceControlCreateIssueRpc.toHandler(({ payload }) =>
       ? { issue, worktree: worktreeResult.right }
       : { issue, worktreeError: formatError(worktreeResult.left) };
   }),
-)
+);
 ```
 
 (`resolveProviderForCwd`, `resolveProjectIdForCwd`, and `git` are existing helpers in this file — read the surrounding code and reuse the exact names. `formatError` may be a small inline helper if none exists.)
@@ -1644,7 +1663,7 @@ WsTextGenerationGenerateBranchNameRpc.toHandler(({ payload }) =>
     });
     return { branch };
   }),
-)
+);
 ```
 
 `generateIssueContent`: same pattern, `mode` determines the dispatch.
@@ -1669,6 +1688,7 @@ git commit -m "Route createIssue, listIssueLabels, listIssueAssignees, generateI
 ## Task 12: Web RPC client — `issueCreationRpc.ts`
 
 **Files:**
+
 - Create: `apps/web/src/lib/issueCreationRpc.ts`
 - Test: `apps/web/src/lib/issueCreationRpc.test.ts`
 
@@ -1689,12 +1709,7 @@ describe("issueCreationRpc query keys", () => {
       environmentId: "env-1" as never,
       cwd: "/repo",
     });
-    expect(options.queryKey).toEqual([
-      "sourceControl",
-      "issueLabels",
-      "env-1",
-      "/repo",
-    ]);
+    expect(options.queryKey).toEqual(["sourceControl", "issueLabels", "env-1", "/repo"]);
   });
 
   it("issue assignees key includes environmentId + cwd", () => {
@@ -1702,12 +1717,7 @@ describe("issueCreationRpc query keys", () => {
       environmentId: "env-1" as never,
       cwd: "/repo",
     });
-    expect(options.queryKey).toEqual([
-      "sourceControl",
-      "issueAssignees",
-      "env-1",
-      "/repo",
-    ]);
+    expect(options.queryKey).toEqual(["sourceControl", "issueAssignees", "env-1", "/repo"]);
   });
 });
 ```
@@ -1847,6 +1857,7 @@ git commit -m "Add issueCreationRpc query/mutation hooks"
 ## Task 13: Web component — `IssueLabelPicker` and `IssueAssigneePicker`
 
 **Files:**
+
 - Create: `apps/web/src/components/issues/IssueLabelPicker.tsx`
 - Create: `apps/web/src/components/issues/IssueAssigneePicker.tsx`
 
@@ -1868,9 +1879,7 @@ interface IssueLabelPickerProps {
 
 export function IssueLabelPicker(props: IssueLabelPickerProps) {
   const [query, setQuery] = useState("");
-  const visible = props.available.filter((l) =>
-    l.name.toLowerCase().includes(query.toLowerCase()),
-  );
+  const visible = props.available.filter((l) => l.name.toLowerCase().includes(query.toLowerCase()));
   const toggle = (name: string) => {
     const has = props.selected.includes(name);
     props.onChange(has ? props.selected.filter((n) => n !== name) : [...props.selected, name]);
@@ -2019,6 +2028,7 @@ git commit -m "Add IssueLabelPicker and IssueAssigneePicker components"
 ## Task 14: Web component — `NewIssueDialog` reducer and view
 
 **Files:**
+
 - Create: `apps/web/src/components/issues/NewIssueDialog.tsx`
 - Create: `apps/web/src/components/issues/newIssueDialogReducer.ts`
 - Test: `apps/web/src/components/issues/newIssueDialogReducer.test.ts`
@@ -2029,10 +2039,7 @@ Create `apps/web/src/components/issues/newIssueDialogReducer.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import {
-  initialNewIssueState,
-  newIssueDialogReducer,
-} from "./newIssueDialogReducer.ts";
+import { initialNewIssueState, newIssueDialogReducer } from "./newIssueDialogReducer.ts";
 
 describe("newIssueDialogReducer", () => {
   it("starts with empty fields and worktree enabled", () => {
@@ -2171,10 +2178,7 @@ export type NewIssueAction =
   | { type: "submitStarted" }
   | { type: "submitFailed"; error: string };
 
-export function newIssueDialogReducer(
-  state: NewIssueState,
-  action: NewIssueAction,
-): NewIssueState {
+export function newIssueDialogReducer(state: NewIssueState, action: NewIssueAction): NewIssueState {
   switch (action.type) {
     case "setTitle":
       return { ...state, title: action.value };
@@ -2307,11 +2311,7 @@ import {
 import { useResolvedProviderKind } from "~/lib/sourceControlDiscoveryState";
 import { IssueLabelPicker } from "./IssueLabelPicker";
 import { IssueAssigneePicker } from "./IssueAssigneePicker";
-import {
-  canSubmit,
-  initialNewIssueState,
-  newIssueDialogReducer,
-} from "./newIssueDialogReducer";
+import { canSubmit, initialNewIssueState, newIssueDialogReducer } from "./newIssueDialogReducer";
 
 export interface NewIssueDialogProps {
   open: boolean;
@@ -2348,7 +2348,15 @@ export function NewIssueDialog(props: NewIssueDialogProps) {
       .catch((e: unknown) =>
         dispatch({ type: "aiBranchFailed", error: e instanceof Error ? e.message : "Failed" }),
       );
-  }, [state.worktreeEnabled, state.worktreeBranchName, state.body, state.title, state.ai.branchStatus, props.cwd, branchGen]);
+  }, [
+    state.worktreeEnabled,
+    state.worktreeBranchName,
+    state.body,
+    state.title,
+    state.ai.branchStatus,
+    props.cwd,
+    branchGen,
+  ]);
 
   const onPolish = async () => {
     dispatch({ type: "aiPolishStarted" });
@@ -2506,9 +2514,7 @@ export function NewIssueDialog(props: NewIssueDialogProps) {
               <input
                 type="checkbox"
                 checked={state.worktreeEnabled}
-                onChange={(e) =>
-                  dispatch({ type: "setWorktreeEnabled", value: e.target.checked })
-                }
+                onChange={(e) => dispatch({ type: "setWorktreeEnabled", value: e.target.checked })}
               />
               Create worktree on submit
             </label>
@@ -2580,6 +2586,7 @@ git commit -m "Add NewIssueDialog and reducer"
 ## Task 15: Wire `IssuesTab` `+` button and provider gating
 
 **Files:**
+
 - Modify: `apps/web/src/components/projectExplorer/IssuesTab.tsx`
 
 - [ ] **Step 1: Locate the provider-kind hook**
@@ -2604,9 +2611,7 @@ export function IssuesTab(props: IssuesTabProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-border/60 border-b px-4 py-2.5">
-        <div className="relative flex-1">
-          {/* existing search input */}
-        </div>
+        <div className="relative flex-1">{/* existing search input */}</div>
         <StateFilterButtons value={props.stateFilter} onChange={props.onStateFilterChange} />
         {providerKind === "github" && props.environmentId && props.cwd ? (
           <Button
@@ -2669,6 +2674,7 @@ git commit -m "Wire + button in IssuesTab to open NewIssueDialog (GitHub only)"
 ## Task 16: Final verification — full test suite, lints, typecheck, manual smoke
 
 **Files:**
+
 - None.
 
 - [ ] **Step 1: Run the full server test suite**
@@ -2728,6 +2734,7 @@ bun run dev:desktop
 ```
 
 Verify:
+
 1. Open a GitHub-backed project.
 2. Switch to the Issues tab.
 3. Confirm the `+` button is visible next to Refresh.

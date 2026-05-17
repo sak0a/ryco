@@ -1,5 +1,5 @@
 import { PlusIcon } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "~/lib/utils";
 import type { SidebarStatusBucket } from "../Sidebar.logic";
 import { tabKeyboardHint } from "./ChatSessionTabs.logic";
@@ -31,6 +31,7 @@ export interface ChatSessionTabsProps {
 export const ChatSessionTabs = memo(function ChatSessionTabs(props: ChatSessionTabsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [indicatorStyle, setIndicatorStyle] = useState({ width: 0, x: 0, visible: false });
   const displayedActiveKey = pendingKey ?? props.activeKey;
 
   useEffect(() => {
@@ -53,6 +54,26 @@ export const ChatSessionTabs = memo(function ChatSessionTabs(props: ChatSessionT
     }
   }, [displayedActiveKey]);
 
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container || displayedActiveKey === null) {
+      setIndicatorStyle((current) => ({ ...current, visible: false }));
+      return;
+    }
+    const active = container.querySelector<HTMLElement>(
+      `[data-session-tab-key="${CSS.escape(displayedActiveKey)}"]`,
+    );
+    if (!active) {
+      setIndicatorStyle((current) => ({ ...current, visible: false }));
+      return;
+    }
+    setIndicatorStyle({
+      width: active.offsetWidth,
+      x: active.offsetLeft,
+      visible: true,
+    });
+  }, [displayedActiveKey, props.items]);
+
   if (props.items.length === 0) return null;
 
   return (
@@ -60,8 +81,19 @@ export const ChatSessionTabs = memo(function ChatSessionTabs(props: ChatSessionT
       ref={containerRef}
       role="tablist"
       aria-label="Sessions in this worktree"
-      className="-mb-px flex min-h-7 shrink-0 items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="-mb-px relative isolate flex min-h-7 shrink-0 items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
+      <span
+        className={cn(
+          "pointer-events-none absolute bottom-0 left-0 z-0 h-7 rounded-t-md border border-b-0 border-border/60 bg-background transition-[transform,width,opacity] duration-[240ms] ease-out",
+          indicatorStyle.visible ? "opacity-100" : "opacity-0",
+        )}
+        style={{
+          width: indicatorStyle.width,
+          transform: `translateX(${indicatorStyle.x}px)`,
+        }}
+        aria-hidden
+      />
       {props.items.map((item, index) => {
         const isActive = item.key === displayedActiveKey;
         const hint = tabKeyboardHint(index);
@@ -85,9 +117,9 @@ export const ChatSessionTabs = memo(function ChatSessionTabs(props: ChatSessionT
             onPointerLeave={prefetchLeave}
             onBlur={prefetchLeave}
             className={cn(
-              "group/tab relative inline-flex h-7 shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-2.5 text-xs transition-colors",
+              "group/tab relative z-10 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-2.5 text-xs transition-colors duration-150",
               isActive
-                ? "border-border/60 bg-background text-foreground"
+                ? "border-transparent text-foreground"
                 : "border-transparent text-muted-foreground hover:bg-accent/40 hover:text-foreground",
             )}
             title={item.title}

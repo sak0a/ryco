@@ -14,6 +14,7 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -893,7 +894,9 @@ export default function ThreadTerminalDrawer({
 }: ThreadTerminalDrawerProps) {
   const [drawerHeight, setDrawerHeight] = useState(() => clampDrawerHeight(height));
   const [resizeEpoch, setResizeEpoch] = useState(0);
+  const [tabIndicatorStyle, setTabIndicatorStyle] = useState({ width: 0, x: 0, visible: false });
   const drawerHeightRef = useRef(drawerHeight);
+  const terminalTablistRef = useRef<HTMLDivElement>(null);
   const lastSyncedHeightRef = useRef(clampDrawerHeight(height));
   const onHeightChangeRef = useRef(onHeightChange);
   const resizeStateRef = useRef<{
@@ -1120,6 +1123,26 @@ export default function ThreadTerminalDrawer({
     setResizeEpoch((value) => value + 1);
   }, [visible]);
 
+  useLayoutEffect(() => {
+    const tablist = terminalTablistRef.current;
+    if (!tablist) {
+      setTabIndicatorStyle((current) => ({ ...current, visible: false }));
+      return;
+    }
+    const activeTab = tablist.querySelector<HTMLElement>(
+      `[data-terminal-tab-id="${CSS.escape(resolvedTerminalGroups[resolvedActiveGroupIndex]?.id ?? "")}"]`,
+    );
+    if (!activeTab) {
+      setTabIndicatorStyle((current) => ({ ...current, visible: false }));
+      return;
+    }
+    setTabIndicatorStyle({
+      width: activeTab.offsetWidth,
+      x: activeTab.offsetLeft,
+      visible: true,
+    });
+  }, [resolvedActiveGroupIndex, resolvedTerminalGroups, resizeEpoch]);
+
   useEffect(() => {
     return () => {
       syncHeight(drawerHeightRef.current);
@@ -1128,7 +1151,7 @@ export default function ThreadTerminalDrawer({
 
   return (
     <aside
-      className="thread-terminal-drawer relative flex min-w-0 shrink-0 flex-col overflow-hidden border-t border-border/80 bg-background"
+      className="thread-terminal-drawer relative flex min-w-0 shrink-0 animate-[terminal-drawer-in_220ms_ease-out] flex-col overflow-hidden border-border/80 border-t bg-background"
       style={{ height: `${drawerHeight}px` }}
     >
       <div
@@ -1142,9 +1165,22 @@ export default function ThreadTerminalDrawer({
       <div
         role="tablist"
         aria-label="Terminals"
-        className="flex h-7 shrink-0 items-stretch border-b border-border/70 bg-muted/10"
+        className="flex h-7 shrink-0 items-stretch border-border/70 border-b bg-muted/10"
       >
-        <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto">
+        <div
+          ref={terminalTablistRef}
+          className="relative isolate flex min-w-0 flex-1 items-stretch overflow-x-auto"
+        >
+          <span
+            className={`pointer-events-none absolute inset-y-0 left-0 z-0 bg-background transition-[transform,width,opacity] duration-[240ms] ease-out ${
+              tabIndicatorStyle.visible ? "opacity-100" : "opacity-0"
+            }`}
+            style={{
+              width: tabIndicatorStyle.width,
+              transform: `translateX(${tabIndicatorStyle.x}px)`,
+            }}
+            aria-hidden
+          />
           {resolvedTerminalGroups.map((group, groupIndex) => {
             const isActive = groupIndex === resolvedActiveGroupIndex;
             const isRunning = groupHasRunningTerminal(group, normalizedRunningTerminalIds);
@@ -1159,9 +1195,10 @@ export default function ThreadTerminalDrawer({
                 key={group.id}
                 role="tab"
                 aria-selected={isActive}
-                className={`group flex shrink-0 items-center gap-1.5 border-r border-border/70 px-2 text-xs transition-colors ${
+                data-terminal-tab-id={group.id}
+                className={`group relative z-10 flex shrink-0 items-center gap-1.5 border-r border-border/70 px-2 text-xs transition-colors duration-150 ${
                   isActive
-                    ? "bg-background text-foreground"
+                    ? "text-foreground"
                     : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
                 }`}
               >

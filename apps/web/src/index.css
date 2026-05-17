@@ -515,6 +515,17 @@ label:has(> select#reasoning-effort) select {
   }
 }
 
+@keyframes terminal-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .ultrathink-frame {
   --ultrathink-spectrum: linear-gradient(
     120deg,
