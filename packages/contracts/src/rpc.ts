@@ -114,6 +114,13 @@ import {
   TerminalWriteInput,
 } from "./terminal.ts";
 import {
+  DetectedServerEvent,
+  DetectedServerOpenInBrowserInput,
+  DetectedServerStopInput,
+  DetectedServerStopResult,
+  SubscribeDetectedServerEventsInput,
+} from "./detectedServers.ts";
+import {
   ServerConfigStreamEvent,
   ServerConfig,
   ServerLifecycleStreamEvent,
@@ -265,6 +272,11 @@ export const WS_METHODS = {
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
+  subscribeDetectedServerEvents: "subscribeDetectedServerEvents",
+
+  // Detected server methods
+  detectedServersStop: "detectedServers.stop",
+  detectedServersOpenInBrowser: "detectedServers.openInBrowser",
 } as const;
 
 export const GitCreateWorktreeForProjectInput = Schema.Struct({
@@ -918,6 +930,25 @@ export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess,
   stream: true,
 });
 
+export const WsSubscribeDetectedServerEventsRpc = Rpc.make(
+  WS_METHODS.subscribeDetectedServerEvents,
+  {
+    payload: SubscribeDetectedServerEventsInput,
+    success: DetectedServerEvent,
+    stream: true,
+  },
+);
+
+export const WsDetectedServersStopRpc = Rpc.make(WS_METHODS.detectedServersStop, {
+  payload: DetectedServerStopInput,
+  success: DetectedServerStopResult,
+});
+
+export const WsDetectedServersOpenInBrowserRpc = Rpc.make(WS_METHODS.detectedServersOpenInBrowser, {
+  payload: DetectedServerOpenInBrowserInput,
+  success: Schema.Struct({ ok: Schema.Boolean }),
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -998,6 +1029,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
+  WsSubscribeDetectedServerEventsRpc,
+  WsDetectedServersStopRpc,
+  WsDetectedServersOpenInBrowserRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,

@@ -87,6 +87,10 @@
     "./sourceControlContextFormatter": {
       "types": "./src/sourceControlContextFormatter.ts",
       "import": "./src/sourceControlContextFormatter.ts"
+    },
+    "./lineBuffer": {
+      "types": "./src/lineBuffer.ts",
+      "import": "./src/lineBuffer.ts"
     }
   },
   "scripts": {

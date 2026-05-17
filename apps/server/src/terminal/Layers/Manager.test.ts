@@ -8,6 +8,7 @@ import {
   type TerminalOpenInput,
   type TerminalRestartInput,
 } from "@ryco/contracts";
+import { DetectedServersIngress } from "../../detectedServers/Layers/DetectedServersIngress.ts";
 import {
   Duration,
   Effect,
@@ -15,6 +16,7 @@ import {
   Exit,
   Fiber,
   FileSystem,
+  Layer,
   Option,
   PlatformError,
   Ref,
@@ -217,7 +219,7 @@ const createManager = (
 ): Effect.Effect<
   ManagerFixture,
   PlatformError.PlatformError,
-  FileSystem.FileSystem | Scope.Scope
+  FileSystem.FileSystem | Scope.Scope | DetectedServersIngress
 > =>
   Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) =>
     Effect.gen(function* () {
@@ -262,7 +264,14 @@ const createManager = (
     }),
   );
 
-it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (it) => {
+const detectedServersIngressTestLayer = Layer.succeed(DetectedServersIngress, {
+  trackAgentCommand: () => Effect.succeed({ feed: () => {}, end: () => {} }),
+  trackPty: () => Effect.succeed({ feed: () => {}, feedCommand: () => {}, end: () => {} }),
+});
+
+it.layer(Layer.mergeAll(NodeServices.layer, detectedServersIngressTestLayer), {
+  excludeTestServices: true,
+})("TerminalManager", (it) => {
   it.effect("spawns lazily and reuses running terminal per thread", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager();

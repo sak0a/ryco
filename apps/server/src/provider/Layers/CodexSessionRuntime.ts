@@ -26,6 +26,10 @@ import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
+import {
+  DetectedServersIngress,
+  type CommandTracker,
+} from "../../detectedServers/Layers/DetectedServersIngress.ts";
 import { buildCodexInitializeParams } from "./CodexProvider.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import {
@@ -695,11 +699,13 @@ export const makeCodexSessionRuntime = (
 ): Effect.Effect<
   CodexSessionRuntimeShape,
   CodexErrors.CodexAppServerError,
-  ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
+  ChildProcessSpawner.ChildProcessSpawner | Scope.Scope | DetectedServersIngress
 > =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const runtimeScope = yield* Scope.Scope;
+    const detectedServers = yield* DetectedServersIngress;
+    const trackerMap = new Map<string, CommandTracker>();
     const events = yield* Queue.unbounded<ProviderEvent>();
     const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>());
     const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>());
@@ -803,6 +809,22 @@ export const makeCodexSessionRuntime = (
 
     const handleRawNotification = (notification: CodexServerNotification) =>
       Effect.gen(function* () {
+        if (notification.method === "item/commandExecution/outputDelta") {
+          const p = notification.params;
+          trackerMap.get(`${p.turnId}::${p.itemId}`)?.feed(p.delta);
+        } else if (notification.method === "item/completed") {
+          const p = notification.params;
+          if (p.item.type === "commandExecution") {
+            const key = `${p.turnId}::${p.item.id}`;
+            const tracker = trackerMap.get(key);
+            if (tracker) {
+              const success = p.item.status === "completed";
+              tracker.end(success ? "success" : "error");
+              trackerMap.delete(key);
+            }
+          }
+        }
+
         const payload = notification.params;
         const route = readRouteFields(notification);
         const collabReceiverTurns = yield* Ref.get(collabReceiverTurnsRef);
@@ -966,6 +988,15 @@ export const makeCodexSessionRuntime = (
           ...(itemId ? { itemId } : {}),
           payload,
         });
+
+        const argv = payload.command ? payload.command.split(/\s+/).filter(Boolean) : [];
+        const cwd = payload.cwd ?? options.cwd;
+        const tracker = yield* detectedServers.trackAgentCommand(
+          { threadId: options.threadId, turnId: payload.turnId, itemId: payload.itemId, argv, cwd },
+          "codex",
+          undefined,
+        );
+        trackerMap.set(`${payload.turnId}::${payload.itemId}`, tracker);
 
         const resolved = yield* Deferred.await(decision).pipe(
           Effect.ensuring(
@@ -1218,6 +1249,10 @@ export const makeCodexSessionRuntime = (
       if (alreadyClosed) {
         return;
       }
+      for (const tracker of trackerMap.values()) {
+        tracker.end("error");
+      }
+      trackerMap.clear();
       yield* settlePendingApprovals("cancel");
       yield* settlePendingUserInputs({});
       yield* updateSession(sessionRef, {

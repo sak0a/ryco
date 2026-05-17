@@ -30,6 +30,7 @@ import {
 } from "./ProviderRegistry.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings.ts";
+import { DetectedServersIngress } from "../../detectedServers/Layers/DetectedServersIngress.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
@@ -43,6 +44,11 @@ const disabledCodexSettings: CodexSettings = Schema.decodeSync(CodexSettings)({
 process.env.RYCO_CURSOR_ENABLED = "1";
 
 // ── Test helpers ────────────────────────────────────────────────────
+
+const detectedServersIngressTestLayer = Layer.succeed(DetectedServersIngress, {
+  trackAgentCommand: () => Effect.succeed({ feed: () => {}, end: () => {} }),
+  trackPty: () => Effect.succeed({ feed: () => {}, feedCommand: () => {}, end: () => {} }),
+});
 
 const encoder = new TextEncoder();
 
@@ -877,7 +883,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           const scope = yield* Scope.make();
           yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
           const providerRegistryLayer = ProviderRegistryLive.pipe(
-            Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+            Layer.provideMerge(
+              ProviderInstanceRegistryHydrationLive.pipe(
+                Layer.provide(detectedServersIngressTestLayer),
+              ),
+            ),
             Layer.provideMerge(Layer.succeed(ServerSettingsService, serverSettings)),
             Layer.provideMerge(
               ServerConfig.layerTest(process.cwd(), {
@@ -971,7 +981,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           const scope = yield* Scope.make();
           yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
           const providerRegistryLayer = ProviderRegistryLive.pipe(
-            Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+            Layer.provideMerge(
+              ProviderInstanceRegistryHydrationLive.pipe(
+                Layer.provide(detectedServersIngressTestLayer),
+              ),
+            ),
             Layer.provideMerge(Layer.succeed(ServerSettingsService, serverSettings)),
             Layer.provideMerge(
               ServerConfig.layerTest(process.cwd(), {
@@ -1085,7 +1099,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           const scope = yield* Scope.make();
           yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
           const providerRegistryLayer = ProviderRegistryLive.pipe(
-            Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+            Layer.provideMerge(
+              ProviderInstanceRegistryHydrationLive.pipe(
+                Layer.provide(detectedServersIngressTestLayer),
+              ),
+            ),
             Layer.provideMerge(Layer.succeed(ServerSettingsService, serverSettings)),
             Layer.provideMerge(
               ServerConfig.layerTest(process.cwd(), {
@@ -1135,7 +1153,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             const scope = yield* Scope.make();
             yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
             const providerRegistryLayer = ProviderRegistryLive.pipe(
-              Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+              Layer.provideMerge(
+                ProviderInstanceRegistryHydrationLive.pipe(
+                  Layer.provide(detectedServersIngressTestLayer),
+                ),
+              ),
               Layer.provideMerge(Layer.succeed(ServerSettingsService, serverSettings)),
               Layer.provideMerge(
                 ServerConfig.layerTest(process.cwd(), {

@@ -40,6 +40,7 @@ import {
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
 } from "./CodexHomeLayout.ts";
+import { DetectedServersIngress } from "../../detectedServers/Layers/DetectedServersIngress.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("codex");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
@@ -54,7 +55,8 @@ export type CodexDriverEnv =
   | FileSystem.FileSystem
   | Path.Path
   | ProviderEventLoggers
-  | ServerConfig;
+  | ServerConfig
+  | DetectedServersIngress;
 
 /**
  * Stamp instance identity onto a `ServerProvider` snapshot produced by the

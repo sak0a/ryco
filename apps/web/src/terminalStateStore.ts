@@ -18,6 +18,8 @@ import {
   type ThreadTerminalGroup,
 } from "./types";
 
+export type DrawerKind = "terminals" | "servers";
+
 interface ThreadTerminalState {
   terminalOpen: boolean;
   terminalHeight: number;
@@ -566,6 +568,7 @@ export function selectTerminalEventEntries(
 interface TerminalStateStoreState {
   terminalStateByThreadKey: Record<string, ThreadTerminalState>;
   terminalLaunchContextByThreadKey: Record<string, ThreadTerminalLaunchContext>;
+  terminalDrawerKindByThreadKey: Record<string, DrawerKind>;
   terminalEventEntriesByKey: Record<string, ReadonlyArray<TerminalEventEntry>>;
   nextTerminalEventId: number;
   setTerminalOpen: (threadRef: ScopedThreadRef, open: boolean) => void;
@@ -591,6 +594,7 @@ interface TerminalStateStoreState {
   ) => void;
   recordTerminalEvent: (threadRef: ScopedThreadRef, event: TerminalEvent) => void;
   applyTerminalEvent: (threadRef: ScopedThreadRef, event: TerminalEvent) => void;
+  setTerminalDrawerKind: (threadKey: string, kind: DrawerKind) => void;
   clearTerminalState: (threadRef: ScopedThreadRef) => void;
   removeTerminalState: (threadRef: ScopedThreadRef) => void;
   removeOrphanedTerminalStates: (activeThreadKeys: Set<string>) => void;
@@ -621,6 +625,7 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
       return {
         terminalStateByThreadKey: {},
         terminalLaunchContextByThreadKey: {},
+        terminalDrawerKindByThreadKey: {},
         terminalEventEntriesByKey: {},
         nextTerminalEventId: 1,
         setTerminalOpen: (threadRef, open) =>
@@ -732,6 +737,22 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
               terminalStateByThreadKey: nextTerminalStateByThreadKey,
               terminalLaunchContextByThreadKey: nextTerminalLaunchContextByThreadKey,
               ...nextEventState,
+            };
+          }),
+        setTerminalDrawerKind: (threadKey, kind) =>
+          set((state) => {
+            const current = state.terminalDrawerKindByThreadKey[threadKey];
+            if (current === kind) return state;
+            if (kind === "terminals") {
+              if (current === undefined) return state;
+              const { [threadKey]: _removed, ...rest } = state.terminalDrawerKindByThreadKey;
+              return { terminalDrawerKindByThreadKey: rest };
+            }
+            return {
+              terminalDrawerKindByThreadKey: {
+                ...state.terminalDrawerKindByThreadKey,
+                [threadKey]: kind,
+              },
             };
           }),
         clearTerminalState: (threadRef) =>

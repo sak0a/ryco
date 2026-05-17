@@ -1,0 +1,8 @@
+ℹ Vite client warmed up in 432ms
+ℹ Vite server warmed up in 451ms
+
+  Nuxt 3.10.0 with Nitro 2.8.1
+
+
+  ➜ Local:    http://localhost:3000/
+  ➜ Network:  use --host to expose

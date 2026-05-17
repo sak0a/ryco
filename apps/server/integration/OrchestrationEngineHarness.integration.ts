@@ -40,6 +40,7 @@ import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSes
 import { ServerSettingsService } from "../src/serverSettings.ts";
 import { makeProviderServiceLive } from "../src/provider/Layers/ProviderService.ts";
 import { makeCodexAdapter } from "../src/provider/Layers/CodexAdapter.ts";
+import { DetectedServersIngress } from "../src/detectedServers/Layers/DetectedServersIngress.ts";
 import {
   NoOpProviderEventLoggers,
   ProviderEventLoggers,
@@ -284,6 +285,12 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(providerSessionDirectoryLayer),
+      Layer.provideMerge(
+        Layer.succeed(DetectedServersIngress, {
+          trackAgentCommand: () => Effect.succeed({ feed: () => {}, end: () => {} }),
+          trackPty: () => Effect.succeed({ feed: () => {}, feedCommand: () => {}, end: () => {} }),
+        }),
+      ),
     );
     const providerEventLoggersLayer = Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers);
     const providerLayer = useRealCodex

@@ -44,12 +44,17 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import {
+  DetectedServersIngress,
+  type CommandTracker,
+} from "../../detectedServers/Layers/DetectedServersIngress.ts";
+import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from "../Errors.ts";
 import { acpPermissionOutcome, mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
+import { AcpDetailSuffixDedup } from "../acp/AcpDetectedServersTap.ts";
 import { type AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
 import {
   makeAcpAssistantItemEvent,
@@ -309,6 +314,9 @@ export function makeCursorAdapter(
     const fileSystem = yield* FileSystem.FileSystem;
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const serverConfig = yield* Effect.service(ServerConfig);
+    const detectedServers = yield* DetectedServersIngress;
+    const trackerMap = new Map<string, CommandTracker>();
+    const detailDedup = new AcpDetailSuffixDedup();
     const nativeEventLogger =
       options?.nativeEventLogger ??
       (options?.nativeEventLogPath !== undefined
@@ -771,6 +779,44 @@ export function makeCursorAdapter(
                       event.rawPayload,
                       "acp.jsonrpc",
                     );
+                    if (event.toolCall.kind === "execute") {
+                      const toolCallId = event.toolCall.toolCallId;
+                      const toolStatus = event.toolCall.status;
+                      const trackerKey = `${ctx.threadId}::${toolCallId}`;
+                      const existingTracker = trackerMap.get(trackerKey);
+                      if (!existingTracker) {
+                        const argv = event.toolCall.command
+                          ? event.toolCall.command.split(/\s+/).filter(Boolean)
+                          : [];
+                        const tracker = yield* detectedServers.trackAgentCommand(
+                          {
+                            threadId: ctx.threadId,
+                            turnId: ctx.activeTurnId ?? toolCallId,
+                            itemId: toolCallId,
+                            argv,
+                            cwd: ctx.session.cwd ?? "",
+                          },
+                          "acp",
+                          undefined,
+                        );
+                        trackerMap.set(trackerKey, tracker);
+                        if (toolStatus === "completed" || toolStatus === "failed") {
+                          tracker.end(toolStatus === "completed" ? "success" : "error");
+                          trackerMap.delete(trackerKey);
+                          detailDedup.reset(toolCallId);
+                        } else if (event.toolCall.detail) {
+                          const suffix = detailDedup.consume(toolCallId, event.toolCall.detail);
+                          if (suffix !== null) tracker.feed(suffix);
+                        }
+                      } else if (toolStatus === "completed" || toolStatus === "failed") {
+                        existingTracker.end(toolStatus === "completed" ? "success" : "error");
+                        trackerMap.delete(trackerKey);
+                        detailDedup.reset(toolCallId);
+                      } else if (event.toolCall.detail) {
+                        const suffix = detailDedup.consume(toolCallId, event.toolCall.detail);
+                        if (suffix !== null) existingTracker.feed(suffix);
+                      }
+                    }
                     yield* offerRuntimeEvent(
                       makeAcpToolCallEvent({
                         stamp: yield* makeEventStamp(),

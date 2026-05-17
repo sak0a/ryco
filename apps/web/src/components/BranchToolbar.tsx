@@ -1,14 +1,16 @@
-import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime";
+import { scopeProjectRef, scopeThreadRef, scopedThreadKey } from "@ryco/client-runtime";
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
 import { TerminalSquareIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
+import { useDetectedServerStore } from "../detectedServerStore";
 import { useStore } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
 import { type EnvironmentOption } from "./BranchToolbar.logic";
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
+import { DetectedServersBadge } from "./BranchToolbar/DetectedServersBadge";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
@@ -28,6 +30,7 @@ interface BranchToolbarProps {
   terminalToggleShortcutLabel: string | null;
   onToggleTerminal: () => void;
   terminalCount: number;
+  onOpenServersTab?: () => void;
 }
 
 export const BranchToolbar = memo(function BranchToolbar({
@@ -46,6 +49,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   terminalToggleShortcutLabel,
   onToggleTerminal,
   terminalCount,
+  onOpenServersTab,
 }: BranchToolbarProps) {
   const threadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
@@ -67,6 +71,10 @@ export const BranchToolbar = memo(function BranchToolbar({
   );
   const activeProject = useStore(activeProjectSelector);
   const hasActiveThread = serverThread !== undefined || draftThread !== null;
+
+  const threadKey = useMemo(() => scopedThreadKey(threadRef), [threadRef]);
+  const serversMap = useDetectedServerStore((s) => s.serversByThreadKey[threadKey]);
+  const detectedServers = useMemo(() => (serversMap ? [...serversMap.values()] : []), [serversMap]);
 
   const showEnvironmentPicker = Boolean(
     availableEnvironments && availableEnvironments.length > 1 && onEnvironmentChange,
@@ -121,6 +129,7 @@ export const BranchToolbar = memo(function BranchToolbar({
                 : "Toggle terminal drawer"}
           </TooltipPopup>
         </Tooltip>
+        <DetectedServersBadge servers={detectedServers} onClick={onOpenServersTab ?? (() => {})} />
       </div>
 
       <BranchToolbarBranchSelector

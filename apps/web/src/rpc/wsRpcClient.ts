@@ -210,6 +210,11 @@ export interface WsRpcClient {
     readonly subscribeShell: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeShell>;
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
   };
+  readonly detectedServers: {
+    readonly onEvent: RpcInputStreamMethod<typeof WS_METHODS.subscribeDetectedServerEvents>;
+    readonly stop: RpcUnaryMethod<typeof WS_METHODS.detectedServersStop>;
+    readonly openInBrowser: RpcUnaryMethod<typeof WS_METHODS.detectedServersOpenInBrowser>;
+  };
 }
 
 export function createWsRpcClient(transport: WsTransport): WsRpcClient {
@@ -445,6 +450,17 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
           listener,
           { ...options, tag: ORCHESTRATION_WS_METHODS.subscribeThread },
         ),
+    },
+    detectedServers: {
+      onEvent: (input, listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeDetectedServerEvents](input),
+          listener,
+          { ...options, tag: WS_METHODS.subscribeDetectedServerEvents },
+        ),
+      stop: (input) => transport.request((client) => client[WS_METHODS.detectedServersStop](input)),
+      openInBrowser: (input) =>
+        transport.request((client) => client[WS_METHODS.detectedServersOpenInBrowser](input)),
     },
   };
 }

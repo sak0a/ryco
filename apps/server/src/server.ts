@@ -36,6 +36,10 @@ import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { TerminalManagerLive } from "./terminal/Layers/Manager.ts";
+import { SocketProbeLive } from "./detectedServers/Layers/SocketProbeLive.ts";
+import { LivenessHeartbeatLive } from "./detectedServers/Layers/LivenessHeartbeat.ts";
+import { DetectedServerRegistryLive } from "./detectedServers/Services/DetectedServerRegistry.ts";
+import { DetectedServersIngressLive } from "./detectedServers/Layers/DetectedServersIngress.ts";
 import * as GitManager from "./git/GitManager.ts";
 import { KeybindingsLive } from "./keybindings.ts";
 import { ServerRuntimeStartup, ServerRuntimeStartupLive } from "./serverRuntimeStartup.ts";
@@ -232,7 +236,21 @@ const CheckpointingLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
 );
 
-const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
+const DetectedServersLayerLive = Layer.mergeAll(
+  SocketProbeLive,
+  LivenessHeartbeatLive,
+  DetectedServerRegistryLive,
+  DetectedServersIngressLive.pipe(
+    Layer.provide(DetectedServerRegistryLive),
+    Layer.provide(SocketProbeLive),
+    Layer.provide(LivenessHeartbeatLive),
+  ),
+);
+
+const TerminalLayerLive = TerminalManagerLive.pipe(
+  Layer.provide(PtyAdapterLive),
+  Layer.provide(DetectedServersLayerLive),
+);
 
 const WorkspaceEntriesLayerLive = WorkspaceEntriesLive.pipe(
   Layer.provide(WorkspacePathsLive),
@@ -278,7 +296,7 @@ const RuntimeCoreBaseDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
-  Layer.provideMerge(TerminalLayerLive),
+  Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, DetectedServersLayerLive)),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(ProjectionWorktreeRepositoryLive),
   Layer.provideMerge(KeybindingsLive),
@@ -288,7 +306,9 @@ const RuntimeCoreBaseDependenciesLive = ReactorLayerLive.pipe(
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // `providerInstances` hydration merges `settings.providers.<kind>`
   // with explicit `providerInstances` entries on boot.
-  Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+  Layer.provideMerge(
+    ProviderInstanceRegistryHydrationLive.pipe(Layer.provide(DetectedServersLayerLive)),
+  ),
   // Shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).

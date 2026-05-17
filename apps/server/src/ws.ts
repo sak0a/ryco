@@ -29,6 +29,7 @@ import {
   OpinionatedPluginError,
   FilesystemBrowseError,
   ThreadId,
+  type DetectedServerEvent,
   type TerminalEvent,
   WorktreeId,
   WS_METHODS,
@@ -96,9 +97,14 @@ import {
   type SessionCredentialChange,
 } from "./auth/Services/SessionCredentialService.ts";
 import { respondToAuthError } from "./auth/http.ts";
+import { DetectedServerRegistry } from "./detectedServers/Services/DetectedServerRegistry.ts";
 import { authorizeWsRpc, type WsRpcAccess } from "./auth/wsAuthorization.ts";
 import { AtlassianConnectionService } from "./atlassian/AtlassianConnectionService.ts";
 import { JiraWorkItemService } from "./atlassian/JiraWorkItemService.ts";
+import {
+  handleDetectedServerOpenInBrowser,
+  handleDetectedServerStop,
+} from "./detectedServers/Handlers.ts";
 
 function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   OrchestrationEvent,
@@ -248,6 +254,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
       const bootstrapCredentials = yield* BootstrapCredentialService;
       const sessions = yield* SessionCredentialService;
       const projectionWorktrees = yield* ProjectionWorktreeRepository;
+      const detectedServerRegistry = yield* DetectedServerRegistry;
       const atlassian = yield* AtlassianConnectionService;
       const workItems = yield* JiraWorkItemService;
       const serverCommandId = (tag: string) =>
@@ -2474,6 +2481,43 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
               }),
             ),
             { "rpc.aggregate": "auth" },
+          ),
+        [WS_METHODS.subscribeDetectedServerEvents]: (input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.subscribeDetectedServerEvents,
+            Effect.gen(function* () {
+              const snapshot = yield* detectedServerRegistry.getCurrent(input.threadId);
+              const snapshotEvents: DetectedServerEvent[] = snapshot.map((server) => ({
+                type: "registered" as const,
+                threadId: input.threadId,
+                server,
+                createdAt: new Date().toISOString(),
+              }));
+              const services = yield* Effect.context<never>();
+              const runSyncOffer = Effect.runSyncWith(services);
+              const liveStream = Stream.callback<DetectedServerEvent>((queue) =>
+                Effect.acquireRelease(
+                  detectedServerRegistry.subscribe(input.threadId, (event) => {
+                    runSyncOffer(Queue.offer(queue, event));
+                  }),
+                  (unsubscribe) => Effect.sync(unsubscribe),
+                ),
+              );
+              return Stream.concat(Stream.fromIterable(snapshotEvents), liveStream);
+            }),
+            { "rpc.aggregate": "detectedServers" },
+          ),
+        [WS_METHODS.detectedServersStop]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.detectedServersStop,
+            handleDetectedServerStop(detectedServerRegistry, terminalManager, input.serverId),
+            { "rpc.aggregate": "detectedServers" },
+          ),
+        [WS_METHODS.detectedServersOpenInBrowser]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.detectedServersOpenInBrowser,
+            handleDetectedServerOpenInBrowser(detectedServerRegistry, open, input.serverId),
+            { "rpc.aggregate": "detectedServers" },
           ),
       });
     }),

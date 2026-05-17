@@ -36,10 +36,12 @@ import {
 import { Effect, Layer } from "effect";
 
 import { ServerConfig } from "../../config.ts";
+import { DetectedServersIngress } from "../../detectedServers/Layers/DetectedServersIngress.ts";
 import { ClaudeDriver } from "../Drivers/ClaudeDriver.ts";
 import { CodexDriver } from "../Drivers/CodexDriver.ts";
 import { CursorDriver } from "../Drivers/CursorDriver.ts";
 import { OpenCodeDriver } from "../Drivers/OpenCodeDriver.ts";
+import { BUILT_IN_DRIVERS } from "../builtInDrivers.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistryLive.ts";
@@ -79,6 +81,11 @@ const makeOpenCodeConfig = (overrides: Partial<OpenCodeSettings>): OpenCodeSetti
   ...overrides,
 });
 
+const detectedServersIngressTestLayer = Layer.succeed(DetectedServersIngress, {
+  trackAgentCommand: () => Effect.succeed({ feed: () => {}, end: () => {} }),
+  trackPty: () => Effect.succeed({ feed: () => {}, feedCommand: () => {}, end: () => {} }),
+});
+
 describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
   // `ServerConfig.layerTest` needs `FileSystem` to materialize its scratch
   // directory. `Layer.merge` just unions requirements, so we have to push
@@ -90,6 +97,7 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
   }).pipe(
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+    Layer.provideMerge(detectedServersIngressTestLayer),
   );
 
   it.live("boots two independent codex instances from a ProviderInstanceConfigMap", () =>
@@ -226,6 +234,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
   }).pipe(
     Layer.provideMerge(infraLayer),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+    Layer.provideMerge(detectedServersIngressTestLayer),
   );
 
   it.live("boots one instance of every shipped driver from a single config map", () =>
@@ -271,7 +280,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       };
 
       const { registry } = yield* makeProviderInstanceRegistry({
-        drivers: [CodexDriver, ClaudeDriver, CursorDriver, OpenCodeDriver],
+        drivers: BUILT_IN_DRIVERS,
         configMap,
       });
 

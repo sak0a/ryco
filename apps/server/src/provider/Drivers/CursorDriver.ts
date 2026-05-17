@@ -17,6 +17,7 @@ import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerConfig } from "../../config.ts";
+import { DetectedServersIngress } from "../../detectedServers/Layers/DetectedServersIngress.ts";
 import { makeCursorTextGeneration } from "../../textGeneration/CursorTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCursorAdapter } from "../Layers/CursorAdapter.ts";
@@ -43,7 +44,8 @@ export type CursorDriverEnv =
   | FileSystem.FileSystem
   | Path.Path
   | ProviderEventLoggers
-  | ServerConfig;
+  | ServerConfig
+  | DetectedServersIngress;
 
 const withInstanceIdentity =
   (input: {

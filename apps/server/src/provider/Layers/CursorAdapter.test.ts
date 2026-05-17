@@ -19,6 +19,7 @@ import {
 
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { DetectedServersIngress } from "../../detectedServers/Layers/DetectedServersIngress.ts";
 import type { CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { makeCursorAdapter } from "./CursorAdapter.ts";
 
@@ -119,6 +120,11 @@ const makeResolveCursorSettings = Effect.gen(function* () {
   );
 });
 
+const detectedServersIngressTestLayer = Layer.succeed(DetectedServersIngress, {
+  trackAgentCommand: () => Effect.succeed({ feed: () => {}, end: () => {} }),
+  trackPty: () => Effect.succeed({ feed: () => {}, feedCommand: () => {}, end: () => {} }),
+});
+
 const cursorAdapterTestLayer = it.layer(
   Layer.effect(
     CursorAdapter,
@@ -135,6 +141,7 @@ const cursorAdapterTestLayer = it.layer(
       }),
     ),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(detectedServersIngressTestLayer),
   ),
 );
 
@@ -610,6 +617,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
               }),
             ),
             Layer.provideMerge(NodeServices.layer),
+            Layer.provideMerge(detectedServersIngressTestLayer),
           ),
         ),
       ),
@@ -1245,6 +1253,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
           }),
         ),
         Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(detectedServersIngressTestLayer),
       );
 
       return Effect.gen(function* () {
