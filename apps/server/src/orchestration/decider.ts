@@ -702,6 +702,36 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "worktree.source-control-state.update": {
+      const existing = readModel.worktrees?.find(
+        (w) => w.worktreeId === command.worktreeId,
+      );
+      if (
+        existing !== undefined &&
+        existing.prState === command.prState &&
+        existing.prIsDraft === command.prIsDraft &&
+        existing.issueState === command.issueState
+      ) {
+        return [];
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "worktree",
+          aggregateId: command.worktreeId,
+          occurredAt: command.updatedAt,
+          commandId: command.commandId,
+        }),
+        type: "worktree.sourceControlStateUpdated",
+        payload: {
+          worktreeId: command.worktreeId,
+          prState: command.prState,
+          prIsDraft: command.prIsDraft,
+          issueState: command.issueState,
+          updatedAt: command.updatedAt,
+        },
+      };
+    }
+
     case "worktree.restore": {
       return {
         ...withEventBase({

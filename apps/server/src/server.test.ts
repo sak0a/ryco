@@ -129,10 +129,7 @@ import {
   JiraWorkItemService,
   type JiraWorkItemServiceShape,
 } from "./atlassian/JiraWorkItemService.ts";
-import {
-  TextGeneration,
-  type TextGenerationShape,
-} from "./textGeneration/TextGeneration.ts";
+import { TextGeneration, type TextGenerationShape } from "./textGeneration/TextGeneration.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -3693,6 +3690,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   issueNumber: null,
                   prTitle: null,
                   issueTitle: null,
+                  prState: null,
+                  prIsDraft: null,
+                  issueState: null,
                   createdAt: "2026-05-10T00:00:00.000Z",
                   updatedAt: "2026-05-10T00:00:00.000Z",
                   archivedAt: null,
@@ -3791,6 +3791,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   issueNumber: 34,
                   prTitle: null,
                   issueTitle: null,
+                  prState: null,
+                  prIsDraft: null,
+                  issueState: null,
                   createdAt: "2026-05-10T00:00:00.000Z",
                   updatedAt: "2026-05-10T00:00:00.000Z",
                   archivedAt: null,

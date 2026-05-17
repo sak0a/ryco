@@ -17,7 +17,14 @@ import {
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import { ComposerSourceControlContext } from "./sourceControl.ts";
-import { StatusBucket, Worktree, WorktreeId, WorktreeOrigin } from "./worktree.ts";
+import {
+  IssueState,
+  PullRequestState,
+  StatusBucket,
+  Worktree,
+  WorktreeId,
+  WorktreeOrigin,
+} from "./worktree.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -760,6 +767,16 @@ const WorktreeMetaUpdateCommand = Schema.Struct({
   changedAt: IsoDateTime,
 });
 
+const WorktreeSourceControlStateUpdateCommand = Schema.Struct({
+  type: Schema.Literal("worktree.source-control-state.update"),
+  commandId: CommandId,
+  worktreeId: WorktreeId,
+  prState: Schema.NullOr(PullRequestState),
+  prIsDraft: Schema.NullOr(Schema.Boolean),
+  issueState: Schema.NullOr(IssueState),
+  updatedAt: IsoDateTime,
+});
+
 const WorktreeRestoreCommand = Schema.Struct({
   type: Schema.Literal("worktree.restore"),
   commandId: CommandId,
@@ -830,6 +847,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   WorktreeCreateCommand,
   WorktreeArchiveCommand,
   WorktreeMetaUpdateCommand,
+  WorktreeSourceControlStateUpdateCommand,
   WorktreeRestoreCommand,
   WorktreeDeleteCommand,
   ThreadAttachToWorktreeCommand,
@@ -862,6 +880,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   WorktreeCreateCommand,
   WorktreeArchiveCommand,
   WorktreeMetaUpdateCommand,
+  WorktreeSourceControlStateUpdateCommand,
   WorktreeRestoreCommand,
   WorktreeDeleteCommand,
   ThreadAttachToWorktreeCommand,
@@ -981,6 +1000,7 @@ export const OrchestrationEventType = Schema.Literals([
   "worktree.created",
   "worktree.archived",
   "worktree.metaUpdated",
+  "worktree.sourceControlStateUpdated",
   "worktree.restored",
   "worktree.deleted",
   "thread.attachedToWorktree",
@@ -1210,6 +1230,16 @@ export const WorktreeMetaUpdatedPayload = Schema.Struct({
   changedAt: IsoDateTime,
 });
 
+export const WorktreeSourceControlStateUpdatedPayload = Schema.Struct({
+  worktreeId: WorktreeId,
+  prState: Schema.NullOr(PullRequestState),
+  prIsDraft: Schema.NullOr(Schema.Boolean),
+  issueState: Schema.NullOr(IssueState),
+  updatedAt: IsoDateTime,
+});
+export type WorktreeSourceControlStateUpdatedPayload =
+  typeof WorktreeSourceControlStateUpdatedPayload.Type;
+
 export const WorktreeRestoredPayload = Schema.Struct({
   worktreeId: WorktreeId,
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -1402,6 +1432,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("worktree.metaUpdated"),
     payload: WorktreeMetaUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("worktree.sourceControlStateUpdated"),
+    payload: WorktreeSourceControlStateUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
