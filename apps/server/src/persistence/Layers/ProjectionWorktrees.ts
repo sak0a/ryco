@@ -1,6 +1,6 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option, Schema, Struct } from "effect";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
@@ -15,6 +15,36 @@ import {
   UpdateProjectionWorktreeMetaInput,
 } from "../Services/ProjectionWorktrees.ts";
 import { WorktreeId } from "@ryco/contracts";
+
+const ProjectionWorktreeDbRowSchema = ProjectionWorktree.mapFields(
+  Struct.assign({
+    prIsDraft: Schema.NullOr(Schema.Number),
+  }),
+);
+
+function toProjectionWorktree(
+  row: Schema.Schema.Type<typeof ProjectionWorktreeDbRowSchema>,
+): ProjectionWorktree {
+  return {
+    worktreeId: row.worktreeId,
+    projectId: row.projectId,
+    title: row.title ?? null,
+    branch: row.branch,
+    worktreePath: row.worktreePath,
+    origin: row.origin,
+    prNumber: row.prNumber,
+    issueNumber: row.issueNumber,
+    prTitle: row.prTitle,
+    issueTitle: row.issueTitle,
+    prState: row.prState,
+    prIsDraft: row.prIsDraft === null ? null : row.prIsDraft === 1,
+    issueState: row.issueState,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    archivedAt: row.archivedAt,
+    manualPosition: row.manualPosition,
+  };
+}
 
 const makeProjectionWorktreeRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -34,6 +64,9 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
           issue_number,
           pr_title,
           issue_title,
+          pr_state,
+          pr_is_draft,
+          issue_state,
           created_at,
           updated_at,
           archived_at,
@@ -50,6 +83,9 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
           ${row.issueNumber},
           ${row.prTitle},
           ${row.issueTitle},
+          ${row.prState},
+          ${row.prIsDraft === null ? null : row.prIsDraft ? 1 : 0},
+          ${row.issueState},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.archivedAt},
@@ -66,6 +102,9 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
           issue_number = excluded.issue_number,
           pr_title = excluded.pr_title,
           issue_title = excluded.issue_title,
+          pr_state = excluded.pr_state,
+          pr_is_draft = excluded.pr_is_draft,
+          issue_state = excluded.issue_state,
           updated_at = excluded.updated_at,
           archived_at = excluded.archived_at,
           manual_position = excluded.manual_position
@@ -74,7 +113,7 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
 
   const getProjectionWorktreeRow = SqlSchema.findOneOption({
     Request: GetProjectionWorktreeInput,
-    Result: ProjectionWorktree,
+    Result: ProjectionWorktreeDbRowSchema,
     execute: ({ worktreeId }) =>
       sql`
         SELECT
@@ -88,6 +127,9 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
           issue_number AS "issueNumber",
           pr_title AS "prTitle",
           issue_title AS "issueTitle",
+          pr_state AS "prState",
+          pr_is_draft AS "prIsDraft",
+          issue_state AS "issueState",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
@@ -99,7 +141,7 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
 
   const listProjectionWorktreeRows = SqlSchema.findAll({
     Request: ListProjectionWorktreesByProjectInput,
-    Result: ProjectionWorktree,
+    Result: ProjectionWorktreeDbRowSchema,
     execute: ({ projectId }) =>
       sql`
         SELECT
@@ -113,6 +155,9 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
           issue_number AS "issueNumber",
           pr_title AS "prTitle",
           issue_title AS "issueTitle",
+          pr_state AS "prState",
+          pr_is_draft AS "prIsDraft",
+          issue_state AS "issueState",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
@@ -213,11 +258,13 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
   const getById: ProjectionWorktreeRepositoryShape["getById"] = (input) =>
     getProjectionWorktreeRow(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionWorktreeRepository.getById:query")),
+      Effect.map(Option.map(toProjectionWorktree)),
     );
 
   const listByProjectId: ProjectionWorktreeRepositoryShape["listByProjectId"] = (input) =>
     listProjectionWorktreeRows(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionWorktreeRepository.listByProjectId:query")),
+      Effect.map((rows) => rows.map(toProjectionWorktree)),
     );
 
   const markArchived: ProjectionWorktreeRepositoryShape["markArchived"] = (input) =>
