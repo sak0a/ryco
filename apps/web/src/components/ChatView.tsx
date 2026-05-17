@@ -177,6 +177,9 @@ import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./Branch
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { ComposerHintRow } from "./chat/ComposerHintRow";
+import type { HintRowTrigger } from "./chat/ComposerHintRow.logic";
+import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
@@ -1452,6 +1455,30 @@ export default function ChatView(props: ChatViewProps) {
     versionMismatchDismissKey,
     versionMismatchServerLabel,
   ]);
+  const sourceControlDiscoveryForHints = useSourceControlDiscovery();
+  const hasSourceControlRemote = useMemo(
+    () =>
+      (sourceControlDiscoveryForHints.data?.sourceControlProviders ?? []).some(
+        (provider) =>
+          provider.status === "available" &&
+          (provider.auth.status === "authenticated" || provider.auth.status === "unknown"),
+      ),
+    [sourceControlDiscoveryForHints.data],
+  );
+  // The Atlassian/Jira source-control provider isn't shipped yet. When the
+  // Atlassian integration plan
+  // (docs/superpowers/plans/2026-05-12-atlassian-bitbucket-jira-integration.md)
+  // adds a new kind to SourceControlProviderKind, replace this with a useMemo
+  // over sourceControlDiscoveryForHints.data?.sourceControlProviders that
+  // checks `provider.kind` for the new value.
+  const hasJiraProvider = false;
+  const hintRowVisible = activeThread !== undefined && activeThread.messages.length === 0;
+  const handleInsertHintTrigger = useCallback(
+    (trigger: HintRowTrigger) => {
+      composerRef.current?.insertTriggerAtCursor(trigger);
+    },
+    [composerRef],
+  );
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
   const unlockedSelectedProvider = resolveSelectableProvider(
     providerStatuses,
@@ -3937,6 +3964,12 @@ export default function ChatView(props: ChatViewProps) {
           >
             <div className="relative isolate">
               <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+              <ComposerHintRow
+                visible={hintRowVisible}
+                hasSourceControlRemote={hasSourceControlRemote}
+                hasJiraProvider={hasJiraProvider}
+                onInsertTrigger={handleInsertHintTrigger}
+              />
               <div className="relative z-10">
                 <ChatComposer
                   ref={composerRef}
