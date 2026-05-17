@@ -16,9 +16,10 @@ export const refreshWorktreeSourceControlState = Effect.fn("refreshWorktreeSourc
     if (Option.isNone(row)) return;
     const existing = row.value;
     if (existing.prNumber === null && existing.issueNumber === null) return;
+    if (existing.worktreePath === null) return;
 
     const registry = yield* SourceControlProviderRegistry;
-    const cwd = existing.worktreePath ?? process.cwd();
+    const cwd = existing.worktreePath;
     const provider = yield* registry.resolve({ cwd });
 
     let nextPrState = existing.prState;

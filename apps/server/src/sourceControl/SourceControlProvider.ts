@@ -154,6 +154,7 @@ export interface SourceControlProviderShape {
   readonly getPullRequestState: (input: {
     readonly number: number;
     readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
   }) => Effect.Effect<
     { readonly state: PullRequestState; readonly isDraft: boolean },
     SourceControlProviderError
@@ -161,6 +162,7 @@ export interface SourceControlProviderShape {
   readonly getIssueState: (input: {
     readonly number: number;
     readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
   }) => Effect.Effect<{ readonly state: IssueState }, SourceControlProviderError>;
 }
 

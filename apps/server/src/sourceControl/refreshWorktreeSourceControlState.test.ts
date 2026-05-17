@@ -219,3 +219,32 @@ it.effect("worktree with no prNumber or issueNumber → no-op", () =>
     assert.equal(dispatched.length, 0);
   }),
 );
+
+it.effect("worktreePath is null → no-op, provider never called", () =>
+  Effect.gen(function* () {
+    const dispatchRef = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
+    const worktreeNullPath: ProjectionWorktree = {
+      ...baseWorktree,
+      worktreePath: null,
+      prNumber: 42,
+    };
+
+    let providerCalled = false;
+    const provider = makeProvider({
+      getPullRequestState: (_input) => {
+        providerCalled = true;
+        return Effect.succeed({ state: "merged" as const, isDraft: false });
+      },
+    });
+
+    yield* refreshWorktreeSourceControlState({ worktreeId }).pipe(
+      Effect.provideService(ProjectionWorktreeRepository, makeWorktreeRepo(worktreeNullPath)),
+      Effect.provideService(SourceControlProviderRegistry, makeRegistry(provider)),
+      Effect.provideService(OrchestrationEngineService, makeEngine(dispatchRef)),
+    );
+
+    const dispatched = yield* Ref.get(dispatchRef);
+    assert.equal(dispatched.length, 0);
+    assert.equal(providerCalled, false);
+  }),
+);
