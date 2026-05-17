@@ -23,6 +23,7 @@ describe("resolveStateBadgeVariant", () => {
     expect(variant.kind).toBe("issue-closed");
     expect(variant.Icon).toBe(CheckCircle2Icon);
     expect(variant.tone).toBe("violet");
+    expect(variant.label).toBe("Closed");
   });
 
   it("returns pr-draft when isDraft is true regardless of state", () => {
