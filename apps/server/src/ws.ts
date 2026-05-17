@@ -27,6 +27,7 @@ import {
   OrchestrationReplayEventsError,
   OpinionatedPluginError,
   FilesystemBrowseError,
+  TextGenerationError,
   ThreadId,
   type TerminalEvent,
   WorktreeId,
@@ -61,6 +62,7 @@ import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
+import { TextGeneration } from "./textGeneration/TextGeneration.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
@@ -244,6 +246,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
       const sourceControlRepositories = yield* SourceControlRepositoryService;
       const sourceControlRegistry =
         yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
+      const textGeneration = yield* TextGeneration;
       const bootstrapCredentials = yield* BootstrapCredentialService;
       const sessions = yield* SessionCredentialService;
       const projectionWorktrees = yield* ProjectionWorktreeRepository;
@@ -1855,6 +1858,155 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             ),
             {
               "rpc.aggregate": "source-control",
+            },
+          ),
+        [WS_METHODS.sourceControlCreateIssue]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlCreateIssue,
+            ownerEffect(
+              WS_METHODS.sourceControlCreateIssue,
+              Effect.gen(function* () {
+                const provider = yield* sourceControlRegistry.resolve({ cwd: input.cwd });
+                const issue = yield* provider.createIssue({
+                  cwd: input.cwd,
+                  title: input.title,
+                  body: input.body,
+                  ...(input.labels ? { labels: input.labels } : {}),
+                  ...(input.assignees ? { assignees: input.assignees } : {}),
+                });
+
+                if (!input.worktree?.enabled) {
+                  return { issue } as {
+                    readonly issue: typeof issue;
+                    readonly worktree?: undefined;
+                    readonly worktreeError?: undefined;
+                  };
+                }
+
+                const projectOpt = yield* projectionSnapshotQuery
+                  .getActiveProjectByWorkspaceRoot(input.cwd)
+                  .pipe(
+                    Effect.mapError((cause) =>
+                      toGitManagerError(
+                        WS_METHODS.sourceControlCreateIssue,
+                        "Failed to resolve project for worktree creation.",
+                        cause,
+                      ),
+                    ),
+                  );
+                if (Option.isNone(projectOpt)) {
+                  return {
+                    issue,
+                    worktreeError: `No project registered for workspace root '${input.cwd}'.`,
+                  };
+                }
+                const projectId = projectOpt.value.id;
+                const worktreeBranchName = input.worktree.branchName;
+                return yield* createWorktreeForProject({
+                  projectId,
+                  intent: {
+                    kind: "issue",
+                    number: issue.number,
+                    branchName: worktreeBranchName,
+                  },
+                }).pipe(
+                  Effect.matchEffect({
+                    onSuccess: (worktree) => Effect.succeed({ issue, worktree }),
+                    onFailure: (error) =>
+                      Effect.succeed({
+                        issue,
+                        worktreeError: error.message ?? "Failed to create worktree for issue.",
+                      }),
+                  }),
+                );
+              }),
+            ),
+            {
+              "rpc.aggregate": "source-control",
+            },
+          ),
+        [WS_METHODS.sourceControlListIssueLabels]: ({ cwd }) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlListIssueLabels,
+            ownerEffect(
+              WS_METHODS.sourceControlListIssueLabels,
+              sourceControlRegistry
+                .resolve({ cwd })
+                .pipe(Effect.flatMap((provider) => provider.listLabels({ cwd }))),
+            ),
+            {
+              "rpc.aggregate": "source-control",
+            },
+          ),
+        [WS_METHODS.sourceControlListIssueAssignees]: ({ cwd }) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlListIssueAssignees,
+            ownerEffect(
+              WS_METHODS.sourceControlListIssueAssignees,
+              sourceControlRegistry
+                .resolve({ cwd })
+                .pipe(Effect.flatMap((provider) => provider.listAssignees({ cwd }))),
+            ),
+            {
+              "rpc.aggregate": "source-control",
+            },
+          ),
+        [WS_METHODS.textGenerationGenerateIssueContent]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.textGenerationGenerateIssueContent,
+            ownerEffect(
+              WS_METHODS.textGenerationGenerateIssueContent,
+              Effect.gen(function* () {
+                const settings = yield* serverSettings.getSettings.pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new TextGenerationError({
+                        operation: "generateIssueContent",
+                        detail: "Failed to load server settings for text generation model.",
+                        cause,
+                      }),
+                  ),
+                );
+                return yield* textGeneration.generateIssueContent({
+                  cwd: input.cwd,
+                  mode: input.mode,
+                  ...(input.rough !== undefined ? { rough: input.rough } : {}),
+                  ...(input.body !== undefined ? { body: input.body } : {}),
+                  ...(input.currentTitle !== undefined ? { currentTitle: input.currentTitle } : {}),
+                  modelSelection: settings.textGenerationModelSelection,
+                });
+              }),
+            ),
+            {
+              "rpc.aggregate": "text-generation",
+            },
+          ),
+        [WS_METHODS.textGenerationGenerateBranchName]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.textGenerationGenerateBranchName,
+            ownerEffect(
+              WS_METHODS.textGenerationGenerateBranchName,
+              Effect.gen(function* () {
+                const settings = yield* serverSettings.getSettings.pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new TextGenerationError({
+                        operation: "generateBranchName",
+                        detail: "Failed to load server settings for text generation model.",
+                        cause,
+                      }),
+                  ),
+                );
+                const { branch } = yield* textGeneration.generateBranchName({
+                  cwd: input.cwd,
+                  message: input.message,
+                  modelSelection: settings.textGenerationModelSelection,
+                });
+                return { branch };
+              }),
+            ),
+            {
+              "rpc.aggregate": "text-generation",
             },
           ),
         [WS_METHODS.atlassianListConnections]: (_input) =>

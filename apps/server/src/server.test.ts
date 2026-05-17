@@ -129,6 +129,10 @@ import {
   JiraWorkItemService,
   type JiraWorkItemServiceShape,
 } from "./atlassian/JiraWorkItemService.ts";
+import {
+  TextGeneration,
+  type TextGenerationShape,
+} from "./textGeneration/TextGeneration.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -353,6 +357,7 @@ const buildAppUnderTest = (options?: {
     repositoryIdentityResolver?: Partial<RepositoryIdentityResolverShape>;
     atlassianConnectionService?: Partial<AtlassianConnectionServiceShape>;
     jiraWorkItemService?: Partial<JiraWorkItemServiceShape>;
+    textGeneration?: Partial<TextGenerationShape>;
   };
 }) =>
   Effect.gen(function* () {
@@ -596,6 +601,16 @@ const buildAppUnderTest = (options?: {
           listTransitions: () => Effect.succeed([]),
           transition: () => Effect.die("not implemented in test"),
           ...options?.layers?.jiraWorkItemService,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(TextGeneration)({
+          generateCommitMessage: () => Effect.die("not implemented in test"),
+          generatePrContent: () => Effect.die("not implemented in test"),
+          generateBranchName: () => Effect.die("not implemented in test"),
+          generateThreadTitle: () => Effect.die("not implemented in test"),
+          generateIssueContent: () => Effect.die("not implemented in test"),
+          ...options?.layers?.textGeneration,
         }),
       ),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
