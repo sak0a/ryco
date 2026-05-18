@@ -10,7 +10,7 @@ import {
 import { scopeThreadRef } from "@ryco/client-runtime";
 import { DEFAULT_UNIFIED_SETTINGS } from "@ryco/contracts/settings";
 import { Equal } from "effect";
-import { APP_VERSION } from "../../branding";
+import { APP_BASE_NAME, APP_VERSION } from "../../branding";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -79,6 +79,58 @@ function AboutVersionTitle() {
       <span>Version</span>
       <code className="text-[11px] font-medium text-muted-foreground">{APP_VERSION}</code>
     </span>
+  );
+}
+
+const REPOSITORY_URL = "https://github.com/sak0a/ryco";
+const CREATOR_URL = "https://github.com/sak0a";
+
+function openExternalLink(url: string) {
+  void ensureLocalApi()
+    .shell.openExternal(url)
+    .catch((error: unknown) => {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not open link",
+          description: error instanceof Error ? error.message : "Failed to open external link.",
+        }),
+      );
+    });
+}
+
+function AboutBrandingHeader() {
+  return (
+    <div className="flex flex-col items-center gap-2 px-4 pt-6 pb-5 text-center sm:px-5">
+      <img
+        src="/favicon-96x96.png"
+        alt=""
+        aria-hidden="true"
+        className="size-14 rounded-xl shadow-sm"
+      />
+      <h3 className="text-base font-semibold tracking-tight text-foreground">{APP_BASE_NAME}</h3>
+      <div className="space-y-0.5 text-[11px] text-muted-foreground">
+        <p>
+          Created by{" "}
+          <button
+            type="button"
+            onClick={() => openExternalLink(CREATOR_URL)}
+            className="font-medium text-foreground/80 underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Laurin (saka)
+          </button>
+        </p>
+        <p>
+          <button
+            type="button"
+            onClick={() => openExternalLink(REPOSITORY_URL)}
+            className="underline-offset-2 hover:text-foreground hover:underline"
+          >
+            github.com/sak0a/ryco
+          </button>
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -813,6 +865,7 @@ export function GeneralSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection title="About">
+        <AboutBrandingHeader />
         {isElectron ? (
           <AboutVersionSection />
         ) : (
