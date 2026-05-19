@@ -10,7 +10,10 @@ import {
 import { scopeThreadRef } from "@ryco/client-runtime";
 import { DEFAULT_UNIFIED_SETTINGS } from "@ryco/contracts/settings";
 import { Equal } from "effect";
-import { APP_BASE_NAME, APP_VERSION } from "../../branding";
+import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../../branding";
+import aboutLogoAlpha from "../../../../../assets/prod/favicon/favicon-96x96.png";
+import aboutLogoDev from "../../../../../assets/dev/favicon/favicon-96x96.png";
+import aboutLogoNightly from "../../../../../assets/nightly/favicon/favicon-96x96.png";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -85,6 +88,12 @@ function AboutVersionTitle() {
 const REPOSITORY_URL = "https://github.com/sak0a/ryco";
 const CREATOR_URL = "https://github.com/sak0a";
 
+const ABOUT_LOGO_BY_STAGE = {
+  Alpha: aboutLogoAlpha,
+  Dev: aboutLogoDev,
+  Nightly: aboutLogoNightly,
+} as const;
+
 function openExternalLink(url: string) {
   void ensureLocalApi()
     .shell.openExternal(url)
@@ -100,10 +109,11 @@ function openExternalLink(url: string) {
 }
 
 function AboutBrandingHeader() {
+  const logoSrc = ABOUT_LOGO_BY_STAGE[APP_STAGE_LABEL] ?? aboutLogoAlpha;
   return (
     <div className="flex flex-col items-center gap-2 px-4 pt-6 pb-5 text-center sm:px-5">
       <img
-        src="/favicon-96x96.png"
+        src={logoSrc}
         alt=""
         aria-hidden="true"
         className="size-14 rounded-xl shadow-sm"
