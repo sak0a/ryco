@@ -64,7 +64,7 @@ import {
   issueListQueryOptions,
   changeRequestListQueryOptions,
 } from "../../lib/sourceControlContextRpc";
-import { searchSourceControlSummaries } from "./composerSourceControlContextSearch";
+import { buildScopedSourceControlComposerItems } from "./composerSourceControlItems";
 import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
 import { ContextPickerButton } from "./ContextPickerButton";
 import {
@@ -485,6 +485,13 @@ export interface ChatComposerHandle {
   }) => void;
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
+  /**
+   * Inserts trigger text (e.g. "#i ", "#pr ", "#jira ", "/") at the current
+   * cursor position, focuses the editor, and lets detectComposerTrigger pick
+   * up the new trigger so the inline picker opens as if the user had typed
+   * the same keys.
+   */
+  insertTriggerAtCursor: (text: string) => void;
   /** Get the current prompt/effort/model state for use in send. */
   getSendContext: () => {
     prompt: string;
@@ -1094,35 +1101,12 @@ export const ChatComposer = memo(
         }));
       }
       if (composerTrigger.kind === "source-control") {
-        const query = composerTrigger.query;
-        const issues = issueListQuery.data ?? [];
-        const prs = changeRequestListQuery.data ?? [];
-        const filteredIssues = searchSourceControlSummaries(issues, query);
-        // ChangeRequest has number/title but is a different type; filter manually
-        const q = query.trim().toLowerCase();
-        const filteredPrs =
-          q.length === 0
-            ? prs
-            : prs.filter((pr) => {
-                const num = String(pr.number);
-                const title = pr.title.toLowerCase();
-                return num === q || num.startsWith(q) || title.includes(q);
-              });
-        const issueItems: ComposerCommandItem[] = filteredIssues.map((issue) => ({
-          id: `source-control-issue:${issue.provider}:${issue.number}`,
-          type: "source-control-issue" as const,
-          summary: issue,
-          label: `#${issue.number}`,
-          description: issue.title,
-        }));
-        const prItems: ComposerCommandItem[] = filteredPrs.map((pr) => ({
-          id: `source-control-pr:${pr.provider}:${pr.number}`,
-          type: "source-control-pr" as const,
-          summary: pr,
-          label: `#${pr.number}`,
-          description: pr.title,
-        }));
-        return [...issueItems, ...prItems];
+        return [
+          ...buildScopedSourceControlComposerItems(composerTrigger.query, {
+            issues: issueListQuery.data ?? [],
+            prs: changeRequestListQuery.data ?? [],
+          }),
+        ];
       }
       return [];
     }, [
@@ -2380,6 +2364,34 @@ export const ChatComposer = memo(
             composerEditorRef.current?.focusAt(nextCollapsedCursor);
           });
         },
+        insertTriggerAtCursor: (text: string) => {
+          if (isMobileViewport) {
+            setIsComposerFocused(true);
+          }
+          const snapshot = composerEditorRef.current?.readSnapshot() ?? {
+            value: promptRef.current,
+            cursor: composerCursor,
+            expandedCursor: expandCollapsedComposerCursor(promptRef.current, composerCursor),
+            terminalContextIds: composerTerminalContexts.map((context) => context.id),
+          };
+          const { text: nextPrompt, cursor: nextExpandedCursor } = replaceTextRange(
+            snapshot.value,
+            snapshot.expandedCursor,
+            snapshot.expandedCursor,
+            text,
+          );
+          const nextCollapsedCursor = collapseExpandedComposerCursor(
+            nextPrompt,
+            nextExpandedCursor,
+          );
+          promptRef.current = nextPrompt;
+          setComposerDraftPrompt(composerDraftTarget, nextPrompt);
+          setComposerCursor(nextCollapsedCursor);
+          setComposerTrigger(detectComposerTrigger(nextPrompt, nextExpandedCursor));
+          window.requestAnimationFrame(() => {
+            composerEditorRef.current?.focusAt(nextCollapsedCursor);
+          });
+        },
         getSendContext: () => ({
           prompt: promptRef.current,
           images: composerImagesRef.current,
@@ -2400,6 +2412,7 @@ export const ChatComposer = memo(
         composerSourceControlContexts,
         composerTerminalContexts,
         insertComposerDraftTerminalContext,
+        isMobileViewport,
         promptRef,
         composerImagesRef,
         composerTerminalContextsRef,
@@ -2411,6 +2424,7 @@ export const ChatComposer = memo(
         selectedPromptEffort,
         selectedProvider,
         selectedProviderModels,
+        setComposerDraftPrompt,
       ],
     );
 
