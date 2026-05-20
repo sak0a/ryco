@@ -4,6 +4,7 @@ import {
   ArchiveIcon,
   BlocksIcon,
   GitBranchIcon,
+  KeyboardIcon,
   Link2Icon,
   PaletteIcon,
   PlugZapIcon,
@@ -19,6 +20,7 @@ import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ScrollArea } from "../ui/scroll-area";
 import { AppearanceSettingsPanel } from "./AppearanceSettings";
 import { ConnectionsSettings } from "./ConnectionsSettings";
+import { KeybindingsSettingsPanel } from "./KeybindingsSettings";
 import { McpServersSettings } from "./McpServersSettings";
 import { OpinionatedPluginsSettingsPanel } from "./OpinionatedPluginsSettings";
 import { ProvidersSettingsPanel } from "./ProvidersSettingsPanel";
@@ -37,6 +39,7 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { id: "opinionated-plugins", label: "Plugins", icon: PlugZapIcon },
   { id: "mcp-servers", label: "MCP Servers", icon: ServerIcon },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
+  { id: "keybindings", label: "Keybindings", icon: KeyboardIcon },
   { id: "source-control", label: "Source Control", icon: GitBranchIcon },
   { id: "connections", label: "Connections", icon: Link2Icon },
   { id: "archived", label: "Archive", icon: ArchiveIcon },
@@ -75,6 +78,8 @@ function SectionPanel({ section }: { section: SettingsSectionId }) {
       return <McpServersSettings />;
     case "appearance":
       return <AppearanceSettingsPanel />;
+    case "keybindings":
+      return <KeybindingsSettingsPanel />;
     case "source-control":
       return <SourceControlSettingsPanel />;
     case "connections":

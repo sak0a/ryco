@@ -6,6 +6,7 @@ export type SettingsSectionId =
   | "opinionated-plugins"
   | "mcp-servers"
   | "appearance"
+  | "keybindings"
   | "source-control"
   | "connections"
   | "archived";

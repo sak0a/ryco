@@ -126,12 +126,7 @@ function AboutBrandingHeader() {
   const logoSrc = ABOUT_LOGO_BY_STAGE[APP_STAGE_LABEL] ?? aboutLogoAlpha;
   return (
     <div className="flex flex-col items-center gap-2 px-4 pt-6 pb-5 text-center sm:px-5">
-      <img
-        src={logoSrc}
-        alt=""
-        aria-hidden="true"
-        className="size-14 rounded-xl shadow-sm"
-      />
+      <img src={logoSrc} alt="" aria-hidden="true" className="size-14 rounded-xl shadow-sm" />
       <h3 className="text-base font-semibold tracking-tight text-foreground">{APP_BASE_NAME}</h3>
       <div className="space-y-0.5 text-[11px] text-muted-foreground">
         <p>

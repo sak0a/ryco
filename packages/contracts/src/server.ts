@@ -8,7 +8,7 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
-import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings.ts";
+import { KeybindingRule, KeybindingsConfig, ResolvedKeybindingsConfig } from "./keybindings.ts";
 import { EditorId } from "./editor.ts";
 import { ModelCapabilities } from "./model.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
@@ -273,6 +273,17 @@ export const ServerUpsertKeybindingResult = Schema.Struct({
   issues: ServerConfigIssues,
 });
 export type ServerUpsertKeybindingResult = typeof ServerUpsertKeybindingResult.Type;
+
+export const KeybindingsReplaceCustomInput = Schema.Struct({
+  rules: KeybindingsConfig,
+});
+export type KeybindingsReplaceCustomInput = typeof KeybindingsReplaceCustomInput.Type;
+
+export const KeybindingsReplaceCustomResult = Schema.Struct({
+  keybindings: ResolvedKeybindingsConfig,
+  issues: ServerConfigIssues,
+});
+export type KeybindingsReplaceCustomResult = typeof KeybindingsReplaceCustomResult.Type;
 
 export const ServerConfigUpdatedPayload = Schema.Struct({
   issues: ServerConfigIssues,

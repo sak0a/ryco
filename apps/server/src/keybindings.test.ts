@@ -491,6 +491,78 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
+  it.effect("replaceCustomKeybindings writes the exact list and merges defaults", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+j", command: "terminal.toggle" },
+      ]);
+
+      const resolved = yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        return yield* keybindings.replaceCustomKeybindings([
+          { key: "mod+shift+t", command: "terminal.toggle" },
+          { key: "mod+shift+r", command: "script.run-tests.run" },
+        ]);
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.map(({ key, command }) => ({ key, command })),
+        [
+          { key: "mod+shift+t", command: "terminal.toggle" },
+          { key: "mod+shift+r", command: "script.run-tests.run" },
+        ],
+      );
+      assert.isTrue(resolved.some((entry) => entry.command === "script.run-tests.run"));
+      // Defaults are merged in for commands not in the custom list.
+      assert.isTrue(resolved.some((entry) => entry.command === "chat.new"));
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("replaceCustomKeybindings with an empty list restores defaults", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+shift+x", command: "terminal.toggle" },
+      ]);
+
+      const resolved = yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        return yield* keybindings.replaceCustomKeybindings([]);
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(persisted, []);
+      // Resolved view falls back to defaults entirely.
+      assert.isTrue(resolved.some((entry) => entry.command === "terminal.toggle"));
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("replaceCustomKeybindings rejects malformed rules atomically", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+j", command: "terminal.toggle" },
+      ]);
+
+      const result = yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        return yield* keybindings.replaceCustomKeybindings([
+          { key: "mod+a", command: "chat.new" },
+          { key: "mod+shift+d+o", command: "terminal.new" },
+        ]);
+      }).pipe(toDetailResult);
+      assertFailure(result, "invalid keybinding rule");
+
+      const persistedRaw = yield* fs.readFileString(keybindingsConfigPath);
+      // File untouched on validation failure.
+      assert.isTrue(persistedRaw.includes("terminal.toggle"));
+      assert.isFalse(persistedRaw.includes("chat.new"));
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
   it.effect("serializes concurrent upserts to avoid lost updates", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig;

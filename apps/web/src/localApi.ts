@@ -160,6 +160,12 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
           ? rpcClient.server.installOpinionatedPlugin(input)
           : Promise.reject(unavailableLocalBackendError()),
     },
+    keybindings: {
+      replaceCustom: (input) =>
+        rpcClient
+          ? rpcClient.keybindings.replaceCustom(input)
+          : Promise.reject(unavailableLocalBackendError()),
+    },
     ...(rpcClient
       ? {
           mcp: {

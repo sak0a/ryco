@@ -69,6 +69,8 @@ import type {
   ServerProviderUpdateInput,
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingResult,
+  KeybindingsReplaceCustomInput,
+  KeybindingsReplaceCustomResult,
 } from "./server.ts";
 import type {
   TerminalClearInput,
@@ -349,6 +351,11 @@ export interface LocalApi {
     installOpinionatedPlugin: (
       input: OpinionatedPluginInstallInput,
     ) => Promise<OpinionatedPluginInstallResult>;
+  };
+  keybindings: {
+    replaceCustom: (
+      input: KeybindingsReplaceCustomInput,
+    ) => Promise<KeybindingsReplaceCustomResult>;
   };
   mcp?: {
     listWorkspaces: () => Promise<McpListWorkspacesResult>;
