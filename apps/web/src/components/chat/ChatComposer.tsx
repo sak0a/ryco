@@ -2209,6 +2209,9 @@ export const ChatComposer = memo(
           });
         },
         insertTriggerAtCursor: (text: string) => {
+          if (isMobileViewport) {
+            setIsComposerFocused(true);
+          }
           const snapshot = composerEditorRef.current?.readSnapshot() ?? {
             value: promptRef.current,
             cursor: composerCursor,
@@ -2253,6 +2256,7 @@ export const ChatComposer = memo(
         composerSourceControlContexts,
         composerTerminalContexts,
         insertComposerDraftTerminalContext,
+        isMobileViewport,
         promptRef,
         composerImagesRef,
         composerTerminalContextsRef,

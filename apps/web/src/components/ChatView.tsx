@@ -1472,7 +1472,15 @@ export default function ChatView(props: ChatViewProps) {
   // over sourceControlDiscoveryForHints.data?.sourceControlProviders that
   // checks `provider.kind` for the new value.
   const hasJiraProvider = false;
-  const hintRowVisible = activeThread !== undefined && activeThread.messages.length === 0;
+  // First-turn-only: hide as soon as anything has been sent. We check both the
+  // persisted messages array and the optimistic send buffer because the latter
+  // is populated immediately on send while the former only updates once the
+  // server acknowledges; checking only messages.length would leave a brief
+  // window where the row stays visible after the user presses send.
+  const hintRowVisible =
+    activeThread !== undefined &&
+    activeThread.messages.length === 0 &&
+    optimisticUserMessages.length === 0;
   const handleInsertHintTrigger = useCallback(
     (trigger: HintRowTrigger) => {
       composerRef.current?.insertTriggerAtCursor(trigger);
