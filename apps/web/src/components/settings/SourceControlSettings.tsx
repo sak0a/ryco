@@ -19,6 +19,14 @@ import {
 } from "../../lib/sourceControlDiscoveryState";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../ui/empty";
 import { Skeleton } from "../ui/skeleton";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -708,9 +716,34 @@ export function SourceControlSettingsPanel() {
 
   const hasVcsItems = result.versionControlSystems.length > 0;
   const hasProviderItems = result.sourceControlProviders.length > 0;
+  const hasDiscoveryItems = hasVcsItems || hasProviderItems;
 
   return (
     <SettingsPageContainer>
+      {hasDiscoveryItems ? null : (
+        <SettingsSection title="Source Control Providers">
+          <Empty className="min-h-56 border-t border-border/60 first:border-t-0">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <GitIcon className="size-4" />
+              </EmptyMedia>
+              <EmptyTitle>Nothing detected yet</EmptyTitle>
+              <EmptyDescription>
+                Install Git on the server, add optional hosting integrations or credentials your
+                workspace needs, then rescan.
+              </EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button type="button" size="xs" onClick={handleScan} disabled={discovery.isPending}>
+                <RefreshCwIcon className={cn("size-3", discovery.isPending && "animate-spin")} />
+                Scan
+              </Button>
+            </EmptyContent>
+          </Empty>
+          <AtlassianConfiguration />
+        </SettingsSection>
+      )}
+
       {hasVcsItems ? (
         <SettingsSection title="Version Control" headerAction={scanButton}>
           {result.versionControlSystems.map((item) => (
@@ -719,24 +752,26 @@ export function SourceControlSettingsPanel() {
         </SettingsSection>
       ) : null}
 
-      <SettingsSection
-        title="Source Control Providers"
-        headerAction={hasVcsItems ? null : scanButton}
-      >
-        {hasProviderItems ? (
-          result.sourceControlProviders.map((item) => (
-            <DiscoveryItemRow key={`provider:${item.kind}`} item={item} />
-          ))
-        ) : (
-          <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              {discovery.error ??
-                "No source control providers were detected on the server. Install a CLI like git, gh, glab, or az on the server host, then rescan."}
-            </p>
-          </div>
-        )}
-        <AtlassianConfiguration />
-      </SettingsSection>
+      {hasDiscoveryItems ? (
+        <SettingsSection
+          title="Source Control Providers"
+          headerAction={hasVcsItems ? null : scanButton}
+        >
+          {hasProviderItems ? (
+            result.sourceControlProviders.map((item) => (
+              <DiscoveryItemRow key={`provider:${item.kind}`} item={item} />
+            ))
+          ) : (
+            <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {discovery.error ??
+                  "No source control providers were detected on the server. Install a CLI like git, gh, glab, or az on the server host, then rescan."}
+              </p>
+            </div>
+          )}
+          <AtlassianConfiguration />
+        </SettingsSection>
+      ) : null}
     </SettingsPageContainer>
   );
 }
