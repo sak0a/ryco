@@ -5,7 +5,7 @@ import {
   type OrchestrationCommand,
 } from "@ryco/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer, Option, Ref, Stream } from "effect";
+import { Effect, Option, Ref, Stream } from "effect";
 
 import type { OrchestrationEngineShape } from "../orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";

@@ -185,7 +185,9 @@ export function writeBrowserSavedEnvironmentSecret(
         lastConnectedAt: record.lastConnectedAt,
         bearerToken: secret,
       };
-      return record.desktopSsh ? { ...nextRecord, desktopSsh: record.desktopSsh } : nextRecord;
+      return record.desktopSsh
+        ? Object.assign(nextRecord, { desktopSsh: record.desktopSsh })
+        : nextRecord;
     }),
   });
   return found;

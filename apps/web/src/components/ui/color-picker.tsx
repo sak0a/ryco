@@ -166,16 +166,6 @@ export function ColorPicker({
     setHexInput(value);
   }, [value, swatch]);
 
-  const updateHsv = useCallback(
-    (next: HSV) => {
-      setHsv(next);
-      const hex = rgbToHex(hsvToRgb(next));
-      setHexInput(hex);
-      scheduleCommit(hex);
-    },
-    [scheduleCommit],
-  );
-
   const padRef = useRef<HTMLDivElement | null>(null);
   const updateFromPad = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {

@@ -204,8 +204,8 @@ function PullRequestDetailBody(props: {
                   isOriginalPost
                 />
               </li>
-              {detail.comments.map((comment, index) => (
-                <li key={`${comment.author}-${index}`}>
+              {detail.comments.map((comment) => (
+                <li key={`${comment.author}-${comment.createdAt}-${comment.body}`}>
                   <CommentItem
                     author={comment.author}
                     body={comment.body}

@@ -248,6 +248,10 @@ import {
 } from "../sidebarProjectGrouping";
 import { SidebarProviderUpdatePill } from "./sidebar/SidebarProviderUpdatePill";
 const THREAD_PREVIEW_LIMIT = 6;
+
+function stopSpanPointerPropagation(event: React.PointerEvent<HTMLSpanElement>) {
+  event.stopPropagation();
+}
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
   created_at: "Created at",
@@ -1099,9 +1103,6 @@ function ProjectSourceControlBadge(props: {
         props.onClick?.();
       }
     };
-    const stopPointer = (event: React.PointerEvent<HTMLSpanElement>) => {
-      event.stopPropagation();
-    };
     // Renders as <span role="button"> rather than <button>: this badge is
     // mounted inside <SidebarMenuButton>, and nesting native <button>
     // elements is invalid HTML and emits a React hydration warning.
@@ -1119,8 +1120,8 @@ function ProjectSourceControlBadge(props: {
         aria-label={actionLabel}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
-        onPointerDown={stopPointer}
-        onPointerDownCapture={stopPointer}
+        onPointerDown={stopSpanPointerPropagation}
+        onPointerDownCapture={stopSpanPointerPropagation}
       >
         {props.icon}
         <span>{formatCompactSourceControlCount(props.count)}</span>

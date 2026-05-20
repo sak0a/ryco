@@ -123,7 +123,7 @@ describe("createSessionTabsSelector", () => {
       worktreeId: "wt-1",
       worktreePath: "/tmp/wt",
     });
-    const titles = result.map((item) => item.title).sort();
+    const titles = result.map((item) => item.title).toSorted();
     expect(titles).toEqual(["Empty Session", "Thread"]);
   });
 
@@ -153,7 +153,7 @@ describe("createSessionTabsSelector", () => {
       }),
     ];
     const result = select(threads, { worktreeId: null, worktreePath: null });
-    const ids = result.map((item) => item.key.split(":").at(-1)).sort();
+    const ids = result.map((item) => item.key.split(":").at(-1)).toSorted();
     expect(ids).toEqual(["m1", "m2"]);
   });
 
@@ -168,7 +168,7 @@ describe("createSessionTabsSelector", () => {
       makeThread({ id: "c" as never, worktreeId: "wt-3", worktreePath: "/tmp/different" }),
     ];
     const result = select(threads, { worktreeId: "wt-1", worktreePath: "/tmp/wt" });
-    const ids = result.map((item) => item.key.split(":").at(-1)).sort();
+    const ids = result.map((item) => item.key.split(":").at(-1)).toSorted();
     expect(ids).toEqual(["a", "b"]);
   });
 });

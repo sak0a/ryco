@@ -5,10 +5,6 @@ import {
   type DesktopUpdateChannel,
   EDITORS,
   type EditorId,
-  PROVIDER_DISPLAY_NAMES,
-  ProviderDriverKind,
-  type ProviderInstanceConfig,
-  type ProviderInstanceId,
   type ScopedThreadRef,
 } from "@ryco/contracts";
 import { scopeThreadRef } from "@ryco/client-runtime";
@@ -49,17 +45,6 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
-import {
-  canOneClickUpdateProviderCandidate,
-  collectProviderUpdateCandidates,
-  hasOneClickUpdateProviderCandidate,
-  isProviderUpdateActive,
-  type ProviderUpdateCandidate,
-} from "../ProviderUpdateLaunchNotification.logic";
-import { ProviderInstanceCard } from "./ProviderInstanceCard";
-import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
-import { buildProviderInstanceUpdatePatch } from "./SettingsPanels.logic";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -85,10 +70,6 @@ function EditorOptionIcon({ editor }: { editor: EditorId }) {
   if (!IconComponent) return null;
   return <IconComponent aria-hidden="true" className="size-4 text-muted-foreground" />;
 }
-
-const PROVIDER_SETTINGS = DRIVER_OPTIONS.map((definition) => ({
-  provider: definition.value,
-}));
 
 function AboutVersionTitle() {
   return (

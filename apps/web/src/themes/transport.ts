@@ -38,6 +38,7 @@ export function parseTheme(raw: string): ThemeDefinition {
   } catch (error) {
     throw new Error(
       `Could not parse theme JSON: ${error instanceof Error ? error.message : "invalid JSON"}`,
+      { cause: error },
     );
   }
   if (!isValidTheme(parsed)) {
