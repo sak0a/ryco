@@ -1,10 +1,4 @@
-import {
-  KeyRoundIcon,
-  GitPullRequestIcon,
-  RefreshCwIcon,
-  TicketCheckIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { KeyRoundIcon, RefreshCwIcon, TicketCheckIcon, Trash2Icon } from "lucide-react";
 import { Option } from "effect";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -25,14 +19,6 @@ import {
 } from "../../lib/sourceControlDiscoveryState";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "../ui/empty";
 import { Skeleton } from "../ui/skeleton";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -343,7 +329,7 @@ function AtlassianProductIcon(props: {
   return <TicketCheckIcon className={props.className} aria-hidden />;
 }
 
-function AtlassianConnectionsSection() {
+function AtlassianConfiguration() {
   const queryClient = useQueryClient();
   const [bitbucketLabel, setBitbucketLabel] = useState("Bitbucket");
   const [bitbucketEmail, setBitbucketEmail] = useState("");
@@ -483,8 +469,14 @@ function AtlassianConnectionsSection() {
   const items = connectionsQuery.data ?? [];
 
   return (
-    <SettingsSection title="Atlassian Workflow" icon={<KeyRoundIcon className="size-3" />}>
-      <div className="border-t border-border/60 px-4 py-4 first:border-t-0 sm:px-5">
+    <>
+      <div className="border-t border-border/60 bg-muted/20 px-4 py-2.5 sm:px-5">
+        <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">
+          <KeyRoundIcon className="size-3" aria-hidden />
+          Atlassian
+        </h3>
+      </div>
+      <div className="border-t border-border/60 px-4 py-4 sm:px-5">
         <form className="grid gap-3 sm:grid-cols-[1fr_1fr] sm:items-end" onSubmit={handleSubmit}>
           <div className="space-y-1.5">
             <Label htmlFor="bitbucket-token-label" className="text-xs">
@@ -673,51 +665,7 @@ function AtlassianConnectionsSection() {
           ))
         )}
       </div>
-    </SettingsSection>
-  );
-}
-
-function EmptySourceControlDiscovery({
-  error,
-  isPending,
-  onScan,
-}: {
-  readonly error: string | null;
-  readonly isPending: boolean;
-  readonly onScan: () => void;
-}) {
-  const hasError = error !== null;
-
-  return (
-    <SettingsSection title="Server environment">
-      <Empty className="min-h-88">
-        <EmptyMedia variant="icon">
-          <GitPullRequestIcon />
-        </EmptyMedia>
-        <EmptyHeader>
-          <EmptyTitle>
-            {hasError ? "Could not scan the server environment" : "Nothing detected yet"}
-          </EmptyTitle>
-          <EmptyDescription>
-            {hasError
-              ? error
-              : "Install Git on the server, add optional hosting integrations or credentials your workspace needs, then rescan."}
-          </EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 gap-1.5 px-3 text-xs"
-            onClick={onScan}
-            disabled={isPending}
-          >
-            <RefreshCwIcon className={cn("size-3.5", isPending && "animate-spin")} />
-            Scan
-          </Button>
-        </EmptyContent>
-      </Empty>
-    </SettingsSection>
+    </>
   );
 }
 
@@ -725,8 +673,6 @@ export function SourceControlSettingsPanel() {
   const discovery = useSourceControlDiscovery();
 
   const result = discovery.data ?? EMPTY_DISCOVERY_RESULT;
-  const hasDiscoveryItems =
-    result.versionControlSystems.length > 0 || result.sourceControlProviders.length > 0;
   const isInitialScanPending = discovery.isPending && discovery.data === null;
   const handleScan = () => {
     void refreshSourceControlDiscovery();
@@ -751,42 +697,46 @@ export function SourceControlSettingsPanel() {
     </Tooltip>
   );
 
+  if (isInitialScanPending) {
+    return (
+      <SettingsPageContainer>
+        <SourceControlSectionSkeleton title="Version Control" headerAction={scanButton} />
+        <SourceControlSectionSkeleton title="Source Control Providers" />
+      </SettingsPageContainer>
+    );
+  }
+
+  const hasVcsItems = result.versionControlSystems.length > 0;
+  const hasProviderItems = result.sourceControlProviders.length > 0;
+
   return (
     <SettingsPageContainer>
-      <AtlassianConnectionsSection />
-      {isInitialScanPending ? (
-        <>
-          <SourceControlSectionSkeleton title="Version Control" headerAction={scanButton} />
-          <SourceControlSectionSkeleton title="Source Control Providers" />
-        </>
-      ) : hasDiscoveryItems ? (
-        <>
-          {result.versionControlSystems.length > 0 ? (
-            <SettingsSection title="Version Control" headerAction={scanButton}>
-              {result.versionControlSystems.map((item) => (
-                <DiscoveryItemRow key={`vcs:${item.kind}`} item={item} />
-              ))}
-            </SettingsSection>
-          ) : null}
+      {hasVcsItems ? (
+        <SettingsSection title="Version Control" headerAction={scanButton}>
+          {result.versionControlSystems.map((item) => (
+            <DiscoveryItemRow key={`vcs:${item.kind}`} item={item} />
+          ))}
+        </SettingsSection>
+      ) : null}
 
-          {result.sourceControlProviders.length > 0 ? (
-            <SettingsSection
-              title="Source Control Providers"
-              headerAction={result.versionControlSystems.length === 0 ? scanButton : null}
-            >
-              {result.sourceControlProviders.map((item) => (
-                <DiscoveryItemRow key={`provider:${item.kind}`} item={item} />
-              ))}
-            </SettingsSection>
-          ) : null}
-        </>
-      ) : (
-        <EmptySourceControlDiscovery
-          error={discovery.error}
-          isPending={discovery.isPending}
-          onScan={handleScan}
-        />
-      )}
+      <SettingsSection
+        title="Source Control Providers"
+        headerAction={hasVcsItems ? null : scanButton}
+      >
+        {hasProviderItems ? (
+          result.sourceControlProviders.map((item) => (
+            <DiscoveryItemRow key={`provider:${item.kind}`} item={item} />
+          ))
+        ) : (
+          <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {discovery.error ??
+                "No source control providers were detected on the server. Install a CLI like git, gh, glab, or az on the server host, then rescan."}
+            </p>
+          </div>
+        )}
+        <AtlassianConfiguration />
+      </SettingsSection>
     </SettingsPageContainer>
   );
 }
