@@ -13,7 +13,6 @@ import { Effect, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { normalizeModelSlug } from "@ryco/shared/model";
 import { isWindowsCommandNotFound } from "../processRunner.ts";
-import { createProviderVersionAdvisory } from "./providerMaintenance.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 
 export const DEFAULT_TIMEOUT_MS = 4_000;
@@ -185,7 +184,6 @@ export function buildBooleanOptionDescriptor(input: {
 }
 
 export function buildServerProvider(input: {
-  driver?: ProviderDriverKind;
   presentation: ServerProviderPresentation;
   enabled: boolean;
   checkedAt: string;
@@ -195,13 +193,6 @@ export function buildServerProvider(input: {
   rateLimits?: ServerProviderRateLimits | undefined;
   probe: ProviderProbeResult;
 }): ServerProviderDraft {
-  const versionAdvisory = input.driver
-    ? createProviderVersionAdvisory({
-        driver: input.driver,
-        currentVersion: input.probe.version,
-        checkedAt: input.checkedAt,
-      })
-    : undefined;
   return {
     displayName: input.presentation.displayName,
     ...(input.presentation.badgeLabel ? { badgeLabel: input.presentation.badgeLabel } : {}),
@@ -219,7 +210,6 @@ export function buildServerProvider(input: {
     slashCommands: [...(input.slashCommands ?? [])],
     skills: [...(input.skills ?? [])],
     ...(input.rateLimits ? { rateLimits: input.rateLimits } : {}),
-    ...(versionAdvisory ? { versionAdvisory } : {}),
   };
 }
 

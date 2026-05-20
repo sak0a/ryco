@@ -412,8 +412,7 @@ export const ProviderRegistryLive = Layer.effect(
           return existingProviders;
         }
 
-        const nextProvider = yield* applyProviderUpdateState(matchingProvider);
-        return yield* upsertProviders([nextProvider], {
+        return yield* upsertProviders([matchingProvider], {
           persist: false,
         });
       },

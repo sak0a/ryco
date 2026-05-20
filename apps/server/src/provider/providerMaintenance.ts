@@ -233,8 +233,7 @@ function isHomebrewCommandPath(commandPath: string): boolean {
     normalized.includes("/opt/homebrew/caskroom/") ||
     normalized.includes("/usr/local/caskroom/") ||
     normalized.includes("/homebrew/caskroom/") ||
-    normalized.startsWith("/opt/homebrew/bin/") ||
-    normalized.startsWith("/usr/local/bin/")
+    normalized.startsWith("/opt/homebrew/bin/")
   );
 }
 
@@ -398,8 +397,11 @@ export function createProviderVersionAdvisory(input: {
 
 const fetchNpmLatestVersion = Effect.fn("fetchNpmLatestVersion")(function* (packageName: string) {
   const client = yield* HttpClient.HttpClient;
+  // npm registry convention: keep '@' literal in scoped names, only encode '/'.
+  // encodeURIComponent percent-encodes '@', which some CDN/proxy layers reject.
+  const encodedPackageName = packageName.replace(/\//g, "%2f");
   const request = HttpClientRequest.get(
-    `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`,
+    `https://registry.npmjs.org/${encodedPackageName}/latest`,
   ).pipe(HttpClientRequest.setHeader("accept", "application/json"));
   const response = yield* client.execute(request).pipe(
     Effect.timeoutOption(LATEST_VERSION_TIMEOUT_MS),
