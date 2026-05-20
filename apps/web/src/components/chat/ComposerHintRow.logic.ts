@@ -9,7 +9,7 @@ export type HintRowPillId =
   | "reference-jira"
   | "browse-commands";
 
-export type HintRowTrigger = "#i " | "#pr " | "#jira " | "/";
+export type HintRowTrigger = "#i" | "#pr" | "#jira" | "/";
 
 export interface HintRowPill {
   readonly id: HintRowPillId;
@@ -21,19 +21,19 @@ export interface HintRowPill {
 const ISSUE_PILL: HintRowPill = {
   id: "reference-issue",
   label: "Reference issue",
-  trigger: "#i ",
+  trigger: "#i",
   ariaLabel: "Reference an issue (inserts #i)",
 };
 const PR_PILL: HintRowPill = {
   id: "reference-pr",
   label: "Reference PR",
-  trigger: "#pr ",
+  trigger: "#pr",
   ariaLabel: "Reference a pull request (inserts #pr)",
 };
 const JIRA_PILL: HintRowPill = {
   id: "reference-jira",
   label: "Reference Jira",
-  trigger: "#jira ",
+  trigger: "#jira",
   ariaLabel: "Reference a Jira ticket (inserts #jira)",
 };
 const COMMANDS_PILL: HintRowPill = {

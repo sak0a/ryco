@@ -32,9 +32,9 @@ describe("resolveHintRowPills", () => {
   it("each pill exposes the trigger text it inserts", () => {
     const pills = resolveHintRowPills(all);
     expect(Object.fromEntries(pills.map((p) => [p.id, p.trigger]))).toEqual({
-      "reference-issue": "#i ",
-      "reference-pr": "#pr ",
-      "reference-jira": "#jira ",
+      "reference-issue": "#i",
+      "reference-pr": "#pr",
+      "reference-jira": "#jira",
       "browse-commands": "/",
     });
   });
