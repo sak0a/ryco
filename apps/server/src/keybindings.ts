@@ -261,6 +261,16 @@ export interface KeybindingsShape {
   readonly upsertKeybindingRule: (
     rule: KeybindingRule,
   ) => Effect.Effect<ResolvedKeybindingsConfig, KeybindingsConfigError>;
+
+  /**
+   * Replace the entire custom keybindings list and persist the resulting
+   * configuration. Used by the interactive Settings panel which always edits
+   * the full list. Atomically writes the file, invalidates the cache, and
+   * publishes a change event. The merged result with defaults is returned.
+   */
+  readonly replaceCustomKeybindings: (
+    rules: readonly KeybindingRule[],
+  ) => Effect.Effect<ResolvedKeybindingsConfig, KeybindingsConfigError>;
 }
 
 /**
@@ -629,6 +639,47 @@ const makeKeybindings = Effect.gen(function* () {
               ? nextConfig.slice(-MAX_KEYBINDINGS_COUNT)
               : nextConfig;
           if (nextConfig.length > MAX_KEYBINDINGS_COUNT) {
+            yield* Effect.logWarning("truncating keybindings config to max entries", {
+              path: keybindingsConfigPath,
+              maxEntries: MAX_KEYBINDINGS_COUNT,
+            });
+          }
+          yield* writeConfigAtomically(cappedConfig);
+          const nextResolved = mergeWithDefaultKeybindings(
+            compileResolvedKeybindingsConfig(cappedConfig),
+          );
+          yield* Cache.set(resolvedConfigCache, resolvedConfigCacheKey, {
+            keybindings: nextResolved,
+            issues: [],
+          });
+          yield* emitChange({
+            keybindings: nextResolved,
+            issues: [],
+          });
+          return nextResolved;
+        }),
+      ),
+    replaceCustomKeybindings: (rules) =>
+      upsertSemaphore.withPermits(1)(
+        Effect.gen(function* () {
+          // Validate every incoming rule before touching the file. If any
+          // entry fails compilation we reject the whole call — no partial
+          // writes, no silent dropping like the runtime loader does for
+          // externally-edited files.
+          for (const rule of rules) {
+            const resolved = Schema.decodeExit(ResolvedKeybindingFromConfig)(rule);
+            if (resolved._tag === "Failure") {
+              return yield* new KeybindingsConfigError({
+                configPath: keybindingsConfigPath,
+                detail: "invalid keybinding rule",
+                cause: resolved.cause,
+              });
+            }
+          }
+
+          const cappedConfig =
+            rules.length > MAX_KEYBINDINGS_COUNT ? rules.slice(-MAX_KEYBINDINGS_COUNT) : rules;
+          if (rules.length > MAX_KEYBINDINGS_COUNT) {
             yield* Effect.logWarning("truncating keybindings config to max entries", {
               path: keybindingsConfigPath,
               maxEntries: MAX_KEYBINDINGS_COUNT,

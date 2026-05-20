@@ -71,6 +71,7 @@ export interface WsRpcClient {
     readonly readFile: RpcUnaryMethod<typeof WS_METHODS.projectsReadFile>;
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
     readonly writeFile: RpcUnaryMethod<typeof WS_METHODS.projectsWriteFile>;
+    readonly stageFileReference: RpcUnaryMethod<typeof WS_METHODS.projectsStageFileReference>;
     readonly initializeGit: RpcUnaryMethod<typeof WS_METHODS.projectsInitializeGit>;
   };
   readonly filesystem: {
@@ -93,6 +94,15 @@ export interface WsRpcClient {
     readonly getChangeRequestDiff: RpcUnaryMethod<
       typeof WS_METHODS.sourceControlGetChangeRequestDiff
     >;
+    readonly createIssue: RpcUnaryMethod<typeof WS_METHODS.sourceControlCreateIssue>;
+    readonly listIssueLabels: RpcUnaryMethod<typeof WS_METHODS.sourceControlListIssueLabels>;
+    readonly listIssueAssignees: RpcUnaryMethod<typeof WS_METHODS.sourceControlListIssueAssignees>;
+  };
+  readonly textGeneration: {
+    readonly generateIssueContent: RpcUnaryMethod<
+      typeof WS_METHODS.textGenerationGenerateIssueContent
+    >;
+    readonly generateBranchName: RpcUnaryMethod<typeof WS_METHODS.textGenerationGenerateBranchName>;
   };
   readonly atlassian: {
     readonly listConnections: RpcUnaryNoArgMethod<typeof WS_METHODS.atlassianListConnections>;
@@ -172,6 +182,7 @@ export interface WsRpcClient {
     readonly refreshProviders: (
       input?: RpcInput<typeof WS_METHODS.serverRefreshProviders>,
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverRefreshProviders>>;
+    readonly updateProvider: RpcUnaryMethod<typeof WS_METHODS.serverUpdateProvider>;
     readonly upsertKeybinding: RpcUnaryMethod<typeof WS_METHODS.serverUpsertKeybinding>;
     readonly getSettings: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetSettings>;
     readonly updateSettings: (
@@ -192,6 +203,9 @@ export interface WsRpcClient {
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
+  };
+  readonly keybindings: {
+    readonly replaceCustom: RpcUnaryMethod<typeof WS_METHODS.keybindingsReplaceCustom>;
   };
   readonly mcp: {
     readonly listWorkspaces: RpcUnaryNoArgMethod<typeof WS_METHODS.mcpListWorkspaces>;
@@ -240,6 +254,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.projectsSearchEntries](input)),
       writeFile: (input) =>
         transport.request((client) => client[WS_METHODS.projectsWriteFile](input)),
+      stageFileReference: (input) =>
+        transport.request((client) => client[WS_METHODS.projectsStageFileReference](input)),
       initializeGit: (input) =>
         transport.request((client) => client[WS_METHODS.projectsInitializeGit](input)),
     },
@@ -269,6 +285,18 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         ),
       getChangeRequestDiff: (input) =>
         transport.request((client) => client[WS_METHODS.sourceControlGetChangeRequestDiff](input)),
+      createIssue: (input) =>
+        transport.request((client) => client[WS_METHODS.sourceControlCreateIssue](input)),
+      listIssueLabels: (input) =>
+        transport.request((client) => client[WS_METHODS.sourceControlListIssueLabels](input)),
+      listIssueAssignees: (input) =>
+        transport.request((client) => client[WS_METHODS.sourceControlListIssueAssignees](input)),
+    },
+    textGeneration: {
+      generateIssueContent: (input) =>
+        transport.request((client) => client[WS_METHODS.textGenerationGenerateIssueContent](input)),
+      generateBranchName: (input) =>
+        transport.request((client) => client[WS_METHODS.textGenerationGenerateBranchName](input)),
     },
     atlassian: {
       listConnections: () =>
@@ -377,6 +405,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       getConfig: () => transport.request((client) => client[WS_METHODS.serverGetConfig]({})),
       refreshProviders: (input) =>
         transport.request((client) => client[WS_METHODS.serverRefreshProviders](input ?? {})),
+      updateProvider: (input) =>
+        transport.request((client) => client[WS_METHODS.serverUpdateProvider](input)),
       upsertKeybinding: (input) =>
         transport.request((client) => client[WS_METHODS.serverUpsertKeybinding](input)),
       getSettings: () => transport.request((client) => client[WS_METHODS.serverGetSettings]({})),
@@ -407,6 +437,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
           ...options,
           tag: WS_METHODS.subscribeAuthAccess,
         }),
+    },
+    keybindings: {
+      replaceCustom: (input) =>
+        transport.request((client) => client[WS_METHODS.keybindingsReplaceCustom](input)),
     },
     mcp: {
       listWorkspaces: () => transport.request((client) => client[WS_METHODS.mcpListWorkspaces]({})),

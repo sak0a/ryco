@@ -5,6 +5,8 @@ import {
   SOURCE_CONTROL_DETAIL_BODY_MAX_BYTES,
   SOURCE_CONTROL_DETAIL_MAX_COMMENTS,
   SourceControlChangeRequestDetail,
+  SourceControlAssigneeCandidate,
+  SourceControlCreateIssueInput,
 } from "./sourceControl.ts";
 
 describe("truncateSourceControlDetailContent", () => {
@@ -123,3 +125,43 @@ describe("SourceControlChangeRequestDetail", () => {
     expect(decoded.tasksCount).toBe(1);
   });
 });
+
+describe("SourceControlAssigneeCandidate", () => {
+  it("requires login; optional displayName and avatarUrl", () => {
+    const decode = Schema.decodeUnknownSync(SourceControlAssigneeCandidate);
+    expect(decode({ login: "alice" })).toEqual({ login: "alice" });
+    expect(decode({ login: "alice", displayName: "Alice", avatarUrl: "https://x" })).toEqual({
+      login: "alice",
+      displayName: "Alice",
+      avatarUrl: "https://x",
+    });
+    expect(() => decode({ login: "" })).toThrow();
+  });
+});
+
+describe("SourceControlCreateIssueInput", () => {
+  it("requires cwd + title; body may be empty; worktree is optional", () => {
+    const decode = Schema.decodeUnknownSync(SourceControlCreateIssueInput);
+    expect(decode({ cwd: "/repo", title: "Bug", body: "" })).toEqual({
+      cwd: "/repo",
+      title: "Bug",
+      body: "",
+    });
+    expect(
+      decode({
+        cwd: "/repo",
+        title: "Bug",
+        body: "details",
+        labels: ["bug"],
+        assignees: ["alice"],
+        worktree: { enabled: true, branchName: "fix/bug" },
+      }),
+    ).toMatchObject({ worktree: { enabled: true, branchName: "fix/bug" } });
+    expect(() => decode({ cwd: "", title: "Bug", body: "" })).toThrow();
+    expect(() => decode({ cwd: "/repo", title: "", body: "" })).toThrow();
+  });
+});
+
+// Note: The merged result type that includes worktree output lives in
+// packages/contracts/src/rpc.ts (Task 10), because GitCreateWorktreeForProjectOutput
+// is declared there. No separate result type is needed in sourceControl.ts.

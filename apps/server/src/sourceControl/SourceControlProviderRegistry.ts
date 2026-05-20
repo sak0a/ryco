@@ -1,4 +1,4 @@
-import { Cache, Context, Duration, Effect, Exit, Layer } from "effect";
+import { Cache, Context, Duration, Effect, Exit, FileSystem, Layer } from "effect";
 import {
   SourceControlProviderError,
   type SourceControlProviderDiscoveryItem,
@@ -86,6 +86,11 @@ function unsupportedProvider(
     searchChangeRequests: () => unsupported("searchChangeRequests"),
     getChangeRequestDetail: () => unsupported("getChangeRequestDetail"),
     getChangeRequestDiff: () => unsupported("getChangeRequestDiff"),
+    createIssue: () => unsupported("createIssue"),
+    listLabels: () => unsupported("listLabels"),
+    listAssignees: () => unsupported("listAssignees"),
+    getPullRequestState: () => unsupported("getPullRequestState"),
+    getIssueState: () => unsupported("getIssueState"),
   });
 }
 
@@ -138,6 +143,14 @@ const makeLazyProvider = Effect.fn("makeLazySourceControlProvider")(function* (
       provider.pipe(Effect.flatMap((loaded) => loaded.getChangeRequestDetail(input))),
     getChangeRequestDiff: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.getChangeRequestDiff(input))),
+    createIssue: (input) => provider.pipe(Effect.flatMap((loaded) => loaded.createIssue(input))),
+    listLabels: (input) => provider.pipe(Effect.flatMap((loaded) => loaded.listLabels(input))),
+    listAssignees: (input) =>
+      provider.pipe(Effect.flatMap((loaded) => loaded.listAssignees(input))),
+    getPullRequestState: (input) =>
+      provider.pipe(Effect.flatMap((loaded) => loaded.getPullRequestState(input))),
+    getIssueState: (input) =>
+      provider.pipe(Effect.flatMap((loaded) => loaded.getIssueState(input))),
   });
 });
 
@@ -240,6 +253,31 @@ function bindProviderContext(
         ...input,
         context: input.context ?? context,
       }),
+    createIssue: (input) =>
+      provider.createIssue({
+        ...input,
+        context: input.context ?? context,
+      }),
+    listLabels: (input) =>
+      provider.listLabels({
+        ...input,
+        context: input.context ?? context,
+      }),
+    listAssignees: (input) =>
+      provider.listAssignees({
+        ...input,
+        context: input.context ?? context,
+      }),
+    getPullRequestState: (input) =>
+      provider.getPullRequestState({
+        ...input,
+        context: input.context ?? context,
+      }),
+    getIssueState: (input) =>
+      provider.getIssueState({
+        ...input,
+        context: input.context ?? context,
+      }),
   });
 }
 
@@ -339,6 +377,7 @@ export const make = Effect.fn("makeSourceControlProviderRegistry")(function* () 
   const bitbucketApi = yield* BitbucketApi.BitbucketApi;
   const forgejoApi = yield* ForgejoApi.ForgejoApi;
   const azureDevOpsCli = yield* AzureDevOpsCli.AzureDevOpsCli;
+  const fileSystem = yield* FileSystem.FileSystem;
 
   const github = yield* makeLazyProvider(
     "github",
@@ -348,6 +387,7 @@ export const make = Effect.fn("makeSourceControlProviderRegistry")(function* () 
     }).pipe(
       Effect.flatMap((module) => module.make()),
       Effect.provideService(GitHubCli.GitHubCli, githubCli),
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
     ),
   );
 

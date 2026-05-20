@@ -650,15 +650,7 @@ function OpenCommandPaletteDialog() {
         envMode: settings.defaultThreadEnvMode,
       });
     },
-    [
-      handleNewThread,
-      navigate,
-      settings.defaultThreadEnvMode,
-      settings.sidebarProjectGroupingMode,
-      settings.sidebarProjectGroupingOverrides,
-      settings.sidebarThreadSortOrder,
-      threads,
-    ],
+    [handleNewThread, navigate, settings, threads],
   );
 
   const projectSearchItems = useMemo(
@@ -1200,8 +1192,7 @@ function OpenCommandPaletteDialog() {
       navigate,
       projects,
       setOpen,
-      settings.defaultThreadEnvMode,
-      settings.sidebarThreadSortOrder,
+      settings,
       threads,
     ],
   );

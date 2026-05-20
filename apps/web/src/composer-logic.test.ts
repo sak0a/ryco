@@ -5,9 +5,12 @@ import {
   collapseExpandedComposerCursor,
   detectComposerTrigger,
   expandCollapsedComposerCursor,
+  formatComposerFileReference,
+  isLocalFilePathInsideDirectory,
   isCollapsedCursorAdjacentToInlineToken,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
+  shouldUseNativeComposerFileReference,
 } from "./composer-logic";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
@@ -241,6 +244,82 @@ describe("replaceTextRange trailing space consumption", () => {
     const extendedEnd = text[rangeEnd] === " " ? rangeEnd + 1 : rangeEnd;
     const withConsume = replaceTextRange(text, rangeStart, extendedEnd, "@AGENTS.md ");
     expect(withConsume.text).toBe("and then @AGENTS.md summarize");
+  });
+});
+
+describe("formatComposerFileReference", () => {
+  it("leaves simple paths unquoted", () => {
+    expect(formatComposerFileReference("/tmp/input.json")).toBe("/tmp/input.json");
+  });
+
+  it("quotes paths containing whitespace", () => {
+    expect(formatComposerFileReference("/tmp/input data.json")).toBe('"/tmp/input data.json"');
+  });
+
+  it("uses single quotes when the path already contains double quotes", () => {
+    expect(formatComposerFileReference('/tmp/"quoted" name.json')).toBe(
+      "'/tmp/\"quoted\" name.json'",
+    );
+  });
+
+  it("uses JSON string quoting when both quote forms are present", () => {
+    expect(formatComposerFileReference("/tmp/\"quoted\" and 'single'.json")).toBe(
+      '"/tmp/\\"quoted\\" and \'single\'.json"',
+    );
+  });
+});
+
+describe("local composer file references", () => {
+  it("detects paths inside a workspace with segment boundaries", () => {
+    expect(isLocalFilePathInsideDirectory("/tmp/workspace/data.json", "/tmp/workspace")).toBe(true);
+    expect(isLocalFilePathInsideDirectory("/tmp/workspace2/data.json", "/tmp/workspace")).toBe(
+      false,
+    );
+  });
+
+  it("treats Windows drive paths case-insensitively", () => {
+    expect(isLocalFilePathInsideDirectory("C:\\Project\\data.json", "c:\\project")).toBe(true);
+  });
+
+  it("treats Windows UNC paths case-insensitively", () => {
+    expect(
+      isLocalFilePathInsideDirectory("\\\\Server\\Share\\data.json", "\\\\server\\share"),
+    ).toBe(true);
+  });
+
+  it("allows native paths only for local readable runtime contexts", () => {
+    expect(
+      shouldUseNativeComposerFileReference({
+        resolvedPath: "/tmp/outside/data.json",
+        cwd: "/tmp/workspace",
+        runtimeMode: "workspace-write",
+        isLocalDesktopEnvironment: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseNativeComposerFileReference({
+        resolvedPath: "/tmp/workspace/data.json",
+        cwd: "/tmp/workspace",
+        runtimeMode: "workspace-write",
+        isLocalDesktopEnvironment: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldUseNativeComposerFileReference({
+        resolvedPath: "/tmp/outside/data.json",
+        cwd: "/tmp/workspace",
+        runtimeMode: "full-access",
+        isLocalDesktopEnvironment: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldUseNativeComposerFileReference({
+        resolvedPath: "/tmp/workspace/data.json",
+        cwd: "/tmp/workspace",
+        runtimeMode: "full-access",
+        isLocalDesktopEnvironment: false,
+      }),
+    ).toBe(false);
   });
 });
 

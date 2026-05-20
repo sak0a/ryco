@@ -2,16 +2,18 @@ import { memo, useCallback, useMemo, useState } from "react";
 import {
   ArchiveIcon,
   ChevronRightIcon,
-  CircleDotIcon,
   CopyIcon,
   Edit3Icon,
   ExternalLinkIcon,
-  GitPullRequestIcon,
   MoreHorizontalIcon,
   PlusIcon,
   RotateCcwIcon,
   Trash2Icon,
 } from "lucide-react";
+import {
+  resolveStateBadgeVariant,
+  type StateBadgeVariant,
+} from "../sourceControl/stateBadgeVariants";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
 import { cn } from "../../lib/utils";
 import {
@@ -320,13 +322,16 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                 props.worktree.aggregateStatus === "in_progress" ? "animate-pulse" : "",
               )}
               title={WORKTREE_STATUS_LABELS[props.worktree.aggregateStatus]}
+              aria-hidden={props.worktree.aggregateStatus === "idle"}
             >
-              <span
-                className={cn(
-                  "size-2 rounded-full",
-                  WORKTREE_STATUS_CLASSNAMES[props.worktree.aggregateStatus],
-                )}
-              />
+              {props.worktree.aggregateStatus === "idle" ? null : (
+                <span
+                  className={cn(
+                    "size-2 rounded-full",
+                    WORKTREE_STATUS_CLASSNAMES[props.worktree.aggregateStatus],
+                  )}
+                />
+              )}
             </span>
             {renaming ? (
               <input
@@ -527,6 +532,12 @@ function WorktreeOriginLabel({ worktree }: { worktree: SidebarTreeWorktree }) {
   if (origin === "main" || origin === "branch") {
     return null;
   }
+  if (origin === "pr" && worktree.worktree.prNumber != null) {
+    return null;
+  }
+  if (origin === "issue" && worktree.worktree.issueNumber != null) {
+    return null;
+  }
   const label = origin === "pr" ? "PR" : origin === "issue" ? "Issue" : "Manual";
   return (
     <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
@@ -553,46 +564,47 @@ function WorktreeSourceControlBadges({
     <span className="inline-flex shrink-0 items-center gap-1">
       {issueNumber !== null ? (
         <WorktreeSourceControlBadge
-          icon={<CircleDotIcon className="size-2.5" />}
-          label={`Linked issue #${issueNumber} — click to view`}
-          tone="issues"
+          variant={resolveStateBadgeVariant({
+            kind: "issue",
+            state: worktree.worktree.issueState ?? null,
+          })}
+          number={issueNumber}
+          kindLabel="Issue"
           onClick={
             onOpenLinkedItem
               ? () => onOpenLinkedItem({ kind: "issue", number: issueNumber })
               : undefined
           }
-        >
-          #{issueNumber}
-        </WorktreeSourceControlBadge>
+        />
       ) : null}
       {prNumber !== null ? (
         <WorktreeSourceControlBadge
-          icon={<GitPullRequestIcon className="size-2.5" />}
-          label={`Linked pull request #${prNumber} — click to view`}
-          tone="pullRequests"
+          variant={resolveStateBadgeVariant({
+            kind: "pr",
+            state: worktree.worktree.prState ?? null,
+            isDraft: worktree.worktree.prIsDraft ?? null,
+          })}
+          number={prNumber}
+          kindLabel="Pull request"
           onClick={
             onOpenLinkedItem ? () => onOpenLinkedItem({ kind: "pr", number: prNumber }) : undefined
           }
-        >
-          #{prNumber}
-        </WorktreeSourceControlBadge>
+        />
       ) : null}
     </span>
   );
 }
 
 function WorktreeSourceControlBadge(props: {
-  children: React.ReactNode;
-  icon: React.ReactNode;
-  label: string;
-  tone: "issues" | "pullRequests";
+  variant: StateBadgeVariant;
+  number: number;
+  kindLabel: string;
   onClick?: (() => void) | undefined;
 }) {
-  const className =
-    props.tone === "issues"
-      ? "border-emerald-500/16 bg-emerald-500/10 text-emerald-500 dark:text-emerald-400"
-      : "border-blue-500/16 bg-blue-500/10 text-blue-500 dark:text-blue-400";
-
+  const Icon = props.variant.Icon;
+  const title = props.variant.label
+    ? `${props.kindLabel} #${props.number} — ${props.variant.label}`
+    : `${props.kindLabel} #${props.number}`;
   const baseClass =
     "inline-flex h-4 shrink-0 items-center justify-center gap-0.5 rounded-sm border px-1 text-[9px] font-semibold tabular-nums leading-none";
 
@@ -607,23 +619,27 @@ function WorktreeSourceControlBadge(props: {
         type="button"
         className={cn(
           baseClass,
-          className,
+          props.variant.compactClassName,
           "cursor-pointer hover:brightness-125 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-current",
         )}
-        title={props.label}
-        aria-label={props.label}
+        title={title}
+        aria-label={title}
         onClick={handleClick}
       >
-        {props.icon}
-        <span>{props.children}</span>
+        <Icon className="size-2.5" />
+        <span>#{props.number}</span>
       </button>
     );
   }
 
   return (
-    <span className={cn(baseClass, className)} title={props.label} aria-label={props.label}>
-      {props.icon}
-      <span>{props.children}</span>
+    <span
+      className={cn(baseClass, props.variant.compactClassName)}
+      title={title}
+      aria-label={title}
+    >
+      <Icon className="size-2.5" />
+      <span>#{props.number}</span>
     </span>
   );
 }

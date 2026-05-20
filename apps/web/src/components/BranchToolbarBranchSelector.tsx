@@ -593,7 +593,11 @@ export function BranchToolbarBranchSelector({
         <span className="min-w-0 max-w-[240px] truncate">{triggerLabel}</span>
         <ChevronDownIcon className="shrink-0" />
       </ComboboxTrigger>
-      <ComboboxPopup align="end" side="top" className="w-80">
+      <ComboboxPopup
+        align="end"
+        side="top"
+        className="w-80 data-ending-style:translate-y-1 data-starting-style:translate-y-1"
+      >
         <div className="border-b p-1">
           <ComboboxInput
             className="[&_input]:font-sans rounded-md"

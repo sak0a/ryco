@@ -1,7 +1,7 @@
-import { OpenCodeSettings, ProviderInstanceId } from "@ryco/contracts";
+import { OpenCodeSettings, ProviderInstanceId, TextGenerationError } from "@ryco/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { Duration, Effect, Layer, Schema } from "effect";
+import { Duration, Effect, Layer, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { NetService } from "@ryco/shared/Net";
 import { beforeEach, expect } from "vitest";
@@ -303,6 +303,97 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
         expect(error.message).toContain("Model did not produce structured output");
       }),
     ),
+  );
+
+  it.effect("generateIssueContent polish mode returns title and body via OpenCode", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: {
+            parts: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  title: "Fix race condition in event loop",
+                  body: "## Steps to reproduce\n- Run concurrent requests",
+                }),
+              },
+            ],
+          },
+        };
+
+        const generated = yield* textGeneration.generateIssueContent({
+          cwd: process.cwd(),
+          mode: "polish",
+          rough: "race condition in event loop under high concurrency",
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        });
+
+        expect(generated.title).toBe("Fix race condition in event loop");
+        expect(generated.body).toBe("## Steps to reproduce\n- Run concurrent requests");
+      }),
+    ),
+  );
+
+  it.effect("generateIssueContent title mode returns title only via OpenCode", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: {
+            parts: [
+              {
+                type: "text",
+                text: JSON.stringify({ title: "Support custom themes" }),
+              },
+            ],
+          },
+        };
+
+        const generated = yield* textGeneration.generateIssueContent({
+          cwd: process.cwd(),
+          mode: "title",
+          body: "Users want to define custom color themes in the settings panel.",
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        });
+
+        expect(generated.title).toBe("Support custom themes");
+        expect(generated.body).toBeUndefined();
+      }),
+    ),
+  );
+
+  it.effect(
+    "generateIssueContent fails with TextGenerationError when OpenCode returns invalid JSON",
+    () =>
+      withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+        Effect.gen(function* () {
+          runtimeMock.state.promptResult = {
+            data: {
+              parts: [
+                {
+                  type: "text",
+                  text: "not valid json",
+                },
+              ],
+            },
+          };
+
+          const result = yield* textGeneration
+            .generateIssueContent({
+              cwd: process.cwd(),
+              mode: "polish",
+              rough: "some rough notes",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.result);
+
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isFailure(result)) {
+            expect(result.failure).toBeInstanceOf(TextGenerationError);
+            expect(result.failure.operation).toBe("generateIssueContent");
+          }
+        }),
+      ),
   );
 });
 

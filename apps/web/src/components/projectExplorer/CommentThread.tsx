@@ -186,8 +186,8 @@ export const CommentThread = memo(function CommentThread(props: {
   }
   return (
     <ol className="space-y-4">
-      {props.comments.map((comment, index) => (
-        <li key={`${comment.author}-${index}`}>
+      {props.comments.map((comment) => (
+        <li key={`${comment.author}-${comment.createdAt}-${comment.body}`}>
           <CommentItem
             author={comment.author}
             body={comment.body}

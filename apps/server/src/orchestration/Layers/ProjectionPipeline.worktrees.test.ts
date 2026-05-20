@@ -116,6 +116,71 @@ layer("OrchestrationProjectionPipeline worktrees", (it) => {
     }),
   );
 
+  it.effect("WorktreeSourceControlStateUpdated event updates projection row", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const worktrees = yield* ProjectionWorktreeRepository;
+      const now = "2026-05-17T00:00:00.000Z";
+      const worktreeId = WorktreeId.make("worktree-sc-state");
+
+      const created = yield* eventStore.append({
+        type: "worktree.created",
+        eventId: EventId.make("evt-sc-worktree-created"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.make("project-sc-state"),
+        occurredAt: now,
+        commandId: CommandId.make("cmd-sc-worktree-created"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-sc-worktree-created"),
+        metadata: {},
+        payload: {
+          worktreeId,
+          projectId: ProjectId.make("project-sc-state"),
+          branch: "feature/sc-state",
+          worktreePath: null,
+          origin: "pr",
+          prNumber: 42,
+          issueNumber: null,
+          prTitle: "My PR",
+          issueTitle: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      yield* projectionPipeline.projectEvent(created);
+      const createdRow = Option.getOrThrow(yield* worktrees.getById({ worktreeId }));
+      assert.isNull(createdRow.prState);
+
+      const updatedAt = "2026-05-17T01:00:00.000Z";
+      const stateUpdated = yield* eventStore.append({
+        type: "worktree.sourceControlStateUpdated",
+        eventId: EventId.make("evt-sc-state-updated"),
+        aggregateKind: "worktree",
+        aggregateId: worktreeId,
+        occurredAt: updatedAt,
+        commandId: CommandId.make("cmd-sc-state-updated"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-sc-state-updated"),
+        metadata: {},
+        payload: {
+          worktreeId,
+          prState: "merged",
+          prIsDraft: false,
+          issueState: null,
+          updatedAt,
+        },
+      });
+
+      yield* projectionPipeline.projectEvent(stateUpdated);
+      const updatedRow = Option.getOrThrow(yield* worktrees.getById({ worktreeId }));
+      assert.equal(updatedRow.prState, "merged");
+      assert.strictEqual(updatedRow.prIsDraft, false);
+      assert.isNull(updatedRow.issueState);
+    }),
+  );
+
   it.effect("registers the worktree projector name", () =>
     Effect.sync(() => {
       assert.equal(ORCHESTRATION_PROJECTOR_NAMES.worktrees, "projection.worktrees");

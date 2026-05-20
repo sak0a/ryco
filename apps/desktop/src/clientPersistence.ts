@@ -206,7 +206,9 @@ export function writeSavedEnvironmentSecret(input: {
         lastConnectedAt: record.lastConnectedAt,
         encryptedBearerToken,
       };
-      return record.desktopSsh ? { ...nextRecord, desktopSsh: record.desktopSsh } : nextRecord;
+      return record.desktopSsh
+        ? Object.assign(nextRecord, { desktopSsh: record.desktopSsh })
+        : nextRecord;
     }),
   } satisfies SavedEnvironmentRegistryDocument);
   return found;

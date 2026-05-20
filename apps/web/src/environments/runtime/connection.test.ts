@@ -82,6 +82,10 @@ function createTestClient() {
       readFile: vi.fn(async () => ({ relativePath: "README.md", contents: "" })),
       searchEntries: vi.fn(async () => []),
       writeFile: vi.fn(async () => undefined),
+      stageFileReference: vi.fn(async () => ({
+        relativePath: ".ryco/attachments/file.txt",
+        sizeBytes: 0,
+      })),
     },
     shell: {
       openInEditor: vi.fn(async () => undefined),

@@ -5,10 +5,12 @@ import {
   type SourceControlRepositoryVisibility,
   type VcsError,
 } from "@ryco/contracts";
+import { formatSchemaError } from "@ryco/shared/schemaJson";
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubIssues from "./gitHubIssues.ts";
 import type { NormalizedGitHubIssueDetail, NormalizedGitHubIssueRecord } from "./gitHubIssues.ts";
+import { buildGitHubIssueCreateArgv, parseGitHubIssueCreateOutput } from "./gitHubIssueCreate.ts";
 import * as GitHubPullRequests from "./gitHubPullRequests.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -170,6 +172,25 @@ export interface GitHubCliShape {
     readonly cwd: string;
     readonly reference: string;
   }) => Effect.Effect<string, GitHubCliError>;
+
+  readonly createIssue: (input: {
+    readonly cwd: string;
+    readonly title: string;
+    readonly bodyFile: string;
+    readonly labels?: ReadonlyArray<string>;
+    readonly assignees?: ReadonlyArray<string>;
+  }) => Effect.Effect<{ url: string; number: number }, GitHubCliError>;
+
+  readonly listLabels: (input: {
+    readonly cwd: string;
+  }) => Effect.Effect<ReadonlyArray<GitHubLabel>, GitHubCliError>;
+
+  readonly listAssignees: (input: {
+    readonly cwd: string;
+  }) => Effect.Effect<
+    ReadonlyArray<{ login: string; name?: string | null; avatarUrl?: string | null }>,
+    GitHubCliError
+  >;
 }
 
 export class GitHubCli extends Context.Service<GitHubCli, GitHubCliShape>()(
@@ -614,6 +635,96 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         cwd: input.cwd,
         args: ["pr", "diff", input.reference],
       }).pipe(Effect.map((r) => r.stdout)),
+    createIssue: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: buildGitHubIssueCreateArgv({
+          title: input.title,
+          bodyFile: input.bodyFile,
+          ...(input.labels ? { labels: input.labels } : {}),
+          ...(input.assignees ? { assignees: input.assignees } : {}),
+        }),
+      }).pipe(
+        Effect.flatMap((r) => {
+          const parsed = parseGitHubIssueCreateOutput(r.stdout);
+          return parsed
+            ? Effect.succeed(parsed)
+            : Effect.fail(
+                new GitHubCliError({
+                  operation: "createIssue",
+                  detail: `Unrecognized 'gh issue create' output: ${r.stdout.slice(0, 200)}`,
+                }),
+              );
+        }),
+      ),
+    listLabels: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: ["label", "list", "--json", "name,color,description", "--limit", "1000"],
+      }).pipe(
+        Effect.map((r) => r.stdout.trim()),
+        Effect.flatMap((raw) =>
+          raw.length === 0
+            ? Effect.succeed([])
+            : Effect.sync(() => GitHubIssues.decodeJsonLabelList(raw)).pipe(
+                Effect.flatMap((decoded) =>
+                  Result.isSuccess(decoded)
+                    ? Effect.succeed(
+                        decoded.success.map((l) => ({
+                          name: l.name,
+                          ...(l.color ? { color: l.color } : {}),
+                          ...(l.description ? { description: l.description } : {}),
+                        })),
+                      )
+                    : Effect.fail(
+                        new GitHubCliError({
+                          operation: "listLabels",
+                          detail: `Invalid label list output: ${formatSchemaError(decoded.failure)}`,
+                          cause: decoded.failure,
+                        }),
+                      ),
+                ),
+              ),
+        ),
+      ),
+    listAssignees: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: [
+          "api",
+          "-X",
+          "GET",
+          "repos/{owner}/{repo}/assignees",
+          "-F",
+          "per_page=100",
+          "--paginate",
+        ],
+      }).pipe(
+        Effect.map((r) => r.stdout.trim()),
+        Effect.flatMap((raw) =>
+          raw.length === 0
+            ? Effect.succeed([])
+            : Effect.sync(() => GitHubIssues.decodeJsonAssigneeList(raw)).pipe(
+                Effect.flatMap((decoded) =>
+                  Result.isSuccess(decoded)
+                    ? Effect.succeed(
+                        decoded.success.map((u) => ({
+                          login: u.login,
+                          ...(u.name ? { name: u.name } : {}),
+                          ...(u.avatar_url ? { avatarUrl: u.avatar_url } : {}),
+                        })),
+                      )
+                    : Effect.fail(
+                        new GitHubCliError({
+                          operation: "listAssignees",
+                          detail: `Invalid assignees output: ${formatSchemaError(decoded.failure)}`,
+                          cause: decoded.failure,
+                        }),
+                      ),
+                ),
+              ),
+        ),
+      ),
   });
 });
 

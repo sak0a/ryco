@@ -132,5 +132,7 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
     generateBranchName: (input) =>
       codexFallback.generateBranchName(withGitFallbackSelection(input)),
     generateThreadTitle,
+    generateIssueContent: (input) =>
+      codexFallback.generateIssueContent(withGitFallbackSelection(input)),
   } satisfies TextGenerationShape;
 });

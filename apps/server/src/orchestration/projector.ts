@@ -43,6 +43,7 @@ import {
   WorktreeManualPositionSetPayload,
   WorktreeMetaUpdatedPayload,
   WorktreeRestoredPayload,
+  WorktreeSourceControlStateUpdatedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -365,6 +366,9 @@ export function projectEvent(
             issueNumber: payload.issueNumber,
             prTitle: payload.prTitle,
             issueTitle: payload.issueTitle,
+            prState: null,
+            prIsDraft: null,
+            issueState: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             archivedAt: null,
@@ -404,6 +408,24 @@ export function projectEvent(
           worktrees: updateWorktree(nextBase.worktrees, payload.worktreeId, {
             ...(payload.title !== undefined ? { title: payload.title } : {}),
             updatedAt: payload.changedAt,
+          }),
+        })),
+      );
+
+    case "worktree.sourceControlStateUpdated":
+      return decodeForEvent(
+        WorktreeSourceControlStateUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          worktrees: updateWorktree(nextBase.worktrees, payload.worktreeId, {
+            prState: payload.prState,
+            prIsDraft: payload.prIsDraft,
+            issueState: payload.issueState,
+            updatedAt: payload.updatedAt,
           }),
         })),
       );

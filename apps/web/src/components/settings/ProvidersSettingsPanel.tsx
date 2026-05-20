@@ -22,10 +22,17 @@ import {
   sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { ensureLocalApi } from "../../localApi";
+import { applyProvidersUpdated } from "../../rpc/serverState";
 import { formatRelativeTime } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import {
+  canOneClickUpdateProviderCandidate,
+  isProviderUpdateCandidate,
+  isProviderUpdateActive,
+  type ProviderUpdateCandidate,
+} from "../ProviderUpdateLaunchNotification.logic";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
@@ -89,6 +96,9 @@ export function ProvidersSettingsPanel() {
   const serverProviders = useServerProviders();
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
   const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false);
+  const [updatingProviderInstanceIds, setUpdatingProviderInstanceIds] = useState<
+    ReadonlySet<ProviderInstanceId>
+  >(new Set());
   // Collapsible state per provider-instance card, keyed by the instance id.
   // `Record<string, boolean>` so we don't need to preseed an entry for every
   // configured instance — an absent key reads as collapsed. Default-slot
@@ -336,6 +346,34 @@ export function ProvidersSettingsPanel() {
     });
   };
 
+  const runProviderUpdate = useCallback((provider: ProviderUpdateCandidate) => {
+    setUpdatingProviderInstanceIds((existing) => new Set(existing).add(provider.instanceId));
+    void ensureLocalApi()
+      .server.updateProvider({
+        provider: provider.driver,
+        instanceId: provider.instanceId,
+      })
+      .then((payload) => {
+        applyProvidersUpdated(payload);
+      })
+      .catch((error: unknown) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Provider update failed",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      })
+      .finally(() => {
+        setUpdatingProviderInstanceIds((existing) => {
+          const next = new Set(existing);
+          next.delete(provider.instanceId);
+          return next;
+        });
+      });
+  }, []);
+
   /**
    * Reset a built-in default slot back to factory defaults. Clears both
    * the legacy `settings.providers[kind]` struct and any explicit
@@ -494,6 +532,14 @@ export function ProvidersSettingsPanel() {
           const liveProvider = serverProviders.find(
             (candidate) => candidate.instanceId === row.instanceId,
           );
+          const updateCandidate =
+            liveProvider && isProviderUpdateCandidate(liveProvider) ? liveProvider : null;
+          const canRunOneClickUpdate =
+            updateCandidate !== null &&
+            canOneClickUpdateProviderCandidate(updateCandidate, serverProviders);
+          const isUpdating =
+            Boolean(liveProvider && isProviderUpdateActive(liveProvider)) ||
+            updatingProviderInstanceIds.has(row.instanceId);
           const modelPreferences = settings.providerModelPreferences?.[row.instanceId] ?? {
             hiddenModels: [],
             modelOrder: [],
@@ -563,6 +609,10 @@ export function ProvidersSettingsPanel() {
                   modelOrder,
                 })
               }
+              onRunUpdate={
+                canRunOneClickUpdate ? () => runProviderUpdate(updateCandidate) : undefined
+              }
+              isUpdating={isUpdating}
             />
           );
         })}

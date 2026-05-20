@@ -262,6 +262,9 @@ function mapWorktree(
     issueNumber: worktree.issueNumber,
     prTitle: worktree.prTitle,
     issueTitle: worktree.issueTitle,
+    prState: worktree.prState ?? null,
+    prIsDraft: worktree.prIsDraft ?? null,
+    issueState: worktree.issueState ?? null,
     createdAt: worktree.createdAt,
     updatedAt: worktree.updatedAt,
     archivedAt: worktree.archivedAt,
@@ -507,6 +510,9 @@ function sidebarWorktreesEqual(
     left.issueNumber === right.issueNumber &&
     left.prTitle === right.prTitle &&
     left.issueTitle === right.issueTitle &&
+    left.prState === right.prState &&
+    left.prIsDraft === right.prIsDraft &&
+    left.issueState === right.issueState &&
     left.createdAt === right.createdAt &&
     left.updatedAt === right.updatedAt &&
     left.archivedAt === right.archivedAt &&
@@ -1933,6 +1939,9 @@ function applyEnvironmentOrchestrationEvent(
             issueNumber: event.payload.issueNumber,
             prTitle: event.payload.prTitle,
             issueTitle: event.payload.issueTitle,
+            prState: null,
+            prIsDraft: null,
+            issueState: null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             archivedAt: null,
@@ -1960,6 +1969,19 @@ function applyEnvironmentOrchestrationEvent(
             ...existing,
             title: event.payload.title ?? null,
             updatedAt: event.payload.changedAt,
+          })
+        : state;
+    }
+
+    case "worktree.sourceControlStateUpdated": {
+      const existing = state.worktreeById?.[event.payload.worktreeId];
+      return existing
+        ? upsertWorktreeState(state, {
+            ...existing,
+            prState: event.payload.prState,
+            prIsDraft: event.payload.prIsDraft,
+            issueState: event.payload.issueState,
+            updatedAt: event.payload.updatedAt,
           })
         : state;
     }

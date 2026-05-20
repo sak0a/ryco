@@ -49,6 +49,7 @@ import {
   VcsStatusInput,
   VcsStatusResult,
   VcsStatusStreamEvent,
+  TextGenerationError,
 } from "./git.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
@@ -95,6 +96,9 @@ import {
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectStageFileReferenceError,
+  ProjectStageFileReferenceInput,
+  ProjectStageFileReferenceResult,
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
@@ -113,10 +117,14 @@ import {
 import {
   ServerConfigStreamEvent,
   ServerConfig,
+  ServerProviderUpdateError,
+  ServerProviderUpdateInput,
   ServerLifecycleStreamEvent,
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
+  KeybindingsReplaceCustomInput,
+  KeybindingsReplaceCustomResult,
 } from "./server.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
@@ -133,6 +141,9 @@ import {
   SourceControlIssueDetail,
   SourceControlIssueSummary,
   SourceControlProviderError,
+  SourceControlAssigneeCandidate,
+  SourceControlCreateIssueInput,
+  SourceControlLabel,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
 import {
@@ -163,6 +174,7 @@ export const WS_METHODS = {
   projectsSearchEntries: "projects.searchEntries",
   projectsReadFile: "projects.readFile",
   projectsWriteFile: "projects.writeFile",
+  projectsStageFileReference: "projects.stageFileReference",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -207,7 +219,9 @@ export const WS_METHODS = {
   // Server meta
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
+  serverUpdateProvider: "server.updateProvider",
   serverUpsertKeybinding: "server.upsertKeybinding",
+  keybindingsReplaceCustom: "keybindings.replaceCustom",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
@@ -235,6 +249,13 @@ export const WS_METHODS = {
   sourceControlSearchChangeRequests: "sourceControl.searchChangeRequests",
   sourceControlGetChangeRequestDetail: "sourceControl.getChangeRequestDetail",
   sourceControlGetChangeRequestDiff: "sourceControl.getChangeRequestDiff",
+  sourceControlCreateIssue: "sourceControl.createIssue",
+  sourceControlListIssueLabels: "sourceControl.listIssueLabels",
+  sourceControlListIssueAssignees: "sourceControl.listIssueAssignees",
+
+  // Text generation methods
+  textGenerationGenerateIssueContent: "textGeneration.generateIssueContent",
+  textGenerationGenerateBranchName: "textGeneration.generateBranchName",
 
   // Atlassian connection methods
   atlassianListConnections: "atlassian.listConnections",
@@ -277,6 +298,44 @@ export const GitCreateWorktreeForProjectOutput = Schema.Struct({
   sessionId: ThreadId,
 });
 export type GitCreateWorktreeForProjectOutput = typeof GitCreateWorktreeForProjectOutput.Type;
+
+export const SourceControlCreateIssueWithWorktreeResult = Schema.Struct({
+  issue: SourceControlIssueSummary,
+  worktree: Schema.optional(GitCreateWorktreeForProjectOutput),
+  worktreeError: Schema.optional(Schema.String),
+});
+export type SourceControlCreateIssueWithWorktreeResult =
+  typeof SourceControlCreateIssueWithWorktreeResult.Type;
+
+export const TextGenerationIssueContentMode = Schema.Literals(["polish", "title"]);
+export type TextGenerationIssueContentMode = typeof TextGenerationIssueContentMode.Type;
+
+export const TextGenerationIssueContentInput = Schema.Struct({
+  cwd: Schema.String,
+  mode: TextGenerationIssueContentMode,
+  rough: Schema.optional(Schema.String),
+  body: Schema.optional(Schema.String),
+  currentTitle: Schema.optional(Schema.String),
+  customInstructions: Schema.optional(Schema.String),
+});
+export type TextGenerationIssueContentInput = typeof TextGenerationIssueContentInput.Type;
+
+export const TextGenerationIssueContentResult = Schema.Struct({
+  title: Schema.optional(Schema.String),
+  body: Schema.optional(Schema.String),
+});
+export type TextGenerationIssueContentResult = typeof TextGenerationIssueContentResult.Type;
+
+export const TextGenerationBranchNameInput = Schema.Struct({
+  cwd: Schema.String,
+  message: Schema.String,
+});
+export type TextGenerationBranchNameInput = typeof TextGenerationBranchNameInput.Type;
+
+export const TextGenerationBranchNameResult = Schema.Struct({
+  branch: Schema.String,
+});
+export type TextGenerationBranchNameResult = typeof TextGenerationBranchNameResult.Type;
 
 export const GitFindWorktreeForOriginInput = Schema.Struct({
   projectId: ProjectId,
@@ -338,6 +397,12 @@ export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybi
   error: Schema.Union([KeybindingsConfigError, AuthRpcError]),
 });
 
+export const WsKeybindingsReplaceCustomRpc = Rpc.make(WS_METHODS.keybindingsReplaceCustom, {
+  payload: KeybindingsReplaceCustomInput,
+  success: KeybindingsReplaceCustomResult,
+  error: Schema.Union([KeybindingsConfigError, AuthRpcError]),
+});
+
 export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   payload: Schema.Struct({}),
   success: ServerConfig,
@@ -356,6 +421,12 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
   }),
   success: ServerProviderUpdatedPayload,
   error: AuthRpcError,
+});
+
+export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvider, {
+  payload: ServerProviderUpdateInput,
+  success: ServerProviderUpdatedPayload,
+  error: ServerProviderUpdateError,
 });
 
 export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
@@ -548,6 +619,45 @@ export const WsSourceControlGetChangeRequestDiffRpc = Rpc.make(
   },
 );
 
+export const WsSourceControlCreateIssueRpc = Rpc.make(WS_METHODS.sourceControlCreateIssue, {
+  payload: SourceControlCreateIssueInput,
+  success: SourceControlCreateIssueWithWorktreeResult,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError, GitManagerServiceError]),
+});
+
+export const WsSourceControlListIssueLabelsRpc = Rpc.make(WS_METHODS.sourceControlListIssueLabels, {
+  payload: Schema.Struct({ cwd: Schema.String }),
+  success: Schema.Array(SourceControlLabel),
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+});
+
+export const WsSourceControlListIssueAssigneesRpc = Rpc.make(
+  WS_METHODS.sourceControlListIssueAssignees,
+  {
+    payload: Schema.Struct({ cwd: Schema.String }),
+    success: Schema.Array(SourceControlAssigneeCandidate),
+    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  },
+);
+
+export const WsTextGenerationGenerateIssueContentRpc = Rpc.make(
+  WS_METHODS.textGenerationGenerateIssueContent,
+  {
+    payload: TextGenerationIssueContentInput,
+    success: TextGenerationIssueContentResult,
+    error: Schema.Union([AuthRpcError, TextGenerationError]),
+  },
+);
+
+export const WsTextGenerationGenerateBranchNameRpc = Rpc.make(
+  WS_METHODS.textGenerationGenerateBranchName,
+  {
+    payload: TextGenerationBranchNameInput,
+    success: TextGenerationBranchNameResult,
+    error: Schema.Union([AuthRpcError, TextGenerationError]),
+  },
+);
+
 export const WsAtlassianListConnectionsRpc = Rpc.make(WS_METHODS.atlassianListConnections, {
   payload: Schema.Struct({}),
   success: Schema.Array(AtlassianConnectionSummary),
@@ -663,6 +773,12 @@ export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
   success: ProjectWriteFileResult,
   error: Schema.Union([ProjectWriteFileError, AuthRpcError]),
+});
+
+export const WsProjectsStageFileReferenceRpc = Rpc.make(WS_METHODS.projectsStageFileReference, {
+  payload: ProjectStageFileReferenceInput,
+  success: ProjectStageFileReferenceResult,
+  error: Schema.Union([ProjectStageFileReferenceError, AuthRpcError]),
 });
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -911,7 +1027,9 @@ export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess,
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
+  WsServerUpdateProviderRpc,
   WsServerUpsertKeybindingRpc,
+  WsKeybindingsReplaceCustomRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerDiscoverSourceControlRpc,
@@ -935,6 +1053,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlSearchChangeRequestsRpc,
   WsSourceControlGetChangeRequestDetailRpc,
   WsSourceControlGetChangeRequestDiffRpc,
+  WsSourceControlCreateIssueRpc,
+  WsSourceControlListIssueLabelsRpc,
+  WsSourceControlListIssueAssigneesRpc,
+  WsTextGenerationGenerateIssueContentRpc,
+  WsTextGenerationGenerateBranchNameRpc,
   WsAtlassianListConnectionsRpc,
   WsAtlassianStartOAuthRpc,
   WsAtlassianDisconnectRpc,
@@ -954,6 +1077,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsSearchEntriesRpc,
   WsProjectsReadFileRpc,
   WsProjectsWriteFileRpc,
+  WsProjectsStageFileReferenceRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsSubscribeVcsStatusRpc,

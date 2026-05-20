@@ -30,6 +30,9 @@ export interface ShortcutModifierStateLike {
 export interface ShortcutMatchContext {
   terminalFocus: boolean;
   terminalOpen: boolean;
+  modelPickerOpen: boolean;
+  commandPaletteOpen: boolean;
+  composerFocus: boolean;
   [key: string]: boolean;
 }
 
@@ -112,6 +115,9 @@ function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatc
   return {
     terminalFocus: false,
     terminalOpen: false,
+    modelPickerOpen: false,
+    commandPaletteOpen: false,
+    composerFocus: false,
     ...options?.context,
   };
 }

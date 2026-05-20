@@ -21,6 +21,9 @@ export interface SidebarWorktree {
   origin: SidebarWorktreeOrigin;
   prNumber?: number | null | undefined;
   issueNumber?: number | null | undefined;
+  prState?: "open" | "closed" | "merged" | null | undefined;
+  prIsDraft?: boolean | null | undefined;
+  issueState?: "open" | "closed" | null | undefined;
   archivedAt?: string | null | undefined;
   manualPosition?: number | null | undefined;
   updatedAt?: string | undefined;
@@ -278,6 +281,7 @@ export function normalizeWorktreePath(worktreePath: string): string {
 }
 
 function mergeWorktree(left: SidebarWorktree, right: SidebarWorktree): SidebarWorktree {
+  const fresher = preferFresher(left, right);
   return {
     ...left,
     archivedAt: mergeArchivedAt(left.archivedAt, right.archivedAt),
@@ -286,11 +290,21 @@ function mergeWorktree(left: SidebarWorktree, right: SidebarWorktree): SidebarWo
     origin: left.origin === "main" || right.origin !== "main" ? left.origin : right.origin,
     prNumber: left.prNumber ?? right.prNumber ?? null,
     issueNumber: left.issueNumber ?? right.issueNumber ?? null,
+    prState: fresher.prState ?? null,
+    prIsDraft: fresher.prIsDraft ?? null,
+    issueState: fresher.issueState ?? null,
     title: preferWorktreeTitle(left, right),
     updatedAt: maxIso(left.updatedAt, right.updatedAt),
     worktreeId: preferWorktreeId(left, right),
     worktreePath: left.worktreePath ?? right.worktreePath,
   };
+}
+
+function preferFresher(left: SidebarWorktree, right: SidebarWorktree): SidebarWorktree {
+  const leftMs = left.updatedAt ? Date.parse(left.updatedAt) : Number.NEGATIVE_INFINITY;
+  const rightMs = right.updatedAt ? Date.parse(right.updatedAt) : Number.NEGATIVE_INFINITY;
+  if (Number.isNaN(rightMs) || rightMs <= leftMs) return left;
+  return right;
 }
 
 function preferWorktreeTitle(

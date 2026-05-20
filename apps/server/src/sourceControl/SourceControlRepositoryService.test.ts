@@ -41,6 +41,11 @@ function makeProvider(
     searchChangeRequests: () => unsupported("searchChangeRequests"),
     getChangeRequestDetail: () => unsupported("getChangeRequestDetail"),
     getChangeRequestDiff: () => unsupported("getChangeRequestDiff"),
+    createIssue: () => unsupported("createIssue"),
+    listLabels: () => unsupported("listLabels"),
+    listAssignees: () => unsupported("listAssignees"),
+    getPullRequestState: () => unsupported("getPullRequestState"),
+    getIssueState: () => unsupported("getIssueState"),
     ...overrides,
   };
 }

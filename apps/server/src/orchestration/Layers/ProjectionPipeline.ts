@@ -850,6 +850,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             issueNumber: event.payload.issueNumber,
             prTitle: event.payload.prTitle,
             issueTitle: event.payload.issueTitle,
+            prState: null,
+            prIsDraft: null,
+            issueState: null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             archivedAt: null,
@@ -871,6 +874,22 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             updatedAt: event.payload.changedAt,
           });
           return;
+
+        case "worktree.sourceControlStateUpdated": {
+          const existing = yield* projectionWorktreeRepository.getById({
+            worktreeId: event.payload.worktreeId,
+          });
+          if (Option.isSome(existing)) {
+            yield* projectionWorktreeRepository.upsert({
+              ...existing.value,
+              prState: event.payload.prState,
+              prIsDraft: event.payload.prIsDraft,
+              issueState: event.payload.issueState,
+              updatedAt: event.payload.updatedAt,
+            });
+          }
+          return;
+        }
 
         case "worktree.restored":
           yield* projectionWorktreeRepository.markRestored({

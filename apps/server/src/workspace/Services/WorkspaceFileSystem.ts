@@ -12,6 +12,8 @@ import type { Effect } from "effect";
 import type {
   ProjectReadFileInput,
   ProjectReadFileResult,
+  ProjectStageFileReferenceInput,
+  ProjectStageFileReferenceResult,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "@ryco/contracts";
@@ -54,6 +56,17 @@ export interface WorkspaceFileSystemShape {
     input: ProjectWriteFileInput,
   ) => Effect.Effect<
     ProjectWriteFileResult,
+    WorkspaceFileSystemError | WorkspacePathOutsideRootError
+  >;
+
+  /**
+   * Stage a user-selected file inside the workspace and return a prompt-safe
+   * relative path that the provider can read.
+   */
+  readonly stageFileReference: (
+    input: ProjectStageFileReferenceInput,
+  ) => Effect.Effect<
+    ProjectStageFileReferenceResult,
     WorkspaceFileSystemError | WorkspacePathOutsideRootError
   >;
 }

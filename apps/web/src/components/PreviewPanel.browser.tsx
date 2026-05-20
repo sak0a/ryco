@@ -111,6 +111,7 @@ vi.mock("../environmentApi", () => ({
         truncated: false,
       }),
       readFile: vi.fn(),
+      stageFileReference: vi.fn(),
     },
   }),
 }));

@@ -1,4 +1,4 @@
-import type { RepositoryIdentity } from "@ryco/contracts";
+import type { RepositoryIdentity, RepositoryRemote } from "@ryco/contracts";
 import { Cache, Duration, Effect, Exit, Layer } from "effect";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
@@ -59,12 +59,18 @@ function buildRepositoryIdentity(input: {
     const provider = detectSourceControlProviderFromGitRemoteUrl(url);
     const canonical = normalizeGitRemoteUrl(url);
     const ownerRepo = canonical.split("/").slice(1).join("/");
-    return {
+    const remote: {
+      name: string;
+      url: string;
+      provider?: string;
+      ownerRepo?: string;
+    } = {
       name,
       url,
-      ...(provider ? { provider: provider.kind } : {}),
-      ...(ownerRepo ? { ownerRepo } : {}),
     };
+    if (provider) remote.provider = provider.kind;
+    if (ownerRepo) remote.ownerRepo = ownerRepo;
+    return remote satisfies RepositoryRemote;
   });
 
   return {

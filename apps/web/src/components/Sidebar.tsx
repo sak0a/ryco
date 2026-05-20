@@ -246,7 +246,12 @@ import {
   type SidebarProjectGroupMember,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
+import { SidebarProviderUpdatePill } from "./sidebar/SidebarProviderUpdatePill";
 const THREAD_PREVIEW_LIMIT = 6;
+
+function stopSpanPointerPropagation(event: React.PointerEvent<HTMLSpanElement>) {
+  event.stopPropagation();
+}
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
   created_at: "Created at",
@@ -1098,9 +1103,6 @@ function ProjectSourceControlBadge(props: {
         props.onClick?.();
       }
     };
-    const stopPointer = (event: React.PointerEvent<HTMLSpanElement>) => {
-      event.stopPropagation();
-    };
     // Renders as <span role="button"> rather than <button>: this badge is
     // mounted inside <SidebarMenuButton>, and nesting native <button>
     // elements is invalid HTML and emits a React hydration warning.
@@ -1118,8 +1120,8 @@ function ProjectSourceControlBadge(props: {
         aria-label={actionLabel}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
-        onPointerDown={stopPointer}
-        onPointerDownCapture={stopPointer}
+        onPointerDown={stopSpanPointerPropagation}
+        onPointerDownCapture={stopSpanPointerPropagation}
       >
         {props.icon}
         <span>{formatCompactSourceControlCount(props.count)}</span>
@@ -1365,6 +1367,13 @@ function ProjectSettingsMenu(props: {
 }
 
 type ProjectSettingsSection = "general" | "location" | "atlassian" | "ai";
+
+const PROJECT_SETTINGS_NAV_ITEMS = [
+  { id: "general", label: "General", Icon: Settings2Icon },
+  { id: "location", label: "Location", Icon: FolderOpenIcon },
+  { id: "atlassian", label: "Atlassian", Icon: SlidersHorizontalIcon },
+  { id: "ai", label: "AI", Icon: SparklesIcon },
+] as const;
 
 interface ProjectSettingsDialogProps {
   open: boolean;
@@ -1695,6 +1704,10 @@ function ProjectSettingsDialog(props: ProjectSettingsDialogProps) {
   const headerSubtitle = target.environmentLabel
     ? `${target.name} · ${target.environmentLabel}`
     : target.name;
+  const activeSectionIndex = Math.max(
+    0,
+    PROJECT_SETTINGS_NAV_ITEMS.findIndex((item) => item.id === section),
+  );
 
   return (
     <Dialog
@@ -1704,7 +1717,7 @@ function ProjectSettingsDialog(props: ProjectSettingsDialogProps) {
       }}
     >
       <DialogPopup
-        className="h-[min(70vh,620px)] max-w-[760px] overflow-hidden p-0"
+        className="h-[min(70vh,620px)] max-w-[760px] overflow-hidden p-0 duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] data-ending-style:translate-y-4 data-starting-style:translate-y-4"
         bottomStickOnMobile={false}
         showCloseButton={true}
       >
@@ -1716,15 +1729,13 @@ function ProjectSettingsDialog(props: ProjectSettingsDialogProps) {
         </header>
 
         <div className="flex min-h-0 flex-1 flex-row">
-          <nav className="flex w-12 shrink-0 flex-col gap-1 border-r border-border p-2 sm:w-48">
-            {(
-              [
-                { id: "general", label: "General", Icon: Settings2Icon },
-                { id: "location", label: "Location", Icon: FolderOpenIcon },
-                { id: "atlassian", label: "Atlassian", Icon: SlidersHorizontalIcon },
-                { id: "ai", label: "AI", Icon: SparklesIcon },
-              ] as const
-            ).map(({ id, label, Icon }) => {
+          <nav className="relative isolate flex w-12 shrink-0 flex-col gap-1 border-r border-border p-2 sm:w-48">
+            <span
+              className="pointer-events-none absolute top-2 right-2 left-2 z-0 h-9 rounded-md bg-accent transition-transform duration-[240ms] ease-out"
+              style={{ transform: `translateY(${activeSectionIndex * 2.5}rem)` }}
+              aria-hidden
+            />
+            {PROJECT_SETTINGS_NAV_ITEMS.map(({ id, label, Icon }) => {
               const isActive = section === id;
               return (
                 <button
@@ -1732,9 +1743,9 @@ function ProjectSettingsDialog(props: ProjectSettingsDialogProps) {
                   type="button"
                   onClick={() => setSection(id)}
                   className={cn(
-                    "flex items-center gap-2.5 rounded-md px-2 py-2 text-left text-[13px] outline-hidden ring-ring transition-colors focus-visible:ring-2",
+                    "relative z-10 flex h-9 items-center gap-2.5 rounded-md px-2 text-left text-[13px] outline-hidden ring-ring transition-colors duration-150 focus-visible:ring-2",
                     isActive
-                      ? "bg-accent font-medium text-foreground"
+                      ? "font-medium text-foreground"
                       : "text-muted-foreground/70 hover:text-foreground/80",
                   )}
                   aria-current={isActive ? "page" : undefined}
@@ -2402,10 +2413,25 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   >("inherit");
   const [projectSettingsTarget, setProjectSettingsTarget] =
     useState<SidebarProjectGroupMember | null>(null);
+  const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const projectSettingsTargetRef = useRef<SidebarProjectGroupMember | null>(null);
+  const projectSettingsOpenFrameRef = useRef<number | null>(null);
+  const projectSettingsCleanupTimeoutRef = useRef<number | null>(null);
   useEffect(() => {
     projectSettingsTargetRef.current = projectSettingsTarget;
   }, [projectSettingsTarget]);
+  const clearProjectSettingsTimers = useCallback(() => {
+    if (projectSettingsOpenFrameRef.current !== null) {
+      window.cancelAnimationFrame(projectSettingsOpenFrameRef.current);
+      projectSettingsOpenFrameRef.current = null;
+    }
+    if (projectSettingsCleanupTimeoutRef.current !== null) {
+      window.clearTimeout(projectSettingsCleanupTimeoutRef.current);
+      projectSettingsCleanupTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => clearProjectSettingsTimers(), [clearProjectSettingsTimers]);
   const [projectSettingsTitle, setProjectSettingsTitle] = useState("");
   const [projectSettingsWorkspaceRoot, setProjectSettingsWorkspaceRoot] = useState("");
   const [projectSettingsCustomSystemPrompt, setProjectSettingsCustomSystemPrompt] = useState("");
@@ -2673,15 +2699,24 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [projectGroupingSettings.sidebarProjectGroupingOverrides],
   );
 
-  const openProjectSettingsDialog = useCallback((member: SidebarProjectGroupMember) => {
-    setProjectSettingsTarget(member);
-    setProjectSettingsTitle(member.name);
-    setProjectSettingsWorkspaceRoot(member.cwd);
-    setProjectSettingsCustomSystemPrompt(member.customSystemPrompt ?? "");
-    setProjectSettingsSaving(false);
-    setProjectSettingsCustomAvatarContentHash(member.customAvatarContentHash ?? null);
-    setProjectSettingsPreferredRemoteName(member.preferredRemoteName ?? null);
-  }, []);
+  const openProjectSettingsDialog = useCallback(
+    (member: SidebarProjectGroupMember) => {
+      clearProjectSettingsTimers();
+      setProjectSettingsOpen(false);
+      setProjectSettingsTarget(member);
+      setProjectSettingsTitle(member.name);
+      setProjectSettingsWorkspaceRoot(member.cwd);
+      setProjectSettingsCustomSystemPrompt(member.customSystemPrompt ?? "");
+      setProjectSettingsSaving(false);
+      setProjectSettingsCustomAvatarContentHash(member.customAvatarContentHash ?? null);
+      setProjectSettingsPreferredRemoteName(member.preferredRemoteName ?? null);
+      projectSettingsOpenFrameRef.current = window.requestAnimationFrame(() => {
+        projectSettingsOpenFrameRef.current = null;
+        setProjectSettingsOpen(true);
+      });
+    },
+    [clearProjectSettingsTimers],
+  );
 
   const openProjectRemoteLink = useCallback((member: SidebarProjectGroupMember) => {
     const remoteLink = resolveProjectRemoteLink(
@@ -3611,13 +3646,24 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   }, []);
 
   const closeProjectSettingsDialog = useCallback(() => {
-    setProjectSettingsTarget(null);
-    setProjectSettingsTitle("");
-    setProjectSettingsWorkspaceRoot("");
-    setProjectSettingsCustomSystemPrompt("");
-    setProjectSettingsSaving(false);
-    setProjectSettingsCustomAvatarContentHash(null);
-    setProjectSettingsPreferredRemoteName(null);
+    if (projectSettingsOpenFrameRef.current !== null) {
+      window.cancelAnimationFrame(projectSettingsOpenFrameRef.current);
+      projectSettingsOpenFrameRef.current = null;
+    }
+    setProjectSettingsOpen(false);
+    if (projectSettingsCleanupTimeoutRef.current !== null) {
+      window.clearTimeout(projectSettingsCleanupTimeoutRef.current);
+    }
+    projectSettingsCleanupTimeoutRef.current = window.setTimeout(() => {
+      projectSettingsCleanupTimeoutRef.current = null;
+      setProjectSettingsTarget(null);
+      setProjectSettingsTitle("");
+      setProjectSettingsWorkspaceRoot("");
+      setProjectSettingsCustomSystemPrompt("");
+      setProjectSettingsSaving(false);
+      setProjectSettingsCustomAvatarContentHash(null);
+      setProjectSettingsPreferredRemoteName(null);
+    }, 340);
   }, []);
 
   const pickProjectSettingsWorkspaceRoot = useCallback(async () => {
@@ -4229,7 +4275,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       />
 
       <ProjectSettingsDialog
-        open={projectSettingsTarget !== null}
+        open={projectSettingsOpen}
         target={projectSettingsTarget}
         title={projectSettingsTitle}
         customAvatarContentHash={projectSettingsCustomAvatarContentHash}
@@ -4617,6 +4663,7 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
     <SidebarFooter className="p-2">
+      <SidebarProviderUpdatePill />
       <SidebarUpdatePill />
     </SidebarFooter>
   );

@@ -56,6 +56,8 @@ import type {
   ProjectListEntriesResult,
   ProjectReadFileInput,
   ProjectReadFileResult,
+  ProjectStageFileReferenceInput,
+  ProjectStageFileReferenceResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
   ProjectWriteFileInput,
@@ -64,8 +66,11 @@ import type {
 import type { ProviderInstanceId } from "./providerInstance.ts";
 import type {
   ServerConfig,
+  ServerProviderUpdateInput,
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingResult,
+  KeybindingsReplaceCustomInput,
+  KeybindingsReplaceCustomResult,
 } from "./server.ts";
 import type {
   TerminalClearInput,
@@ -269,6 +274,7 @@ export interface DesktopBridge {
     readonly port?: number;
   }) => Promise<DesktopServerExposureState>;
   getAdvertisedEndpoints: () => Promise<readonly AdvertisedEndpoint[]>;
+  getPathForFile?: (file: File) => string;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
@@ -304,6 +310,7 @@ export interface LocalApi {
   shell: {
     openInEditor: (cwd: string, editor: EditorId) => Promise<void>;
     openExternal: (url: string) => Promise<void>;
+    getPathForFile?: (file: File) => Promise<string | null>;
   };
   contextMenu: {
     show: <T extends string>(
@@ -332,6 +339,7 @@ export interface LocalApi {
     refreshProviders: (input?: {
       readonly instanceId?: ProviderInstanceId;
     }) => Promise<ServerProviderUpdatedPayload>;
+    updateProvider: (input: ServerProviderUpdateInput) => Promise<ServerProviderUpdatedPayload>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
@@ -343,6 +351,11 @@ export interface LocalApi {
     installOpinionatedPlugin: (
       input: OpinionatedPluginInstallInput,
     ) => Promise<OpinionatedPluginInstallResult>;
+  };
+  keybindings: {
+    replaceCustom: (
+      input: KeybindingsReplaceCustomInput,
+    ) => Promise<KeybindingsReplaceCustomResult>;
   };
   mcp?: {
     listWorkspaces: () => Promise<McpListWorkspacesResult>;
@@ -379,6 +392,9 @@ export interface EnvironmentApi {
     readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
+    stageFileReference: (
+      input: ProjectStageFileReferenceInput,
+    ) => Promise<ProjectStageFileReferenceResult>;
     initializeGit?: (input: ProjectsInitializeGitInput) => Promise<EmptyRpcResult>;
   };
   filesystem: {

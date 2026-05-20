@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { realpath as realpathPromise } from "node:fs/promises";
 
 import { Data, Effect, FileSystem, Layer, Path } from "effect";
+import { PROJECT_STAGE_FILE_MAX_BYTES } from "@ryco/contracts";
 
 import {
   WorkspaceFileSystem,
@@ -12,6 +14,8 @@ import { WorkspacePathOutsideRootError, WorkspacePaths } from "../Services/Works
 
 const WORKSPACE_PREVIEW_MAX_BYTES = 512 * 1024;
 const WORKSPACE_PREVIEW_TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
+const STAGED_FILE_ROOT = ".ryco/attachments";
+const UNSAFE_PATH_SEGMENT_CHARS = new Set(["<", ">", ":", '"', "/", "\\", "|", "?", "*"]);
 
 function isLikelyBinaryPreview(bytes: Uint8Array): boolean {
   return bytes.subarray(0, Math.min(bytes.length, 8_192)).includes(0);
@@ -27,6 +31,57 @@ function decodePreviewContents(bytes: Uint8Array): string | null {
 
 function toPosixPath(input: string): string {
   return input.replaceAll("\\", "/");
+}
+
+function replaceUnsafePathSegmentCharacters(input: string): string {
+  let output = "";
+  let previousWasReplacement = false;
+  for (const char of input) {
+    const unsafe = char.charCodeAt(0) < 0x20 || UNSAFE_PATH_SEGMENT_CHARS.has(char);
+    if (unsafe) {
+      if (!previousWasReplacement) {
+        output += "-";
+      }
+      previousWasReplacement = true;
+      continue;
+    }
+    output += char;
+    previousWasReplacement = false;
+  }
+  return output;
+}
+
+function sanitizePathSegment(input: string, fallback: string): string {
+  const sanitized = replaceUnsafePathSegmentCharacters(input.trim())
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^\.+/g, "")
+    .replace(/[.-]+$/g, "")
+    .slice(0, 80);
+  return sanitized.length > 0 ? sanitized : fallback;
+}
+
+function splitSafeFileName(fileName: string): { base: string; extension: string } {
+  const safeName = sanitizePathSegment(fileName, "file");
+  const dotIndex = safeName.lastIndexOf(".");
+  if (dotIndex <= 0 || dotIndex === safeName.length - 1) {
+    return { base: safeName, extension: "" };
+  }
+  return {
+    base: safeName.slice(0, dotIndex) || "file",
+    extension: safeName.slice(dotIndex).slice(0, 24),
+  };
+}
+
+function decodeBase64File(input: { dataBase64: string; sizeBytes: number }): Uint8Array | null {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.dataBase64)) {
+    return null;
+  }
+  const bytes = Buffer.from(input.dataBase64, "base64");
+  if (bytes.byteLength !== input.sizeBytes || bytes.byteLength > PROJECT_STAGE_FILE_MAX_BYTES) {
+    return null;
+  }
+  return bytes;
 }
 
 class MissingRealPathError extends Data.TaggedError("MissingRealPathError") {}
@@ -209,7 +264,63 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
     yield* workspaceEntries.invalidate(input.cwd);
     return { relativePath: target.relativePath };
   });
-  return { readFile, writeFile } satisfies WorkspaceFileSystemShape;
+
+  const stageFileReference: WorkspaceFileSystemShape["stageFileReference"] = Effect.fn(
+    "WorkspaceFileSystem.stageFileReference",
+  )(function* (input) {
+    const bytes = decodeBase64File({
+      dataBase64: input.dataBase64,
+      sizeBytes: input.sizeBytes,
+    });
+    if (!bytes) {
+      return yield* new WorkspaceFileSystemError({
+        cwd: input.cwd,
+        operation: "workspaceFileSystem.stageFileReference.decode",
+        detail: "Staged file payload is invalid.",
+      });
+    }
+
+    const scopeSegment = sanitizePathSegment(input.scopeId, "draft");
+    const { base, extension } = splitSafeFileName(input.name);
+    const relativePath = toPosixPath(
+      path.join(STAGED_FILE_ROOT, scopeSegment, `${base}-${randomUUID().slice(0, 8)}${extension}`),
+    );
+    const target = yield* workspacePaths.resolveRelativePathWithinRoot({
+      workspaceRoot: input.cwd,
+      relativePath,
+    });
+
+    yield* ensureResolvedPathStaysWithinWorkspace(
+      { cwd: input.cwd, relativePath },
+      target.absolutePath,
+    );
+
+    yield* fileSystem
+      .makeDirectory(path.dirname(target.absolutePath), { recursive: true })
+      .pipe(
+        Effect.mapError(
+          toWorkspaceFileSystemError(
+            { cwd: input.cwd, relativePath },
+            "workspaceFileSystem.stageFileReference.makeDirectory",
+          ),
+        ),
+      );
+    yield* fileSystem
+      .writeFile(target.absolutePath, bytes)
+      .pipe(
+        Effect.mapError(
+          toWorkspaceFileSystemError(
+            { cwd: input.cwd, relativePath },
+            "workspaceFileSystem.stageFileReference.writeFile",
+          ),
+        ),
+      );
+    yield* workspaceEntries.invalidate(input.cwd);
+
+    return { relativePath: target.relativePath, sizeBytes: bytes.byteLength };
+  });
+
+  return { readFile, writeFile, stageFileReference } satisfies WorkspaceFileSystemShape;
 });
 
 export const WorkspaceFileSystemLive = Layer.effect(WorkspaceFileSystem, makeWorkspaceFileSystem);

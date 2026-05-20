@@ -10,7 +10,10 @@ import {
 import { scopeThreadRef } from "@ryco/client-runtime";
 import { DEFAULT_UNIFIED_SETTINGS } from "@ryco/contracts/settings";
 import { Equal } from "effect";
-import { APP_VERSION } from "../../branding";
+import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../../branding";
+import aboutLogoAlpha from "../../../../../assets/prod/favicon/favicon-96x96.png";
+import aboutLogoDev from "../../../../../assets/dev/favicon/favicon-96x96.png";
+import aboutLogoNightly from "../../../../../assets/nightly/favicon/favicon-96x96.png";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -42,7 +45,6 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { DRIVER_OPTIONS } from "./providerDriverMeta";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -69,16 +71,66 @@ function EditorOptionIcon({ editor }: { editor: EditorId }) {
   return <IconComponent aria-hidden="true" className="size-4 text-muted-foreground" />;
 }
 
-const PROVIDER_SETTINGS = DRIVER_OPTIONS.map((definition) => ({
-  provider: definition.value,
-}));
-
 function AboutVersionTitle() {
   return (
     <span className="inline-flex items-center gap-2">
       <span>Version</span>
       <code className="text-[11px] font-medium text-muted-foreground">{APP_VERSION}</code>
     </span>
+  );
+}
+
+const REPOSITORY_URL = "https://github.com/sak0a/ryco";
+const CREATOR_URL = "https://github.com/sak0a";
+
+const ABOUT_LOGO_BY_STAGE = {
+  Alpha: aboutLogoAlpha,
+  Dev: aboutLogoDev,
+  Nightly: aboutLogoNightly,
+} as const;
+
+function openExternalLink(url: string) {
+  void ensureLocalApi()
+    .shell.openExternal(url)
+    .catch((error: unknown) => {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not open link",
+          description: error instanceof Error ? error.message : "Failed to open external link.",
+        }),
+      );
+    });
+}
+
+function AboutBrandingHeader() {
+  const logoSrc = ABOUT_LOGO_BY_STAGE[APP_STAGE_LABEL] ?? aboutLogoAlpha;
+  return (
+    <div className="flex flex-col items-center gap-2 px-4 pt-6 pb-5 text-center sm:px-5">
+      <img src={logoSrc} alt="" aria-hidden="true" className="size-14 rounded-xl shadow-sm" />
+      <h3 className="text-base font-semibold tracking-tight text-foreground">{APP_BASE_NAME}</h3>
+      <div className="space-y-0.5 text-[11px] text-muted-foreground">
+        <p>
+          Created by{" "}
+          <button
+            type="button"
+            onClick={() => openExternalLink(CREATOR_URL)}
+            className="font-medium text-foreground/80 underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Laurin (saka)
+          </button>
+        </p>
+        <p>
+          <button
+            type="button"
+            onClick={() => openExternalLink(REPOSITORY_URL)}
+            className="underline-offset-2 hover:text-foreground hover:underline"
+          >
+            github.com/sak0a/ryco
+          </button>
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -279,37 +331,12 @@ function AboutVersionSection() {
 export function useSettingsRestore(onRestored?: () => void) {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
-  const { resetSettings } = useUpdateSettings();
+  const { updateSettings } = useUpdateSettings();
 
   const isGitWritingModelDirty = !Equal.equals(
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
-  // A provider surface is "dirty" if either the legacy per-kind
-  // `settings.providers[kind]` struct differs from defaults (for users
-  // on pre-migration data) or the new `settings.providerInstances` map
-  // has any entries (every edit to a default slot promotes it into an
-  // explicit entry, so any key in that map represents user intent to
-  // diverge from factory defaults). Checking both keeps the Restore
-  // Defaults chip accurate throughout the legacy→instance migration.
-  const areProviderSettingsDirty =
-    PROVIDER_SETTINGS.some((providerSettings) => {
-      type LegacyProviderSettings = (typeof settings.providers)[keyof typeof settings.providers];
-      const currentProviders = settings.providers as Record<
-        string,
-        LegacyProviderSettings | undefined
-      >;
-      const defaultProviders = DEFAULT_UNIFIED_SETTINGS.providers as Record<
-        string,
-        LegacyProviderSettings | undefined
-      >;
-      const currentSettings = currentProviders[providerSettings.provider];
-      const defaultSettings = defaultProviders[providerSettings.provider];
-      return !Equal.equals(currentSettings, defaultSettings);
-    }) ||
-    Object.keys(settings.providerInstances ?? {}).length > 0 ||
-    Object.keys(settings.providerModelPreferences ?? {}).length > 0 ||
-    (settings.favorites ?? []).length > 0;
 
   const changedSettingLabels = useMemo(
     () => [
@@ -342,10 +369,8 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Delete confirmation"]
         : []),
       ...(isGitWritingModelDirty ? ["Git writing model"] : []),
-      ...(areProviderSettingsDirty ? ["Providers"] : []),
     ],
     [
-      areProviderSettingsDirty,
       isGitWritingModelDirty,
       settings.autoOpenPlanSidebar,
       settings.confirmThreadArchive,
@@ -371,9 +396,20 @@ export function useSettingsRestore(onRestored?: () => void) {
     if (!confirmed) return;
 
     setTheme("system");
-    resetSettings();
+    updateSettings({
+      timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
+      diffWordWrap: DEFAULT_UNIFIED_SETTINGS.diffWordWrap,
+      diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
+      autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
+      enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
+      defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
+      addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
+      confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
+      confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
+      textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+    });
     onRestored?.();
-  }, [changedSettingLabels, onRestored, resetSettings, setTheme]);
+  }, [changedSettingLabels, onRestored, setTheme, updateSettings]);
 
   return {
     changedSettingLabels,
@@ -813,6 +849,7 @@ export function GeneralSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection title="About">
+        <AboutBrandingHeader />
         {isElectron ? (
           <AboutVersionSection />
         ) : (

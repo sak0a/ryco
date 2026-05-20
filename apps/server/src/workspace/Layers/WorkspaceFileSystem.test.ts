@@ -388,4 +388,57 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
       }),
     );
   });
+
+  describe("stageFileReference", () => {
+    it.effect("writes staged binary files under a workspace attachment directory", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const payload = Buffer.from([0, 1, 2, 3]);
+
+        const result = yield* workspaceFileSystem.stageFileReference({
+          cwd,
+          scopeId: "thread/test id",
+          name: "report data.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: payload.byteLength,
+          dataBase64: payload.toString("base64"),
+        });
+
+        expect(result.relativePath).toMatch(
+          /^\.ryco\/attachments\/thread-test-id\/report-data-[a-f0-9]{8}\.pdf$/,
+        );
+        expect(result.sizeBytes).toBe(payload.byteLength);
+
+        const saved = yield* fileSystem
+          .readFile(path.join(cwd, result.relativePath))
+          .pipe(Effect.orDie);
+        expect(Array.from(saved)).toEqual(Array.from(payload));
+      }),
+    );
+
+    it.effect("rejects invalid staged file payloads", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+
+        const error = yield* workspaceFileSystem
+          .stageFileReference({
+            cwd,
+            scopeId: "thread-1",
+            name: "data.txt",
+            sizeBytes: 4,
+            dataBase64: "not base64",
+          })
+          .pipe(Effect.flip);
+
+        if (!("detail" in error)) {
+          throw new Error("Expected WorkspaceFileSystemError detail.");
+        }
+        expect(error.detail).toBe("Staged file payload is invalid.");
+      }),
+    );
+  });
 });

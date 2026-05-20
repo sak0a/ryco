@@ -62,6 +62,10 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
 
         window.open(url, "_blank", "noopener,noreferrer");
       },
+      getPathForFile: async (file) => {
+        const resolvedPath = window.desktopBridge?.getPathForFile?.(file);
+        return resolvedPath || null;
+      },
     },
     contextMenu: {
       show: async <T extends string>(
@@ -125,6 +129,10 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         rpcClient
           ? rpcClient.server.refreshProviders()
           : Promise.reject(unavailableLocalBackendError()),
+      updateProvider: (input) =>
+        rpcClient
+          ? rpcClient.server.updateProvider(input)
+          : Promise.reject(unavailableLocalBackendError()),
       upsertKeybinding: (input) =>
         rpcClient
           ? rpcClient.server.upsertKeybinding(input)
@@ -150,6 +158,12 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
       installOpinionatedPlugin: (input) =>
         rpcClient
           ? rpcClient.server.installOpinionatedPlugin(input)
+          : Promise.reject(unavailableLocalBackendError()),
+    },
+    keybindings: {
+      replaceCustom: (input) =>
+        rpcClient
+          ? rpcClient.keybindings.replaceCustom(input)
           : Promise.reject(unavailableLocalBackendError()),
     },
     ...(rpcClient

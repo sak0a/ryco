@@ -79,8 +79,11 @@ Examples:
 
 Currently available context keys:
 
-- `terminalFocus`
-- `terminalOpen`
+- `terminalFocus` — the terminal drawer has keyboard focus
+- `terminalOpen` — the terminal drawer is visible in the active thread
+- `modelPickerOpen` — the model picker dialog is open
+- `commandPaletteOpen` — the command palette is open
+- `composerFocus` — the message composer (main chat input) is focused
 
 Supported operators:
 

@@ -4,6 +4,7 @@ import {
   ArchiveIcon,
   BlocksIcon,
   GitBranchIcon,
+  KeyboardIcon,
   Link2Icon,
   PaletteIcon,
   PlugZapIcon,
@@ -19,6 +20,7 @@ import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ScrollArea } from "../ui/scroll-area";
 import { AppearanceSettingsPanel } from "./AppearanceSettings";
 import { ConnectionsSettings } from "./ConnectionsSettings";
+import { KeybindingsSettingsPanel } from "./KeybindingsSettings";
 import { McpServersSettings } from "./McpServersSettings";
 import { OpinionatedPluginsSettingsPanel } from "./OpinionatedPluginsSettings";
 import { ProvidersSettingsPanel } from "./ProvidersSettingsPanel";
@@ -37,6 +39,7 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { id: "opinionated-plugins", label: "Plugins", icon: PlugZapIcon },
   { id: "mcp-servers", label: "MCP Servers", icon: ServerIcon },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
+  { id: "keybindings", label: "Keybindings", icon: KeyboardIcon },
   { id: "source-control", label: "Source Control", icon: GitBranchIcon },
   { id: "connections", label: "Connections", icon: Link2Icon },
   { id: "archived", label: "Archive", icon: ArchiveIcon },
@@ -75,6 +78,8 @@ function SectionPanel({ section }: { section: SettingsSectionId }) {
       return <McpServersSettings />;
     case "appearance":
       return <AppearanceSettingsPanel />;
+    case "keybindings":
+      return <KeybindingsSettingsPanel />;
     case "source-control":
       return <SourceControlSettingsPanel />;
     case "connections":
@@ -96,6 +101,10 @@ export function SettingsDialog() {
   }, []);
 
   const showRestore = SECTIONS_WITH_RESTORE.has(section);
+  const activeSectionIndex = Math.max(
+    0,
+    NAV_ITEMS.findIndex((item) => item.id === section),
+  );
 
   return (
     <Dialog
@@ -117,7 +126,12 @@ export function SettingsDialog() {
         </header>
 
         <div className="flex min-h-0 flex-1 flex-row">
-          <nav className="flex w-12 shrink-0 flex-col gap-1 border-r border-border p-2 sm:w-48">
+          <nav className="relative isolate flex w-12 shrink-0 flex-col gap-1 border-r border-border p-2 sm:w-48">
+            <span
+              className="pointer-events-none absolute top-2 right-2 left-2 z-0 h-9 rounded-md bg-accent transition-transform duration-[240ms] ease-out"
+              style={{ transform: `translateY(${activeSectionIndex * 2.5}rem)` }}
+              aria-hidden
+            />
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const isActive = section === item.id;
@@ -127,9 +141,9 @@ export function SettingsDialog() {
                   type="button"
                   onClick={() => setSection(item.id)}
                   className={cn(
-                    "flex items-center gap-2.5 rounded-md px-2 py-2 text-left text-[13px] outline-hidden ring-ring transition-colors focus-visible:ring-2",
+                    "relative z-10 flex h-9 items-center gap-2.5 rounded-md px-2 text-left text-[13px] outline-hidden ring-ring transition-colors duration-150 focus-visible:ring-2",
                     isActive
-                      ? "bg-accent font-medium text-foreground"
+                      ? "font-medium text-foreground"
                       : "text-muted-foreground/70 hover:text-foreground/80",
                   )}
                   aria-label={item.label}

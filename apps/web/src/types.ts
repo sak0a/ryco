@@ -191,6 +191,9 @@ export interface SidebarWorktreeSummary {
   issueNumber: number | null;
   prTitle: string | null;
   issueTitle: string | null;
+  prState: "open" | "closed" | "merged" | null;
+  prIsDraft: boolean | null;
+  issueState: "open" | "closed" | null;
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;

@@ -1546,7 +1546,7 @@ git commit -m "Declare RPC contracts for createIssue, listIssueLabels, listIssue
 - [ ] **Step 1: Locate the existing source-control handler**
 
 ```bash
-
+rg -n "sourceControlListIssues|sourceControl\\.listIssues" apps/server/src packages/contracts/src
 ```
 
 Grep the server source for `sourceControlListIssues` to find where existing handlers are wired up.

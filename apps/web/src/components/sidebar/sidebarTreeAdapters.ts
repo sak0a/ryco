@@ -236,6 +236,9 @@ function readExplicitWorktrees(
         manualPosition: readNumber(record.manualPosition),
         origin,
         prNumber: readNumber(record.prNumber),
+        prState: readPullRequestState(record.prState),
+        prIsDraft: readNullableBoolean(record.prIsDraft),
+        issueState: readIssueState(record.issueState),
         projectId: logicalProjectId,
         title: readNullableString(record.title),
         updatedAt: readString(record.updatedAt),
@@ -244,6 +247,18 @@ function readExplicitWorktrees(
       },
     ];
   });
+}
+
+function readPullRequestState(value: unknown): "open" | "closed" | "merged" | null {
+  return value === "open" || value === "closed" || value === "merged" ? value : null;
+}
+
+function readIssueState(value: unknown): "open" | "closed" | null {
+  return value === "open" || value === "closed" ? value : null;
+}
+
+function readNullableBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
 }
 
 function synthesizeWorktreesFromThreads(input: {

@@ -1,10 +1,11 @@
 import type { EnvironmentId, SourceControlIssueSummary } from "@ryco/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
-import { SearchIcon, RotateCwIcon } from "lucide-react";
-import { useMemo, type RefObject } from "react";
+import { PlusIcon, RotateCwIcon, SearchIcon } from "lucide-react";
+import { useMemo, useState, type RefObject } from "react";
 import { issueListQueryOptions, searchIssuesQueryOptions } from "~/lib/sourceControlContextRpc";
 import { searchSourceControlSummaries } from "../chat/composerSourceControlContextSearch";
+import { NewIssueDialog } from "../issues/NewIssueDialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { IssueList } from "./IssueList";
@@ -23,6 +24,7 @@ interface IssuesTabProps {
 
 export function IssuesTab(props: IssuesTabProps) {
   const [debouncedQuery] = useDebouncedValue(props.query, { wait: 200 });
+  const [showNewIssueDialog, setShowNewIssueDialog] = useState(false);
 
   const listQuery = useQuery(
     issueListQueryOptions({
@@ -70,6 +72,17 @@ export function IssuesTab(props: IssuesTabProps) {
           />
         </div>
         <StateFilterButtons value={props.stateFilter} onChange={props.onStateFilterChange} />
+        {props.environmentId && props.cwd ? (
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            onClick={() => setShowNewIssueDialog(true)}
+            aria-label="New issue"
+          >
+            <PlusIcon className="size-3.5" />
+          </Button>
+        ) : null}
         <Button
           type="button"
           size="icon"
@@ -98,6 +111,18 @@ export function IssuesTab(props: IssuesTabProps) {
           />
         )}
       </div>
+
+      {showNewIssueDialog && props.environmentId && props.cwd ? (
+        <NewIssueDialog
+          open={showNewIssueDialog}
+          onOpenChange={setShowNewIssueDialog}
+          environmentId={props.environmentId}
+          cwd={props.cwd}
+          onCreated={() => {
+            void listQuery.refetch();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

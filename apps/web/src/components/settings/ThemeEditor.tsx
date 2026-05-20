@@ -153,7 +153,7 @@ export function setTokenValue(
   token: ThemeTokenName,
   value: string,
 ): ThemeDefinition {
-  const current: ThemeTokens = { ...(theme[variant] ?? {}) };
+  const current: ThemeTokens = { ...theme[variant] };
   if (value.length === 0) delete current[token];
   else current[token] = value;
   if (variant === "light") return { ...theme, light: current };

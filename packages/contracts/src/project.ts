@@ -1,8 +1,10 @@
 import { Schema } from "effect";
-import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
+export const PROJECT_STAGE_FILE_MAX_BYTES = 10 * 1024 * 1024;
+const PROJECT_STAGE_FILE_MAX_BASE64_CHARS = Math.ceil((PROJECT_STAGE_FILE_MAX_BYTES * 4) / 3) + 4;
 
 export const ProjectSearchEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
@@ -87,6 +89,30 @@ export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type;
 
 export class ProjectWriteFileError extends Schema.TaggedErrorClass<ProjectWriteFileError>()(
   "ProjectWriteFileError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export const ProjectStageFileReferenceInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  scopeId: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  mimeType: Schema.optional(Schema.String.check(Schema.isMaxLength(200))),
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROJECT_STAGE_FILE_MAX_BYTES)),
+  dataBase64: Schema.String.check(Schema.isMaxLength(PROJECT_STAGE_FILE_MAX_BASE64_CHARS)),
+});
+export type ProjectStageFileReferenceInput = typeof ProjectStageFileReferenceInput.Type;
+
+export const ProjectStageFileReferenceResult = Schema.Struct({
+  relativePath: TrimmedNonEmptyString,
+  sizeBytes: NonNegativeInt,
+});
+export type ProjectStageFileReferenceResult = typeof ProjectStageFileReferenceResult.Type;
+
+export class ProjectStageFileReferenceError extends Schema.TaggedErrorClass<ProjectStageFileReferenceError>()(
+  "ProjectStageFileReferenceError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),
