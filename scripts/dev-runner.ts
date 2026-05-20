@@ -28,10 +28,10 @@ const MODE_ARGS = {
     "--ui=tui",
     "--filter=@ryco/contracts",
     "--filter=@ryco/web",
-    "--filter=ryco",
+    "--filter=ryco-cli",
     "--parallel",
   ],
-  "dev:server": ["run", "dev", "--filter=ryco"],
+  "dev:server": ["run", "dev", "--filter=ryco-cli"],
   "dev:web": ["run", "dev", "--filter=@ryco/web"],
   "dev:desktop": ["run", "dev", "--filter=@ryco/desktop", "--filter=@ryco/web", "--parallel"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
