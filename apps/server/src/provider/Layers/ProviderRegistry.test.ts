@@ -727,7 +727,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               attempt < 50 && cachedProvider?.checkedAt !== refreshedProvider.checkedAt;
               attempt += 1
             ) {
-              yield* Effect.sleep("10 millis");
+              yield* Effect.yieldNow;
               cachedProvider = yield* readProviderStatusCache(filePath);
             }
 

@@ -121,11 +121,11 @@ export function AppearanceSettingsPanel() {
   const [refreshTick, setRefreshTick] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  void refreshTick;
-
-  const themes = useMemo(() => getAllThemes(), [refreshTick]);
-  const editing =
-    editingId !== null && draft !== null ? { source: findTheme(editingId), draft } : null;
+  const themes = getAllThemes();
+  const editing = useMemo(() => {
+    void refreshTick;
+    return editingId !== null && draft !== null ? { source: findTheme(editingId), draft } : null;
+  }, [draft, editingId, refreshTick]);
   const pendingDeleteTheme = pendingDeleteId ? findTheme(pendingDeleteId) : null;
 
   const refresh = useCallback(() => setRefreshTick((tick) => tick + 1), []);

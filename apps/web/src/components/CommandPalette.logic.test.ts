@@ -45,6 +45,34 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
   };
 }
 
+function makeBrowseEntry(overrides: Partial<FilesystemBrowseEntry>): FilesystemBrowseEntry {
+  return {
+    name: "entry",
+    fullPath: "/entry",
+    ...overrides,
+  };
+}
+
+function makeBrowseInput(
+  entries: FilesystemBrowseEntry[],
+  handlers: {
+    browseTo?: (name: string) => void;
+    browseToPath?: (fullPath: string) => void;
+  } = {},
+) {
+  return {
+    browseEntries: entries,
+    browseQuery: "~/",
+    canBrowseUp: false,
+    upIcon: "up-icon",
+    directoryIcon: "dir-icon",
+    symlinkIcon: "symlink-icon",
+    browseUp: () => undefined,
+    browseTo: handlers.browseTo ?? (() => undefined),
+    browseToPath: handlers.browseToPath ?? (() => undefined),
+  };
+}
+
 describe("buildThreadActionItems", () => {
   it("orders threads by most recent activity and formats timestamps from updatedAt", () => {
     vi.useFakeTimers();
@@ -175,36 +203,12 @@ describe("buildThreadActionItems", () => {
 });
 
 describe("buildBrowseGroups", () => {
-  const makeEntry = (overrides: Partial<FilesystemBrowseEntry>): FilesystemBrowseEntry => ({
-    name: "entry",
-    fullPath: "/entry",
-    ...overrides,
-  });
-
-  const makeInput = (
-    entries: FilesystemBrowseEntry[],
-    handlers: {
-      browseTo?: (name: string) => void;
-      browseToPath?: (fullPath: string) => void;
-    } = {},
-  ) => ({
-    browseEntries: entries,
-    browseQuery: "~/",
-    canBrowseUp: false,
-    upIcon: "up-icon",
-    directoryIcon: "dir-icon",
-    symlinkIcon: "symlink-icon",
-    browseUp: () => undefined,
-    browseTo: handlers.browseTo ?? (() => undefined),
-    browseToPath: handlers.browseToPath ?? (() => undefined),
-  });
-
   it("uses the symlink icon for symlinked and aliased entries", () => {
     const groups = buildBrowseGroups(
-      makeInput([
-        makeEntry({ name: "real", fullPath: "/p/real" }),
-        makeEntry({ name: "linked", fullPath: "/p/linked", isSymlink: true }),
-        makeEntry({ name: "aliased", fullPath: "/target", isSymlink: true, isAlias: true }),
+      makeBrowseInput([
+        makeBrowseEntry({ name: "real", fullPath: "/p/real" }),
+        makeBrowseEntry({ name: "linked", fullPath: "/p/linked", isSymlink: true }),
+        makeBrowseEntry({ name: "aliased", fullPath: "/target", isSymlink: true, isAlias: true }),
       ]),
     );
 
@@ -214,9 +218,19 @@ describe("buildBrowseGroups", () => {
 
   it("produces unique values for aliases that share a resolved target", () => {
     const groups = buildBrowseGroups(
-      makeInput([
-        makeEntry({ name: "alias-a", fullPath: "/shared/target", isSymlink: true, isAlias: true }),
-        makeEntry({ name: "alias-b", fullPath: "/shared/target", isSymlink: true, isAlias: true }),
+      makeBrowseInput([
+        makeBrowseEntry({
+          name: "alias-a",
+          fullPath: "/shared/target",
+          isSymlink: true,
+          isAlias: true,
+        }),
+        makeBrowseEntry({
+          name: "alias-b",
+          fullPath: "/shared/target",
+          isSymlink: true,
+          isAlias: true,
+        }),
       ]),
     );
 
@@ -228,8 +242,8 @@ describe("buildBrowseGroups", () => {
     const browseTo = vi.fn();
     const browseToPath = vi.fn();
     const groups = buildBrowseGroups(
-      makeInput(
-        [makeEntry({ name: "alias", fullPath: "/target", isSymlink: true, isAlias: true })],
+      makeBrowseInput(
+        [makeBrowseEntry({ name: "alias", fullPath: "/target", isSymlink: true, isAlias: true })],
         { browseTo, browseToPath },
       ),
     );
@@ -246,10 +260,10 @@ describe("buildBrowseGroups", () => {
     const browseTo = vi.fn();
     const browseToPath = vi.fn();
     const groups = buildBrowseGroups(
-      makeInput(
+      makeBrowseInput(
         [
-          makeEntry({ name: "dir", fullPath: "/p/dir" }),
-          makeEntry({ name: "symlink", fullPath: "/p/symlink", isSymlink: true }),
+          makeBrowseEntry({ name: "dir", fullPath: "/p/dir" }),
+          makeBrowseEntry({ name: "symlink", fullPath: "/p/symlink", isSymlink: true }),
         ],
         { browseTo, browseToPath },
       ),
@@ -267,14 +281,8 @@ describe("buildBrowseGroups", () => {
 });
 
 describe("filterBrowseEntries", () => {
-  const makeEntry = (overrides: Partial<FilesystemBrowseEntry>): FilesystemBrowseEntry => ({
-    name: "entry",
-    fullPath: "/entry",
-    ...overrides,
-  });
-
   it("resolves highlightedEntry for non-alias entries", () => {
-    const entry = makeEntry({ name: "dir", fullPath: "/p/dir" });
+    const entry = makeBrowseEntry({ name: "dir", fullPath: "/p/dir" });
     const result = filterBrowseEntries({
       browseEntries: [entry],
       browseFilterQuery: "",
@@ -286,13 +294,13 @@ describe("filterBrowseEntries", () => {
   it("resolves highlightedEntry for alias entries sharing a resolved target", () => {
     // Two aliases in the same listing pointing at the same target; the
     // filename is what disambiguates them.
-    const aliasA = makeEntry({
+    const aliasA = makeBrowseEntry({
       name: "alias-a",
       fullPath: "/shared/target",
       isSymlink: true,
       isAlias: true,
     });
-    const aliasB = makeEntry({
+    const aliasB = makeBrowseEntry({
       name: "alias-b",
       fullPath: "/shared/target",
       isSymlink: true,
@@ -313,7 +321,7 @@ describe("filterBrowseEntries", () => {
     // first `:` after `alias:` would misread the name/fullPath boundary
     // and fail to match. The consumer recomputes the value instead, so
     // the round-trip is robust.
-    const alias = makeEntry({
+    const alias = makeBrowseEntry({
       name: "weird:name",
       fullPath: "/real/target",
       isSymlink: true,

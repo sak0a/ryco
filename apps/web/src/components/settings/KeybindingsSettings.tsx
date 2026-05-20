@@ -111,7 +111,7 @@ function stripDraftIds(draft: ReadonlyArray<DraftRule>): KeybindingRule[] {
 
 function defaultRulesFor(command: KeybindingCommand): KeybindingRule[] {
   return DEFAULT_KEYBINDINGS.filter((rule: KeybindingRule) => rule.command === command).map(
-    (r: KeybindingRule) => ({ ...r }),
+    (r: KeybindingRule) => Object.assign({}, r),
   );
 }
 
@@ -414,7 +414,7 @@ export function KeybindingsSettingsPanel() {
     }
 
     const sortedGroups: CategoryGroup[] = [];
-    for (const category of Object.values(KEYBINDING_CATEGORIES).sort(
+    for (const category of Object.values(KEYBINDING_CATEGORIES).toSorted(
       (a, b) => a.sortWeight - b.sortWeight,
     )) {
       const rows = rowsByCategory.get(category.id);
@@ -492,8 +492,8 @@ export function KeybindingsSettingsPanel() {
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
           <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
           <div className="flex-1 space-y-0.5">
-            {issues.map((issue, i) => (
-              <p key={`${issue.kind}-${i}`}>{issue.message}</p>
+            {issues.map((issue) => (
+              <p key={`${issue.kind}-${issue.message}`}>{issue.message}</p>
             ))}
             {keybindingsConfigPath ? (
               <p className="opacity-70">
@@ -643,9 +643,9 @@ const CommandRow = memo(function CommandRow({
 
       {visibleConflicts.length > 0 ? (
         <div className="animate-in fade-in slide-in-from-top-1 flex flex-col gap-1 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive-foreground/90">
-          {visibleConflicts.map((conflict, i) => (
+          {visibleConflicts.map((conflict) => (
             <ConflictLine
-              key={`${conflict.key}-${i}`}
+              key={`${conflict.key}-${conflict.otherCommand}`}
               conflict={conflict}
               isMac={isMac}
               platform={context.platform}
@@ -693,8 +693,8 @@ function ConflictLine({ conflict, platform, isMac, onSelect }: ConflictLineProps
     <div className="flex flex-wrap items-center gap-1.5">
       <AlertTriangleIcon className="size-3 shrink-0 text-destructive" />
       <span className="inline-flex items-center gap-0.5 font-mono">
-        {tokens.map((token, i) => (
-          <KeyToken key={`${i}-${token}`} token={token} isMac={isMac} />
+        {tokens.map((token) => (
+          <KeyToken key={token} token={token} isMac={isMac} />
         ))}
       </span>
       <span>also bound to</span>
@@ -847,16 +847,14 @@ function ShortcutChip({
               ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-100"
               : "border-border bg-muted/60 text-foreground hover:bg-muted",
         )}
-        style={{
-          ...(isRecording ? { animation: "keybindings-pulse 1.4s ease-in-out infinite" } : {}),
-        }}
+        style={isRecording ? { animation: "keybindings-pulse 1.4s ease-in-out infinite" } : {}}
       >
         {isRecording ? (
           <span className="text-[11px] tracking-[0.04em]">Press shortcut…</span>
         ) : tokens.length === 0 ? (
           <span className="text-muted-foreground/60">Click to set</span>
         ) : (
-          tokens.map((token, i) => <KeyToken key={`${i}-${token}`} token={token} isMac={isMac} />)
+          tokens.map((token) => <KeyToken key={token} token={token} isMac={isMac} />)
         )}
         {!isRecording && rule.when !== undefined ? (
           <span className="ml-1 hidden sm:inline">·</span>

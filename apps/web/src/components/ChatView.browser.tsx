@@ -645,36 +645,23 @@ async function startPromotedServerThreadViaDomainEvent(threadId: ThreadId): Prom
   });
   fixture.snapshot = {
     ...snapshotWithSession,
-    threads: snapshotWithSession.threads.map((thread) =>
-      thread.id === threadId
-        ? {
-            ...thread,
-            latestTurn: {
-              turnId: `turn-${threadId}` as TurnId,
-              state: "running",
-              requestedAt: NOW_ISO,
-              startedAt: NOW_ISO,
-              completedAt: null,
-              assistantMessageId: null,
-            },
-          }
-        : thread,
-    ),
+    threads: snapshotWithSession.threads.map((thread) => {
+      if (thread.id !== threadId) {
+        return thread;
+      }
+      return Object.assign({}, thread, {
+        latestTurn: {
+          turnId: `turn-${threadId}` as TurnId,
+          state: "running",
+          requestedAt: NOW_ISO,
+          startedAt: NOW_ISO,
+          completedAt: null,
+          assistantMessageId: null,
+        },
+      });
+    }),
   };
   sendShellThreadUpsert(threadId);
-}
-
-async function promoteDraftThreadViaDomainEvent(threadId: ThreadId): Promise<void> {
-  await materializePromotedDraftThreadViaDomainEvent(threadId);
-  await startPromotedServerThreadViaDomainEvent(threadId);
-  await vi.waitFor(
-    () => {
-      expect(useComposerDraftStore.getState().draftThreadsByThreadKey[threadKeyFor(threadId)]).toBe(
-        undefined,
-      );
-    },
-    { timeout: 8_000, interval: 16 },
-  );
 }
 
 function createDraftOnlySnapshot(): OrchestrationReadModel {

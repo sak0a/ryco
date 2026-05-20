@@ -644,7 +644,7 @@ export const make = Effect.fn("makeAzureDevOpsCli")(function* () {
         ),
       );
       return Effect.all([showCmd, commentsCmd], { concurrency: 2 }).pipe(
-        Effect.map(([detail, comments]) => ({ ...detail, comments })),
+        Effect.map(([detail, comments]) => Object.assign({}, detail, { comments })),
       );
     },
   });

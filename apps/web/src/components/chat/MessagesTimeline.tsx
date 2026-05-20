@@ -1082,7 +1082,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
 // a leading chevron, conditionally mounting WorkEntryExpandedPanel below.
 // ---------------------------------------------------------------------------
 
-const ANSI_SGR_RE = /\u001b\[[0-9;]*m/g;
+const ANSI_SGR_RE = new RegExp(String.raw`\u001b\[[0-9;]*m`, "g");
 
 function workEntryExpandPanelId(entryId: string): string {
   return `work-entry-panel:${entryId}`;

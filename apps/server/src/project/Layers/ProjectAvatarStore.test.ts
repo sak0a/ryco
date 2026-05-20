@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, expect } from "@effect/vitest";
-import { Effect, FileSystem, Layer } from "effect";
+import { Effect, FileSystem } from "effect";
 
 import { ProjectAvatarStore } from "../Services/ProjectAvatarStore.ts";
 import { ProjectAvatarStoreLive } from "./ProjectAvatarStore.ts";
