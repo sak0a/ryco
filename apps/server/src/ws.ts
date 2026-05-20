@@ -1615,6 +1615,18 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             ),
             { "rpc.aggregate": "server" },
           ),
+        [WS_METHODS.keybindingsReplaceCustom]: ({ rules }) =>
+          observeRpcEffect(
+            WS_METHODS.keybindingsReplaceCustom,
+            ownerEffect(
+              WS_METHODS.keybindingsReplaceCustom,
+              Effect.gen(function* () {
+                const keybindingsConfig = yield* keybindings.replaceCustomKeybindings(rules);
+                return { keybindings: keybindingsConfig, issues: [] };
+              }),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverGetSettings]: (_input) =>
           observeRpcEffect(
             WS_METHODS.serverGetSettings,

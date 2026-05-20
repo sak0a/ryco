@@ -121,6 +121,8 @@ import {
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
+  KeybindingsReplaceCustomInput,
+  KeybindingsReplaceCustomResult,
 } from "./server.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
@@ -216,6 +218,7 @@ export const WS_METHODS = {
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
   serverUpsertKeybinding: "server.upsertKeybinding",
+  keybindingsReplaceCustom: "keybindings.replaceCustom",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
@@ -388,6 +391,12 @@ export type EmptyRpcResult = typeof EmptyRpcResult.Type;
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
   payload: ServerUpsertKeybindingInput,
   success: ServerUpsertKeybindingResult,
+  error: Schema.Union([KeybindingsConfigError, AuthRpcError]),
+});
+
+export const WsKeybindingsReplaceCustomRpc = Rpc.make(WS_METHODS.keybindingsReplaceCustom, {
+  payload: KeybindingsReplaceCustomInput,
+  success: KeybindingsReplaceCustomResult,
   error: Schema.Union([KeybindingsConfigError, AuthRpcError]),
 });
 
@@ -1010,6 +1019,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpsertKeybindingRpc,
+  WsKeybindingsReplaceCustomRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerDiscoverSourceControlRpc,

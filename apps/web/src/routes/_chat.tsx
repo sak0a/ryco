@@ -7,7 +7,9 @@ import {
   startNewLocalThreadFromContext,
   startNewThreadFromContext,
 } from "../lib/chatThreadActions";
+import { isComposerFocused } from "../lib/composerFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { useModelPickerOpen } from "../modelPickerOpenState";
 import { resolveShortcutCommand } from "../keybindings";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
@@ -26,19 +28,28 @@ function ChatRouteGlobalShortcuts() {
       ? selectThreadTerminalState(state.terminalStateByThreadKey, routeThreadRef).terminalOpen
       : false,
   );
+  const modelPickerOpen = useModelPickerOpen();
   const appSettings = useSettings();
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      // Read modal/palette state via `getState()` at event time so we always
+      // see the latest value without having to re-bind the listener on every
+      // toggle. The other booleans come from React-tracked stores or DOM
+      // queries that are cheap enough to call per event.
+      const commandPaletteOpen = useCommandPaletteStore.getState().open;
       const command = resolveShortcutCommand(event, keybindings, {
         context: {
           terminalFocus: isTerminalFocused(),
           terminalOpen,
+          modelPickerOpen,
+          commandPaletteOpen,
+          composerFocus: isComposerFocused(),
         },
       });
 
-      if (useCommandPaletteStore.getState().open) {
+      if (commandPaletteOpen) {
         return;
       }
 
@@ -91,6 +102,7 @@ function ChatRouteGlobalShortcuts() {
     defaultProjectRef,
     selectedThreadKeysSize,
     terminalOpen,
+    modelPickerOpen,
     appSettings.defaultThreadEnvMode,
   ]);
 

@@ -203,6 +203,9 @@ export interface WsRpcClient {
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
   };
+  readonly keybindings: {
+    readonly replaceCustom: RpcUnaryMethod<typeof WS_METHODS.keybindingsReplaceCustom>;
+  };
   readonly mcp: {
     readonly listWorkspaces: RpcUnaryNoArgMethod<typeof WS_METHODS.mcpListWorkspaces>;
     readonly listServers: RpcUnaryMethod<typeof WS_METHODS.mcpListServers>;
@@ -431,6 +434,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
           ...options,
           tag: WS_METHODS.subscribeAuthAccess,
         }),
+    },
+    keybindings: {
+      replaceCustom: (input) =>
+        transport.request((client) => client[WS_METHODS.keybindingsReplaceCustom](input)),
     },
     mcp: {
       listWorkspaces: () => transport.request((client) => client[WS_METHODS.mcpListWorkspaces]({})),

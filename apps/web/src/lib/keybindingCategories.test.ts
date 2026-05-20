@@ -1,0 +1,56 @@
+import { describe, expect, it } from "vitest";
+import { KEYBINDING_CATEGORIES, getCommandMeta } from "./keybindingCategories";
+
+describe("keybindingCategories", () => {
+  it("maps terminal commands to the Terminal category", () => {
+    expect(getCommandMeta("terminal.toggle").category).toBe(KEYBINDING_CATEGORIES.terminal);
+    expect(getCommandMeta("terminal.split").category).toBe(KEYBINDING_CATEGORIES.terminal);
+    expect(getCommandMeta("terminal.new").category).toBe(KEYBINDING_CATEGORIES.terminal);
+    expect(getCommandMeta("terminal.close").category).toBe(KEYBINDING_CATEGORIES.terminal);
+  });
+
+  it("maps chat commands to the Chat category", () => {
+    expect(getCommandMeta("chat.new").category).toBe(KEYBINDING_CATEGORIES.chat);
+    expect(getCommandMeta("chat.newLocal").category).toBe(KEYBINDING_CATEGORIES.chat);
+  });
+
+  it("maps thread navigation to the Threads category", () => {
+    expect(getCommandMeta("thread.previous").category).toBe(KEYBINDING_CATEGORIES.thread);
+    expect(getCommandMeta("thread.jump.1").category).toBe(KEYBINDING_CATEGORIES.thread);
+    expect(getCommandMeta("thread.jump.9").category).toBe(KEYBINDING_CATEGORIES.thread);
+  });
+
+  it("maps model-picker commands to the Model picker category", () => {
+    expect(getCommandMeta("modelPicker.toggle").category).toBe(KEYBINDING_CATEGORIES.modelPicker);
+    expect(getCommandMeta("modelPicker.jump.5").category).toBe(KEYBINDING_CATEGORIES.modelPicker);
+  });
+
+  it("maps script.<id>.run commands to the Project scripts category", () => {
+    expect(getCommandMeta("script.test.run").category).toBe(KEYBINDING_CATEGORIES.script);
+    expect(getCommandMeta("script.build.run").category).toBe(KEYBINDING_CATEGORIES.script);
+  });
+
+  it("returns a friendly title for static commands", () => {
+    expect(getCommandMeta("terminal.toggle").title).toBe("Toggle terminal drawer");
+    expect(getCommandMeta("commandPalette.toggle").title).toBe("Open command palette");
+    expect(getCommandMeta("editor.openFavorite").title).toBe("Open in preferred editor");
+  });
+
+  it("derives a title from the script id when no override is given", () => {
+    expect(getCommandMeta("script.test.run").title).toBe("Run: test");
+    expect(getCommandMeta("script.build-dev.run").title).toBe("Run: build-dev");
+  });
+
+  it("prefers the provided script title over the derived one", () => {
+    expect(getCommandMeta("script.test.run", "Run tests").title).toBe("Run tests");
+  });
+
+  it("assigns increasing sort weights within a category", () => {
+    expect(getCommandMeta("terminal.toggle").sortWeight).toBeLessThan(
+      getCommandMeta("terminal.close").sortWeight,
+    );
+    expect(getCommandMeta("thread.previous").sortWeight).toBeLessThan(
+      getCommandMeta("thread.jump.1").sortWeight,
+    );
+  });
+});

@@ -35,8 +35,11 @@ pipeline and writes via a new RPC. The "Open file" escape hatch in
   `Restore defaults` already exists and gains the `keybindings` section.
 - Search box that filters by command id, title, current shortcut, or `when`
   text.
-- Server RPC `keybindingsReplaceCustom(rules)` replacing the existing
-  `upsertKeybindingRule`.
+- Server RPC `keybindingsReplaceCustom(rules)` for the panel. The existing
+  `serverUpsertKeybinding` RPC is **kept** because `apps/web/src/components/ChatView.tsx`
+  uses it for the inline "create project script with a keybinding" flow — removing
+  it would force two-step UX. Both RPCs are routed through the same atomic
+  write path and the file watcher behaves identically.
 
 ### Out of scope
 
@@ -93,13 +96,13 @@ user is editing inside the panel.
 
 ## Server (`apps/server/src/keybindings.ts`)
 
-- Remove `upsertKeybindingRule` from `KeybindingsShape` (and from
-  `wsServer.ts` routing) — the new method subsumes it.
+- Keep `upsertKeybindingRule` on `KeybindingsShape` for the inline single-rule
+  caller in `ChatView.tsx`.
 - Add `replaceCustomKeybindings(rules: KeybindingsConfig)` on `KeybindingsShape`
   with the existing `upsertSemaphore`-gated implementation:
   1. Validate each rule via `ResolvedKeybindingFromConfig` — fail the whole
      call if any rule is malformed (no partial writes).
-  2. Cap to `MAX_KEYBINDINGS_COUNT`; log a warning and truncate the *oldest*
+  2. Cap to `MAX_KEYBINDINGS_COUNT`; log a warning and truncate the _oldest_
      entries (semantics chosen to match the existing
      `syncDefaultKeybindingsOnStartup` truncation rule — last entries win).
   3. Write atomically via `writeFileStringAtomically`.
@@ -166,14 +169,14 @@ Wiring:
   `aria-label="Edit shortcut for <command title>"`.
 - **Enter recording** — click, or focus + Enter/Space. Sets state to
   `recording`. Attaches a `keydown` listener on `window` with `capture:
-  true` and `preventDefault: true` so global app shortcuts (the existing
+true` and `preventDefault: true` so global app shortcuts (the existing
   `keybindings.ts` runtime) do not fire while recording.
 - **Capture** — first non-modifier `keydown` becomes the shortcut. Modifiers
   held at that moment populate `metaKey/ctrlKey/altKey/shiftKey`. To keep
   bindings cross-platform, the recorder collapses the platform's primary
   modifier into `mod`: on macOS, `metaKey` (Cmd) becomes `mod`; on Linux/Windows,
   `ctrlKey` becomes `mod`. The other modifiers (`shift`, `alt`/`option`, and
-  the *non-primary* `meta`/`ctrl`) are recorded verbatim, mirroring how the
+  the _non-primary_ `meta`/`ctrl`) are recorded verbatim, mirroring how the
   existing `parseKeybindingShortcut` decodes `mod` at runtime. Modifier-only
   events (just `Shift`, just `Cmd`, etc.) do not commit.
 - **Special-key escape hatches** —
@@ -191,7 +194,7 @@ Wiring:
   surfaces via the existing `toastManager` with the error detail.
 - **Conflict detection** — runs synchronously on the candidate shortcut
   against the draft. A rule conflicts when its serialized shortcut equals
-  another rule's *and* their `when` contexts overlap (`undefined` overlaps
+  another rule's _and_ their `when` contexts overlap (`undefined` overlaps
   with anything, identical `when` strings overlap, otherwise we treat them
   as non-overlapping for the v1 detector — same heuristic the server's
   `hasSameShortcutContext` already uses).
@@ -204,13 +207,13 @@ Wiring:
 Click the inline `when` chip on a `ShortcutChip`. `WhenPresetMenu` opens
 anchored to the chip with these entries:
 
-| Label                | Stored value         |
-| -------------------- | -------------------- |
-| Always               | `undefined`          |
-| Terminal focused     | `terminalFocus`      |
-| Not in terminal      | `!terminalFocus`     |
-| Terminal open        | `terminalOpen`       |
-| Terminal not open    | `!terminalOpen`      |
+| Label             | Stored value     |
+| ----------------- | ---------------- |
+| Always            | `undefined`      |
+| Terminal focused  | `terminalFocus`  |
+| Not in terminal   | `!terminalFocus` |
+| Terminal open     | `terminalOpen`   |
+| Terminal not open | `!terminalOpen`  |
 
 If the on-disk `when` is something outside this set (e.g.
 `terminalOpen && !terminalFocus`), the menu shows a non-interactive header
