@@ -13,6 +13,7 @@ import { Effect, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { normalizeModelSlug } from "@ryco/shared/model";
 import { isWindowsCommandNotFound } from "../processRunner.ts";
+import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 
 export const DEFAULT_TIMEOUT_MS = 4_000;
 // Auth status checks involve disk/network lookups and can be slow on first run (especially Windows)
@@ -215,10 +216,4 @@ export function buildServerProvider(input: {
 export const collectStreamAsString = <E>(
   stream: Stream.Stream<Uint8Array, E>,
 ): Effect.Effect<string, E> =>
-  stream.pipe(
-    Stream.decodeText(),
-    Stream.runFold(
-      () => "",
-      (acc, chunk) => acc + chunk,
-    ),
-  );
+  collectUint8StreamText({ stream }).pipe(Effect.map((collected) => collected.text));

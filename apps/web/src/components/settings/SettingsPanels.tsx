@@ -5,6 +5,10 @@ import {
   type DesktopUpdateChannel,
   EDITORS,
   type EditorId,
+  PROVIDER_DISPLAY_NAMES,
+  ProviderDriverKind,
+  type ProviderInstanceConfig,
+  type ProviderInstanceId,
   type ScopedThreadRef,
 } from "@ryco/contracts";
 import { scopeThreadRef } from "@ryco/client-runtime";
@@ -45,7 +49,17 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { DRIVER_OPTIONS } from "./providerDriverMeta";
+import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
+import {
+  canOneClickUpdateProviderCandidate,
+  collectProviderUpdateCandidates,
+  hasOneClickUpdateProviderCandidate,
+  isProviderUpdateActive,
+  type ProviderUpdateCandidate,
+} from "../ProviderUpdateLaunchNotification.logic";
+import { ProviderInstanceCard } from "./ProviderInstanceCard";
+import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
+import { buildProviderInstanceUpdatePatch } from "./SettingsPanels.logic";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -341,37 +355,12 @@ function AboutVersionSection() {
 export function useSettingsRestore(onRestored?: () => void) {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
-  const { resetSettings } = useUpdateSettings();
+  const { updateSettings } = useUpdateSettings();
 
   const isGitWritingModelDirty = !Equal.equals(
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
-  // A provider surface is "dirty" if either the legacy per-kind
-  // `settings.providers[kind]` struct differs from defaults (for users
-  // on pre-migration data) or the new `settings.providerInstances` map
-  // has any entries (every edit to a default slot promotes it into an
-  // explicit entry, so any key in that map represents user intent to
-  // diverge from factory defaults). Checking both keeps the Restore
-  // Defaults chip accurate throughout the legacy→instance migration.
-  const areProviderSettingsDirty =
-    PROVIDER_SETTINGS.some((providerSettings) => {
-      type LegacyProviderSettings = (typeof settings.providers)[keyof typeof settings.providers];
-      const currentProviders = settings.providers as Record<
-        string,
-        LegacyProviderSettings | undefined
-      >;
-      const defaultProviders = DEFAULT_UNIFIED_SETTINGS.providers as Record<
-        string,
-        LegacyProviderSettings | undefined
-      >;
-      const currentSettings = currentProviders[providerSettings.provider];
-      const defaultSettings = defaultProviders[providerSettings.provider];
-      return !Equal.equals(currentSettings, defaultSettings);
-    }) ||
-    Object.keys(settings.providerInstances ?? {}).length > 0 ||
-    Object.keys(settings.providerModelPreferences ?? {}).length > 0 ||
-    (settings.favorites ?? []).length > 0;
 
   const changedSettingLabels = useMemo(
     () => [
@@ -404,10 +393,8 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Delete confirmation"]
         : []),
       ...(isGitWritingModelDirty ? ["Git writing model"] : []),
-      ...(areProviderSettingsDirty ? ["Providers"] : []),
     ],
     [
-      areProviderSettingsDirty,
       isGitWritingModelDirty,
       settings.autoOpenPlanSidebar,
       settings.confirmThreadArchive,
@@ -433,9 +420,20 @@ export function useSettingsRestore(onRestored?: () => void) {
     if (!confirmed) return;
 
     setTheme("system");
-    resetSettings();
+    updateSettings({
+      timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
+      diffWordWrap: DEFAULT_UNIFIED_SETTINGS.diffWordWrap,
+      diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
+      autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
+      enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
+      defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
+      addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
+      confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
+      confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
+      textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+    });
     onRestored?.();
-  }, [changedSettingLabels, onRestored, resetSettings, setTheme]);
+  }, [changedSettingLabels, onRestored, setTheme, updateSettings]);
 
   return {
     changedSettingLabels,
