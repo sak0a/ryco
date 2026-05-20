@@ -38,7 +38,7 @@ export const ComposerHintRow = memo(function ComposerHintRow(props: ComposerHint
   return (
     <div
       className={cn(
-        "mx-auto mb-2 flex max-w-208 flex-wrap items-center justify-center gap-x-3 gap-y-1 text-muted-foreground text-xs",
+        "mx-auto mb-2 flex max-w-208 flex-wrap items-center justify-center gap-x-3 gap-y-1 text-muted-foreground text-sm",
         props.className,
       )}
       data-testid="composer-hint-row"
@@ -58,7 +58,7 @@ export const ComposerHintRow = memo(function ComposerHintRow(props: ComposerHint
               onClick={() => props.onInsertTrigger(pill.trigger)}
               className="inline-flex cursor-pointer items-center gap-1 rounded-sm transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
             >
-              <Icon className="size-3.5 opacity-70" aria-hidden />
+              <Icon className="size-4 opacity-70" aria-hidden />
               <span>{pill.label}</span>
             </button>
           </Fragment>
