@@ -1,8 +1,19 @@
-import { memo } from "react";
+import { Fragment, memo } from "react";
+import { BugIcon, GitPullRequestIcon, type LucideIcon, SlashIcon, TicketIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
-import { Button } from "../ui/button";
-import { type HintRowTrigger, resolveHintRowPills } from "./ComposerHintRow.logic";
+import {
+  type HintRowPill,
+  type HintRowTrigger,
+  resolveHintRowPills,
+} from "./ComposerHintRow.logic";
+
+const PILL_ICON: Record<HintRowPill["id"], LucideIcon> = {
+  "reference-issue": BugIcon,
+  "reference-pr": GitPullRequestIcon,
+  "reference-jira": TicketIcon,
+  "browse-commands": SlashIcon,
+};
 
 export interface ComposerHintRowProps {
   readonly visible: boolean;
@@ -27,22 +38,32 @@ export const ComposerHintRow = memo(function ComposerHintRow(props: ComposerHint
   return (
     <div
       className={cn(
-        "mx-auto mb-2 flex max-w-208 flex-wrap items-center justify-center gap-2",
+        "mx-auto mb-2 flex max-w-208 flex-wrap items-center justify-center gap-x-3 gap-y-1 text-muted-foreground text-xs",
         props.className,
       )}
       data-testid="composer-hint-row"
     >
-      {pills.map((pill) => (
-        <Button
-          key={pill.id}
-          variant="outline"
-          size="sm"
-          aria-label={pill.ariaLabel}
-          onClick={() => props.onInsertTrigger(pill.trigger)}
-        >
-          {pill.label}
-        </Button>
-      ))}
+      {pills.map((pill, index) => {
+        const Icon = PILL_ICON[pill.id];
+        return (
+          <Fragment key={pill.id}>
+            {index > 0 ? (
+              <span aria-hidden className="select-none text-muted-foreground/40">
+                •
+              </span>
+            ) : null}
+            <button
+              type="button"
+              aria-label={pill.ariaLabel}
+              onClick={() => props.onInsertTrigger(pill.trigger)}
+              className="inline-flex cursor-pointer items-center gap-1 rounded-sm transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+            >
+              <Icon className="size-3.5 opacity-70" aria-hidden />
+              <span>{pill.label}</span>
+            </button>
+          </Fragment>
+        );
+      })}
     </div>
   );
 });
