@@ -40,7 +40,7 @@ describe("TraceSink", () => {
         try {
           const sink = yield* makeTraceSink({
             filePath: tracePath,
-            maxBytes: 1024,
+            maxBytes: Number.MAX_SAFE_INTEGER,
             maxFiles: 2,
             batchWindowMs: 10_000,
           });
