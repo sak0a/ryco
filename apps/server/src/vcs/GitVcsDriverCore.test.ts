@@ -173,6 +173,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           (call) => call.operation === "GitVcsDriver.fetchRemoteForStatus",
         );
         assert.isDefined(fetchCall);
+        assert.equal(fetchCall?.env?.GIT_TERMINAL_PROMPT, "0");
         assert.equal(fetchCall?.env?.SSH_ASKPASS_REQUIRE, "never");
       }).pipe(Effect.provide(OverrideTestLayer)),
     );

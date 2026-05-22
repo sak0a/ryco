@@ -29,6 +29,7 @@ import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 const DEFAULT_VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30);
 const VCS_STATUS_REFRESH_FAILURE_BASE_DELAY = Duration.seconds(30);
 const VCS_STATUS_REFRESH_FAILURE_MAX_DELAY = Duration.minutes(15);
+const MAX_REMOTE_REFRESH_CONSECUTIVE_FAILURES = 64;
 
 interface VcsStatusChange {
   readonly cwd: string;
@@ -89,7 +90,8 @@ export function remoteRefreshFailureDelay(
   consecutiveFailures: number,
   configuredInterval: Duration.Duration,
 ): Duration.Duration {
-  const exponent = Math.max(0, consecutiveFailures - 1);
+  const clampedFailures = Math.min(consecutiveFailures, MAX_REMOTE_REFRESH_CONSECUTIVE_FAILURES);
+  const exponent = Math.max(0, clampedFailures - 1);
   const backoffMs =
     Duration.toMillis(VCS_STATUS_REFRESH_FAILURE_BASE_DELAY) * Math.pow(2, exponent);
   const cappedBackoff = Duration.min(
@@ -274,9 +276,8 @@ export const layer = Layer.effect(
             return configuredInterval;
           }
 
-          const consecutiveFailures = yield* Ref.updateAndGet(
-            consecutiveFailuresRef,
-            (count) => count + 1,
+          const consecutiveFailures = yield* Ref.updateAndGet(consecutiveFailuresRef, (count) =>
+            Math.min(count + 1, MAX_REMOTE_REFRESH_CONSECUTIVE_FAILURES),
           );
           const nextDelay = remoteRefreshFailureDelay(consecutiveFailures, configuredInterval);
           yield* Effect.logWarning("VCS remote status refresh failed", {
@@ -287,6 +288,8 @@ export const layer = Layer.effect(
           });
           return nextDelay;
         });
+
+        yield* Ref.set(consecutiveFailuresRef, 0);
 
         return yield* refreshRemoteStatusIfEnabled.pipe(
           Effect.repeat(

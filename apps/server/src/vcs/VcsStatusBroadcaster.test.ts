@@ -96,6 +96,12 @@ describe("VcsStatusBroadcaster", () => {
       Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(10, Duration.seconds(5))),
       Duration.toMillis(Duration.minutes(15)),
     );
+    assert.equal(
+      Duration.toMillis(
+        VcsStatusBroadcaster.remoteRefreshFailureDelay(10_000, Duration.seconds(5)),
+      ),
+      Duration.toMillis(Duration.minutes(15)),
+    );
   });
 
   it.effect("reuses the cached VCS status across repeated reads", () => {

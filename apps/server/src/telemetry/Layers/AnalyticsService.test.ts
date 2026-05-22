@@ -34,6 +34,27 @@ interface RecordedBatchBody {
   }>;
 }
 
+function waitFor(predicate: () => boolean, timeoutMs = 1_000): Effect.Effect<void> {
+  return Effect.promise(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const deadline = Date.now() + timeoutMs;
+        const poll = () => {
+          if (predicate()) {
+            resolve();
+            return;
+          }
+          if (Date.now() >= deadline) {
+            reject(new Error("Timed out waiting for expectation."));
+            return;
+          }
+          setTimeout(poll, 10);
+        };
+        poll();
+      }),
+  );
+}
+
 it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
   it.effect("flush drains all buffered events across multiple batches", () =>
     Effect.gen(function* () {
@@ -172,6 +193,69 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       );
       assert.equal(batchRequests.length, 1);
       assert.equal(batchRequests[0]?.body.batch[0]?.event, "test.flush.scheduled");
+    }),
+  );
+
+  it.effect("keeps background flushes single-flight during bursts", () =>
+    Effect.gen(function* () {
+      const capturedRequests: Array<RecordedBatchRequest> = [];
+      let activeRequests = 0;
+      let maxActiveRequests = 0;
+      const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
+        prefix: "s3-telemetry-single-flight-",
+      });
+
+      const telemetryLayer = AnalyticsServiceLayerLive.pipe(Layer.provideMerge(serverConfigLayer));
+      const configLayer = ConfigProvider.layer(
+        ConfigProvider.fromUnknown({
+          RYCO_TELEMETRY_ENABLED: true,
+          RYCO_POSTHOG_KEY: "phc_test_key",
+          RYCO_POSTHOG_HOST: "",
+          RYCO_TELEMETRY_FLUSH_BATCH_SIZE: 1,
+          RYCO_TELEMETRY_FLUSH_INTERVAL_MS: 1,
+        }),
+      );
+      const batchServerLayer = HttpServer.serve(
+        Effect.gen(function* () {
+          activeRequests += 1;
+          maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+          const request = yield* HttpServerRequest.HttpServerRequest;
+          if (request.method !== "POST") {
+            activeRequests -= 1;
+            return HttpServerResponse.empty({ status: 404 });
+          }
+
+          const payload = yield* request.json.pipe(
+            Effect.map((body) => body as RecordedBatchRequest["body"]),
+            Effect.catch(() => Effect.succeed(null)),
+          );
+
+          yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 20)));
+          capturedRequests.push({ path: request.url, body: payload });
+          activeRequests -= 1;
+
+          return HttpServerResponse.jsonUnsafe({});
+        }),
+      );
+      const runtimeLayer = telemetryLayer.pipe(
+        Layer.provide(configLayer),
+        Layer.provideMerge(NodeHttpServer.layerTest),
+      );
+
+      yield* Effect.gen(function* () {
+        yield* Layer.launch(batchServerLayer).pipe(Effect.forkScoped);
+        const telemetryIdentifier = yield* getTelemetryIdentifier;
+        assert.equal(telemetryIdentifier !== null, true);
+        const analytics = yield* AnalyticsService;
+
+        for (let index = 0; index < 5; index += 1) {
+          yield* analytics.record("test.flush.single-flight", { index });
+        }
+
+        yield* waitFor(() => capturedRequests.length === 5);
+      }).pipe(Effect.provide(runtimeLayer));
+
+      assert.equal(maxActiveRequests, 1);
     }),
   );
 });

@@ -61,6 +61,34 @@ describe("TraceSink", () => {
     ),
   );
 
+  it.effect("re-arms the batch-window timer when a write fails", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-trace-sink-"));
+        const tracePath = tempDir;
+        const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+
+        try {
+          const sink = yield* makeTraceSink({
+            filePath: tracePath,
+            maxBytes: 1024,
+            maxFiles: 2,
+            batchWindowMs: 10_000,
+          });
+
+          sink.push(makeRecord("alpha"));
+          assert.equal(setTimeoutSpy.mock.calls.length, 1);
+
+          yield* sink.flush;
+          assert.equal(setTimeoutSpy.mock.calls.length, 2);
+        } finally {
+          setTimeoutSpy.mockRestore();
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      }),
+    ),
+  );
+
   it.effect("flushes buffered records on close", () =>
     Effect.scoped(
       Effect.gen(function* () {

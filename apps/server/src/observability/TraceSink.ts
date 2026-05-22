@@ -24,6 +24,7 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
     filePath: options.filePath,
     maxBytes: options.maxBytes,
     maxFiles: options.maxFiles,
+    throwOnError: true,
   });
 
   let buffer: Array<string> = [];
@@ -38,7 +39,7 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
     flushTimeoutId = null;
   };
 
-  const flushUnsafe = () => {
+  const flushUnsafe = (options?: { readonly scheduleRetry?: boolean }) => {
     clearScheduledFlush();
 
     if (buffer.length === 0) {
@@ -52,10 +53,13 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
       sink.write(chunk);
     } catch {
       buffer.unshift(chunk);
+      if (options?.scheduleRetry !== false) {
+        scheduleFlush();
+      }
     }
   };
 
-  const scheduleFlush = () => {
+  function scheduleFlush() {
     if (buffer.length === 0 || flushTimeoutId !== null) {
       return;
     }
@@ -70,12 +74,15 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
       flushUnsafe();
     }, options.batchWindowMs);
     flushTimeoutId.unref?.();
-  };
+  }
 
-  const flush = Effect.sync(flushUnsafe).pipe(Effect.withTracerEnabled(false));
+  const flush = Effect.sync(() => flushUnsafe()).pipe(Effect.withTracerEnabled(false));
+  const close = Effect.sync(() => flushUnsafe({ scheduleRetry: false })).pipe(
+    Effect.withTracerEnabled(false),
+  );
 
   yield* Effect.addFinalizer(() =>
-    Effect.sync(clearScheduledFlush).pipe(Effect.andThen(flush), Effect.ignore),
+    Effect.sync(clearScheduledFlush).pipe(Effect.andThen(close), Effect.ignore),
   );
 
   return {
@@ -93,6 +100,6 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
       }
     },
     flush,
-    close: () => flush,
+    close: () => close,
   } satisfies TraceSink;
 });

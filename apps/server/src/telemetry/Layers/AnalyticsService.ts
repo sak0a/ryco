@@ -46,6 +46,7 @@ const makeAnalyticsService = Effect.gen(function* () {
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
   let flushTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  let flushRunning = false;
 
   const clearScheduledFlush = Effect.sync(() => {
     if (flushTimeoutId === null) {
@@ -121,7 +122,7 @@ const makeAnalyticsService = Effect.gen(function* () {
     flushTimeoutId = setTimeout(
       () => {
         flushTimeoutId = null;
-        runFork(flush);
+        runFlushNow();
       },
       Math.max(0, telemetryConfig.flushIntervalMs),
     );
@@ -168,6 +169,23 @@ const makeAnalyticsService = Effect.gen(function* () {
     }
   });
 
+  function runFlushNow() {
+    if (flushRunning) {
+      return;
+    }
+
+    flushRunning = true;
+    runFork(
+      flush.pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            flushRunning = false;
+          }),
+        ),
+      ),
+    );
+  }
+
   const record: AnalyticsServiceShape["record"] = Effect.fn("record")(
     function* (event, properties) {
       if (!telemetryConfig.enabled || !identifier) return;
@@ -182,7 +200,7 @@ const makeAnalyticsService = Effect.gen(function* () {
 
       if (enqueueResult.size >= telemetryConfig.flushBatchSize) {
         yield* Effect.sync(() => {
-          runFork(flush);
+          runFlushNow();
         });
         return;
       }
