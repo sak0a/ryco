@@ -65,8 +65,11 @@ describe("TraceSink", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-trace-sink-"));
-        const tracePath = tempDir;
+        const tracePath = path.join(tempDir, "server.trace.ndjson");
         const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+        const appendFileSyncSpy = vi.spyOn(fs, "appendFileSync").mockImplementationOnce(() => {
+          throw new Error("forced trace sink write failure");
+        });
 
         try {
           const sink = yield* makeTraceSink({
@@ -82,6 +85,7 @@ describe("TraceSink", () => {
           yield* sink.flush;
           assert.equal(setTimeoutSpy.mock.calls.length, 2);
         } finally {
+          appendFileSyncSpy.mockRestore();
           setTimeoutSpy.mockRestore();
           fs.rmSync(tempDir, { recursive: true, force: true });
         }
