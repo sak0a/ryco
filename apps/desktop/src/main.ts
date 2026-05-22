@@ -128,6 +128,8 @@ const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
 const SAVED_ENVIRONMENT_REGISTRY_PATH = Path.join(STATE_DIR, "saved-environments.json");
 const SHELL_ENVIRONMENT_CACHE_PATH = Path.join(STATE_DIR, "shell-environment-cache.json");
 const DESKTOP_SCHEME = "s3";
+const DESKTOP_BOOT_HOST = "app";
+const DESKTOP_BOOT_PATH = "/desktop-boot.html";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 // Dev-only SSH launcher override. Set this to an absolute path on the SSH host
@@ -310,6 +312,23 @@ function resolveDesktopDevServerUrl(): string {
   }
 
   return devServerUrl;
+}
+
+function resolveDesktopBootUrl(): string {
+  return `${DESKTOP_SCHEME}://${DESKTOP_BOOT_HOST}${DESKTOP_BOOT_PATH}`;
+}
+
+function isDesktopBootUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.protocol === `${DESKTOP_SCHEME}:` &&
+      url.hostname === DESKTOP_BOOT_HOST &&
+      url.pathname === DESKTOP_BOOT_PATH
+    );
+  } catch {
+    return false;
+  }
 }
 
 function backendChildEnv(): NodeJS.ProcessEnv {
@@ -653,21 +672,50 @@ function ensureDevelopmentInitialWindowOpen(): void {
   developmentInitialWindowOpenInFlight = nextOpen;
 }
 
-function ensureInitialBackendWindowOpen(): void {
+function ensurePackagedBootstrapWindowOpen(reason: string): BrowserWindow | null {
+  if (isDevelopment) {
+    return null;
+  }
+
   const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
-  if (isDevelopment || existingWindow !== null || backendInitialWindowOpenInFlight !== null) {
+  if (existingWindow !== null) {
+    return existingWindow;
+  }
+
+  mainWindow = createWindow();
+  writeDesktopLogHeader(`bootstrap main window created reason=${reason}`);
+  return mainWindow;
+}
+
+function loadPackagedBackendAppWindow(window: BrowserWindow, reason: string): void {
+  if (isDevelopment || window.isDestroyed() || backendHttpUrl.length === 0) {
     return;
   }
+
+  const currentUrl = window.webContents.getURL();
+  if (currentUrl && currentUrl !== "about:blank" && !isDesktopBootUrl(currentUrl)) {
+    return;
+  }
+
+  writeDesktopLogHeader(`bootstrap backend app load requested reason=${reason}`);
+  void window.loadURL(backendHttpUrl);
+}
+
+function ensureInitialBackendWindowOpen(): void {
+  if (isDevelopment || backendInitialWindowOpenInFlight !== null) {
+    return;
+  }
+
+  ensurePackagedBootstrapWindowOpen("backend-bootstrap");
 
   const nextOpen = waitForBackendWindowReady(backendHttpUrl)
     .then((source) => {
       markDesktopStartupPhase("desktop.backend.listening", `source=${source}`);
       writeDesktopLogHeader(`bootstrap backend ready source=${source}`);
-      if (mainWindow ?? BrowserWindow.getAllWindows()[0]) {
-        return;
+      const window = ensurePackagedBootstrapWindowOpen("backend-ready");
+      if (window) {
+        loadPackagedBackendAppWindow(window, "backend-ready");
       }
-      mainWindow = createWindow();
-      writeDesktopLogHeader("bootstrap main window created");
     })
     .catch((error) => {
       if (isBackendReadinessAborted(error)) {
@@ -2259,7 +2307,20 @@ function createWindow(): BrowserWindow {
       }, 1000);
     });
   } else {
-    void window.loadURL(backendHttpUrl);
+    const bootUrl = resolveDesktopBootUrl();
+    void window.loadURL(bootUrl);
+    window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+      if (errorCode === -3 || window.isDestroyed()) {
+        return;
+      }
+      writeDesktopLogHeader(
+        `packaged renderer load failed code=${errorCode} desc=${errorDescription} url=${validatedURL}`,
+      );
+      if (isDesktopBootUrl(validatedURL) && backendHttpUrl.length > 0) {
+        writeDesktopLogHeader("packaged boot document failed; falling back to backend URL");
+        void window.loadURL(backendHttpUrl);
+      }
+    });
   }
 
   window.on("closed", () => {
@@ -2325,6 +2386,9 @@ async function bootstrap(): Promise<void> {
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");
+  if (!isDevelopment) {
+    ensurePackagedBootstrapWindowOpen("pre-backend-bootstrap");
+  }
   const shellEnvironmentPrepareResult = prepareDesktopShellEnvironmentForBackend();
   startBackend();
   if (shellEnvironmentPrepareResult === "cache-hit") {

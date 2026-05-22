@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#161616" media="(prefers-color-scheme: dark)" />
+    <title>Ryco</title>
+    <script>
+      (() => {
+        const lightBackground = "#ffffff";
+        const darkBackground = "#161616";
+        try {
+          const storedTheme = window.localStorage.getItem("ryco:theme");
+          const theme =
+            storedTheme === "light" || storedTheme === "dark" || storedTheme === "system"
+              ? storedTheme
+              : "system";
+          const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          const isDark = theme === "dark" || (theme === "system" && prefersDark);
+          document.documentElement.classList.toggle("dark", isDark);
+          document.documentElement.style.backgroundColor = isDark
+            ? darkBackground
+            : lightBackground;
+        } catch {
+          document.documentElement.classList.add("dark");
+          document.documentElement.style.backgroundColor = darkBackground;
+        }
+      })();
+    </script>
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        align-items: center;
+        background: #ffffff;
+        color: #262626;
+        display: flex;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        justify-content: center;
+        overflow: hidden;
+      }
+
+      html.dark body {
+        background: #161616;
+        color: #f5f5f5;
+      }
+
+      #boot-shell {
+        display: grid;
+        height: 96px;
+        place-items: center;
+        width: 96px;
+      }
+
+      #boot-logo {
+        animation: boot-logo-pulse 1.4s ease-in-out infinite;
+        height: 64px;
+        object-fit: contain;
+        width: 64px;
+      }
+
+      @keyframes boot-logo-pulse {
+        0%,
+        100% {
+          opacity: 0.74;
+          transform: scale(0.985);
+        }
+
+        50% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #boot-logo {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="boot-shell" aria-label="Ryco is starting" role="status">
+      <img id="boot-logo" src="/apple-touch-icon.png" alt="" />
+    </main>
+  </body>
+</html>

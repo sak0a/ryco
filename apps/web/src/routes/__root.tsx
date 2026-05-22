@@ -11,6 +11,7 @@ import { useEffect, useEffectEvent, useRef } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { APP_DISPLAY_NAME } from "../branding";
+import { AppBootLoadingSurface } from "../components/AppBootLoadingSurface";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
@@ -102,7 +103,14 @@ export const Route = createRootRouteWithContext<{
   head: () => ({
     meta: [{ name: "title", content: APP_DISPLAY_NAME }],
   }),
+  pendingComponent: RootRoutePendingView,
+  pendingMinMs: 0,
+  pendingMs: 0,
 });
+
+function RootRoutePendingView() {
+  return <AppBootLoadingSurface />;
+}
 
 function RootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
