@@ -167,6 +167,7 @@ const configSnapshot = {
 function createClient() {
   return {
     dispose: vi.fn(async () => undefined),
+    isHeartbeatFresh: vi.fn(() => false),
     reconnect: vi.fn(async () => undefined),
     server: {
       getConfig: vi.fn(async () => configSnapshot),

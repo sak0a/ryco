@@ -9,6 +9,7 @@ import {
 import { makeKeyedCoalescingWorker } from "@ryco/shared/KeyedCoalescingWorker";
 import {
   Effect,
+  Deferred,
   Encoding,
   Equal,
   Exit,
@@ -16,6 +17,7 @@ import {
   FileSystem,
   Layer,
   Option,
+  Ref,
   Schema,
   Scope,
   Semaphore,
@@ -736,6 +738,8 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       killFibers: new Map(),
     });
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
+    const initialRunningSessionSignal = yield* Deferred.make<void>();
+    const runningSessionSignalRef = yield* Ref.make(initialRunningSessionSignal);
     const terminalEventListeners = new Set<(event: TerminalEvent) => Effect.Effect<void>>();
     const workerScope = yield* Scope.make("sequential");
     yield* Effect.addFinalizer(() => Scope.close(workerScope, Exit.void));
@@ -773,6 +777,28 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     const modifyManagerState = <A>(
       f: (state: TerminalManagerState) => readonly [A, TerminalManagerState],
     ) => SynchronizedRef.modify(managerStateRef, f);
+
+    const hasRunningSessions = readManagerState.pipe(
+      Effect.map((state) =>
+        [...state.sessions.values()].some((session) => session.status === "running"),
+      ),
+    );
+
+    const signalRunningSession = Effect.gen(function* () {
+      const nextSignal = yield* Deferred.make<void>();
+      const currentSignal = yield* Ref.getAndSet(runningSessionSignalRef, nextSignal);
+      yield* Deferred.succeed(currentSignal, undefined).pipe(Effect.ignore);
+    });
+
+    const waitForRunningSession = Effect.gen(function* () {
+      while (!(yield* hasRunningSessions)) {
+        const signal = yield* Ref.get(runningSessionSignalRef);
+        if (yield* hasRunningSessions) {
+          return;
+        }
+        yield* Deferred.await(signal);
+      }
+    });
 
     const getThreadSemaphore = (threadId: string) =>
       SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
@@ -1414,6 +1440,8 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
                 return [undefined, state] as const;
               });
 
+              yield* signalRunningSession;
+
               yield* publishEvent({
                 type: eventType,
                 threadId: session.threadId,
@@ -1568,21 +1596,10 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       });
     });
 
-    const hasRunningSessions = readManagerState.pipe(
-      Effect.map((state) =>
-        [...state.sessions.values()].some((session) => session.status === "running"),
-      ),
-    );
-
     yield* Effect.forever(
-      hasRunningSessions.pipe(
-        Effect.flatMap((active) =>
-          active
-            ? pollSubprocessActivity().pipe(
-                Effect.flatMap(() => Effect.sleep(subprocessPollIntervalMs)),
-              )
-            : Effect.sleep(subprocessPollIntervalMs),
-        ),
+      waitForRunningSession.pipe(
+        Effect.flatMap(() => pollSubprocessActivity()),
+        Effect.flatMap(() => Effect.sleep(subprocessPollIntervalMs)),
       ),
     ).pipe(Effect.forkIn(workerScope));
 

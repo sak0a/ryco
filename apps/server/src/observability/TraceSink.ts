@@ -27,8 +27,20 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
   });
 
   let buffer: Array<string> = [];
+  let flushTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const clearScheduledFlush = () => {
+    if (flushTimeoutId === null) {
+      return;
+    }
+
+    clearTimeout(flushTimeoutId);
+    flushTimeoutId = null;
+  };
 
   const flushUnsafe = () => {
+    clearScheduledFlush();
+
     if (buffer.length === 0) {
       return;
     }
@@ -43,11 +55,27 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
     }
   };
 
+  const scheduleFlush = () => {
+    if (buffer.length === 0 || flushTimeoutId !== null) {
+      return;
+    }
+
+    if (options.batchWindowMs <= 0) {
+      flushUnsafe();
+      return;
+    }
+
+    flushTimeoutId = setTimeout(() => {
+      flushTimeoutId = null;
+      flushUnsafe();
+    }, options.batchWindowMs);
+    flushTimeoutId.unref?.();
+  };
+
   const flush = Effect.sync(flushUnsafe).pipe(Effect.withTracerEnabled(false));
 
-  yield* Effect.addFinalizer(() => flush.pipe(Effect.ignore));
-  yield* Effect.forkScoped(
-    Effect.sleep(`${options.batchWindowMs} millis`).pipe(Effect.andThen(flush), Effect.forever),
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(clearScheduledFlush).pipe(Effect.andThen(flush), Effect.ignore),
   );
 
   return {
@@ -57,7 +85,9 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
         buffer.push(`${JSON.stringify(record)}\n`);
         if (buffer.length >= FLUSH_BUFFER_THRESHOLD) {
           flushUnsafe();
+          return;
         }
+        scheduleFlush();
       } catch {
         return;
       }

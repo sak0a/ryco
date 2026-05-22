@@ -30,6 +30,7 @@ const TelemetryEnvConfig = Config.all({
   ),
   enabled: Config.boolean("RYCO_TELEMETRY_ENABLED").pipe(Config.withDefault(true)),
   flushBatchSize: Config.number("RYCO_TELEMETRY_FLUSH_BATCH_SIZE").pipe(Config.withDefault(20)),
+  flushIntervalMs: Config.number("RYCO_TELEMETRY_FLUSH_INTERVAL_MS").pipe(Config.withDefault(1000)),
   maxBufferedEvents: Config.number("RYCO_TELEMETRY_MAX_BUFFERED_EVENTS").pipe(
     Config.withDefault(1_000),
   ),
@@ -42,6 +43,18 @@ const makeAnalyticsService = Effect.gen(function* () {
   const identifier = yield* getTelemetryIdentifier;
   const bufferRef = yield* Ref.make<ReadonlyArray<BufferedAnalyticsEvent>>([]);
   const clientType = serverConfig.mode === "desktop" ? "desktop-app" : "cli-web-client";
+  const context = yield* Effect.context<never>();
+  const runFork = Effect.runForkWith(context);
+  let flushTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const clearScheduledFlush = Effect.sync(() => {
+    if (flushTimeoutId === null) {
+      return;
+    }
+
+    clearTimeout(flushTimeoutId);
+    flushTimeoutId = null;
+  });
 
   const enqueueBufferedEvent = (event: string, properties?: Readonly<Record<string, unknown>>) =>
     Effect.flatMap(DateTime.now, (now) =>
@@ -100,7 +113,30 @@ const makeAnalyticsService = Effect.gen(function* () {
     );
   });
 
+  const scheduleFlush = Effect.sync(() => {
+    if (flushTimeoutId !== null) {
+      return;
+    }
+
+    flushTimeoutId = setTimeout(
+      () => {
+        flushTimeoutId = null;
+        runFork(flush);
+      },
+      Math.max(0, telemetryConfig.flushIntervalMs),
+    );
+    flushTimeoutId.unref?.();
+  });
+
+  function scheduleFlushIfBuffered() {
+    return Ref.get(bufferRef).pipe(
+      Effect.flatMap((buffer) => (buffer.length > 0 ? scheduleFlush : Effect.void)),
+    );
+  }
+
   const flush: AnalyticsServiceShape["flush"] = Effect.gen(function* () {
+    yield* clearScheduledFlush;
+
     while (true) {
       const batch = yield* Ref.modify(bufferRef, (current) => {
         if (current.length === 0) {
@@ -115,15 +151,22 @@ const makeAnalyticsService = Effect.gen(function* () {
         return;
       }
 
-      yield* sendBatch(batch).pipe(
-        Effect.catch((error) =>
+      const sent = yield* sendBatch(batch).pipe(
+        Effect.as(true),
+        Effect.catch((cause) =>
           Ref.update(bufferRef, (current) => [...batch, ...current]).pipe(
-            Effect.flatMap(() => Effect.fail(error)),
+            Effect.andThen(Effect.logDebug("Failed to flush telemetry", { cause })),
+            Effect.as(false),
           ),
         ),
       );
+
+      if (!sent) {
+        yield* scheduleFlushIfBuffered();
+        return;
+      }
     }
-  }).pipe(Effect.catch((cause) => Effect.logDebug("Failed to flush telemetry", { cause })));
+  });
 
   const record: AnalyticsServiceShape["record"] = Effect.fn("record")(
     function* (event, properties) {
@@ -136,14 +179,19 @@ const makeAnalyticsService = Effect.gen(function* () {
           event,
         });
       }
+
+      if (enqueueResult.size >= telemetryConfig.flushBatchSize) {
+        yield* Effect.sync(() => {
+          runFork(flush);
+        });
+        return;
+      }
+
+      yield* scheduleFlush;
     },
   );
 
-  yield* Effect.forever(Effect.sleep(1000).pipe(Effect.flatMap(() => flush)), {
-    disableYield: true,
-  }).pipe(Effect.forkScoped);
-
-  yield* Effect.addFinalizer(() => flush);
+  yield* Effect.addFinalizer(() => clearScheduledFlush.pipe(Effect.andThen(flush)));
 
   return {
     record,

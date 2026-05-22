@@ -7,6 +7,7 @@ import { Effect, FileSystem, Layer, Path, PlatformError, Scope } from "effect";
 import { GitCommandError } from "@ryco/contracts";
 import { ServerConfig } from "../config.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
+import { makeGitVcsDriverCore } from "./GitVcsDriverCore.ts";
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "s3-git-vcs-driver-test-",
@@ -15,6 +16,7 @@ const TestLayer = GitVcsDriver.layer.pipe(
   Layer.provide(ServerConfigLayer),
   Layer.provideMerge(NodeServices.layer),
 );
+const OverrideTestLayer = Layer.merge(ServerConfigLayer, NodeServices.layer);
 
 const makeTmpDir = (
   prefix = "git-vcs-driver-test-",
@@ -102,6 +104,77 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           "feature.ts",
         );
       }),
+    );
+
+    it.effect("uses non-interactive env when refreshing upstream status", () =>
+      Effect.gen(function* () {
+        const calls: GitVcsDriver.ExecuteGitInput[] = [];
+        const ok = (stdout = "") =>
+          ({
+            exitCode: 0 as GitVcsDriver.ExecuteGitResult["exitCode"],
+            stdout,
+            stderr: "",
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          }) satisfies GitVcsDriver.ExecuteGitResult;
+        const driver = yield* makeGitVcsDriverCore({
+          executeOverride: (input) =>
+            Effect.sync(() => {
+              calls.push(input);
+              const [command] = input.args;
+              if (command === "rev-parse" && input.args.includes("@{upstream}")) {
+                return ok("origin/main\n");
+              }
+              if (command === "rev-parse" && input.args.includes("--git-common-dir")) {
+                return ok(".git\n");
+              }
+              if (command === "--git-dir") {
+                return ok();
+              }
+              if (command === "remote" && input.args.length === 1) {
+                return ok("origin\n");
+              }
+              if (command === "remote" && input.args[1] === "get-url") {
+                return ok("git@example.com:owner/repo.git\n");
+              }
+              if (command === "status") {
+                return ok(
+                  [
+                    "# branch.oid abc123",
+                    "# branch.head main",
+                    "# branch.upstream origin/main",
+                    "# branch.ab +0 -0",
+                    "",
+                  ].join("\n"),
+                );
+              }
+              if (command === "diff") {
+                return ok();
+              }
+              if (command === "symbolic-ref") {
+                return ok("refs/remotes/origin/main\n");
+              }
+              if (command === "config") {
+                return ok();
+              }
+              if (command === "rev-list") {
+                return ok("0\n");
+              }
+              if (command === "show-ref") {
+                return ok();
+              }
+              throw new Error(`Unexpected git command: ${input.args.join(" ")}`);
+            }),
+        });
+
+        yield* driver.statusDetails("/repo");
+
+        const fetchCall = calls.find(
+          (call) => call.operation === "GitVcsDriver.fetchRemoteForStatus",
+        );
+        assert.isDefined(fetchCall);
+        assert.equal(fetchCall?.env?.SSH_ASKPASS_REQUIRE, "never");
+      }).pipe(Effect.provide(OverrideTestLayer)),
     );
 
     it.effect("reports default-branch delta separately from upstream delta", () =>

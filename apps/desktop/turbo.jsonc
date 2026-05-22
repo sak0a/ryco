@@ -7,16 +7,16 @@
       "outputs": ["dist-electron/**"],
     },
     "dev": {
-      "dependsOn": ["ryco#build"],
+      "dependsOn": ["ryco-cli#build"],
       "persistent": true,
     },
     "start": {
-      "dependsOn": ["build", "@ryco/web#build", "ryco#build"],
+      "dependsOn": ["build", "@ryco/web#build", "ryco-cli#build"],
       "cache": false,
       "persistent": true,
     },
     "smoke-test": {
-      "dependsOn": ["build", "@ryco/web#build", "ryco#build"],
+      "dependsOn": ["build", "@ryco/web#build", "ryco-cli#build"],
       "cache": false,
       "outputs": [],
     },

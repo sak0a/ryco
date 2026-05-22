@@ -993,7 +993,21 @@ export default function GitActionsControl({
   const [pendingDefaultBranchAction, setPendingDefaultBranchAction] =
     useState<PendingDefaultBranchAction | null>(null);
   const activeGitActionProgressRef = useRef<ActiveGitActionProgress | null>(null);
+  const [activeGitActionProgressVersion, setActiveGitActionProgressVersion] = useState(0);
   let runGitActionWithToast: (input: RunGitActionWithToastInput) => Promise<void>;
+
+  const setActiveGitActionProgress = useCallback((progress: ActiveGitActionProgress) => {
+    activeGitActionProgressRef.current = progress;
+    setActiveGitActionProgressVersion((version) => version + 1);
+  }, []);
+
+  const clearActiveGitActionProgress = useCallback(() => {
+    if (!activeGitActionProgressRef.current) {
+      return;
+    }
+    activeGitActionProgressRef.current = null;
+    setActiveGitActionProgressVersion((version) => version + 1);
+  }, []);
 
   const updateActiveProgressToast = useCallback(() => {
     const progress = activeGitActionProgressRef.current;
@@ -1169,17 +1183,18 @@ export default function GitActionsControl({
     : null;
 
   useEffect(() => {
+    if (!activeGitActionProgressRef.current) {
+      return;
+    }
+
     const interval = window.setInterval(() => {
-      if (!activeGitActionProgressRef.current) {
-        return;
-      }
       updateActiveProgressToast();
     }, 1000);
 
     return () => {
       window.clearInterval(interval);
     };
-  }, [updateActiveProgressToast]);
+  }, [activeGitActionProgressVersion, updateActiveProgressToast]);
 
   useEffect(() => {
     if (gitCwd === null) {
@@ -1313,7 +1328,7 @@ export default function GitActionsControl({
           data: scopedToastData,
         });
 
-      activeGitActionProgressRef.current = {
+      setActiveGitActionProgress({
         toastId: resolvedProgressToastId,
         toastData: scopedToastData,
         actionId,
@@ -1323,7 +1338,7 @@ export default function GitActionsControl({
         hookName: null,
         lastOutputLine: null,
         currentPhaseLabel: progressStages[0] ?? "Running git action...",
-      };
+      });
 
       if (progressToastId) {
         toastManager.update(progressToastId, {
@@ -1402,7 +1417,7 @@ export default function GitActionsControl({
 
       try {
         const result = await promise;
-        activeGitActionProgressRef.current = null;
+        clearActiveGitActionProgress();
         syncThreadBranchAfterGitAction(result);
         const closeResultToast = () => {
           toastManager.close(resolvedProgressToastId);
@@ -1463,7 +1478,7 @@ export default function GitActionsControl({
           });
         }
       } catch (err) {
-        activeGitActionProgressRef.current = null;
+        clearActiveGitActionProgress();
         toastManager.update(
           resolvedProgressToastId,
           stackedThreadToast({
