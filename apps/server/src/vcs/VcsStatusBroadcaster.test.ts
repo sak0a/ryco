@@ -1,6 +1,17 @@
 import { assert, it, describe } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Deferred, Effect, Exit, FileSystem, Layer, Option, Path, Scope, Stream } from "effect";
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Scope,
+  Stream,
+} from "effect";
 import type {
   VcsStatusLocalResult,
   VcsStatusRemoteResult,
@@ -72,6 +83,27 @@ function makeTestLayer(state: {
 }
 
 describe("VcsStatusBroadcaster", () => {
+  it("backs off remote refresh failures from the configured interval", () => {
+    assert.equal(
+      Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(1, Duration.seconds(5))),
+      30_000,
+    );
+    assert.equal(
+      Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(2, Duration.seconds(5))),
+      60_000,
+    );
+    assert.equal(
+      Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(10, Duration.seconds(5))),
+      Duration.toMillis(Duration.minutes(15)),
+    );
+    assert.equal(
+      Duration.toMillis(
+        VcsStatusBroadcaster.remoteRefreshFailureDelay(10_000, Duration.seconds(5)),
+      ),
+      Duration.toMillis(Duration.minutes(15)),
+    );
+  });
+
   it.effect("reuses the cached VCS status across repeated reads", () => {
     const state = {
       currentLocalStatus: baseLocalStatus,
@@ -274,7 +306,35 @@ describe("VcsStatusBroadcaster", () => {
     }).pipe(Effect.provide(makeTestLayer(state)));
   });
 
-  it.effect("stops the remote poller after the last stream subscriber disconnects", () => {
+  it.effect("does not start a remote poller for status streams by default", () => {
+    const state = {
+      currentLocalStatus: baseLocalStatus,
+      currentRemoteStatus: baseRemoteStatus,
+      localStatusCalls: 0,
+      remoteStatusCalls: 0,
+      localInvalidationCalls: 0,
+      remoteInvalidationCalls: 0,
+    };
+
+    return Effect.gen(function* () {
+      const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+      const snapshotDeferred = yield* Deferred.make<VcsStatusStreamEvent>();
+      yield* Stream.runForEach(broadcaster.streamStatus({ cwd: "/repo" }), (event) =>
+        event._tag === "snapshot"
+          ? Deferred.succeed(snapshotDeferred, event).pipe(Effect.ignore)
+          : Effect.void,
+      ).pipe(Effect.forkScoped);
+
+      yield* Deferred.await(snapshotDeferred);
+      yield* Effect.yieldNow;
+
+      assert.equal(state.localStatusCalls, 1);
+      assert.equal(state.remoteStatusCalls, 0);
+      assert.equal(state.remoteInvalidationCalls, 0);
+    }).pipe(Effect.provide(makeTestLayer(state)));
+  });
+
+  it.effect("stops an enabled remote poller after the last stream subscriber disconnects", () => {
     const state = {
       currentLocalStatus: baseLocalStatus,
       currentRemoteStatus: baseRemoteStatus,
@@ -332,12 +392,15 @@ describe("VcsStatusBroadcaster", () => {
       const secondSnapshot = yield* Deferred.make<VcsStatusStreamEvent>();
       const firstScope = yield* Scope.make();
       const secondScope = yield* Scope.make();
-      yield* Stream.runForEach(broadcaster.streamStatus({ cwd: "/repo" }), (event) =>
+      const options = {
+        automaticRemoteRefreshInterval: Effect.succeed(Duration.seconds(30)),
+      };
+      yield* Stream.runForEach(broadcaster.streamStatus({ cwd: "/repo" }, options), (event) =>
         event._tag === "snapshot"
           ? Deferred.succeed(firstSnapshot, event).pipe(Effect.ignore)
           : Effect.void,
       ).pipe(Effect.forkIn(firstScope));
-      yield* Stream.runForEach(broadcaster.streamStatus({ cwd: "/repo" }), (event) =>
+      yield* Stream.runForEach(broadcaster.streamStatus({ cwd: "/repo" }, options), (event) =>
         event._tag === "snapshot"
           ? Deferred.succeed(secondSnapshot, event).pipe(Effect.ignore)
           : Effect.void,

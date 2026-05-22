@@ -72,6 +72,7 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
   const listeners = new Set<(event: VcsStatusResult) => void>();
   const client = {
     dispose: vi.fn(async () => undefined),
+    isHeartbeatFresh: vi.fn(() => false),
     reconnect: vi.fn(async () => undefined),
     terminal: {
       open: vi.fn(async () => undefined),

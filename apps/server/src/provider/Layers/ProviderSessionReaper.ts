@@ -8,8 +8,10 @@ import {
 } from "../Services/ProviderSessionReaper.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 
-const DEFAULT_INACTIVITY_THRESHOLD_MS = 30 * 60 * 1000;
-const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+// Keep provider processes around briefly for UX, while still reaping genuinely idle
+// sessions without a frequent background sweep. Override through layer options in tests.
+const DEFAULT_INACTIVITY_THRESHOLD_MS = 5 * 60 * 1000;
+const DEFAULT_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
 export interface ProviderSessionReaperLiveOptions {
   readonly inactivityThresholdMs?: number;

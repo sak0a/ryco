@@ -1,5 +1,5 @@
 import { CopilotSettings, ProviderDriverKind, type ServerProvider } from "@ryco/contracts";
-import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
+import { Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerConfig } from "../../config.ts";
@@ -22,7 +22,6 @@ import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("copilot");
-const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
 
 export type CopilotDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -94,7 +93,7 @@ export const CopilotDriver: ProviderDriver<CopilotSettings, CopilotDriverEnv> = 
         haveSettingsChanged: () => false,
         initialSnapshot: (settings) => stampIdentity(makePendingCopilotProvider(settings)),
         checkProvider,
-        refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
+        refreshInterval: null,
       }).pipe(
         Effect.mapError(
           (cause) =>

@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { vi } from "vitest";
 
 import type { TraceRecord } from "./TraceRecord.ts";
 import { makeTraceSink } from "./TraceSink.ts";
@@ -29,6 +30,69 @@ const makeRecord = (name: string, suffix = ""): TraceRecord => ({
 });
 
 describe("TraceSink", () => {
+  it.effect("arms the batch-window timer only after records are buffered", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-trace-sink-"));
+        const tracePath = path.join(tempDir, "server.trace.ndjson");
+        const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+
+        try {
+          const sink = yield* makeTraceSink({
+            filePath: tracePath,
+            maxBytes: Number.MAX_SAFE_INTEGER,
+            maxFiles: 2,
+            batchWindowMs: 10_000,
+          });
+
+          assert.equal(setTimeoutSpy.mock.calls.length, 0);
+
+          sink.push(makeRecord("alpha"));
+          assert.equal(setTimeoutSpy.mock.calls.length, 1);
+
+          yield* sink.flush;
+          sink.push(makeRecord("beta"));
+          assert.equal(setTimeoutSpy.mock.calls.length, 2);
+        } finally {
+          setTimeoutSpy.mockRestore();
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      }),
+    ),
+  );
+
+  it.effect("re-arms the batch-window timer when a write fails", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-trace-sink-"));
+        const tracePath = path.join(tempDir, "server.trace.ndjson");
+        const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+        const appendFileSyncSpy = vi.spyOn(fs, "appendFileSync").mockImplementationOnce(() => {
+          throw new Error("forced trace sink write failure");
+        });
+
+        try {
+          const sink = yield* makeTraceSink({
+            filePath: tracePath,
+            maxBytes: 1024,
+            maxFiles: 2,
+            batchWindowMs: 10_000,
+          });
+
+          sink.push(makeRecord("alpha"));
+          assert.equal(setTimeoutSpy.mock.calls.length, 1);
+
+          yield* sink.flush;
+          assert.equal(setTimeoutSpy.mock.calls.length, 2);
+        } finally {
+          appendFileSyncSpy.mockRestore();
+          setTimeoutSpy.mockRestore();
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      }),
+    ),
+  );
+
   it.effect("flushes buffered records on close", () =>
     Effect.scoped(
       Effect.gen(function* () {

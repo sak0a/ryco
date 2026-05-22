@@ -13,7 +13,7 @@
  * @module provider/Drivers/OpenCodeDriver
  */
 import { OpenCodeSettings, ProviderDriverKind, type ServerProvider } from "@ryco/contracts";
-import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
+import { Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
@@ -43,7 +43,6 @@ import {
 } from "../providerMaintenance.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("opencode");
-const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
 
 function isOpenCodeNativeCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
@@ -146,7 +145,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
             Effect.provideService(HttpClient.HttpClient, httpClient),
             Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
           ),
-        refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
+        refreshInterval: null,
       }).pipe(
         Effect.mapError(
           (cause) =>

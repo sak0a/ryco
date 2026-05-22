@@ -45,7 +45,6 @@ import {
 import { makeClaudeCapabilitiesCacheKey, makeClaudeContinuationGroupKey } from "./ClaudeHome.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
-const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
 const USAGE_PROBE_TTL = Duration.seconds(60);
 
@@ -177,7 +176,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
             Effect.provideService(HttpClient.HttpClient, httpClient),
             Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
           ),
-        refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
+        refreshInterval: null,
       }).pipe(
         Effect.mapError(
           (cause) =>

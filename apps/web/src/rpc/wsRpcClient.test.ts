@@ -62,13 +62,14 @@ describe("wsRpcClient", () => {
 
     const transport = {
       dispose: vi.fn(async () => undefined),
+      isHeartbeatFresh: vi.fn(() => true),
       reconnect: vi.fn(async () => undefined),
       request: vi.fn(),
       requestStream: vi.fn(),
       subscribe,
     } satisfies Pick<
       WsTransport,
-      "dispose" | "reconnect" | "request" | "requestStream" | "subscribe"
+      "dispose" | "isHeartbeatFresh" | "reconnect" | "request" | "requestStream" | "subscribe"
     >;
 
     const client = createWsRpcClient(transport as unknown as WsTransport);
@@ -101,5 +102,6 @@ describe("wsRpcClient", () => {
         },
       ],
     ]);
+    expect(client.isHeartbeatFresh()).toBe(true);
   });
 });

@@ -1,7 +1,8 @@
 import { describe, it, assert } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@ryco/contracts";
 import { createModelCapabilities } from "@ryco/shared/model";
-import { Deferred, Effect, Fiber, PubSub, Ref, Stream } from "effect";
+import { Deferred, Duration, Effect, Fiber, PubSub, Ref, Stream } from "effect";
+import { TestClock } from "effect/testing";
 
 import { makeManagedServerProvider } from "./makeManagedServerProvider.ts";
 
@@ -135,6 +136,37 @@ describe("makeManagedServerProvider", () => {
           assert.strictEqual(yield* Ref.get(checkCalls), 1);
         }),
       ),
+  );
+
+  it.effect("does not run periodic checks when automatic refresh is disabled", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checkCalls = yield* Ref.make(0);
+        const initialCheckComplete = yield* Deferred.make<void>();
+        yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => initialSnapshot,
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.tap((count) =>
+              count === 1
+                ? Deferred.succeed(initialCheckComplete, undefined).pipe(Effect.ignore)
+                : Effect.void,
+            ),
+            Effect.as(refreshedSnapshot),
+          ),
+          refreshInterval: null,
+        });
+
+        yield* Deferred.await(initialCheckComplete);
+        yield* TestClock.adjust(Duration.minutes(120));
+        yield* Effect.yieldNow;
+
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+      }),
+    ).pipe(Effect.provide(TestClock.layer())),
   );
 
   it.effect("reruns the provider check when streamed settings change", () =>

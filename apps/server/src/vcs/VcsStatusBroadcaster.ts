@@ -9,6 +9,7 @@ import {
   Layer,
   PubSub,
   Ref,
+  Schedule,
   Scope,
   Stream,
   SynchronizedRef,
@@ -25,7 +26,10 @@ import { mergeGitStatusParts } from "@ryco/shared/git";
 
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 
-const VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30);
+const DEFAULT_VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30);
+const VCS_STATUS_REFRESH_FAILURE_BASE_DELAY = Duration.seconds(30);
+const VCS_STATUS_REFRESH_FAILURE_MAX_DELAY = Duration.minutes(15);
+const MAX_REMOTE_REFRESH_CONSECUTIVE_FAILURES = 64;
 
 interface VcsStatusChange {
   readonly cwd: string;
@@ -47,6 +51,10 @@ interface ActiveRemotePoller {
   readonly subscriberCount: number;
 }
 
+interface StreamStatusOptions {
+  readonly automaticRemoteRefreshInterval?: Effect.Effect<Duration.Duration, never>;
+}
+
 export interface VcsStatusBroadcasterShape {
   readonly getStatus: (
     input: VcsStatusInput,
@@ -57,6 +65,7 @@ export interface VcsStatusBroadcasterShape {
   readonly refreshStatus: (cwd: string) => Effect.Effect<VcsStatusResult, GitManagerServiceError>;
   readonly streamStatus: (
     input: VcsStatusInput,
+    options?: StreamStatusOptions,
   ) => Stream.Stream<VcsStatusStreamEvent, GitManagerServiceError>;
 }
 
@@ -75,6 +84,21 @@ function normalizeCwd(cwd: string): string {
   } catch {
     return cwd;
   }
+}
+
+export function remoteRefreshFailureDelay(
+  consecutiveFailures: number,
+  configuredInterval: Duration.Duration,
+): Duration.Duration {
+  const clampedFailures = Math.min(consecutiveFailures, MAX_REMOTE_REFRESH_CONSECUTIVE_FAILURES);
+  const exponent = Math.max(0, clampedFailures - 1);
+  const backoffMs =
+    Duration.toMillis(VCS_STATUS_REFRESH_FAILURE_BASE_DELAY) * Math.pow(2, exponent);
+  const cappedBackoff = Duration.min(
+    Duration.millis(backoffMs),
+    VCS_STATUS_REFRESH_FAILURE_MAX_DELAY,
+  );
+  return Duration.max(configuredInterval, cappedBackoff);
 }
 
 export const layer = Layer.effect(
@@ -234,27 +258,52 @@ export const layer = Layer.effect(
       return mergeGitStatusParts(local, remote);
     });
 
-    const makeRemoteRefreshLoop = (cwd: string) => {
-      const logRefreshFailure = (error: Error) =>
-        Effect.logWarning("VCS remote status refresh failed", {
-          cwd,
-          detail: error.message,
+    const makeRemoteRefreshLoop = (
+      cwd: string,
+      automaticRemoteRefreshInterval: Effect.Effect<Duration.Duration, never>,
+    ) =>
+      Effect.gen(function* () {
+        const consecutiveFailuresRef = yield* Ref.make(0);
+        const refreshRemoteStatusIfEnabled = Effect.gen(function* () {
+          const configuredInterval = yield* automaticRemoteRefreshInterval;
+          if (Duration.isZero(configuredInterval)) {
+            return DEFAULT_VCS_STATUS_REFRESH_INTERVAL;
+          }
+
+          const exit = yield* refreshRemoteStatus(cwd).pipe(Effect.exit);
+          if (Exit.isSuccess(exit)) {
+            yield* Ref.set(consecutiveFailuresRef, 0);
+            return configuredInterval;
+          }
+
+          const consecutiveFailures = yield* Ref.updateAndGet(consecutiveFailuresRef, (count) =>
+            Math.min(count + 1, MAX_REMOTE_REFRESH_CONSECUTIVE_FAILURES),
+          );
+          const nextDelay = remoteRefreshFailureDelay(consecutiveFailures, configuredInterval);
+          yield* Effect.logWarning("VCS remote status refresh failed", {
+            cwd,
+            detail: exit.cause.toString(),
+            consecutiveFailures,
+            nextDelayMs: Duration.toMillis(nextDelay),
+          });
+          return nextDelay;
         });
 
-      return refreshRemoteStatus(cwd).pipe(
-        Effect.catch(logRefreshFailure),
-        Effect.andThen(
-          Effect.forever(
-            Effect.sleep(VCS_STATUS_REFRESH_INTERVAL).pipe(
-              Effect.andThen(refreshRemoteStatus(cwd).pipe(Effect.catch(logRefreshFailure))),
+        yield* Ref.set(consecutiveFailuresRef, 0);
+
+        return yield* refreshRemoteStatusIfEnabled.pipe(
+          Effect.repeat(
+            Schedule.identity<Duration.Duration>().pipe(
+              Schedule.addDelay((delay) => Effect.succeed(delay)),
             ),
           ),
-        ),
-      );
-    };
+          Effect.asVoid,
+        );
+      });
 
     const retainRemotePoller = Effect.fn("VcsStatusBroadcaster.retainRemotePoller")(function* (
       cwd: string,
+      automaticRemoteRefreshInterval: Effect.Effect<Duration.Duration, never>,
     ) {
       yield* SynchronizedRef.modifyEffect(pollersRef, (activePollers) => {
         const existing = activePollers.get(cwd);
@@ -267,7 +316,7 @@ export const layer = Layer.effect(
           return Effect.succeed([undefined, nextPollers] as const);
         }
 
-        return makeRemoteRefreshLoop(cwd).pipe(
+        return makeRemoteRefreshLoop(cwd, automaticRemoteRefreshInterval).pipe(
           Effect.forkIn(broadcasterScope),
           Effect.map((fiber) => {
             const nextPollers = new Map(activePollers);
@@ -309,16 +358,24 @@ export const layer = Layer.effect(
       }
     });
 
-    const streamStatus: VcsStatusBroadcasterShape["streamStatus"] = (input) =>
+    const streamStatus: VcsStatusBroadcasterShape["streamStatus"] = (input, options) =>
       Stream.unwrap(
         Effect.gen(function* () {
           const cwd = normalizeCwd(input.cwd);
           const subscription = yield* PubSub.subscribe(changesPubSub);
           const initialLocal = yield* getOrLoadLocalStatus(cwd);
           const initialRemote = (yield* getCachedStatus(cwd))?.remote?.value ?? null;
-          yield* retainRemotePoller(cwd);
+          const automaticRemoteRefreshInterval =
+            options?.automaticRemoteRefreshInterval ?? Effect.succeed(Duration.zero);
+          const initialRemoteRefreshInterval = yield* automaticRemoteRefreshInterval;
+          const retainedRemotePoller = !Duration.isZero(initialRemoteRefreshInterval);
+          if (retainedRemotePoller) {
+            yield* retainRemotePoller(cwd, automaticRemoteRefreshInterval);
+          }
 
-          const release = releaseRemotePoller(cwd).pipe(Effect.ignore, Effect.asVoid);
+          const release = retainedRemotePoller
+            ? releaseRemotePoller(cwd).pipe(Effect.ignore, Effect.asVoid)
+            : Effect.void;
 
           return Stream.concat(
             Stream.make({

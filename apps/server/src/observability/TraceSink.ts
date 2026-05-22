@@ -24,11 +24,24 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
     filePath: options.filePath,
     maxBytes: options.maxBytes,
     maxFiles: options.maxFiles,
+    throwOnError: true,
   });
 
   let buffer: Array<string> = [];
+  let flushTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
-  const flushUnsafe = () => {
+  const clearScheduledFlush = () => {
+    if (flushTimeoutId === null) {
+      return;
+    }
+
+    clearTimeout(flushTimeoutId);
+    flushTimeoutId = null;
+  };
+
+  const flushUnsafe = (options?: { readonly scheduleRetry?: boolean }) => {
+    clearScheduledFlush();
+
     if (buffer.length === 0) {
       return;
     }
@@ -40,14 +53,36 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
       sink.write(chunk);
     } catch {
       buffer.unshift(chunk);
+      if (options?.scheduleRetry !== false) {
+        scheduleFlush();
+      }
     }
   };
 
-  const flush = Effect.sync(flushUnsafe).pipe(Effect.withTracerEnabled(false));
+  function scheduleFlush() {
+    if (buffer.length === 0 || flushTimeoutId !== null) {
+      return;
+    }
 
-  yield* Effect.addFinalizer(() => flush.pipe(Effect.ignore));
-  yield* Effect.forkScoped(
-    Effect.sleep(`${options.batchWindowMs} millis`).pipe(Effect.andThen(flush), Effect.forever),
+    if (options.batchWindowMs <= 0) {
+      flushUnsafe();
+      return;
+    }
+
+    flushTimeoutId = setTimeout(() => {
+      flushTimeoutId = null;
+      flushUnsafe();
+    }, options.batchWindowMs);
+    flushTimeoutId.unref?.();
+  }
+
+  const flush = Effect.sync(() => flushUnsafe()).pipe(Effect.withTracerEnabled(false));
+  const close = Effect.sync(() => flushUnsafe({ scheduleRetry: false })).pipe(
+    Effect.withTracerEnabled(false),
+  );
+
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(clearScheduledFlush).pipe(Effect.andThen(close), Effect.ignore),
   );
 
   return {
@@ -57,12 +92,14 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
         buffer.push(`${JSON.stringify(record)}\n`);
         if (buffer.length >= FLUSH_BUFFER_THRESHOLD) {
           flushUnsafe();
+          return;
         }
+        scheduleFlush();
       } catch {
         return;
       }
     },
     flush,
-    close: () => flush,
+    close: () => close,
   } satisfies TraceSink;
 });

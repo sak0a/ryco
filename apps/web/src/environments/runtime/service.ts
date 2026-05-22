@@ -142,7 +142,7 @@ let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
 // - Threads with active work or pending user action are sticky and are never
 //   evicted while they remain non-idle.
 // - Capacity eviction only targets idle cached subscriptions.
-const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
+const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 5 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
 const BROWSER_RESUME_RECONNECT_COOLDOWN_MS = 2_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
@@ -1555,9 +1555,12 @@ function reconnectEnvironmentConnectionsAfterBrowserResume(reason: string): void
   if (now - lastBrowserResumeReconnectAt < BROWSER_RESUME_RECONNECT_COOLDOWN_MS) {
     return;
   }
-  lastBrowserResumeReconnectAt = now;
 
   for (const connection of environmentConnections.values()) {
+    if (connection.client.isHeartbeatFresh()) {
+      continue;
+    }
+    lastBrowserResumeReconnectAt = now;
     void connection.reconnect().catch((error) => {
       console.warn("Environment reconnect after browser resume failed", {
         environmentId: connection.environmentId,
