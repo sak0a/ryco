@@ -157,6 +157,7 @@ export const ProviderInstanceRegistryHydrationLive: Layer.Layer<
   BuiltInDriversEnv | ServerSettingsService
 > = Layer.unwrap(
   Effect.gen(function* () {
+    const startedAt = Date.now();
     const serverSettings = yield* ServerSettingsService;
     const initialSettings: ServerSettings | undefined = yield* serverSettings.getSettings.pipe(
       Effect.orElseSucceed(() => undefined),
@@ -165,6 +166,12 @@ export const ProviderInstanceRegistryHydrationLive: Layer.Layer<
       initialSettings === undefined
         ? ({} as ProviderInstanceConfigMap)
         : deriveProviderInstanceConfigMap(initialSettings);
+    yield* Effect.logInfo("provider instance registry hydration config resolved", {
+      durationMs: Date.now() - startedAt,
+      settingsLoaded: initialSettings !== undefined,
+      explicitInstances: Object.keys(initialSettings?.providerInstances ?? {}).length,
+      configuredInstances: Object.keys(initialConfigMap).length,
+    });
 
     const mutableLayer = ProviderInstanceRegistryMutableLayer({
       drivers: BUILT_IN_DRIVERS,

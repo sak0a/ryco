@@ -8,6 +8,7 @@ import { resolveWebIconOverrides, type WebAssetBrand } from "./lib/brand-assets.
 
 const WEB_ASSET_BRANDS = [
   "development",
+  "nightly",
   "production",
 ] as const satisfies ReadonlyArray<WebAssetBrand>;
 

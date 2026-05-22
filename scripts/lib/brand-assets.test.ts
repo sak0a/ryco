@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BRAND_ASSET_PATHS,
   DEVELOPMENT_ICON_OVERRIDES,
+  NIGHTLY_ICON_OVERRIDES,
   PUBLISH_ICON_OVERRIDES,
   resolveWebIconOverrides,
 } from "./brand-assets.ts";
@@ -36,6 +37,39 @@ describe("brand-assets", () => {
       },
       {
         sourceRelativePath: BRAND_ASSET_PATHS.productionWebSiteManifest,
+        targetRelativePath: "dist/client/site.webmanifest",
+      },
+    ]);
+  });
+
+  it("maps nightly packaged web assets to nightly icons", () => {
+    expect(NIGHTLY_ICON_OVERRIDES).toEqual([
+      {
+        sourceRelativePath: BRAND_ASSET_PATHS.nightlyWebFaviconIco,
+        targetRelativePath: "dist/client/favicon.ico",
+      },
+      {
+        sourceRelativePath: BRAND_ASSET_PATHS.nightlyWebFaviconSvg,
+        targetRelativePath: "dist/client/favicon.svg",
+      },
+      {
+        sourceRelativePath: BRAND_ASSET_PATHS.nightlyWebFavicon96Png,
+        targetRelativePath: "dist/client/favicon-96x96.png",
+      },
+      {
+        sourceRelativePath: BRAND_ASSET_PATHS.nightlyWebAppleTouchIconPng,
+        targetRelativePath: "dist/client/apple-touch-icon.png",
+      },
+      {
+        sourceRelativePath: BRAND_ASSET_PATHS.nightlyWebManifest192Png,
+        targetRelativePath: "dist/client/web-app-manifest-192x192.png",
+      },
+      {
+        sourceRelativePath: BRAND_ASSET_PATHS.nightlyWebManifest512Png,
+        targetRelativePath: "dist/client/web-app-manifest-512x512.png",
+      },
+      {
+        sourceRelativePath: BRAND_ASSET_PATHS.nightlyWebSiteManifest,
         targetRelativePath: "dist/client/site.webmanifest",
       },
     ]);

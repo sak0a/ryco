@@ -15,6 +15,13 @@ export const BRAND_ASSET_PATHS = {
   nightlyMacIconset: "assets/nightly/ryco-macos.iconset",
   nightlyLinuxIconPng: "assets/nightly/ryco-linux-1024.png",
   nightlyWindowsIconIco: "assets/nightly/ryco-windows.ico",
+  nightlyWebFaviconIco: "assets/nightly/favicon/favicon.ico",
+  nightlyWebFaviconSvg: "assets/nightly/favicon/favicon.svg",
+  nightlyWebFavicon96Png: "assets/nightly/favicon/favicon-96x96.png",
+  nightlyWebAppleTouchIconPng: "assets/nightly/favicon/apple-touch-icon.png",
+  nightlyWebManifest192Png: "assets/nightly/favicon/web-app-manifest-192x192.png",
+  nightlyWebManifest512Png: "assets/nightly/favicon/web-app-manifest-512x512.png",
+  nightlyWebSiteManifest: "assets/nightly/favicon/site.webmanifest",
 
   developmentDesktopIconPng: "assets/dev/ryco-macos-1024.png",
   developmentMacIconset: "assets/dev/ryco-macos.iconset",
@@ -29,7 +36,7 @@ export const BRAND_ASSET_PATHS = {
   developmentWebSiteManifest: "assets/dev/favicon/site.webmanifest",
 } as const;
 
-export type WebAssetBrand = "development" | "production";
+export type WebAssetBrand = "development" | "nightly" | "production";
 
 export interface IconOverride {
   readonly sourceRelativePath: string;
@@ -68,8 +75,25 @@ const DEVELOPMENT_WEB_ICON_OVERRIDE_FILES = [
   { source: BRAND_ASSET_PATHS.developmentWebSiteManifest, filename: "site.webmanifest" },
 ] as const;
 
+const NIGHTLY_WEB_ICON_OVERRIDE_FILES = [
+  { source: BRAND_ASSET_PATHS.nightlyWebFaviconIco, filename: "favicon.ico" },
+  { source: BRAND_ASSET_PATHS.nightlyWebFaviconSvg, filename: "favicon.svg" },
+  { source: BRAND_ASSET_PATHS.nightlyWebFavicon96Png, filename: "favicon-96x96.png" },
+  { source: BRAND_ASSET_PATHS.nightlyWebAppleTouchIconPng, filename: "apple-touch-icon.png" },
+  {
+    source: BRAND_ASSET_PATHS.nightlyWebManifest192Png,
+    filename: "web-app-manifest-192x192.png",
+  },
+  {
+    source: BRAND_ASSET_PATHS.nightlyWebManifest512Png,
+    filename: "web-app-manifest-512x512.png",
+  },
+  { source: BRAND_ASSET_PATHS.nightlyWebSiteManifest, filename: "site.webmanifest" },
+] as const;
+
 const WEB_ICON_OVERRIDE_FILES_BY_BRAND = {
   development: DEVELOPMENT_WEB_ICON_OVERRIDE_FILES,
+  nightly: NIGHTLY_WEB_ICON_OVERRIDE_FILES,
   production: PRODUCTION_WEB_ICON_OVERRIDE_FILES,
 } as const satisfies Record<
   WebAssetBrand,
@@ -87,5 +111,7 @@ export function resolveWebIconOverrides(
 }
 
 export const DEVELOPMENT_ICON_OVERRIDES = resolveWebIconOverrides("development", "dist/client");
+
+export const NIGHTLY_ICON_OVERRIDES = resolveWebIconOverrides("nightly", "dist/client");
 
 export const PUBLISH_ICON_OVERRIDES = resolveWebIconOverrides("production", "dist/client");
