@@ -1,0 +1,737 @@
+$ node scripts/startup-timing-smoke.mjs --app /Applications/Ryco.app --json
+{
+  "launchTarget": "/Applications/Ryco.app",
+  "baseDir": "/var/folders/qg/d70224p92p33637cf3lvsk9w0000gn/T/ryco-startup-smoke-m0CBoC",
+  "logFiles": {
+    "desktop": "/var/folders/qg/d70224p92p33637cf3lvsk9w0000gn/T/ryco-startup-smoke-m0CBoC/userdata/logs/desktop-main.log",
+    "backend": "/var/folders/qg/d70224p92p33637cf3lvsk9w0000gn/T/ryco-startup-smoke-m0CBoC/userdata/logs/server-child.log"
+  },
+  "timings": {
+    "windowCreated": 96,
+    "firstReveal": 4114,
+    "backendSpawn": 509,
+    "backendListening": null,
+    "bootLoaded": null,
+    "appDomReady": null,
+    "appLoaded": null
+  },
+  "entries": [
+    {
+      "phase": "desktop.launch",
+      "elapsedMs": 0,
+      "deltaMs": 0,
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.ready",
+      "elapsedMs": 65,
+      "deltaMs": 65,
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.bootstrap.start",
+      "elapsedMs": 90,
+      "deltaMs": 25,
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.window.create",
+      "elapsedMs": 96,
+      "deltaMs": 6,
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.shell-env.prepare.start",
+      "elapsedMs": 157,
+      "deltaMs": 61,
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.shell-env.cache.miss",
+      "elapsedMs": 158,
+      "deltaMs": 0,
+      "detail": "reason=unreadable",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.shell-env.refresh.start",
+      "elapsedMs": 158,
+      "deltaMs": 0,
+      "detail": "reason=cache-miss",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.shell-env.refresh.end",
+      "elapsedMs": 509,
+      "deltaMs": 352,
+      "detail": "reason=cache-miss",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 509,
+      "deltaMs": 0,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 514,
+      "deltaMs": 5,
+      "detail": "pid=98120",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 1463,
+      "deltaMs": 948,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 1464,
+      "deltaMs": 1,
+      "detail": "pid=98281",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 2281,
+      "deltaMs": 817,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 2282,
+      "deltaMs": 1,
+      "detail": "pid=98400",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 3076,
+      "deltaMs": 794,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 3080,
+      "deltaMs": 4,
+      "detail": "pid=98419",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 3898,
+      "deltaMs": 818,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 3902,
+      "deltaMs": 4,
+      "detail": "pid=98546",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.window.first-reveal",
+      "elapsedMs": 4114,
+      "deltaMs": 212,
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 4735,
+      "deltaMs": 621,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 4738,
+      "deltaMs": 3,
+      "detail": "pid=98674",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 5547,
+      "deltaMs": 810,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 5549,
+      "deltaMs": 2,
+      "detail": "pid=98801",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 6366,
+      "deltaMs": 817,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 6368,
+      "deltaMs": 2,
+      "detail": "pid=98802",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 7166,
+      "deltaMs": 798,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 7169,
+      "deltaMs": 3,
+      "detail": "pid=98929",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 7989,
+      "deltaMs": 820,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 7991,
+      "deltaMs": 2,
+      "detail": "pid=99182",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 8789,
+      "deltaMs": 798,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 8792,
+      "deltaMs": 3,
+      "detail": "pid=99309",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 9605,
+      "deltaMs": 813,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 9607,
+      "deltaMs": 1,
+      "detail": "pid=99436",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 10401,
+      "deltaMs": 794,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 10404,
+      "deltaMs": 3,
+      "detail": "pid=99437",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 11222,
+      "deltaMs": 819,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 11225,
+      "deltaMs": 3,
+      "detail": "pid=99566",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 12033,
+      "deltaMs": 809,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 12037,
+      "deltaMs": 3,
+      "detail": "pid=99693",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 12850,
+      "deltaMs": 813,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 12852,
+      "deltaMs": 1,
+      "detail": "pid=99820",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 13641,
+      "deltaMs": 789,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 13641,
+      "deltaMs": 1,
+      "detail": "pid=99947",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 14433,
+      "deltaMs": 792,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 14435,
+      "deltaMs": 1,
+      "detail": "pid=99948",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 15240,
+      "deltaMs": 805,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 15242,
+      "deltaMs": 2,
+      "detail": "pid=267",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 16057,
+      "deltaMs": 815,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 16059,
+      "deltaMs": 2,
+      "detail": "pid=753",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 16872,
+      "deltaMs": 813,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 16873,
+      "deltaMs": 1,
+      "detail": "pid=938",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 17662,
+      "deltaMs": 789,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 17664,
+      "deltaMs": 3,
+      "detail": "pid=939",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 18475,
+      "deltaMs": 810,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 18476,
+      "deltaMs": 1,
+      "detail": "pid=1076",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawn",
+      "elapsedMs": 19266,
+      "deltaMs": 790,
+      "detail": "port=3774",
+      "source": "desktop-log"
+    },
+    {
+      "phase": "desktop.backend.spawned",
+      "elapsedMs": 19267,
+      "deltaMs": 1,
+      "detail": "pid=1687",
+      "source": "desktop-log"
+    }
+  ],
+  "outputTail": [
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:06.350Z] [desktop run=82ab0b4fe55d] startup timing phase=desktop.backend.spawn elapsedMs=16872 deltaMs=813 port=3774"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:06.351Z] [desktop run=82ab0b4fe55d] startup timing phase=desktop.backend.spawned elapsedMs=16873 deltaMs=1 pid=938"
+    },
+    {
+      "source": "backend-log",
+      "line": "[2026-05-24T14:23:06.351Z] ---- APP SESSION START run=82ab0b4fe55d pid=938 port=3774 cwd=/Users/laurinfrank ----"
+    },
+    {
+      "source": "backend-log",
+      "line": "[16:23:06.629] ERROR (#3): ConfigError: SchemaError(TypeError: Invalid URL"
+    },
+    {
+      "source": "backend-log",
+      "line": "  at [\"VITE_DEV_SERVER_URL\"]) {"
+    },
+    {
+      "source": "backend-log",
+      "line": "  [cause]: SchemaError: TypeError: Invalid URL"
+    },
+    {
+      "source": "backend-log",
+      "line": "    at [\"VITE_DEV_SERVER_URL\"]"
+    },
+    {
+      "source": "backend-log",
+      "line": "}"
+    },
+    {
+      "source": "stderr",
+      "line": "[desktop] backend exited unexpectedly (code=1 signal=null); restarting in 500ms"
+    },
+    {
+      "source": "stderr",
+      "line": "[desktop] backend readiness check timed out during packaged bootstrap Error: backend exited before logging readiness (code=1 signal=null)"
+    },
+    {
+      "source": "stderr",
+      "line": "    at ChildProcess.<anonymous> (/Applications/Ryco.app/Contents/Resources/app.asar/apps/desktop/dist-electron/main.cjs:10241:43)"
+    },
+    {
+      "source": "stderr",
+      "line": "    at ChildProcess.emit (node:events:508:28)"
+    },
+    {
+      "source": "stderr",
+      "line": "    at ChildProcess._handle.onexit (node:internal/child_process:294:12)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:06.636Z] [stderr run=82ab0b4fe55d] [desktop] backend exited unexpectedly (code=1 signal=null); restarting in 500ms"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:06.636Z] [desktop run=82ab0b4fe55d] bootstrap backend readiness warning message=backend exited before logging readiness (code=1 signal=null)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:06.636Z] [stderr run=82ab0b4fe55d] [desktop] backend readiness check timed out during packaged bootstrap Error: backend exited before logging readiness (code=1 signal=null)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "    at ChildProcess.<anonymous> (/Applications/Ryco.app/Contents/Resources/app.asar/apps/desktop/dist-electron/main.cjs:10241:43)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "    at ChildProcess.emit (node:events:508:28)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "    at ChildProcess._handle.onexit (node:internal/child_process:294:12)"
+    },
+    {
+      "source": "backend-log",
+      "line": "[2026-05-24T14:23:06.636Z] ---- APP SESSION END run=82ab0b4fe55d pid=938 code=1 signal=null ----"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:07.140Z] [desktop run=82ab0b4fe55d] startup timing phase=desktop.backend.spawn elapsedMs=17662 deltaMs=789 port=3774"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:07.142Z] [desktop run=82ab0b4fe55d] startup timing phase=desktop.backend.spawned elapsedMs=17664 deltaMs=3 pid=939"
+    },
+    {
+      "source": "backend-log",
+      "line": "[2026-05-24T14:23:07.141Z] ---- APP SESSION START run=82ab0b4fe55d pid=939 port=3774 cwd=/Users/laurinfrank ----"
+    },
+    {
+      "source": "stderr",
+      "line": "[desktop] backend exited unexpectedly (code=1 signal=null); restarting in 500ms"
+    },
+    {
+      "source": "stderr",
+      "line": "[desktop] backend readiness check timed out during packaged bootstrap Error: backend exited before logging readiness (code=1 signal=null)"
+    },
+    {
+      "source": "stderr",
+      "line": "    at ChildProcess.<anonymous> (/Applications/Ryco.app/Contents/Resources/app.asar/apps/desktop/dist-electron/main.cjs:10241:43)"
+    },
+    {
+      "source": "stderr",
+      "line": "    at ChildProcess.emit (node:events:508:28)"
+    },
+    {
+      "source": "stderr",
+      "line": "    at ChildProcess._handle.onexit (node:internal/child_process:294:12)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:07.452Z] [stderr run=82ab0b4fe55d] [desktop] backend exited unexpectedly (code=1 signal=null); restarting in 500ms"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:07.452Z] [desktop run=82ab0b4fe55d] bootstrap backend readiness warning message=backend exited before logging readiness (code=1 signal=null)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:07.452Z] [stderr run=82ab0b4fe55d] [desktop] backend readiness check timed out during packaged bootstrap Error: backend exited before logging readiness (code=1 signal=null)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "    at ChildProcess.<anonymous> (/Applications/Ryco.app/Contents/Resources/app.asar/apps/desktop/dist-electron/main.cjs:10241:43)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "    at ChildProcess.emit (node:events:508:28)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "    at ChildProcess._handle.onexit (node:internal/child_process:294:12)"
+    },
+    {
+      "source": "backend-log",
+      "line": "[16:23:07.445] ERROR (#3): ConfigError: SchemaError(TypeError: Invalid URL"
+    },
+    {
+      "source": "backend-log",
+      "line": "  at [\"VITE_DEV_SERVER_URL\"]) {"
+    },
+    {
+      "source": "backend-log",
+      "line": "  [cause]: SchemaError: TypeError: Invalid URL"
+    },
+    {
+      "source": "backend-log",
+      "line": "    at [\"VITE_DEV_SERVER_URL\"]"
+    },
+    {
+      "source": "backend-log",
+      "line": "}"
+    },
+    {
+      "source": "backend-log",
+      "line": "[2026-05-24T14:23:07.452Z] ---- APP SESSION END run=82ab0b4fe55d pid=939 code=1 signal=null ----"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:07.953Z] [desktop run=82ab0b4fe55d] startup timing phase=desktop.backend.spawn elapsedMs=18475 deltaMs=810 port=3774"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:07.954Z] [desktop run=82ab0b4fe55d] startup timing phase=desktop.backend.spawned elapsedMs=18476 deltaMs=1 pid=1076"
+    },
+    {
+      "source": "backend-log",
+      "line": "[2026-05-24T14:23:07.953Z] ---- APP SESSION START run=82ab0b4fe55d pid=1076 port=3774 cwd=/Users/laurinfrank ----"
+    },
+    {
+      "source": "stderr",
+      "line": "[desktop] backend exited unexpectedly (code=1 signal=null); restarting in 500ms"
+    },
+    {
+      "source": "stderr",
+      "line": "[desktop] backend readiness check timed out during packaged bootstrap Error: backend exited before logging readiness (code=1 signal=null)"
+    },
+    {
+      "source": "stderr",
+      "line": "    at ChildProcess.<anonymous> (/Applications/Ryco.app/Contents/Resources/app.asar/apps/desktop/dist-electron/main.cjs:10241:43)"
+    },
+    {
+      "source": "stderr",
+      "line": "    at ChildProcess.emit (node:events:508:28)"
+    },
+    {
+      "source": "stderr",
+      "line": "    at ChildProcess._handle.onexit (node:internal/child_process:294:12)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:08.239Z] [stderr run=82ab0b4fe55d] [desktop] backend exited unexpectedly (code=1 signal=null); restarting in 500ms"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:08.239Z] [desktop run=82ab0b4fe55d] bootstrap backend readiness warning message=backend exited before logging readiness (code=1 signal=null)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:08.239Z] [stderr run=82ab0b4fe55d] [desktop] backend readiness check timed out during packaged bootstrap Error: backend exited before logging readiness (code=1 signal=null)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "    at ChildProcess.<anonymous> (/Applications/Ryco.app/Contents/Resources/app.asar/apps/desktop/dist-electron/main.cjs:10241:43)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "    at ChildProcess.emit (node:events:508:28)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "    at ChildProcess._handle.onexit (node:internal/child_process:294:12)"
+    },
+    {
+      "source": "backend-log",
+      "line": "[16:23:08.231] ERROR (#3): ConfigError: SchemaError(TypeError: Invalid URL"
+    },
+    {
+      "source": "backend-log",
+      "line": "  at [\"VITE_DEV_SERVER_URL\"]) {"
+    },
+    {
+      "source": "backend-log",
+      "line": "  [cause]: SchemaError: TypeError: Invalid URL"
+    },
+    {
+      "source": "backend-log",
+      "line": "    at [\"VITE_DEV_SERVER_URL\"]"
+    },
+    {
+      "source": "backend-log",
+      "line": "}"
+    },
+    {
+      "source": "backend-log",
+      "line": "[2026-05-24T14:23:08.238Z] ---- APP SESSION END run=82ab0b4fe55d pid=1076 code=1 signal=null ----"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:08.744Z] [desktop run=82ab0b4fe55d] startup timing phase=desktop.backend.spawn elapsedMs=19266 deltaMs=790 port=3774"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:08.745Z] [desktop run=82ab0b4fe55d] startup timing phase=desktop.backend.spawned elapsedMs=19267 deltaMs=1 pid=1687"
+    },
+    {
+      "source": "backend-log",
+      "line": "[2026-05-24T14:23:08.744Z] ---- APP SESSION START run=82ab0b4fe55d pid=1687 port=3774 cwd=/Users/laurinfrank ----"
+    },
+    {
+      "source": "stderr",
+      "line": "[desktop] backend exited unexpectedly (code=1 signal=null); restarting in 500ms"
+    },
+    {
+      "source": "stderr",
+      "line": "[desktop] backend readiness check timed out during packaged bootstrap Error: backend exited before logging readiness (code=1 signal=null)"
+    },
+    {
+      "source": "stderr",
+      "line": "    at ChildProcess.<anonymous> (/Applications/Ryco.app/Contents/Resources/app.asar/apps/desktop/dist-electron/main.cjs:10241:43)"
+    },
+    {
+      "source": "stderr",
+      "line": "    at ChildProcess.emit (node:events:508:28)"
+    },
+    {
+      "source": "stderr",
+      "line": "    at ChildProcess._handle.onexit (node:internal/child_process:294:12)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:09.037Z] [stderr run=82ab0b4fe55d] [desktop] backend exited unexpectedly (code=1 signal=null); restarting in 500ms"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:09.037Z] [desktop run=82ab0b4fe55d] bootstrap backend readiness warning message=backend exited before logging readiness (code=1 signal=null)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "[2026-05-24T14:23:09.037Z] [stderr run=82ab0b4fe55d] [desktop] backend readiness check timed out during packaged bootstrap Error: backend exited before logging readiness (code=1 signal=null)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "    at ChildProcess.<anonymous> (/Applications/Ryco.app/Contents/Resources/app.asar/apps/desktop/dist-electron/main.cjs:10241:43)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "    at ChildProcess.emit (node:events:508:28)"
+    },
+    {
+      "source": "desktop-log",
+      "line": "    at ChildProcess._handle.onexit (node:internal/child_process:294:12)"
+    },
+    {
+      "source": "backend-log",
+      "line": "[16:23:09.030] ERROR (#3): ConfigError: SchemaError(TypeError: Invalid URL"
+    },
+    {
+      "source": "backend-log",
+      "line": "  at [\"VITE_DEV_SERVER_URL\"]) {"
+    },
+    {
+      "source": "backend-log",
+      "line": "  [cause]: SchemaError: TypeError: Invalid URL"
+    },
+    {
+      "source": "backend-log",
+      "line": "    at [\"VITE_DEV_SERVER_URL\"]"
+    },
+    {
+      "source": "backend-log",
+      "line": "}"
+    },
+    {
+      "source": "backend-log",
+      "line": "[2026-05-24T14:23:09.036Z] ---- APP SESSION END run=82ab0b4fe55d pid=1687 code=1 signal=null ----"
+    }
+  ]
+}
+
+Timed out after 20000ms. Missing: desktop.backend.listening, desktop.window.app.did-finish-load

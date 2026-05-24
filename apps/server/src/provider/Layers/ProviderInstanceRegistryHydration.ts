@@ -27,12 +27,17 @@
  *
  * Hot-reload
  * ----------
- * On layer build we:
+ * On web/headless layer build we:
  *   1. Read the current `ServerSettings` once and use it to seed the
  *      registry's initial state via `ProviderInstanceRegistryMutableLayer`.
  *   2. Fork a daemon fiber (lifetime tied to the layer's scope) that
  *      subscribes to `ServerSettingsService.streamChanges` and calls
  *      `ProviderInstanceRegistryMutator.reconcile` on every emission.
+ *
+ * Desktop mode starts with an empty registry and defers the first settings
+ * reconcile briefly in a scoped background fiber. The desktop shell already
+ * shows a native preload surface, so backend HTTP readiness should not wait
+ * on provider SDK imports and driver construction.
  *
  * Failures inside the watcher are logged and swallowed so a single bad
  * settings emission cannot kill the registry. Unknown drivers and invalid
@@ -49,6 +54,7 @@ import {
 } from "@ryco/contracts";
 import { Effect, Layer, Stream } from "effect";
 
+import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { BUILT_IN_DRIVERS, type BuiltInDriversEnv } from "../builtInDrivers.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
@@ -135,14 +141,50 @@ const SettingsWatcherLive: Layer.Layer<
   }),
 );
 
+const InitialSettingsReconcileLive: Layer.Layer<
+  never,
+  never,
+  ProviderInstanceRegistryMutator | ServerSettingsService
+> = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const mutator = yield* ProviderInstanceRegistryMutator;
+    const serverSettings = yield* ServerSettingsService;
+    yield* Effect.gen(function* () {
+      yield* Effect.sleep("100 millis");
+      const startedAt = Date.now();
+      const initialSettings: ServerSettings | undefined = yield* serverSettings.getSettings.pipe(
+        Effect.orElseSucceed(() => undefined),
+      );
+      const initialConfigMap =
+        initialSettings === undefined
+          ? ({} as ProviderInstanceConfigMap)
+          : deriveProviderInstanceConfigMap(initialSettings);
+
+      yield* mutator.reconcile(initialConfigMap);
+      yield* Effect.logInfo("provider instance registry initial reconcile complete", {
+        durationMs: Date.now() - startedAt,
+        settingsLoaded: initialSettings !== undefined,
+        explicitInstances: Object.keys(initialSettings?.providerInstances ?? {}).length,
+        configuredInstances: Object.keys(initialConfigMap).length,
+      });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError("ProviderInstanceRegistry initial reconcile failed", { cause }),
+      ),
+      Effect.forkScoped,
+    );
+  }),
+);
+
 /**
  * Hydrate `ProviderInstanceRegistry` from `ServerSettings` and keep it in
  * sync with subsequent `streamChanges` emissions.
  *
  * The Layer's two halves:
  *   - `ProviderInstanceRegistryMutableLayer` produces the registry +
- *     mutator from the initial config map. Its scope owns every
- *     per-instance child scope created during reconcile.
+ *     mutator from the initial config map. In desktop mode the initial map
+ *     is intentionally empty and a sidecar fiber performs the first real
+ *     reconcile shortly after HTTP startup can proceed.
  *   - `SettingsWatcherLive` consumes the mutator and runs a daemon fiber
  *     in the same scope.
  *
@@ -154,30 +196,41 @@ const SettingsWatcherLive: Layer.Layer<
 export const ProviderInstanceRegistryHydrationLive: Layer.Layer<
   ProviderInstanceRegistry,
   never,
-  BuiltInDriversEnv | ServerSettingsService
+  BuiltInDriversEnv | ServerConfig | ServerSettingsService
 > = Layer.unwrap(
   Effect.gen(function* () {
-    const startedAt = Date.now();
+    const config = yield* ServerConfig;
     const serverSettings = yield* ServerSettingsService;
-    const initialSettings: ServerSettings | undefined = yield* serverSettings.getSettings.pipe(
-      Effect.orElseSucceed(() => undefined),
-    );
+    const initialSettings: ServerSettings | undefined =
+      config.mode === "desktop"
+        ? undefined
+        : yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => undefined));
     const initialConfigMap =
       initialSettings === undefined
         ? ({} as ProviderInstanceConfigMap)
         : deriveProviderInstanceConfigMap(initialSettings);
-    yield* Effect.logInfo("provider instance registry hydration config resolved", {
-      durationMs: Date.now() - startedAt,
-      settingsLoaded: initialSettings !== undefined,
-      explicitInstances: Object.keys(initialSettings?.providerInstances ?? {}).length,
-      configuredInstances: Object.keys(initialConfigMap).length,
-    });
+    if (config.mode !== "desktop") {
+      yield* Effect.logInfo("provider instance registry hydration config resolved", {
+        settingsLoaded: initialSettings !== undefined,
+        explicitInstances: Object.keys(initialSettings?.providerInstances ?? {}).length,
+        configuredInstances: Object.keys(initialConfigMap).length,
+      });
+    }
 
     const mutableLayer = ProviderInstanceRegistryMutableLayer({
       drivers: BUILT_IN_DRIVERS,
       configMap: initialConfigMap,
     });
 
-    return SettingsWatcherLive.pipe(Layer.provideMerge(mutableLayer));
+    const sidecarLayer =
+      config.mode === "desktop"
+        ? Layer.mergeAll(InitialSettingsReconcileLive, SettingsWatcherLive)
+        : SettingsWatcherLive;
+
+    return sidecarLayer.pipe(Layer.provideMerge(mutableLayer));
   }),
-) as Layer.Layer<ProviderInstanceRegistry, never, BuiltInDriversEnv | ServerSettingsService>;
+) as Layer.Layer<
+  ProviderInstanceRegistry,
+  never,
+  BuiltInDriversEnv | ServerConfig | ServerSettingsService
+>;

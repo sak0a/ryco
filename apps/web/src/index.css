@@ -6,6 +6,7 @@
 
 @theme inline {
   --animate-skeleton: skeleton 2s -1s infinite linear;
+  --animate-boot-logo-pulse: boot-logo-pulse 1.4s ease-in-out infinite;
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
   --color-success-foreground: var(--success-foreground);
@@ -41,6 +42,17 @@
   @keyframes skeleton {
     to {
       background-position: -200% 0;
+    }
+  }
+  @keyframes boot-logo-pulse {
+    0%,
+    100% {
+      opacity: 0.74;
+      transform: scale(0.985);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1);
     }
   }
 }

@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { DesktopBridge } from "@ryco/contracts";
 
+const startupTimingEnabled = process.env.RYCO_DESKTOP_STARTUP_TIMING_STDOUT === "1";
+const preloadStartMs = performance.now();
+if (startupTimingEnabled) {
+  console.info(`[desktop-startup] preload start elapsedMs=${Math.round(preloadStartMs)}`);
+}
+
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
@@ -146,3 +152,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     };
   },
 } satisfies DesktopBridge);
+
+if (startupTimingEnabled) {
+  console.info(
+    `[desktop-startup] preload end elapsedMs=${Math.round(performance.now())} durationMs=${Math.round(
+      performance.now() - preloadStartMs,
+    )}`,
+  );
+}

@@ -9,34 +9,17 @@
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#161616" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#161616" />
-    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="shortcut icon" href="/favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-title" content="Ryco" />
-    <link rel="manifest" href="/site.webmanifest" />
     <script>
       (() => {
         const LIGHT_BACKGROUND = "#ffffff";
         const DARK_BACKGROUND = "#161616";
         const themeColorMeta = document.querySelector('meta[name="theme-color"]');
-        try {
-          const storedTheme = window.localStorage.getItem("ryco:theme");
-          const theme =
-            storedTheme === "light" || storedTheme === "dark" || storedTheme === "system"
-              ? storedTheme
-              : "system";
-          const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-          const isDark = theme === "dark" || (theme === "system" && prefersDark);
-          document.documentElement.classList.toggle("dark", isDark);
-          const chromeColor = isDark ? DARK_BACKGROUND : LIGHT_BACKGROUND;
-          document.documentElement.style.backgroundColor = chromeColor;
-          themeColorMeta?.setAttribute("content", chromeColor);
-        } catch {
-          document.documentElement.classList.add("dark");
-          document.documentElement.style.backgroundColor = DARK_BACKGROUND;
-          themeColorMeta?.setAttribute("content", DARK_BACKGROUND);
-        }
+        const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.classList.toggle("dark", isDark);
+        const chromeColor = isDark ? DARK_BACKGROUND : LIGHT_BACKGROUND;
+        document.documentElement.style.backgroundColor = chromeColor;
+        themeColorMeta?.setAttribute("content", chromeColor);
       })();
     </script>
     <style>
@@ -85,15 +68,61 @@
         width: 64px;
         height: 64px;
         object-fit: contain;
+        animation: boot-logo-pulse 1.4s ease-in-out infinite;
+      }
+
+      @keyframes boot-logo-pulse {
+        0%,
+        100% {
+          opacity: 0.74;
+          transform: scale(0.985);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #boot-shell-logo {
+          animation: none;
+        }
       }
     </style>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..800;1,9..40,300..800&display=swap"
-      rel="stylesheet"
-    />
     <title>Ryco (Alpha)</title>
+    <script type="module">
+      const appendDeferredHeadLink = (attributes) => {
+        const link = document.createElement("link");
+        for (const [name, value] of Object.entries(attributes)) {
+          link.setAttribute(name, value);
+        }
+        document.head.append(link);
+      };
+
+      window.addEventListener(
+        "load",
+        () => {
+          appendDeferredHeadLink({
+            rel: "icon",
+            type: "image/png",
+            href: "/favicon-96x96.png",
+            sizes: "96x96",
+          });
+          appendDeferredHeadLink({ rel: "shortcut icon", href: "/favicon.ico" });
+          appendDeferredHeadLink({
+            rel: "apple-touch-icon",
+            sizes: "180x180",
+            href: "/apple-touch-icon.png",
+          });
+          appendDeferredHeadLink({ rel: "manifest", href: "/site.webmanifest" });
+          performance.mark("s3:startup:web-entry.import-start");
+          void import("/src/main.tsx").finally(() => {
+            performance.mark("s3:startup:web-entry.import-end");
+          });
+        },
+        { once: true },
+      );
+    </script>
   </head>
   <body>
     <div id="root">
@@ -103,6 +132,5 @@
         </div>
       </div>
     </div>
-    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

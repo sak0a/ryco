@@ -1,4 +1,5 @@
 import { APP_DISPLAY_NAME } from "../branding";
+import { BRANDED_APP_LOGO_SRC } from "../brandedLogo";
 
 export function AppBootLoadingSurface() {
   return (
@@ -10,9 +11,9 @@ export function AppBootLoadingSurface() {
       <div className="grid size-24 place-items-center">
         <img
           alt=""
-          className="size-16 animate-pulse object-contain"
+          className="size-16 animate-boot-logo-pulse object-contain motion-reduce:animate-none"
           draggable={false}
-          src="/apple-touch-icon.png"
+          src={BRANDED_APP_LOGO_SRC}
         />
       </div>
     </div>
