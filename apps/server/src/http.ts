@@ -36,6 +36,19 @@ const STATIC_IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+const STATIC_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  ".css": "text/css; charset=utf-8",
+  ".html": "text/html; charset=utf-8",
+  ".ico": "image/x-icon",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".svg": "image/svg+xml; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+  ".wasm": "application/wasm",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+};
 
 export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: ["GET", "POST", "OPTIONS"],
@@ -70,12 +83,20 @@ export function resolveStaticCacheControl(staticRelativePath: string): string {
   return hasBuildHash ? STATIC_IMMUTABLE_CACHE_CONTROL : STATIC_INDEX_CACHE_CONTROL;
 }
 
+function resolveStaticContentType(filePath: string, path: Path.Path): string {
+  return STATIC_CONTENT_TYPES[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
+}
+
 const staticFileResponse = (filePath: string, staticRelativePath: string) =>
-  HttpServerResponse.file(filePath, {
-    status: 200,
-    headers: {
-      "Cache-Control": resolveStaticCacheControl(staticRelativePath),
-    },
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    return yield* HttpServerResponse.file(filePath, {
+      status: 200,
+      contentType: resolveStaticContentType(filePath, path),
+      headers: {
+        "Cache-Control": resolveStaticCacheControl(staticRelativePath),
+      },
+    });
   }).pipe(
     Effect.catch(() =>
       Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),

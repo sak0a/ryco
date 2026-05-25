@@ -41,6 +41,7 @@ import {
   type ServerProvider,
 } from "@ryco/contracts";
 import { Context, Effect, Equal, Exit, Layer, PubSub, Ref, Schema, Scope, Stream } from "effect";
+import * as Semaphore from "effect/Semaphore";
 
 import { buildUnavailableProviderSnapshot } from "../unavailableProviderSnapshot.ts";
 import {
@@ -64,15 +65,52 @@ interface LiveEntry {
   readonly entry: ProviderInstanceConfig;
 }
 
+interface UnavailableEntry {
+  readonly snapshot: ServerProvider;
+  readonly entry: ProviderInstanceConfig;
+}
+
 /**
  * Internal state shared between the public registry service and the
  * mutator service. Both services are thin shells around these refs.
  */
 interface RegistryState {
   readonly entries: Ref.Ref<ReadonlyMap<ProviderInstanceId, LiveEntry>>;
-  readonly unavailable: Ref.Ref<ReadonlyMap<ProviderInstanceId, ServerProvider>>;
+  readonly unavailable: Ref.Ref<ReadonlyMap<ProviderInstanceId, UnavailableEntry>>;
   readonly changes: PubSub.PubSub<void>;
 }
+
+type BuildEntryResult =
+  | { readonly kind: "live"; readonly live: LiveEntry }
+  | { readonly kind: "unavailable"; readonly snapshot: ServerProvider };
+
+type ReconcileBuildPlan =
+  | { readonly kind: "existing"; readonly instanceId: ProviderInstanceId; readonly live: LiveEntry }
+  | {
+      readonly kind: "existingUnavailable";
+      readonly instanceId: ProviderInstanceId;
+      readonly unavailable: UnavailableEntry;
+    }
+  | {
+      readonly kind: "build";
+      readonly instanceId: ProviderInstanceId;
+      readonly rawInstanceId: string;
+      readonly entry: ProviderInstanceConfig;
+    };
+
+type ReconcileBuildResult =
+  | { readonly kind: "existing"; readonly instanceId: ProviderInstanceId; readonly live: LiveEntry }
+  | {
+      readonly kind: "existingUnavailable";
+      readonly instanceId: ProviderInstanceId;
+      readonly unavailable: UnavailableEntry;
+    }
+  | {
+      readonly kind: "built";
+      readonly instanceId: ProviderInstanceId;
+      readonly entry: ProviderInstanceConfig;
+      readonly result: BuildEntryResult;
+    };
 
 /**
  * Structural equality on `ProviderInstanceConfig` envelopes. Used by
@@ -83,6 +121,18 @@ interface RegistryState {
  */
 const entryEqual = (a: ProviderInstanceConfig, b: ProviderInstanceConfig): boolean =>
   Equal.equals(a, b);
+
+const orderChanged = <A>(previousOrder: ReadonlyArray<A>, nextOrder: ReadonlyArray<A>): boolean => {
+  if (previousOrder.length !== nextOrder.length) {
+    return true;
+  }
+  for (let i = 0; i < previousOrder.length; i++) {
+    if (previousOrder[i] !== nextOrder[i]) {
+      return true;
+    }
+  }
+  return false;
+};
 
 const decodedConfigEnabled = (config: unknown): boolean | undefined => {
   if (!config || typeof config !== "object" || globalThis.Array.isArray(config)) {
@@ -103,16 +153,19 @@ const buildEntry = <R>(input: {
   readonly instanceId: ProviderInstanceId;
   readonly rawInstanceId: string;
   readonly entry: ProviderInstanceConfig;
-}): Effect.Effect<
-  | { readonly kind: "live"; readonly live: LiveEntry }
-  | { readonly kind: "unavailable"; readonly snapshot: ServerProvider },
-  never,
-  R
-> =>
+}): Effect.Effect<BuildEntryResult, never, R> =>
   Effect.gen(function* () {
     const { driversById, parentScope, instanceId, rawInstanceId, entry } = input;
+    const startedAt = Date.now();
     const driver = driversById.get(entry.driver);
     if (!driver) {
+      yield* Effect.logInfo("provider instance registry entry resolved", {
+        instanceId: rawInstanceId,
+        driver: entry.driver,
+        outcome: "unavailable",
+        reason: "driver-not-registered",
+        durationMs: Date.now() - startedAt,
+      });
       return {
         kind: "unavailable" as const,
         snapshot: buildUnavailableProviderSnapshot({
@@ -134,6 +187,14 @@ const buildEntry = <R>(input: {
         instanceId: rawInstanceId,
         driver: entry.driver,
         detail,
+        durationMs: Date.now() - startedAt,
+      });
+      yield* Effect.logInfo("provider instance registry entry resolved", {
+        instanceId: rawInstanceId,
+        driver: entry.driver,
+        outcome: "unavailable",
+        reason: "invalid-config",
+        durationMs: Date.now() - startedAt,
       });
       return {
         kind: "unavailable" as const,
@@ -171,8 +232,16 @@ const buildEntry = <R>(input: {
         instanceId: rawInstanceId,
         driver: entry.driver,
         detail: createResult.failure.detail,
+        durationMs: Date.now() - startedAt,
       });
       yield* Scope.close(childScope, Exit.void).pipe(Effect.ignore);
+      yield* Effect.logInfo("provider instance registry entry resolved", {
+        instanceId: rawInstanceId,
+        driver: entry.driver,
+        outcome: "unavailable",
+        reason: "create-failed",
+        durationMs: Date.now() - startedAt,
+      });
       return {
         kind: "unavailable" as const,
         snapshot: buildUnavailableProviderSnapshot({
@@ -184,6 +253,14 @@ const buildEntry = <R>(input: {
         }),
       };
     }
+
+    yield* Effect.logInfo("provider instance registry entry resolved", {
+      instanceId: rawInstanceId,
+      driver: entry.driver,
+      outcome: "live",
+      enabled: entry.enabled ?? decodedConfigEnabled(typedConfig) ?? true,
+      durationMs: Date.now() - startedAt,
+    });
 
     return {
       kind: "live" as const,
@@ -207,6 +284,7 @@ const makeReconcile = <R>(input: {
   const { state, driversById, parentScope } = input;
   return (configMap: ProviderInstanceConfigMap) =>
     Effect.gen(function* () {
+      const startedAt = Date.now();
       const previousEntries = yield* Ref.get(state.entries);
       const previousUnavailable = yield* Ref.get(state.unavailable);
       const nextRaw = Object.entries(configMap);
@@ -239,57 +317,126 @@ const makeReconcile = <R>(input: {
       // 2. Build additions and replacements. Walk `nextRaw` so the final
       //    entry order follows settings-author order.
       const builtEntries = new Map<ProviderInstanceId, LiveEntry>();
-      const builtUnavailable = new Map<ProviderInstanceId, ServerProvider>();
-      let orderChanged = false;
-      const previousOrder = [...previousEntries.keys()];
-      const nextOrder: Array<ProviderInstanceId> = [];
+      const builtUnavailable = new Map<ProviderInstanceId, UnavailableEntry>();
 
-      for (const [rawInstanceId, entry] of nextRaw) {
-        const instanceId = ProviderInstanceId.make(rawInstanceId);
-        nextOrder.push(instanceId);
+      const buildPlans: ReadonlyArray<ReconcileBuildPlan> = nextRaw.map(
+        ([rawInstanceId, entry]) => {
+          const instanceId = ProviderInstanceId.make(rawInstanceId);
 
-        const existing = previousEntries.get(instanceId);
-        if (existing !== undefined && !replacedIds.has(instanceId)) {
-          // No-op update: keep the existing live entry and scope.
-          builtEntries.set(instanceId, existing);
+          const existing = previousEntries.get(instanceId);
+          if (existing !== undefined && !replacedIds.has(instanceId)) {
+            // No-op update: keep the existing live entry and scope.
+            return {
+              kind: "existing" as const,
+              instanceId,
+              live: existing,
+            };
+          }
+
+          const existingUnavailable = previousUnavailable.get(instanceId);
+          if (existingUnavailable !== undefined && entryEqual(existingUnavailable.entry, entry)) {
+            return {
+              kind: "existingUnavailable" as const,
+              instanceId,
+              unavailable: existingUnavailable,
+            };
+          }
+
+          return {
+            kind: "build" as const,
+            instanceId,
+            rawInstanceId,
+            entry,
+          };
+        },
+      );
+
+      const buildResults: ReadonlyArray<ReconcileBuildResult> = yield* Effect.forEach(
+        buildPlans,
+        (plan): Effect.Effect<ReconcileBuildResult, never, R> => {
+          if (plan.kind === "existing") {
+            return Effect.succeed({
+              kind: "existing",
+              instanceId: plan.instanceId,
+              live: plan.live,
+            });
+          }
+
+          if (plan.kind === "existingUnavailable") {
+            return Effect.succeed({
+              kind: "existingUnavailable",
+              instanceId: plan.instanceId,
+              unavailable: plan.unavailable,
+            });
+          }
+
+          return buildEntry({
+            driversById,
+            parentScope,
+            instanceId: plan.instanceId,
+            rawInstanceId: plan.rawInstanceId,
+            entry: plan.entry,
+          }).pipe(
+            Effect.map((result) => ({
+              kind: "built" as const,
+              instanceId: plan.instanceId,
+              entry: plan.entry,
+              result,
+            })),
+          );
+        },
+        { concurrency: "unbounded" },
+      );
+
+      let reusedInstances = 0;
+      let createdInstances = 0;
+      let unavailableInstances = 0;
+      for (const result of buildResults) {
+        if (result.kind === "existing") {
+          reusedInstances++;
+          builtEntries.set(result.instanceId, result.live);
           continue;
         }
 
-        const result = yield* buildEntry({
-          driversById,
-          parentScope,
-          instanceId,
-          rawInstanceId,
-          entry,
-        });
-        if (result.kind === "live") {
-          builtEntries.set(instanceId, result.live);
+        if (result.kind === "existingUnavailable") {
+          reusedInstances++;
+          unavailableInstances++;
+          builtUnavailable.set(result.instanceId, result.unavailable);
+          continue;
+        }
+
+        if (result.result.kind === "live") {
+          createdInstances++;
+          builtEntries.set(result.instanceId, result.result.live);
         } else {
-          builtUnavailable.set(instanceId, result.snapshot);
+          unavailableInstances++;
+          builtUnavailable.set(result.instanceId, {
+            snapshot: result.result.snapshot,
+            entry: result.entry,
+          });
         }
       }
 
-      if (previousOrder.length === nextOrder.length) {
-        for (let i = 0; i < previousOrder.length; i++) {
-          if (previousOrder[i] !== nextOrder[i]) {
-            orderChanged = true;
-            break;
-          }
-        }
-      } else {
-        orderChanged = true;
-      }
+      const entriesOrderChanged = orderChanged(
+        [...previousEntries.keys()],
+        [...builtEntries.keys()],
+      );
+      const unavailableOrderChanged = orderChanged(
+        [...previousUnavailable.keys()],
+        [...builtUnavailable.keys()],
+      );
 
       const entriesChanged =
-        orderChanged ||
+        entriesOrderChanged ||
         removedIds.length > 0 ||
         replacedIds.size > 0 ||
         builtEntries.size !== previousEntries.size;
       const unavailableChanged =
+        unavailableOrderChanged ||
         builtUnavailable.size !== previousUnavailable.size ||
-        [...builtUnavailable].some(([id, snapshot]) => {
+        [...builtUnavailable].some(([id, unavailable]) => {
           const prev = previousUnavailable.get(id);
-          return prev === undefined || !Equal.equals(prev, snapshot);
+          return prev === undefined || !Equal.equals(prev.snapshot, unavailable.snapshot);
         }) ||
         [...previousUnavailable].some(([id]) => !builtUnavailable.has(id));
 
@@ -299,6 +446,18 @@ const makeReconcile = <R>(input: {
       if (entriesChanged || unavailableChanged) {
         yield* PubSub.publish(state.changes, undefined);
       }
+
+      yield* Effect.logInfo("provider instance registry reconcile complete", {
+        durationMs: Date.now() - startedAt,
+        configuredInstances: nextRaw.length,
+        reusedInstances,
+        createdInstances,
+        unavailableInstances,
+        removedInstances: removedIds.length,
+        replacedInstances: replacedIds.size,
+        entriesChanged,
+        unavailableChanged,
+      });
     });
 };
 
@@ -347,14 +506,19 @@ export const makeProviderInstanceRegistry = <R>(input: {
     const driverContext = yield* Effect.context<R>();
 
     const entries = yield* Ref.make<ReadonlyMap<ProviderInstanceId, LiveEntry>>(new Map());
-    const unavailable = yield* Ref.make<ReadonlyMap<ProviderInstanceId, ServerProvider>>(new Map());
+    const unavailable = yield* Ref.make<ReadonlyMap<ProviderInstanceId, UnavailableEntry>>(
+      new Map(),
+    );
     const changes = yield* PubSub.unbounded<void>();
     yield* Effect.addFinalizer(() => PubSub.shutdown(changes));
 
     const state: RegistryState = { entries, unavailable, changes };
     const reconcileWithR = makeReconcile({ state, driversById, parentScope });
+    const reconcileSemaphore = yield* Semaphore.make(1);
     const reconcile: ProviderInstanceRegistryMutatorShape["reconcile"] = (configMap) =>
-      reconcileWithR(configMap).pipe(Effect.provideContext(driverContext));
+      reconcileSemaphore
+        .withPermits(1)(reconcileWithR(configMap))
+        .pipe(Effect.provideContext(driverContext));
 
     // Hydrate the initial configMap synchronously so callers can read
     // `listInstances` immediately after this effect completes.
@@ -369,7 +533,10 @@ export const makeProviderInstanceRegistry = <R>(input: {
         ),
       ),
       listUnavailable: Ref.get(unavailable).pipe(
-        Effect.map((map) => Array.from(map.values()) as ReadonlyArray<ServerProvider>),
+        Effect.map(
+          (map) =>
+            Array.from(map.values(), (entry) => entry.snapshot) as ReadonlyArray<ServerProvider>,
+        ),
       ),
       // Getters: each read constructs a fresh Stream / Effect descriptor
       // so multiple consumers don't share a single already-started

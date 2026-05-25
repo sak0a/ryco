@@ -4,7 +4,11 @@ import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
-import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
+import {
+  BRAND_ASSET_PATHS,
+  resolveWebIconOverrides,
+  type WebAssetBrand,
+} from "./lib/brand-assets.ts";
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
@@ -569,6 +573,10 @@ export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIcon
   };
 }
 
+export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
+  return resolveDesktopUpdateChannel(version) === "nightly" ? "nightly" : "production";
+}
+
 export function resolveMockUpdateServerUrl(mockUpdateServerPort: number | undefined): string {
   return `http://localhost:${mockUpdateServerPort ?? 3000}`;
 }
@@ -715,6 +723,25 @@ const assertPlatformBuildResources = Effect.fn("assertPlatformBuildResources")(f
   }
 });
 
+const stageWebBrandAssets = Effect.fn("stageWebBrandAssets")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageServerDir: string;
+  readonly brand: WebAssetBrand;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  yield* Effect.forEach(
+    resolveWebIconOverrides(input.brand, "dist/client"),
+    (override) =>
+      fs.copyFile(
+        path.join(input.repoRoot, override.sourceRelativePath),
+        path.join(input.stageServerDir, override.targetRelativePath),
+      ),
+    { concurrency: "unbounded", discard: true },
+  );
+});
+
 const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   options: ResolvedBuildOptions,
 ) {
@@ -780,6 +807,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   const appVersion = options.version ?? serverPackageJson.version;
   const iconAssets = resolveDesktopBuildIconAssets(appVersion);
+  const webAssetBrand = resolveDesktopWebAssetBrand(appVersion);
   const commitHash = yield* resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
@@ -829,7 +857,15 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* Effect.log("[desktop-artifact] Staging release app...");
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
-  yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+  const stageServerDir = path.join(stageAppDir, "apps/server");
+  const stageServerDistDir = path.join(stageServerDir, "dist");
+  yield* fs.copy(distDirs.serverDist, stageServerDistDir);
+  yield* stageWebBrandAssets({
+    repoRoot,
+    stageServerDir,
+    brand: webAssetBrand,
+  });
+  yield* validateBundledClientAssets(path.join(stageServerDistDir, "client"));
 
   yield* assertPlatformBuildResources(
     options.platform,

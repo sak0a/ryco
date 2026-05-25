@@ -1,120 +1,154 @@
-import { type ServerLifecycleWelcomePayload } from "@ryco/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime";
 import {
   Outlet,
   createRootRouteWithContext,
   type ErrorComponentProps,
   useLocation,
-  useNavigate,
 } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef } from "react";
-import { QueryClient, useQueryClient } from "@tanstack/react-query";
+import { lazy, Suspense, useEffect } from "react";
+import type { QueryClient } from "@tanstack/react-query";
+import type { AuthSessionState } from "@ryco/contracts";
 
 import { APP_DISPLAY_NAME } from "../branding";
-import { AppSidebarLayout } from "../components/AppSidebarLayout";
-import { CommandPalette } from "../components/CommandPalette";
-import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
-import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
-import {
-  SlowRpcAckToastCoordinator,
-  WebSocketConnectionCoordinator,
-  WebSocketConnectionSurface,
-} from "../components/WebSocketConnectionSurface";
+import { AppBootLoadingSurface } from "../components/AppBootLoadingSurface";
 import { Button } from "../components/ui/button";
-import {
-  AnchoredToastProvider,
-  stackedThreadToast,
-  ToastProvider,
-  toastManager,
-} from "../components/ui/toast";
-import { resolveAndPersistPreferredEditor } from "../editorPreferences";
-import { readLocalApi } from "../localApi";
-import { useSettings } from "../hooks/useSettings";
-import {
-  deriveLogicalProjectKeyFromSettings,
-  derivePhysicalProjectKeyFromPath,
-} from "../logicalProject";
-import {
-  getServerConfigUpdatedNotification,
-  ServerConfigUpdatedNotification,
-  startServerStateSync,
-  useServerConfig,
-  useServerConfigUpdatedSubscription,
-  useServerWelcomeSubscription,
-} from "../rpc/serverState";
-import { useStore } from "../store";
-import { useUiStateStore } from "../uiStateStore";
-import { syncBrowserChromeTheme } from "../hooks/useTheme";
-import {
-  ensureEnvironmentConnectionBootstrapped,
-  getPrimaryEnvironmentConnection,
-  listSavedEnvironmentRecords,
-  waitForSavedEnvironmentRegistryHydration,
-  startEnvironmentConnectionService,
-  useSavedEnvironmentRegistryStore,
-} from "../environments/runtime";
-import { configureClientTracing } from "../observability/clientTracing";
-import {
-  ensurePrimaryEnvironmentReady,
-  getPrimaryKnownEnvironment,
-  resolveInitialServerAuthGateState,
-  updatePrimaryEnvironmentDescriptor,
-} from "../environments/primary";
-import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
 import { markStartupPhase, measureStartupPhase } from "../perf/startupInstrumentation";
+
+const RootAppShell = lazy(() =>
+  import("../components/RootAppShell").then((module) => ({ default: module.RootAppShell })),
+);
+
+export type RootAuthGateState =
+  | { status: "authenticated" }
+  | {
+      status: "requires-auth";
+      auth: AuthSessionState["auth"];
+      errorMessage?: string;
+    }
+  | { status: "hosted-pairing" }
+  | { status: "hosted-static" };
+
+export interface RootBeforeLoadContext {
+  readonly authGateState: RootAuthGateState;
+}
+
+let cachedReadyRootContext: RootBeforeLoadContext | null = null;
+let pendingReadyRootContext: Promise<RootBeforeLoadContext> | null = null;
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
-  beforeLoad: async ({ location }) => {
-    markStartupPhase("root-before-load-start");
-    if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
-      markStartupPhase("root-before-load-ready");
-      return {
-        authGateState: {
-          status: "hosted-pairing",
-        } as const,
-      };
-    }
-
-    if (isHostedStaticApp(new URL(window.location.href))) {
-      await waitForSavedEnvironmentRegistryHydration();
-      markStartupPhase("root-before-load-ready");
-      return {
-        authGateState: {
-          status: "hosted-static",
-        } as const,
-      };
-    }
-
-    const [, authGateState] = await Promise.all([
-      ensurePrimaryEnvironmentReady(),
-      resolveInitialServerAuthGateState(),
-    ]);
-    markStartupPhase("root-before-load-ready");
-    measureStartupPhase("root-before-load", "root-before-load-start", "root-before-load-ready");
-    return {
-      authGateState,
-    };
-  },
+  beforeLoad: ({ location }) => resolveRootBeforeLoadContext(location.pathname),
   component: RootRouteView,
   errorComponent: RootRouteErrorView,
   head: () => ({
     meta: [{ name: "title", content: APP_DISPLAY_NAME }],
   }),
+  pendingComponent: RootRoutePendingView,
+  pendingMinMs: 0,
+  pendingMs: 0,
 });
+
+function resolveRootBeforeLoadContext(
+  pathname: string,
+): RootBeforeLoadContext | Promise<RootBeforeLoadContext> {
+  markStartupPhase("root-before-load-start");
+
+  if (pathname !== "/pair" && cachedReadyRootContext) {
+    markStartupPhase("root-before-load-ready");
+    measureStartupPhase("root-before-load", "root-before-load-start", "root-before-load-ready");
+    return cachedReadyRootContext;
+  }
+
+  if (pathname !== "/pair" && pendingReadyRootContext) {
+    return pendingReadyRootContext;
+  }
+
+  const pendingContext: Promise<RootBeforeLoadContext> = resolveRootBeforeLoadContextAsync(
+    pathname,
+  ).then((context) => {
+    if (
+      context.authGateState.status === "authenticated" ||
+      context.authGateState.status === "hosted-static"
+    ) {
+      cachedReadyRootContext = context;
+    }
+    return context;
+  });
+
+  if (pathname !== "/pair") {
+    const trackedPendingContext = pendingContext.finally(() => {
+      if (pendingReadyRootContext === trackedPendingContext) {
+        pendingReadyRootContext = null;
+      }
+    });
+    pendingReadyRootContext = trackedPendingContext;
+    return pendingReadyRootContext;
+  }
+
+  return pendingContext;
+}
+
+async function resolveRootBeforeLoadContextAsync(pathname: string): Promise<RootBeforeLoadContext> {
+  const currentUrl = new URL(window.location.href);
+  const { hasHostedPairingRequest, isHostedStaticApp } = await import("../hostedPairing");
+
+  if (pathname === "/pair" && hasHostedPairingRequest(currentUrl)) {
+    markStartupPhase("root-before-load-ready");
+    return {
+      authGateState: {
+        status: "hosted-pairing",
+      },
+    };
+  }
+
+  if (isHostedStaticApp(currentUrl)) {
+    const { waitForSavedEnvironmentRegistryHydration } = await import("../environments/runtime");
+    await waitForSavedEnvironmentRegistryHydration();
+    markStartupPhase("root-before-load-ready");
+    return {
+      authGateState: {
+        status: "hosted-static",
+      },
+    };
+  }
+
+  const { ensurePrimaryEnvironmentReady, resolveInitialServerAuthGateState } =
+    await import("../environments/primary");
+  const [, authGateState] = await Promise.all([
+    ensurePrimaryEnvironmentReady(),
+    resolveInitialServerAuthGateState(),
+  ]);
+  markStartupPhase("root-before-load-ready");
+  measureStartupPhase("root-before-load", "root-before-load-start", "root-before-load-ready");
+  return {
+    authGateState,
+  };
+}
+
+function RootRoutePendingView() {
+  return <AppBootLoadingSurface />;
+}
 
 function RootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const { authGateState } = Route.useRouteContext();
-  const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      syncBrowserChromeTheme();
+    let frame: number | null = null;
+    let disposed = false;
+    void import("../hooks/useTheme").then(({ syncBrowserChromeTheme }) => {
+      if (disposed) {
+        return;
+      }
+      frame = window.requestAnimationFrame(() => {
+        syncBrowserChromeTheme();
+      });
     });
     return () => {
-      window.cancelAnimationFrame(frame);
+      disposed = true;
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
     };
   }, [pathname]);
 
@@ -126,60 +160,11 @@ function RootRouteView() {
     return <Outlet />;
   }
 
-  const appShell = (
-    <CommandPalette>
-      <AppSidebarLayout>
-        <Outlet />
-      </AppSidebarLayout>
-    </CommandPalette>
-  );
-
   return (
-    <ToastProvider>
-      <AnchoredToastProvider>
-        {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
-        {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
-        <EnvironmentConnectionManagerBootstrap />
-        <SshPasswordPromptDialog />
-        <HostedStaticEnvironmentBootstrap />
-        {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
-        {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
-        {primaryEnvironmentAuthenticated ? <WebSocketConnectionCoordinator /> : null}
-        {primaryEnvironmentAuthenticated ? <SlowRpcAckToastCoordinator /> : null}
-        {primaryEnvironmentAuthenticated ? (
-          <WebSocketConnectionSurface>{appShell}</WebSocketConnectionSurface>
-        ) : (
-          appShell
-        )}
-      </AnchoredToastProvider>
-    </ToastProvider>
+    <Suspense fallback={<AppBootLoadingSurface />}>
+      <RootAppShell authGateState={authGateState} />
+    </Suspense>
   );
-}
-
-function HostedStaticEnvironmentBootstrap() {
-  const savedEnvironmentCount = useSavedEnvironmentRegistryStore(
-    (state) => Object.keys(state.byId).length,
-  );
-
-  useEffect(() => {
-    if (getPrimaryKnownEnvironment()) {
-      return;
-    }
-
-    const currentActiveEnvironmentId = useStore.getState().activeEnvironmentId;
-    if (currentActiveEnvironmentId) {
-      return;
-    }
-
-    const firstSavedEnvironment = listSavedEnvironmentRecords()[0];
-    if (!firstSavedEnvironment) {
-      return;
-    }
-
-    useStore.getState().setActiveEnvironmentId(firstSavedEnvironment.environmentId);
-  }, [savedEnvironmentCount]);
-
-  return null;
 }
 
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
@@ -251,180 +236,4 @@ function errorDetails(error: unknown): string {
   } catch {
     return "No additional error details are available.";
   }
-}
-
-function ServerStateBootstrap() {
-  useEffect(() => {
-    if (!getPrimaryKnownEnvironment()) {
-      return;
-    }
-
-    return startServerStateSync(getPrimaryEnvironmentConnection().client.server);
-  }, []);
-
-  return null;
-}
-
-function AuthenticatedTracingBootstrap() {
-  useEffect(() => {
-    void configureClientTracing();
-  }, []);
-
-  return null;
-}
-
-function EnvironmentConnectionManagerBootstrap() {
-  const queryClient = useQueryClient();
-
-  useEffect(() => {
-    return startEnvironmentConnectionService(queryClient);
-  }, [queryClient]);
-
-  return null;
-}
-
-function EventRouter() {
-  const setActiveEnvironmentId = useStore((store) => store.setActiveEnvironmentId);
-  const navigate = useNavigate();
-  const pathname = useLocation({ select: (loc) => loc.pathname });
-  const projectGroupingSettings = useSettings((settings) => ({
-    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
-    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
-  }));
-  const readPathname = useEffectEvent(() => pathname);
-  const handledBootstrapThreadIdRef = useRef<string | null>(null);
-  const seenServerConfigUpdateIdRef = useRef(getServerConfigUpdatedNotification()?.id ?? 0);
-  const disposedRef = useRef(false);
-  const serverConfig = useServerConfig();
-
-  const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
-    if (!payload) return;
-
-    updatePrimaryEnvironmentDescriptor(payload.environment);
-    setActiveEnvironmentId(payload.environment.environmentId);
-    void (async () => {
-      await ensureEnvironmentConnectionBootstrapped(payload.environment.environmentId);
-      if (disposedRef.current) {
-        return;
-      }
-
-      if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
-        return;
-      }
-      const bootstrapEnvironmentState =
-        useStore.getState().environmentStateById[payload.environment.environmentId];
-      const bootstrapProject =
-        bootstrapEnvironmentState?.projectById[payload.bootstrapProjectId] ?? null;
-      const bootstrapProjectKey =
-        (bootstrapProject
-          ? deriveLogicalProjectKeyFromSettings(bootstrapProject, projectGroupingSettings)
-          : null) ??
-        (serverConfig?.cwd
-          ? derivePhysicalProjectKeyFromPath(payload.environment.environmentId, serverConfig.cwd)
-          : null) ??
-        scopedProjectKey(
-          scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
-        );
-      useUiStateStore.getState().setProjectExpanded(bootstrapProjectKey, true);
-
-      if (readPathname() !== "/") {
-        return;
-      }
-      if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
-        return;
-      }
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: {
-          environmentId: payload.environment.environmentId,
-          threadId: payload.bootstrapThreadId,
-        },
-        replace: true,
-      });
-      handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
-    })().catch(() => undefined);
-  });
-
-  const handleServerConfigUpdated = useEffectEvent(
-    (notification: ServerConfigUpdatedNotification | null) => {
-      if (!notification) return;
-
-      const { id, payload, source } = notification;
-      if (id <= seenServerConfigUpdateIdRef.current) {
-        return;
-      }
-      seenServerConfigUpdateIdRef.current = id;
-      if (source !== "keybindingsUpdated") {
-        return;
-      }
-
-      const issue = payload.issues.find((entry) => entry.kind.startsWith("keybindings."));
-      if (!issue) {
-        toastManager.add({
-          type: "success",
-          title: "Keybindings updated",
-          description: "Keybindings configuration reloaded successfully.",
-        });
-        return;
-      }
-
-      toastManager.add(
-        stackedThreadToast({
-          type: "warning",
-          title: "Invalid keybindings configuration",
-          description: issue.message,
-          actionVariant: "outline",
-          actionProps: {
-            children: "Open keybindings.json",
-            onClick: () => {
-              const api = readLocalApi();
-              if (!api) {
-                return;
-              }
-
-              void Promise.resolve(serverConfig ?? api.server.getConfig())
-                .then((config) => {
-                  const editor = resolveAndPersistPreferredEditor(config.availableEditors);
-                  if (!editor) {
-                    throw new Error("No available editors found.");
-                  }
-                  return api.shell.openInEditor(config.keybindingsConfigPath, editor);
-                })
-                .catch((error) => {
-                  toastManager.add(
-                    stackedThreadToast({
-                      type: "error",
-                      title: "Unable to open keybindings file",
-                      description:
-                        error instanceof Error ? error.message : "Unknown error opening file.",
-                    }),
-                  );
-                });
-            },
-          },
-        }),
-      );
-    },
-  );
-
-  useEffect(() => {
-    if (!serverConfig) {
-      return;
-    }
-
-    updatePrimaryEnvironmentDescriptor(serverConfig.environment);
-    setActiveEnvironmentId(serverConfig.environment.environmentId);
-  }, [serverConfig, setActiveEnvironmentId]);
-
-  useEffect(() => {
-    disposedRef.current = false;
-    return () => {
-      disposedRef.current = true;
-    };
-  }, []);
-
-  useServerWelcomeSubscription(handleWelcome);
-  useServerConfigUpdatedSubscription(handleServerConfigUpdated);
-
-  return null;
 }

@@ -117,6 +117,7 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    modulePreload: false,
     sourcemap: buildSourcemap,
   },
 });

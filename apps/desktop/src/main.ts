@@ -3,6 +3,7 @@ import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   app,
@@ -95,6 +96,7 @@ import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider
 
 const desktopStartupTiming = createStartupTiming();
 desktopStartupTiming.mark("desktop.launch");
+const STARTUP_TIMING_STDOUT = readEnv("RYCO_DESKTOP_STARTUP_TIMING_STDOUT")?.trim() === "1";
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
@@ -128,6 +130,8 @@ const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
 const SAVED_ENVIRONMENT_REGISTRY_PATH = Path.join(STATE_DIR, "saved-environments.json");
 const SHELL_ENVIRONMENT_CACHE_PATH = Path.join(STATE_DIR, "shell-environment-cache.json");
 const DESKTOP_SCHEME = "s3";
+const DESKTOP_BOOT_HOST = "app";
+const DESKTOP_BOOT_PATH = "/desktop-boot.html";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 // Dev-only SSH launcher override. Set this to an absolute path on the SSH host
@@ -152,6 +156,21 @@ const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
 const SERVER_SETTINGS_PATH = Path.join(STATE_DIR, "settings.json");
 const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
+
+if (!isDevelopment) {
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: DESKTOP_SCHEME,
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        codeCache: true,
+      },
+    },
+  ]);
+}
 
 function resolvePickFolderDefaultPath(rawOptions: unknown): string | undefined {
   if (typeof rawOptions !== "object" || rawOptions === null) {
@@ -312,6 +331,48 @@ function resolveDesktopDevServerUrl(): string {
   return devServerUrl;
 }
 
+function resolveDesktopBootUrl(): string {
+  return `${DESKTOP_SCHEME}://${DESKTOP_BOOT_HOST}${DESKTOP_BOOT_PATH}`;
+}
+
+function resolveDesktopBootFilePath(): string | null {
+  const staticRoot = resolveDesktopStaticDir();
+  if (!staticRoot) {
+    return null;
+  }
+  const bootPath = Path.join(staticRoot, DESKTOP_BOOT_PATH.replace(/^\/+/, ""));
+  return FS.existsSync(bootPath) ? bootPath : null;
+}
+
+function isDesktopBootUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol === "file:") {
+      return Path.basename(fileURLToPath(url)) === Path.basename(DESKTOP_BOOT_PATH);
+    }
+    return (
+      url.protocol === `${DESKTOP_SCHEME}:` &&
+      url.hostname === DESKTOP_BOOT_HOST &&
+      url.pathname === DESKTOP_BOOT_PATH
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isDesktopAppUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.protocol === `${DESKTOP_SCHEME}:` &&
+      url.hostname === DESKTOP_BOOT_HOST &&
+      url.pathname !== DESKTOP_BOOT_PATH
+    );
+  } catch {
+    return false;
+  }
+}
+
 function backendChildEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   deleteEnv(env, "RYCO_PORT");
@@ -324,6 +385,10 @@ function backendChildEnv(): NodeJS.ProcessEnv {
   deleteEnv(env, "RYCO_DESKTOP_HTTPS_ENDPOINTS");
   deleteEnv(env, "RYCO_TAILSCALE_SERVE");
   deleteEnv(env, "RYCO_TAILSCALE_SERVE_PORT");
+  // VITE_DEV_SERVER_URL must never reach the packaged backend: if a developer's
+  // shell exports it, the server's Config.url parser throws and the backend
+  // exits before HTTP listen, causing the desktop to spin in a restart loop.
+  deleteEnv(env, "VITE_DEV_SERVER_URL");
   return env;
 }
 
@@ -518,7 +583,11 @@ function writeDesktopLogHeader(message: string): void {
 }
 
 function writeDesktopStartupTimingEntry(entry: ReturnType<typeof desktopStartupTiming.mark>): void {
-  writeDesktopLogHeader(formatStartupTimingEntry(entry));
+  const formatted = formatStartupTimingEntry(entry);
+  writeDesktopLogHeader(formatted);
+  if (STARTUP_TIMING_STDOUT) {
+    console.log(`[desktop-startup] ${formatted}`);
+  }
 }
 
 function markDesktopStartupPhase(phase: string, detail?: string): void {
@@ -653,21 +722,56 @@ function ensureDevelopmentInitialWindowOpen(): void {
   developmentInitialWindowOpenInFlight = nextOpen;
 }
 
-function ensureInitialBackendWindowOpen(): void {
+function ensurePackagedBootstrapWindowOpen(reason: string): BrowserWindow | null {
+  if (isDevelopment) {
+    return null;
+  }
+
   const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
-  if (isDevelopment || existingWindow !== null || backendInitialWindowOpenInFlight !== null) {
+  if (existingWindow !== null) {
+    return existingWindow;
+  }
+
+  mainWindow = createWindow();
+  writeDesktopLogHeader(`bootstrap main window created reason=${reason}`);
+  return mainWindow;
+}
+
+function loadPackagedBackendAppWindow(window: BrowserWindow, reason: string): void {
+  if (isDevelopment || window.isDestroyed() || backendHttpUrl.length === 0) {
     return;
   }
+
+  const currentUrl = window.webContents.getURL();
+  if (
+    currentUrl &&
+    currentUrl !== "about:blank" &&
+    !isDesktopBootUrl(currentUrl) &&
+    !currentUrl.startsWith(backendHttpUrl)
+  ) {
+    return;
+  }
+
+  writeDesktopLogHeader(`bootstrap backend app load requested reason=${reason}`);
+  markDesktopStartupPhase("desktop.window.app.load-request", `reason=${reason}`);
+  void window.loadURL(backendHttpUrl);
+}
+
+function ensureInitialBackendWindowOpen(): void {
+  if (isDevelopment || backendInitialWindowOpenInFlight !== null) {
+    return;
+  }
+
+  ensurePackagedBootstrapWindowOpen("backend-bootstrap");
 
   const nextOpen = waitForBackendWindowReady(backendHttpUrl)
     .then((source) => {
       markDesktopStartupPhase("desktop.backend.listening", `source=${source}`);
       writeDesktopLogHeader(`bootstrap backend ready source=${source}`);
-      if (mainWindow ?? BrowserWindow.getAllWindows()[0]) {
-        return;
+      const window = ensurePackagedBootstrapWindowOpen("backend-ready");
+      if (window) {
+        loadPackagedBackendAppWindow(window, "backend-ready");
       }
-      mainWindow = createWindow();
-      writeDesktopLogHeader("bootstrap main window created");
     })
     .catch((error) => {
       if (isBackendReadinessAborted(error)) {
@@ -773,7 +877,7 @@ function captureBackendOutput(child: ChildProcess.ChildProcess): void {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "utf8");
       backendLogSink?.write(buffer);
       backendListeningDetector?.push(buffer);
-      if (isDevelopment) {
+      if (isDevelopment || STARTUP_TIMING_STDOUT) {
         process[streamName].write(buffer);
       }
     });
@@ -841,18 +945,6 @@ function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
   if (updateCheckInFlight) return "check";
   return updateState.errorContext;
 }
-
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: DESKTOP_SCHEME,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-    },
-  },
-]);
 
 function resolveAppRoot(): string {
   if (!app.isPackaged) {
@@ -1297,6 +1389,126 @@ function revealWindow(window: BrowserWindow): void {
   }
 
   window.focus();
+}
+
+function schedulePackagedBootReveal(window: BrowserWindow): void {
+  const timer = setTimeout(() => {
+    if (window.isDestroyed() || window.isVisible()) {
+      return;
+    }
+
+    const currentUrl = window.webContents.getURL();
+    const urlKind = classifyDesktopWindowStartupUrl(currentUrl);
+    if (
+      urlKind === "blank" ||
+      urlKind === "boot" ||
+      (urlKind === "app" && isDesktopAppUrl(currentUrl))
+    ) {
+      markDesktopStartupPhase("desktop.window.boot.reveal-fallback", `urlKind=${urlKind}`);
+      revealWindow(window);
+    }
+  }, 250);
+  timer.unref?.();
+}
+
+function classifyDesktopWindowStartupUrl(rawUrl: string): "app" | "blank" | "boot" | "other" {
+  if (!rawUrl || rawUrl === "about:blank") {
+    return "blank";
+  }
+  if (isDesktopBootUrl(rawUrl)) {
+    return "boot";
+  }
+  if (isDesktopAppUrl(rawUrl)) {
+    return "app";
+  }
+  if (backendHttpUrl.length > 0 && rawUrl.startsWith(backendHttpUrl)) {
+    return "app";
+  }
+  if (isDevelopment) {
+    try {
+      if (rawUrl.startsWith(resolveDesktopDevServerUrl())) {
+        return "app";
+      }
+    } catch {
+      return "other";
+    }
+  }
+  return "other";
+}
+
+type DesktopWindowStartupUrlKind = "app" | "blank" | "boot" | "other";
+
+function markDesktopWindowStartupLoad(
+  eventName: "did-finish-load" | "dom-ready",
+  url: string,
+): DesktopWindowStartupUrlKind {
+  const urlKind = classifyDesktopWindowStartupUrl(url);
+  markDesktopStartupPhase(`desktop.window.${urlKind}.${eventName}`);
+  return urlKind;
+}
+
+function logDesktopRendererStartupPerformance(
+  window: BrowserWindow,
+  urlKind: string,
+): Promise<void> | null {
+  if (!STARTUP_TIMING_STDOUT || urlKind !== "app" || window.isDestroyed()) {
+    return null;
+  }
+
+  return window.webContents
+    .executeJavaScript(
+      `(() => {
+        const nav = performance.getEntriesByType("navigation")[0];
+        const resources = performance
+          .getEntriesByType("resource")
+          .map((entry) => ({
+            name: entry.name.replace(location.origin, ""),
+            start: Math.round(entry.startTime),
+            duration: Math.round(entry.duration),
+            transferSize: entry.transferSize,
+            encodedBodySize: entry.encodedBodySize,
+          }))
+          .sort((left, right) => right.duration - left.duration)
+          .slice(0, 12);
+        const startup = performance
+          .getEntries()
+          .filter((entry) => entry.name.startsWith("s3:startup:"))
+          .map((entry) => ({
+            name: entry.name,
+            entryType: entry.entryType,
+            start: Math.round(entry.startTime),
+            duration: Math.round(entry.duration),
+          }));
+        return {
+          nav: nav
+            ? {
+                start: Math.round(nav.startTime),
+                redirect: Math.round(nav.redirectEnd - nav.redirectStart),
+                dns: Math.round(nav.domainLookupEnd - nav.domainLookupStart),
+                connect: Math.round(nav.connectEnd - nav.connectStart),
+                requestStart: Math.round(nav.requestStart),
+                responseStart: Math.round(nav.responseStart),
+                responseEnd: Math.round(nav.responseEnd),
+                domInteractive: Math.round(nav.domInteractive),
+                domContentLoaded: Math.round(nav.domContentLoadedEventEnd),
+                load: Math.round(nav.loadEventEnd),
+                transferSize: nav.transferSize,
+              }
+            : null,
+          resources,
+          startup,
+        };
+      })()`,
+      true,
+    )
+    .then((performanceSummary: unknown) => {
+      console.info(`[desktop-startup] renderer performance ${JSON.stringify(performanceSummary)}`);
+    })
+    .catch((error: unknown) => {
+      writeDesktopLogHeader(
+        `startup renderer performance failed message=${sanitizeLogValue(formatErrorMessage(error))}`,
+      );
+    });
 }
 
 function emitUpdateState(): void {
@@ -2163,6 +2375,7 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: false,
     },
   });
 
@@ -2225,9 +2438,20 @@ function createWindow(): BrowserWindow {
     event.preventDefault();
     window.setTitle(APP_DISPLAY_NAME);
   });
+  window.webContents.on("dom-ready", () => {
+    const currentUrl = window.webContents.getURL();
+    markDesktopWindowStartupLoad("dom-ready", currentUrl);
+    if (!isDevelopment && isDesktopBootUrl(currentUrl)) {
+      revealWindow(window);
+    }
+  });
   window.webContents.on("did-finish-load", () => {
+    const currentUrl = window.webContents.getURL();
+    const urlKind = classifyDesktopWindowStartupUrl(currentUrl);
+    markDesktopStartupPhase(`desktop.window.${urlKind}.did-finish-load`);
     window.setTitle(APP_DISPLAY_NAME);
     emitUpdateState();
+    void logDesktopRendererStartupPerformance(window, urlKind);
   });
 
   // On Linux/Wayland with `show: false`, Electron's `ready-to-show` only
@@ -2259,7 +2483,35 @@ function createWindow(): BrowserWindow {
       }, 1000);
     });
   } else {
-    void window.loadURL(backendHttpUrl);
+    const bootFilePath = resolveDesktopBootFilePath();
+    markDesktopStartupPhase("desktop.window.boot.load-request");
+    if (bootFilePath) {
+      void window.loadFile(bootFilePath);
+    } else {
+      void window.loadURL(resolveDesktopBootUrl());
+    }
+    schedulePackagedBootReveal(window);
+    window.webContents.on(
+      "did-fail-load",
+      (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (errorCode === -3 || window.isDestroyed()) {
+          return;
+        }
+        writeDesktopLogHeader(
+          `packaged renderer load failed code=${errorCode} desc=${errorDescription} url=${validatedURL}`,
+        );
+        if (
+          isMainFrame &&
+          backendHttpUrl.length > 0 &&
+          (isDesktopBootUrl(validatedURL) || isDesktopAppUrl(validatedURL))
+        ) {
+          writeDesktopLogHeader(
+            "packaged desktop protocol load failed; falling back to backend URL",
+          );
+          void window.loadURL(backendHttpUrl);
+        }
+      },
+    );
   }
 
   window.on("closed", () => {
@@ -2325,6 +2577,9 @@ async function bootstrap(): Promise<void> {
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");
+  if (!isDevelopment) {
+    ensurePackagedBootstrapWindowOpen("pre-backend-bootstrap");
+  }
   const shellEnvironmentPrepareResult = prepareDesktopShellEnvironmentForBackend();
   startBackend();
   if (shellEnvironmentPrepareResult === "cache-hit") {
