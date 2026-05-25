@@ -29,6 +29,10 @@ export const SidebarProjectGroupingMode = Schema.Literals([
 export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
 export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
 
+export const GitStatusPollIntervalMs = Schema.Literals([0, 10_000, 30_000, 60_000, 300_000]);
+export type GitStatusPollIntervalMs = typeof GitStatusPollIntervalMs.Type;
+export const DEFAULT_GIT_STATUS_POLL_INTERVAL_MS: GitStatusPollIntervalMs = 0;
+
 export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -83,6 +87,9 @@ export const ClientSettingsSchema = Schema.Struct({
   // "open in your preferred editor" affordance. `null` falls back to
   // last-used (localStorage) → first-available behavior.
   preferredEditor: Schema.NullOr(EditorId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  gitStatusPollIntervalMs: GitStatusPollIntervalMs.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_GIT_STATUS_POLL_INTERVAL_MS)),
+  ),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -528,5 +535,6 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
   timestampFormat: Schema.optionalKey(TimestampFormat),
   preferredEditor: Schema.optionalKey(Schema.NullOr(EditorId)),
+  gitStatusPollIntervalMs: Schema.optionalKey(GitStatusPollIntervalMs),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

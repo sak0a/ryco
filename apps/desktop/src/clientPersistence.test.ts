@@ -65,6 +65,7 @@ const clientSettings: ClientSettings = {
   sidebarThreadSortOrder: "created_at",
   timestampFormat: "24-hour",
   preferredEditor: null,
+  gitStatusPollIntervalMs: 0,
 };
 
 const savedRegistryRecord: PersistedSavedEnvironmentRecord = {

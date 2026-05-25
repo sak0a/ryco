@@ -1810,6 +1810,7 @@ function startBackend(): void {
         port: backendPort,
         t3Home: BASE_DIR,
         host: backendBindHost,
+        ...(isDevelopment ? { devUrl: resolveDesktopDevServerUrl() } : {}),
         desktopBootstrapToken: backendBootstrapToken,
         tailscaleServeEnabled: desktopSettings.tailscaleServeEnabled,
         tailscaleServePort: desktopSettings.tailscaleServePort,

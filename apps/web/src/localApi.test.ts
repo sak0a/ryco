@@ -632,6 +632,7 @@ describe("wsApi", () => {
       sidebarThreadSortOrder: "created_at" as const,
       timestampFormat: "24-hour" as const,
       preferredEditor: null,
+      gitStatusPollIntervalMs: 0 as const,
     };
     const getClientSettings = vi.fn().mockResolvedValue({
       ...clientSettings,
@@ -695,6 +696,7 @@ describe("wsApi", () => {
       sidebarThreadSortOrder: "created_at" as const,
       timestampFormat: "24-hour" as const,
       preferredEditor: null,
+      gitStatusPollIntervalMs: 0 as const,
     };
 
     await api.persistence.setClientSettings(clientSettings);

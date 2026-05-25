@@ -4,6 +4,7 @@ import {
   type GitManagerServiceError,
   type VcsStatusResult,
 } from "@ryco/contracts";
+import type { GitStatusPollIntervalMs } from "@ryco/contracts/settings";
 import { Cause } from "effect";
 import { Atom } from "effect/unstable/reactivity";
 import { useEffect } from "react";
@@ -14,6 +15,7 @@ import {
   subscribeEnvironmentConnections,
 } from "../environments/runtime";
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
+import { useSettings } from "~/hooks/useSettings";
 
 interface GitStatusState {
   readonly data: VcsStatusResult | null;
@@ -36,6 +38,10 @@ interface WatchedGitStatus {
 interface GitStatusTarget {
   readonly environmentId: EnvironmentId | null;
   readonly cwd: string | null;
+}
+
+interface GitStatusWatchOptions {
+  readonly automaticRemoteRefreshIntervalMs?: GitStatusPollIntervalMs | undefined;
 }
 
 const EMPTY_GIT_STATUS_STATE = Object.freeze<GitStatusState>({
@@ -77,6 +83,10 @@ function getGitStatusTargetKey(target: GitStatusTarget): string | null {
   return `${target.environmentId}:${target.cwd}`;
 }
 
+function getGitStatusWatchKey(targetKey: string, options?: GitStatusWatchOptions): string {
+  return `${targetKey}:remote-poll=${options?.automaticRemoteRefreshIntervalMs ?? 0}`;
+}
+
 function readResolvedGitStatusClient(target: GitStatusTarget): ResolvedGitStatusClient | null {
   if (target.environmentId === null) {
     return null;
@@ -96,24 +106,29 @@ export function getGitStatusSnapshot(target: GitStatusTarget): GitStatusState {
   return appAtomRegistry.get(gitStatusStateAtom(targetKey));
 }
 
-export function watchGitStatus(target: GitStatusTarget, client?: GitStatusClient): () => void {
+export function watchGitStatus(
+  target: GitStatusTarget,
+  client?: GitStatusClient,
+  options?: GitStatusWatchOptions,
+): () => void {
   const targetKey = getGitStatusTargetKey(target);
   if (targetKey === null) {
     return NOOP;
   }
 
-  const watched = watchedGitStatuses.get(targetKey);
+  const watchKey = getGitStatusWatchKey(targetKey, options);
+  const watched = watchedGitStatuses.get(watchKey);
   if (watched) {
     watched.refCount += 1;
-    return () => unwatchGitStatus(targetKey);
+    return () => unwatchGitStatus(watchKey);
   }
 
-  watchedGitStatuses.set(targetKey, {
+  watchedGitStatuses.set(watchKey, {
     refCount: 1,
-    unsubscribe: subscribeToGitStatusTarget(targetKey, target, client),
+    unsubscribe: subscribeToGitStatusTarget(targetKey, target, client, options),
   });
 
-  return () => unwatchGitStatus(targetKey);
+  return () => unwatchGitStatus(watchKey);
 }
 
 export function refreshGitStatus(
@@ -164,9 +179,13 @@ export function resetGitStatusStateForTests(): void {
 
 export function useGitStatus(target: GitStatusTarget): GitStatusState {
   const targetKey = getGitStatusTargetKey(target);
+  const automaticRemoteRefreshIntervalMs = useSettings((s) => s.gitStatusPollIntervalMs);
   useEffect(
-    () => watchGitStatus({ environmentId: target.environmentId, cwd: target.cwd }),
-    [target.environmentId, target.cwd],
+    () =>
+      watchGitStatus({ environmentId: target.environmentId, cwd: target.cwd }, undefined, {
+        automaticRemoteRefreshIntervalMs,
+      }),
+    [automaticRemoteRefreshIntervalMs, target.environmentId, target.cwd],
   );
 
   const state = useAtomValue(
@@ -194,6 +213,7 @@ function subscribeToGitStatusTarget(
   targetKey: string,
   target: GitStatusTarget,
   providedClient?: GitStatusClient,
+  options?: GitStatusWatchOptions,
 ): () => void {
   if (target.cwd === null) {
     return NOOP;
@@ -227,7 +247,7 @@ function subscribeToGitStatusTarget(
 
     currentUnsubscribe();
     currentClientIdentity = resolved.clientIdentity;
-    currentUnsubscribe = subscribeToGitStatus(targetKey, cwd, resolved.client);
+    currentUnsubscribe = subscribeToGitStatus(targetKey, cwd, resolved.client, options);
   };
 
   const unsubscribeRegistry = providedClient
@@ -241,10 +261,19 @@ function subscribeToGitStatusTarget(
   };
 }
 
-function subscribeToGitStatus(targetKey: string, cwd: string, client: GitStatusClient): () => void {
+function subscribeToGitStatus(
+  targetKey: string,
+  cwd: string,
+  client: GitStatusClient,
+  options?: GitStatusWatchOptions,
+): () => void {
   markGitStatusPending(targetKey);
+  const automaticRemoteRefreshIntervalMs = options?.automaticRemoteRefreshIntervalMs ?? 0;
   return client.onStatus(
-    { cwd },
+    {
+      cwd,
+      ...(automaticRemoteRefreshIntervalMs > 0 ? { automaticRemoteRefreshIntervalMs } : {}),
+    },
     (status: VcsStatusResult) => {
       appAtomRegistry.set(gitStatusStateAtom(targetKey), {
         data: status,

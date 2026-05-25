@@ -8,7 +8,7 @@ import {
   type ScopedThreadRef,
 } from "@ryco/contracts";
 import { scopeThreadRef } from "@ryco/client-runtime";
-import { DEFAULT_UNIFIED_SETTINGS } from "@ryco/contracts/settings";
+import { DEFAULT_UNIFIED_SETTINGS, type GitStatusPollIntervalMs } from "@ryco/contracts/settings";
 import { Equal } from "effect";
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../../branding";
 import aboutLogoAlpha from "../../../../../assets/prod/favicon/favicon-96x96.png";
@@ -64,6 +64,26 @@ const TIMESTAMP_FORMAT_LABELS = {
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
+
+const GIT_STATUS_POLL_INTERVAL_LABELS = {
+  0: "Off",
+  10000: "10 seconds",
+  30000: "30 seconds",
+  60000: "1 minute",
+  300000: "5 minutes",
+} satisfies Record<GitStatusPollIntervalMs, string>;
+
+const GIT_STATUS_POLL_INTERVAL_OPTIONS = [
+  0, 10_000, 30_000, 60_000, 300_000,
+] as const satisfies readonly GitStatusPollIntervalMs[];
+
+function parseGitStatusPollInterval(value: string | null): GitStatusPollIntervalMs | null {
+  if (value === null) return null;
+  const parsed = Number.parseInt(value, 10);
+  return GIT_STATUS_POLL_INTERVAL_OPTIONS.includes(parsed as GitStatusPollIntervalMs)
+    ? (parsed as GitStatusPollIntervalMs)
+    : null;
+}
 
 function EditorOptionIcon({ editor }: { editor: EditorId }) {
   const IconComponent = EDITOR_ICONS[editor];
@@ -641,6 +661,48 @@ export function GeneralSettingsPanel() {
               }
               aria-label="Hide whitespace changes by default"
             />
+          }
+        />
+
+        <SettingsRow
+          title="Git status polling"
+          description="Refresh remote branch and pull request status while a repository is open."
+          resetAction={
+            settings.gitStatusPollIntervalMs !==
+            DEFAULT_UNIFIED_SETTINGS.gitStatusPollIntervalMs ? (
+              <SettingResetButton
+                label="git status polling"
+                onClick={() =>
+                  updateSettings({
+                    gitStatusPollIntervalMs: DEFAULT_UNIFIED_SETTINGS.gitStatusPollIntervalMs,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={String(settings.gitStatusPollIntervalMs)}
+              onValueChange={(value) => {
+                const interval = parseGitStatusPollInterval(value);
+                if (interval !== null) {
+                  updateSettings({ gitStatusPollIntervalMs: interval });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Git status polling interval">
+                <SelectValue>
+                  {GIT_STATUS_POLL_INTERVAL_LABELS[settings.gitStatusPollIntervalMs]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {GIT_STATUS_POLL_INTERVAL_OPTIONS.map((interval) => (
+                  <SelectItem key={interval} hideIndicator value={String(interval)}>
+                    {GIT_STATUS_POLL_INTERVAL_LABELS[interval]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           }
         />
 

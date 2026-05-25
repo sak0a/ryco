@@ -2272,7 +2272,14 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
         [WS_METHODS.subscribeVcsStatus]: (input) =>
           observeRpcStream(
             WS_METHODS.subscribeVcsStatus,
-            ownerStream(WS_METHODS.subscribeVcsStatus, vcsStatusBroadcaster.streamStatus(input)),
+            ownerStream(
+              WS_METHODS.subscribeVcsStatus,
+              vcsStatusBroadcaster.streamStatus(input, {
+                automaticRemoteRefreshInterval: Effect.succeed(
+                  Duration.millis(input.automaticRemoteRefreshIntervalMs ?? 0),
+                ),
+              }),
+            ),
             {
               "rpc.aggregate": "vcs",
             },

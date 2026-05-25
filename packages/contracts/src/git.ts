@@ -108,6 +108,7 @@ export type GitResolvedPullRequest = typeof GitResolvedPullRequest.Type;
 
 export const VcsStatusInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
+  automaticRemoteRefreshIntervalMs: Schema.optional(NonNegativeInt),
 });
 export type VcsStatusInput = typeof VcsStatusInput.Type;
 
