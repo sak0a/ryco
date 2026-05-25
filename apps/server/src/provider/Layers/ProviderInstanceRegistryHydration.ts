@@ -52,7 +52,8 @@ import {
   type ProviderInstanceConfigMap,
   ServerSettings,
 } from "@ryco/contracts";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Ref, Stream } from "effect";
+import * as Semaphore from "effect/Semaphore";
 
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -141,7 +142,7 @@ const SettingsWatcherLive: Layer.Layer<
   }),
 );
 
-const InitialSettingsReconcileLive: Layer.Layer<
+const DesktopSettingsReconcileLive: Layer.Layer<
   never,
   never,
   ProviderInstanceRegistryMutator | ServerSettingsService
@@ -149,9 +150,30 @@ const InitialSettingsReconcileLive: Layer.Layer<
   Effect.gen(function* () {
     const mutator = yield* ProviderInstanceRegistryMutator;
     const serverSettings = yield* ServerSettingsService;
+    const watcherVersion = yield* Ref.make(0);
+    const reconcileSemaphore = yield* Semaphore.make(1);
+
+    const reconcileLatest = (configMap: ProviderInstanceConfigMap) =>
+      reconcileSemaphore.withPermits(1)(mutator.reconcile(configMap));
+
+    yield* serverSettings.streamChanges.pipe(
+      Stream.runForEach((next) =>
+        Effect.gen(function* () {
+          yield* Ref.update(watcherVersion, (version) => version + 1);
+          yield* reconcileLatest(deriveProviderInstanceConfigMap(next));
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError("ProviderInstanceRegistry reconcile failed", cause),
+          ),
+        ),
+      ),
+      Effect.forkScoped,
+    );
+
     yield* Effect.gen(function* () {
       yield* Effect.sleep("100 millis");
       const startedAt = Date.now();
+      const seedVersion = yield* Ref.get(watcherVersion);
       const initialSettings: ServerSettings | undefined = yield* serverSettings.getSettings.pipe(
         Effect.orElseSucceed(() => undefined),
       );
@@ -160,12 +182,24 @@ const InitialSettingsReconcileLive: Layer.Layer<
           ? ({} as ProviderInstanceConfigMap)
           : deriveProviderInstanceConfigMap(initialSettings);
 
-      yield* mutator.reconcile(initialConfigMap);
+      const didReconcile = yield* reconcileSemaphore.withPermits(1)(
+        Effect.gen(function* () {
+          const latestVersion = yield* Ref.get(watcherVersion);
+          if (latestVersion !== seedVersion) {
+            return false;
+          }
+
+          yield* mutator.reconcile(initialConfigMap);
+          return true;
+        }),
+      );
+
       yield* Effect.logInfo("provider instance registry initial reconcile complete", {
         durationMs: Date.now() - startedAt,
         settingsLoaded: initialSettings !== undefined,
         explicitInstances: Object.keys(initialSettings?.providerInstances ?? {}).length,
         configuredInstances: Object.keys(initialConfigMap).length,
+        skippedForNewerWatcherUpdate: !didReconcile,
       });
     }).pipe(
       Effect.catchCause((cause) =>
@@ -223,9 +257,7 @@ export const ProviderInstanceRegistryHydrationLive: Layer.Layer<
     });
 
     const sidecarLayer =
-      config.mode === "desktop"
-        ? Layer.mergeAll(InitialSettingsReconcileLive, SettingsWatcherLive)
-        : SettingsWatcherLive;
+      config.mode === "desktop" ? DesktopSettingsReconcileLive : SettingsWatcherLive;
 
     return sidecarLayer.pipe(Layer.provideMerge(mutableLayer));
   }),

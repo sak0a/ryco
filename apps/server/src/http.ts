@@ -89,15 +89,12 @@ function resolveStaticContentType(filePath: string, path: Path.Path): string {
 
 const staticFileResponse = (filePath: string, staticRelativePath: string) =>
   Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const bytes = yield* fileSystem.readFile(filePath);
-    return HttpServerResponse.uint8Array(bytes, {
+    return yield* HttpServerResponse.file(filePath, {
       status: 200,
       contentType: resolveStaticContentType(filePath, path),
       headers: {
         "Cache-Control": resolveStaticCacheControl(staticRelativePath),
-        "Content-Length": String(bytes.byteLength),
       },
     });
   }).pipe(

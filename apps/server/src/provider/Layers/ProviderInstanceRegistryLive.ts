@@ -65,13 +65,18 @@ interface LiveEntry {
   readonly entry: ProviderInstanceConfig;
 }
 
+interface UnavailableEntry {
+  readonly snapshot: ServerProvider;
+  readonly entry: ProviderInstanceConfig;
+}
+
 /**
  * Internal state shared between the public registry service and the
  * mutator service. Both services are thin shells around these refs.
  */
 interface RegistryState {
   readonly entries: Ref.Ref<ReadonlyMap<ProviderInstanceId, LiveEntry>>;
-  readonly unavailable: Ref.Ref<ReadonlyMap<ProviderInstanceId, ServerProvider>>;
+  readonly unavailable: Ref.Ref<ReadonlyMap<ProviderInstanceId, UnavailableEntry>>;
   readonly changes: PubSub.PubSub<void>;
 }
 
@@ -82,6 +87,11 @@ type BuildEntryResult =
 type ReconcileBuildPlan =
   | { readonly kind: "existing"; readonly instanceId: ProviderInstanceId; readonly live: LiveEntry }
   | {
+      readonly kind: "existingUnavailable";
+      readonly instanceId: ProviderInstanceId;
+      readonly unavailable: UnavailableEntry;
+    }
+  | {
       readonly kind: "build";
       readonly instanceId: ProviderInstanceId;
       readonly rawInstanceId: string;
@@ -91,8 +101,14 @@ type ReconcileBuildPlan =
 type ReconcileBuildResult =
   | { readonly kind: "existing"; readonly instanceId: ProviderInstanceId; readonly live: LiveEntry }
   | {
+      readonly kind: "existingUnavailable";
+      readonly instanceId: ProviderInstanceId;
+      readonly unavailable: UnavailableEntry;
+    }
+  | {
       readonly kind: "built";
       readonly instanceId: ProviderInstanceId;
+      readonly entry: ProviderInstanceConfig;
       readonly result: BuildEntryResult;
     };
 
@@ -105,6 +121,18 @@ type ReconcileBuildResult =
  */
 const entryEqual = (a: ProviderInstanceConfig, b: ProviderInstanceConfig): boolean =>
   Equal.equals(a, b);
+
+const orderChanged = <A>(previousOrder: ReadonlyArray<A>, nextOrder: ReadonlyArray<A>): boolean => {
+  if (previousOrder.length !== nextOrder.length) {
+    return true;
+  }
+  for (let i = 0; i < previousOrder.length; i++) {
+    if (previousOrder[i] !== nextOrder[i]) {
+      return true;
+    }
+  }
+  return false;
+};
 
 const decodedConfigEnabled = (config: unknown): boolean | undefined => {
   if (!config || typeof config !== "object" || globalThis.Array.isArray(config)) {
@@ -289,15 +317,11 @@ const makeReconcile = <R>(input: {
       // 2. Build additions and replacements. Walk `nextRaw` so the final
       //    entry order follows settings-author order.
       const builtEntries = new Map<ProviderInstanceId, LiveEntry>();
-      const builtUnavailable = new Map<ProviderInstanceId, ServerProvider>();
-      let orderChanged = false;
-      const previousOrder = [...previousEntries.keys()];
-      const nextOrder: Array<ProviderInstanceId> = [];
+      const builtUnavailable = new Map<ProviderInstanceId, UnavailableEntry>();
 
       const buildPlans: ReadonlyArray<ReconcileBuildPlan> = nextRaw.map(
         ([rawInstanceId, entry]) => {
           const instanceId = ProviderInstanceId.make(rawInstanceId);
-          nextOrder.push(instanceId);
 
           const existing = previousEntries.get(instanceId);
           if (existing !== undefined && !replacedIds.has(instanceId)) {
@@ -306,6 +330,15 @@ const makeReconcile = <R>(input: {
               kind: "existing" as const,
               instanceId,
               live: existing,
+            };
+          }
+
+          const existingUnavailable = previousUnavailable.get(instanceId);
+          if (existingUnavailable !== undefined && entryEqual(existingUnavailable.entry, entry)) {
+            return {
+              kind: "existingUnavailable" as const,
+              instanceId,
+              unavailable: existingUnavailable,
             };
           }
 
@@ -329,6 +362,14 @@ const makeReconcile = <R>(input: {
             });
           }
 
+          if (plan.kind === "existingUnavailable") {
+            return Effect.succeed({
+              kind: "existingUnavailable",
+              instanceId: plan.instanceId,
+              unavailable: plan.unavailable,
+            });
+          }
+
           return buildEntry({
             driversById,
             parentScope,
@@ -339,6 +380,7 @@ const makeReconcile = <R>(input: {
             Effect.map((result) => ({
               kind: "built" as const,
               instanceId: plan.instanceId,
+              entry: plan.entry,
               result,
             })),
           );
@@ -356,36 +398,45 @@ const makeReconcile = <R>(input: {
           continue;
         }
 
+        if (result.kind === "existingUnavailable") {
+          reusedInstances++;
+          unavailableInstances++;
+          builtUnavailable.set(result.instanceId, result.unavailable);
+          continue;
+        }
+
         if (result.result.kind === "live") {
           createdInstances++;
           builtEntries.set(result.instanceId, result.result.live);
         } else {
           unavailableInstances++;
-          builtUnavailable.set(result.instanceId, result.result.snapshot);
+          builtUnavailable.set(result.instanceId, {
+            snapshot: result.result.snapshot,
+            entry: result.entry,
+          });
         }
       }
 
-      if (previousOrder.length === nextOrder.length) {
-        for (let i = 0; i < previousOrder.length; i++) {
-          if (previousOrder[i] !== nextOrder[i]) {
-            orderChanged = true;
-            break;
-          }
-        }
-      } else {
-        orderChanged = true;
-      }
+      const entriesOrderChanged = orderChanged(
+        [...previousEntries.keys()],
+        [...builtEntries.keys()],
+      );
+      const unavailableOrderChanged = orderChanged(
+        [...previousUnavailable.keys()],
+        [...builtUnavailable.keys()],
+      );
 
       const entriesChanged =
-        orderChanged ||
+        entriesOrderChanged ||
         removedIds.length > 0 ||
         replacedIds.size > 0 ||
         builtEntries.size !== previousEntries.size;
       const unavailableChanged =
+        unavailableOrderChanged ||
         builtUnavailable.size !== previousUnavailable.size ||
-        [...builtUnavailable].some(([id, snapshot]) => {
+        [...builtUnavailable].some(([id, unavailable]) => {
           const prev = previousUnavailable.get(id);
-          return prev === undefined || !Equal.equals(prev, snapshot);
+          return prev === undefined || !Equal.equals(prev.snapshot, unavailable.snapshot);
         }) ||
         [...previousUnavailable].some(([id]) => !builtUnavailable.has(id));
 
@@ -455,7 +506,9 @@ export const makeProviderInstanceRegistry = <R>(input: {
     const driverContext = yield* Effect.context<R>();
 
     const entries = yield* Ref.make<ReadonlyMap<ProviderInstanceId, LiveEntry>>(new Map());
-    const unavailable = yield* Ref.make<ReadonlyMap<ProviderInstanceId, ServerProvider>>(new Map());
+    const unavailable = yield* Ref.make<ReadonlyMap<ProviderInstanceId, UnavailableEntry>>(
+      new Map(),
+    );
     const changes = yield* PubSub.unbounded<void>();
     yield* Effect.addFinalizer(() => PubSub.shutdown(changes));
 
@@ -480,7 +533,10 @@ export const makeProviderInstanceRegistry = <R>(input: {
         ),
       ),
       listUnavailable: Ref.get(unavailable).pipe(
-        Effect.map((map) => Array.from(map.values()) as ReadonlyArray<ServerProvider>),
+        Effect.map(
+          (map) =>
+            Array.from(map.values(), (entry) => entry.snapshot) as ReadonlyArray<ServerProvider>,
+        ),
       ),
       // Getters: each read constructs a fresh Stream / Effect descriptor
       // so multiple consumers don't share a single already-started

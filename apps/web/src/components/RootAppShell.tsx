@@ -67,7 +67,7 @@ export function RootAppShell({ authGateState }: RootAppShellProps) {
         {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
         <EnvironmentConnectionManagerBootstrap />
         <SshPasswordPromptDialog />
-        <HostedStaticEnvironmentBootstrap />
+        {authGateState.status === "hosted-static" ? <HostedStaticEnvironmentBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
         {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
         {primaryEnvironmentAuthenticated ? <WebSocketConnectionCoordinator /> : null}

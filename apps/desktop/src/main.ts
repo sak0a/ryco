@@ -743,7 +743,12 @@ function loadPackagedBackendAppWindow(window: BrowserWindow, reason: string): vo
   }
 
   const currentUrl = window.webContents.getURL();
-  if (currentUrl && currentUrl !== "about:blank" && !isDesktopBootUrl(currentUrl)) {
+  if (
+    currentUrl &&
+    currentUrl !== "about:blank" &&
+    !isDesktopBootUrl(currentUrl) &&
+    !currentUrl.startsWith(backendHttpUrl)
+  ) {
     return;
   }
 
@@ -940,18 +945,6 @@ function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
   if (updateCheckInFlight) return "check";
   return updateState.errorContext;
 }
-
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: DESKTOP_SCHEME,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-    },
-  },
-]);
 
 function resolveAppRoot(): string {
   if (!app.isPackaged) {

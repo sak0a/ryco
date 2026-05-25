@@ -115,13 +115,13 @@
             href: "/apple-touch-icon.png",
           });
           appendDeferredHeadLink({ rel: "manifest", href: "/site.webmanifest" });
-          performance.mark("s3:startup:web-entry.import-start");
-          void import("/src/main.tsx").finally(() => {
-            performance.mark("s3:startup:web-entry.import-end");
-          });
         },
         { once: true },
       );
+      performance.mark("s3:startup:web-entry.import-start");
+      void import("/src/main.tsx").finally(() => {
+        performance.mark("s3:startup:web-entry.import-end");
+      });
     </script>
   </head>
   <body>
