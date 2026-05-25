@@ -140,9 +140,9 @@ layer("OrchestrationProjectionPipeline worktrees", (it) => {
           branch: "feature/sc-state",
           worktreePath: null,
           origin: "pr",
-          prNumber: 42,
+          prNumber: null,
           issueNumber: null,
-          prTitle: "My PR",
+          prTitle: null,
           issueTitle: null,
           createdAt: now,
           updatedAt: now,
@@ -151,6 +151,8 @@ layer("OrchestrationProjectionPipeline worktrees", (it) => {
 
       yield* projectionPipeline.projectEvent(created);
       const createdRow = Option.getOrThrow(yield* worktrees.getById({ worktreeId }));
+      assert.isNull(createdRow.prNumber);
+      assert.isNull(createdRow.prTitle);
       assert.isNull(createdRow.prState);
 
       const updatedAt = "2026-05-17T01:00:00.000Z";
@@ -166,6 +168,8 @@ layer("OrchestrationProjectionPipeline worktrees", (it) => {
         metadata: {},
         payload: {
           worktreeId,
+          prNumber: 42,
+          prTitle: "My PR",
           prState: "merged",
           prIsDraft: false,
           issueState: null,
@@ -175,6 +179,8 @@ layer("OrchestrationProjectionPipeline worktrees", (it) => {
 
       yield* projectionPipeline.projectEvent(stateUpdated);
       const updatedRow = Option.getOrThrow(yield* worktrees.getById({ worktreeId }));
+      assert.equal(updatedRow.prNumber, 42);
+      assert.equal(updatedRow.prTitle, "My PR");
       assert.equal(updatedRow.prState, "merged");
       assert.strictEqual(updatedRow.prIsDraft, false);
       assert.isNull(updatedRow.issueState);

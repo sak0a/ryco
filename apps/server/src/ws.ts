@@ -2326,10 +2326,47 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                   .pipe(
                     Effect.matchCauseEffect({
                       onFailure: (cause) => Queue.failCause(queue, cause),
-                      onSuccess: () =>
-                        refreshGitStatus(input.cwd).pipe(
-                          Effect.andThen(Queue.end(queue).pipe(Effect.asVoid)),
-                        ),
+                      onSuccess: (result) =>
+                        Effect.gen(function* () {
+                          if (
+                            input.worktreeId !== undefined &&
+                            result.pr.number !== undefined &&
+                            (result.pr.status === "created" ||
+                              result.pr.status === "opened_existing")
+                          ) {
+                            const existing = yield* projectionWorktrees
+                              .getById({
+                                worktreeId: input.worktreeId,
+                              })
+                              .pipe(
+                                Effect.mapError((cause) =>
+                                  toGitManagerError(
+                                    WS_METHODS.gitRunStackedAction,
+                                    "Failed to load worktree for pull request link update.",
+                                    cause,
+                                  ),
+                                ),
+                              );
+                            if (Option.isSome(existing)) {
+                              yield* dispatchWorktreeCommand(
+                                {
+                                  type: "worktree.source-control-state.update",
+                                  commandId: serverCommandId("worktree-pr-link"),
+                                  worktreeId: input.worktreeId,
+                                  prNumber: result.pr.number,
+                                  prTitle: result.pr.title ?? existing.value.prTitle,
+                                  prState: existing.value.prState ?? "open",
+                                  prIsDraft: existing.value.prIsDraft ?? null,
+                                  issueState: existing.value.issueState ?? null,
+                                  updatedAt: new Date().toISOString(),
+                                },
+                                WS_METHODS.gitRunStackedAction,
+                              );
+                            }
+                          }
+                          yield* refreshGitStatus(input.cwd);
+                          yield* Queue.end(queue).pipe(Effect.asVoid);
+                        }),
                     }),
                   ),
               ),

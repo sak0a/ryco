@@ -422,6 +422,8 @@ export function projectEvent(
         Effect.map((payload) => ({
           ...nextBase,
           worktrees: updateWorktree(nextBase.worktrees, payload.worktreeId, {
+            ...(payload.prNumber !== undefined ? { prNumber: payload.prNumber } : {}),
+            ...(payload.prTitle !== undefined ? { prTitle: payload.prTitle } : {}),
             prState: payload.prState,
             prIsDraft: payload.prIsDraft,
             issueState: payload.issueState,

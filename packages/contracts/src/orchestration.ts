@@ -771,6 +771,8 @@ const WorktreeSourceControlStateUpdateCommand = Schema.Struct({
   type: Schema.Literal("worktree.source-control-state.update"),
   commandId: CommandId,
   worktreeId: WorktreeId,
+  prNumber: Schema.optional(Schema.NullOr(Schema.Number)),
+  prTitle: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   prState: Schema.NullOr(PullRequestState),
   prIsDraft: Schema.NullOr(Schema.Boolean),
   issueState: Schema.NullOr(IssueState),
@@ -1232,6 +1234,8 @@ export const WorktreeMetaUpdatedPayload = Schema.Struct({
 
 export const WorktreeSourceControlStateUpdatedPayload = Schema.Struct({
   worktreeId: WorktreeId,
+  prNumber: Schema.optional(Schema.NullOr(Schema.Number)),
+  prTitle: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   prState: Schema.NullOr(PullRequestState),
   prIsDraft: Schema.NullOr(Schema.Boolean),
   issueState: Schema.NullOr(IssueState),

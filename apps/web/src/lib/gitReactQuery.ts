@@ -5,6 +5,7 @@ import {
   type ProjectId,
   type SourceControlPublishRepositoryInput,
   type ThreadId,
+  type WorktreeId,
 } from "@ryco/contracts";
 import {
   infiniteQueryOptions,
@@ -183,6 +184,7 @@ export function gitRunStackedActionMutationOptions(input: {
       commitMessage,
       featureBranch,
       filePaths,
+      worktreeId,
       onProgress,
     }: {
       actionId: string;
@@ -190,6 +192,7 @@ export function gitRunStackedActionMutationOptions(input: {
       commitMessage?: string;
       featureBranch?: boolean;
       filePaths?: string[];
+      worktreeId?: WorktreeId | null;
       onProgress?: (event: GitActionProgressEvent) => void;
     }) => {
       if (!input.cwd || !input.environmentId) throw new Error("Git action is unavailable.");
@@ -198,6 +201,7 @@ export function gitRunStackedActionMutationOptions(input: {
           action,
           actionId,
           cwd: input.cwd,
+          ...(worktreeId ? { worktreeId } : {}),
           ...(commitMessage ? { commitMessage } : {}),
           ...(featureBranch ? { featureBranch: true } : {}),
           ...(filePaths && filePaths.length > 0 ? { filePaths } : {}),

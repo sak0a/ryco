@@ -1,4 +1,4 @@
-import { type ScopedThreadRef } from "@ryco/contracts";
+import { type ScopedThreadRef, WorktreeId } from "@ryco/contracts";
 import type {
   GitActionProgressEvent,
   GitRunStackedActionResult,
@@ -1409,6 +1409,9 @@ export default function GitActionsControl({
       const promise = runImmediateGitActionMutation.mutateAsync({
         actionId,
         action,
+        worktreeId: activeServerThread?.worktreeId
+          ? WorktreeId.make(activeServerThread.worktreeId)
+          : null,
         ...(commitMessage ? { commitMessage } : {}),
         ...(featureBranch ? { featureBranch } : {}),
         ...(filePaths ? { filePaths } : {}),

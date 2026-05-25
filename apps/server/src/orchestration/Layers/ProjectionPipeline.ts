@@ -882,6 +882,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           if (Option.isSome(existing)) {
             yield* projectionWorktreeRepository.upsert({
               ...existing.value,
+              ...(event.payload.prNumber !== undefined ? { prNumber: event.payload.prNumber } : {}),
+              ...(event.payload.prTitle !== undefined ? { prTitle: event.payload.prTitle } : {}),
               prState: event.payload.prState,
               prIsDraft: event.payload.prIsDraft,
               issueState: event.payload.issueState,

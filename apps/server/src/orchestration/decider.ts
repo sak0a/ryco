@@ -713,6 +713,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "worktree.sourceControlStateUpdated",
         payload: {
           worktreeId: command.worktreeId,
+          ...(command.prNumber !== undefined ? { prNumber: command.prNumber } : {}),
+          ...(command.prTitle !== undefined ? { prTitle: command.prTitle } : {}),
           prState: command.prState,
           prIsDraft: command.prIsDraft,
           issueState: command.issueState,

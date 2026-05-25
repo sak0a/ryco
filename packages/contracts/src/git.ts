@@ -8,7 +8,7 @@ import {
 } from "./baseSchemas.ts";
 import { SourceControlProviderError, SourceControlProviderInfo } from "./sourceControl.ts";
 import { VcsDriverKind } from "./vcs.ts";
-import { WorktreeCheckoutLocation } from "./worktree.ts";
+import { WorktreeCheckoutLocation, WorktreeId } from "./worktree.ts";
 
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const GIT_LIST_BRANCHES_MAX_LIMIT = 200;
@@ -121,6 +121,7 @@ export const GitRunStackedActionInput = Schema.Struct({
   actionId: TrimmedNonEmptyStringSchema,
   cwd: TrimmedNonEmptyStringSchema,
   action: GitStackedAction,
+  worktreeId: Schema.optional(WorktreeId),
   commitMessage: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000))),
   featureBranch: Schema.optional(Schema.Boolean),
   filePaths: Schema.optional(
