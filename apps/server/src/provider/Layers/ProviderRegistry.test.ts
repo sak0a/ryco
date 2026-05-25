@@ -1490,7 +1490,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
       );
 
       it.effect(
-        "includes Claude Opus 4.7 with xhigh as the default effort on supported versions",
+        "includes Claude Opus 4.7 with fast mode and xhigh as the default effort on supported versions",
         () =>
           Effect.gen(function* () {
             const status = yield* checkClaudeProviderStatus(
@@ -1514,6 +1514,12 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
                 ? effortDescriptor.options.find((option) => option.isDefault)
                 : undefined,
               { id: "xhigh", label: "Extra High", isDefault: true },
+            );
+            assert.deepStrictEqual(
+              opus47.capabilities.optionDescriptors?.find(
+                (descriptor) => descriptor.type === "boolean" && descriptor.id === "fastMode",
+              ),
+              { id: "fastMode", label: "Fast Mode", type: "boolean" },
             );
           }).pipe(
             Effect.provide(

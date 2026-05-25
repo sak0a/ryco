@@ -67,6 +67,10 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
           ],
           promptInjectedValues: ["ultrathink"],
         }),
+        buildBooleanOptionDescriptor({
+          id: "fastMode",
+          label: "Fast Mode",
+        }),
         buildSelectOptionDescriptor({
           id: "contextWindow",
           label: "Context Window",
