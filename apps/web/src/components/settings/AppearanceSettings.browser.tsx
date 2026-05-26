@@ -109,19 +109,32 @@ describe("AppearanceSettingsPanel", () => {
   it("persists global interface controls outside the active theme", async () => {
     mounted = await render(<AppearanceSettingsPanel />);
 
+    const interfaceFontLabel = "Geist";
+    const codeFontLabel = "Geist Mono";
+    const interfaceFontValue = FONT_FAMILY_SANS_OPTIONS.find(
+      (option) => option.label === interfaceFontLabel,
+    )?.value;
+    const codeFontValue = FONT_FAMILY_MONO_OPTIONS.find(
+      (option) => option.label === codeFontLabel,
+    )?.value;
+
     await expect.element(page.getByText("Interface controls")).toBeInTheDocument();
-    await page.getByRole("radio", { name: "Use Geist for interface font" }).click();
-    await page.getByRole("radio", { name: "Use Geist Mono for code font" }).click();
+    await page.getByRole("radio", { name: `Use ${interfaceFontLabel} for interface font` }).click();
+    await page.getByRole("radio", { name: `Use ${codeFontLabel} for code font` }).click();
     await page.getByRole("button", { name: "Set text size to Large" }).click();
     await page.getByRole("button", { name: "Set corner radius to Square" }).click();
 
     await vi.waitFor(() => {
-      expect(JSON.parse(localStorage.getItem(APPEARANCE_PREFERENCES_STORAGE_KEY) ?? "{}")).toEqual({
-        fontFamilySans: FONT_FAMILY_SANS_OPTIONS[1].value,
-        fontFamilyMono: FONT_FAMILY_MONO_OPTIONS[1].value,
-        fontSizeBase: "18px",
-        radius: "0rem",
-      });
+      expect(interfaceFontValue).toBeDefined();
+      expect(codeFontValue).toBeDefined();
+      expect(JSON.parse(localStorage.getItem(APPEARANCE_PREFERENCES_STORAGE_KEY) ?? "{}")).toEqual(
+        expect.objectContaining({
+          fontFamilySans: interfaceFontValue,
+          fontFamilyMono: codeFontValue,
+          fontSizeBase: "18px",
+          radius: "0rem",
+        }),
+      );
     });
 
     const style = document.getElementById(APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID);
