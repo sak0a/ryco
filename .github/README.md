@@ -5,7 +5,8 @@ Ryco keeps CI entrypoints small and routes shared checks through
 
 - `ci.yml` validates `main` and manual CI runs with the full suite.
 - `branch-ci.yml` validates non-`main` branch pushes with format, lint,
-  typecheck, and tests.
+  typecheck, and tests. When the branch already has an open PR, branch CI skips
+  expensive validation and lets PR validation own the ref.
 - `pull-request-validation.yml` runs the full validation suite for PR review.
 - `worktree-validation.yml` manually validates a worktree-backed ref and records
   the local worktree label/path in the run summary when provided.
