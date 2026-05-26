@@ -1,0 +1,98 @@
+name: Reusable Validation
+
+on:
+  workflow_call:
+    inputs:
+      checkout-ref:
+        description: Git ref to validate. Defaults to the event ref.
+        required: false
+        type: string
+        default: ""
+      run-browser-tests:
+        description: Install Chromium and run browser tests.
+        required: false
+        type: boolean
+        default: false
+      run-desktop-build:
+        description: Build the desktop pipeline and verify preload output.
+        required: false
+        type: boolean
+        default: false
+      run-release-smoke:
+        description: Run release workflow smoke checks.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+
+      - name: Setup project
+        uses: ./.github/actions/setup-ryco
+
+      - name: Format
+        run: bun run fmt:check
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun run test
+
+      - name: Cache Playwright browsers
+        if: ${{ inputs['run-browser-tests'] }}
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install browser test runtime
+        if: ${{ inputs['run-browser-tests'] }}
+        run: bun run --cwd apps/web test:browser:install
+
+      - name: Browser test
+        if: ${{ inputs['run-browser-tests'] }}
+        run: bun run --cwd apps/web test:browser
+
+      - name: Build desktop pipeline
+        if: ${{ inputs['run-desktop-build'] }}
+        run: bun run build:desktop
+
+      - name: Verify preload bundle output
+        if: ${{ inputs['run-desktop-build'] }}
+        run: |
+          test -f apps/desktop/dist-electron/preload.cjs
+          grep -nE "desktopBridge|getLocalEnvironmentBootstrap|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.cjs
+
+  release-smoke:
+    name: Release Smoke
+    if: ${{ inputs['run-release-smoke'] }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+
+      - name: Setup project
+        uses: ./.github/actions/setup-ryco
+
+      - name: Exercise release-only workflow steps
+        run: node scripts/release-smoke.ts
