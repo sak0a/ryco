@@ -1,0 +1,70 @@
+name: Worktree Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA backing the worktree.
+        required: true
+        type: string
+      worktree-label:
+        description: Optional human-readable worktree label.
+        required: false
+        type: string
+        default: ""
+      worktree-path:
+        description: Optional local worktree path for run summary context.
+        required: false
+        type: string
+        default: ""
+      run-browser-tests:
+        description: Run browser tests in addition to core checks.
+        required: false
+        type: boolean
+        default: false
+      run-desktop-build:
+        description: Run the desktop build in addition to core checks.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worktree-validation-${{ github.event.inputs.ref }}
+  cancel-in-progress: true
+
+jobs:
+  context:
+    name: Worktree Context
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Record worktree context
+        env:
+          WORKTREE_REF: ${{ github.event.inputs.ref }}
+          WORKTREE_LABEL: ${{ github.event.inputs['worktree-label'] }}
+          WORKTREE_PATH: ${{ github.event.inputs['worktree-path'] }}
+        run: |
+          {
+            echo "### Worktree validation"
+            echo ""
+            echo "- Ref: \`${WORKTREE_REF}\`"
+            if [[ -n "${WORKTREE_LABEL}" ]]; then
+              echo "- Label: ${WORKTREE_LABEL}"
+            fi
+            if [[ -n "${WORKTREE_PATH}" ]]; then
+              echo "- Local path: \`${WORKTREE_PATH}\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  validate:
+    name: Worktree
+    needs: context
+    uses: ./.github/workflows/_validation.yml
+    with:
+      checkout-ref: ${{ github.event.inputs.ref }}
+      run-browser-tests: ${{ inputs['run-browser-tests'] }}
+      run-desktop-build: ${{ inputs['run-desktop-build'] }}
+      run-release-smoke: false

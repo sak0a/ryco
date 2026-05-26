@@ -1,0 +1,30 @@
+name: Branch CI
+
+on:
+  push:
+    branches-ignore:
+      - main
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to validate. Defaults to the selected workflow ref.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: branch-ci-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Branch
+    uses: ./.github/workflows/_validation.yml
+    with:
+      checkout-ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
+      run-browser-tests: false
+      run-desktop-build: false
+      run-release-smoke: false

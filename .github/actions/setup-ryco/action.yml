@@ -1,0 +1,37 @@
+name: Setup Ryco
+description: Install the Bun and Node toolchains, restore build caches, and optionally install dependencies.
+
+inputs:
+  install-dependencies:
+    description: Run bun install after toolchain setup.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: package.json
+
+    - name: Setup Node
+      uses: actions/setup-node@v6
+      with:
+        node-version-file: package.json
+
+    - name: Cache Bun and Turbo
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.bun/install/cache
+          .turbo
+        key: ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}
+        restore-keys: |
+          ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-
+          ${{ runner.os }}-bun-turbo-
+
+    - name: Install dependencies
+      if: ${{ inputs['install-dependencies'] == 'true' }}
+      shell: bash
+      run: bun install --frozen-lockfile
