@@ -1,6 +1,6 @@
 # Theme System
 
-A VS Code-style custom theming system for Ryco. Users will be able to pick from built-in themes, install community themes, and author their own — overriding any chrome color, radius, or scrollbar token.
+A VS Code-style custom theming system for Ryco. Users can pick from built-in themes, install community themes, and author their own — overriding chrome color, scrollbar, and status tokens. Global interface controls such as font family, text size, and corner radius live outside themes so they stay consistent while users switch palettes.
 
 ## Goal
 
@@ -19,6 +19,7 @@ apps/web/src/
 │   ├── types.ts               ThemeDefinition + token name allow-list
 │   ├── builtin.ts             Default light/dark tokens as data
 │   ├── registry.ts            Storage, lookup, CSS injection
+│   ├── appearancePreferences.ts Global font/text-size/radius preferences
 │   └── README.md              You are here.
 └── hooks/
     └── useTheme.ts            Light/dark toggle + active-theme application
@@ -29,9 +30,10 @@ apps/web/src/
 1. `useTheme` reads `ryco:theme` (light/dark/system) → toggles `.dark` class on `<html>`
 2. `useTheme` reads `ryco:active-theme` → looks up theme in registry → calls `applyThemeToDocument`
 3. `applyThemeToDocument` writes a `<style id="ryco-active-theme">` tag containing `:root { --x: ... } :root.dark { --y: ... }`
-4. Because the style tag is appended after `index.css`, its variables win — but only ones the theme defines, so partial themes work.
+4. `applyAppearancePreferencesToDocument` writes `<style id="ryco-appearance-preferences">` for global controls like `--font-family-sans`, `--font-family-mono`, `--font-size-base`, and `--radius`
+5. Because these style tags are appended after `index.css`, their variables win — but only ones the theme or preference layer defines, so partial themes work.
 
-**Key invariant:** `index.css` always contains the _full_ default token set. Any theme is a _patch_ on top, never a replacement. This guarantees the app never breaks if a user's theme is incomplete.
+**Key invariant:** `index.css` always contains the _full_ default token set. Any theme is a _patch_ on top, never a replacement. Global appearance preferences are a second patch after themes, so palette changes cannot unexpectedly change typography, resize, or reshape the UI.
 
 ---
 
@@ -148,6 +150,7 @@ Rules:
 - `id` and `name` must be non-empty strings.
 - `light` and `dark` are both optional. Tokens missing from a variant fall back to the default theme's values for that variant.
 - Token values must be strings. Allowed: any CSS color, `var(...)`, `oklch(...)`, `color-mix(...)`, percentages, `rgba(...)`, etc.
+- `font-family-sans`, `font-family-mono`, `font-size-base`, and `radius` are global appearance preferences. Legacy theme files may still contain them, but theme CSS emission ignores them.
 - The full token allow-list lives in `types.ts` (`THEME_TOKEN_NAMES`). Tokens outside that set are ignored on save by the editor; on import they're preserved but won't be emitted to CSS.
 - `builtIn` is ignored on import — every imported theme becomes a custom theme.
 
@@ -183,21 +186,23 @@ Acceptance: switching theme also re-colors code blocks; falls back gracefully if
 
 ## File reference (current Phase 1 state)
 
-| File                              | Purpose                                                                                      |
-| --------------------------------- | -------------------------------------------------------------------------------------------- |
-| `apps/web/src/index.css`          | Default tokens for `:root` and `.dark` (the fallback every theme patches)                    |
-| `apps/web/src/themes/types.ts`    | `ThemeDefinition`, `ThemeTokens`, `THEME_TOKEN_NAMES`                                        |
-| `apps/web/src/themes/builtin.ts`  | `DEFAULT_THEME` + `BUILT_IN_THEMES`                                                          |
-| `apps/web/src/themes/registry.ts` | Storage, lookup, CSS injection (`applyThemeToDocument`)                                      |
-| `apps/web/src/hooks/useTheme.ts`  | React hook — exposes `theme`, `setTheme`, `resolvedTheme`, `activeThemeId`, `setActiveTheme` |
+| File                                           | Purpose                                                                                      |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `apps/web/src/index.css`                       | Default tokens for `:root` and `.dark` (the fallback every theme patches)                    |
+| `apps/web/src/themes/types.ts`                 | `ThemeDefinition`, `ThemeTokens`, `THEME_TOKEN_NAMES`                                        |
+| `apps/web/src/themes/builtin.ts`               | `DEFAULT_THEME` + `BUILT_IN_THEMES`                                                          |
+| `apps/web/src/themes/registry.ts`              | Storage, lookup, CSS injection (`applyThemeToDocument`)                                      |
+| `apps/web/src/themes/appearancePreferences.ts` | Global font/text-size/radius storage and CSS injection                                       |
+| `apps/web/src/hooks/useTheme.ts`               | React hook — exposes `theme`, `setTheme`, `resolvedTheme`, `activeThemeId`, `setActiveTheme` |
 
 ## Storage keys
 
-| Key                  | Type                            | Purpose                              |
-| -------------------- | ------------------------------- | ------------------------------------ |
-| `ryco:theme`         | `"light" \| "dark" \| "system"` | Light/dark/system mode (existing)    |
-| `ryco:active-theme`  | string (theme id)               | Which theme to apply (new — Phase 1) |
-| `ryco:custom-themes` | `ThemeDefinition[]` JSON        | User-authored themes (new — Phase 1) |
+| Key                           | Type                                                                | Purpose                                |
+| ----------------------------- | ------------------------------------------------------------------- | -------------------------------------- |
+| `ryco:theme`                  | `"light" \| "dark" \| "system"`                                     | Light/dark/system mode (existing)      |
+| `ryco:active-theme`           | string (theme id)                                                   | Which theme to apply (new — Phase 1)   |
+| `ryco:custom-themes`          | `ThemeDefinition[]` JSON                                            | User-authored themes (new — Phase 1)   |
+| `ryco:appearance-preferences` | `{ fontFamilySans?, fontFamilyMono?, fontSizeBase?, radius? }` JSON | Global font/text-size/radius overrides |
 
 ## Hook API
 

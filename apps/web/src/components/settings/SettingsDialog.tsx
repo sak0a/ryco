@@ -114,7 +114,7 @@ export function SettingsDialog() {
       }}
     >
       <DialogPopup
-        className="h-[min(80vh,720px)] max-w-[960px] overflow-hidden p-0"
+        className="h-[min(88dvh,880px)] max-w-[1180px] overflow-hidden p-0"
         bottomStickOnMobile={false}
         showCloseButton={true}
       >

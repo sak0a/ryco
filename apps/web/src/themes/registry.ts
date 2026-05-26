@@ -19,6 +19,12 @@ export { DEFAULT_THEME, DEFAULT_THEME_ID };
 const CUSTOM_ID_PREFIX = "custom-";
 const FORBIDDEN_VALUE_PATTERN =
   /(?:javascript:|expression\s*\(|<script|url\s*\(\s*['"]?\s*javascript:)/i;
+const GLOBAL_APPEARANCE_TOKEN_NAMES = new Set<string>([
+  "font-family-sans",
+  "font-family-mono",
+  "font-size-base",
+  "radius",
+]);
 
 export function isBuiltInThemeId(id: string): boolean {
   return BUILT_IN_THEMES.some((theme) => theme.id === id);
@@ -221,6 +227,7 @@ export function resolveTokens(theme: ThemeDefinition, variant: ThemeVariant): Th
 export function tokensToCss(tokens: ThemeTokens): string {
   return Object.entries(tokens)
     .filter(([name, value]) => {
+      if (GLOBAL_APPEARANCE_TOKEN_NAMES.has(name)) return false;
       if (!KNOWN_TOKEN_NAMES.has(name)) return false;
       if (typeof value !== "string" || value.length === 0) return false;
       if (value.includes(";") || value.includes("}")) return false;

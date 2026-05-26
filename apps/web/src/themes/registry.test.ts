@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { DEFAULT_THEME, DEFAULT_THEME_ID } from "./builtin";
+import { BUILT_IN_THEMES, DEFAULT_THEME, DEFAULT_THEME_ID } from "./builtin";
 import {
   ACTIVE_THEME_STORAGE_KEY,
   CUSTOM_THEMES_STORAGE_KEY,
@@ -158,19 +158,65 @@ describe("tokensToCss", () => {
     } as unknown as Parameters<typeof tokensToCss>[0]);
     expect(css).toBe("--background: #000;");
   });
+
+  it("drops global appearance tokens that are controlled outside themes", () => {
+    const css = tokensToCss({
+      primary: "#fff",
+      "font-family-sans": '"Geist", sans-serif',
+      "font-family-mono": '"Geist Mono", monospace',
+      radius: "2rem",
+      "font-size-base": "20px",
+    });
+    expect(css).toBe("--primary: #fff;");
+  });
 });
 
 describe("isBuiltInThemeId", () => {
   it("recognizes shipped built-in themes", () => {
-    expect(isBuiltInThemeId(DEFAULT_THEME_ID)).toBe(true);
-    expect(isBuiltInThemeId("solarized-dark")).toBe(true);
-    expect(isBuiltInThemeId("nord")).toBe(true);
-    expect(isBuiltInThemeId("high-contrast")).toBe(true);
+    for (const theme of BUILT_IN_THEMES) {
+      expect(isBuiltInThemeId(theme.id)).toBe(true);
+    }
   });
 
   it("returns false for unknown ids", () => {
     expect(isBuiltInThemeId("custom-thing")).toBe(false);
     expect(isBuiltInThemeId("")).toBe(false);
+  });
+});
+
+describe("built-in themes", () => {
+  it("uses unique ids", () => {
+    const ids = BUILT_IN_THEMES.map((theme) => theme.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("resolves every built-in theme to valid light and dark CSS", () => {
+    for (const theme of BUILT_IN_THEMES) {
+      const lightCss = tokensToCss(resolveTokens(theme, "light"));
+      const darkCss = tokensToCss(resolveTokens(theme, "dark"));
+      expect(lightCss, `${theme.id} light`).toContain("--background:");
+      expect(lightCss, `${theme.id} light`).toContain("--primary:");
+      expect(darkCss, `${theme.id} dark`).toContain("--background:");
+      expect(darkCss, `${theme.id} dark`).toContain("--primary:");
+    }
+  });
+
+  it("ships combined light and dark variants for dual-mode popular presets", () => {
+    expect(findTheme("github")).toMatchObject({
+      id: "github",
+      light: expect.any(Object),
+      dark: expect.any(Object),
+    });
+    expect(findTheme("catppuccin")).toMatchObject({
+      id: "catppuccin",
+      light: expect.any(Object),
+      dark: expect.any(Object),
+    });
+    expect(findTheme("gruvbox-material")).toMatchObject({
+      id: "gruvbox-material",
+      light: expect.any(Object),
+      dark: expect.any(Object),
+    });
   });
 });
 

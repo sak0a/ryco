@@ -9,6 +9,10 @@ import {
   getActiveThemeId,
   setActiveThemeId,
 } from "../themes/registry";
+import {
+  APPEARANCE_PREFERENCES_STORAGE_KEY,
+  applyAppearancePreferencesToDocument,
+} from "../themes/appearancePreferences";
 
 type Theme = "light" | "dark" | "system";
 type ThemeSnapshot = {
@@ -107,6 +111,7 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
   const isDark = theme === "dark" || (theme === "system" && getSystemDark());
   document.documentElement.classList.toggle("dark", isDark);
   applyThemeToDocument(findTheme(getActiveThemeId()));
+  applyAppearancePreferencesToDocument();
   syncBrowserChromeTheme();
   syncDesktopTheme(theme);
   if (suppressTransitions) {
@@ -179,7 +184,8 @@ function subscribe(listener: () => void): () => void {
     if (
       e.key === STORAGE_KEY ||
       e.key === ACTIVE_THEME_STORAGE_KEY ||
-      e.key === CUSTOM_THEMES_STORAGE_KEY
+      e.key === CUSTOM_THEMES_STORAGE_KEY ||
+      e.key === APPEARANCE_PREFERENCES_STORAGE_KEY
     ) {
       applyTheme(getStored(), true);
       emitChange();
