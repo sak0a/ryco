@@ -1,21 +1,48 @@
 import {
+  BaselineIcon,
   BrainIcon,
   CircleOffIcon,
   ClipboardCopyIcon,
+  Code2Icon,
   CopyIcon,
   DownloadIcon,
   GaugeIcon,
   type LucideIcon,
   PencilIcon,
   PlusIcon,
+  RadiusIcon,
   Trash2Icon,
+  TypeIcon,
   UploadIcon,
   ZapIcon,
 } from "lucide-react";
-import { type ChangeEvent, Fragment, useCallback, useMemo, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  Fragment,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { useTheme } from "../../hooks/useTheme";
 import { cn } from "../../lib/utils";
+import {
+  APPEARANCE_PREFERENCES_STORAGE_KEY,
+  FONT_FAMILY_MONO_OPTIONS,
+  FONT_FAMILY_SANS_OPTIONS,
+  FONT_SIZE_OPTIONS,
+  RADIUS_OPTIONS,
+  applyAppearancePreferencesToDocument,
+  getAppearancePreferences,
+  hasAppearancePreferenceOverride,
+  resetAppearancePreference,
+  setAppearancePreference,
+  type AppearancePreferenceKey,
+  type AppearancePreferenceOption,
+} from "../../themes/appearancePreferences";
 import {
   type ReasoningIndicatorStyle,
   type TokenModeControlStyle,
@@ -118,6 +145,9 @@ export function AppearanceSettingsPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ThemeDefinition | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [appearancePreferences, setAppearancePreferencesState] = useState(() =>
+    getAppearancePreferences(),
+  );
   const [refreshTick, setRefreshTick] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -129,6 +159,31 @@ export function AppearanceSettingsPanel() {
   const pendingDeleteTheme = pendingDeleteId ? findTheme(pendingDeleteId) : null;
 
   const refresh = useCallback(() => setRefreshTick((tick) => tick + 1), []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== APPEARANCE_PREFERENCES_STORAGE_KEY) return;
+      setAppearancePreferencesState(getAppearancePreferences());
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  const handleAppearancePreferenceChange = useCallback(
+    (key: AppearancePreferenceKey, value: string) => {
+      setAppearancePreference(key, value);
+      applyAppearancePreferencesToDocument();
+      setAppearancePreferencesState(getAppearancePreferences());
+    },
+    [],
+  );
+
+  const handleAppearancePreferenceReset = useCallback((key: AppearancePreferenceKey) => {
+    resetAppearancePreference(key);
+    applyAppearancePreferencesToDocument();
+    setAppearancePreferencesState(getAppearancePreferences());
+  }, []);
 
   const startEditing = useCallback(
     (target: ThemeDefinition) => {
@@ -267,6 +322,112 @@ export function AppearanceSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      <SettingsSection title="Interface controls">
+        <SettingsRow
+          title="Interface font"
+          description="Normal app text, navigation, dialogs, and controls."
+          resetAction={
+            hasAppearancePreferenceOverride("fontFamilySans") ? (
+              <SettingResetButton
+                label="interface font"
+                onClick={() => handleAppearancePreferenceReset("fontFamilySans")}
+              />
+            ) : null
+          }
+          control={
+            <FontPreferencePicker
+              ariaLabel="Interface font"
+              icon={<TypeIcon className="size-3.5" />}
+              options={FONT_FAMILY_SANS_OPTIONS}
+              value={appearancePreferences.fontFamilySans}
+              sample="The quick brown fox"
+              onChange={(value) => handleAppearancePreferenceChange("fontFamilySans", value)}
+            />
+          }
+        />
+        <SettingsRow
+          title="Code font"
+          description="Code blocks, diffs, file paths, and terminal surfaces."
+          resetAction={
+            hasAppearancePreferenceOverride("fontFamilyMono") ? (
+              <SettingResetButton
+                label="code font"
+                onClick={() => handleAppearancePreferenceReset("fontFamilyMono")}
+              />
+            ) : null
+          }
+          control={
+            <FontPreferencePicker
+              ariaLabel="Code font"
+              icon={<Code2Icon className="size-3.5" />}
+              options={FONT_FAMILY_MONO_OPTIONS}
+              value={appearancePreferences.fontFamilyMono}
+              sample="const answer = 42"
+              onChange={(value) => handleAppearancePreferenceChange("fontFamilyMono", value)}
+            />
+          }
+        />
+        <SettingsRow
+          title="Text size"
+          description="Scale the interface independently from the active theme."
+          resetAction={
+            hasAppearancePreferenceOverride("fontSizeBase") ? (
+              <SettingResetButton
+                label="text size"
+                onClick={() => handleAppearancePreferenceReset("fontSizeBase")}
+              />
+            ) : null
+          }
+          control={
+            <AppearancePreferenceSlider
+              ariaLabel="Text size"
+              icon={<BaselineIcon className="size-3.5" />}
+              options={FONT_SIZE_OPTIONS}
+              value={appearancePreferences.fontSizeBase}
+              onChange={(value) => handleAppearancePreferenceChange("fontSizeBase", value)}
+              preview={
+                <span className="flex h-9 min-w-14 items-center justify-center rounded-md border border-border/70 bg-background px-2 font-semibold text-foreground shadow-xs/5">
+                  <span style={{ fontSize: appearancePreferences.fontSizeBase }}>Aa</span>
+                </span>
+              }
+            />
+          }
+        />
+        <SettingsRow
+          title="Corner radius"
+          description="Adjust rounding for panels, buttons, inputs, and menus globally."
+          resetAction={
+            hasAppearancePreferenceOverride("radius") ? (
+              <SettingResetButton
+                label="corner radius"
+                onClick={() => handleAppearancePreferenceReset("radius")}
+              />
+            ) : null
+          }
+          control={
+            <AppearancePreferenceSlider
+              ariaLabel="Corner radius"
+              icon={<RadiusIcon className="size-3.5" />}
+              options={RADIUS_OPTIONS}
+              value={appearancePreferences.radius}
+              onChange={(value) => handleAppearancePreferenceChange("radius", value)}
+              preview={
+                <span className="grid h-9 min-w-14 grid-cols-2 gap-1 rounded-md border border-border/70 bg-background p-1.5 shadow-xs/5">
+                  <span
+                    className="border border-primary/55 bg-primary/15"
+                    style={{ borderRadius: appearancePreferences.radius }}
+                  />
+                  <span
+                    className="border border-muted-foreground/30 bg-muted"
+                    style={{ borderRadius: appearancePreferences.radius }}
+                  />
+                </span>
+              }
+            />
+          }
+        />
+      </SettingsSection>
+
       <SettingsSection
         title="Theme palette"
         headerAction={
@@ -621,5 +782,191 @@ export function AppearanceSettingsPanel() {
         </AlertDialogPopup>
       </AlertDialog>
     </SettingsPageContainer>
+  );
+}
+
+function FontPreferencePicker({
+  ariaLabel,
+  icon,
+  options,
+  value,
+  sample,
+  onChange,
+}: {
+  ariaLabel: string;
+  icon: ReactNode;
+  options: ReadonlyArray<AppearancePreferenceOption>;
+  value: string;
+  sample: string;
+  onChange: (value: string) => void;
+}) {
+  const selectedIndex = Math.max(
+    0,
+    options.findIndex((option) => option.value === value),
+  );
+  const current = options[selectedIndex] ?? options[0];
+
+  return (
+    <div className="w-full sm:w-96">
+      <div className="mb-2 flex min-h-9 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/60 text-muted-foreground">
+            {icon}
+          </span>
+          <span className="min-w-0">
+            <span
+              className="block truncate text-sm font-semibold text-foreground"
+              style={{ fontFamily: current?.value ?? value }}
+            >
+              {current?.label ?? value}
+            </span>
+            <span className="block truncate text-[11px] text-muted-foreground">
+              {current?.description ?? "Custom"}
+            </span>
+          </span>
+        </div>
+        <span
+          className="flex h-9 min-w-30 max-w-44 items-center justify-start truncate rounded-md border border-border/70 bg-background px-2 text-xs text-foreground shadow-xs/5"
+          style={{ fontFamily: current?.value ?? value }}
+          title={sample}
+        >
+          {sample}
+        </span>
+      </div>
+      <div
+        role="radiogroup"
+        aria-label={ariaLabel}
+        className="grid grid-cols-2 gap-1.5 sm:grid-cols-3"
+      >
+        {options.map((option, index) => {
+          const selected = index === selectedIndex;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-label={`Use ${option.label} for ${ariaLabel.toLowerCase()}`}
+              title={`${option.label} (${option.description})`}
+              onClick={() => onChange(option.value)}
+              className={cn(
+                "min-h-12 min-w-0 rounded-md border px-2 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                selected
+                  ? "border-primary bg-primary/8 text-foreground ring-1 ring-primary/35"
+                  : "border-border/70 text-muted-foreground hover:border-foreground/25 hover:bg-muted/45",
+              )}
+            >
+              <span
+                className="block truncate text-[12px] font-semibold leading-4"
+                style={{ fontFamily: option.value }}
+              >
+                {option.label}
+              </span>
+              <span className="block truncate text-[10px] leading-3 opacity-75">
+                {option.description}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AppearancePreferenceSlider({
+  ariaLabel,
+  icon,
+  options,
+  value,
+  onChange,
+  preview,
+}: {
+  ariaLabel: string;
+  icon: ReactNode;
+  options: ReadonlyArray<AppearancePreferenceOption>;
+  value: string;
+  onChange: (value: string) => void;
+  preview: ReactNode;
+}) {
+  const selectedIndex = Math.max(
+    0,
+    options.findIndex((option) => option.value === value),
+  );
+  const current = options[selectedIndex] ?? options[0];
+  const progress = options.length > 1 ? (selectedIndex / (options.length - 1)) * 100 : 0;
+
+  return (
+    <div className="w-full sm:w-96">
+      <div className="mb-2 flex min-h-9 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/60 text-muted-foreground">
+            {icon}
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-foreground">
+              {current?.label ?? value}
+            </span>
+            <span className="block truncate text-[11px] text-muted-foreground">
+              {current?.description ?? value}
+            </span>
+          </span>
+        </div>
+        {preview}
+      </div>
+      <input
+        aria-label={ariaLabel}
+        className={cn(
+          "h-5 w-full cursor-pointer appearance-none bg-transparent outline-none",
+          "[&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:rounded-full",
+          "[&::-webkit-slider-thumb]:mt-[-5px] [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-background [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:shadow-sm",
+          "[&::-moz-range-track]:h-1.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:border-0",
+          "[&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-background [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:shadow-sm",
+          "focus-visible:[&::-webkit-slider-thumb]:ring-2 focus-visible:[&::-webkit-slider-thumb]:ring-ring focus-visible:[&::-moz-range-thumb]:ring-2 focus-visible:[&::-moz-range-thumb]:ring-ring",
+        )}
+        max={Math.max(0, options.length - 1)}
+        min={0}
+        step={1}
+        type="range"
+        value={selectedIndex}
+        style={{
+          background: `linear-gradient(to right, var(--color-primary) 0%, var(--color-primary) ${progress}%, color-mix(in srgb, var(--color-muted-foreground) 18%, transparent) ${progress}%, color-mix(in srgb, var(--color-muted-foreground) 18%, transparent) 100%)`,
+          borderRadius: "999px",
+        }}
+        onChange={(event) => {
+          const next = options[Number(event.currentTarget.value)];
+          if (next) onChange(next.value);
+        }}
+      />
+      <div
+        className="mt-1.5 grid gap-1"
+        style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+      >
+        {options.map((option, index) => {
+          const selected = index === selectedIndex;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-label={`Set ${ariaLabel.toLowerCase()} to ${option.label}`}
+              title={`${option.label} (${option.description})`}
+              onClick={() => onChange(option.value)}
+              className={cn(
+                "flex min-h-7 min-w-0 flex-col items-center justify-start gap-1 rounded-md px-1 py-1 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                selected ? "text-foreground" : "text-muted-foreground hover:bg-muted/50",
+              )}
+            >
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  selected ? "bg-primary" : "bg-muted-foreground/35",
+                )}
+                aria-hidden
+              />
+              <span className="max-w-full truncate text-[10px] leading-none">{option.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

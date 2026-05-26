@@ -101,12 +101,8 @@ const TOKEN_CATEGORIES: ReadonlyArray<TokenCategory> = [
     ],
   },
   {
-    title: "Typography",
-    tokens: ["font-family-sans", "font-family-mono", "font-size-base"],
-  },
-  {
     title: "Misc",
-    tokens: ["noise-opacity", "radius"],
+    tokens: ["noise-opacity"],
   },
 ];
 

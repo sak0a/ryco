@@ -37,7 +37,7 @@ describe("setTokenValue", () => {
     expect(next.dark).toEqual({ primary: "#def" });
   });
 
-  it("stores typography tokens with the same shape as colors", () => {
+  it("stores legacy global appearance tokens with the same shape as colors", () => {
     const withFont = setTokenValue(BASE, "light", "font-family-sans", "Inter, sans-serif");
     expect(withFont.light).toEqual({ "font-family-sans": "Inter, sans-serif" });
     const withSize = setTokenValue(withFont, "light", "font-size-base", "18px");

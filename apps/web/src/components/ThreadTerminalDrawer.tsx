@@ -22,6 +22,7 @@ import {
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
 import { openInPreferredEditor } from "../editorPreferences";
+import { APPEARANCE_PREFERENCES_CHANGE_EVENT } from "../themes/appearancePreferences";
 import {
   collectWrappedTerminalLinkLine,
   extractTerminalLinks,
@@ -53,6 +54,18 @@ import { selectTerminalEventEntries, useTerminalStateStore } from "../terminalSt
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
 const MULTI_CLICK_SELECTION_ACTION_DELAY_MS = 260;
+const DEFAULT_TERMINAL_FONT_FAMILY =
+  '"SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace';
+
+function readTerminalFontFamily(): string {
+  if (typeof document === "undefined" || typeof getComputedStyle === "undefined") {
+    return DEFAULT_TERMINAL_FONT_FAMILY;
+  }
+  return (
+    getComputedStyle(document.documentElement).getPropertyValue("--font-family-mono").trim() ||
+    DEFAULT_TERMINAL_FONT_FAMILY
+  );
+}
 
 function maxDrawerHeight(): number {
   if (typeof window === "undefined") return DEFAULT_THREAD_TERMINAL_HEIGHT;
@@ -334,7 +347,7 @@ export function TerminalViewport({
       lineHeight: 1.2,
       fontSize: 12,
       scrollback: 5_000,
-      fontFamily: '"SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
+      fontFamily: readTerminalFontFamily(),
       theme: terminalThemeFromApp(mount),
     });
     terminal.loadAddon(fitAddon);
@@ -343,6 +356,14 @@ export function TerminalViewport({
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+
+    const syncTerminalFontFamily = () => {
+      const nextFontFamily = readTerminalFontFamily();
+      if (terminal.options.fontFamily === nextFontFamily) return;
+      terminal.options.fontFamily = nextFontFamily;
+      fitAddon.fit();
+    };
+    window.addEventListener(APPEARANCE_PREFERENCES_CHANGE_EVENT, syncTerminalFontFamily);
 
     const clearSelectionAction = () => {
       selectionActionRequestIdRef.current += 1;
@@ -759,6 +780,7 @@ export function TerminalViewport({
       window.removeEventListener("mouseup", handleMouseUp);
       mount.removeEventListener("pointerdown", handlePointerDown);
       themeObserver.disconnect();
+      window.removeEventListener(APPEARANCE_PREFERENCES_CHANGE_EVENT, syncTerminalFontFamily);
       terminalRef.current = null;
       fitAddonRef.current = null;
       terminal.dispose();

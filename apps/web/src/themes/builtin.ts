@@ -1,4 +1,4 @@
-import type { ThemeDefinition } from "./types";
+import type { ThemeDefinition, ThemeTokens } from "./types";
 
 export const DEFAULT_THEME_ID = "default";
 
@@ -8,7 +8,6 @@ export const DEFAULT_THEME: ThemeDefinition = {
   description: "The built-in Ryco light & dark palette.",
   builtIn: true,
   light: {
-    radius: "0.625rem",
     background: "var(--color-white)",
     "app-chrome-background": "var(--background)",
     foreground: "var(--color-neutral-800)",
@@ -40,11 +39,6 @@ export const DEFAULT_THEME: ThemeDefinition = {
     "scrollbar-thumb-thin": "rgba(0, 0, 0, 0.1)",
     "scrollbar-thumb-thin-hover": "rgba(0, 0, 0, 0.2)",
     "noise-opacity": "0.035",
-    "font-family-sans":
-      '"DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
-    "font-family-mono":
-      '"SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
-    "font-size-base": "16px",
   },
   dark: {
     background: "color-mix(in srgb, var(--color-neutral-950) 95%, var(--color-white))",
@@ -77,13 +71,78 @@ export const DEFAULT_THEME: ThemeDefinition = {
     "scrollbar-thumb-hover": "rgba(255, 255, 255, 0.18)",
     "scrollbar-thumb-thin": "rgba(255, 255, 255, 0.08)",
     "scrollbar-thumb-thin-hover": "rgba(255, 255, 255, 0.15)",
-    "font-family-sans":
-      '"DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
-    "font-family-mono":
-      '"SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
-    "font-size-base": "16px",
   },
 };
+
+type PresetPalette = {
+  background: string;
+  chrome: string;
+  foreground: string;
+  card: string;
+  popover?: string;
+  primary: string;
+  primaryForeground: string;
+  secondary: string;
+  muted: string;
+  mutedForeground: string;
+  accent: string;
+  accentForeground: string;
+  destructive: string;
+  destructiveForeground: string;
+  border: string;
+  input: string;
+  ring?: string;
+  info: string;
+  success: string;
+  warning: string;
+  scrollbarForeground?: string;
+};
+
+function presetTokens(palette: PresetPalette): ThemeTokens {
+  const scrollbarBase = palette.scrollbarForeground ?? palette.foreground;
+  return {
+    background: palette.background,
+    "app-chrome-background": palette.chrome,
+    foreground: palette.foreground,
+    card: palette.card,
+    "card-foreground": palette.foreground,
+    popover: palette.popover ?? palette.card,
+    "popover-foreground": palette.foreground,
+    primary: palette.primary,
+    "primary-foreground": palette.primaryForeground,
+    secondary: palette.secondary,
+    "secondary-foreground": palette.foreground,
+    muted: palette.muted,
+    "muted-foreground": palette.mutedForeground,
+    accent: palette.accent,
+    "accent-foreground": palette.accentForeground,
+    destructive: palette.destructive,
+    "destructive-foreground": palette.destructiveForeground,
+    border: palette.border,
+    input: palette.input,
+    ring: palette.ring ?? palette.primary,
+    info: palette.info,
+    "info-foreground": palette.info,
+    success: palette.success,
+    "success-foreground": palette.success,
+    warning: palette.warning,
+    "warning-foreground": palette.warning,
+    "scrollbar-thumb": hexToRgba(scrollbarBase, 0.18),
+    "scrollbar-thumb-hover": hexToRgba(scrollbarBase, 0.32),
+    "scrollbar-thumb-thin": hexToRgba(scrollbarBase, 0.12),
+    "scrollbar-thumb-thin-hover": hexToRgba(scrollbarBase, 0.24),
+  };
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!match || match[1] === undefined) return hex;
+  const value = match[1];
+  const r = Number.parseInt(value.slice(0, 2), 16);
+  const g = Number.parseInt(value.slice(2, 4), 16);
+  const b = Number.parseInt(value.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 const SOLARIZED_DARK: ThemeDefinition = {
   id: "solarized-dark",
@@ -268,9 +327,295 @@ const HIGH_CONTRAST: ThemeDefinition = {
   },
 };
 
+const ONE_DARK_PRO: ThemeDefinition = {
+  id: "one-dark-pro",
+  name: "One Dark Pro",
+  description: "Atom's One Dark palette adapted from the popular VS Code theme.",
+  builtIn: true,
+  dark: presetTokens({
+    background: "#282c34",
+    chrome: "#21252b",
+    foreground: "#abb2bf",
+    card: "#30333d",
+    primary: "#61afef",
+    primaryForeground: "#ffffff",
+    secondary: "#30333d",
+    muted: "#2c313c",
+    mutedForeground: "#636b78",
+    accent: "#3e4452",
+    accentForeground: "#abb2bf",
+    destructive: "#e06c75",
+    destructiveForeground: "#ffffff",
+    border: "#3e4452",
+    input: "#1d1f23",
+    info: "#56b6c2",
+    success: "#98c379",
+    warning: "#e5c07b",
+  }),
+};
+
+const DRACULA: ThemeDefinition = {
+  id: "dracula",
+  name: "Dracula",
+  description: "A dark purple workbench inspired by the Dracula VS Code theme.",
+  builtIn: true,
+  dark: presetTokens({
+    background: "#282A36",
+    chrome: "#21222C",
+    foreground: "#F8F8F2",
+    card: "#343746",
+    primary: "#BD93F9",
+    primaryForeground: "#282A36",
+    secondary: "#44475A",
+    muted: "#44475A",
+    mutedForeground: "#6272A4",
+    accent: "#FF79C6",
+    accentForeground: "#282A36",
+    destructive: "#FF5555",
+    destructiveForeground: "#282A36",
+    border: "#191A21",
+    input: "#191A21",
+    ring: "#6272A4",
+    info: "#8BE9FD",
+    success: "#50FA7B",
+    warning: "#FFB86C",
+  }),
+};
+
+const GITHUB: ThemeDefinition = {
+  id: "github",
+  name: "GitHub",
+  description: "GitHub Light and Dark palettes adapted from the official VS Code theme.",
+  builtIn: true,
+  light: presetTokens({
+    background: "#ffffff",
+    chrome: "#f6f8fa",
+    foreground: "#1f2328",
+    card: "#ffffff",
+    primary: "#0969da",
+    primaryForeground: "#ffffff",
+    secondary: "#f6f8fa",
+    muted: "#f6f8fa",
+    mutedForeground: "#656d76",
+    accent: "#dbeafe",
+    accentForeground: "#0969da",
+    destructive: "#cf222e",
+    destructiveForeground: "#ffffff",
+    border: "#d0d7de",
+    input: "#d0d7de",
+    info: "#0969da",
+    success: "#1f883d",
+    warning: "#9a6700",
+    scrollbarForeground: "#1f2328",
+  }),
+  dark: presetTokens({
+    background: "#0d1117",
+    chrome: "#010409",
+    foreground: "#e6edf3",
+    card: "#161b22",
+    primary: "#2f81f7",
+    primaryForeground: "#ffffff",
+    secondary: "#21262d",
+    muted: "#21262d",
+    mutedForeground: "#7d8590",
+    accent: "#1f6feb",
+    accentForeground: "#ffffff",
+    destructive: "#f85149",
+    destructiveForeground: "#ffffff",
+    border: "#30363d",
+    input: "#30363d",
+    info: "#2f81f7",
+    success: "#3fb950",
+    warning: "#d29922",
+  }),
+};
+
+const CATPPUCCIN: ThemeDefinition = {
+  id: "catppuccin",
+  name: "Catppuccin",
+  description: "Catppuccin Latte and Mocha palettes with a mauve accent.",
+  builtIn: true,
+  light: presetTokens({
+    background: "#eff1f5",
+    chrome: "#e6e9ef",
+    foreground: "#4c4f69",
+    card: "#ffffff",
+    primary: "#8839ef",
+    primaryForeground: "#ffffff",
+    secondary: "#ccd0da",
+    muted: "#dce0e8",
+    mutedForeground: "#6c6f85",
+    accent: "#bcc0cc",
+    accentForeground: "#4c4f69",
+    destructive: "#d20f39",
+    destructiveForeground: "#ffffff",
+    border: "#bcc0cc",
+    input: "#bcc0cc",
+    info: "#1e66f5",
+    success: "#40a02b",
+    warning: "#df8e1d",
+  }),
+  dark: presetTokens({
+    background: "#1e1e2e",
+    chrome: "#181825",
+    foreground: "#cdd6f4",
+    card: "#313244",
+    primary: "#cba6f7",
+    primaryForeground: "#1e1e2e",
+    secondary: "#313244",
+    muted: "#313244",
+    mutedForeground: "#a6adc8",
+    accent: "#45475a",
+    accentForeground: "#cdd6f4",
+    destructive: "#f38ba8",
+    destructiveForeground: "#1e1e2e",
+    border: "#45475a",
+    input: "#45475a",
+    info: "#89b4fa",
+    success: "#a6e3a1",
+    warning: "#f9e2af",
+  }),
+};
+
+const TOKYO_NIGHT: ThemeDefinition = {
+  id: "tokyo-night",
+  name: "Tokyo Night",
+  description: "A deep blue workbench inspired by Enkia's Tokyo Night theme.",
+  builtIn: true,
+  dark: presetTokens({
+    background: "#1a1b26",
+    chrome: "#16161e",
+    foreground: "#a9b1d6",
+    card: "#202330",
+    primary: "#7aa2f7",
+    primaryForeground: "#ffffff",
+    secondary: "#202330",
+    muted: "#1c1d29",
+    mutedForeground: "#787c99",
+    accent: "#3d59a1",
+    accentForeground: "#ffffff",
+    destructive: "#db4b4b",
+    destructiveForeground: "#ffffff",
+    border: "#101014",
+    input: "#14141b",
+    info: "#2ac3de",
+    success: "#9ece6a",
+    warning: "#e0af68",
+  }),
+};
+
+const MONOKAI: ThemeDefinition = {
+  id: "monokai",
+  name: "Monokai",
+  description: "Classic Monokai colors with hot pink and green accents.",
+  builtIn: true,
+  dark: presetTokens({
+    background: "#272822",
+    chrome: "#1f201b",
+    foreground: "#f8f8f2",
+    card: "#34352f",
+    primary: "#f92672",
+    primaryForeground: "#ffffff",
+    secondary: "#3e3d32",
+    muted: "#3e3d32",
+    mutedForeground: "#a59f85",
+    accent: "#49483e",
+    accentForeground: "#f8f8f2",
+    destructive: "#f92672",
+    destructiveForeground: "#ffffff",
+    border: "#49483e",
+    input: "#1f201b",
+    info: "#66d9ef",
+    success: "#a6e22e",
+    warning: "#e6db74",
+  }),
+};
+
+const GRUVBOX_MATERIAL: ThemeDefinition = {
+  id: "gruvbox-material",
+  name: "Gruvbox Material",
+  description: "Warm low-contrast Gruvbox Material light and dark palettes.",
+  builtIn: true,
+  light: presetTokens({
+    background: "#fbf1c7",
+    chrome: "#f2e5bc",
+    foreground: "#654735",
+    card: "#f9ead3",
+    primary: "#7c6f64",
+    primaryForeground: "#fbf1c7",
+    secondary: "#ebdbb2",
+    muted: "#ebdbb2",
+    mutedForeground: "#7c6f64",
+    accent: "#d5c4a1",
+    accentForeground: "#654735",
+    destructive: "#c14a4a",
+    destructiveForeground: "#fbf1c7",
+    border: "#d5c4a1",
+    input: "#d5c4a1",
+    info: "#45707a",
+    success: "#6c782e",
+    warning: "#b47109",
+  }),
+  dark: presetTokens({
+    background: "#292828",
+    chrome: "#292828",
+    foreground: "#d4be98",
+    card: "#32302f",
+    primary: "#a89984",
+    primaryForeground: "#292828",
+    secondary: "#383432",
+    muted: "#32302f",
+    mutedForeground: "#928374",
+    accent: "#45403d",
+    accentForeground: "#d4be98",
+    destructive: "#ea6962",
+    destructiveForeground: "#292828",
+    border: "#45403d",
+    input: "#45403d",
+    info: "#7daea3",
+    success: "#a9b665",
+    warning: "#d8a657",
+  }),
+};
+
+const CURSOR_DARK_INSPIRED: ThemeDefinition = {
+  id: "cursor-dark-inspired",
+  name: "Cursor Dark Inspired",
+  description: "A restrained dark editor palette inspired by Cursor's VS Code-compatible UI.",
+  builtIn: true,
+  dark: presetTokens({
+    background: "#171717",
+    chrome: "#101010",
+    foreground: "#d4d4d4",
+    card: "#1f1f1f",
+    primary: "#8ab4ff",
+    primaryForeground: "#0b0b0b",
+    secondary: "#272727",
+    muted: "#222222",
+    mutedForeground: "#858585",
+    accent: "#333333",
+    accentForeground: "#d4d4d4",
+    destructive: "#f87171",
+    destructiveForeground: "#0b0b0b",
+    border: "#333333",
+    input: "#2b2b2b",
+    info: "#7dd3fc",
+    success: "#86efac",
+    warning: "#facc15",
+  }),
+};
+
 export const BUILT_IN_THEMES: readonly ThemeDefinition[] = [
   DEFAULT_THEME,
   SOLARIZED_DARK,
   NORD,
   HIGH_CONTRAST,
+  ONE_DARK_PRO,
+  DRACULA,
+  GITHUB,
+  CATPPUCCIN,
+  TOKYO_NIGHT,
+  MONOKAI,
+  GRUVBOX_MATERIAL,
+  CURSOR_DARK_INSPIRED,
 ];
