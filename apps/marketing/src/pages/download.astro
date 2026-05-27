@@ -27,6 +27,20 @@ import { RELEASES_URL } from "../lib/releases";
           <span class="card-format">.dmg</span>
         </a>
       </div>
+      <div class="unsigned-note">
+        <p>
+          Ryco for macOS is unsigned and not notarized. Apple requires a paid Developer ID account
+          for notarization, so macOS may say the app is damaged even when the GitHub download is
+          valid.
+        </p>
+        <p>
+          Open the DMG and run <code>Install Ryco.command</code>. It copies Ryco to
+          <code>/Applications</code>, removes the quarantine flag from that installed app, and opens
+          it.
+        </p>
+        <pre><code>xattr -dr com.apple.quarantine /Applications/Ryco.app
+open /Applications/Ryco.app</code></pre>
+      </div>
     </section>
 
     <!-- Windows -->
@@ -229,6 +243,44 @@ import { RELEASES_URL } from "../lib/releases";
   .card-format {
     font-size: 0.8rem;
     color: var(--fg-dim);
+  }
+
+  .unsigned-note {
+    margin-top: 0.35rem;
+    border: 1px solid rgba(251, 191, 36, 0.24);
+    border-radius: 8px;
+    background: rgba(251, 191, 36, 0.06);
+    color: var(--fg-muted);
+    padding: 0.85rem 1rem;
+    font-size: 0.8rem;
+    line-height: 1.55;
+  }
+
+  .unsigned-note p {
+    margin: 0;
+  }
+
+  .unsigned-note p + p {
+    margin-top: 0.55rem;
+  }
+
+  .unsigned-note code {
+    color: var(--fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+      "Courier New", monospace;
+    font-size: 0.78rem;
+  }
+
+  .unsigned-note pre {
+    margin: 0.7rem 0 0;
+    overflow-x: auto;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.24);
+    padding: 0.65rem 0.75rem;
+  }
+
+  .unsigned-note pre code {
+    white-space: pre;
   }
 
   /* ── Releases link ── */

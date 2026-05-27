@@ -406,6 +406,24 @@ jobs:
       #       exit 1
       #     fi
 
+      - name: Prepare release notes body
+        shell: bash
+        run: |
+          cat > release-assets/release-body.md <<'EOF'
+          ## macOS unsigned install
+
+          Ryco for macOS is currently unsigned and not notarized. Apple requires a paid Developer ID account for notarization, so macOS may say the app is damaged even when the GitHub download is valid.
+
+          To install it, download the `.dmg`, open it, and run `Install Ryco.command`. The helper copies Ryco to `/Applications`, removes the quarantine flag from that installed app, and opens it.
+
+          Manual fallback after dragging Ryco to `/Applications`:
+
+          ```bash
+          xattr -dr com.apple.quarantine /Applications/Ryco.app
+          open /Applications/Ryco.app
+          ```
+          EOF
+
       - name: Publish release
         if: needs.preflight.outputs.previous_tag != ''
         uses: softprops/action-gh-release@v2
@@ -413,6 +431,7 @@ jobs:
           tag_name: ${{ needs.preflight.outputs.tag }}
           target_commitish: ${{ needs.preflight.outputs.ref }}
           name: ${{ needs.preflight.outputs.release_name }}
+          body_path: release-assets/release-body.md
           generate_release_notes: true
           previous_tag: ${{ needs.preflight.outputs.previous_tag }}
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
@@ -434,6 +453,7 @@ jobs:
           tag_name: ${{ needs.preflight.outputs.tag }}
           target_commitish: ${{ needs.preflight.outputs.ref }}
           name: ${{ needs.preflight.outputs.release_name }}
+          body_path: release-assets/release-body.md
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}

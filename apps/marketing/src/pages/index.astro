@@ -16,6 +16,11 @@ import Layout from "../layouts/Layout.astro";
     <span id="download-label">Download now</span>
   </a>
 
+  <p id="macos-unsigned-note" class="macos-unsigned-note" hidden>
+    macOS builds are unsigned. Open the DMG and run <code>Install Ryco.command</code> if macOS says
+    Ryco is damaged.
+  </p>
+
   <a href="/download" class="other-platforms">Other platforms</a>
 
   <div class="screenshot-wrap">
@@ -75,6 +80,10 @@ import Layout from "../layouts/Layout.astro";
 
     document.documentElement.dataset.platform = platform.os;
     label.textContent = platform.label;
+    const macosUnsignedNote = document.getElementById("macos-unsigned-note");
+    if (macosUnsignedNote && platform.os === "mac") {
+      macosUnsignedNote.hidden = false;
+    }
 
     try {
       const release = await fetchLatestRelease();
@@ -135,6 +144,24 @@ import Layout from "../layouts/Layout.astro";
 
   .hero-button:active {
     transform: scale(0.98);
+  }
+
+  .macos-unsigned-note {
+    max-width: min(92vw, 420px);
+    margin: -0.25rem 0 1.25rem;
+    color: var(--fg-dim);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    text-align: center;
+    opacity: 0;
+    animation: fade-in 1s ease-out 0.22s forwards;
+  }
+
+  .macos-unsigned-note code {
+    color: var(--fg-muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+      "Courier New", monospace;
+    font-size: 0.76rem;
   }
 
   .hero-button-icon {
