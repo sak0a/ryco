@@ -71,7 +71,7 @@ export function ContextWindowMeter(props: {
             <span className="relative flex h-6 w-6 items-center justify-center">
               <svg
                 viewBox="0 0 24 24"
-                className="-rotate-90 absolute inset-0 h-full w-full transform-gpu"
+                className="-rotate-90 absolute inset-0 h-full w-full"
                 aria-hidden="true"
               >
                 <circle

@@ -124,7 +124,7 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
             className={cn(
               "pointer-events-none absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-20 space-y-2 opacity-0",
               "transition-[opacity,transform] duration-150 ease-out",
-              "translate-y-1 transform-gpu will-change-[opacity,transform]",
+              "translate-y-1",
               "group-hover/banner-stack:pointer-events-auto group-hover/banner-stack:translate-y-0 group-hover/banner-stack:opacity-100",
               "group-focus-within/banner-stack:pointer-events-auto group-focus-within/banner-stack:translate-y-0 group-focus-within/banner-stack:opacity-100",
             )}
