@@ -1,4 +1,8 @@
-import { type TimelineEntry, type WorkLogEntry } from "../../session-logic";
+import {
+  type ContextCompactionTimelineEntry,
+  type TimelineEntry,
+  type WorkLogEntry,
+} from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { type MessageId } from "@ryco/contracts";
 
@@ -39,6 +43,12 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string;
       proposedPlan: ProposedPlan;
+    }
+  | {
+      kind: "context-compaction";
+      id: string;
+      createdAt: string;
+      marker: ContextCompactionTimelineEntry;
     }
   | { kind: "working"; id: string; createdAt: string | null };
 
@@ -161,6 +171,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "context-compaction") {
+      nextRows.push({
+        kind: "context-compaction",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        marker: timelineEntry.marker,
+      });
+      continue;
+    }
+
     nextRows.push({
       kind: "message",
       id: timelineEntry.id,
@@ -229,6 +249,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "work":
       return a.groupedEntries === (b as typeof a).groupedEntries;
+
+    case "context-compaction":
+      return a.marker === (b as typeof a).marker;
 
     case "message": {
       const bm = b as typeof a;

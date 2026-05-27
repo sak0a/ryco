@@ -24,6 +24,7 @@ import { isProviderDriverKind, ProviderDriverKind } from "@ryco/contracts";
 import type { ThreadId, TurnId } from "@ryco/contracts";
 import { Schema } from "effect";
 import { resolveModelSlugForProvider } from "@ryco/shared/model";
+import { capThreadActivitiesPreservingMilestones } from "@ryco/shared/threadActivity";
 import { create } from "zustand";
 import {
   type ChatMessage,
@@ -1914,12 +1915,14 @@ function applyEnvironmentOrchestrationEvent(
         const activities = [
           ...thread.activities.filter((activity) => activity.id !== event.payload.activity.id),
           { ...event.payload.activity },
-        ]
-          .toSorted(compareActivities)
-          .slice(-MAX_THREAD_ACTIVITIES);
+        ].toSorted(compareActivities);
+        const cappedActivities = capThreadActivitiesPreservingMilestones(
+          activities,
+          MAX_THREAD_ACTIVITIES,
+        );
         return {
           ...thread,
-          activities,
+          activities: cappedActivities,
           updatedAt: event.occurredAt,
         };
       });

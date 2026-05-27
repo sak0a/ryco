@@ -315,6 +315,10 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
     >
       {row.kind === "work" && <WorkGroupSection groupedEntries={row.groupedEntries} />}
 
+      {row.kind === "context-compaction" && (
+        <ContextCompactionMarkerRow createdAt={row.createdAt} label={row.marker.label} />
+      )}
+
       {row.kind === "message" &&
         row.message.role === "user" &&
         (() => {
@@ -611,6 +615,31 @@ const WorkGroupSection = memo(function WorkGroupSection({
           />
         ))}
       </div>
+    </div>
+  );
+});
+
+const ContextCompactionMarkerRow = memo(function ContextCompactionMarkerRow({
+  createdAt,
+  label,
+}: {
+  createdAt: string;
+  label: string;
+}) {
+  const { timestampFormat } = use(TimelineRowCtx);
+  const timestamp = formatTimestamp(createdAt, timestampFormat);
+
+  return (
+    <div className="flex items-center gap-3 py-1.5" aria-label={`${label} at ${timestamp}`}>
+      <span className="h-px flex-1 bg-border/55" />
+      <span className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-border/60 bg-muted/35 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/75">
+        <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/35" />
+        <span className="truncate">{label}</span>
+        <span className="shrink-0 font-normal normal-case tracking-normal text-muted-foreground/45">
+          {timestamp}
+        </span>
+      </span>
+      <span className="h-px flex-1 bg-border/55" />
     </div>
   );
 });

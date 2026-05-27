@@ -97,6 +97,8 @@ import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider
 const desktopStartupTiming = createStartupTiming();
 desktopStartupTiming.mark("desktop.launch");
 const STARTUP_TIMING_STDOUT = readEnv("RYCO_DESKTOP_STARTUP_TIMING_STDOUT")?.trim() === "1";
+const DESKTOP_OPEN_DEVTOOLS = readEnv("RYCO_DESKTOP_OPEN_DEVTOOLS")?.trim() === "1";
+const DESKTOP_DISABLE_GPU = readEnv("RYCO_DESKTOP_DISABLE_GPU")?.trim() === "1";
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
@@ -888,6 +890,11 @@ function captureBackendOutput(child: ChildProcess.ChildProcess): void {
 }
 
 initializePackagedLogging();
+
+if (DESKTOP_DISABLE_GPU) {
+  app.disableHardwareAcceleration();
+  writeDesktopLogHeader("chromium hardware acceleration disabled via RYCO_DESKTOP_DISABLE_GPU=1");
+}
 
 if (process.platform === "linux") {
   app.commandLine.appendSwitch("class", LINUX_WM_CLASS);
@@ -2376,7 +2383,7 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      backgroundThrottling: false,
+      backgroundThrottling: true,
     },
   });
 
@@ -2469,7 +2476,9 @@ function createWindow(): BrowserWindow {
   if (isDevelopment) {
     const devUrl = resolveDesktopDevServerUrl();
     void window.loadURL(devUrl);
-    window.webContents.openDevTools({ mode: "detach" });
+    if (DESKTOP_OPEN_DEVTOOLS) {
+      window.webContents.openDevTools({ mode: "detach" });
+    }
     window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
       if (errorCode === -3 || window.isDestroyed()) {
         return;

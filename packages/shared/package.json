@@ -44,6 +44,10 @@
       "types": "./src/toolActivity.ts",
       "import": "./src/toolActivity.ts"
     },
+    "./threadActivity": {
+      "types": "./src/threadActivity.ts",
+      "import": "./src/threadActivity.ts"
+    },
     "./Struct": {
       "types": "./src/Struct.ts",
       "import": "./src/Struct.ts"

@@ -63,6 +63,7 @@ import {
 } from "../composer-logic";
 import {
   deriveCompletionDividerBeforeEntryId,
+  deriveContextCompactionTimelineEntries,
   derivePendingApprovals,
   derivePendingUserInputs,
   derivePhase,
@@ -1500,6 +1501,10 @@ export default function ChatView(props: ChatViewProps) {
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
+  const contextCompactionEntries = useMemo(
+    () => deriveContextCompactionTimelineEntries(threadActivities),
+    [threadActivities],
+  );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),
     [activeLatestTurn?.turnId, threadActivities],
@@ -1791,8 +1796,13 @@ export default function ChatView(props: ChatViewProps) {
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
-    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+      deriveTimelineEntries(
+        timelineMessages,
+        activeThread?.proposedPlans ?? [],
+        workLogEntries,
+        contextCompactionEntries,
+      ),
+    [activeThread?.proposedPlans, contextCompactionEntries, timelineMessages, workLogEntries],
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);

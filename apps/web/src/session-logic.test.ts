@@ -11,6 +11,7 @@ import {
   deriveCompletionDividerBeforeEntryId,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveContextCompactionTimelineEntries,
   derivePendingApprovals,
   derivePendingUserInputs,
   deriveTimelineEntries,
@@ -1482,7 +1483,7 @@ describe("deriveWorkLogEntries", () => {
 });
 
 describe("deriveTimelineEntries", () => {
-  it("includes proposed plans alongside messages and work entries in chronological order", () => {
+  it("includes proposed plans, compaction markers, and work entries in chronological order", () => {
     const entries = deriveTimelineEntries(
       [
         {
@@ -1512,15 +1513,35 @@ describe("deriveTimelineEntries", () => {
           tone: "tool",
         },
       ],
+      [
+        {
+          id: "context-compaction:activity-1",
+          activityId: "activity-1",
+          createdAt: "2026-02-23T00:00:02.500Z",
+          label: "Context compacted",
+          turnId: TurnId.make("turn-1"),
+        },
+      ],
     );
 
-    expect(entries.map((entry) => entry.kind)).toEqual(["message", "proposed-plan", "work"]);
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "message",
+      "proposed-plan",
+      "context-compaction",
+      "work",
+    ]);
     expect(entries[1]).toMatchObject({
       kind: "proposed-plan",
       proposedPlan: {
         planMarkdown: "# Ship it",
         implementedAt: null,
         implementationThreadId: null,
+      },
+    });
+    expect(entries[2]).toMatchObject({
+      kind: "context-compaction",
+      marker: {
+        label: "Context compacted",
       },
     });
   });
@@ -1583,7 +1604,7 @@ describe("deriveWorkLogEntries context window handling", () => {
     expect(entries[0]?.label).toBe("Ran command");
   });
 
-  it("keeps context compaction activities as normal work log entries", () => {
+  it("excludes context compaction activities from the work log", () => {
     const entries = deriveWorkLogEntries(
       [
         makeActivity({
@@ -1593,12 +1614,50 @@ describe("deriveWorkLogEntries context window handling", () => {
           summary: "Context compacted",
           tone: "info",
         }),
+        makeActivity({
+          id: "tool-1",
+          turnId: "turn-1",
+          kind: "tool.completed",
+          summary: "Ran command",
+          tone: "tool",
+        }),
       ],
       TurnId.make("turn-1"),
     );
 
     expect(entries).toHaveLength(1);
-    expect(entries[0]?.label).toBe("Context compacted");
+    expect(entries[0]?.label).toBe("Ran command");
+  });
+
+  it("derives context compaction entries for the full timeline", () => {
+    const entries = deriveContextCompactionTimelineEntries([
+      makeActivity({
+        id: "tool-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        turnId: "turn-1",
+        kind: "tool.completed",
+        summary: "Ran command",
+        tone: "tool",
+      }),
+      makeActivity({
+        id: "compaction-1",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        turnId: "turn-1",
+        kind: "context-compaction",
+        summary: "Context compacted",
+        tone: "info",
+      }),
+    ]);
+
+    expect(entries).toEqual([
+      {
+        id: "context-compaction:compaction-1",
+        activityId: "compaction-1",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        label: "Context compacted",
+        turnId: TurnId.make("turn-1"),
+      },
+    ]);
   });
 });
 

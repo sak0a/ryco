@@ -14,6 +14,7 @@ import {
   OrchestrationWorktreeShell as OrchestrationWorktreeShellSchema,
 } from "@ryco/contracts";
 import { Effect, Schema } from "effect";
+import { capThreadActivitiesPreservingMilestones } from "@ryco/shared/threadActivity";
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
@@ -50,6 +51,7 @@ type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 type WorktreePatch = Partial<Omit<OrchestrationWorktreeShell, "worktreeId" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
+const MAX_THREAD_ACTIVITIES = 500;
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
   if (status === "error") return "error" as const;
@@ -822,14 +824,16 @@ export function projectEvent(
           const activities = [
             ...thread.activities.filter((entry) => entry.id !== payload.activity.id),
             payload.activity,
-          ]
-            .toSorted(compareThreadActivities)
-            .slice(-500);
+          ].toSorted(compareThreadActivities);
+          const cappedActivities = capThreadActivitiesPreservingMilestones(
+            activities,
+            MAX_THREAD_ACTIVITIES,
+          );
 
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
-              activities,
+              activities: cappedActivities,
               updatedAt: event.occurredAt,
             }),
           };

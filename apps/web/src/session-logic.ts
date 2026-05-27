@@ -1,5 +1,6 @@
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
+import { isContextCompactionActivity } from "@ryco/shared/threadActivity";
 import {
   ApprovalRequestId,
   isToolLifecycleItemType,
@@ -70,6 +71,14 @@ export interface WorkLogEntry {
   exitCode?: number;
 }
 
+export interface ContextCompactionTimelineEntry {
+  id: string;
+  activityId: string;
+  createdAt: string;
+  label: string;
+  turnId: TurnId | null;
+}
+
 interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
   collapseKey?: string;
@@ -127,6 +136,12 @@ export type TimelineEntry =
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
+    }
+  | {
+      id: string;
+      kind: "context-compaction";
+      createdAt: string;
+      marker: ContextCompactionTimelineEntry;
     };
 
 export function formatDuration(durationMs: number): string {
@@ -499,6 +514,7 @@ export function deriveWorkLogEntries(
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started")
     .filter((activity) => activity.kind !== "context-window.updated")
+    .filter((activity) => !isContextCompactionActivity(activity))
     .filter((activity) => activity.summary !== "Checkpoint captured")
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .map(toDerivedWorkLogEntry);
@@ -1319,10 +1335,26 @@ export function hasToolActivityForTurn(
   return activities.some((activity) => activity.turnId === turnId && activity.tone === "tool");
 }
 
+export function deriveContextCompactionTimelineEntries(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ContextCompactionTimelineEntry[] {
+  return [...activities]
+    .filter(isContextCompactionActivity)
+    .toSorted(compareActivitiesByOrder)
+    .map((activity) => ({
+      id: `context-compaction:${activity.id}`,
+      activityId: activity.id,
+      createdAt: activity.createdAt,
+      label: activity.summary,
+      turnId: activity.turnId,
+    }));
+}
+
 export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
+  contextCompactionEntries: ContextCompactionTimelineEntry[] = [],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
@@ -1342,8 +1374,14 @@ export function deriveTimelineEntries(
     createdAt: entry.createdAt,
     entry,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
+  const contextCompactionRows: TimelineEntry[] = contextCompactionEntries.map((marker) => ({
+    id: marker.id,
+    kind: "context-compaction",
+    createdAt: marker.createdAt,
+    marker,
+  }));
+  return [...messageRows, ...proposedPlanRows, ...workRows, ...contextCompactionRows].toSorted(
+    (a, b) => a.createdAt.localeCompare(b.createdAt),
   );
 }
 
