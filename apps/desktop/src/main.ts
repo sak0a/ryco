@@ -32,7 +32,7 @@ import type {
   DesktopUpdateCheckResult,
   DesktopUpdateState,
 } from "@ryco/contracts";
-import { autoUpdater } from "electron-updater";
+import { autoUpdater, type UpdateDownloadedEvent } from "electron-updater";
 
 import type { ContextMenuItem } from "@ryco/contracts";
 import { RotatingFileSink } from "@ryco/shared/logging";
@@ -93,6 +93,14 @@ import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runti
 import { resolveDesktopAppBranding } from "./appBranding.ts";
 import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
+import {
+  createUnsignedMacUpdateInstallScript,
+  parseMacCodeSignatureKind,
+  resolveMacAppBundlePath,
+  resolveMacUpdateTargetAppPath,
+  shouldUseUnsignedMacUpdateInstaller,
+  type MacCodeSignatureKind,
+} from "./unsignedMacUpdateInstaller.ts";
 
 const desktopStartupTiming = createStartupTiming();
 desktopStartupTiming.mark("desktop.launch");
@@ -158,6 +166,8 @@ const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
 const SERVER_SETTINGS_PATH = Path.join(STATE_DIR, "settings.json");
 const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
+const UNSIGNED_MAC_UPDATE_INSTALLER_DIR = Path.join(STATE_DIR, "update-installers");
+const UNSIGNED_MAC_UPDATE_INSTALLER_LOG_PATH = Path.join(LOG_DIR, "unsigned-mac-update.log");
 
 if (!isDevelopment) {
   protocol.registerSchemesAsPrivileged([
@@ -929,6 +939,8 @@ let updateDownloadInFlight = false;
 let updateInstallInFlight = false;
 let updaterConfigured = false;
 let updateState: DesktopUpdateState = initialUpdateState();
+let downloadedUpdateFilePath: string | null = null;
+let macCodeSignatureKindCache: MacCodeSignatureKind | null = null;
 
 const desktopSshEnvironmentBridge = new DesktopSshEnvironmentBridge({
   getMainWindow: () => mainWindow,
@@ -1599,6 +1611,7 @@ async function downloadAvailableUpdate(): Promise<{
   if (!updaterConfigured || updateDownloadInFlight || updateState.status !== "available") {
     return { accepted: false, completed: false };
   }
+  downloadedUpdateFilePath = null;
   updateDownloadInFlight = true;
   setUpdateState(reduceDesktopUpdateStateOnDownloadStart(updateState));
   autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
@@ -1609,12 +1622,120 @@ async function downloadAvailableUpdate(): Promise<{
     return { accepted: true, completed: true };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
+    downloadedUpdateFilePath = null;
     setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, message));
     console.error(`[desktop-updater] Failed to download update: ${message}`);
     return { accepted: true, completed: false };
   } finally {
     updateDownloadInFlight = false;
   }
+}
+
+function resolveCurrentMacAppBundlePath(): string | null {
+  if (process.platform !== "darwin") {
+    return null;
+  }
+  return resolveMacAppBundlePath(process.execPath);
+}
+
+function resolveCurrentMacCodeSignatureKind(): MacCodeSignatureKind {
+  if (macCodeSignatureKindCache !== null) {
+    return macCodeSignatureKindCache;
+  }
+
+  const appBundlePath = resolveCurrentMacAppBundlePath();
+  if (!appBundlePath) {
+    macCodeSignatureKindCache = "unknown";
+    return macCodeSignatureKindCache;
+  }
+
+  const result = ChildProcess.spawnSync(
+    "/usr/bin/codesign",
+    ["-dv", "--verbose=4", appBundlePath],
+    {
+      encoding: "utf8",
+    },
+  );
+  macCodeSignatureKindCache = parseMacCodeSignatureKind({
+    exitCode: result.status,
+    output: `${result.stdout ?? ""}\n${result.stderr ?? ""}`,
+  });
+  console.info(
+    `[desktop-updater] macOS code signature kind for ${appBundlePath}: ${macCodeSignatureKindCache}`,
+  );
+  return macCodeSignatureKindCache;
+}
+
+function shouldInstallUpdateWithUnsignedMacInstaller(): boolean {
+  if (process.platform !== "darwin" || !app.isPackaged) {
+    return false;
+  }
+
+  return shouldUseUnsignedMacUpdateInstaller({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    signatureKind: resolveCurrentMacCodeSignatureKind(),
+    disabledByEnv: readEnv("RYCO_DISABLE_UNSIGNED_MAC_UPDATE_INSTALLER") === "1",
+    forcedByEnv: readEnv("RYCO_FORCE_UNSIGNED_MAC_UPDATE_INSTALLER") === "1",
+  });
+}
+
+function prepareUnsignedMacUpdateInstaller(): {
+  readonly scriptPath: string;
+  readonly targetAppPath: string;
+} {
+  if (!downloadedUpdateFilePath) {
+    throw new Error("Downloaded update file path is not available.");
+  }
+  if (!FS.existsSync(downloadedUpdateFilePath)) {
+    throw new Error(`Downloaded update file no longer exists: ${downloadedUpdateFilePath}`);
+  }
+
+  const currentAppBundlePath = resolveCurrentMacAppBundlePath();
+  if (!currentAppBundlePath) {
+    throw new Error("Could not resolve the current macOS app bundle path.");
+  }
+
+  const targetAppPath = resolveMacUpdateTargetAppPath(currentAppBundlePath);
+  const targetParent = Path.dirname(targetAppPath);
+  try {
+    FS.accessSync(targetParent, FS.constants.W_OK);
+  } catch {
+    throw new Error(
+      `Cannot install update to ${targetAppPath} because ${targetParent} is not writable. Install the update manually from the latest GitHub release.`,
+    );
+  }
+
+  FS.mkdirSync(UNSIGNED_MAC_UPDATE_INSTALLER_DIR, { recursive: true });
+  const scriptPath = Path.join(UNSIGNED_MAC_UPDATE_INSTALLER_DIR, `install-${APP_RUN_ID}.zsh`);
+  FS.writeFileSync(
+    scriptPath,
+    createUnsignedMacUpdateInstallScript({
+      appLabel: APP_DISPLAY_NAME,
+      updateZipPath: downloadedUpdateFilePath,
+      targetAppPath,
+      waitPid: process.pid,
+      logPath: UNSIGNED_MAC_UPDATE_INSTALLER_LOG_PATH,
+    }),
+    "utf8",
+  );
+  FS.chmodSync(scriptPath, 0o755);
+
+  return { scriptPath, targetAppPath };
+}
+
+function launchUnsignedMacUpdateInstaller(input: {
+  readonly scriptPath: string;
+  readonly targetAppPath: string;
+}): void {
+  const child = ChildProcess.spawn("/bin/zsh", [input.scriptPath], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  console.info(
+    `[desktop-updater] Launched unsigned macOS update installer pid=${child.pid ?? "unknown"} target=${input.targetAppPath}`,
+  );
 }
 
 async function installDownloadedUpdate(): Promise<{
@@ -1629,7 +1750,23 @@ async function installDownloadedUpdate(): Promise<{
   updateInstallInFlight = true;
   clearUpdatePollTimer();
   try {
+    const unsignedMacInstallPlan = shouldInstallUpdateWithUnsignedMacInstaller()
+      ? prepareUnsignedMacUpdateInstaller()
+      : null;
+
     await stopBackendAndWaitForExit();
+    if (unsignedMacInstallPlan) {
+      launchUnsignedMacUpdateInstaller(unsignedMacInstallPlan);
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.destroy();
+      }
+      console.info(
+        `[desktop-updater] Quitting to let unsigned macOS update installer replace ${unsignedMacInstallPlan.targetAppPath}.`,
+      );
+      app.quit();
+      return { accepted: true, completed: false };
+    }
+
     // Destroy all windows before launching the NSIS installer to avoid the installer finding live windows it needs to close.
     for (const win of BrowserWindow.getAllWindows()) {
       win.destroy();
@@ -1697,6 +1834,7 @@ function configureAutoUpdater(): void {
     console.info("[desktop-updater] Looking for updates...");
   });
   autoUpdater.on("update-available", (info) => {
+    downloadedUpdateFilePath = null;
     if (!doesVersionMatchDesktopUpdateChannel(info.version, updateState.channel)) {
       console.info(
         `[desktop-updater] Ignoring ${info.version} because it does not match the selected '${updateState.channel}' channel.`,
@@ -1717,6 +1855,7 @@ function configureAutoUpdater(): void {
     console.info(`[desktop-updater] Update available: ${info.version}`);
   });
   autoUpdater.on("update-not-available", () => {
+    downloadedUpdateFilePath = null;
     setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
     lastLoggedDownloadMilestone = -1;
     console.info("[desktop-updater] No updates available.");
@@ -1756,9 +1895,12 @@ function configureAutoUpdater(): void {
       console.info(`[desktop-updater] Download progress: ${percent}%`);
     }
   });
-  autoUpdater.on("update-downloaded", (info) => {
+  autoUpdater.on("update-downloaded", (info: UpdateDownloadedEvent) => {
+    downloadedUpdateFilePath = info.downloadedFile;
     setUpdateState(reduceDesktopUpdateStateOnDownloadComplete(updateState, info.version));
-    console.info(`[desktop-updater] Update downloaded: ${info.version}`);
+    console.info(
+      `[desktop-updater] Update downloaded: ${info.version} file=${info.downloadedFile}`,
+    );
   });
 
   clearUpdatePollTimer();
@@ -2253,6 +2395,7 @@ function registerIpcHandlers(): void {
     }
 
     const enabled = shouldEnableAutoUpdates();
+    downloadedUpdateFilePath = null;
     setUpdateState(createBaseUpdateState(nextChannel, enabled));
 
     if (!enabled || !updaterConfigured) {
