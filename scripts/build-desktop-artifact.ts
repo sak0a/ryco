@@ -45,6 +45,11 @@ interface DesktopBuildIconAssets {
   readonly windowsIconIco: string;
 }
 
+interface MacUnsignedInstallAssetPaths {
+  readonly installHelper: string;
+  readonly readme: string;
+}
+
 interface PlatformConfig {
   readonly cliFlag: "--mac" | "--linux" | "--win";
   readonly defaultTarget: string;
@@ -609,6 +614,85 @@ export const EXTERNALIZED_DESKTOP_DEPENDENCY_PATHS = [
 ] as const;
 
 export const COPILOT_SDK_PACKAGE_JSON_PATH = "node_modules/@github/copilot-sdk/package.json";
+export const MAC_UNSIGNED_INSTALL_HELPER_NAME = "Install Ryco.command";
+export const MAC_UNSIGNED_README_NAME = "README-macOS.txt";
+
+function toShellSingleQuoted(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+export function createMacUnsignedInstallScript(productName: string): string {
+  return `#!/bin/zsh
+set -euo pipefail
+
+APP_LABEL=${toShellSingleQuoted(productName)}
+APP_NAME=${toShellSingleQuoted(`${productName}.app`)}
+SOURCE_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+SOURCE_APP="$SOURCE_DIR/$APP_NAME"
+TARGET_APP="/Applications/$APP_NAME"
+
+if [[ ! -d "$SOURCE_APP" ]]; then
+  echo "Could not find $APP_NAME next to this installer."
+  echo "Open the Ryco DMG and run this file from the mounted disk image."
+  exit 1
+fi
+
+echo "Installing $APP_LABEL to /Applications..."
+rm -rf "$TARGET_APP"
+ditto "$SOURCE_APP" "$TARGET_APP"
+
+echo "Removing the macOS quarantine flag for this unsigned build..."
+xattr -dr com.apple.quarantine "$TARGET_APP" || true
+
+echo "Opening $APP_LABEL..."
+open "$TARGET_APP"
+
+echo "Done."
+`;
+}
+
+export function createMacUnsignedInstallReadme(productName: string): string {
+  const appName = `${productName}.app`;
+  return `Ryco unsigned macOS install
+============================
+
+This macOS build is unsigned and not notarized. Apple requires a paid Developer ID account for notarization. Because Ryco does not currently use that paid account, macOS may say the app is damaged even when the download is valid.
+
+If you downloaded Ryco from the official GitHub release, use Install Ryco.command from this DMG. It copies ${appName} to /Applications, removes the com.apple.quarantine flag from that installed app, and opens it.
+
+Manual fallback:
+
+1. Drag ${appName} to /Applications.
+2. Run:
+
+   xattr -dr com.apple.quarantine "/Applications/${appName}"
+   open "/Applications/${appName}"
+
+Only use this workaround for builds downloaded from:
+https://github.com/sak0a/ryco/releases
+`;
+}
+
+function resolveMacUnsignedInstallAssetPaths(
+  stageResourcesDir: string,
+  path: Path.Path,
+): MacUnsignedInstallAssetPaths {
+  return {
+    installHelper: path.join(stageResourcesDir, MAC_UNSIGNED_INSTALL_HELPER_NAME),
+    readme: path.join(stageResourcesDir, MAC_UNSIGNED_README_NAME),
+  };
+}
+
+const stageMacUnsignedInstallAssets = Effect.fn("stageMacUnsignedInstallAssets")(function* (
+  assetPaths: MacUnsignedInstallAssetPaths,
+  productName: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+
+  yield* fs.writeFileString(assetPaths.installHelper, createMacUnsignedInstallScript(productName));
+  yield* fs.chmod(assetPaths.installHelper, 0o755);
+  yield* fs.writeFileString(assetPaths.readme, createMacUnsignedInstallReadme(productName));
+});
 
 const pruneExternalizedDesktopDependencies = Effect.fn("pruneExternalizedDesktopDependencies")(
   function* (stageAppDir: string) {
@@ -640,6 +724,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   signed: boolean,
   mockUpdates: boolean,
   mockUpdateServerPort: number | undefined,
+  macUnsignedInstallAssets: MacUnsignedInstallAssetPaths | undefined,
 ) {
   const buildConfig: Record<string, unknown> = {
     appId: "com.laurinfrank.ryco",
@@ -669,6 +754,45 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
     };
+    if (macUnsignedInstallAssets) {
+      buildConfig.dmg = {
+        window: {
+          size: {
+            width: 560,
+            height: 430,
+          },
+        },
+        contents: [
+          {
+            x: 140,
+            y: 155,
+            type: "file",
+          },
+          {
+            x: 420,
+            y: 155,
+            type: "link",
+            path: "/Applications",
+          },
+          {
+            x: 140,
+            y: 320,
+            type: "file",
+            path: macUnsignedInstallAssets.installHelper,
+            name: MAC_UNSIGNED_INSTALL_HELPER_NAME,
+          },
+          {
+            x: 420,
+            y: 320,
+            type: "file",
+            path: macUnsignedInstallAssets.readme,
+            name: MAC_UNSIGNED_README_NAME,
+          },
+        ],
+        iconSize: 80,
+        iconTextSize: 12,
+      };
+    }
   }
 
   if (platform === "linux") {
@@ -808,6 +932,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const appVersion = options.version ?? serverPackageJson.version;
   const iconAssets = resolveDesktopBuildIconAssets(appVersion);
   const webAssetBrand = resolveDesktopWebAssetBrand(appVersion);
+  const productName = resolveDesktopProductName(appVersion);
   const commitHash = yield* resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
@@ -878,6 +1003,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     },
     options.verbose,
   );
+  const macUnsignedInstallAssets =
+    options.platform === "mac" && !options.signed
+      ? resolveMacUnsignedInstallAssetPaths(stageResourcesDir, path)
+      : undefined;
+  if (macUnsignedInstallAssets) {
+    yield* stageMacUnsignedInstallAssets(macUnsignedInstallAssets, productName);
+  }
 
   // electron-builder is filtering out stageResourcesDir directory in the AppImage for production
   yield* fs.copy(stageResourcesDir, path.join(stageAppDir, "apps/desktop/prod-resources"));
@@ -898,6 +1030,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       options.signed,
       options.mockUpdates,
       options.mockUpdateServerPort,
+      macUnsignedInstallAssets,
     ),
     dependencies: {
       ...resolvedServerDependencies,

@@ -6,6 +6,10 @@ import {
   COPILOT_SDK_PACKAGE_JSON_PATH,
   DESKTOP_BUILD_FILES,
   EXTERNALIZED_DESKTOP_DEPENDENCY_PATHS,
+  MAC_UNSIGNED_INSTALL_HELPER_NAME,
+  MAC_UNSIGNED_README_NAME,
+  createMacUnsignedInstallReadme,
+  createMacUnsignedInstallScript,
   resolveBuildOptions,
   resolveDesktopBuildIconAssets,
   resolveDesktopProductName,
@@ -69,6 +73,28 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "node_modules/@github/copilot-win32-x64",
     ]);
     assert.equal(COPILOT_SDK_PACKAGE_JSON_PATH, "node_modules/@github/copilot-sdk/package.json");
+  });
+
+  it("generates an unsigned macOS install helper for stable and nightly bundle names", () => {
+    assert.equal(MAC_UNSIGNED_INSTALL_HELPER_NAME, "Install Ryco.command");
+    assert.equal(MAC_UNSIGNED_README_NAME, "README-macOS.txt");
+
+    const stableScript = createMacUnsignedInstallScript("Ryco");
+    assert.ok(stableScript.includes("APP_NAME='Ryco.app'"));
+    assert.ok(stableScript.includes("xattr -dr com.apple.quarantine"));
+    assert.ok(stableScript.includes('TARGET_APP="/Applications/$APP_NAME"'));
+
+    const nightlyScript = createMacUnsignedInstallScript("Ryco (Nightly)");
+    assert.ok(nightlyScript.includes("APP_NAME='Ryco (Nightly).app'"));
+    assert.ok(nightlyScript.includes('ditto "$SOURCE_APP" "$TARGET_APP"'));
+  });
+
+  it("explains the unsigned macOS install fallback without promising notarization", () => {
+    const readme = createMacUnsignedInstallReadme("Ryco");
+    assert.ok(readme.includes("unsigned and not notarized"));
+    assert.ok(readme.includes("Apple requires a paid Developer ID account"));
+    assert.ok(readme.includes('xattr -dr com.apple.quarantine "/Applications/Ryco.app"'));
+    assert.ok(readme.includes("https://github.com/sak0a/ryco/releases"));
   });
 
   it("falls back to the default mock update port when the configured port is blank", () => {
