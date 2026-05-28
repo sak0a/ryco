@@ -10,6 +10,7 @@ import {
   MAC_UNSIGNED_README_NAME,
   createMacUnsignedInstallReadme,
   createMacUnsignedInstallScript,
+  createBuildConfig,
   resolveBuildOptions,
   resolveDesktopBuildIconAssets,
   resolveDesktopProductName,
@@ -96,6 +97,51 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.ok(readme.includes('xattr -dr com.apple.quarantine "/Applications/Ryco.app"'));
     assert.ok(readme.includes("https://github.com/sak0a/ryco/releases"));
   });
+
+  it.effect("uses electron-builder's current DMG window schema", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig("mac", "dmg", "0.1.1", false, false, undefined, {
+        installHelper: "/tmp/Install Ryco.command",
+        readme: "/tmp/README-macOS.txt",
+      });
+
+      assert.deepStrictEqual(config.dmg, {
+        window: {
+          width: 560,
+          height: 430,
+        },
+        contents: [
+          {
+            x: 140,
+            y: 155,
+            type: "file",
+          },
+          {
+            x: 420,
+            y: 155,
+            type: "link",
+            path: "/Applications",
+          },
+          {
+            x: 140,
+            y: 320,
+            type: "file",
+            path: "/tmp/Install Ryco.command",
+            name: MAC_UNSIGNED_INSTALL_HELPER_NAME,
+          },
+          {
+            x: 420,
+            y: 320,
+            type: "file",
+            path: "/tmp/README-macOS.txt",
+            name: MAC_UNSIGNED_README_NAME,
+          },
+        ],
+        iconSize: 80,
+        iconTextSize: 12,
+      });
+    }),
+  );
 
   it("falls back to the default mock update port when the configured port is blank", () => {
     assert.equal(resolveMockUpdateServerUrl(undefined), "http://localhost:3000");

@@ -717,7 +717,7 @@ const pruneExternalizedDesktopDependencies = Effect.fn("pruneExternalizedDesktop
   },
 );
 
-const createBuildConfig = Effect.fn("createBuildConfig")(function* (
+export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   platform: typeof BuildPlatform.Type,
   target: string,
   version: string,
@@ -757,10 +757,8 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     if (macUnsignedInstallAssets) {
       buildConfig.dmg = {
         window: {
-          size: {
-            width: 560,
-            height: 430,
-          },
+          width: 560,
+          height: 430,
         },
         contents: [
           {
