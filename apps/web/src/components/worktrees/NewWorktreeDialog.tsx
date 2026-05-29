@@ -41,7 +41,7 @@ interface NewWorktreeDialogProps {
 }
 
 type Selection =
-  | { kind: "issue"; item: SourceControlIssueSummary }
+  | { kind: "issue"; item: SourceControlIssueSummary & { readonly body?: string | undefined } }
   | { kind: "pr"; item: ChangeRequest }
   | null;
 
@@ -238,7 +238,12 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
         : activeTab === "prs" && selection?.kind === "pr"
           ? ({ kind: "pr", number: selection.item.number } as const)
           : activeTab === "issues" && selection?.kind === "issue"
-            ? ({ kind: "issue", number: selection.item.number } as const)
+            ? ({
+                kind: "issue",
+                number: selection.item.number,
+                title: selection.item.title,
+                ...(selection.item.body !== undefined ? { body: selection.item.body } : {}),
+              } as const)
             : activeTab === "newBranch" && trimmedNewBranchName.length > 0
               ? ({
                   kind: "newBranch",
