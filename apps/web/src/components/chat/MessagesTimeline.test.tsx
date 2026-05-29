@@ -1,4 +1,4 @@
-import { EnvironmentId, MessageId } from "@ryco/contracts";
+import { EnvironmentId, MessageId, TurnId } from "@ryco/contracts";
 import { createRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -186,5 +186,47 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("ryco/apps/web/src/session-logic.ts");
     expect(markup).not.toContain("C:/Users/mike/dev-stuff/ryco/apps/web/src/session-logic.ts");
+  });
+
+  it("labels the changed-files diff button as close for the open turn", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const assistantMessageId = MessageId.make("assistant-1");
+    const turnId = TurnId.make("turn-1");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            message: {
+              id: assistantMessageId,
+              role: "assistant",
+              text: "Done",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              streaming: false,
+              turnId,
+            },
+          },
+        ]}
+        turnDiffSummaryByAssistantMessageId={
+          new Map([
+            [
+              assistantMessageId,
+              {
+                turnId,
+                completedAt: "2026-03-17T19:12:30.000Z",
+                files: [{ path: "src/index.ts", additions: 2, deletions: 1 }],
+              },
+            ],
+          ])
+        }
+        openDiffTurnId={turnId}
+      />,
+    );
+
+    expect(markup).toContain("Close diff");
+    expect(markup).not.toContain("View diff");
   });
 });

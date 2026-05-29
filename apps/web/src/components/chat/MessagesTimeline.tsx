@@ -93,7 +93,9 @@ interface TimelineRowSharedState {
   activeThreadEnvironmentId: EnvironmentId;
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
+  openDiffTurnId: TurnId | null;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onCloseDiff: () => void;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -115,8 +117,10 @@ interface MessagesTimelineProps {
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
+  openDiffTurnId?: TurnId | null;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onCloseDiff?: () => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
@@ -144,8 +148,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   completionDividerBeforeEntryId,
   completionSummary,
   turnDiffSummaryByAssistantMessageId,
+  openDiffTurnId = null,
   routeThreadKey,
   onOpenTurnDiff,
+  onCloseDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
   isRevertingCheckpoint,
@@ -223,7 +229,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRevertUserMessage,
       onImageExpand,
+      openDiffTurnId,
       onOpenTurnDiff,
+      onCloseDiff: onCloseDiff ?? (() => {}),
     }),
     [
       activeTurnInProgress,
@@ -240,7 +248,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRevertUserMessage,
       onImageExpand,
+      openDiffTurnId,
       onOpenTurnDiff,
+      onCloseDiff,
     ],
   );
 
@@ -437,7 +447,9 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   turnSummary={row.assistantTurnDiffSummary}
                   routeThreadKey={ctx.routeThreadKey}
                   resolvedTheme={ctx.resolvedTheme}
+                  openDiffTurnId={ctx.openDiffTurnId}
                   onOpenTurnDiff={ctx.onOpenTurnDiff}
+                  onCloseDiff={ctx.onCloseDiff}
                 />
                 <div className="mt-1.5 flex items-center gap-2">
                   <p className="text-[10px] text-muted-foreground/30">
@@ -650,12 +662,16 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
   turnSummary,
   routeThreadKey,
   resolvedTheme,
+  openDiffTurnId,
   onOpenTurnDiff,
+  onCloseDiff,
 }: {
   turnSummary: TurnDiffSummary | undefined;
   routeThreadKey: string;
   resolvedTheme: "light" | "dark";
+  openDiffTurnId: TurnId | null;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onCloseDiff: () => void;
 }) {
   if (!turnSummary) return null;
   const checkpointFiles = turnSummary.files;
@@ -667,7 +683,9 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
       checkpointFiles={checkpointFiles}
       routeThreadKey={routeThreadKey}
       resolvedTheme={resolvedTheme}
+      openDiffTurnId={openDiffTurnId}
       onOpenTurnDiff={onOpenTurnDiff}
+      onCloseDiff={onCloseDiff}
     />
   );
 });
@@ -679,13 +697,17 @@ function AssistantChangedFilesSectionInner({
   checkpointFiles,
   routeThreadKey,
   resolvedTheme,
+  openDiffTurnId,
   onOpenTurnDiff,
+  onCloseDiff,
 }: {
   turnSummary: TurnDiffSummary;
   checkpointFiles: TurnDiffSummary["files"];
   routeThreadKey: string;
   resolvedTheme: "light" | "dark";
+  openDiffTurnId: TurnId | null;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onCloseDiff: () => void;
 }) {
   const allDirectoriesExpanded = useUiStateStore(
     (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.turnId] ?? true,
@@ -693,6 +715,7 @@ function AssistantChangedFilesSectionInner({
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
   const summaryStat = summarizeTurnDiffStats(checkpointFiles);
   const changedFileCountLabel = String(checkpointFiles.length);
+  const diffOpenForTurn = openDiffTurnId === turnSummary.turnId;
 
   return (
     <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
@@ -720,9 +743,15 @@ function AssistantChangedFilesSectionInner({
             type="button"
             size="xs"
             variant="outline"
-            onClick={() => onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)}
+            onClick={() => {
+              if (diffOpenForTurn) {
+                onCloseDiff();
+                return;
+              }
+              onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path);
+            }}
           >
-            View diff
+            {diffOpenForTurn ? "Close diff" : "View diff"}
           </Button>
         </div>
       </div>
