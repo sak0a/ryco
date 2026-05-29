@@ -132,6 +132,26 @@ const randomShortId = (length = 8) =>
     "abcdefghijklmnopqrstuvwxyz0123456789".charAt(Math.floor(Math.random() * 36)),
   ).join("");
 
+const buildIssueBranchNameFallback = (number: number): string =>
+  `issue/${number}-${randomShortId(6)}`;
+
+const buildIssueBranchNameMessage = (input: {
+  readonly number: number;
+  readonly title?: string | undefined;
+  readonly body?: string | undefined;
+}): string => {
+  const lines = [`Create a branch name for issue #${input.number}.`];
+  const title = input.title?.trim();
+  const body = input.body?.trim();
+  if (title) {
+    lines.push("", `Title: ${title}`);
+  }
+  if (body) {
+    lines.push("", `Body: ${body}`);
+  }
+  return lines.join("\n");
+};
+
 function gitErrorText(error: GitManagerServiceError): string {
   const detail = "detail" in error ? error.detail : "";
   return `${error.message}\n${detail}`.toLowerCase();
@@ -1017,10 +1037,29 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             }
             case "issue": {
               const number = input.intent.number ?? 0;
-              branch = input.intent.branchName ?? `issue/${number}-${randomShortId(6)}`;
+              const generatedBranchFallback = buildIssueBranchNameFallback(number);
+              branch =
+                input.intent.branchName ??
+                (yield* textGeneration
+                  .generateBranchName({
+                    cwd: project.workspaceRoot,
+                    message: buildIssueBranchNameMessage({
+                      number,
+                      title: input.intent.title,
+                      body: input.intent.body,
+                    }),
+                    modelSelection,
+                  })
+                  .pipe(
+                    Effect.map(({ branch: generatedBranch }) => {
+                      const trimmedBranch = generatedBranch.trim();
+                      return trimmedBranch.length > 0 ? trimmedBranch : generatedBranchFallback;
+                    }),
+                    Effect.catch(() => Effect.succeed(generatedBranchFallback)),
+                  ));
               refName = "HEAD";
               newRefName = branch;
-              title = `Issue #${number}`;
+              title = input.intent.title?.trim() || `Issue #${number}`;
               origin = "issue";
               issueNumber = number;
               issueTitle = title;

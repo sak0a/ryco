@@ -238,7 +238,11 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
         : activeTab === "prs" && selection?.kind === "pr"
           ? ({ kind: "pr", number: selection.item.number } as const)
           : activeTab === "issues" && selection?.kind === "issue"
-            ? ({ kind: "issue", number: selection.item.number } as const)
+            ? ({
+                kind: "issue",
+                number: selection.item.number,
+                title: selection.item.title,
+              } as const)
             : activeTab === "newBranch" && trimmedNewBranchName.length > 0
               ? ({
                   kind: "newBranch",

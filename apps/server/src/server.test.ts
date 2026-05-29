@@ -13,6 +13,7 @@ import {
   OpenError,
   type OrchestrationThreadShell,
   TerminalNotRunningError,
+  TextGenerationError,
   type OrchestrationCommand,
   type OrchestrationEvent,
   ORCHESTRATION_WS_METHODS,
@@ -3115,9 +3116,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("creates project worktrees from issues with a fresh issue branch", () =>
+  it.effect("creates project worktrees from issues with a generated issue branch", () =>
     Effect.gen(function* () {
       const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const generateBranchName = vi.fn<TextGenerationShape["generateBranchName"]>((_input) =>
+        Effect.succeed({ branch: "fix/generated-issue-branch" }),
+      );
       const createWorktree = vi.fn(
         (input: Parameters<GitVcsDriver.GitVcsDriverShape["createWorktree"]>[0]) =>
           Effect.succeed({
@@ -3148,6 +3152,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 aheadOfDefaultCount: 0,
                 pr: null,
               }),
+          },
+          textGeneration: {
+            generateBranchName,
           },
           orchestrationEngine: {
             dispatch: (command) =>
@@ -3183,14 +3190,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         withWsRpcClient(wsUrl, (client) =>
           client[WS_METHODS.gitCreateWorktreeForProject]({
             projectId: defaultProjectId,
-            intent: { kind: "issue", number: 42 },
+            intent: { kind: "issue", number: 42, title: "Fix broken reconnects" },
           }),
         ),
       );
 
       const createdWorktreeInput = createWorktree.mock.calls[0]?.[0];
       assert.equal(createdWorktreeInput?.refName, "HEAD");
-      assert.match(createdWorktreeInput?.newRefName ?? "", /^issue\/42-[a-z0-9]{6}$/);
+      assert.equal(createdWorktreeInput?.newRefName, "fix/generated-issue-branch");
+      const branchGenerationInput = generateBranchName.mock.calls[0]?.[0];
+      assert.equal(branchGenerationInput?.cwd, "/tmp/project");
+      assert.equal(branchGenerationInput?.modelSelection, defaultModelSelection);
+      assert.match(branchGenerationInput?.message ?? "", /Fix broken reconnects/);
 
       const worktreeCreate = dispatchedCommands.find(
         (command): command is Extract<OrchestrationCommand, { type: "worktree.create" }> =>
@@ -3199,6 +3210,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(worktreeCreate?.origin, "issue");
       assert.equal(worktreeCreate?.branch, createdWorktreeInput?.newRefName);
       assert.equal(worktreeCreate?.issueNumber, 42);
+      assert.equal(worktreeCreate?.issueTitle, "Fix broken reconnects");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -3289,9 +3301,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("falls back to generated branch name when branchName is omitted on issue intent", () =>
+  it.effect("falls back to random issue branch when issue branch generation fails", () =>
     Effect.gen(function* () {
       const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const generateBranchName = vi.fn<TextGenerationShape["generateBranchName"]>(() =>
+        Effect.fail(
+          new TextGenerationError({
+            operation: "generateBranchName",
+            detail: "generation unavailable",
+          }),
+        ),
+      );
       const createWorktree = vi.fn(
         (input: Parameters<GitVcsDriver.GitVcsDriverShape["createWorktree"]>[0]) =>
           Effect.succeed({
@@ -3322,6 +3342,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 aheadOfDefaultCount: 0,
                 pr: null,
               }),
+          },
+          textGeneration: {
+            generateBranchName,
           },
           orchestrationEngine: {
             dispatch: (command) =>
@@ -3366,6 +3389,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(createdWorktreeInput?.refName, "HEAD");
       assert.match(createdWorktreeInput?.newRefName ?? "", /^issue\/42-[a-z0-9]{6}$/);
       assert.notEqual(createdWorktreeInput?.newRefName, "custom/branch");
+      assert.equal(generateBranchName.mock.calls.length, 1);
 
       const worktreeCreate = dispatchedCommands.find(
         (command): command is Extract<OrchestrationCommand, { type: "worktree.create" }> =>

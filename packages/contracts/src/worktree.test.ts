@@ -34,6 +34,22 @@ describe("CreateWorktreeIntent (issue variant)", () => {
     });
   });
 
+  it("accepts optional issue metadata for branch generation", () => {
+    expect(
+      decode({
+        kind: "issue",
+        number: 42,
+        title: "Fix reconnect handling",
+        body: "Sessions should recover after restart.",
+      }),
+    ).toMatchObject({
+      kind: "issue",
+      number: 42,
+      title: "Fix reconnect handling",
+      body: "Sessions should recover after restart.",
+    });
+  });
+
   it("rejects empty branchName", () => {
     expect(() => decode({ kind: "issue", number: 42, branchName: "" })).toThrow();
   });
