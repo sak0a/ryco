@@ -3190,7 +3190,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         withWsRpcClient(wsUrl, (client) =>
           client[WS_METHODS.gitCreateWorktreeForProject]({
             projectId: defaultProjectId,
-            intent: { kind: "issue", number: 42, title: "Fix broken reconnects" },
+            intent: {
+              kind: "issue",
+              number: 42,
+              title: "Fix broken reconnects",
+              body: "Sessions should recover after restart.",
+            },
           }),
         ),
       );
@@ -3202,6 +3207,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(branchGenerationInput?.cwd, "/tmp/project");
       assert.equal(branchGenerationInput?.modelSelection, defaultModelSelection);
       assert.match(branchGenerationInput?.message ?? "", /Fix broken reconnects/);
+      assert.match(branchGenerationInput?.message ?? "", /Sessions should recover after restart/);
 
       const worktreeCreate = dispatchedCommands.find(
         (command): command is Extract<OrchestrationCommand, { type: "worktree.create" }> =>
@@ -3301,7 +3307,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("falls back to random issue branch when issue branch generation fails", () =>
+  it.effect("falls back to deterministic issue branch when issue branch generation fails", () =>
     Effect.gen(function* () {
       const dispatchedCommands: Array<OrchestrationCommand> = [];
       const generateBranchName = vi.fn<TextGenerationShape["generateBranchName"]>(() =>
@@ -3387,7 +3393,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const createdWorktreeInput = createWorktree.mock.calls[0]?.[0];
       assert.equal(createdWorktreeInput?.refName, "HEAD");
-      assert.match(createdWorktreeInput?.newRefName ?? "", /^issue\/42-[a-z0-9]{6}$/);
+      assert.equal(createdWorktreeInput?.newRefName, "issue/42-73475c");
       assert.notEqual(createdWorktreeInput?.newRefName, "custom/branch");
       assert.equal(generateBranchName.mock.calls.length, 1);
 
@@ -3396,7 +3402,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           command.type === "worktree.create",
       );
       assert.equal(worktreeCreate?.origin, "issue");
-      assert.match(worktreeCreate?.branch ?? "", /^issue\/42-[a-z0-9]{6}$/);
+      assert.equal(worktreeCreate?.branch, "issue/42-73475c");
       assert.equal(worktreeCreate?.issueNumber, 42);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -131,9 +132,11 @@ const randomShortId = (length = 8) =>
   Array.from({ length }, () =>
     "abcdefghijklmnopqrstuvwxyz0123456789".charAt(Math.floor(Math.random() * 36)),
   ).join("");
+const deterministicShortId = (input: string, length = 6): string =>
+  createHash("sha256").update(input).digest("hex").slice(0, length);
 
 const buildIssueBranchNameFallback = (number: number): string =>
-  `issue/${number}-${randomShortId(6)}`;
+  `issue/${number}-${deterministicShortId(String(number), 6)}`;
 
 const buildIssueBranchNameMessage = (input: {
   readonly number: number;
