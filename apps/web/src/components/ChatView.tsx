@@ -3845,6 +3845,25 @@ export default function ChatView(props: ChatViewProps) {
     },
     [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
   );
+  const onCloseDiff = useCallback(() => {
+    if (!isServerThread) {
+      return;
+    }
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId,
+        threadId,
+      },
+      search: (previous) => ({
+        ...stripPreviewSearchParams(stripDiffSearchParams(previous)),
+        diff: undefined,
+        diffTurnId: undefined,
+        diffFilePath: undefined,
+        preview: undefined,
+      }),
+    });
+  }, [environmentId, isServerThread, navigate, threadId]);
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
@@ -3947,7 +3966,9 @@ export default function ChatView(props: ChatViewProps) {
                 turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
                 activeThreadEnvironmentId={activeThread.environmentId}
                 routeThreadKey={routeThreadKey}
+                openDiffTurnId={diffOpen ? (rawSearch.diffTurnId ?? null) : null}
                 onOpenTurnDiff={onOpenTurnDiff}
+                onCloseDiff={onCloseDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
