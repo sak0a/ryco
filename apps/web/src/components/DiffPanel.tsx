@@ -53,6 +53,7 @@ import {
   getNextDiffSearchMatchIndex,
   groupDiffSearchMatchesByFileIndex,
   normalizeDiffSearchQuery,
+  parseDiffRenderedLineIndexes,
   resolveDiffFilePath,
 } from "./DiffPanel.search.logic";
 import { resolveDiffOpenInEditorTarget } from "./DiffPanel.openInEditor.logic";
@@ -294,13 +295,15 @@ function appendDiffLineSearchRange(
 function getRenderedLineSearchMatches(input: {
   readonly matches: readonly DiffSearchMatch[];
   readonly renderMode: DiffRenderMode;
-  readonly lineIndex: number;
+  readonly lineIndexAttr: string | null;
   readonly lineType: string | null;
 }): DiffSearchMatch[] {
+  const lineIndexes = parseDiffRenderedLineIndexes(input.lineIndexAttr);
+  if (!lineIndexes) return [];
   return input.matches.filter((match) =>
     doesDiffSearchMatchRenderedLine(match, {
       renderMode: input.renderMode,
-      lineIndex: input.lineIndex,
+      lineIndexes,
       lineType: input.lineType,
     }),
   );
@@ -319,13 +322,15 @@ function findRenderedDiffLineElement(input: {
   const containers = input.fileElement.querySelectorAll<HTMLElement>("diffs-container");
   for (const container of containers) {
     const candidates = container.shadowRoot?.querySelectorAll<HTMLElement>(
-      `[data-line][data-line-index="${renderedLineIndex}"]`,
+      "[data-line][data-line-index]",
     );
     for (const candidate of candidates ?? []) {
+      const lineIndexes = parseDiffRenderedLineIndexes(candidate.getAttribute("data-line-index"));
+      if (!lineIndexes) continue;
       if (
         doesDiffSearchMatchRenderedLine(input.match, {
           renderMode: input.renderMode,
-          lineIndex: renderedLineIndex,
+          lineIndexes,
           lineType: candidate.getAttribute("data-line-type"),
         })
       ) {
@@ -360,12 +365,10 @@ function findDiffSearchRanges(input: {
       );
       for (const lineElement of lineElements ?? []) {
         if (!isNearViewport(lineElement, input.viewportElement)) continue;
-        const lineIndex = Number.parseInt(lineElement.getAttribute("data-line-index") ?? "", 10);
-        if (!Number.isFinite(lineIndex)) continue;
         const lineMatches = getRenderedLineSearchMatches({
           matches,
           renderMode: input.renderMode,
-          lineIndex,
+          lineIndexAttr: lineElement.getAttribute("data-line-index"),
           lineType: lineElement.getAttribute("data-line-type"),
         });
         for (const match of lineMatches) {

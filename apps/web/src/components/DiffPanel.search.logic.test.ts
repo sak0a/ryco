@@ -8,6 +8,7 @@ import {
   findDiffSearchMatches,
   getDiffSearchMatchRenderedLineIndex,
   getNextDiffSearchMatchIndex,
+  parseDiffRenderedLineIndexes,
 } from "./DiffPanel.search.logic";
 
 const files = [
@@ -141,17 +142,23 @@ describe("buildDiffSearchIndex", () => {
     expect(
       doesDiffSearchMatchRenderedLine(matches[1]!, {
         renderMode: "split",
-        lineIndex: 1,
+        lineIndexes: { stacked: 2, split: 1 },
         lineType: "change-addition",
       }),
     ).toBe(true);
     expect(
       doesDiffSearchMatchRenderedLine(matches[0]!, {
         renderMode: "split",
-        lineIndex: 1,
+        lineIndexes: { stacked: 2, split: 1 },
         lineType: "change-addition",
       }),
     ).toBe(false);
+  });
+
+  it("parses Pierre's composite rendered line indexes", () => {
+    expect(parseDiffRenderedLineIndexes("2,1")).toEqual({ stacked: 2, split: 1 });
+    expect(parseDiffRenderedLineIndexes("2")).toEqual({ stacked: 2, split: 2 });
+    expect(parseDiffRenderedLineIndexes("bad")).toBeNull();
   });
 });
 

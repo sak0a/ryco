@@ -55,6 +55,11 @@ export interface DiffSearchIndex {
   readonly records: readonly DiffSearchIndexRecord[];
 }
 
+export interface DiffRenderedLineIndexes {
+  readonly stacked: number;
+  readonly split: number;
+}
+
 export function resolveDiffFilePath(fileDiff: Pick<DiffSearchFile, "name" | "prevName">): string {
   const raw = fileDiff.name ?? fileDiff.prevName ?? "";
   if (raw.startsWith("a/") || raw.startsWith("b/")) {
@@ -300,11 +305,25 @@ export function isDiffSearchMatchLineField(field: DiffSearchField): field is Dif
   return field === "addition" || field === "deletion" || field === "context";
 }
 
+export function parseDiffRenderedLineIndexes(value: string | null): DiffRenderedLineIndexes | null {
+  if (!value) return null;
+  const [stackedRaw, splitRaw] = value.split(",");
+  const stacked = Number.parseInt(stackedRaw ?? "", 10);
+  if (!Number.isFinite(stacked)) {
+    return null;
+  }
+  const split = Number.parseInt(splitRaw ?? "", 10);
+  return {
+    stacked,
+    split: Number.isFinite(split) ? split : stacked,
+  };
+}
+
 export function doesDiffSearchMatchRenderedLine(
   match: DiffSearchMatch,
   input: {
     readonly renderMode: DiffSearchRenderMode;
-    readonly lineIndex: number;
+    readonly lineIndexes: DiffRenderedLineIndexes;
     readonly lineType: string | null;
   },
 ): boolean {
@@ -312,7 +331,9 @@ export function doesDiffSearchMatchRenderedLine(
     return false;
   }
   const renderedLineIndex = getDiffSearchMatchRenderedLineIndex(match, input.renderMode);
-  if (renderedLineIndex !== input.lineIndex) {
+  const candidateLineIndex =
+    input.renderMode === "split" ? input.lineIndexes.split : input.lineIndexes.stacked;
+  if (renderedLineIndex !== candidateLineIndex) {
     return false;
   }
 
