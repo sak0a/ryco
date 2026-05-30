@@ -30,6 +30,11 @@ import {
   terminalRestartsTotal,
   terminalSessionsTotal,
 } from "../../observability/Metrics.ts";
+import {
+  approximateTextBytes,
+  isServerPerfProfileEnabled,
+  recordServerPerf,
+} from "../../observability/PerfInstrumentation.ts";
 import { runProcess } from "../../processRunner.ts";
 import {
   TerminalCwdError,
@@ -746,6 +751,12 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
     const publishEvent = (event: TerminalEvent) =>
       Effect.gen(function* () {
+        recordServerPerf("server.terminal.events");
+        if (event.type === "output" && isServerPerfProfileEnabled()) {
+          recordServerPerf("server.terminal.output", {
+            bytes: approximateTextBytes(event.data),
+          });
+        }
         for (const listener of terminalEventListeners) {
           yield* listener(event).pipe(Effect.ignoreCause({ log: true }));
         }

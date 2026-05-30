@@ -128,6 +128,7 @@ import {
   resolveThreadRouteRef,
   resolveThreadRouteTarget,
 } from "../threadRoutes";
+import { usePerfMark } from "../perf/tabSwitchInstrumentation";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { useSettingsDialogStore } from "../settingsDialogStore";
@@ -4930,6 +4931,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 });
 
 export default function Sidebar() {
+  usePerfMark("Sidebar");
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const sidebarThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
   const sidebarWorktrees = useStore(useShallow(selectSidebarWorktreesAcrossEnvironments));

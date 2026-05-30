@@ -49,6 +49,12 @@ import {
 } from "../types";
 import { readEnvironmentApi } from "~/environmentApi";
 import { readLocalApi } from "~/localApi";
+import {
+  approximateTextBytes,
+  isWebPerfProfileEnabled,
+  readWebPerfNow,
+  recordWebPerf,
+} from "~/perf/perfInstrumentation";
 import { selectTerminalEventEntries, useTerminalStateStore } from "../terminalStateStore";
 
 const MIN_DRAWER_HEIGHT = 180;
@@ -683,18 +689,32 @@ export function TerminalViewport({
     });
 
     const applyTerminalEvent = (event: TerminalEvent) => {
+      const perfEnabled = isWebPerfProfileEnabled();
+      const startedAt = perfEnabled ? readWebPerfNow() : 0;
+      const recordTerminalApply = () => {
+        if (!perfEnabled) {
+          return;
+        }
+        recordWebPerf("web.terminal.drawer.events.apply", {
+          ...(event.type === "output" ? { bytes: approximateTextBytes(event.data) } : {}),
+          durationMs: readWebPerfNow() - startedAt,
+        });
+      };
       const activeTerminal = terminalRef.current;
       if (!activeTerminal) {
+        recordTerminalApply();
         return;
       }
 
       if (event.type === "activity") {
+        recordTerminalApply();
         return;
       }
 
       if (event.type === "output") {
         outputBatcher.writeOutput(event.data);
         clearSelectionAction();
+        recordTerminalApply();
         return;
       }
 
@@ -704,6 +724,7 @@ export function TerminalViewport({
         hasHandledExitRef.current = false;
         clearSelectionAction();
         writeTerminalSnapshot(activeTerminal, event.snapshot);
+        recordTerminalApply();
         return;
       }
 
@@ -711,11 +732,13 @@ export function TerminalViewport({
         clearSelectionAction();
         activeTerminal.clear();
         activeTerminal.write("\u001bc");
+        recordTerminalApply();
         return;
       }
 
       if (event.type === "error") {
         writeBufferedSystemMessage(activeTerminal, event.message);
+        recordTerminalApply();
         return;
       }
 
@@ -730,6 +753,7 @@ export function TerminalViewport({
         details.length > 0 ? `Process exited (${details})` : "Process exited",
       );
       if (hasHandledExitRef.current) {
+        recordTerminalApply();
         return;
       }
       hasHandledExitRef.current = true;
@@ -739,6 +763,7 @@ export function TerminalViewport({
         }
         handleSessionExited();
       }, 0);
+      recordTerminalApply();
     };
     const applyPendingTerminalEvents = (
       terminalEventEntries: ReadonlyArray<{ id: number; event: TerminalEvent }>,

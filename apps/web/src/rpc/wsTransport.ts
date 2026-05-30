@@ -12,6 +12,7 @@ import {
 import { RpcClient } from "effect/unstable/rpc";
 
 import { ClientTracingLive } from "../observability/clientTracing";
+import { recordWebPerfPayload } from "../perf/perfInstrumentation";
 import { clearAllTrackedRpcRequests } from "./requestLatencyState";
 import {
   createWsRpcProtocolLayer,
@@ -342,6 +343,9 @@ export class WsTransport {
               }
 
               markValueReceived();
+              if (requestStart.tag) {
+                recordWebPerfPayload(`web.ws.stream.${requestStart.tag}`, value);
+              }
               try {
                 listener(value);
               } catch {
