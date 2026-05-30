@@ -14,6 +14,7 @@ import {
   deriveContextCompactionTimelineEntries,
   derivePendingApprovals,
   derivePendingUserInputs,
+  deriveThreadActivityViewModel,
   deriveTimelineEntries,
   deriveWorkLogEntries,
   findLatestProposedPlan,
@@ -1679,6 +1680,104 @@ describe("hasToolActivityForTurn", () => {
 
     expect(hasToolActivityForTurn(activities, TurnId.make("turn-1"))).toBe(true);
     expect(hasToolActivityForTurn(activities, TurnId.make("turn-2"))).toBe(false);
+  });
+});
+
+describe("deriveThreadActivityViewModel", () => {
+  it("matches the focused activity derivations from a mixed source list", () => {
+    const latestTurnId = TurnId.make("turn-1");
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "later-plan",
+        createdAt: "2026-02-23T00:00:05.000Z",
+        kind: "turn.plan.updated",
+        tone: "info",
+        turnId: "turn-2",
+        payload: {
+          plan: [{ step: "Follow-up task", status: "pending" }],
+        },
+      }),
+      makeActivity({
+        id: "approval-open",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "approval.requested",
+        tone: "approval",
+        payload: {
+          requestId: "approval-1",
+          requestKind: "command",
+          detail: "bun run lint",
+        },
+      }),
+      makeActivity({
+        id: "input-open",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "user-input.requested",
+        tone: "info",
+        payload: {
+          requestId: "input-1",
+          questions: [
+            {
+              id: "scope",
+              header: "Scope",
+              question: "Which scope?",
+              options: [{ label: "Focused", description: "Use the focused path." }],
+            },
+          ],
+        },
+      }),
+      makeActivity({
+        id: "current-plan",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "turn.plan.updated",
+        tone: "info",
+        turnId: "turn-1",
+        payload: {
+          plan: [{ step: "Current task", status: "inProgress" }],
+        },
+      }),
+      makeActivity({
+        id: "context-compact",
+        createdAt: "2026-02-23T00:00:04.000Z",
+        kind: "context-compaction",
+        summary: "Context compacted",
+        tone: "info",
+        turnId: "turn-1",
+      }),
+      makeActivity({
+        id: "tool-current",
+        createdAt: "2026-02-23T00:00:06.000Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        tone: "tool",
+        turnId: "turn-1",
+      }),
+      makeActivity({
+        id: "tool-other",
+        createdAt: "2026-02-23T00:00:07.000Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        tone: "tool",
+        turnId: "turn-2",
+      }),
+    ];
+
+    const viewModel = deriveThreadActivityViewModel(activities, latestTurnId);
+
+    expect(viewModel.pendingApprovals).toEqual(derivePendingApprovals(activities));
+    expect(viewModel.pendingUserInputs).toEqual(derivePendingUserInputs(activities));
+    expect(viewModel.activePlan).toEqual(deriveActivePlanState(activities, latestTurnId));
+    expect(viewModel.workLogEntries).toEqual(deriveWorkLogEntries(activities, latestTurnId));
+    expect(viewModel.contextCompactionEntries).toEqual(
+      deriveContextCompactionTimelineEntries(activities),
+    );
+    expect(viewModel.latestTurnHasToolActivity).toBe(
+      hasToolActivityForTurn(activities, latestTurnId),
+    );
+    expect(viewModel.activePlan?.turnId).toBe(latestTurnId);
+    expect(viewModel.workLogEntries.map((entry) => entry.id)).toEqual([
+      "current-plan",
+      "tool-current",
+    ]);
   });
 });
 

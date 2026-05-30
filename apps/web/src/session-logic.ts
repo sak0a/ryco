@@ -1,5 +1,3 @@
-import * as Option from "effect/Option";
-import * as Arr from "effect/Array";
 import { isContextCompactionActivity } from "@ryco/shared/threadActivity";
 import {
   ApprovalRequestId,
@@ -106,6 +104,15 @@ export interface ActivePlanState {
     step: string;
     status: "pending" | "inProgress" | "completed";
   }>;
+}
+
+export interface ThreadActivityViewModel {
+  workLogEntries: WorkLogEntry[];
+  contextCompactionEntries: ContextCompactionTimelineEntry[];
+  latestTurnHasToolActivity: boolean;
+  pendingApprovals: PendingApproval[];
+  pendingUserInputs: PendingUserInput[];
+  activePlan: ActivePlanState | null;
 }
 
 export interface LatestProposedPlanState {
@@ -229,6 +236,85 @@ function isStalePendingRequestFailureDetail(detail: string | undefined): boolean
   );
 }
 
+function activityPayload(activity: OrchestrationThreadActivity): Record<string, unknown> | null {
+  return activity.payload && typeof activity.payload === "object"
+    ? (activity.payload as Record<string, unknown>)
+    : null;
+}
+
+function requestIdFromPayload(payload: Record<string, unknown> | null): ApprovalRequestId | null {
+  return payload && typeof payload.requestId === "string"
+    ? ApprovalRequestId.make(payload.requestId)
+    : null;
+}
+
+function detailFromPayload(payload: Record<string, unknown> | null): string | undefined {
+  return payload && typeof payload.detail === "string" ? payload.detail : undefined;
+}
+
+function requestKindFromPayload(
+  payload: Record<string, unknown> | null,
+): PendingApproval["requestKind"] | null {
+  if (
+    payload &&
+    (payload.requestKind === "command" ||
+      payload.requestKind === "file-read" ||
+      payload.requestKind === "file-change")
+  ) {
+    return payload.requestKind;
+  }
+  return payload ? requestKindFromRequestType(payload.requestType) : null;
+}
+
+function updatePendingApprovalState(
+  openByRequestId: Map<ApprovalRequestId, PendingApproval>,
+  activity: OrchestrationThreadActivity,
+  payload: Record<string, unknown> | null,
+) {
+  if (
+    activity.kind !== "approval.requested" &&
+    activity.kind !== "approval.resolved" &&
+    activity.kind !== "provider.approval.respond.failed"
+  ) {
+    return;
+  }
+
+  const requestId = requestIdFromPayload(payload);
+  const requestKind = requestKindFromPayload(payload);
+  const detail = detailFromPayload(payload);
+
+  if (activity.kind === "approval.requested" && requestId && requestKind) {
+    openByRequestId.set(requestId, {
+      requestId,
+      requestKind,
+      createdAt: activity.createdAt,
+      ...(detail ? { detail } : {}),
+    });
+    return;
+  }
+
+  if (activity.kind === "approval.resolved" && requestId) {
+    openByRequestId.delete(requestId);
+    return;
+  }
+
+  if (
+    activity.kind === "provider.approval.respond.failed" &&
+    requestId &&
+    isStalePendingRequestFailureDetail(detail)
+  ) {
+    openByRequestId.delete(requestId);
+  }
+}
+
+function pendingApprovalsFromState(
+  openByRequestId: ReadonlyMap<ApprovalRequestId, PendingApproval>,
+): PendingApproval[] {
+  return [...openByRequestId.values()].toSorted((left, right) =>
+    left.createdAt.localeCompare(right.createdAt),
+  );
+}
+
 export function derivePendingApprovals(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): PendingApproval[] {
@@ -236,53 +322,10 @@ export function derivePendingApprovals(
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
 
   for (const activity of ordered) {
-    const payload =
-      activity.payload && typeof activity.payload === "object"
-        ? (activity.payload as Record<string, unknown>)
-        : null;
-    const requestId =
-      payload && typeof payload.requestId === "string"
-        ? ApprovalRequestId.make(payload.requestId)
-        : null;
-    const requestKind =
-      payload &&
-      (payload.requestKind === "command" ||
-        payload.requestKind === "file-read" ||
-        payload.requestKind === "file-change")
-        ? payload.requestKind
-        : payload
-          ? requestKindFromRequestType(payload.requestType)
-          : null;
-    const detail = payload && typeof payload.detail === "string" ? payload.detail : undefined;
-
-    if (activity.kind === "approval.requested" && requestId && requestKind) {
-      openByRequestId.set(requestId, {
-        requestId,
-        requestKind,
-        createdAt: activity.createdAt,
-        ...(detail ? { detail } : {}),
-      });
-      continue;
-    }
-
-    if (activity.kind === "approval.resolved" && requestId) {
-      openByRequestId.delete(requestId);
-      continue;
-    }
-
-    if (
-      activity.kind === "provider.approval.respond.failed" &&
-      requestId &&
-      isStalePendingRequestFailureDetail(detail)
-    ) {
-      openByRequestId.delete(requestId);
-      continue;
-    }
+    updatePendingApprovalState(openByRequestId, activity, activityPayload(activity));
   }
 
-  return [...openByRequestId.values()].toSorted((left, right) =>
-    left.createdAt.localeCompare(right.createdAt),
-  );
+  return pendingApprovalsFromState(openByRequestId);
 }
 
 function parseUserInputQuestions(
@@ -342,69 +385,68 @@ export function derivePendingUserInputs(
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
 
   for (const activity of ordered) {
-    const payload =
-      activity.payload && typeof activity.payload === "object"
-        ? (activity.payload as Record<string, unknown>)
-        : null;
-    const requestId =
-      payload && typeof payload.requestId === "string"
-        ? ApprovalRequestId.make(payload.requestId)
-        : null;
-    const detail = payload && typeof payload.detail === "string" ? payload.detail : undefined;
-
-    if (activity.kind === "user-input.requested" && requestId) {
-      const questions = parseUserInputQuestions(payload);
-      if (!questions) {
-        continue;
-      }
-      openByRequestId.set(requestId, {
-        requestId,
-        createdAt: activity.createdAt,
-        questions,
-      });
-      continue;
-    }
-
-    if (activity.kind === "user-input.resolved" && requestId) {
-      openByRequestId.delete(requestId);
-      continue;
-    }
-
-    if (
-      activity.kind === "provider.user-input.respond.failed" &&
-      requestId &&
-      isStalePendingRequestFailureDetail(detail)
-    ) {
-      openByRequestId.delete(requestId);
-    }
+    updatePendingUserInputState(openByRequestId, activity, activityPayload(activity));
   }
 
+  return pendingUserInputsFromState(openByRequestId);
+}
+
+function updatePendingUserInputState(
+  openByRequestId: Map<ApprovalRequestId, PendingUserInput>,
+  activity: OrchestrationThreadActivity,
+  payload: Record<string, unknown> | null,
+) {
+  if (
+    activity.kind !== "user-input.requested" &&
+    activity.kind !== "user-input.resolved" &&
+    activity.kind !== "provider.user-input.respond.failed"
+  ) {
+    return;
+  }
+
+  const requestId = requestIdFromPayload(payload);
+  const detail = detailFromPayload(payload);
+
+  if (activity.kind === "user-input.requested" && requestId) {
+    const questions = parseUserInputQuestions(payload);
+    if (!questions) {
+      return;
+    }
+    openByRequestId.set(requestId, {
+      requestId,
+      createdAt: activity.createdAt,
+      questions,
+    });
+    return;
+  }
+
+  if (activity.kind === "user-input.resolved" && requestId) {
+    openByRequestId.delete(requestId);
+    return;
+  }
+
+  if (
+    activity.kind === "provider.user-input.respond.failed" &&
+    requestId &&
+    isStalePendingRequestFailureDetail(detail)
+  ) {
+    openByRequestId.delete(requestId);
+  }
+}
+
+function pendingUserInputsFromState(
+  openByRequestId: ReadonlyMap<ApprovalRequestId, PendingUserInput>,
+): PendingUserInput[] {
   return [...openByRequestId.values()].toSorted((left, right) =>
     left.createdAt.localeCompare(right.createdAt),
   );
 }
 
-export function deriveActivePlanState(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
-  latestTurnId: TurnId | undefined,
-): ActivePlanState | null {
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  const allPlanActivities = ordered.filter((activity) => activity.kind === "turn.plan.updated");
-  // Prefer plan from the current turn; fall back to the most recent plan from any turn
-  // so that TodoWrite tasks persist across follow-up messages.
-  const latest = Option.firstSomeOf([
-    ...(latestTurnId
-      ? Arr.findLast(allPlanActivities, (activity) => activity.turnId === latestTurnId)
-      : Option.none()),
-    Arr.last(allPlanActivities),
-  ]).pipe(Option.getOrNull);
-  if (!latest) {
+function toActivePlanState(activity: OrchestrationThreadActivity | null): ActivePlanState | null {
+  if (!activity) {
     return null;
   }
-  const payload =
-    latest.payload && typeof latest.payload === "object"
-      ? (latest.payload as Record<string, unknown>)
-      : null;
+  const payload = activityPayload(activity);
   const rawPlan = payload?.plan;
   if (!Array.isArray(rawPlan)) {
     return null;
@@ -435,13 +477,36 @@ export function deriveActivePlanState(
     return null;
   }
   return {
-    createdAt: latest.createdAt,
-    turnId: latest.turnId,
+    createdAt: activity.createdAt,
+    turnId: activity.turnId,
     ...(payload && "explanation" in payload
       ? { explanation: payload.explanation as string | null }
       : {}),
     steps,
   };
+}
+
+export function deriveActivePlanState(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  latestTurnId: TurnId | undefined,
+): ActivePlanState | null {
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  let latestPlanActivity: OrchestrationThreadActivity | null = null;
+  let latestPlanActivityForTurn: OrchestrationThreadActivity | null = null;
+
+  for (const activity of ordered) {
+    if (activity.kind !== "turn.plan.updated") {
+      continue;
+    }
+    latestPlanActivity = activity;
+    if (latestTurnId && activity.turnId === latestTurnId) {
+      latestPlanActivityForTurn = activity;
+    }
+  }
+
+  // Prefer plan from the current turn; fall back to the most recent plan from any turn
+  // so that TodoWrite tasks persist across follow-up messages.
+  return toActivePlanState(latestPlanActivityForTurn ?? latestPlanActivity);
 }
 
 export function findLatestProposedPlan(
@@ -509,15 +574,33 @@ export function deriveWorkLogEntries(
   latestTurnId: TurnId | undefined,
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  const entries = ordered
-    .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
-    .filter((activity) => activity.kind !== "tool.started")
-    .filter((activity) => activity.kind !== "task.started")
-    .filter((activity) => activity.kind !== "context-window.updated")
-    .filter((activity) => !isContextCompactionActivity(activity))
-    .filter((activity) => activity.summary !== "Checkpoint captured")
-    .filter((activity) => !isPlanBoundaryToolActivity(activity))
-    .map(toDerivedWorkLogEntry);
+  const entries: DerivedWorkLogEntry[] = [];
+  for (const activity of ordered) {
+    if (shouldIncludeActivityInWorkLog(activity, latestTurnId)) {
+      entries.push(toDerivedWorkLogEntry(activity));
+    }
+  }
+  return toWorkLogEntries(entries);
+}
+
+function shouldIncludeActivityInWorkLog(
+  activity: OrchestrationThreadActivity,
+  latestTurnId: TurnId | undefined,
+): boolean {
+  if (latestTurnId && activity.turnId !== latestTurnId) {
+    return false;
+  }
+  return (
+    activity.kind !== "tool.started" &&
+    activity.kind !== "task.started" &&
+    activity.kind !== "context-window.updated" &&
+    !isContextCompactionActivity(activity) &&
+    activity.summary !== "Checkpoint captured" &&
+    !isPlanBoundaryToolActivity(activity)
+  );
+}
+
+function toWorkLogEntries(entries: ReadonlyArray<DerivedWorkLogEntry>): WorkLogEntry[] {
   return collapseDerivedWorkLogEntries(entries).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
   );
@@ -1332,22 +1415,92 @@ export function hasToolActivityForTurn(
   turnId: TurnId | null | undefined,
 ): boolean {
   if (!turnId) return false;
-  return activities.some((activity) => activity.turnId === turnId && activity.tone === "tool");
+  for (const activity of activities) {
+    if (activity.turnId === turnId && activity.tone === "tool") {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function deriveContextCompactionTimelineEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): ContextCompactionTimelineEntry[] {
-  return [...activities]
-    .filter(isContextCompactionActivity)
-    .toSorted(compareActivitiesByOrder)
-    .map((activity) => ({
-      id: `context-compaction:${activity.id}`,
-      activityId: activity.id,
-      createdAt: activity.createdAt,
-      label: activity.summary,
-      turnId: activity.turnId,
-    }));
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const entries: ContextCompactionTimelineEntry[] = [];
+  for (const activity of ordered) {
+    if (isContextCompactionActivity(activity)) {
+      entries.push(toContextCompactionTimelineEntry(activity));
+    }
+  }
+  return entries;
+}
+
+function toContextCompactionTimelineEntry(
+  activity: OrchestrationThreadActivity,
+): ContextCompactionTimelineEntry {
+  return {
+    id: `context-compaction:${activity.id}`,
+    activityId: activity.id,
+    createdAt: activity.createdAt,
+    label: activity.summary,
+    turnId: activity.turnId,
+  };
+}
+
+export function deriveThreadActivityViewModel(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  latestTurnId: TurnId | null | undefined,
+): ThreadActivityViewModel {
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const effectiveLatestTurnId = latestTurnId ?? undefined;
+  const pendingApprovalState = new Map<ApprovalRequestId, PendingApproval>();
+  const pendingUserInputState = new Map<ApprovalRequestId, PendingUserInput>();
+  const workLogState: DerivedWorkLogEntry[] = [];
+  const contextCompactionEntries: ContextCompactionTimelineEntry[] = [];
+  let latestTurnHasToolActivity = false;
+  let latestPlanActivity: OrchestrationThreadActivity | null = null;
+  let latestPlanActivityForTurn: OrchestrationThreadActivity | null = null;
+
+  for (const activity of ordered) {
+    const payload = activityPayload(activity);
+
+    updatePendingApprovalState(pendingApprovalState, activity, payload);
+    updatePendingUserInputState(pendingUserInputState, activity, payload);
+
+    if (activity.kind === "turn.plan.updated") {
+      latestPlanActivity = activity;
+      if (effectiveLatestTurnId && activity.turnId === effectiveLatestTurnId) {
+        latestPlanActivityForTurn = activity;
+      }
+    }
+
+    if (
+      effectiveLatestTurnId &&
+      !latestTurnHasToolActivity &&
+      activity.turnId === effectiveLatestTurnId &&
+      activity.tone === "tool"
+    ) {
+      latestTurnHasToolActivity = true;
+    }
+
+    if (isContextCompactionActivity(activity)) {
+      contextCompactionEntries.push(toContextCompactionTimelineEntry(activity));
+    }
+
+    if (shouldIncludeActivityInWorkLog(activity, effectiveLatestTurnId)) {
+      workLogState.push(toDerivedWorkLogEntry(activity));
+    }
+  }
+
+  return {
+    workLogEntries: toWorkLogEntries(workLogState),
+    contextCompactionEntries,
+    latestTurnHasToolActivity,
+    pendingApprovals: pendingApprovalsFromState(pendingApprovalState),
+    pendingUserInputs: pendingUserInputsFromState(pendingUserInputState),
+    activePlan: toActivePlanState(latestPlanActivityForTurn ?? latestPlanActivity),
+  };
 }
 
 export function deriveTimelineEntries(

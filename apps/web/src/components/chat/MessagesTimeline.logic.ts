@@ -3,7 +3,12 @@ import {
   type TimelineEntry,
   type WorkLogEntry,
 } from "../../session-logic";
-import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
+import {
+  type ChatAttachment,
+  type ChatMessage,
+  type ProposedPlan,
+  type TurnDiffSummary,
+} from "../../types";
 import { type MessageId } from "@ryco/contracts";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
@@ -120,6 +125,44 @@ function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<Timeli
   }
 
   return new Set(lastAssistantMessageIdByResponseKey.values());
+}
+
+export function deriveRevertTurnCountByUserMessageId(input: {
+  timelineEntries: ReadonlyArray<TimelineEntry>;
+  turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
+  inferredCheckpointTurnCountByTurnId: Readonly<Partial<Record<TurnDiffSummary["turnId"], number>>>;
+}): Map<MessageId, number> {
+  const byUserMessageId = new Map<MessageId, number>();
+  let pendingUserMessageId: MessageId | null = null;
+
+  for (const entry of input.timelineEntries) {
+    if (entry.kind !== "message") {
+      continue;
+    }
+
+    if (entry.message.role === "user") {
+      pendingUserMessageId = entry.message.id;
+      continue;
+    }
+
+    if (!pendingUserMessageId) {
+      continue;
+    }
+
+    const summary = input.turnDiffSummaryByAssistantMessageId.get(entry.message.id);
+    if (!summary) {
+      continue;
+    }
+
+    const turnCount =
+      summary.checkpointTurnCount ?? input.inferredCheckpointTurnCountByTurnId[summary.turnId];
+    if (typeof turnCount === "number") {
+      byUserMessageId.set(pendingUserMessageId, Math.max(0, turnCount - 1));
+    }
+    pendingUserMessageId = null;
+  }
+
+  return byUserMessageId;
 }
 
 export function deriveMessagesTimelineRows(input: {
@@ -248,7 +291,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return a.proposedPlan === (b as typeof a).proposedPlan;
 
     case "work":
-      return a.groupedEntries === (b as typeof a).groupedEntries;
+      return areWorkRowsUnchanged(a, b as typeof a);
 
     case "context-compaction":
       return a.marker === (b as typeof a).marker;
@@ -256,7 +299,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "message": {
       const bm = b as typeof a;
       return (
-        a.message === bm.message &&
+        areMessagesUnchanged(a.message, bm.message) &&
         a.durationStart === bm.durationStart &&
         a.showCompletionDivider === bm.showCompletionDivider &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
@@ -265,4 +308,118 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       );
     }
   }
+}
+
+function areWorkRowsUnchanged(
+  previous: Extract<MessagesTimelineRow, { kind: "work" }>,
+  next: Extract<MessagesTimelineRow, { kind: "work" }>,
+): boolean {
+  if (previous.createdAt !== next.createdAt) {
+    return false;
+  }
+  if (previous.groupedEntries.length !== next.groupedEntries.length) {
+    return false;
+  }
+  for (let index = 0; index < previous.groupedEntries.length; index += 1) {
+    const previousEntry = previous.groupedEntries[index];
+    const nextEntry = next.groupedEntries[index];
+    if (!previousEntry || !nextEntry) {
+      return false;
+    }
+    if (!areWorkLogEntriesUnchanged(previousEntry, nextEntry)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areMessagesUnchanged(previous: ChatMessage, next: ChatMessage): boolean {
+  return (
+    previous === next ||
+    (previous.id === next.id &&
+      previous.role === next.role &&
+      previous.text === next.text &&
+      areChatAttachmentsUnchanged(previous.attachments, next.attachments) &&
+      previous.turnId === next.turnId &&
+      previous.createdAt === next.createdAt &&
+      previous.completedAt === next.completedAt &&
+      previous.streaming === next.streaming)
+  );
+}
+
+function areWorkLogEntriesUnchanged(previous: WorkLogEntry, next: WorkLogEntry): boolean {
+  return (
+    previous === next ||
+    (previous.id === next.id &&
+      previous.createdAt === next.createdAt &&
+      previous.label === next.label &&
+      previous.detail === next.detail &&
+      previous.command === next.command &&
+      previous.rawCommand === next.rawCommand &&
+      areStringArraysUnchanged(previous.changedFiles, next.changedFiles) &&
+      previous.tone === next.tone &&
+      previous.toolTitle === next.toolTitle &&
+      previous.itemType === next.itemType &&
+      previous.requestKind === next.requestKind &&
+      previous.output === next.output &&
+      previous.exitCode === next.exitCode)
+  );
+}
+
+function areStringArraysUnchanged(
+  previous: ReadonlyArray<string> | undefined,
+  next: ReadonlyArray<string> | undefined,
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+  const previousLength = previous?.length ?? 0;
+  const nextLength = next?.length ?? 0;
+  if (previousLength !== nextLength) {
+    return false;
+  }
+  for (let index = 0; index < previousLength; index += 1) {
+    if (previous?.[index] !== next?.[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areChatAttachmentsUnchanged(
+  previous: ReadonlyArray<ChatAttachment> | undefined,
+  next: ReadonlyArray<ChatAttachment> | undefined,
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+  const previousLength = previous?.length ?? 0;
+  const nextLength = next?.length ?? 0;
+  if (previousLength !== nextLength) {
+    return false;
+  }
+  for (let index = 0; index < previousLength; index += 1) {
+    const previousAttachment = previous?.[index];
+    const nextAttachment = next?.[index];
+    if (
+      !previousAttachment ||
+      !nextAttachment ||
+      !areChatAttachmentUnchanged(previousAttachment, nextAttachment)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areChatAttachmentUnchanged(previous: ChatAttachment, next: ChatAttachment): boolean {
+  return (
+    previous === next ||
+    (previous.type === next.type &&
+      previous.id === next.id &&
+      previous.name === next.name &&
+      previous.mimeType === next.mimeType &&
+      previous.sizeBytes === next.sizeBytes &&
+      previous.previewUrl === next.previewUrl)
+  );
 }

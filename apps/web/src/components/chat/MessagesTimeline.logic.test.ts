@@ -4,6 +4,7 @@ import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
+  deriveRevertTurnCountByUserMessageId,
   isErroredWorkEntry,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
@@ -360,6 +361,95 @@ describe("deriveMessagesTimelineRows", () => {
   });
 });
 
+describe("deriveRevertTurnCountByUserMessageId", () => {
+  it("projects the first assistant diff summary after each user message", () => {
+    const result = deriveRevertTurnCountByUserMessageId({
+      timelineEntries: [
+        {
+          id: "user-1-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "user-1" as never,
+            role: "user",
+            text: "Do the first thing",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "work-1",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:05Z",
+          entry: makeWorkEntry({ id: "work-1", createdAt: "2026-01-01T00:00:05Z" }),
+        },
+        {
+          id: "assistant-1-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:10Z",
+          message: {
+            id: "assistant-1" as never,
+            role: "assistant",
+            text: "Done",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:10Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "user-2-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:20Z",
+          message: {
+            id: "user-2" as never,
+            role: "user",
+            text: "Do the second thing",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:20Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "assistant-2-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:30Z",
+          message: {
+            id: "assistant-2" as never,
+            role: "assistant",
+            text: "Done again",
+            turnId: "turn-2" as never,
+            createdAt: "2026-01-01T00:00:30Z",
+            streaming: false,
+          },
+        },
+      ],
+      turnDiffSummaryByAssistantMessageId: new Map([
+        [
+          "assistant-1" as never,
+          {
+            turnId: "turn-1" as never,
+            completedAt: "2026-01-01T00:00:11Z",
+            checkpointTurnCount: 3,
+            files: [],
+          },
+        ],
+        [
+          "assistant-2" as never,
+          {
+            turnId: "turn-2" as never,
+            completedAt: "2026-01-01T00:00:31Z",
+            files: [],
+          },
+        ],
+      ]),
+      inferredCheckpointTurnCountByTurnId: {},
+    });
+
+    expect(result).toEqual(new Map([["user-1" as never, 2]]));
+  });
+});
+
 describe("computeStableMessagesTimelineRows", () => {
   it("returns the previous result when row order and content are unchanged", () => {
     const firstUserMessage = {
@@ -461,5 +551,161 @@ describe("computeStableMessagesTimelineRows", () => {
 
     expect(reordered).not.toBe(initial);
     expect(reordered.result).toEqual([initial.result[1], initial.result[0]]);
+  });
+
+  it("preserves unchanged grouped work rows when grouping arrays are rebuilt", () => {
+    const firstWorkEntry = makeWorkEntry({
+      id: "work-1",
+      createdAt: "2026-01-01T00:00:00Z",
+      label: "Read file",
+      detail: "src/index.ts",
+      changedFiles: ["src/index.ts"],
+    });
+    const secondWorkEntry = makeWorkEntry({
+      id: "work-2",
+      createdAt: "2026-01-01T00:00:01Z",
+      label: "Ran command",
+      command: "bun lint",
+      exitCode: 0,
+    });
+    const timelineEntries = [
+      {
+        id: "work-1",
+        kind: "work" as const,
+        createdAt: firstWorkEntry.createdAt,
+        entry: firstWorkEntry,
+      },
+      {
+        id: "work-2",
+        kind: "work" as const,
+        createdAt: secondWorkEntry.createdAt,
+        entry: secondWorkEntry,
+      },
+    ];
+    const firstRows = deriveMessagesTimelineRows({
+      timelineEntries,
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+    const initial = computeStableMessagesTimelineRows(firstRows, {
+      byId: new Map(),
+      result: [],
+    });
+    const nextRows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          ...timelineEntries[0]!,
+          entry: { ...firstWorkEntry, changedFiles: [...(firstWorkEntry.changedFiles ?? [])] },
+        },
+        {
+          ...timelineEntries[1]!,
+          entry: { ...secondWorkEntry },
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const stable = computeStableMessagesTimelineRows(nextRows, initial);
+
+    expect(stable).toBe(initial);
+    expect(stable.result[0]).toBe(initial.result[0]);
+  });
+
+  it("preserves unchanged message rows when equal message objects are recreated", () => {
+    const initialUserMessage = {
+      id: "user-1" as never,
+      role: "user" as const,
+      text: "Start",
+      turnId: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      streaming: false,
+      attachments: [
+        {
+          type: "image" as const,
+          id: "attachment-1",
+          name: "screen.png",
+          mimeType: "image/png",
+          sizeBytes: 42,
+          previewUrl: "blob:screen",
+        },
+      ],
+    };
+    const initialAssistantMessage = {
+      id: "assistant-1" as never,
+      role: "assistant" as const,
+      text: "Working",
+      turnId: "turn-1" as never,
+      createdAt: "2026-01-01T00:00:01Z",
+      streaming: true,
+    };
+    const firstRows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "user-1-entry",
+          kind: "message",
+          createdAt: initialUserMessage.createdAt,
+          message: initialUserMessage,
+        },
+        {
+          id: "assistant-1-entry",
+          kind: "message",
+          createdAt: initialAssistantMessage.createdAt,
+          message: initialAssistantMessage,
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+    const initial = computeStableMessagesTimelineRows(firstRows, {
+      byId: new Map(),
+      result: [],
+    });
+
+    const nextRows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "user-1-entry",
+          kind: "message",
+          createdAt: initialUserMessage.createdAt,
+          message: {
+            ...initialUserMessage,
+            attachments: initialUserMessage.attachments.map((attachment) => ({
+              type: attachment.type,
+              id: attachment.id,
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              sizeBytes: attachment.sizeBytes,
+              previewUrl: attachment.previewUrl,
+            })),
+          },
+        },
+        {
+          id: "assistant-1-entry",
+          kind: "message",
+          createdAt: initialAssistantMessage.createdAt,
+          message: { ...initialAssistantMessage, text: "Working." },
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const stable = computeStableMessagesTimelineRows(nextRows, initial);
+
+    expect(stable.result[0]).toBe(initial.result[0]);
+    expect(stable.result[1]).not.toBe(initial.result[1]);
   });
 });
