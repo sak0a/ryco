@@ -3,7 +3,12 @@ import {
   type TimelineEntry,
   type WorkLogEntry,
 } from "../../session-logic";
-import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
+import {
+  type ChatAttachment,
+  type ChatMessage,
+  type ProposedPlan,
+  type TurnDiffSummary,
+} from "../../types";
 import { type MessageId } from "@ryco/contracts";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
@@ -312,9 +317,6 @@ function areWorkRowsUnchanged(
   if (previous.createdAt !== next.createdAt) {
     return false;
   }
-  if (previous.groupedEntries === next.groupedEntries) {
-    return true;
-  }
   if (previous.groupedEntries.length !== next.groupedEntries.length) {
     return false;
   }
@@ -324,7 +326,7 @@ function areWorkRowsUnchanged(
     if (!previousEntry || !nextEntry) {
       return false;
     }
-    if (previousEntry.id !== nextEntry.id || previousEntry !== nextEntry) {
+    if (!areWorkLogEntriesUnchanged(previousEntry, nextEntry)) {
       return false;
     }
   }
@@ -337,10 +339,87 @@ function areMessagesUnchanged(previous: ChatMessage, next: ChatMessage): boolean
     (previous.id === next.id &&
       previous.role === next.role &&
       previous.text === next.text &&
-      previous.attachments === next.attachments &&
+      areChatAttachmentsUnchanged(previous.attachments, next.attachments) &&
       previous.turnId === next.turnId &&
       previous.createdAt === next.createdAt &&
       previous.completedAt === next.completedAt &&
       previous.streaming === next.streaming)
+  );
+}
+
+function areWorkLogEntriesUnchanged(previous: WorkLogEntry, next: WorkLogEntry): boolean {
+  return (
+    previous === next ||
+    (previous.id === next.id &&
+      previous.createdAt === next.createdAt &&
+      previous.label === next.label &&
+      previous.detail === next.detail &&
+      previous.command === next.command &&
+      previous.rawCommand === next.rawCommand &&
+      areStringArraysUnchanged(previous.changedFiles, next.changedFiles) &&
+      previous.tone === next.tone &&
+      previous.toolTitle === next.toolTitle &&
+      previous.itemType === next.itemType &&
+      previous.requestKind === next.requestKind &&
+      previous.output === next.output &&
+      previous.exitCode === next.exitCode)
+  );
+}
+
+function areStringArraysUnchanged(
+  previous: ReadonlyArray<string> | undefined,
+  next: ReadonlyArray<string> | undefined,
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+  const previousLength = previous?.length ?? 0;
+  const nextLength = next?.length ?? 0;
+  if (previousLength !== nextLength) {
+    return false;
+  }
+  for (let index = 0; index < previousLength; index += 1) {
+    if (previous?.[index] !== next?.[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areChatAttachmentsUnchanged(
+  previous: ReadonlyArray<ChatAttachment> | undefined,
+  next: ReadonlyArray<ChatAttachment> | undefined,
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+  const previousLength = previous?.length ?? 0;
+  const nextLength = next?.length ?? 0;
+  if (previousLength !== nextLength) {
+    return false;
+  }
+  for (let index = 0; index < previousLength; index += 1) {
+    const previousAttachment = previous?.[index];
+    const nextAttachment = next?.[index];
+    if (
+      !previousAttachment ||
+      !nextAttachment ||
+      !areChatAttachmentUnchanged(previousAttachment, nextAttachment)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areChatAttachmentUnchanged(previous: ChatAttachment, next: ChatAttachment): boolean {
+  return (
+    previous === next ||
+    (previous.type === next.type &&
+      previous.id === next.id &&
+      previous.name === next.name &&
+      previous.mimeType === next.mimeType &&
+      previous.sizeBytes === next.sizeBytes &&
+      previous.previewUrl === next.previewUrl)
   );
 }

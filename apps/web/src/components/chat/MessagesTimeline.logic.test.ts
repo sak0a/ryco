@@ -558,11 +558,15 @@ describe("computeStableMessagesTimelineRows", () => {
       id: "work-1",
       createdAt: "2026-01-01T00:00:00Z",
       label: "Read file",
+      detail: "src/index.ts",
+      changedFiles: ["src/index.ts"],
     });
     const secondWorkEntry = makeWorkEntry({
       id: "work-2",
       createdAt: "2026-01-01T00:00:01Z",
       label: "Ran command",
+      command: "bun lint",
+      exitCode: 0,
     });
     const timelineEntries = [
       {
@@ -591,7 +595,16 @@ describe("computeStableMessagesTimelineRows", () => {
       result: [],
     });
     const nextRows = deriveMessagesTimelineRows({
-      timelineEntries: [...timelineEntries],
+      timelineEntries: [
+        {
+          ...timelineEntries[0]!,
+          entry: { ...firstWorkEntry, changedFiles: [...(firstWorkEntry.changedFiles ?? [])] },
+        },
+        {
+          ...timelineEntries[1]!,
+          entry: { ...secondWorkEntry },
+        },
+      ],
       completionDividerBeforeEntryId: null,
       isWorking: false,
       activeTurnStartedAt: null,
@@ -613,6 +626,16 @@ describe("computeStableMessagesTimelineRows", () => {
       turnId: null,
       createdAt: "2026-01-01T00:00:00Z",
       streaming: false,
+      attachments: [
+        {
+          type: "image" as const,
+          id: "attachment-1",
+          name: "screen.png",
+          mimeType: "image/png",
+          sizeBytes: 42,
+          previewUrl: "blob:screen",
+        },
+      ],
     };
     const initialAssistantMessage = {
       id: "assistant-1" as never,
@@ -654,7 +677,17 @@ describe("computeStableMessagesTimelineRows", () => {
           id: "user-1-entry",
           kind: "message",
           createdAt: initialUserMessage.createdAt,
-          message: { ...initialUserMessage },
+          message: {
+            ...initialUserMessage,
+            attachments: initialUserMessage.attachments.map((attachment) => ({
+              type: attachment.type,
+              id: attachment.id,
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              sizeBytes: attachment.sizeBytes,
+              previewUrl: attachment.previewUrl,
+            })),
+          },
         },
         {
           id: "assistant-1-entry",
