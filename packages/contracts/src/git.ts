@@ -122,6 +122,7 @@ export const GitRunStackedActionInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   action: GitStackedAction,
   worktreeId: Schema.optional(WorktreeId),
+  linkedIssueNumbers: Schema.optional(Schema.Array(PositiveInt)),
   commitMessage: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000))),
   featureBranch: Schema.optional(Schema.Boolean),
   filePaths: Schema.optional(

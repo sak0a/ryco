@@ -465,6 +465,46 @@ function appendUnique(values: string[], next: string | null | undefined): void {
   values.push(trimmed);
 }
 
+const CLOSING_ISSUE_REFERENCE_PATTERN =
+  /\b(?:close[sd]?|fixe?[sd]?|resolve[sd]?)\s+#(?<number>\d+)\b/giu;
+
+function uniquePositiveIssueNumbers(numbers: ReadonlyArray<number> | undefined): number[] {
+  if (!numbers) return [];
+  const seen = new Set<number>();
+  const unique: number[] = [];
+  for (const number of numbers) {
+    if (!Number.isInteger(number) || number <= 0 || seen.has(number)) continue;
+    seen.add(number);
+    unique.push(number);
+  }
+  return unique;
+}
+
+function appendClosingIssueReferences(
+  body: string,
+  issueNumbers: ReadonlyArray<number> | undefined,
+): string {
+  const uniqueNumbers = uniquePositiveIssueNumbers(issueNumbers);
+  if (uniqueNumbers.length === 0) return body;
+
+  const alreadyClosing = new Set<number>();
+  for (const match of body.matchAll(CLOSING_ISSUE_REFERENCE_PATTERN)) {
+    const rawNumber = match.groups?.number;
+    if (!rawNumber) continue;
+    const parsed = Number.parseInt(rawNumber, 10);
+    if (Number.isInteger(parsed) && parsed > 0) {
+      alreadyClosing.add(parsed);
+    }
+  }
+
+  const missingReferences = uniqueNumbers
+    .filter((number) => !alreadyClosing.has(number))
+    .map((number) => `Fixes #${number}`);
+  if (missingReferences.length === 0) return body;
+
+  return `${body.trimEnd()}\n\n${missingReferences.join("\n")}\n`;
+}
+
 function toStatusPr(pr: PullRequestInfo): {
   number: number;
   title: string;
@@ -1249,6 +1289,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     modelSelection: ModelSelection,
     cwd: string,
     fallbackBranch: string | null,
+    linkedIssueNumbers: ReadonlyArray<number> | undefined,
     emit: GitActionProgressEmitter,
   ) {
     const provider = yield* sourceControlProvider(cwd);
@@ -1302,10 +1343,11 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       diffPatch: limitContext(rangeContext.diffPatch, 60_000),
       modelSelection,
     });
+    const body = appendClosingIssueReferences(generated.body, linkedIssueNumbers);
 
     const bodyFile = path.join(tempDir, `ryco-pr-body-${process.pid}-${randomUUID()}.md`);
     yield* fileSystem
-      .writeFileString(bodyFile, generated.body)
+      .writeFileString(bodyFile, body)
       .pipe(
         Effect.mapError((cause) =>
           gitManagerError("runPrStep", "Failed to write pull request body temp file.", cause),
@@ -1732,7 +1774,13 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
               .pipe(
                 Effect.tap(() => Ref.set(currentPhase, Option.some("pr"))),
                 Effect.flatMap(() =>
-                  runPrStep(modelSelection, input.cwd, currentBranch, progress.emit),
+                  runPrStep(
+                    modelSelection,
+                    input.cwd,
+                    currentBranch,
+                    input.linkedIssueNumbers,
+                    progress.emit,
+                  ),
                 ),
               )
           : { status: "skipped_not_requested" as const };

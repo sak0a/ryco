@@ -9,6 +9,7 @@ import {
   CommandId,
   EventId,
   type GitCreateWorktreeForProjectInput,
+  type GitRunStackedActionInput,
   type OrchestrationCommand,
   type GitActionProgressEvent,
   type GitManagerServiceError,
@@ -129,6 +130,7 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
 }
 
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
+const SOURCE_CONTROL_LINKED_REFRESH_DEBOUNCE_MS = 5_000;
 const randomShortId = (length = 8) =>
   Array.from({ length }, () =>
     "abcdefghijklmnopqrstuvwxyz0123456789".charAt(Math.floor(Math.random() * 36)),
@@ -282,6 +284,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
       const workItems = yield* JiraWorkItemService;
       const serverCommandId = (tag: string) =>
         CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
+      const linkedSourceControlRefreshAtByProject = new Map<string, number>();
 
       const authorize = (access: WsRpcAccess, method: string) =>
         authorizeWsRpc(session, access, method);
@@ -294,6 +297,38 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
 
       const ownerEffect = <A, E, R>(method: string, effect: Effect.Effect<A, E, R>) =>
         withAccess("owner", method, effect);
+
+      const refreshLinkedWorktreeSourceControlStates = (input: {
+        readonly cwd: string;
+        readonly reason: string;
+      }) =>
+        Effect.gen(function* () {
+          const projectOpt = yield* projectionSnapshotQuery
+            .getActiveProjectByWorkspaceRoot(input.cwd)
+            .pipe(Effect.catch(() => Effect.succeed(Option.none())));
+          if (Option.isNone(projectOpt)) return;
+
+          const project = projectOpt.value;
+          const key = `${project.id}:${input.cwd}`;
+          const now = Date.now();
+          const lastRefreshAt = linkedSourceControlRefreshAtByProject.get(key) ?? 0;
+          if (now - lastRefreshAt < SOURCE_CONTROL_LINKED_REFRESH_DEBOUNCE_MS) {
+            return;
+          }
+          linkedSourceControlRefreshAtByProject.set(key, now);
+
+          const worktrees = yield* projectionWorktrees
+            .listByProjectId({ projectId: project.id })
+            .pipe(Effect.catch(() => Effect.succeed([])));
+          for (const worktree of worktrees) {
+            if (worktree.archivedAt !== null) continue;
+            if (worktree.prNumber === null && worktree.issueNumber === null) continue;
+            yield* refreshWorktreeSourceControlState({ worktreeId: worktree.worktreeId }).pipe(
+              Effect.ignoreCause({ log: true }),
+              Effect.forkDetach,
+            );
+          }
+        }).pipe(Effect.ignoreCause({ log: true }), Effect.asVoid);
 
       const refreshStateForLinkedReference = (input: {
         readonly cwd: string;
@@ -319,6 +354,30 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             );
           }
         }).pipe(Effect.ignoreCause({ log: true }), Effect.asVoid);
+
+      const attachLinkedIssuesToPrAction = (
+        input: GitRunStackedActionInput,
+      ): Effect.Effect<GitRunStackedActionInput> => {
+        if (
+          input.worktreeId === undefined ||
+          (input.action !== "create_pr" && input.action !== "commit_push_pr")
+        ) {
+          return Effect.succeed(input);
+        }
+
+        return projectionWorktrees.getById({ worktreeId: input.worktreeId }).pipe(
+          Effect.map((worktreeOpt) => {
+            if (Option.isNone(worktreeOpt)) return input;
+            const issueNumber = worktreeOpt.value.issueNumber;
+            if (issueNumber === null) return input;
+            return {
+              ...input,
+              linkedIssueNumbers: [...new Set([...(input.linkedIssueNumbers ?? []), issueNumber])],
+            };
+          }),
+          Effect.catch(() => Effect.succeed(input)),
+        );
+      };
 
       const ownerStreamEffect = <A, E, R>(
         method: string,
@@ -1850,6 +1909,12 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                     ...(limit !== undefined ? { limit } : {}),
                   }),
                 ),
+                Effect.tap(() =>
+                  refreshLinkedWorktreeSourceControlStates({
+                    cwd,
+                    reason: "sourceControl.listIssues",
+                  }),
+                ),
               ),
             ),
             {
@@ -1889,6 +1954,12 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                     ...(limit !== undefined ? { limit } : {}),
                   }),
                 ),
+                Effect.tap(() =>
+                  refreshLinkedWorktreeSourceControlStates({
+                    cwd,
+                    reason: "sourceControl.searchIssues",
+                  }),
+                ),
               ),
             ),
             {
@@ -1915,6 +1986,12 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                   ...(limit !== undefined ? { limit } : {}),
                 });
               }),
+              Effect.tap(() =>
+                refreshLinkedWorktreeSourceControlStates({
+                  cwd,
+                  reason: "sourceControl.listChangeRequests",
+                }),
+              ),
             ),
             {
               "rpc.aggregate": "source-control",
@@ -1931,6 +2008,12 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                     cwd,
                     query,
                     ...(limit !== undefined ? { limit } : {}),
+                  }),
+                ),
+                Effect.tap(() =>
+                  refreshLinkedWorktreeSourceControlStates({
+                    cwd,
+                    reason: "sourceControl.searchChangeRequests",
                   }),
                 ),
               ),
@@ -2371,59 +2454,59 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             ownerStream(
               WS_METHODS.gitRunStackedAction,
               Stream.callback<GitActionProgressEvent, GitManagerServiceError>((queue) =>
-                gitWorkflow
-                  .runStackedAction(input, {
-                    actionId: input.actionId,
-                    progressReporter: {
-                      publish: (event) => Queue.offer(queue, event).pipe(Effect.asVoid),
-                    },
-                  })
-                  .pipe(
-                    Effect.matchCauseEffect({
-                      onFailure: (cause) => Queue.failCause(queue, cause),
-                      onSuccess: (result) =>
-                        Effect.gen(function* () {
-                          if (
-                            input.worktreeId !== undefined &&
-                            result.pr.number !== undefined &&
-                            (result.pr.status === "created" ||
-                              result.pr.status === "opened_existing")
-                          ) {
-                            const existing = yield* projectionWorktrees
-                              .getById({
-                                worktreeId: input.worktreeId,
-                              })
-                              .pipe(
-                                Effect.mapError((cause) =>
-                                  toGitManagerError(
-                                    WS_METHODS.gitRunStackedAction,
-                                    "Failed to load worktree for pull request link update.",
-                                    cause,
-                                  ),
-                                ),
-                              );
-                            if (Option.isSome(existing)) {
-                              yield* dispatchWorktreeCommand(
-                                {
-                                  type: "worktree.source-control-state.update",
-                                  commandId: serverCommandId("worktree-pr-link"),
-                                  worktreeId: input.worktreeId,
-                                  prNumber: result.pr.number,
-                                  prTitle: result.pr.title ?? existing.value.prTitle,
-                                  prState: existing.value.prState ?? "open",
-                                  prIsDraft: existing.value.prIsDraft ?? null,
-                                  issueState: existing.value.issueState ?? null,
-                                  updatedAt: new Date().toISOString(),
-                                },
-                                WS_METHODS.gitRunStackedAction,
-                              );
-                            }
-                          }
-                          yield* refreshGitStatus(input.cwd);
-                          yield* Queue.end(queue).pipe(Effect.asVoid);
-                        }),
+                attachLinkedIssuesToPrAction(input).pipe(
+                  Effect.flatMap((runInput) =>
+                    gitWorkflow.runStackedAction(runInput, {
+                      actionId: input.actionId,
+                      progressReporter: {
+                        publish: (event) => Queue.offer(queue, event).pipe(Effect.asVoid),
+                      },
                     }),
                   ),
+                  Effect.matchCauseEffect({
+                    onFailure: (cause) => Queue.failCause(queue, cause),
+                    onSuccess: (result) =>
+                      Effect.gen(function* () {
+                        if (
+                          input.worktreeId !== undefined &&
+                          result.pr.number !== undefined &&
+                          (result.pr.status === "created" || result.pr.status === "opened_existing")
+                        ) {
+                          const existing = yield* projectionWorktrees
+                            .getById({
+                              worktreeId: input.worktreeId,
+                            })
+                            .pipe(
+                              Effect.mapError((cause) =>
+                                toGitManagerError(
+                                  WS_METHODS.gitRunStackedAction,
+                                  "Failed to load worktree for pull request link update.",
+                                  cause,
+                                ),
+                              ),
+                            );
+                          if (Option.isSome(existing)) {
+                            yield* dispatchWorktreeCommand(
+                              {
+                                type: "worktree.source-control-state.update",
+                                commandId: serverCommandId("worktree-pr-link"),
+                                worktreeId: input.worktreeId,
+                                prNumber: result.pr.number,
+                                prTitle: result.pr.title ?? existing.value.prTitle,
+                                prState: "open",
+                                prIsDraft: false,
+                                issueState: existing.value.issueState ?? null,
+                                updatedAt: new Date().toISOString(),
+                              },
+                              WS_METHODS.gitRunStackedAction,
+                            );
+                          }
+                        }
+                        yield* refreshGitStatus(input.cwd);
+                        yield* Queue.end(queue).pipe(Effect.asVoid);
+                      }),
+                  }),
+                ),
               ),
             ),
             { "rpc.aggregate": "vcs" },

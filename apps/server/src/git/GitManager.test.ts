@@ -393,6 +393,7 @@ function createTextGeneration(overrides: Partial<FakeGitTextGeneration> = {}): T
 function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
   service: GitHubCliShape;
   ghCalls: string[];
+  createdPrBodies: string[];
 } {
   const prListQueue = [...(scenario.prListSequence ?? [])];
   const prListQueueByHeadSelector = new Map(
@@ -402,6 +403,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
     ]),
   );
   const ghCalls: string[] = [];
+  const createdPrBodies: string[] = [];
 
   const execute: GitHubCliShape["execute"] = (input) => {
     const args = [...input.args];
@@ -563,21 +565,28 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
           ),
         ),
       createPullRequest: (input) =>
-        execute({
-          cwd: input.cwd,
-          args: [
-            "pr",
-            "create",
-            "--base",
-            input.baseBranch,
-            "--head",
-            input.headSelector,
-            "--title",
-            input.title,
-            "--body-file",
-            input.bodyFile,
-          ],
-        }).pipe(Effect.asVoid),
+        Effect.sync(() => {
+          createdPrBodies.push(fs.readFileSync(input.bodyFile, "utf8"));
+        }).pipe(
+          Effect.andThen(
+            execute({
+              cwd: input.cwd,
+              args: [
+                "pr",
+                "create",
+                "--base",
+                input.baseBranch,
+                "--head",
+                input.headSelector,
+                "--title",
+                input.title,
+                "--body-file",
+                input.bodyFile,
+              ],
+            }),
+          ),
+          Effect.asVoid,
+        ),
       getDefaultBranch: (input) =>
         execute({
           cwd: input.cwd,
@@ -635,6 +644,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
         Effect.fail(new GitHubCliError({ operation: "listAssignees", detail: "stub" })),
     },
     ghCalls,
+    createdPrBodies,
   };
 }
 
@@ -647,6 +657,7 @@ function runStackedAction(
     commitMessage?: string;
     featureBranch?: boolean;
     filePaths?: readonly string[];
+    linkedIssueNumbers?: readonly number[];
   },
   options?: Parameters<GitManagerShape["runStackedAction"]>[1],
 ) {
@@ -675,7 +686,11 @@ function makeManager(input?: {
   textGeneration?: Partial<FakeGitTextGeneration>;
   setupScriptRunner?: ProjectSetupScriptRunnerShape;
 }) {
-  const { service: gitHubCli, ghCalls } = createGitHubCliWithFakeGh(input?.ghScenario);
+  const {
+    service: gitHubCli,
+    ghCalls,
+    createdPrBodies,
+  } = createGitHubCliWithFakeGh(input?.ghScenario);
   const textGeneration = createTextGeneration(input?.textGeneration);
   const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
     prefix: "s3-git-manager-test-",
@@ -718,7 +733,7 @@ function makeManager(input?: {
 
   return makeGitManager().pipe(
     Effect.provide(managerLayer),
-    Effect.map((manager) => ({ manager, ghCalls })),
+    Effect.map((manager) => ({ manager, ghCalls, createdPrBodies })),
   );
 }
 
@@ -2217,6 +2232,47 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         ghCalls.some((call) => call.includes("pr create --base main --head feature-create-pr")),
       ).toBe(true);
       expect(ghCalls.some((call) => call.startsWith("pr view "))).toBe(false);
+    }),
+  );
+
+  it.effect("adds closing references for linked issues when creating a PR", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("ryco-git-manager-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature-linked-issue"]);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      fs.writeFileSync(path.join(repoDir, "changes.txt"), "change\n");
+      yield* runGit(repoDir, ["add", "changes.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Feature commit"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature-linked-issue"]);
+      yield* runGit(repoDir, ["config", "branch.feature-linked-issue.gh-merge-base", "main"]);
+
+      const { manager, createdPrBodies } = yield* makeManager({
+        ghScenario: {
+          prListSequence: [
+            "[]",
+            JSON.stringify([
+              {
+                number: 89,
+                title: "Add linked issue",
+                url: "https://github.com/pingdotgg/codething-mvp/pull/89",
+                baseRefName: "main",
+                headRefName: "feature-linked-issue",
+              },
+            ]),
+          ],
+        },
+      });
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit_push_pr",
+        linkedIssueNumbers: [123],
+      });
+
+      expect(result.pr.status).toBe("created");
+      expect(createdPrBodies).toHaveLength(1);
+      expect(createdPrBodies[0]).toContain("Fixes #123");
     }),
   );
 
