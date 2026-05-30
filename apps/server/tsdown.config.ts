@@ -1,4 +1,7 @@
+import { parseOptInSourcemapEnv, readEnv } from "@ryco/shared/runtimeEnv";
 import { defineConfig } from "tsdown";
+
+const buildSourcemap = parseOptInSourcemapEnv(readEnv("RYCO_SERVER_SOURCEMAP"));
 
 export default defineConfig({
   entry: ["src/bin.ts"],
@@ -7,7 +10,7 @@ export default defineConfig({
     legacyCjs: false,
   },
   outDir: "dist",
-  sourcemap: true,
+  sourcemap: buildSourcemap,
   clean: true,
   noExternal: (id) => id.startsWith("@ryco/") || id.startsWith("effect-acp"),
   inlineOnly: false,

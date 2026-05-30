@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createTerminalOutputBatcher,
   groupHasRunningTerminal,
   resolveTabLabel,
   resolveTerminalSelectionActionPosition,
@@ -9,6 +10,73 @@ import {
   shouldHandleTerminalSelectionMouseUp,
   terminalSelectionActionDelayForClickCount,
 } from "./ThreadTerminalDrawer";
+
+describe("createTerminalOutputBatcher", () => {
+  it("coalesces consecutive output writes until the scheduled flush", () => {
+    const writes: string[] = [];
+    const scheduledFlushes: Array<() => void> = [];
+    const batcher = createTerminalOutputBatcher({
+      write: (data) => {
+        writes.push(data);
+      },
+      requestFlush: (callback) => {
+        scheduledFlushes.push(callback);
+        return () => undefined;
+      },
+    });
+
+    batcher.writeOutput("one");
+    batcher.writeOutput("two");
+
+    expect(writes).toEqual([]);
+    expect(scheduledFlushes).toHaveLength(1);
+
+    scheduledFlushes[0]?.();
+
+    expect(writes).toEqual(["onetwo"]);
+  });
+
+  it("flushes pending output before ordering-sensitive terminal events", () => {
+    const writes: string[] = [];
+    const cancellations: string[] = [];
+    const batcher = createTerminalOutputBatcher({
+      write: (data) => {
+        writes.push(data);
+      },
+      requestFlush: () => () => {
+        cancellations.push("cancelled");
+      },
+    });
+
+    batcher.writeOutput("before ");
+    batcher.writeOutput("reset");
+    batcher.flush();
+    writes.push("snapshot");
+
+    expect(writes).toEqual(["before reset", "snapshot"]);
+    expect(cancellations).toEqual(["cancelled"]);
+  });
+
+  it("flushes pending output on dispose without duplicating later scheduled flushes", () => {
+    const writes: string[] = [];
+    const scheduledFlushes: Array<() => void> = [];
+    const batcher = createTerminalOutputBatcher({
+      write: (data) => {
+        writes.push(data);
+      },
+      requestFlush: (callback) => {
+        scheduledFlushes.push(callback);
+        return () => undefined;
+      },
+    });
+
+    batcher.writeOutput("tail");
+    batcher.dispose();
+    scheduledFlushes[0]?.();
+
+    expect(writes).toEqual(["tail"]);
+  });
+});
 
 describe("resolveTerminalSelectionActionPosition", () => {
   it("prefers the selection rect over the last pointer position", () => {

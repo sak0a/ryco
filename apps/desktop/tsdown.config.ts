@@ -1,9 +1,12 @@
+import { parseOptInSourcemapEnv, readEnv } from "@ryco/shared/runtimeEnv";
 import { defineConfig } from "tsdown";
+
+const buildSourcemap = parseOptInSourcemapEnv(readEnv("RYCO_DESKTOP_SOURCEMAP"));
 
 const shared = {
   format: "cjs" as const,
   outDir: "dist-electron",
-  sourcemap: true,
+  sourcemap: buildSourcemap,
   outExtensions: () => ({ js: ".cjs" }),
 };
 

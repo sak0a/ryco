@@ -2,7 +2,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
-import { readEnv } from "@ryco/shared/runtimeEnv";
+import { parseOptInSourcemapEnv, readEnv } from "@ryco/shared/runtimeEnv";
 import { defineConfig } from "vite";
 import pkg from "./package.json" with { type: "json" };
 
@@ -19,14 +19,9 @@ const configuredHostedAppUrl = (() => {
   }
   return process.env.VITE_HOSTED_APP_URL?.trim();
 })();
-const sourcemapEnv = readEnv("RYCO_WEB_SOURCEMAP")?.trim().toLowerCase();
-
-const buildSourcemap =
-  sourcemapEnv === "0" || sourcemapEnv === "false"
-    ? false
-    : sourcemapEnv === "hidden"
-      ? "hidden"
-      : true;
+const buildSourcemap = parseOptInSourcemapEnv(readEnv("RYCO_WEB_SOURCEMAP"), {
+  allowHidden: true,
+});
 
 function resolveDevProxyTarget(wsUrl: string | undefined): string | undefined {
   if (!wsUrl) {
