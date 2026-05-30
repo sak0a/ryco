@@ -2078,6 +2078,283 @@ describe("ProviderRuntimeIngestion", () => {
     expect(finalMessage?.streaming).toBe(false);
   });
 
+  it("coalesces live assistant deltas until completion while preserving final text", async () => {
+    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-live-coalesce-complete"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-live-coalesce-complete"),
+    });
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-live-coalesce-complete",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-live-coalesce-1"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-live-coalesce-complete"),
+      itemId: asItemId("item-live-coalesce-complete"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "hello",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-live-coalesce-2"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-live-coalesce-complete"),
+      itemId: asItemId("item-live-coalesce-complete"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: " world",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-message-completed-live-coalesce"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-live-coalesce-complete"),
+      itemId: asItemId("item-live-coalesce-complete"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-live-coalesce-complete" && !message.streaming,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-live-coalesce-complete",
+    );
+    expect(message?.text).toBe("hello world");
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    const assistantEvents = events.filter(
+      (event): event is Extract<(typeof events)[number], { type: "thread.message-sent" }> =>
+        event.type === "thread.message-sent" &&
+        event.payload.messageId === "assistant:item-live-coalesce-complete",
+    );
+    expect(assistantEvents.map((event) => event.payload.streaming)).toEqual([true, false]);
+    expect(assistantEvents.map((event) => event.payload.text)).toEqual(["hello world", ""]);
+  });
+
+  it("flushes coalesced live assistant deltas on the interval before completion", async () => {
+    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-live-coalesce-interval"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-live-coalesce-interval"),
+    });
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-live-coalesce-interval",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-live-coalesce-interval-1"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-live-coalesce-interval"),
+      itemId: asItemId("item-live-coalesce-interval"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "tick",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-live-coalesce-interval-2"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-live-coalesce-interval"),
+      itemId: asItemId("item-live-coalesce-interval"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: " tock",
+      },
+    });
+
+    await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-live-coalesce-interval" &&
+          message.streaming &&
+          message.text === "tick tock",
+      ),
+    );
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    const liveDeltaEvents = events.filter(
+      (event): event is Extract<(typeof events)[number], { type: "thread.message-sent" }> =>
+        event.type === "thread.message-sent" &&
+        event.payload.messageId === "assistant:item-live-coalesce-interval" &&
+        event.payload.streaming,
+    );
+    expect(liveDeltaEvents).toHaveLength(1);
+    expect(liveDeltaEvents[0]?.payload.text).toBe("tick tock");
+  });
+
+  it("flushes live assistant deltas before runtime errors", async () => {
+    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-live-error-flush"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-live-error-flush"),
+    });
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-live-error-flush",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-live-error-flush"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-live-error-flush"),
+      itemId: asItemId("item-live-error-flush"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "partial before error",
+      },
+    });
+    harness.emit({
+      type: "runtime.error",
+      eventId: asEventId("evt-runtime-error-live-error-flush"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-live-error-flush"),
+      payload: {
+        message: "provider failed",
+      },
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (entry) =>
+        entry.session?.status === "error" &&
+        entry.messages.some(
+          (message: ProviderRuntimeTestMessage) =>
+            message.id === "assistant:item-live-error-flush" &&
+            message.text === "partial before error",
+        ),
+    );
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    const deltaIndex = events.findIndex(
+      (event) =>
+        event.type === "thread.message-sent" &&
+        event.payload.messageId === "assistant:item-live-error-flush" &&
+        event.payload.text === "partial before error",
+    );
+    const errorSessionIndex = events.findIndex(
+      (event) => event.type === "thread.session-set" && event.payload.session.status === "error",
+    );
+    expect(deltaIndex).toBeGreaterThanOrEqual(0);
+    expect(errorSessionIndex).toBeGreaterThanOrEqual(0);
+    expect(deltaIndex).toBeLessThan(errorSessionIndex);
+  });
+
+  it("flushes live assistant deltas when the coalesced buffer crosses the size threshold", async () => {
+    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
+    const now = new Date().toISOString();
+    const oversizedText = "x".repeat(5_000);
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-live-threshold"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-live-threshold"),
+    });
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-live-threshold",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-live-threshold"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-live-threshold"),
+      itemId: asItemId("item-live-threshold"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: oversizedText,
+      },
+    });
+    await harness.drain();
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    const thresholdEvent = events.find(
+      (event): event is Extract<(typeof events)[number], { type: "thread.message-sent" }> =>
+        event.type === "thread.message-sent" &&
+        event.payload.messageId === "assistant:item-live-threshold",
+    );
+    expect(thresholdEvent?.payload.text).toBe(oversizedText);
+    expect(String(thresholdEvent?.commandId)).toContain("assistant-delta-coalesced-threshold");
+  });
+
   it("spills oversized buffered deltas and still finalizes full assistant text", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

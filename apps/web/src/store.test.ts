@@ -780,6 +780,9 @@ describe("incremental orchestration updates", () => {
     expect(threadsOf(next)[0]?.latestTurn?.state).toBe("running");
     const nextEnvironmentState = next.environmentStateById[localEnvironmentId];
     const previousEnvironmentState = state.environmentStateById[localEnvironmentId];
+    expect(nextEnvironmentState?.messageIdsByThreadId[thread1.id]).toBe(
+      previousEnvironmentState?.messageIdsByThreadId[thread1.id],
+    );
     expect(nextEnvironmentState?.threadShellById[thread2.id]).toBe(
       previousEnvironmentState?.threadShellById[thread2.id],
     );
@@ -792,6 +795,86 @@ describe("incremental orchestration updates", () => {
     expect(nextEnvironmentState?.messageByThreadId[thread2.id]).toBe(
       previousEnvironmentState?.messageByThreadId[thread2.id],
     );
+  });
+
+  it("updates activity records without rebuilding the id list when ordering is unchanged", () => {
+    const thread = makeThread({
+      activities: [
+        {
+          id: EventId.make("activity-1"),
+          tone: "info",
+          kind: "step",
+          summary: "old summary",
+          payload: {},
+          turnId: TurnId.make("turn-1"),
+          createdAt: "2026-02-27T00:00:00.000Z",
+        },
+      ],
+    });
+    const state = makeState(thread);
+    const previousEnvironmentState = localEnvironmentStateOf(state);
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.activity-appended", {
+        threadId: thread.id,
+        activity: {
+          id: EventId.make("activity-1"),
+          tone: "info",
+          kind: "step",
+          summary: "new summary",
+          payload: {},
+          turnId: TurnId.make("turn-1"),
+          createdAt: "2026-02-27T00:00:00.000Z",
+        },
+      }),
+      localEnvironmentId,
+    );
+    const nextEnvironmentState = localEnvironmentStateOf(next);
+
+    expect(threadsOf(next)[0]?.activities[0]?.summary).toBe("new summary");
+    expect(nextEnvironmentState.activityIdsByThreadId[thread.id]).toBe(
+      previousEnvironmentState.activityIdsByThreadId[thread.id],
+    );
+  });
+
+  it("inserts out-of-order activity appends without changing activity ordering semantics", () => {
+    const thread = makeThread({
+      activities: [
+        {
+          id: EventId.make("activity-2"),
+          tone: "info",
+          kind: "step",
+          summary: "two",
+          payload: {},
+          turnId: TurnId.make("turn-1"),
+          createdAt: "2026-02-27T00:00:02.000Z",
+        },
+      ],
+    });
+    const state = makeState(thread);
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.activity-appended", {
+        threadId: thread.id,
+        activity: {
+          id: EventId.make("activity-1"),
+          tone: "info",
+          kind: "step",
+          summary: "one",
+          payload: {},
+          turnId: TurnId.make("turn-1"),
+          createdAt: "2026-02-27T00:00:01.000Z",
+        },
+      }),
+      localEnvironmentId,
+    );
+
+    expect(threadsOf(next)[0]?.activities.map((activity) => activity.id)).toEqual([
+      EventId.make("activity-1"),
+      EventId.make("activity-2"),
+    ]);
   });
 
   it("applies replay batches in sequence and updates session state", () => {
