@@ -4,13 +4,21 @@ import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
-const { openInPreferredEditorMock, readLocalApiMock } = vi.hoisted(() => ({
-  openInPreferredEditorMock: vi.fn(async () => "vscode"),
-  readLocalApiMock: vi.fn(() => ({
-    server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
-    shell: { openInEditor: vi.fn(async () => undefined) },
-  })),
-}));
+const { codeToHtmlMock, getSharedHighlighterMock, openInPreferredEditorMock, readLocalApiMock } =
+  vi.hoisted(() => {
+    const codeToHtmlMock = vi.fn((code: string) => `<pre class="shiki"><code>${code}</code></pre>`);
+    return {
+      codeToHtmlMock,
+      getSharedHighlighterMock: vi.fn(async () => ({
+        codeToHtml: codeToHtmlMock,
+      })),
+      openInPreferredEditorMock: vi.fn(async () => "vscode"),
+      readLocalApiMock: vi.fn(() => ({
+        server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
+        shell: { openInEditor: vi.fn(async () => undefined) },
+      })),
+    };
+  });
 
 vi.mock("../editorPreferences", () => ({
   openInPreferredEditor: openInPreferredEditorMock,
@@ -23,12 +31,18 @@ vi.mock("../localApi", () => ({
   readLocalApi: readLocalApiMock,
 }));
 
+vi.mock("@pierre/diffs", () => ({
+  getSharedHighlighter: getSharedHighlighterMock,
+}));
+
 import ChatMarkdown from "./ChatMarkdown";
 
 describe("ChatMarkdown", () => {
   afterEach(() => {
     openInPreferredEditorMock.mockClear();
     readLocalApiMock.mockClear();
+    getSharedHighlighterMock.mockClear();
+    codeToHtmlMock.mockClear();
     localStorage.clear();
     document.body.innerHTML = "";
   });
@@ -134,6 +148,41 @@ describe("ChatMarkdown", () => {
       await expect.element(link).toBeInTheDocument();
       await expect.element(link).toHaveAttribute("href", "https://openai.com/docs");
       await expect.element(link).toHaveAttribute("target", "_blank");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("renders streaming code blocks without starting the Shiki highlighter", async () => {
+    const screen = await render(
+      <ChatMarkdown text={"```ts\nconst value = 1;\n```"} cwd="/repo/project" isStreaming />,
+    );
+
+    try {
+      const codeBlock = document.querySelector("pre code.language-ts");
+      expect(codeBlock?.textContent).toBe("const value = 1;\n");
+      expect(document.querySelector(".chat-markdown-shiki")).toBeNull();
+      expect(getSharedHighlighterMock).not.toHaveBeenCalled();
+      expect(codeToHtmlMock).not.toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("uses Shiki for finalized code blocks", async () => {
+    const screen = await render(
+      <ChatMarkdown text={"```ts\nconst finalValue = 1;\n```"} cwd="/repo/project" />,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(getSharedHighlighterMock).toHaveBeenCalledTimes(1);
+      });
+      expect(codeToHtmlMock).toHaveBeenCalledWith(
+        "const finalValue = 1;\n",
+        expect.objectContaining({ lang: "ts" }),
+      );
+      expect(document.querySelector(".chat-markdown-shiki")).not.toBeNull();
     } finally {
       await screen.unmount();
     }

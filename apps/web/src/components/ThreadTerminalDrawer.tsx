@@ -89,6 +89,74 @@ function writeTerminalSnapshot(terminal: Terminal, snapshot: TerminalSessionSnap
   }
 }
 
+interface TerminalOutputBatcher {
+  writeOutput: (data: string) => void;
+  flush: () => void;
+  dispose: () => void;
+}
+
+function requestTerminalOutputFlush(callback: () => void): () => void {
+  if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+    const frame = window.requestAnimationFrame(callback);
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }
+
+  const timer = setTimeout(callback, 0);
+  return () => {
+    clearTimeout(timer);
+  };
+}
+
+export function createTerminalOutputBatcher(options: {
+  write: (data: string) => void;
+  requestFlush?: (callback: () => void) => () => void;
+}): TerminalOutputBatcher {
+  const requestFlush = options.requestFlush ?? requestTerminalOutputFlush;
+  let pendingOutput = "";
+  let cancelScheduledFlush: (() => void) | null = null;
+
+  const flush = () => {
+    if (cancelScheduledFlush !== null) {
+      cancelScheduledFlush();
+      cancelScheduledFlush = null;
+    }
+
+    if (pendingOutput.length === 0) {
+      return;
+    }
+
+    const output = pendingOutput;
+    pendingOutput = "";
+    options.write(output);
+  };
+
+  const runScheduledFlush = () => {
+    cancelScheduledFlush = null;
+    flush();
+  };
+
+  const scheduleFlush = () => {
+    if (cancelScheduledFlush !== null) {
+      return;
+    }
+    cancelScheduledFlush = requestFlush(runScheduledFlush);
+  };
+
+  return {
+    writeOutput: (data) => {
+      if (data.length === 0) {
+        return;
+      }
+      pendingOutput += data;
+      scheduleFlush();
+    },
+    flush,
+    dispose: flush,
+  };
+}
+
 export function selectTerminalEventEntriesAfterSnapshot(
   entries: ReadonlyArray<{ id: number; event: TerminalEvent }>,
   snapshotUpdatedAt: string,
@@ -356,6 +424,15 @@ export function TerminalViewport({
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    const outputBatcher = createTerminalOutputBatcher({
+      write: (data) => {
+        terminal.write(data);
+      },
+    });
+    const writeBufferedSystemMessage = (targetTerminal: Terminal, message: string) => {
+      outputBatcher.flush();
+      writeSystemMessage(targetTerminal, message);
+    };
 
     const syncTerminalFontFamily = () => {
       const nextFontFamily = readTerminalFontFamily();
@@ -446,7 +523,10 @@ export function TerminalViewport({
       try {
         await api.terminal.write({ threadId, terminalId, data });
       } catch (error) {
-        writeSystemMessage(activeTerminal, error instanceof Error ? error.message : fallbackError);
+        writeBufferedSystemMessage(
+          activeTerminal,
+          error instanceof Error ? error.message : fallbackError,
+        );
       }
     };
 
@@ -527,7 +607,7 @@ export function TerminalViewport({
 
               if (match.kind === "url") {
                 void localApi.shell.openExternal(match.text).catch((error: unknown) => {
-                  writeSystemMessage(
+                  writeBufferedSystemMessage(
                     latestTerminal,
                     error instanceof Error ? error.message : "Unable to open link",
                   );
@@ -537,7 +617,7 @@ export function TerminalViewport({
 
               const target = resolvePathLinkTarget(match.text, cwd);
               void openInPreferredEditor(localApi, target).catch((error) => {
-                writeSystemMessage(
+                writeBufferedSystemMessage(
                   latestTerminal,
                   error instanceof Error ? error.message : "Unable to open path",
                 );
@@ -552,7 +632,7 @@ export function TerminalViewport({
       void api.terminal
         .write({ threadId, terminalId, data })
         .catch((err) =>
-          writeSystemMessage(
+          writeBufferedSystemMessage(
             terminal,
             err instanceof Error ? err.message : "Terminal write failed",
           ),
@@ -613,10 +693,12 @@ export function TerminalViewport({
       }
 
       if (event.type === "output") {
-        activeTerminal.write(event.data);
+        outputBatcher.writeOutput(event.data);
         clearSelectionAction();
         return;
       }
+
+      outputBatcher.flush();
 
       if (event.type === "started" || event.type === "restarted") {
         hasHandledExitRef.current = false;
@@ -633,7 +715,7 @@ export function TerminalViewport({
       }
 
       if (event.type === "error") {
-        writeSystemMessage(activeTerminal, event.message);
+        writeBufferedSystemMessage(activeTerminal, event.message);
         return;
       }
 
@@ -643,7 +725,7 @@ export function TerminalViewport({
       ]
         .filter((value): value is string => value !== null)
         .join(", ");
-      writeSystemMessage(
+      writeBufferedSystemMessage(
         activeTerminal,
         details.length > 0 ? `Process exited (${details})` : "Process exited",
       );
@@ -737,7 +819,7 @@ export function TerminalViewport({
         }
       } catch (err) {
         if (disposed) return;
-        writeSystemMessage(
+        writeBufferedSystemMessage(
           terminal,
           err instanceof Error ? err.message : "Failed to open terminal",
         );
@@ -766,6 +848,7 @@ export function TerminalViewport({
     void openTerminal();
 
     return () => {
+      outputBatcher.dispose();
       disposed = true;
       terminalHydratedRef.current = false;
       lastAppliedTerminalEventIdRef.current = 0;
