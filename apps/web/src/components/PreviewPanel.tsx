@@ -1,4 +1,4 @@
-import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
+import { File as DiffsFile } from "@pierre/diffs/react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useSearch } from "@tanstack/react-router";
 import { Schema } from "effect";
@@ -15,7 +15,7 @@ import {
 
 import { ensureEnvironmentApi } from "../environmentApi";
 import { parsePreviewRouteSearch } from "../previewRouteSearch";
-import { resolveDiffThemeName } from "../lib/diffRendering";
+import { fnv1a32, resolveDiffThemeName } from "../lib/diffRendering";
 import { useSettings } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
 import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";
@@ -41,52 +41,36 @@ const PREVIEW_TREE_WIDTH_STORAGE_KEY = "chat_preview_tree_width";
 const PREVIEW_TREE_MIN_WIDTH = 220;
 const PREVIEW_TREE_DEFAULT_WIDTH = 280;
 const PREVIEW_TREE_MAX_RATIO = 0.55;
-const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
 const PREVIEW_CODE_CSS = `
-.preview-panel-shiki {
-  background-color: color-mix(in srgb, var(--card) 90%, var(--background));
-  --preview-line-number-width: 2rem;
-  --preview-line-number-gap: 0.75rem;
-}
-
-.preview-panel-shiki pre {
-  margin: 0;
-  line-height: 0;
-}
-
-.preview-panel-shiki pre,
-.preview-panel-shiki code {
-  background: transparent !important;
-}
-
-.preview-panel-shiki code {
-  counter-reset: preview-line;
-  display: grid;
-  font-size: 11px;
-}
-
-.preview-panel-shiki .line {
+.preview-panel-diffs-file {
   display: block;
+  min-height: 100%;
+  background-color: color-mix(in srgb, var(--card) 90%, var(--background));
+}
+`;
+
+const PREVIEW_FILE_UNSAFE_CSS = `
+[data-file] {
+  --diffs-bg: color-mix(in srgb, var(--card) 90%, var(--background)) !important;
+  --diffs-light-bg: color-mix(in srgb, var(--card) 90%, var(--background)) !important;
+  --diffs-dark-bg: color-mix(in srgb, var(--card) 90%, var(--background)) !important;
+  --diffs-token-light-bg: transparent;
+  --diffs-token-dark-bg: transparent;
+  background-color: var(--diffs-bg) !important;
+}
+
+[data-content] {
+  padding: 0.75rem;
+}
+
+[data-line],
+[data-column-number] {
+  font-size: 11px;
   line-height: 1.25rem;
-  padding-left: calc(var(--preview-line-number-width) + var(--preview-line-number-gap));
-  text-indent: calc(-1 * (var(--preview-line-number-width) + var(--preview-line-number-gap)));
 }
 
-.preview-panel-shiki .line::before {
-  counter-increment: preview-line;
-  content: counter(preview-line);
-  display: inline-block;
-  width: var(--preview-line-number-width);
-  margin-right: var(--preview-line-number-gap);
+[data-line-number-content] {
   color: color-mix(in srgb, var(--muted-foreground) 85%, transparent);
-  text-align: right;
-  text-indent: 0;
-  user-select: none;
-}
-
-.preview-panel-shiki.preview-wrap .line {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 `;
 
@@ -101,25 +85,6 @@ type RichPreviewFileData = {
   readonly base64?: string;
   readonly mimeType?: string;
 };
-
-function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
-  const cached = highlighterPromiseCache.get(language);
-  if (cached) return cached;
-
-  const promise = getSharedHighlighter({
-    themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light")],
-    langs: [language as SupportedLanguages],
-    preferredHighlighter: "shiki-js",
-  }).catch((err) => {
-    highlighterPromiseCache.delete(language);
-    if (language === "text") {
-      throw err;
-    }
-    return getHighlighterPromise("text");
-  });
-  highlighterPromiseCache.set(language, promise);
-  return promise;
-}
 
 function clampTreeWidth(width: number, containerWidth: number): number {
   const maxWidth = Math.max(
@@ -149,6 +114,10 @@ function isMissingWorkspaceFileError(message: string | null): boolean {
     normalized.includes("file not found") ||
     normalized.includes("cannot find the file")
   );
+}
+
+function buildPreviewFileCacheKey(filePath: string, contents: string): string {
+  return `preview:${filePath}:${contents.length}:${fnv1a32(contents).toString(36)}`;
 }
 
 const EMPTY_TURN_DIFF_SUMMARIES: readonly TurnDiffSummary[] = [];
@@ -214,7 +183,6 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
   const activeCwd = activeThread?.worktreePath ?? activeProject?.cwd ?? null;
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [wrapPreviewLines, setWrapPreviewLines] = useState(settings.diffWordWrap);
-  const [highlightedPreviewHtml, setHighlightedPreviewHtml] = useState<string | null>(null);
   const splitLayoutRef = useRef<HTMLDivElement | null>(null);
   const [treeWidth, setTreeWidth] = useState(() => {
     if (typeof window === "undefined") {
@@ -420,35 +388,19 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
       .catch(() => undefined);
   }, [activeCwd, refetchProjectFiles, selectedFileError, selectedFilePath]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const contents = richSelectedFileData?.contents ?? "";
-    if (!selectedFilePath || selectedFileKind !== "text" || contents.length === 0) {
-      setHighlightedPreviewHtml(null);
-      return;
+  const previewTextFile = useMemo(() => {
+    const contents = richSelectedFileData?.contents;
+    if (!selectedFilePath || selectedFileKind !== "text" || contents === undefined) {
+      return null;
     }
 
-    const language = inferPreviewLanguage(selectedFilePath);
-    getHighlighterPromise(language)
-      .then((highlighter) => {
-        const html = highlighter.codeToHtml(contents, {
-          lang: language,
-          theme: resolveDiffThemeName(resolvedTheme),
-        });
-        if (!cancelled) {
-          setHighlightedPreviewHtml(html);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setHighlightedPreviewHtml(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
+    return {
+      name: selectedFilePath,
+      contents,
+      lang: inferPreviewLanguage(selectedFilePath),
+      cacheKey: buildPreviewFileCacheKey(selectedFilePath, contents),
     };
-  }, [resolvedTheme, richSelectedFileData?.contents, selectedFileKind, selectedFilePath]);
+  }, [richSelectedFileData?.contents, selectedFileKind, selectedFilePath]);
 
   const onResizePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -654,13 +606,18 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
                         }`}
                       />
                     </div>
-                  ) : highlightedPreviewHtml ? (
-                    <div
-                      className={cn(
-                        "preview-panel-shiki min-h-full p-3",
-                        wrapPreviewLines && "preview-wrap",
-                      )}
-                      dangerouslySetInnerHTML={{ __html: highlightedPreviewHtml }}
+                  ) : previewTextFile ? (
+                    <DiffsFile
+                      file={previewTextFile}
+                      className="preview-panel-diffs-file"
+                      options={{
+                        disableFileHeader: true,
+                        overflow: wrapPreviewLines ? "wrap" : "scroll",
+                        theme: resolveDiffThemeName(resolvedTheme),
+                        themeType: resolvedTheme,
+                        unsafeCSS: PREVIEW_FILE_UNSAFE_CSS,
+                        tokenizeMaxLineLength: 1_000,
+                      }}
                     />
                   ) : (
                     <pre

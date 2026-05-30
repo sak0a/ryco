@@ -1,18 +1,58 @@
-export type DiffSearchLineKind = "addition" | "deletion";
+export type DiffSearchLineKind = "addition" | "deletion" | "context";
+export type DiffSearchField = "path" | "previousPath" | DiffSearchLineKind;
+export type DiffSearchRenderMode = "stacked" | "split";
+
+interface DiffSearchContextContent {
+  readonly type: "context";
+  readonly lines: number;
+  readonly additionLineIndex: number;
+  readonly deletionLineIndex: number;
+}
+
+interface DiffSearchChangeContent {
+  readonly type: "change";
+  readonly deletions: number;
+  readonly deletionLineIndex: number;
+  readonly additions: number;
+  readonly additionLineIndex: number;
+}
+
+interface DiffSearchHunk {
+  readonly hunkContent: readonly (DiffSearchContextContent | DiffSearchChangeContent)[];
+  readonly splitLineStart: number;
+  readonly unifiedLineStart: number;
+}
 
 export interface DiffSearchFile {
   readonly name?: string | null;
   readonly prevName?: string | null;
   readonly additionLines: readonly string[];
   readonly deletionLines: readonly string[];
+  readonly hunks?: readonly DiffSearchHunk[];
 }
 
 export interface DiffSearchMatch {
   readonly fileIndex: number;
-  readonly field: "path" | "previousPath" | DiffSearchLineKind;
+  readonly field: DiffSearchField;
   readonly lineIndex?: number;
+  readonly unifiedLineIndex?: number;
+  readonly splitLineIndex?: number;
   readonly start: number;
   readonly end: number;
+}
+
+export interface DiffSearchIndexRecord {
+  readonly fileIndex: number;
+  readonly field: DiffSearchField;
+  readonly lineIndex?: number;
+  readonly unifiedLineIndex?: number;
+  readonly splitLineIndex?: number;
+  readonly text: string;
+  readonly normalizedText: string;
+}
+
+export interface DiffSearchIndex {
+  readonly records: readonly DiffSearchIndexRecord[];
 }
 
 export function resolveDiffFilePath(fileDiff: Pick<DiffSearchFile, "name" | "prevName">): string {
@@ -28,15 +68,145 @@ export function normalizeDiffSearchQuery(query: string, caseSensitive = false): 
   return caseSensitive ? trimmed : trimmed.toLowerCase();
 }
 
-function collectTextMatches(input: {
-  readonly text: string;
+function appendSearchRecord(
+  records: DiffSearchIndexRecord[],
+  input: {
+    readonly fileIndex: number;
+    readonly field: DiffSearchField;
+    readonly text: string | undefined;
+    readonly lineIndex?: number;
+    readonly unifiedLineIndex?: number;
+    readonly splitLineIndex?: number;
+  },
+): void {
+  if (input.text === undefined) return;
+  records.push({
+    fileIndex: input.fileIndex,
+    field: input.field,
+    text: input.text,
+    normalizedText: input.text.toLowerCase(),
+    ...(input.lineIndex === undefined ? {} : { lineIndex: input.lineIndex }),
+    ...(input.unifiedLineIndex === undefined ? {} : { unifiedLineIndex: input.unifiedLineIndex }),
+    ...(input.splitLineIndex === undefined ? {} : { splitLineIndex: input.splitLineIndex }),
+  });
+}
+
+function appendFallbackLineRecords(
+  records: DiffSearchIndexRecord[],
+  file: DiffSearchFile,
+  fileIndex: number,
+): void {
+  file.additionLines.forEach((line, lineIndex) => {
+    appendSearchRecord(records, {
+      fileIndex,
+      field: "addition",
+      lineIndex,
+      text: line,
+    });
+  });
+  file.deletionLines.forEach((line, lineIndex) => {
+    appendSearchRecord(records, {
+      fileIndex,
+      field: "deletion",
+      lineIndex,
+      text: line,
+    });
+  });
+}
+
+function appendHunkLineRecords(
+  records: DiffSearchIndexRecord[],
+  file: DiffSearchFile,
+  fileIndex: number,
+): boolean {
+  if (!file.hunks || file.hunks.length === 0) {
+    return false;
+  }
+
+  for (const hunk of file.hunks) {
+    let unifiedLineCursor = hunk.unifiedLineStart;
+    let splitLineCursor = hunk.splitLineStart;
+
+    for (const content of hunk.hunkContent) {
+      if (content.type === "context") {
+        for (let offset = 0; offset < content.lines; offset += 1) {
+          const additionLineIndex = content.additionLineIndex + offset;
+          const deletionLineIndex = content.deletionLineIndex + offset;
+          appendSearchRecord(records, {
+            fileIndex,
+            field: "context",
+            lineIndex: additionLineIndex,
+            unifiedLineIndex: unifiedLineCursor + offset,
+            splitLineIndex: splitLineCursor + offset,
+            text: file.additionLines[additionLineIndex] ?? file.deletionLines[deletionLineIndex],
+          });
+        }
+        unifiedLineCursor += content.lines;
+        splitLineCursor += content.lines;
+        continue;
+      }
+
+      for (let offset = 0; offset < content.deletions; offset += 1) {
+        const deletionLineIndex = content.deletionLineIndex + offset;
+        appendSearchRecord(records, {
+          fileIndex,
+          field: "deletion",
+          lineIndex: deletionLineIndex,
+          unifiedLineIndex: unifiedLineCursor + offset,
+          splitLineIndex: splitLineCursor + offset,
+          text: file.deletionLines[deletionLineIndex],
+        });
+      }
+      for (let offset = 0; offset < content.additions; offset += 1) {
+        const additionLineIndex = content.additionLineIndex + offset;
+        appendSearchRecord(records, {
+          fileIndex,
+          field: "addition",
+          lineIndex: additionLineIndex,
+          unifiedLineIndex: unifiedLineCursor + content.deletions + offset,
+          splitLineIndex: splitLineCursor + offset,
+          text: file.additionLines[additionLineIndex],
+        });
+      }
+
+      unifiedLineCursor += content.deletions + content.additions;
+      splitLineCursor += Math.max(content.deletions, content.additions);
+    }
+  }
+
+  return true;
+}
+
+export function buildDiffSearchIndex(files: readonly DiffSearchFile[]): DiffSearchIndex {
+  const records: DiffSearchIndexRecord[] = [];
+  files.forEach((file, fileIndex) => {
+    appendSearchRecord(records, {
+      text: resolveDiffFilePath(file),
+      fileIndex,
+      field: "path",
+    });
+    if (file.prevName) {
+      appendSearchRecord(records, {
+        text: resolveDiffFilePath({ name: file.prevName }),
+        fileIndex,
+        field: "previousPath",
+      });
+    }
+
+    if (!appendHunkLineRecords(records, file, fileIndex)) {
+      appendFallbackLineRecords(records, file, fileIndex);
+    }
+  });
+
+  return { records };
+}
+
+function collectRecordMatches(input: {
+  readonly record: DiffSearchIndexRecord;
   readonly needle: string;
   readonly caseSensitive: boolean;
-  readonly fileIndex: number;
-  readonly field: DiffSearchMatch["field"];
-  readonly lineIndex?: number;
 }): DiffSearchMatch[] {
-  const haystack = input.caseSensitive ? input.text : input.text.toLowerCase();
+  const haystack = input.caseSensitive ? input.record.text : input.record.normalizedText;
   const matches: DiffSearchMatch[] = [];
   let from = 0;
   while (true) {
@@ -44,9 +214,15 @@ function collectTextMatches(input: {
     if (start === -1) return matches;
     const end = start + input.needle.length;
     matches.push({
-      fileIndex: input.fileIndex,
-      field: input.field,
-      ...(input.lineIndex === undefined ? {} : { lineIndex: input.lineIndex }),
+      fileIndex: input.record.fileIndex,
+      field: input.record.field,
+      ...(input.record.lineIndex === undefined ? {} : { lineIndex: input.record.lineIndex }),
+      ...(input.record.unifiedLineIndex === undefined
+        ? {}
+        : { unifiedLineIndex: input.record.unifiedLineIndex }),
+      ...(input.record.splitLineIndex === undefined
+        ? {}
+        : { splitLineIndex: input.record.splitLineIndex }),
       start,
       end,
     });
@@ -54,8 +230,14 @@ function collectTextMatches(input: {
   }
 }
 
+function isDiffSearchIndex(
+  input: readonly DiffSearchFile[] | DiffSearchIndex,
+): input is DiffSearchIndex {
+  return !Array.isArray(input);
+}
+
 export function findDiffSearchMatches(
-  files: readonly DiffSearchFile[],
+  source: readonly DiffSearchFile[] | DiffSearchIndex,
   query: string,
   options?: { readonly caseSensitive?: boolean },
 ): DiffSearchMatch[] {
@@ -63,60 +245,32 @@ export function findDiffSearchMatches(
   const needle = normalizeDiffSearchQuery(query, caseSensitive);
   if (!needle) return [];
 
+  const index = isDiffSearchIndex(source) ? source : buildDiffSearchIndex(source);
   const matches: DiffSearchMatch[] = [];
-  files.forEach((file, fileIndex) => {
-    matches.push(
-      ...collectTextMatches({
-        text: resolveDiffFilePath(file),
-        needle,
-        caseSensitive,
-        fileIndex,
-        field: "path",
-      }),
-    );
-    if (file.prevName) {
-      matches.push(
-        ...collectTextMatches({
-          text: file.prevName,
-          needle,
-          caseSensitive,
-          fileIndex,
-          field: "previousPath",
-        }),
-      );
-    }
-
-    file.additionLines.forEach((line, lineIndex) => {
-      matches.push(
-        ...collectTextMatches({
-          text: line,
-          needle,
-          caseSensitive,
-          fileIndex,
-          field: "addition",
-          lineIndex,
-        }),
-      );
-    });
-    file.deletionLines.forEach((line, lineIndex) => {
-      matches.push(
-        ...collectTextMatches({
-          text: line,
-          needle,
-          caseSensitive,
-          fileIndex,
-          field: "deletion",
-          lineIndex,
-        }),
-      );
-    });
-  });
+  for (const record of index.records) {
+    matches.push(...collectRecordMatches({ record, needle, caseSensitive }));
+  }
 
   return matches;
 }
 
 export function deriveDiffSearchFileIndexes(matches: readonly DiffSearchMatch[]): number[] {
   return [...new Set(matches.map((match) => match.fileIndex))];
+}
+
+export function groupDiffSearchMatchesByFileIndex(
+  matches: readonly DiffSearchMatch[],
+): ReadonlyMap<number, readonly DiffSearchMatch[]> {
+  const groups = new Map<number, DiffSearchMatch[]>();
+  for (const match of matches) {
+    const group = groups.get(match.fileIndex);
+    if (group) {
+      group.push(match);
+    } else {
+      groups.set(match.fileIndex, [match]);
+    }
+  }
+  return groups;
 }
 
 export function getNextDiffSearchMatchIndex(
@@ -126,4 +280,48 @@ export function getNextDiffSearchMatchIndex(
 ): number {
   if (matchCount <= 0) return 0;
   return (currentIndex + delta + matchCount) % matchCount;
+}
+
+export function getDiffSearchMatchRenderedLineIndex(
+  match: DiffSearchMatch,
+  renderMode: DiffSearchRenderMode,
+): number | null {
+  if (match.field === "path" || match.field === "previousPath") {
+    return null;
+  }
+  return (
+    (renderMode === "split" ? match.splitLineIndex : match.unifiedLineIndex) ??
+    match.lineIndex ??
+    null
+  );
+}
+
+export function isDiffSearchMatchLineField(field: DiffSearchField): field is DiffSearchLineKind {
+  return field === "addition" || field === "deletion" || field === "context";
+}
+
+export function doesDiffSearchMatchRenderedLine(
+  match: DiffSearchMatch,
+  input: {
+    readonly renderMode: DiffSearchRenderMode;
+    readonly lineIndex: number;
+    readonly lineType: string | null;
+  },
+): boolean {
+  if (!isDiffSearchMatchLineField(match.field)) {
+    return false;
+  }
+  const renderedLineIndex = getDiffSearchMatchRenderedLineIndex(match, input.renderMode);
+  if (renderedLineIndex !== input.lineIndex) {
+    return false;
+  }
+
+  switch (match.field) {
+    case "addition":
+      return input.lineType === "change-addition" || input.lineType === "addition";
+    case "deletion":
+      return input.lineType === "change-deletion" || input.lineType === "deletion";
+    case "context":
+      return input.lineType === "context" || input.lineType === "context-expanded";
+  }
 }

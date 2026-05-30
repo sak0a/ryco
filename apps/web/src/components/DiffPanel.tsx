@@ -1,5 +1,6 @@
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type FileDiffMetadata, Virtualizer } from "@pierre/diffs/react";
+import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { scopeThreadRef } from "@ryco/client-runtime";
@@ -43,9 +44,14 @@ import { usePerfMark } from "../perf/tabSwitchInstrumentation";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import {
+  buildDiffSearchIndex,
   deriveDiffSearchFileIndexes,
+  doesDiffSearchMatchRenderedLine,
+  type DiffSearchMatch,
   findDiffSearchMatches,
+  getDiffSearchMatchRenderedLineIndex,
   getNextDiffSearchMatchIndex,
+  groupDiffSearchMatchesByFileIndex,
   normalizeDiffSearchQuery,
   resolveDiffFilePath,
 } from "./DiffPanel.search.logic";
@@ -179,6 +185,9 @@ function buildFileDiffRenderKey(fileDiff: FileDiffMetadata): string {
 }
 
 const DIFF_SEARCH_HIGHLIGHT_NAME = "s3-diff-search-match";
+const DIFF_SEARCH_DEBOUNCE_MS = 150;
+const DIFF_SEARCH_HIGHLIGHT_REFRESH_DELAY_MS = 80;
+const DIFF_SEARCH_HIGHLIGHT_VIEWPORT_MARGIN_PX = 1600;
 
 function isCSSHighlightSupported(): boolean {
   return (
@@ -188,66 +197,182 @@ function isCSSHighlightSupported(): boolean {
   );
 }
 
-function collectDiffSearchRangesIn(scope: ParentNode, queryLower: string, ranges: Range[]): void {
-  const lineElements = scope.querySelectorAll<HTMLElement>("[data-line]");
-  for (const lineElement of lineElements) {
-    const textNodes: Text[] = [];
-    const walker = document.createTreeWalker(lineElement, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        const parent = node.parentElement;
-        if (parent && parent.closest("[data-line-number-content]")) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
-    let current = walker.nextNode();
-    while (current) {
-      textNodes.push(current as Text);
-      current = walker.nextNode();
-    }
-    if (textNodes.length === 0) continue;
-
-    let aggregateText = "";
-    const offsets: { node: Text; start: number; end: number }[] = [];
-    for (const textNode of textNodes) {
-      const text = textNode.data;
-      offsets.push({
-        node: textNode,
-        start: aggregateText.length,
-        end: aggregateText.length + text.length,
-      });
-      aggregateText += text;
-    }
-    const aggregateLower = aggregateText.toLowerCase();
-
-    let from = 0;
-    while (true) {
-      const matchIndex = aggregateLower.indexOf(queryLower, from);
-      if (matchIndex === -1) break;
-      const matchEnd = matchIndex + queryLower.length;
-      const startInfo = offsets.find((info) => info.start <= matchIndex && matchIndex < info.end);
-      const endInfo = offsets.find((info) => info.start < matchEnd && matchEnd <= info.end);
-      if (startInfo && endInfo) {
-        const range = document.createRange();
-        range.setStart(startInfo.node, matchIndex - startInfo.start);
-        range.setEnd(endInfo.node, matchEnd - endInfo.start);
-        ranges.push(range);
-      }
-      from = matchEnd > matchIndex ? matchEnd : matchIndex + 1;
-    }
-  }
+function isNearViewport(
+  element: Element,
+  viewport: Element,
+  margin = DIFF_SEARCH_HIGHLIGHT_VIEWPORT_MARGIN_PX,
+): boolean {
+  const elementRect = element.getBoundingClientRect();
+  const viewportRect = viewport.getBoundingClientRect();
+  return (
+    elementRect.bottom >= viewportRect.top - margin &&
+    elementRect.top <= viewportRect.bottom + margin &&
+    elementRect.right >= viewportRect.left - margin &&
+    elementRect.left <= viewportRect.right + margin
+  );
 }
 
-function findDiffSearchRanges(rootElement: HTMLElement, query: string): Range[] {
-  if (!query) return [];
-  const queryLower = query.toLowerCase();
-  const ranges: Range[] = [];
-  const containers = rootElement.querySelectorAll<HTMLElement>("diffs-container");
+function collectDiffLineTextOffsets(lineElement: HTMLElement): {
+  readonly textLength: number;
+  readonly offsets: readonly {
+    readonly node: Text;
+    readonly start: number;
+    readonly end: number;
+  }[];
+} {
+  const offsets: { node: Text; start: number; end: number }[] = [];
+  const walker = document.createTreeWalker(lineElement, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (parent && parent.closest("[data-line-number-content]")) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  let current = walker.nextNode();
+  let textLength = 0;
+  while (current) {
+    const textNode = current as Text;
+    const nextTextLength = textLength + textNode.data.length;
+    offsets.push({
+      node: textNode,
+      start: textLength,
+      end: nextTextLength,
+    });
+    textLength = nextTextLength;
+    current = walker.nextNode();
+  }
+  return { offsets, textLength };
+}
+
+function findTextOffsetPosition(
+  offsets: readonly { readonly node: Text; readonly start: number; readonly end: number }[],
+  offset: number,
+  edge: "start" | "end",
+): { readonly node: Text; readonly offset: number } | null {
+  for (const info of offsets) {
+    if (offset < info.start || offset > info.end) {
+      continue;
+    }
+    if (offset === info.end && edge === "start") {
+      continue;
+    }
+    return {
+      node: info.node,
+      offset: offset - info.start,
+    };
+  }
+  return null;
+}
+
+function appendDiffLineSearchRange(
+  lineElement: HTMLElement,
+  match: DiffSearchMatch,
+  ranges: Range[],
+): void {
+  const { offsets, textLength } = collectDiffLineTextOffsets(lineElement);
+  if (
+    offsets.length === 0 ||
+    match.start < 0 ||
+    match.end > textLength ||
+    match.start >= match.end
+  ) {
+    return;
+  }
+
+  const start = findTextOffsetPosition(offsets, match.start, "start");
+  const end = findTextOffsetPosition(offsets, match.end, "end");
+  if (!start || !end) return;
+
+  const range = document.createRange();
+  range.setStart(start.node, start.offset);
+  range.setEnd(end.node, end.offset);
+  ranges.push(range);
+}
+
+function getRenderedLineSearchMatches(input: {
+  readonly matches: readonly DiffSearchMatch[];
+  readonly renderMode: DiffRenderMode;
+  readonly lineIndex: number;
+  readonly lineType: string | null;
+}): DiffSearchMatch[] {
+  return input.matches.filter((match) =>
+    doesDiffSearchMatchRenderedLine(match, {
+      renderMode: input.renderMode,
+      lineIndex: input.lineIndex,
+      lineType: input.lineType,
+    }),
+  );
+}
+
+function findRenderedDiffLineElement(input: {
+  readonly fileElement: HTMLElement;
+  readonly match: DiffSearchMatch;
+  readonly renderMode: DiffRenderMode;
+}): HTMLElement | null {
+  const renderedLineIndex = getDiffSearchMatchRenderedLineIndex(input.match, input.renderMode);
+  if (renderedLineIndex === null) {
+    return null;
+  }
+
+  const containers = input.fileElement.querySelectorAll<HTMLElement>("diffs-container");
   for (const container of containers) {
-    const shadow = container.shadowRoot;
-    if (!shadow) continue;
-    collectDiffSearchRangesIn(shadow, queryLower, ranges);
+    const candidates = container.shadowRoot?.querySelectorAll<HTMLElement>(
+      `[data-line][data-line-index="${renderedLineIndex}"]`,
+    );
+    for (const candidate of candidates ?? []) {
+      if (
+        doesDiffSearchMatchRenderedLine(input.match, {
+          renderMode: input.renderMode,
+          lineIndex: renderedLineIndex,
+          lineType: candidate.getAttribute("data-line-type"),
+        })
+      ) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
+function findDiffSearchRanges(input: {
+  readonly rootElement: HTMLElement;
+  readonly viewportElement: HTMLElement;
+  readonly matchesByFileIndex: ReadonlyMap<number, readonly DiffSearchMatch[]>;
+  readonly renderMode: DiffRenderMode;
+}): Range[] {
+  const ranges: Range[] = [];
+  const fileElements = input.rootElement.querySelectorAll<HTMLElement>("[data-diff-file-index]");
+  for (const fileElement of fileElements) {
+    if (!isNearViewport(fileElement, input.viewportElement)) continue;
+    const rawFileIndex = fileElement.dataset.diffFileIndex;
+    const fileIndex = rawFileIndex ? Number.parseInt(rawFileIndex, 10) : Number.NaN;
+    if (!Number.isFinite(fileIndex)) continue;
+    const matches = input.matchesByFileIndex.get(fileIndex);
+    if (!matches || matches.length === 0) continue;
+
+    const containers = fileElement.querySelectorAll<HTMLElement>("diffs-container");
+    for (const container of containers) {
+      const lineElements = container.shadowRoot?.querySelectorAll<HTMLElement>(
+        "[data-line][data-line-index]",
+      );
+      for (const lineElement of lineElements ?? []) {
+        if (!isNearViewport(lineElement, input.viewportElement)) continue;
+        const lineIndex = Number.parseInt(lineElement.getAttribute("data-line-index") ?? "", 10);
+        if (!Number.isFinite(lineIndex)) continue;
+        const lineMatches = getRenderedLineSearchMatches({
+          matches,
+          renderMode: input.renderMode,
+          lineIndex,
+          lineType: lineElement.getAttribute("data-line-type"),
+        });
+        for (const match of lineMatches) {
+          appendDiffLineSearchRange(lineElement, match, ranges);
+        }
+      }
+    }
   }
   return ranges;
 }
@@ -285,6 +410,11 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     () => new Set(),
   );
   const [diffSearchQuery, setDiffSearchQuery] = useState("");
+  const [debouncedDiffSearchQuery] = useDebouncedValue(diffSearchQuery, {
+    wait: DIFF_SEARCH_DEBOUNCE_MS,
+  });
+  const effectiveDiffSearchQuery =
+    diffSearchQuery.trim().length === 0 ? "" : debouncedDiffSearchQuery;
   const [currentDiffMatchIndex, setCurrentDiffMatchIndex] = useState(0);
   const diffSearchInputRef = useRef<HTMLInputElement>(null);
   const patchViewportRef = useRef<HTMLDivElement>(null);
@@ -433,54 +563,103 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     );
   }, [renderablePatch]);
 
+  const diffSearchIndex = useMemo(() => buildDiffSearchIndex(renderableFiles), [renderableFiles]);
   const normalizedDiffSearchQuery = useMemo(
-    () => normalizeDiffSearchQuery(diffSearchQuery),
-    [diffSearchQuery],
+    () => normalizeDiffSearchQuery(effectiveDiffSearchQuery),
+    [effectiveDiffSearchQuery],
   );
   const diffSearchMatches = useMemo(
-    () => findDiffSearchMatches(renderableFiles, diffSearchQuery),
-    [diffSearchQuery, renderableFiles],
+    () => findDiffSearchMatches(diffSearchIndex, effectiveDiffSearchQuery),
+    [diffSearchIndex, effectiveDiffSearchQuery],
   );
-  const filteredFiles = useMemo(() => {
-    if (!normalizedDiffSearchQuery) return renderableFiles;
-    return deriveDiffSearchFileIndexes(diffSearchMatches).map((index) => renderableFiles[index]!);
-  }, [diffSearchMatches, normalizedDiffSearchQuery, renderableFiles]);
+  const diffSearchMatchesByFileIndex = useMemo(
+    () => groupDiffSearchMatchesByFileIndex(diffSearchMatches),
+    [diffSearchMatches],
+  );
+  const renderableFileEntries = useMemo(
+    () => renderableFiles.map((fileDiff, fileIndex) => ({ fileDiff, fileIndex })),
+    [renderableFiles],
+  );
+  const filteredFileEntries = useMemo(() => {
+    if (!normalizedDiffSearchQuery) return renderableFileEntries;
+    return deriveDiffSearchFileIndexes(diffSearchMatches).map((index) => ({
+      fileDiff: renderableFiles[index]!,
+      fileIndex: index,
+    }));
+  }, [diffSearchMatches, normalizedDiffSearchQuery, renderableFileEntries, renderableFiles]);
 
   useEffect(() => {
     setCurrentDiffMatchIndex(0);
   }, [normalizedDiffSearchQuery, renderableFiles]);
 
+  useEffect(() => {
+    setCurrentDiffMatchIndex((current) => {
+      if (diffSearchMatches.length === 0) return 0;
+      return Math.min(current, diffSearchMatches.length - 1);
+    });
+  }, [diffSearchMatches.length]);
+
   const goToDiffMatch = useCallback(
     (delta: 1 | -1) => {
-      if (filteredFiles.length === 0) return;
-      const next = getNextDiffSearchMatchIndex(currentDiffMatchIndex, filteredFiles.length, delta);
+      if (diffSearchMatches.length === 0) return;
+      const next = getNextDiffSearchMatchIndex(
+        currentDiffMatchIndex,
+        diffSearchMatches.length,
+        delta,
+      );
       setCurrentDiffMatchIndex(next);
-      const targetFile = filteredFiles[next];
-      if (!targetFile || !patchViewportRef.current) return;
-      const filePath = resolveFileDiffPath(targetFile);
-      const target = Array.from(
-        patchViewportRef.current.querySelectorAll<HTMLElement>("[data-diff-file-path]"),
-      ).find((element) => element.dataset.diffFilePath === filePath);
-      target?.scrollIntoView({ block: "start", behavior: "smooth" });
+      const match = diffSearchMatches[next];
+      const root = patchViewportRef.current;
+      if (!match || !root) return;
+      const targetFile = root.querySelector<HTMLElement>(
+        `[data-diff-file-index="${match.fileIndex}"]`,
+      );
+      if (!targetFile) return;
+
+      const targetLine = findRenderedDiffLineElement({
+        fileElement: targetFile,
+        match,
+        renderMode: diffRenderMode,
+      });
+      (targetLine ?? targetFile).scrollIntoView({ block: "center", behavior: "smooth" });
+      if (!targetLine && getDiffSearchMatchRenderedLineIndex(match, diffRenderMode) !== null) {
+        window.requestAnimationFrame(() => {
+          findRenderedDiffLineElement({
+            fileElement: targetFile,
+            match,
+            renderMode: diffRenderMode,
+          })?.scrollIntoView({ block: "center", behavior: "smooth" });
+        });
+      }
     },
-    [currentDiffMatchIndex, filteredFiles],
+    [currentDiffMatchIndex, diffRenderMode, diffSearchMatches],
   );
 
   useEffect(() => {
     if (!isCSSHighlightSupported()) return;
     const cssHighlights = (CSS as unknown as { highlights: Map<string, Highlight> }).highlights;
     const root = patchViewportRef.current;
-    if (!root || !normalizedDiffSearchQuery) {
+    if (!root || !normalizedDiffSearchQuery || diffSearchMatches.length === 0) {
       cssHighlights.delete(DIFF_SEARCH_HIGHLIGHT_NAME);
       return;
     }
 
     let frameId = 0;
+    let refreshTimeoutId = 0;
     const shadowObservers = new Map<ShadowRoot, MutationObserver>();
+    const viewport =
+      root.querySelector<HTMLElement>(".diff-render-surface") ??
+      root.querySelector<HTMLElement>("[data-virtualizer]") ??
+      root;
     const refreshHighlights = () => {
       frameId = 0;
       observeNewShadowRoots();
-      const ranges = findDiffSearchRanges(root, normalizedDiffSearchQuery);
+      const ranges = findDiffSearchRanges({
+        rootElement: root,
+        viewportElement: viewport,
+        matchesByFileIndex: diffSearchMatchesByFileIndex,
+        renderMode: diffRenderMode,
+      });
       if (ranges.length === 0) {
         cssHighlights.delete(DIFF_SEARCH_HIGHLIGHT_NAME);
         return;
@@ -488,34 +667,52 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       cssHighlights.set(DIFF_SEARCH_HIGHLIGHT_NAME, new Highlight(...ranges));
     };
     const scheduleRefresh = () => {
-      if (frameId !== 0) return;
-      frameId = window.requestAnimationFrame(refreshHighlights);
+      if (frameId !== 0 || refreshTimeoutId !== 0) return;
+      refreshTimeoutId = window.setTimeout(() => {
+        refreshTimeoutId = 0;
+        frameId = window.requestAnimationFrame(refreshHighlights);
+      }, DIFF_SEARCH_HIGHLIGHT_REFRESH_DELAY_MS);
     };
     const observeNewShadowRoots = () => {
-      const containers = root.querySelectorAll<HTMLElement>("diffs-container");
-      for (const container of containers) {
-        const shadow = container.shadowRoot;
-        if (!shadow || shadowObservers.has(shadow)) continue;
-        const observer = new MutationObserver(scheduleRefresh);
-        observer.observe(shadow, { childList: true, subtree: true, characterData: true });
-        shadowObservers.set(shadow, observer);
+      const fileElements = root.querySelectorAll<HTMLElement>("[data-diff-file-index]");
+      for (const fileElement of fileElements) {
+        if (!isNearViewport(fileElement, viewport)) continue;
+        const containers = fileElement.querySelectorAll<HTMLElement>("diffs-container");
+        for (const container of containers) {
+          const shadow = container.shadowRoot;
+          if (!shadow || shadowObservers.has(shadow)) continue;
+          const observer = new MutationObserver(scheduleRefresh);
+          observer.observe(shadow, { childList: true, subtree: true });
+          shadowObservers.set(shadow, observer);
+        }
       }
     };
 
     const lightObserver = new MutationObserver(scheduleRefresh);
     lightObserver.observe(root, { childList: true, subtree: true });
+    viewport.addEventListener("scroll", scheduleRefresh, { passive: true });
+    const resizeObserver = new ResizeObserver(scheduleRefresh);
+    resizeObserver.observe(viewport);
     scheduleRefresh();
 
     return () => {
       lightObserver.disconnect();
+      viewport.removeEventListener("scroll", scheduleRefresh);
+      resizeObserver.disconnect();
       for (const observer of shadowObservers.values()) {
         observer.disconnect();
       }
       shadowObservers.clear();
+      if (refreshTimeoutId !== 0) window.clearTimeout(refreshTimeoutId);
       if (frameId !== 0) window.cancelAnimationFrame(frameId);
       cssHighlights.delete(DIFF_SEARCH_HIGHLIGHT_NAME);
     };
-  }, [normalizedDiffSearchQuery, filteredFiles]);
+  }, [
+    diffRenderMode,
+    diffSearchMatches.length,
+    diffSearchMatchesByFileIndex,
+    normalizedDiffSearchQuery,
+  ]);
 
   useEffect(() => {
     if (renderableFiles.length === 0) {
@@ -872,14 +1069,14 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                   {normalizedDiffSearchQuery && (
                     <>
                       <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
-                        {filteredFiles.length === 0 ? 0 : currentDiffMatchIndex + 1} of{" "}
-                        {filteredFiles.length}
+                        {diffSearchMatches.length === 0 ? 0 : currentDiffMatchIndex + 1} of{" "}
+                        {diffSearchMatches.length}
                       </span>
                       <div className="flex shrink-0 items-center">
                         <button
                           type="button"
                           onClick={() => goToDiffMatch(-1)}
-                          disabled={filteredFiles.length === 0}
+                          disabled={diffSearchMatches.length === 0}
                           className="inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70"
                           aria-label="Previous match"
                           title="Previous match (Shift+Enter)"
@@ -889,7 +1086,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                         <button
                           type="button"
                           onClick={() => goToDiffMatch(1)}
-                          disabled={filteredFiles.length === 0}
+                          disabled={diffSearchMatches.length === 0}
                           className="inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70"
                           aria-label="Next match"
                           title="Next match (Enter)"
@@ -914,7 +1111,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                     </button>
                   )}
                 </div>
-                {filteredFiles.length === 0 ? (
+                {filteredFileEntries.length === 0 ? (
                   <div className="flex flex-1 items-center justify-center px-3 py-2 text-xs text-muted-foreground/70">
                     <p>No files match &ldquo;{diffSearchQuery}&rdquo;.</p>
                   </div>
@@ -926,7 +1123,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                       intersectionObserverMargin: 1200,
                     }}
                   >
-                    {filteredFiles.map((fileDiff) => {
+                    {filteredFileEntries.map(({ fileDiff, fileIndex }) => {
                       const filePath = resolveFileDiffPath(fileDiff);
                       const fileKey = buildFileDiffRenderKey(fileDiff);
                       const themedFileKey = `${fileKey}:${resolvedTheme}`;
@@ -935,6 +1132,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                         <div
                           key={themedFileKey}
                           data-diff-file-path={filePath}
+                          data-diff-file-index={fileIndex}
                           className="diff-render-file group/diff-file mb-2 rounded-md first:mt-2 last:mb-0"
                           onClickCapture={(event) => {
                             const nativeEvent = event.nativeEvent as MouseEvent;

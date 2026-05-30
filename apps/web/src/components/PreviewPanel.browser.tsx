@@ -51,14 +51,12 @@ const previewHarness = vi.hoisted(() => {
   };
 });
 
-vi.mock("@pierre/diffs", () => ({
-  getSharedHighlighter: vi.fn().mockResolvedValue({
-    codeToHtml: (contents: string) =>
-      `<pre><code>${contents
-        .split("\n")
-        .map((line) => `<span class="line">${line}</span>`)
-        .join("\n")}</code></pre>`,
-  }),
+vi.mock("@pierre/diffs/react", () => ({
+  File: (props: { file: { contents: string } }) => (
+    <pre>
+      <code>{props.file.contents}</code>
+    </pre>
+  ),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
