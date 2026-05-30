@@ -6,6 +6,7 @@ import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import {
   adaptDraftThreadsForSidebarProject,
   adaptProjectForSidebarTree,
+  createSidebarProjectDraftThreadsSelector,
 } from "./sidebarTreeAdapters";
 
 const environmentId = EnvironmentId.make("environment-local");
@@ -57,6 +58,41 @@ describe("sidebarTreeAdapters", () => {
     });
 
     expect(draftRows).toEqual([]);
+  });
+
+  it("keeps selector output stable when unrelated project drafts change", () => {
+    const project = makeSidebarProjectSnapshot();
+    const selector = createSidebarProjectDraftThreadsSelector(project);
+    const draftThread = makeDraftThread();
+    const first = selector({
+      draftThreadsByThreadKey: {
+        "draft-1": draftThread,
+      },
+    });
+    const unrelatedProjectDraft = makeDraftThread({
+      projectId: ProjectId.make("project-2"),
+      threadId: ThreadId.make("thread-other-draft"),
+    });
+
+    const withUnrelatedDraft = selector({
+      draftThreadsByThreadKey: {
+        "draft-1": draftThread,
+        "draft-unrelated": unrelatedProjectDraft,
+      },
+    });
+    const withChangedProjectDraft = selector({
+      draftThreadsByThreadKey: {
+        "draft-1": {
+          ...draftThread,
+          branch: "feature/sidebar-updated",
+        },
+        "draft-unrelated": unrelatedProjectDraft,
+      },
+    });
+
+    expect(withUnrelatedDraft).toBe(first);
+    expect(withChangedProjectDraft).not.toBe(first);
+    expect(withChangedProjectDraft[0]?.branch).toBe("feature/sidebar-updated");
   });
 });
 

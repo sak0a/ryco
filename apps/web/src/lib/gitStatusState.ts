@@ -17,7 +17,7 @@ import {
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
 import { useSettings } from "~/hooks/useSettings";
 
-interface GitStatusState {
+export interface GitStatusState {
   readonly data: VcsStatusResult | null;
   readonly error: GitManagerServiceError | null;
   readonly cause: Cause.Cause<GitManagerServiceError> | null;

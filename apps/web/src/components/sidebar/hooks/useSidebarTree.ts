@@ -37,6 +37,7 @@ export interface SidebarWorktreeDiffStats {
 export type SidebarTreeThread = SidebarThreadSummary & {
   draftId?: DraftId | undefined;
   manualStatusBucket?: SidebarStatusBucket | null | undefined;
+  sourceProjectId?: Project["id"] | undefined;
   statusPill?: ThreadStatusPill | null | undefined;
   worktreeId?: string | null | undefined;
 };

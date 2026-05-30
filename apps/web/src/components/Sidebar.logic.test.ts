@@ -8,6 +8,7 @@ import {
   deriveStatusBucket,
   getSidebarThreadIdsToPrewarm,
   getVisibleSidebarThreadIds,
+  resolveSharedSidebarGitStatusTarget,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
   getVisibleThreadsForProject,
@@ -20,10 +21,15 @@ import {
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  shouldAutoAnimateSidebarProjectList,
+  shouldAutoAnimateSidebarThreadLists,
   shouldSuggestArchive,
   shouldConfirmCloseSidebarThread,
   shouldClearThreadSelectionOnMouseDown,
+  shouldQuerySidebarSourceControlCounts,
   sortProjectsForSidebar,
+  SIDEBAR_AUTO_ANIMATE_PROJECT_LIMIT,
+  SIDEBAR_AUTO_ANIMATE_VISIBLE_THREAD_LIMIT,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
 import {
@@ -161,6 +167,61 @@ describe("getSidebarThreadIdsToPrewarm", () => {
 
   it("returns no thread ids when the limit is zero", () => {
     expect(getSidebarThreadIdsToPrewarm(["t1", "t2"], 0)).toEqual([]);
+  });
+});
+
+describe("sidebar performance gates", () => {
+  it("keeps autoAnimate enabled for small sidebars and disables it past project/thread limits", () => {
+    expect(shouldAutoAnimateSidebarProjectList(SIDEBAR_AUTO_ANIMATE_PROJECT_LIMIT)).toBe(true);
+    expect(shouldAutoAnimateSidebarProjectList(SIDEBAR_AUTO_ANIMATE_PROJECT_LIMIT + 1)).toBe(false);
+    expect(
+      shouldAutoAnimateSidebarThreadLists({
+        projectCount: 3,
+        visibleThreadCount: SIDEBAR_AUTO_ANIMATE_VISIBLE_THREAD_LIMIT,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAutoAnimateSidebarThreadLists({
+        projectCount: 3,
+        visibleThreadCount: SIDEBAR_AUTO_ANIMATE_VISIBLE_THREAD_LIMIT + 1,
+      }),
+    ).toBe(false);
+  });
+
+  it("runs source-control count queries only for requested sidebar surfaces", () => {
+    expect(
+      shouldQuerySidebarSourceControlCounts({ explorerOpen: false, projectVisible: false }),
+    ).toBe(false);
+    expect(
+      shouldQuerySidebarSourceControlCounts({ explorerOpen: false, projectVisible: true }),
+    ).toBe(true);
+    expect(
+      shouldQuerySidebarSourceControlCounts({ explorerOpen: true, projectVisible: false }),
+    ).toBe(true);
+  });
+
+  it("shares git status only when visible rows resolve to the same target", () => {
+    const localTarget = { environmentId: localEnvironmentId, cwd: "/repo" };
+    expect(
+      resolveSharedSidebarGitStatusTarget(
+        [{ target: null }, { target: localTarget }],
+        (thread) => thread.target,
+      ),
+    ).toEqual({ kind: "shared", target: localTarget });
+    expect(
+      resolveSharedSidebarGitStatusTarget(
+        [
+          { target: localTarget },
+          { target: { environmentId: EnvironmentId.make("environment-remote"), cwd: "/repo" } },
+        ],
+        (thread) => thread.target,
+      ),
+    ).toEqual({ kind: "mixed" });
+    expect(
+      resolveSharedSidebarGitStatusTarget([{ target: null }], (thread) => thread.target),
+    ).toEqual({
+      kind: "none",
+    });
   });
 });
 
