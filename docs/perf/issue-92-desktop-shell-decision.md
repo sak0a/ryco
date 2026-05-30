@@ -2,7 +2,9 @@
 
 Date: 2026-05-30
 
-Parent issue: #80
+Program umbrella: #80
+
+Decision issue: #92
 
 Phase: #92, after #86-#91
 
