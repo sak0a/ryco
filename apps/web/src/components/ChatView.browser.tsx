@@ -1600,6 +1600,35 @@ async function openNewWorkspaceDialog(): Promise<void> {
   await expect.element(page.getByText("New worktree", { exact: true })).toBeInTheDocument();
 }
 
+async function expectVisibleComboboxPopupToBeOpaqueAndClipped(): Promise<void> {
+  const popup = await waitForElement(
+    () =>
+      Array.from(document.querySelectorAll<HTMLElement>('[data-slot="combobox-popup"]')).find(
+        (element) => element.getBoundingClientRect().width > 0,
+      ) ?? null,
+    "Unable to find the visible combobox popup.",
+  );
+  const popupShell = popup.parentElement as HTMLElement | null;
+
+  expect(popupShell).toBeTruthy();
+  if (!popupShell) {
+    throw new Error("Unable to find the combobox popup shell.");
+  }
+
+  const popupShellStyles = window.getComputedStyle(popupShell);
+  const popupStyles = window.getComputedStyle(popup);
+
+  expect(popupShellStyles.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+  expect(popupShellStyles.overflow).toBe("hidden");
+  expect(popupStyles.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+
+  const popupShellRect = popupShell.getBoundingClientRect();
+  const popupRect = popup.getBoundingClientRect();
+
+  expect(popupRect.left).toBeGreaterThanOrEqual(popupShellRect.left - 1);
+  expect(popupRect.right).toBeLessThanOrEqual(popupShellRect.right + 1);
+}
+
 async function createDraftFromChatNewLocalShortcut(
   mounted: Pick<MountedChatView, "router">,
 ): Promise<string> {
@@ -2847,7 +2876,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await openNewWorkspaceDialog();
-      await page.getByText("Create worktree", { exact: true }).click();
+      await page.getByRole("button", { name: /Create worktree/ }).click();
 
       await vi.waitFor(
         () => {
@@ -2924,7 +2953,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await openNewWorkspaceDialog();
       await page.getByText("release/next", { exact: true }).click();
-      await page.getByText("Create worktree", { exact: true }).click();
+      await page.getByRole("button", { name: /Create worktree/ }).click();
 
       await vi.waitFor(
         () => {
@@ -2941,6 +2970,57 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the new workspace from-branch picker opaque when opened wide", async () => {
+    const branches = [
+      {
+        name: "main",
+        current: true,
+        isDefault: true,
+        worktreePath: null,
+      },
+      ...Array.from({ length: 80 }, (_, index) => ({
+        name: `feature/very-long-worktree-branch-selector-regression-${String(index).padStart(2, "0")}`,
+        current: false,
+        isDefault: false,
+        worktreePath: null,
+      })),
+    ];
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.vcsListRefs) {
+          return {
+            isRepo: true,
+            hasPrimaryRemote: true,
+            nextCursor: null,
+            totalCount: branches.length,
+            refs: branches,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await openNewWorkspaceDialog();
+      await page.getByRole("tab", { name: "New branch" }).click();
+
+      const fromBranchTrigger = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLButtonElement>('[data-slot="combobox-trigger"]'))
+            .filter((element) => element.getBoundingClientRect().width > 0)
+            .find((element) => element.textContent?.includes("main")) ?? null,
+        "Unable to find the new workspace from-branch selector trigger.",
+      );
+
+      fromBranchTrigger.click();
+      await expectVisibleComboboxPopupToBeOpaqueAndClipped();
     } finally {
       await mounted.cleanup();
     }
@@ -2990,7 +3070,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await page.getByText("Cancel", { exact: true }).click();
 
       await openNewWorkspaceDialog();
-      await page.getByText("Create worktree", { exact: true }).click();
+      await page.getByRole("button", { name: /Create worktree/ }).click();
 
       await vi.waitFor(
         () => {

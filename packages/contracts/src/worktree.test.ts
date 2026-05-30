@@ -34,6 +34,14 @@ describe("CreateWorktreeIntent (issue variant)", () => {
     });
   });
 
+  it("accepts issue intent with baseBranch override", () => {
+    expect(decode({ kind: "issue", number: 42, baseBranch: "release/next" })).toMatchObject({
+      kind: "issue",
+      number: 42,
+      baseBranch: "release/next",
+    });
+  });
+
   it("accepts optional issue metadata for branch generation", () => {
     expect(
       decode({

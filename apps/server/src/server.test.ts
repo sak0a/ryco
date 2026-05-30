@@ -3220,7 +3220,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("uses branchName override when provided on issue intent", () =>
+  it.effect("uses branchName and baseBranch overrides when provided on issue intent", () =>
     Effect.gen(function* () {
       const dispatchedCommands: Array<OrchestrationCommand> = [];
       const createWorktree = vi.fn(
@@ -3288,13 +3288,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         withWsRpcClient(wsUrl, (client) =>
           client[WS_METHODS.gitCreateWorktreeForProject]({
             projectId: defaultProjectId,
-            intent: { kind: "issue", number: 42, branchName: "custom/branch" },
+            intent: {
+              kind: "issue",
+              number: 42,
+              branchName: "custom/branch",
+              baseBranch: "release/next",
+            },
           }),
         ),
       );
 
       const createdWorktreeInput = createWorktree.mock.calls[0]?.[0];
-      assert.equal(createdWorktreeInput?.refName, "HEAD");
+      assert.equal(createdWorktreeInput?.refName, "release/next");
       assert.equal(createdWorktreeInput?.newRefName, "custom/branch");
 
       const worktreeCreate = dispatchedCommands.find(

@@ -42,6 +42,11 @@ import {
 import { resolveEnvironmentHttpUrl } from "./environments/runtime";
 import { sanitizeThreadErrorMessage } from "./rpc/transportError";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
+import {
+  isWebPerfProfileEnabled,
+  readWebPerfNow,
+  recordWebPerfPayload,
+} from "./perf/perfInstrumentation";
 
 export interface EnvironmentState {
   projectIds: ProjectId[];
@@ -2100,12 +2105,21 @@ export function applyOrchestrationEvents(
   if (events.length === 0) {
     return state;
   }
+  const perfEnabled = isWebPerfProfileEnabled();
+  const startedAt = perfEnabled ? readWebPerfNow() : 0;
   const currentEnvironmentState = getStoredEnvironmentState(state, environmentId);
   const nextEnvironmentState = events.reduce(
     (nextState, event) => applyEnvironmentOrchestrationEvent(nextState, event, environmentId),
     currentEnvironmentState,
   );
-  return commitEnvironmentState(state, environmentId, nextEnvironmentState);
+  const nextState = commitEnvironmentState(state, environmentId, nextEnvironmentState);
+  if (perfEnabled) {
+    recordWebPerfPayload("web.store.orchestration.events.apply", events, {
+      count: events.length,
+      durationMs: readWebPerfNow() - startedAt,
+    });
+  }
+  return nextState;
 }
 
 function getEnvironmentEntries(
@@ -2299,7 +2313,9 @@ export function applyOrchestrationEvent(
   event: OrchestrationEvent,
   environmentId: EnvironmentId,
 ): AppState {
-  return commitEnvironmentState(
+  const perfEnabled = isWebPerfProfileEnabled();
+  const startedAt = perfEnabled ? readWebPerfNow() : 0;
+  const nextState = commitEnvironmentState(
     state,
     environmentId,
     applyEnvironmentOrchestrationEvent(
@@ -2308,6 +2324,12 @@ export function applyOrchestrationEvent(
       environmentId,
     ),
   );
+  if (perfEnabled) {
+    recordWebPerfPayload("web.store.orchestration.event.apply", event, {
+      durationMs: readWebPerfNow() - startedAt,
+    });
+  }
+  return nextState;
 }
 
 export function applyShellEvent(
@@ -2315,7 +2337,9 @@ export function applyShellEvent(
   event: OrchestrationShellStreamEvent,
   environmentId: EnvironmentId,
 ): AppState {
-  return commitEnvironmentState(
+  const perfEnabled = isWebPerfProfileEnabled();
+  const startedAt = perfEnabled ? readWebPerfNow() : 0;
+  const nextState = commitEnvironmentState(
     state,
     environmentId,
     applyEnvironmentShellEvent(
@@ -2324,6 +2348,12 @@ export function applyShellEvent(
       environmentId,
     ),
   );
+  if (perfEnabled) {
+    recordWebPerfPayload("web.store.orchestration.shell.apply", event, {
+      durationMs: readWebPerfNow() - startedAt,
+    });
+  }
+  return nextState;
 }
 
 export function setActiveEnvironmentId(state: AppState, environmentId: EnvironmentId): AppState {

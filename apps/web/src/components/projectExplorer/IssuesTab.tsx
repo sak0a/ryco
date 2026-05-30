@@ -17,6 +17,7 @@ interface IssuesTabProps {
   searchInputRef: RefObject<HTMLInputElement | null>;
   query: string;
   onQueryChange: (value: string) => void;
+  selectedKey?: string | null;
   stateFilter: IssueStateFilter;
   onStateFilterChange: (state: IssueStateFilter) => void;
   onSelect: (issue: SourceControlIssueSummary) => void;
@@ -107,6 +108,7 @@ export function IssuesTab(props: IssuesTabProps) {
             emptyText={
               props.query.trim().length > 0 ? "No issues match this search." : "No issues to show."
             }
+            selectedKey={props.selectedKey}
             onSelect={props.onSelect}
           />
         )}

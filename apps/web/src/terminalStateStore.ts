@@ -10,6 +10,11 @@ import { type ScopedThreadRef, type TerminalEvent } from "@ryco/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { resolveStorage } from "./lib/storage";
+import {
+  isWebPerfProfileEnabled,
+  readWebPerfNow,
+  recordWebPerfPayload,
+} from "./perf/perfInstrumentation";
 import { terminalRunningSubprocessFromEvent } from "./terminalActivity";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
@@ -676,7 +681,9 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
           updateTerminal(threadRef, (state) =>
             setThreadTerminalActivity(state, terminalId, hasRunningSubprocess),
           ),
-        recordTerminalEvent: (threadRef, event) =>
+        recordTerminalEvent: (threadRef, event) => {
+          const perfEnabled = isWebPerfProfileEnabled();
+          const startedAt = perfEnabled ? readWebPerfNow() : 0;
           set((state) =>
             appendTerminalEventEntry(
               state.terminalEventEntriesByKey,
@@ -684,8 +691,16 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
               threadRef,
               event,
             ),
-          ),
-        applyTerminalEvent: (threadRef, event) =>
+          );
+          if (perfEnabled) {
+            recordWebPerfPayload("web.terminal.store.events.record", event, {
+              durationMs: readWebPerfNow() - startedAt,
+            });
+          }
+        },
+        applyTerminalEvent: (threadRef, event) => {
+          const perfEnabled = isWebPerfProfileEnabled();
+          const startedAt = perfEnabled ? readWebPerfNow() : 0;
           set((state) => {
             const threadKey = terminalThreadKey(threadRef);
             let nextTerminalStateByThreadKey = state.terminalStateByThreadKey;
@@ -733,7 +748,13 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
               terminalLaunchContextByThreadKey: nextTerminalLaunchContextByThreadKey,
               ...nextEventState,
             };
-          }),
+          });
+          if (perfEnabled) {
+            recordWebPerfPayload("web.terminal.store.events.apply", event, {
+              durationMs: readWebPerfNow() - startedAt,
+            });
+          }
+        },
         clearTerminalState: (threadRef) =>
           set((state) => {
             const threadKey = terminalThreadKey(threadRef);

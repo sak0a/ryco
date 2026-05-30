@@ -22,6 +22,7 @@ interface PullRequestsTabProps {
   searchInputRef: RefObject<HTMLInputElement | null>;
   query: string;
   onQueryChange: (value: string) => void;
+  selectedKey?: string | null;
   stateFilter: ChangeRequestStateFilter;
   onStateFilterChange: (state: ChangeRequestStateFilter) => void;
   onSelect: (changeRequest: ChangeRequest) => void;
@@ -111,6 +112,7 @@ export function PullRequestsTab(props: PullRequestsTabProps) {
                 ? "No pull requests match this search."
                 : "No pull requests to show."
             }
+            selectedKey={props.selectedKey}
             onSelect={props.onSelect}
           />
         )}

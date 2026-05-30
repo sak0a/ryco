@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { getWebPerfReporter, isWebPerfProfileEnabled, readWebPerfNow } from "./perfInstrumentation";
 
 export const TAB_SWITCH_MARK_PREFIX = "s3:tab-switch:";
 export const COMPONENT_RENDER_MARK_PREFIX = "s3:render:";
@@ -13,12 +14,12 @@ export function makeTabSwitchMarkName(phase: TabSwitchPhase, key: string): strin
 }
 
 export function markTabSwitchClick(key: string): void {
-  if (!import.meta.env.DEV || typeof performance === "undefined") return;
+  if (!isWebPerfProfileEnabled() || typeof performance === "undefined") return;
   performance.mark(makeTabSwitchMarkName("click", key));
 }
 
 export function markTabSwitchFirstPaint(key: string): void {
-  if (!import.meta.env.DEV || typeof performance === "undefined") return;
+  if (!isWebPerfProfileEnabled() || typeof performance === "undefined") return;
   const name = makeTabSwitchMarkName("first-paint", key);
   if (performance.getEntriesByName(name).length > 0) return;
   performance.mark(name);
@@ -62,23 +63,32 @@ export function useDevPropDiff<T extends Record<string, unknown>>(props: T, labe
 }
 
 /**
- * Dev-only render-duration mark. Sets a `<prefix><label>:start:N` mark in the
+ * Opt-in render-duration mark. Sets a `<prefix><label>:start:N` mark in the
  * render body and a matching `:end:N` in useLayoutEffect (runs synchronously
- * after commit, before paint). The N-suffix avoids the "latest-mark wins"
- * problem when a component re-renders multiple times during a single
- * interaction. Inspect via:
+ * after commit, before paint) when `VITE_RYCO_PERF_PROFILE=1`. The N-suffix
+ * avoids the "latest-mark wins" problem when a component re-renders multiple
+ * times during a single interaction. Inspect via:
  *
  *   performance.getEntriesByType("measure")
  *     .filter(m => m.name.startsWith("s3:render:"))
  */
 export function usePerfMark(label: string): void {
   const seq = useRef(0);
-  if (import.meta.env.DEV && typeof performance !== "undefined") {
+  const startedAtRef = useRef(0);
+  const perfEnabled = isWebPerfProfileEnabled();
+  if (perfEnabled) {
     seq.current += 1;
-    performance.mark(`${COMPONENT_RENDER_MARK_PREFIX}${label}:start:${seq.current}`);
+    startedAtRef.current = readWebPerfNow();
+    if (typeof performance !== "undefined") {
+      performance.mark(`${COMPONENT_RENDER_MARK_PREFIX}${label}:start:${seq.current}`);
+    }
   }
   useLayoutEffect(() => {
-    if (!import.meta.env.DEV || typeof performance === "undefined") return;
+    if (!perfEnabled) return;
+    getWebPerfReporter(`web.render.${label}`).record({
+      durationMs: Math.max(0, readWebPerfNow() - startedAtRef.current),
+    });
+    if (typeof performance === "undefined") return;
     const i = seq.current;
     const startName = `${COMPONENT_RENDER_MARK_PREFIX}${label}:start:${i}`;
     const endName = `${COMPONENT_RENDER_MARK_PREFIX}${label}:end:${i}`;
@@ -88,5 +98,5 @@ export function usePerfMark(label: string): void {
     } catch {
       // Ignore — start mark may have been cleared.
     }
-  });
+  }, [label, perfEnabled]);
 }
