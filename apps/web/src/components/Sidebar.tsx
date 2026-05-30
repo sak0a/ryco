@@ -38,7 +38,7 @@ import {
   GitLabIcon,
   type Icon,
 } from "./Icons";
-import { autoAnimate } from "@formkit/auto-animate";
+import { autoAnimate, type AnimationController } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -272,6 +272,7 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
 } as const;
+type SidebarAutoAnimateControllers = Map<HTMLElement, AnimationController>;
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
 const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
   repository: "Group by repository",
@@ -299,6 +300,54 @@ function projectGroupingModeDescription(mode: SidebarProjectGroupingMode): strin
       return "Projects group only when both the repository and repo-relative path match.";
     case "separate":
       return "Every project path gets its own sidebar row.";
+  }
+}
+
+function pruneDisconnectedSidebarAutoAnimateControllers(
+  controllers: SidebarAutoAnimateControllers,
+) {
+  for (const [node] of controllers) {
+    if (!node.isConnected) {
+      controllers.delete(node);
+    }
+  }
+}
+
+function setSidebarAutoAnimateControllersEnabled(
+  controllers: SidebarAutoAnimateControllers,
+  enabled: boolean,
+) {
+  pruneDisconnectedSidebarAutoAnimateControllers(controllers);
+  for (const controller of controllers.values()) {
+    if (enabled) {
+      controller.enable();
+    } else {
+      controller.disable();
+    }
+  }
+}
+
+function attachSidebarAutoAnimateNode(
+  controllers: SidebarAutoAnimateControllers,
+  node: HTMLElement | null,
+  enabled: boolean,
+) {
+  if (node === null) {
+    return;
+  }
+  pruneDisconnectedSidebarAutoAnimateControllers(controllers);
+  let controller = controllers.get(node);
+  if (controller === undefined) {
+    if (!enabled) {
+      return;
+    }
+    controller = autoAnimate(node, SIDEBAR_LIST_ANIMATION_OPTIONS);
+    controllers.set(node, controller);
+  }
+  if (enabled) {
+    controller.enable();
+  } else {
+    controller.disable();
   }
 }
 
@@ -979,7 +1028,6 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               key={threadKey}
               thread={thread}
               projectCwd={projectCwd}
-              gitStatus={null}
               orderedProjectThreadKeys={orderedProjectThreadKeys}
               isActive={activeRouteThreadKey === threadKey}
               jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
@@ -5291,29 +5339,41 @@ export default function Sidebar() {
     projectCount: projects.length,
     visibleThreadCount: sidebarThreads.length,
   });
-  const animatedProjectListsRef = useRef(new WeakSet<HTMLElement>());
+  const projectListAnimationControllersRef = useRef<SidebarAutoAnimateControllers>(new Map());
   const attachProjectListAutoAnimateRef = useCallback(
     (node: HTMLElement | null) => {
-      if (!shouldAnimateProjectLists || !node || animatedProjectListsRef.current.has(node)) {
-        return;
-      }
-      autoAnimate(node, SIDEBAR_LIST_ANIMATION_OPTIONS);
-      animatedProjectListsRef.current.add(node);
+      attachSidebarAutoAnimateNode(
+        projectListAnimationControllersRef.current,
+        node,
+        shouldAnimateProjectLists,
+      );
     },
     [shouldAnimateProjectLists],
   );
+  useEffect(() => {
+    setSidebarAutoAnimateControllersEnabled(
+      projectListAnimationControllersRef.current,
+      shouldAnimateProjectLists,
+    );
+  }, [shouldAnimateProjectLists]);
 
-  const animatedThreadListsRef = useRef(new WeakSet<HTMLElement>());
+  const threadListAnimationControllersRef = useRef<SidebarAutoAnimateControllers>(new Map());
   const attachThreadListAutoAnimateRef = useCallback(
     (node: HTMLElement | null) => {
-      if (!shouldAnimateThreadLists || !node || animatedThreadListsRef.current.has(node)) {
-        return;
-      }
-      autoAnimate(node, SIDEBAR_LIST_ANIMATION_OPTIONS);
-      animatedThreadListsRef.current.add(node);
+      attachSidebarAutoAnimateNode(
+        threadListAnimationControllersRef.current,
+        node,
+        shouldAnimateThreadLists,
+      );
     },
     [shouldAnimateThreadLists],
   );
+  useEffect(() => {
+    setSidebarAutoAnimateControllersEnabled(
+      threadListAnimationControllersRef.current,
+      shouldAnimateThreadLists,
+    );
+  }, [shouldAnimateThreadLists]);
 
   const visibleThreads = useMemo(
     () => sidebarThreads.filter((thread) => thread.archivedAt === null),
