@@ -22,6 +22,7 @@ describe("SidebarWorktreeList", () => {
       <SidebarWorktreeList
         attachThreadListAutoAnimateRef={() => undefined}
         projectExpanded
+        resolveThreadGitStatusTarget={() => null}
         renderThread={(thread) => <div>{thread.title}</div>}
         treeProject={makeTreeProject()}
         visibleThreadKeys={null}
@@ -50,6 +51,7 @@ describe("SidebarWorktreeList", () => {
       <SidebarWorktreeList
         attachThreadListAutoAnimateRef={() => undefined}
         projectExpanded
+        resolveThreadGitStatusTarget={() => null}
         renderThread={(thread) => <div>{thread.title}</div>}
         treeProject={treeProject}
         visibleThreadKeys={null}
@@ -79,6 +81,7 @@ describe("SidebarWorktreeList", () => {
       <SidebarWorktreeList
         attachThreadListAutoAnimateRef={() => undefined}
         projectExpanded
+        resolveThreadGitStatusTarget={() => null}
         renderThread={(thread) => <div>{thread.title}</div>}
         treeProject={treeProject}
         visibleThreadKeys={null}

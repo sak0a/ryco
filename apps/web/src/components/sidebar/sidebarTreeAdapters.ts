@@ -91,21 +91,10 @@ export function adaptDraftThreadsForSidebarProject(input: {
   draftThreadsByThreadKey: Readonly<Record<string, DraftThreadState>>;
   project: SidebarProjectSnapshot;
 }): ReadonlyArray<SidebarTreeThread> {
-  const memberProjectKeys = new Set(
-    input.project.memberProjects.map((member) =>
-      scopedProjectKey(scopeProjectRef(member.environmentId, member.id)),
-    ),
-  );
+  const memberProjectKeys = getSidebarProjectMemberKeys(input.project);
 
   return Object.entries(input.draftThreadsByThreadKey).flatMap(([draftId, draftThread]) => {
-    if (draftThread.promotedTo != null) {
-      return [];
-    }
-    if (
-      !memberProjectKeys.has(
-        scopedProjectKey(scopeProjectRef(draftThread.environmentId, draftThread.projectId)),
-      )
-    ) {
+    if (!draftThreadBelongsToSidebarProject(draftThread, memberProjectKeys)) {
       return [];
     }
     return [
@@ -116,6 +105,66 @@ export function adaptDraftThreadsForSidebarProject(input: {
       }),
     ];
   });
+}
+
+export function createSidebarProjectDraftThreadsSelector(
+  project: SidebarProjectSnapshot,
+): (state: {
+  readonly draftThreadsByThreadKey: Readonly<Record<string, DraftThreadState>>;
+}) => ReadonlyArray<SidebarTreeThread> {
+  const memberProjectKeys = getSidebarProjectMemberKeys(project);
+  const logicalProjectId = project.projectKey as ProjectId;
+  let previousMatches: ReadonlyArray<readonly [string, DraftThreadState]> = [];
+  let previousRows: ReadonlyArray<SidebarTreeThread> = [];
+
+  return (state) => {
+    const matches: Array<readonly [string, DraftThreadState]> = [];
+    for (const [draftId, draftThread] of Object.entries(state.draftThreadsByThreadKey)) {
+      if (draftThreadBelongsToSidebarProject(draftThread, memberProjectKeys)) {
+        matches.push([draftId, draftThread] as const);
+      }
+    }
+
+    if (
+      matches.length === previousMatches.length &&
+      matches.every((match, index) => {
+        const previous = previousMatches[index];
+        return previous?.[0] === match[0] && previous[1] === match[1];
+      })
+    ) {
+      return previousRows;
+    }
+
+    previousMatches = matches;
+    previousRows = matches.map(([draftId, draftThread]) =>
+      adaptDraftThreadForSidebarTree({
+        draftId: draftId as DraftId,
+        logicalProjectId,
+        draftThread,
+      }),
+    );
+    return previousRows;
+  };
+}
+
+function getSidebarProjectMemberKeys(project: SidebarProjectSnapshot): ReadonlySet<string> {
+  return new Set(
+    project.memberProjects.map((member) =>
+      scopedProjectKey(scopeProjectRef(member.environmentId, member.id)),
+    ),
+  );
+}
+
+function draftThreadBelongsToSidebarProject(
+  draftThread: DraftThreadState,
+  memberProjectKeys: ReadonlySet<string>,
+): boolean {
+  if (draftThread.promotedTo != null) {
+    return false;
+  }
+  return memberProjectKeys.has(
+    scopedProjectKey(scopeProjectRef(draftThread.environmentId, draftThread.projectId)),
+  );
 }
 
 function adaptThreadForSidebarTree(input: {
@@ -148,6 +197,7 @@ function adaptThreadForSidebarTree(input: {
       readStatusBucket(extra.manualBucket) ??
       readStatusBucket(extra.statusBucket) ??
       null,
+    sourceProjectId: input.thread.projectId,
     statusPill,
     worktreeId: typeof extra.worktreeId === "string" ? extra.worktreeId : null,
   };
@@ -175,6 +225,7 @@ function adaptDraftThreadForSidebarTree(input: {
     manualStatusBucket: null,
     projectId: input.logicalProjectId,
     session: null,
+    sourceProjectId: input.draftThread.projectId,
     statusPill: null,
     title: "Empty Session",
     updatedAt: input.draftThread.createdAt,

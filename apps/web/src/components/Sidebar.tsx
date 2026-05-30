@@ -38,7 +38,7 @@ import {
   GitLabIcon,
   type Icon,
 } from "./Icons";
-import { autoAnimate } from "@formkit/auto-animate";
+import { autoAnimate, type AnimationController } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -116,7 +116,7 @@ import {
 } from "../keybindings";
 import { useModelPickerOpen } from "../modelPickerOpenState";
 import { useShortcutModifierState } from "../shortcutModifierState";
-import { useGitStatus } from "../lib/gitStatusState";
+import { useGitStatus, type GitStatusState } from "../lib/gitStatusState";
 import { readLocalApi } from "../localApi";
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -197,18 +197,24 @@ import {
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
+  shouldAutoAnimateSidebarProjectList,
+  shouldAutoAnimateSidebarThreadLists,
   shouldClearThreadSelectionOnMouseDown,
   shouldConfirmCloseSidebarThread,
+  shouldQuerySidebarSourceControlCounts,
   sortProjectsForSidebar,
   useThreadJumpHintVisibility,
   ThreadStatusPill,
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
-import { SidebarWorktreeList } from "./sidebar/SidebarWorktreeList";
 import {
-  adaptDraftThreadsForSidebarProject,
+  SidebarWorktreeList,
+  type SidebarThreadGitStatusTarget,
+} from "./sidebar/SidebarWorktreeList";
+import {
   adaptProjectForSidebarTree,
+  createSidebarProjectDraftThreadsSelector,
 } from "./sidebar/sidebarTreeAdapters";
 import {
   composeSidebarTree,
@@ -266,6 +272,7 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
 } as const;
+type SidebarAutoAnimateControllers = Map<HTMLElement, AnimationController>;
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
 const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
   repository: "Group by repository",
@@ -293,6 +300,54 @@ function projectGroupingModeDescription(mode: SidebarProjectGroupingMode): strin
       return "Projects group only when both the repository and repo-relative path match.";
     case "separate":
       return "Every project path gets its own sidebar row.";
+  }
+}
+
+function pruneDisconnectedSidebarAutoAnimateControllers(
+  controllers: SidebarAutoAnimateControllers,
+) {
+  for (const [node] of controllers) {
+    if (!node.isConnected) {
+      controllers.delete(node);
+    }
+  }
+}
+
+function setSidebarAutoAnimateControllersEnabled(
+  controllers: SidebarAutoAnimateControllers,
+  enabled: boolean,
+) {
+  pruneDisconnectedSidebarAutoAnimateControllers(controllers);
+  for (const controller of controllers.values()) {
+    if (enabled) {
+      controller.enable();
+    } else {
+      controller.disable();
+    }
+  }
+}
+
+function attachSidebarAutoAnimateNode(
+  controllers: SidebarAutoAnimateControllers,
+  node: HTMLElement | null,
+  enabled: boolean,
+) {
+  if (node === null) {
+    return;
+  }
+  pruneDisconnectedSidebarAutoAnimateControllers(controllers);
+  let controller = controllers.get(node);
+  if (controller === undefined) {
+    if (!enabled) {
+      return;
+    }
+    controller = autoAnimate(node, SIDEBAR_LIST_ANIMATION_OPTIONS);
+    controllers.set(node, controller);
+  }
+  if (enabled) {
+    controller.enable();
+  } else {
+    controller.disable();
   }
 }
 
@@ -329,6 +384,7 @@ function buildThreadJumpLabelMap(input: {
 interface SidebarThreadRowProps {
   thread: SidebarThreadSummary & { draftId?: DraftId | undefined };
   projectCwd: string | null;
+  gitStatus?: GitStatusState | null | undefined;
   orderedProjectThreadKeys: readonly string[];
   isActive: boolean;
   isTreeChild?: boolean | undefined;
@@ -370,6 +426,38 @@ interface SidebarThreadRowProps {
 }
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
+  if (props.gitStatus !== undefined) {
+    return <SidebarThreadRowContent {...props} gitStatus={props.gitStatus} />;
+  }
+
+  return <SidebarThreadRowWithGitStatusFallback {...props} />;
+});
+
+function SidebarThreadRowWithGitStatusFallback(props: SidebarThreadRowProps) {
+  const { thread } = props;
+  // For grouped projects, the thread may belong to a different environment
+  // than the representative project.  Look up the thread's own project cwd
+  // so git status (and thus PR detection) queries the correct path.
+  const threadProjectCwd = useStore(
+    useMemo(
+      () => (state: import("../store").AppState) =>
+        selectProjectByRef(state, scopeProjectRef(thread.environmentId, thread.projectId))?.cwd ??
+        null,
+      [thread.environmentId, thread.projectId],
+    ),
+  );
+  const gitCwd = thread.worktreePath ?? threadProjectCwd ?? props.projectCwd;
+  const gitStatus = useGitStatus({
+    environmentId: thread.environmentId,
+    cwd: thread.branch != null ? gitCwd : null,
+  });
+
+  return <SidebarThreadRowContent {...props} gitStatus={gitStatus} />;
+}
+
+const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
+  props: SidebarThreadRowProps & { gitStatus: GitStatusState | null },
+) {
   const {
     orderedProjectThreadKeys,
     isActive,
@@ -396,6 +484,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     openPrLink,
     thread,
   } = props;
+  const gitStatus = props.gitStatus;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
   const draftId = thread.draftId ?? null;
@@ -418,22 +507,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const threadEnvironmentLabel = isRemoteThread
     ? (remoteEnvLabel ?? remoteEnvSavedLabel ?? "Remote")
     : null;
-  // For grouped projects, the thread may belong to a different environment
-  // than the representative project.  Look up the thread's own project cwd
-  // so git status (and thus PR detection) queries the correct path.
-  const threadProjectCwd = useStore(
-    useMemo(
-      () => (state: import("../store").AppState) =>
-        selectProjectByRef(state, scopeProjectRef(thread.environmentId, thread.projectId))?.cwd ??
-        null,
-      [thread.environmentId, thread.projectId],
-    ),
-  );
-  const gitCwd = thread.worktreePath ?? threadProjectCwd ?? props.projectCwd;
-  const gitStatus = useGitStatus({
-    environmentId: thread.environmentId,
-    cwd: thread.branch != null ? gitCwd : null,
-  });
   const isHighlighted = isActive || isSelected;
   const isThreadRunning =
     thread.session?.status === "running" && thread.session.activeTurnId != null;
@@ -443,8 +516,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       lastVisitedAt,
     },
   });
-  const pr = resolveThreadPr(thread.branch, gitStatus.data);
-  const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
+  const pr = gitStatus ? resolveThreadPr(thread.branch, gitStatus.data) : null;
+  const prStatus = prStatusIndicator(pr, gitStatus?.data?.sourceControlProvider);
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const canArchiveThread = !draftId && canArchiveSidebarThread(thread);
@@ -1146,6 +1219,37 @@ function sumSourceControlQueryCounts(
   queries: ReadonlyArray<{ readonly data?: ReadonlyArray<unknown> | undefined }>,
 ): number {
   return queries.reduce((total, query) => total + (query.data?.length ?? 0), 0);
+}
+
+function useHasIntersectedViewport(
+  rootMargin = "160px 0px",
+): [(node: HTMLElement | null) => void, boolean] {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const [hasIntersected, setHasIntersected] = useState(false);
+
+  useEffect(() => {
+    if (hasIntersected || node === null) {
+      return;
+    }
+    if (typeof IntersectionObserver === "undefined") {
+      setHasIntersected(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setHasIntersected(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasIntersected, node, rootMargin]);
+
+  return [setNode, hasIntersected];
 }
 
 interface ProjectRemoteLink {
@@ -2342,14 +2446,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       ),
     ),
   );
-  const draftThreadsByThreadKey = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
-  const projectDraftThreads = useMemo(
-    () =>
-      adaptDraftThreadsForSidebarProject({
-        draftThreadsByThreadKey,
-        project,
-      }),
-    [draftThreadsByThreadKey, project],
+  const projectDraftThreads = useComposerDraftStore(
+    useMemo(() => createSidebarProjectDraftThreadsSelector(project), [project]),
   );
   const sidebarThreadByKey = useMemo(
     () =>
@@ -2403,6 +2501,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     open: boolean;
     initialTab: "issues" | "prs";
   }>({ open: false, initialTab: "issues" });
+  const [setProjectHeaderVisibilityNode, projectHeaderHasIntersected] = useHasIntersectedViewport();
   const [projectRenameTarget, setProjectRenameTarget] = useState<SidebarProjectGroupMember | null>(
     null,
   );
@@ -2455,6 +2554,25 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       ),
     [project.memberProjects],
   );
+  const resolveThreadGitStatusTarget = useCallback(
+    (
+      thread: Pick<
+        SidebarTreeThread,
+        "branch" | "environmentId" | "projectId" | "sourceProjectId" | "worktreePath"
+      >,
+    ): SidebarThreadGitStatusTarget | null => {
+      if (thread.branch === null) {
+        return null;
+      }
+      const sourceProjectId = thread.sourceProjectId ?? thread.projectId;
+      const memberProject = memberProjectByScopedKey.get(
+        scopedProjectKey(scopeProjectRef(thread.environmentId, sourceProjectId)),
+      );
+      const cwd = thread.worktreePath ?? memberProject?.cwd ?? project.cwd;
+      return cwd ? { environmentId: thread.environmentId, cwd } : null;
+    },
+    [memberProjectByScopedKey, project.cwd],
+  );
   const memberThreadCountByPhysicalKey = useMemo(() => {
     const counts = new Map<string, number>(
       project.memberProjects.map((member) => [member.physicalProjectKey, 0] as const),
@@ -2470,6 +2588,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     }
     return counts;
   }, [memberProjectByScopedKey, project.memberProjects, projectThreads]);
+  const shouldQuerySourceControlCounts = shouldQuerySidebarSourceControlCounts({
+    explorerOpen: explorerDialog.open,
+    projectVisible: projectHeaderHasIntersected,
+  });
   const sourceControlIssueQueries = useQueries({
     queries: project.memberProjects.map((member) =>
       issueListQueryOptions({
@@ -2477,6 +2599,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         cwd: member.cwd,
         state: "open",
         limit: 100,
+        enabled: shouldQuerySourceControlCounts,
       }),
     ),
   });
@@ -2487,6 +2610,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         cwd: member.cwd,
         state: "open",
         limit: 100,
+        enabled: shouldQuerySourceControlCounts,
       }),
     ),
   });
@@ -4041,7 +4165,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
   return (
     <>
-      <div className="group/project-header relative">
+      <div ref={setProjectHeaderVisibilityNode} className="group/project-header relative">
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
           size="sm"
@@ -4172,6 +4296,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           projectExpanded={projectExpanded}
           visibleThreadKeys={visibleTreeThreadKeys}
           attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+          resolveThreadGitStatusTarget={resolveThreadGitStatusTarget}
           onArchiveWorktree={archiveWorktree}
           onCopyWorktreePath={copyWorktreePath}
           onDeleteWorktree={deleteWorktree}
@@ -4180,13 +4305,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           onOpenWorktree={openWorktree}
           onRenameWorktree={renameWorktree}
           onRestoreWorktree={restoreWorktree}
-          renderThread={(thread: SidebarTreeThread, treeThreadKeys) => {
+          renderThread={(thread: SidebarTreeThread, treeThreadKeys, gitStatus) => {
             const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
             return (
               <SidebarThreadRow
                 key={threadKey}
                 thread={thread}
                 projectCwd={project.cwd}
+                gitStatus={gitStatus}
                 orderedProjectThreadKeys={treeThreadKeys}
                 isActive={activeRouteThreadKey === threadKey}
                 jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
@@ -4935,7 +5061,6 @@ export default function Sidebar() {
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const sidebarThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
   const sidebarWorktrees = useStore(useShallow(selectSidebarWorktreesAcrossEnvironments));
-  const draftThreadsByThreadKey = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
@@ -4960,7 +5085,13 @@ export default function Sidebar() {
     select: (params) => (typeof params.draftId === "string" ? (params.draftId as DraftId) : null),
   });
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
-  const routeDraftThread = routeDraftId ? (draftThreadsByThreadKey[routeDraftId] ?? null) : null;
+  const routeDraftThread = useComposerDraftStore(
+    useMemo(
+      () => (store) =>
+        routeDraftId ? (store.draftThreadsByThreadKey[routeDraftId] ?? null) : null,
+      [routeDraftId],
+    ),
+  );
   const routeDraftThreadKey = routeDraftThread
     ? scopedThreadKey(scopeThreadRef(routeDraftThread.environmentId, routeDraftThread.threadId))
     : null;
@@ -5203,23 +5334,46 @@ export default function Sidebar() {
     dragInProgressRef.current = false;
   }, []);
 
-  const animatedProjectListsRef = useRef(new WeakSet<HTMLElement>());
-  const attachProjectListAutoAnimateRef = useCallback((node: HTMLElement | null) => {
-    if (!node || animatedProjectListsRef.current.has(node)) {
-      return;
-    }
-    autoAnimate(node, SIDEBAR_LIST_ANIMATION_OPTIONS);
-    animatedProjectListsRef.current.add(node);
-  }, []);
+  const shouldAnimateProjectLists = shouldAutoAnimateSidebarProjectList(projects.length);
+  const shouldAnimateThreadLists = shouldAutoAnimateSidebarThreadLists({
+    projectCount: projects.length,
+    visibleThreadCount: sidebarThreads.length,
+  });
+  const projectListAnimationControllersRef = useRef<SidebarAutoAnimateControllers>(new Map());
+  const attachProjectListAutoAnimateRef = useCallback(
+    (node: HTMLElement | null) => {
+      attachSidebarAutoAnimateNode(
+        projectListAnimationControllersRef.current,
+        node,
+        shouldAnimateProjectLists,
+      );
+    },
+    [shouldAnimateProjectLists],
+  );
+  useEffect(() => {
+    setSidebarAutoAnimateControllersEnabled(
+      projectListAnimationControllersRef.current,
+      shouldAnimateProjectLists,
+    );
+  }, [shouldAnimateProjectLists]);
 
-  const animatedThreadListsRef = useRef(new WeakSet<HTMLElement>());
-  const attachThreadListAutoAnimateRef = useCallback((node: HTMLElement | null) => {
-    if (!node || animatedThreadListsRef.current.has(node)) {
-      return;
-    }
-    autoAnimate(node, SIDEBAR_LIST_ANIMATION_OPTIONS);
-    animatedThreadListsRef.current.add(node);
-  }, []);
+  const threadListAnimationControllersRef = useRef<SidebarAutoAnimateControllers>(new Map());
+  const attachThreadListAutoAnimateRef = useCallback(
+    (node: HTMLElement | null) => {
+      attachSidebarAutoAnimateNode(
+        threadListAnimationControllersRef.current,
+        node,
+        shouldAnimateThreadLists,
+      );
+    },
+    [shouldAnimateThreadLists],
+  );
+  useEffect(() => {
+    setSidebarAutoAnimateControllersEnabled(
+      threadListAnimationControllersRef.current,
+      shouldAnimateThreadLists,
+    );
+  }, [shouldAnimateThreadLists]);
 
   const visibleThreads = useMemo(
     () => sidebarThreads.filter((thread) => thread.archivedAt === null),

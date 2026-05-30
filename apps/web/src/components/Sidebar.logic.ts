@@ -1,4 +1,5 @@
 import * as React from "react";
+import type { EnvironmentId } from "@ryco/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@ryco/contracts/settings";
 import {
   getThreadSortTimestamp,
@@ -15,6 +16,8 @@ export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
 // Visible sidebar rows are prewarmed into the thread-detail cache so opening a
 // nearby thread usually reuses an already-hot subscription.
 export const SIDEBAR_THREAD_PREWARM_LIMIT = 10;
+export const SIDEBAR_AUTO_ANIMATE_PROJECT_LIMIT = 80;
+export const SIDEBAR_AUTO_ANIMATE_VISIBLE_THREAD_LIMIT = 120;
 export type SidebarNewThreadEnvMode = "local" | "worktree";
 type SidebarProject = {
   id: string;
@@ -24,6 +27,16 @@ type SidebarProject = {
 };
 
 export type ThreadTraversalDirection = "previous" | "next";
+
+export interface SidebarGitStatusTarget {
+  environmentId: EnvironmentId;
+  cwd: string;
+}
+
+export type SharedSidebarGitStatusTargetResolution =
+  | { kind: "none" }
+  | { kind: "mixed" }
+  | { kind: "shared"; target: SidebarGitStatusTarget };
 
 export interface ThreadStatusPill {
   label:
@@ -334,6 +347,50 @@ export function getSidebarThreadIdsToPrewarm<TThreadId>(
   limit = SIDEBAR_THREAD_PREWARM_LIMIT,
 ): TThreadId[] {
   return visibleThreadIds.slice(0, Math.max(0, limit));
+}
+
+export function shouldAutoAnimateSidebarProjectList(projectCount: number): boolean {
+  return projectCount <= SIDEBAR_AUTO_ANIMATE_PROJECT_LIMIT;
+}
+
+export function shouldAutoAnimateSidebarThreadLists(input: {
+  projectCount: number;
+  visibleThreadCount: number;
+}): boolean {
+  return (
+    input.projectCount <= SIDEBAR_AUTO_ANIMATE_PROJECT_LIMIT &&
+    input.visibleThreadCount <= SIDEBAR_AUTO_ANIMATE_VISIBLE_THREAD_LIMIT
+  );
+}
+
+export function shouldQuerySidebarSourceControlCounts(input: {
+  explorerOpen: boolean;
+  projectVisible: boolean;
+}): boolean {
+  return input.explorerOpen || input.projectVisible;
+}
+
+export function resolveSharedSidebarGitStatusTarget<TThread>(
+  threads: readonly TThread[],
+  resolveTarget: (thread: TThread) => SidebarGitStatusTarget | null,
+): SharedSidebarGitStatusTargetResolution {
+  let sharedTarget: SidebarGitStatusTarget | null = null;
+
+  for (const thread of threads) {
+    const target = resolveTarget(thread);
+    if (target === null) {
+      continue;
+    }
+    if (sharedTarget === null) {
+      sharedTarget = target;
+      continue;
+    }
+    if (sharedTarget.environmentId !== target.environmentId || sharedTarget.cwd !== target.cwd) {
+      return { kind: "mixed" };
+    }
+  }
+
+  return sharedTarget === null ? { kind: "none" } : { kind: "shared", target: sharedTarget };
 }
 
 export function resolveAdjacentThreadId<T>(input: {
