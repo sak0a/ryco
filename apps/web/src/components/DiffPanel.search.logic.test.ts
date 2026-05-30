@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildDiffSearchIndex,
   deriveDiffSearchFileIndexes,
+  doesDiffSearchMatchRenderedLine,
   type DiffSearchFile,
   findDiffSearchMatches,
+  getDiffSearchMatchRenderedLineIndex,
   getNextDiffSearchMatchIndex,
+  parseDiffRenderedLineIndexes,
 } from "./DiffPanel.search.logic";
 
 const files = [
@@ -74,6 +78,87 @@ describe("findDiffSearchMatches", () => {
       },
     ]);
     expect(findDiffSearchMatches(matchesFileWithCafePath(), "café")).toHaveLength(1);
+  });
+});
+
+describe("buildDiffSearchIndex", () => {
+  const hunkBackedFiles = [
+    {
+      name: "b/src/sample.ts",
+      additionLines: ["shared context", "new alpha", "tail context"],
+      deletionLines: ["shared context", "old alpha", "tail context"],
+      hunks: [
+        {
+          unifiedLineStart: 0,
+          splitLineStart: 0,
+          hunkContent: [
+            {
+              type: "context",
+              lines: 1,
+              additionLineIndex: 0,
+              deletionLineIndex: 0,
+            },
+            {
+              type: "change",
+              deletions: 1,
+              deletionLineIndex: 1,
+              additions: 1,
+              additionLineIndex: 1,
+            },
+            {
+              type: "context",
+              lines: 1,
+              additionLineIndex: 2,
+              deletionLineIndex: 2,
+            },
+          ],
+        },
+      ],
+    },
+  ] satisfies DiffSearchFile[];
+
+  it("indexes context lines once from hunk metadata", () => {
+    const matches = findDiffSearchMatches(buildDiffSearchIndex(hunkBackedFiles), "context");
+
+    expect(matches.map((match) => [match.field, match.lineIndex])).toEqual([
+      ["context", 0],
+      ["context", 2],
+    ]);
+  });
+
+  it("maps hunk line matches to stacked and split rendered rows", () => {
+    const matches = findDiffSearchMatches(buildDiffSearchIndex(hunkBackedFiles), "alpha");
+
+    expect(
+      matches.map((match) => [
+        match.field,
+        getDiffSearchMatchRenderedLineIndex(match, "stacked"),
+        getDiffSearchMatchRenderedLineIndex(match, "split"),
+      ]),
+    ).toEqual([
+      ["deletion", 1, 1],
+      ["addition", 2, 1],
+    ]);
+    expect(
+      doesDiffSearchMatchRenderedLine(matches[1]!, {
+        renderMode: "split",
+        lineIndexes: { stacked: 2, split: 1 },
+        lineType: "change-addition",
+      }),
+    ).toBe(true);
+    expect(
+      doesDiffSearchMatchRenderedLine(matches[0]!, {
+        renderMode: "split",
+        lineIndexes: { stacked: 2, split: 1 },
+        lineType: "change-addition",
+      }),
+    ).toBe(false);
+  });
+
+  it("parses Pierre's composite rendered line indexes", () => {
+    expect(parseDiffRenderedLineIndexes("2,1")).toEqual({ stacked: 2, split: 1 });
+    expect(parseDiffRenderedLineIndexes("2")).toEqual({ stacked: 2, split: 2 });
+    expect(parseDiffRenderedLineIndexes("bad")).toBeNull();
   });
 });
 

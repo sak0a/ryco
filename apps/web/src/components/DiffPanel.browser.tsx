@@ -179,9 +179,9 @@ describe("DiffPanel", () => {
     mounted = await render(<DiffPanel mode="sheet" />);
 
     const search = page.getByLabelText("Search diff");
-    await search.fill("alpha");
+    await search.fill("beta");
 
-    await expect.element(page.getByText("alpha")).toBeInTheDocument();
+    await expect.element(page.getByText("beta line")).toBeInTheDocument();
     await expect.element(page.getByText("1 of 1")).toBeInTheDocument();
     await page.getByRole("button", { name: "Next match" }).click();
     await expect.element(page.getByText("1 of 1")).toBeInTheDocument();

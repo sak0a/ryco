@@ -4,6 +4,9 @@ import { useEffect, useMemo, type ReactNode } from "react";
 import { useTheme } from "../hooks/useTheme";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 
+const MAX_DIFF_WORKER_POOL_SIZE = 3;
+const DIFF_AST_CACHE_SIZE = 120;
+
 function DiffWorkerThemeSync({ themeName }: { themeName: DiffThemeName }) {
   const workerPool = useWorkerPool();
 
@@ -34,7 +37,10 @@ export function DiffWorkerPoolProvider({ children }: { children?: ReactNode }) {
   const workerPoolSize = useMemo(() => {
     const cores =
       typeof navigator === "undefined" ? 4 : Math.max(1, navigator.hardwareConcurrency || 4);
-    return Math.max(2, Math.min(6, Math.floor(cores / 2)));
+    // The right panel mounts this provider lazily, but @pierre/diffs initializes
+    // the pool immediately after mount. Keep concurrency below core-count/2 so
+    // large diff syntax work does not starve chat rendering or navigation.
+    return Math.max(1, Math.min(MAX_DIFF_WORKER_POOL_SIZE, Math.floor(cores / 3)));
   }, []);
 
   return (
@@ -42,7 +48,7 @@ export function DiffWorkerPoolProvider({ children }: { children?: ReactNode }) {
       poolOptions={{
         workerFactory: () => new DiffsWorker(),
         poolSize: workerPoolSize,
-        totalASTLRUCacheSize: 240,
+        totalASTLRUCacheSize: DIFF_AST_CACHE_SIZE,
       }}
       highlighterOptions={{
         theme: diffThemeName,

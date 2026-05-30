@@ -75,6 +75,9 @@ const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
+// Chat markdown is rendered outside the lazily mounted diff worker provider, so
+// finalized code blocks stay on the shared Suspense highlighter path for now.
+// Streaming blocks are still plain text to keep token updates off the Shiki path.
 
 function extractFenceLanguage(className: string | undefined): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
