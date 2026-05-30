@@ -3026,6 +3026,100 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("ignores stale generated branch names after the base branch changes", async () => {
+    let resolveGeneration!: (value: { branch: string }) => void;
+    const generationPromise = new Promise<{ branch: string }>((resolve) => {
+      resolveGeneration = resolve;
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.vcsListRefs) {
+          return {
+            isRepo: true,
+            hasPrimaryRemote: true,
+            nextCursor: null,
+            totalCount: 2,
+            refs: [
+              {
+                name: "main",
+                current: true,
+                isDefault: true,
+                worktreePath: null,
+              },
+              {
+                name: "release/next",
+                current: false,
+                isDefault: false,
+                worktreePath: null,
+              },
+            ],
+          };
+        }
+        if (body._tag === WS_METHODS.textGenerationGenerateBranchName) {
+          return generationPromise;
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await openNewWorkspaceDialog();
+      await page.getByRole("tab", { name: "New branch" }).click();
+      await page.getByRole("button", { name: "Generate branch name" }).click();
+
+      await vi.waitFor(
+        () => {
+          expect(
+            wsRequests.some(
+              (request) => request._tag === WS_METHODS.textGenerationGenerateBranchName,
+            ),
+          ).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const fromBranchTrigger = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLButtonElement>('[data-slot="combobox-trigger"]'))
+            .filter((element) => element.getBoundingClientRect().width > 0)
+            .find((element) => element.textContent?.includes("main")) ?? null,
+        "Unable to find the new workspace from-branch selector trigger.",
+      );
+      fromBranchTrigger.click();
+      await page.getByText("release/next", { exact: true }).click();
+
+      await vi.waitFor(
+        () => {
+          const releaseTrigger = Array.from(
+            document.querySelectorAll<HTMLButtonElement>('[data-slot="combobox-trigger"]'),
+          )
+            .filter((element) => element.getBoundingClientRect().width > 0)
+            .find((element) => element.textContent?.includes("release/next"));
+          expect(releaseTrigger).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      resolveGeneration({ branch: "stale/generated" });
+      await waitForLayout();
+      const branchNameInput = await waitForElement(
+        () => document.querySelector<HTMLInputElement>('input[placeholder="task/short-name"]'),
+        "Unable to find new branch name input.",
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(branchNameInput.value).toBe("");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("preserves the selected branch when reopening the new workspace dialog", async () => {
     const createdThreadId = "thread-browser-test-reopened-worktree" as ThreadId;
     const mounted = await mountChatView({

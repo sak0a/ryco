@@ -1,6 +1,6 @@
 # Issue #80 Performance Baseline
 
-Phase 0 adds opt-in local instrumentation for issue #86. It is disabled by default.
+Phase 0 adds opt-in local instrumentation for issue #80. It is disabled by default.
 
 ## Enable Profiling
 

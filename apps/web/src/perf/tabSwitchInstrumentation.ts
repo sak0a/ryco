@@ -98,5 +98,5 @@ export function usePerfMark(label: string): void {
     } catch {
       // Ignore — start mark may have been cleared.
     }
-  }, [label, perfEnabled]);
+  });
 }

@@ -42,6 +42,10 @@ describe("CreateWorktreeIntent (issue variant)", () => {
     });
   });
 
+  it("rejects empty baseBranch", () => {
+    expect(() => decode({ kind: "issue", number: 42, baseBranch: "" })).toThrow();
+  });
+
   it("accepts optional issue metadata for branch generation", () => {
     expect(
       decode({

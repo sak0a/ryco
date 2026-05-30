@@ -57,6 +57,7 @@ type Selection =
   | { kind: "issue"; item: SourceControlIssueSummary & { readonly body?: string | undefined } }
   | { kind: "pr"; item: ChangeRequest }
   | null;
+type SelectionKind = NonNullable<Selection>["kind"] | null;
 
 type IssueBranchMode = "ai" | "custom";
 type NewBranchNameMode = "manual" | "ai";
@@ -120,6 +121,7 @@ function useWorktreeBranchRefs(input: {
     if (!api || !input.cwd) {
       setRefs([]);
       setError("Project is unavailable.");
+      setIsLoading(false);
       return;
     }
 
@@ -178,6 +180,32 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
   const issueInputRef = useRef<HTMLInputElement>(null);
   const prInputRef = useRef<HTMLInputElement>(null);
   const newBranchInputRef = useRef<HTMLInputElement>(null);
+  const dialogTargetKey = `${props.projectId ?? ""}\0${props.environmentId ?? ""}\0${props.cwd ?? ""}`;
+  const previousDialogTargetKeyRef = useRef(dialogTargetKey);
+  const branchNameGenerationRequestIdRef = useRef(0);
+  const branchNameGenerationContextRef = useRef({
+    activeTab,
+    baseBranch,
+    cwd: props.cwd,
+    environmentId: props.environmentId,
+    selectionBody: undefined as string | undefined,
+    selectionKey: null as string | null,
+    selectionKind: null as SelectionKind,
+    selectionTitle: undefined as string | undefined,
+    targetKey: dialogTargetKey,
+  });
+
+  branchNameGenerationContextRef.current = {
+    activeTab,
+    baseBranch,
+    cwd: props.cwd,
+    environmentId: props.environmentId,
+    selectionBody: selection?.kind === "issue" ? selection.item.body : undefined,
+    selectionKey: selection ? sourceControlItemKey(selection.item) : null,
+    selectionKind: selection?.kind ?? null,
+    selectionTitle: selection?.item.title,
+    targetKey: dialogTargetKey,
+  };
 
   const branchSearch = useWorktreeBranchRefs({
     open: props.open,
@@ -189,14 +217,27 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
 
   useEffect(() => {
     if (props.open) {
+      const targetChanged = previousDialogTargetKeyRef.current !== dialogTargetKey;
+      previousDialogTargetKeyRef.current = dialogTargetKey;
       setActiveTab(props.initialTab ?? "branches");
       setSelection(null);
       setCreateError(null);
       setExistingWorktreeId(null);
       setBranchNameGenerationError(null);
       setBranchNameGenerationTarget(null);
+      if (targetChanged) {
+        setSelectedBranchName(null);
+        setBaseBranch("main");
+        setNewBranchName("");
+        setNewBranchNameMode("manual");
+        setIssueBranchName("");
+        setIssueBranchMode("ai");
+        setBranchQuery("");
+        setIssueQuery("");
+        setPrQuery("");
+      }
     }
-  }, [props.initialTab, props.open]);
+  }, [dialogTargetKey, props.initialTab, props.open]);
 
   useEffect(() => {
     if (!props.open || activeTab !== "branches") {
@@ -319,6 +360,26 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
         return;
       }
 
+      const requestId = branchNameGenerationRequestIdRef.current + 1;
+      branchNameGenerationRequestIdRef.current = requestId;
+      const snapshot = branchNameGenerationContextRef.current;
+      const generationIsCurrent = () => {
+        const current = branchNameGenerationContextRef.current;
+        return (
+          branchNameGenerationRequestIdRef.current === requestId &&
+          current.cwd === snapshot.cwd &&
+          current.environmentId === snapshot.environmentId &&
+          current.targetKey === snapshot.targetKey &&
+          (target === "issue"
+            ? current.activeTab === "issues" &&
+              current.selectionKind === "issue" &&
+              current.selectionKey === snapshot.selectionKey &&
+              current.selectionTitle === snapshot.selectionTitle &&
+              current.selectionBody === snapshot.selectionBody
+            : current.activeTab === "newBranch" && current.baseBranch === snapshot.baseBranch)
+        );
+      };
+
       setBranchNameGenerationTarget(target);
       setBranchNameGenerationError(null);
       try {
@@ -332,6 +393,9 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
         if (!branch) {
           throw new Error("AI returned an empty branch name.");
         }
+        if (!generationIsCurrent()) {
+          return;
+        }
         if (target === "issue") {
           setIssueBranchMode("custom");
           setIssueBranchName(branch);
@@ -340,11 +404,16 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
           setNewBranchName(branch);
         }
       } catch (cause) {
+        if (!generationIsCurrent()) {
+          return;
+        }
         setBranchNameGenerationError(
           cause instanceof Error ? cause.message : "Failed to generate branch name.",
         );
       } finally {
-        setBranchNameGenerationTarget(null);
+        if (branchNameGenerationRequestIdRef.current === requestId) {
+          setBranchNameGenerationTarget(null);
+        }
       }
     },
     [baseBranch, props.cwd, props.environmentId, selection],
