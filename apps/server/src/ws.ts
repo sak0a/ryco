@@ -59,6 +59,7 @@ import {
   observeRpcStream,
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
+import { recordServerPerfPayload } from "./observability/PerfInstrumentation.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
@@ -1060,7 +1061,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                     }),
                     Effect.catch(() => Effect.succeed(generatedBranchFallback)),
                   ));
-              refName = "HEAD";
+              refName = input.intent.baseBranch ?? "HEAD";
               newRefName = branch;
               title = input.intent.title?.trim() || `Issue #${number}`;
               origin = "issue";
@@ -1568,6 +1569,12 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                   snapshot,
                 }),
                 liveStream,
+              ).pipe(
+                Stream.tap((item) =>
+                  Effect.sync(() =>
+                    recordServerPerfPayload("server.ws.orchestration.subscribeShell", item),
+                  ),
+                ),
               );
             }),
             { "rpc.aggregate": "orchestration" },
@@ -1627,6 +1634,12 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                   },
                 }),
                 liveStream,
+              ).pipe(
+                Stream.tap((item) =>
+                  Effect.sync(() =>
+                    recordServerPerfPayload("server.ws.orchestration.subscribeThread", item),
+                  ),
+                ),
               );
             }),
             { "rpc.aggregate": "orchestration" },
@@ -2676,7 +2689,12 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
               WS_METHODS.subscribeTerminalEvents,
               Stream.callback<TerminalEvent>((queue) =>
                 Effect.acquireRelease(
-                  terminalManager.subscribe((event) => Queue.offer(queue, event)),
+                  terminalManager.subscribe((event) =>
+                    Effect.gen(function* () {
+                      recordServerPerfPayload("server.ws.terminal.events", event);
+                      yield* Queue.offer(queue, event);
+                    }),
+                  ),
                   (unsubscribe) => Effect.sync(unsubscribe),
                 ),
               ),

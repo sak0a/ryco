@@ -54,6 +54,7 @@ export const CreateWorktreeIntent = Schema.Union([
     kind: Schema.Literal("issue"),
     number: Schema.Number,
     branchName: Schema.optional(TrimmedNonEmptyString),
+    baseBranch: Schema.optional(TrimmedNonEmptyString),
     title: Schema.optional(TrimmedNonEmptyString),
     body: Schema.optional(Schema.String),
   }),

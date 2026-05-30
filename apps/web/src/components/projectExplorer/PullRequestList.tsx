@@ -21,6 +21,7 @@ export const PullRequestList = memo(function PullRequestList(props: {
   items: ReadonlyArray<ChangeRequest>;
   isLoading: boolean;
   emptyText: string;
+  selectedKey?: string | null | undefined;
   onSelect: (changeRequest: ChangeRequest) => void;
 }) {
   if (props.isLoading && props.items.length === 0) {
@@ -34,17 +35,22 @@ export const PullRequestList = memo(function PullRequestList(props: {
   return (
     <ul role="listbox" className="divide-y divide-border/40">
       {props.items.map((pr) => {
+        const itemKey = `${pr.provider}:${pr.number}`;
+        const isSelected = props.selectedKey === itemKey;
         const labels = pr.labels ?? [];
         const visibleLabels = labels.slice(0, 3);
         const moreLabelCount = labels.length - visibleLabels.length;
         return (
-          <li key={`${pr.provider}:${pr.number}`}>
+          <li key={itemKey}>
             <button
               type="button"
+              role="option"
+              aria-selected={isSelected}
               onClick={() => props.onSelect(pr)}
               className={cn(
                 "flex w-full items-start gap-3 px-4 py-3 text-left",
                 "hover:bg-accent/40 focus-visible:bg-accent/60 focus-visible:outline-none",
+                isSelected && "bg-accent/55",
               )}
             >
               <StateBadge
