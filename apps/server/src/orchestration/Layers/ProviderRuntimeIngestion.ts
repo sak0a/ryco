@@ -808,20 +808,34 @@ const make = Effect.gen(function* () {
         return false;
       }
 
-      liveAssistantDeltaBuffers.delete(input.key);
       if (buffer.text.length === 0) {
+        liveAssistantDeltaBuffers.delete(input.key);
         return false;
       }
 
-      yield* orchestrationEngine.dispatch({
-        type: "thread.message.assistant.delta",
-        commandId: providerCommandId(buffer.event, input.commandTag),
-        threadId: buffer.threadId,
-        messageId: buffer.messageId,
-        delta: buffer.text,
-        ...(buffer.turnId ? { turnId: buffer.turnId } : {}),
-        createdAt: buffer.createdAt,
-      });
+      yield* orchestrationEngine
+        .dispatch({
+          type: "thread.message.assistant.delta",
+          commandId: providerCommandId(buffer.event, input.commandTag),
+          threadId: buffer.threadId,
+          messageId: buffer.messageId,
+          delta: buffer.text,
+          ...(buffer.turnId ? { turnId: buffer.turnId } : {}),
+          createdAt: buffer.createdAt,
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.sync(() => {
+              const current = liveAssistantDeltaBuffers.get(input.key);
+              if (!current || current.generation === buffer.generation) {
+                liveAssistantDeltaBuffers.set(input.key, buffer);
+              }
+            }).pipe(Effect.andThen(Effect.failCause(cause))),
+          ),
+        );
+      if (liveAssistantDeltaBuffers.get(input.key) === buffer) {
+        liveAssistantDeltaBuffers.delete(input.key);
+      }
       return true;
     });
 
@@ -1825,6 +1839,8 @@ const make = Effect.gen(function* () {
 
   return {
     start,
+    // Drain pending runtime work, flush any remaining live assistant text,
+    // then drain again for scheduled flush inputs that landed during shutdown.
     drain: worker.drain.pipe(
       Effect.andThen(
         flushLiveAssistantDeltaBuffersSafely({

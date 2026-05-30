@@ -1058,6 +1058,149 @@ describe("incremental orchestration updates", () => {
     expect(threadsOf(next)[0]?.messages[0]?.text).toBe("hello before create");
   });
 
+  it("appends pending streamed message deltas before thread creation", () => {
+    const state = makeEmptyState();
+    const threadId = ThreadId.make("thread-late-stream");
+    const messageId = MessageId.make("message-streaming-early");
+    const turnId = TurnId.make("turn-streaming-early");
+
+    const withFirstDelta = applyOrchestrationEvent(
+      state,
+      makeEvent(
+        "thread.message-sent",
+        {
+          threadId,
+          messageId,
+          role: "assistant",
+          text: "hello",
+          turnId,
+          streaming: true,
+          createdAt: "2026-02-27T00:00:01.000Z",
+          updatedAt: "2026-02-27T00:00:01.000Z",
+        },
+        { sequence: 1 },
+      ),
+      localEnvironmentId,
+    );
+    const withSecondDelta = applyOrchestrationEvent(
+      withFirstDelta,
+      makeEvent(
+        "thread.message-sent",
+        {
+          threadId,
+          messageId,
+          role: "assistant",
+          text: " world",
+          turnId,
+          streaming: true,
+          createdAt: "2026-02-27T00:00:02.000Z",
+          updatedAt: "2026-02-27T00:00:02.000Z",
+        },
+        { sequence: 2 },
+      ),
+      localEnvironmentId,
+    );
+    const withCompletion = applyOrchestrationEvent(
+      withSecondDelta,
+      makeEvent(
+        "thread.message-sent",
+        {
+          threadId,
+          messageId,
+          role: "assistant",
+          text: "",
+          turnId,
+          streaming: false,
+          createdAt: "2026-02-27T00:00:03.000Z",
+          updatedAt: "2026-02-27T00:00:03.000Z",
+        },
+        { sequence: 3 },
+      ),
+      localEnvironmentId,
+    );
+
+    const next = applyOrchestrationEvent(
+      withCompletion,
+      makeEvent(
+        "thread.created",
+        {
+          threadId,
+          projectId: ProjectId.make("project-1"),
+          title: "late streaming thread",
+          branch: "main",
+          worktreePath: null,
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdAt: "2026-02-27T00:00:04.000Z",
+          updatedAt: "2026-02-27T00:00:04.000Z",
+        },
+        { sequence: 4 },
+      ),
+      localEnvironmentId,
+    );
+
+    const message = threadsOf(next)[0]?.messages[0];
+    expect(message?.id).toBe(messageId);
+    expect(message?.text).toBe("hello world");
+    expect(message?.streaming).toBe(false);
+  });
+
+  it("consumes matching pending messages once the thread shell exists", () => {
+    const threadId = ThreadId.make("thread-shell-before-detail");
+    const messageId = MessageId.make("message-pending-before-shell");
+    const turnId = TurnId.make("turn-pending-before-shell");
+    const base = makeState(makeThread({ id: threadId, messages: [] }));
+    const environmentState = localEnvironmentStateOf(base);
+    const state: AppState = {
+      ...base,
+      environmentStateById: {
+        ...base.environmentStateById,
+        [localEnvironmentId]: {
+          ...environmentState,
+          pendingMessagesByThreadId: {
+            [threadId]: [
+              {
+                id: messageId,
+                role: "assistant",
+                text: "hello",
+                turnId,
+                createdAt: "2026-02-27T00:00:01.000Z",
+                streaming: true,
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.message-sent", {
+        threadId,
+        messageId,
+        role: "assistant",
+        text: " world",
+        turnId,
+        streaming: true,
+        createdAt: "2026-02-27T00:00:02.000Z",
+        updatedAt: "2026-02-27T00:00:02.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    const nextEnvironmentState = localEnvironmentStateOf(next);
+    const message = threadsOf(next)[0]?.messages[0];
+    expect(nextEnvironmentState.pendingMessagesByThreadId[threadId]).toBeUndefined();
+    expect(nextEnvironmentState.messageIdsByThreadId[threadId]).toEqual([messageId]);
+    expect(message?.id).toBe(messageId);
+    expect(message?.text).toBe("hello world");
+    expect(message?.streaming).toBe(true);
+  });
+
   it("reverts messages, plans, activities, and checkpoints by retained turns", () => {
     const state = makeState(
       makeThread({

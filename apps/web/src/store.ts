@@ -1294,7 +1294,7 @@ function upsertPendingThreadMessage(
   const pending = state.pendingMessagesByThreadId[threadId] ?? [];
   const existing = pending.find((entry) => entry.id === message.id);
   const nextPending = existing
-    ? pending.map((entry) => (entry.id === message.id ? { ...entry, ...message } : entry))
+    ? pending.map((entry) => (entry.id === message.id ? mergeMessageUpdate(entry, message) : entry))
     : [...pending, message];
   return {
     ...state,
@@ -1354,15 +1354,18 @@ function applyThreadMessageSentEvent(
 
   const currentIds = state.messageIdsByThreadId[threadId] ?? EMPTY_MESSAGE_IDS;
   const currentById = state.messageByThreadId[threadId] ?? {};
-  const existingMessage = currentById[message.id];
+  const pendingMessages = state.pendingMessagesByThreadId[threadId] ?? [];
+  const pendingMessage = pendingMessages.find((entry) => entry.id === message.id);
+  const existingMessage = currentById[message.id] ?? pendingMessage;
   const nextMessage = existingMessage ? mergeMessageUpdate(existingMessage, message) : message;
   let nextIds = currentIds;
   let nextById: Record<MessageId, ChatMessage> = {
     ...currentById,
     [message.id]: nextMessage,
   };
+  let nextPendingMessagesByThreadId = state.pendingMessagesByThreadId;
 
-  if (!existingMessage) {
+  if (!currentById[message.id] && !currentIds.includes(message.id)) {
     nextIds = [...currentIds, message.id];
     if (nextIds.length > MAX_THREAD_MESSAGES) {
       const retainedIds = nextIds.slice(-MAX_THREAD_MESSAGES);
@@ -1374,8 +1377,22 @@ function applyThreadMessageSentEvent(
     }
   }
 
+  if (pendingMessage) {
+    const nextPendingMessages = pendingMessages.filter((entry) => entry.id !== message.id);
+    if (nextPendingMessages.length === 0) {
+      const { [threadId]: _removedPendingMessages, ...rest } = state.pendingMessagesByThreadId;
+      nextPendingMessagesByThreadId = rest;
+    } else {
+      nextPendingMessagesByThreadId = {
+        ...state.pendingMessagesByThreadId,
+        [threadId]: nextPendingMessages,
+      };
+    }
+  }
+
   let nextState: EnvironmentState = {
     ...state,
+    pendingMessagesByThreadId: nextPendingMessagesByThreadId,
     messageIdsByThreadId:
       nextIds === currentIds
         ? state.messageIdsByThreadId
