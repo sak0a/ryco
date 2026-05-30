@@ -8,6 +8,10 @@ import { DateTime, Option } from "effect";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import {
+  classifySourceControlCommentAuthorRole,
+  parseGitHubRepositoryOwnerFromUrl,
+} from "@ryco/shared/sourceControl";
+import {
   ArrowLeftIcon,
   ChevronRightIcon,
   ExternalLinkIcon,
@@ -147,6 +151,12 @@ function PullRequestDetailBody(props: {
       ? detail.updatedAt.value
       : DateTime.fromDateUnsafe(new Date());
   const opAuthor = detail.author ?? "unknown";
+  const repositoryOwner = parseGitHubRepositoryOwnerFromUrl(detail.url);
+  const opAuthorRole = classifySourceControlCommentAuthorRole({
+    commentAuthor: opAuthor,
+    itemAuthor: detail.author,
+    repositoryOwner,
+  });
 
   const conversationCount = detail.comments.length + 1;
   const commitCount = detail.commits?.length ?? 0;
@@ -201,6 +211,7 @@ function PullRequestDetailBody(props: {
                   author={opAuthor}
                   body={detail.body}
                   createdAt={opCreatedAt}
+                  authorRole={opAuthorRole}
                   isOriginalPost
                 />
               </li>

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DateTime } from "effect";
-import type { SourceControlIssueComment } from "@ryco/contracts";
+import type { SourceControlCommentAuthorRole, SourceControlIssueComment } from "@ryco/contracts";
 import { CommentThread } from "./CommentThread";
 
 function comment(
@@ -14,6 +14,16 @@ function comment(
     ...(partial.authorAssociation !== undefined
       ? { authorAssociation: partial.authorAssociation }
       : {}),
+    ...(partial.authorRole !== undefined ? { authorRole: partial.authorRole } : {}),
+  };
+}
+
+function role(partial: Partial<SourceControlCommentAuthorRole>): SourceControlCommentAuthorRole {
+  return {
+    primary: partial.primary ?? "participant",
+    isOriginalAuthor: partial.isOriginalAuthor ?? false,
+    isRepositoryOwner: partial.isRepositoryOwner ?? false,
+    isRepositoryMaintainer: partial.isRepositoryMaintainer ?? false,
   };
 }
 
@@ -53,5 +63,78 @@ describe("CommentThread", () => {
       <CommentThread comments={[comment({ author: "alice", authorAssociation: "MANNEQUIN" })]} />,
     );
     expect(markup).not.toMatch(/>Mannequin</);
+  });
+
+  it("renders original author comments with author styling", () => {
+    const markup = renderToStaticMarkup(
+      <CommentThread
+        comments={[
+          comment({
+            author: "alice",
+            authorRole: role({ primary: "author", isOriginalAuthor: true }),
+          }),
+        ]}
+      />,
+    );
+    expect(markup).toContain(">Author<");
+    expect(markup).toContain("border-primary/30");
+  });
+
+  it("renders owner and maintainer comments with distinct badges", () => {
+    const markup = renderToStaticMarkup(
+      <CommentThread
+        comments={[
+          comment({
+            author: "owner",
+            authorRole: role({ primary: "owner", isRepositoryOwner: true }),
+          }),
+          comment({
+            author: "maintainer",
+            authorRole: role({ primary: "maintainer", isRepositoryMaintainer: true }),
+          }),
+        ]}
+      />,
+    );
+    expect(markup).toContain(">Owner<");
+    expect(markup).toContain("border-amber-500/28");
+    expect(markup).toContain(">Maintainer<");
+    expect(markup).toContain("border-sky-500/28");
+  });
+
+  it("renders combined author-owner comments as author while exposing owner status", () => {
+    const markup = renderToStaticMarkup(
+      <CommentThread
+        comments={[
+          comment({
+            author: "alice",
+            authorRole: role({
+              primary: "author",
+              isOriginalAuthor: true,
+              isRepositoryOwner: true,
+            }),
+          }),
+        ]}
+      />,
+    );
+    expect(markup).toContain(">Author<");
+    expect(markup).toContain(">Owner<");
+    expect(markup).toContain("border-primary/30");
+  });
+
+  it("preserves ordinary participant rendering", () => {
+    const markup = renderToStaticMarkup(
+      <CommentThread
+        comments={[
+          comment({
+            author: "bob",
+            authorRole: role({ primary: "participant" }),
+          }),
+        ]}
+      />,
+    );
+    expect(markup).not.toContain(">Author<");
+    expect(markup).not.toContain(">Owner<");
+    expect(markup).not.toContain(">Maintainer<");
+    expect(markup).toContain("border-border/60");
   });
 });

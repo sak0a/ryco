@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { authorAssociationLabel, avatarUrlForAuthor, hashAuthorToHue } from "./CommentThread.logic";
+import {
+  authorAssociationLabel,
+  avatarUrlForAuthor,
+  commentRoleBadges,
+  commentToneForAuthorRole,
+  hashAuthorToHue,
+} from "./CommentThread.logic";
 
 describe("avatarUrlForAuthor", () => {
   it("returns null for unknown author", () => {
@@ -76,5 +82,64 @@ describe("hashAuthorToHue", () => {
   it("handles empty author with a stable fallback", () => {
     expect(hashAuthorToHue("")).toBeGreaterThanOrEqual(0);
     expect(hashAuthorToHue("")).toBeLessThan(360);
+  });
+});
+
+describe("comment roles", () => {
+  it("uses author tone and badge for original author comments", () => {
+    const role = {
+      primary: "author" as const,
+      isOriginalAuthor: true,
+      isRepositoryOwner: false,
+      isRepositoryMaintainer: false,
+    };
+    expect(commentToneForAuthorRole(role)).toBe("author");
+    expect(commentRoleBadges({ role })).toEqual([{ label: "Author", tone: "author" }]);
+  });
+
+  it("uses owner or maintainer tone for privileged repository participants", () => {
+    const ownerRole = {
+      primary: "owner" as const,
+      isOriginalAuthor: false,
+      isRepositoryOwner: true,
+      isRepositoryMaintainer: false,
+    };
+    const maintainerRole = {
+      primary: "maintainer" as const,
+      isOriginalAuthor: false,
+      isRepositoryOwner: false,
+      isRepositoryMaintainer: true,
+    };
+    expect(commentToneForAuthorRole(ownerRole)).toBe("owner");
+    expect(commentRoleBadges({ role: ownerRole })).toEqual([{ label: "Owner", tone: "owner" }]);
+    expect(commentToneForAuthorRole(maintainerRole)).toBe("maintainer");
+    expect(commentRoleBadges({ role: maintainerRole })).toEqual([
+      { label: "Maintainer", tone: "maintainer" },
+    ]);
+  });
+
+  it("keeps author tone but exposes owner badge for combined author-owner comments", () => {
+    const role = {
+      primary: "author" as const,
+      isOriginalAuthor: true,
+      isRepositoryOwner: true,
+      isRepositoryMaintainer: false,
+    };
+    expect(commentToneForAuthorRole(role)).toBe("author");
+    expect(commentRoleBadges({ role })).toEqual([
+      { label: "Author", tone: "author" },
+      { label: "Owner", tone: "owner" },
+    ]);
+  });
+
+  it("keeps ordinary participants visually neutral", () => {
+    const role = {
+      primary: "participant" as const,
+      isOriginalAuthor: false,
+      isRepositoryOwner: false,
+      isRepositoryMaintainer: false,
+    };
+    expect(commentToneForAuthorRole(role)).toBe("participant");
+    expect(commentRoleBadges({ role, association: "NONE" })).toEqual([]);
   });
 });

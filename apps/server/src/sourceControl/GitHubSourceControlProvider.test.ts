@@ -219,6 +219,72 @@ it.effect("getIssue returns truncated details when body exceeds 8 KB", () =>
   }),
 );
 
+it.effect("getIssue classifies author and repository participant comment roles", () =>
+  Effect.gen(function* () {
+    const provider = yield* makeProvider({
+      getIssue: () =>
+        Effect.succeed({
+          number: 7,
+          title: "Role issue",
+          url: "https://github.com/owner/repo/issues/7",
+          state: "open" as const,
+          author: "owner",
+          updatedAt: Option.none(),
+          labels: [],
+          assignees: [],
+          commentsCount: 4,
+          body: "Body",
+          comments: [
+            {
+              author: "owner",
+              body: "I opened this and own the repo.",
+              createdAt: "2026-03-01T10:00:00Z",
+              authorAssociation: "OWNER",
+            },
+            {
+              author: "maintainer",
+              body: "I can help.",
+              createdAt: "2026-03-01T11:00:00Z",
+              authorAssociation: "COLLABORATOR",
+            },
+            {
+              author: "bob",
+              body: "Ordinary comment.",
+              createdAt: "2026-03-01T12:00:00Z",
+              authorAssociation: "NONE",
+            },
+          ],
+        }),
+    });
+
+    const detail = yield* provider.getIssue({ cwd: "/repo", reference: "7", fullContent: true });
+
+    assert.deepStrictEqual(
+      detail.comments.map((comment) => comment.authorRole),
+      [
+        {
+          primary: "author",
+          isOriginalAuthor: true,
+          isRepositoryOwner: true,
+          isRepositoryMaintainer: false,
+        },
+        {
+          primary: "maintainer",
+          isOriginalAuthor: false,
+          isRepositoryOwner: false,
+          isRepositoryMaintainer: true,
+        },
+        {
+          primary: "participant",
+          isOriginalAuthor: false,
+          isRepositoryOwner: false,
+          isRepositoryMaintainer: false,
+        },
+      ],
+    );
+  }),
+);
+
 it.effect("searchIssues passes query through to cli.searchIssues", () =>
   Effect.gen(function* () {
     let capturedQuery: string | undefined;
@@ -290,6 +356,75 @@ it.effect("getChangeRequestDetail returns body and comments", () =>
     assert.strictEqual(detail.comments[0]?.author, "reviewer");
     assert.strictEqual(detail.comments[0]?.body, "Looks good!");
     assert.strictEqual(detail.truncated, false);
+  }),
+);
+
+it.effect("getChangeRequestDetail classifies PR conversation and review comment roles", () =>
+  Effect.gen(function* () {
+    const provider = yield* makeProvider({
+      getPullRequestDetail: () =>
+        Effect.succeed({
+          number: 99,
+          title: "Add feature",
+          url: "https://github.com/owner/repo/pull/99",
+          baseRefName: "main",
+          headRefName: "feature/add",
+          state: "open" as const,
+          isCrossRepository: false,
+          author: "alice",
+          assignees: [],
+          labels: [],
+          commentsCount: 2,
+          body: "PR body text",
+          comments: [
+            {
+              author: "alice",
+              body: "Author follow-up",
+              createdAt: "2026-03-01T10:00:00Z",
+              authorAssociation: "CONTRIBUTOR",
+            },
+            {
+              author: "reviewer",
+              body: "Review summary",
+              createdAt: "2026-03-01T11:00:00Z",
+              authorAssociation: "MEMBER",
+              reviewState: "approved",
+            },
+          ],
+          linkedIssueNumbers: [],
+          reviewers: [],
+          commits: [],
+          additions: 0,
+          deletions: 0,
+          changedFiles: 0,
+          files: [],
+        }),
+    });
+
+    const detail = yield* provider.getChangeRequestDetail({
+      cwd: "/repo",
+      reference: "99",
+      fullContent: true,
+    });
+
+    assert.deepStrictEqual(
+      detail.comments.map((comment) => comment.authorRole),
+      [
+        {
+          primary: "author",
+          isOriginalAuthor: true,
+          isRepositoryOwner: false,
+          isRepositoryMaintainer: false,
+        },
+        {
+          primary: "maintainer",
+          isOriginalAuthor: false,
+          isRepositoryOwner: false,
+          isRepositoryMaintainer: true,
+        },
+      ],
+    );
+    assert.strictEqual(detail.comments[1]?.reviewState, "approved");
   }),
 );
 

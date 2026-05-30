@@ -1,4 +1,8 @@
-import type { SourceControlIssueComment, SourceControlReviewState } from "@ryco/contracts";
+import type {
+  SourceControlCommentAuthorRole,
+  SourceControlIssueComment,
+  SourceControlReviewState,
+} from "@ryco/contracts";
 import {
   CheckCircle2Icon,
   CodeIcon,
@@ -9,7 +13,15 @@ import {
 import { DateTime } from "effect";
 import { memo, useState } from "react";
 import { cn } from "../../lib/utils";
-import { authorAssociationLabel, avatarUrlForAuthor, hashAuthorToHue } from "./CommentThread.logic";
+import {
+  authorAssociationLabel,
+  avatarUrlForAuthor,
+  commentRoleBadges,
+  commentToneForAuthorRole,
+  hashAuthorToHue,
+  type CommentRoleBadgeTone,
+  type CommentRoleTone,
+} from "./CommentThread.logic";
 import { MarkdownView } from "./MarkdownView";
 
 const dateTimeFmt = new Intl.DateTimeFormat(undefined, {
@@ -63,21 +75,28 @@ export function CommentAvatar({ author, size = 28 }: { author: string; size?: nu
 export function AuthorAssociationBadge({
   association,
   override,
+  tone,
   variant = "default",
 }: {
   association?: string | undefined;
   override?: string | undefined;
+  tone?: CommentRoleBadgeTone | undefined;
   variant?: "default" | "highlight";
 }) {
   const label = override ?? authorAssociationLabel(association);
   if (label === null) return null;
+  const badgeTone = tone ?? (variant === "highlight" ? "author" : "default");
   return (
     <span
       className={cn(
         "inline-flex h-4 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-medium",
-        variant === "highlight"
+        badgeTone === "author"
           ? "border-primary/30 bg-primary/10 text-primary"
-          : "border-border/60 bg-muted text-muted-foreground",
+          : badgeTone === "owner"
+            ? "border-amber-500/35 bg-amber-500/12 text-amber-700 dark:text-amber-300"
+            : badgeTone === "maintainer"
+              ? "border-sky-500/35 bg-sky-500/12 text-sky-700 dark:text-sky-300"
+              : "border-border/60 bg-muted text-muted-foreground",
       )}
     >
       {label}
@@ -90,6 +109,7 @@ export interface CommentItemProps {
   body: string;
   createdAt: DateTime.Utc;
   authorAssociation?: string | undefined;
+  authorRole?: SourceControlCommentAuthorRole | undefined;
   reviewState?: SourceControlReviewState | undefined;
   isOriginalPost?: boolean;
   className?: string;
@@ -141,24 +161,46 @@ function ReviewStateBadge({ state }: { state: SourceControlReviewState }) {
   );
 }
 
+function commentArticleToneClassName(tone: CommentRoleTone): string {
+  switch (tone) {
+    case "author":
+      return "border-primary/30 bg-primary/4";
+    case "owner":
+      return "border-amber-500/28 bg-amber-500/8";
+    case "maintainer":
+      return "border-sky-500/28 bg-sky-500/8";
+    case "participant":
+      return "border-border/60 bg-muted/24";
+  }
+}
+
 export const CommentItem = memo(function CommentItem(props: CommentItemProps) {
   const [showRaw, setShowRaw] = useState(false);
   const isoDate = DateTime.toDate(props.createdAt).toISOString();
+  const roleTone = commentToneForAuthorRole(props.authorRole, props.isOriginalPost);
+  const roleBadges = commentRoleBadges({
+    role: props.authorRole,
+    association: props.authorAssociation,
+    isOriginalPost: props.isOriginalPost,
+  });
   return (
     <article
       className={cn(
-        "rounded-xl border bg-muted/24 p-3",
-        props.isOriginalPost ? "border-primary/30 bg-primary/4" : "border-border/60",
+        "rounded-xl border p-3",
+        commentArticleToneClassName(roleTone),
         props.className,
       )}
     >
       <header className="mb-2 flex items-center gap-2">
         <CommentAvatar author={props.author} />
         <span className="font-medium text-sm">{props.author}</span>
-        {props.isOriginalPost ? (
-          <AuthorAssociationBadge override="Author" variant="highlight" />
-        ) : null}
-        <AuthorAssociationBadge association={props.authorAssociation} />
+        {roleBadges.map((badge) => (
+          <AuthorAssociationBadge
+            key={`${badge.tone}-${badge.label}`}
+            override={badge.label}
+            tone={badge.tone}
+          />
+        ))}
         {props.reviewState ? <ReviewStateBadge state={props.reviewState} /> : null}
         <time dateTime={isoDate} className="text-muted-foreground text-xs" title={isoDate}>
           {dateTimeFmt.format(DateTime.toDate(props.createdAt))}
@@ -193,6 +235,7 @@ export const CommentThread = memo(function CommentThread(props: {
             body={comment.body}
             createdAt={comment.createdAt}
             authorAssociation={comment.authorAssociation}
+            authorRole={comment.authorRole}
             reviewState={comment.reviewState}
           />
         </li>

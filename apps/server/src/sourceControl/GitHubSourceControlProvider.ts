@@ -8,6 +8,10 @@ import {
   type SourceControlIssueDetail,
   type SourceControlIssueSummary,
 } from "@ryco/contracts";
+import {
+  classifySourceControlCommentAuthorRole,
+  parseGitHubRepositoryOwnerFromUrl,
+} from "@ryco/shared/sourceControl";
 
 import * as GitHubCli from "./GitHubCli.ts";
 import * as GitHubIssues from "./gitHubIssues.ts";
@@ -76,6 +80,7 @@ function toIssueDetail(
   const content = options.fullContent
     ? { body: raw.body, comments: raw.comments, truncated: false }
     : truncateSourceControlDetailContent({ body: raw.body, comments: raw.comments });
+  const repositoryOwner = parseGitHubRepositoryOwnerFromUrl(raw.url);
   return {
     ...toIssueSummary(raw),
     body: content.body,
@@ -84,6 +89,12 @@ function toIssueDetail(
       body: c.body,
       createdAt: DateTime.fromDateUnsafe(new Date(c.createdAt)),
       ...(c.authorAssociation ? { authorAssociation: c.authorAssociation } : {}),
+      authorRole: classifySourceControlCommentAuthorRole({
+        commentAuthor: c.author,
+        itemAuthor: raw.author,
+        repositoryOwner,
+        authorAssociation: c.authorAssociation,
+      }),
     })),
     truncated: content.truncated,
   };
@@ -96,6 +107,7 @@ function toChangeRequestDetail(
   const content = options.fullContent
     ? { body: raw.body, comments: raw.comments, truncated: false }
     : truncateSourceControlDetailContent({ body: raw.body, comments: raw.comments });
+  const repositoryOwner = parseGitHubRepositoryOwnerFromUrl(raw.url);
   return {
     ...toChangeRequest(raw),
     body: content.body,
@@ -104,6 +116,12 @@ function toChangeRequestDetail(
       body: c.body,
       createdAt: DateTime.fromDateUnsafe(new Date(c.createdAt)),
       ...(c.authorAssociation ? { authorAssociation: c.authorAssociation } : {}),
+      authorRole: classifySourceControlCommentAuthorRole({
+        commentAuthor: c.author,
+        itemAuthor: raw.author,
+        repositoryOwner,
+        authorAssociation: c.authorAssociation,
+      }),
       ...(c.reviewState ? { reviewState: c.reviewState } : {}),
     })),
     truncated: content.truncated,

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  classifySourceControlCommentAuthorRole,
   detectSourceControlProviderFromRemoteUrl,
   getChangeRequestTerminologyForKind,
+  parseGitHubRepositoryOwnerFromUrl,
   resolveChangeRequestPresentation,
 } from "./sourceControl.ts";
 
@@ -66,5 +68,99 @@ describe("detectSourceControlProviderFromRemoteUrl", () => {
       detectSourceControlProviderFromRemoteUrl("https://code.forgejo.org/forgejo/forgejo.git")
         ?.kind,
     ).toBe("forgejo");
+  });
+});
+
+describe("classifySourceControlCommentAuthorRole", () => {
+  it("marks a comment from the original author as author", () => {
+    expect(
+      classifySourceControlCommentAuthorRole({
+        commentAuthor: "alice",
+        itemAuthor: "Alice",
+        repositoryOwner: "owner",
+        authorAssociation: "CONTRIBUTOR",
+      }),
+    ).toEqual({
+      primary: "author",
+      isOriginalAuthor: true,
+      isRepositoryOwner: false,
+      isRepositoryMaintainer: false,
+    });
+  });
+
+  it("marks repository owner and maintainer comments distinctly", () => {
+    expect(
+      classifySourceControlCommentAuthorRole({
+        commentAuthor: "owner",
+        itemAuthor: "alice",
+        repositoryOwner: "owner",
+        authorAssociation: "OWNER",
+      }),
+    ).toEqual({
+      primary: "owner",
+      isOriginalAuthor: false,
+      isRepositoryOwner: true,
+      isRepositoryMaintainer: false,
+    });
+
+    expect(
+      classifySourceControlCommentAuthorRole({
+        commentAuthor: "maintainer",
+        itemAuthor: "alice",
+        repositoryOwner: "owner",
+        authorAssociation: "COLLABORATOR",
+      }),
+    ).toEqual({
+      primary: "maintainer",
+      isOriginalAuthor: false,
+      isRepositoryOwner: false,
+      isRepositoryMaintainer: true,
+    });
+  });
+
+  it("keeps author primary when the author is also the repository owner", () => {
+    expect(
+      classifySourceControlCommentAuthorRole({
+        commentAuthor: "owner",
+        itemAuthor: "owner",
+        repositoryOwner: "owner",
+        authorAssociation: "OWNER",
+      }),
+    ).toEqual({
+      primary: "author",
+      isOriginalAuthor: true,
+      isRepositoryOwner: true,
+      isRepositoryMaintainer: false,
+    });
+  });
+
+  it("preserves ordinary participant comments", () => {
+    expect(
+      classifySourceControlCommentAuthorRole({
+        commentAuthor: "bob",
+        itemAuthor: "alice",
+        repositoryOwner: "owner",
+        authorAssociation: "NONE",
+      }),
+    ).toEqual({
+      primary: "participant",
+      isOriginalAuthor: false,
+      isRepositoryOwner: false,
+      isRepositoryMaintainer: false,
+    });
+  });
+});
+
+describe("parseGitHubRepositoryOwnerFromUrl", () => {
+  it("parses repository owner from issue and pull request URLs", () => {
+    expect(parseGitHubRepositoryOwnerFromUrl("https://github.com/owner/repo/issues/42")).toBe(
+      "owner",
+    );
+    expect(parseGitHubRepositoryOwnerFromUrl("https://github.com/Owner/repo/pull/9")).toBe("Owner");
+  });
+
+  it("returns null for invalid or incomplete URLs", () => {
+    expect(parseGitHubRepositoryOwnerFromUrl("not a url")).toBeNull();
+    expect(parseGitHubRepositoryOwnerFromUrl("https://github.com/owner")).toBeNull();
   });
 });

@@ -2,6 +2,10 @@ import type { EnvironmentId, SourceControlIssueDetail } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeftIcon, ExternalLinkIcon } from "lucide-react";
+import {
+  classifySourceControlCommentAuthorRole,
+  parseGitHubRepositoryOwnerFromUrl,
+} from "@ryco/shared/sourceControl";
 import { issueDetailQueryOptions } from "~/lib/sourceControlContextRpc";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
@@ -115,6 +119,12 @@ function IssueDetailBody(props: {
       ? detail.updatedAt.value
       : DateTime.fromDateUnsafe(new Date());
   const opAuthor = detail.author ?? "unknown";
+  const repositoryOwner = parseGitHubRepositoryOwnerFromUrl(detail.url);
+  const opAuthorRole = classifySourceControlCommentAuthorRole({
+    commentAuthor: opAuthor,
+    itemAuthor: detail.author,
+    repositoryOwner,
+  });
 
   return (
     <div className="flex h-full min-h-0">
@@ -144,6 +154,7 @@ function IssueDetailBody(props: {
               author={opAuthor}
               body={detail.body}
               createdAt={opCreatedAt}
+              authorRole={opAuthorRole}
               isOriginalPost
             />
           </li>

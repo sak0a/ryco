@@ -1,4 +1,8 @@
-import type { SourceControlProviderInfo, SourceControlProviderKind } from "@ryco/contracts";
+import type {
+  SourceControlCommentAuthorRole,
+  SourceControlProviderInfo,
+  SourceControlProviderKind,
+} from "@ryco/contracts";
 
 export interface ChangeRequestPresentation {
   readonly icon: "github" | "gitlab" | "forgejo" | "azure-devops" | "bitbucket" | "change-request";
@@ -143,6 +147,80 @@ export function getChangeRequestTerminologyForKind(
     shortLabel: presentation.shortName,
     singular: presentation.longName,
   };
+}
+
+export interface ClassifySourceControlCommentAuthorRoleInput {
+  readonly commentAuthor: string | null | undefined;
+  readonly itemAuthor: string | null | undefined;
+  readonly repositoryOwner: string | null | undefined;
+  readonly authorAssociation?: string | null | undefined;
+}
+
+function normalizeLogin(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed.toLowerCase() : null;
+}
+
+function normalizeAuthorAssociation(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed.toUpperCase() : null;
+}
+
+function isOwnerAssociation(association: string | null): boolean {
+  return association === "OWNER";
+}
+
+function isMaintainerAssociation(association: string | null): boolean {
+  return association === "MEMBER" || association === "COLLABORATOR";
+}
+
+export function classifySourceControlCommentAuthorRole(
+  input: ClassifySourceControlCommentAuthorRoleInput,
+): SourceControlCommentAuthorRole {
+  const commentAuthor = normalizeLogin(input.commentAuthor);
+  const itemAuthor = normalizeLogin(input.itemAuthor);
+  const repositoryOwner = normalizeLogin(input.repositoryOwner);
+  const authorAssociation = normalizeAuthorAssociation(input.authorAssociation);
+  const isOriginalAuthor =
+    commentAuthor !== null && itemAuthor !== null && commentAuthor === itemAuthor;
+  const isRepositoryOwner =
+    isOwnerAssociation(authorAssociation) ||
+    (commentAuthor !== null && repositoryOwner !== null && commentAuthor === repositoryOwner);
+  const isRepositoryMaintainer = isMaintainerAssociation(authorAssociation);
+
+  return {
+    primary: isOriginalAuthor
+      ? "author"
+      : isRepositoryOwner
+        ? "owner"
+        : isRepositoryMaintainer
+          ? "maintainer"
+          : "participant",
+    isOriginalAuthor,
+    isRepositoryOwner,
+    isRepositoryMaintainer,
+  };
+}
+
+/**
+ * Best-effort parse of the owner/login segment from GitHub issue, pull request,
+ * or repository URLs such as `https://github.com/owner/repo/issues/42`.
+ */
+export function parseGitHubRepositoryOwnerFromUrl(url: string | null | undefined): string | null {
+  const trimmed = url?.trim() ?? "";
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    const segments = parsed.pathname.split("/").filter((segment) => segment.length > 0);
+    const owner = segments[0]?.trim() ?? "";
+    const repo = segments[1]?.trim() ?? "";
+    return owner.length > 0 && repo.length > 0 ? owner : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseRemoteHost(remoteUrl: string): string | null {
