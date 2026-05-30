@@ -122,6 +122,44 @@ function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<Timeli
   return new Set(lastAssistantMessageIdByResponseKey.values());
 }
 
+export function deriveRevertTurnCountByUserMessageId(input: {
+  timelineEntries: ReadonlyArray<TimelineEntry>;
+  turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
+  inferredCheckpointTurnCountByTurnId: Readonly<Partial<Record<TurnDiffSummary["turnId"], number>>>;
+}): Map<MessageId, number> {
+  const byUserMessageId = new Map<MessageId, number>();
+  let pendingUserMessageId: MessageId | null = null;
+
+  for (const entry of input.timelineEntries) {
+    if (entry.kind !== "message") {
+      continue;
+    }
+
+    if (entry.message.role === "user") {
+      pendingUserMessageId = entry.message.id;
+      continue;
+    }
+
+    if (!pendingUserMessageId) {
+      continue;
+    }
+
+    const summary = input.turnDiffSummaryByAssistantMessageId.get(entry.message.id);
+    if (!summary) {
+      continue;
+    }
+
+    const turnCount =
+      summary.checkpointTurnCount ?? input.inferredCheckpointTurnCountByTurnId[summary.turnId];
+    if (typeof turnCount === "number") {
+      byUserMessageId.set(pendingUserMessageId, Math.max(0, turnCount - 1));
+    }
+    pendingUserMessageId = null;
+  }
+
+  return byUserMessageId;
+}
+
 export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   completionDividerBeforeEntryId: string | null;
@@ -248,7 +286,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return a.proposedPlan === (b as typeof a).proposedPlan;
 
     case "work":
-      return a.groupedEntries === (b as typeof a).groupedEntries;
+      return areWorkRowsUnchanged(a, b as typeof a);
 
     case "context-compaction":
       return a.marker === (b as typeof a).marker;
@@ -256,7 +294,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "message": {
       const bm = b as typeof a;
       return (
-        a.message === bm.message &&
+        areMessagesUnchanged(a.message, bm.message) &&
         a.durationStart === bm.durationStart &&
         a.showCompletionDivider === bm.showCompletionDivider &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
@@ -265,4 +303,44 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       );
     }
   }
+}
+
+function areWorkRowsUnchanged(
+  previous: Extract<MessagesTimelineRow, { kind: "work" }>,
+  next: Extract<MessagesTimelineRow, { kind: "work" }>,
+): boolean {
+  if (previous.createdAt !== next.createdAt) {
+    return false;
+  }
+  if (previous.groupedEntries === next.groupedEntries) {
+    return true;
+  }
+  if (previous.groupedEntries.length !== next.groupedEntries.length) {
+    return false;
+  }
+  for (let index = 0; index < previous.groupedEntries.length; index += 1) {
+    const previousEntry = previous.groupedEntries[index];
+    const nextEntry = next.groupedEntries[index];
+    if (!previousEntry || !nextEntry) {
+      return false;
+    }
+    if (previousEntry.id !== nextEntry.id || previousEntry !== nextEntry) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areMessagesUnchanged(previous: ChatMessage, next: ChatMessage): boolean {
+  return (
+    previous === next ||
+    (previous.id === next.id &&
+      previous.role === next.role &&
+      previous.text === next.text &&
+      previous.attachments === next.attachments &&
+      previous.turnId === next.turnId &&
+      previous.createdAt === next.createdAt &&
+      previous.completedAt === next.completedAt &&
+      previous.streaming === next.streaming)
+  );
 }
