@@ -37,11 +37,23 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
   CommandId.make(`provider:${event.eventId}:${tag}:${crypto.randomUUID()}`);
+const liveAssistantDeltaBufferKey = (threadId: ThreadId, messageId: MessageId) =>
+  `${threadId}:${messageId}`;
 
 interface AssistantSegmentState {
   baseKey: string;
   nextSegmentIndex: number;
   activeMessageId: MessageId | null;
+}
+
+interface LiveAssistantDeltaBuffer {
+  threadId: ThreadId;
+  messageId: MessageId;
+  turnId?: TurnId;
+  event: ProviderRuntimeEvent;
+  text: string;
+  createdAt: string;
+  generation: number;
 }
 
 const TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY = 10_000;
@@ -51,6 +63,8 @@ const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL = Duration.minutes(120);
 const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
+const LIVE_ASSISTANT_DELTA_FLUSH_INTERVAL = Duration.millis(32);
+const LIVE_ASSISTANT_DELTA_FLUSH_THRESHOLD_CHARS = 4_096;
 const STRICT_PROVIDER_LIFECYCLE_GUARD = readEnv("RYCO_STRICT_PROVIDER_LIFECYCLE_GUARD") !== "0";
 
 type TurnStartRequestedDomainEvent = Extract<
@@ -66,6 +80,11 @@ type RuntimeIngestionInput =
   | {
       source: "domain";
       event: TurnStartRequestedDomainEvent;
+    }
+  | {
+      source: "liveAssistantFlush";
+      key: string;
+      generation: number;
     };
 
 function toTurnId(value: TurnId | string | undefined): TurnId | undefined {
@@ -173,6 +192,12 @@ function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string
 
 function hasRenderableAssistantText(text: string | undefined): boolean {
   return (text?.trim().length ?? 0) > 0;
+}
+
+function isAssistantTextDeltaEvent(
+  event: ProviderRuntimeEvent,
+): event is Extract<ProviderRuntimeEvent, { type: "content.delta" }> {
+  return event.type === "content.delta" && event.payload.streamKind === "assistant_text";
 }
 
 function proposedPlanIdForTurn(threadId: ThreadId, turnId: TurnId): string {
@@ -608,6 +633,9 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const liveAssistantDeltaBuffers = new Map<string, LiveAssistantDeltaBuffer>();
+  let nextLiveAssistantDeltaBufferGeneration = 1;
+  let enqueueRuntimeInput: ((input: RuntimeIngestionInput) => Effect.Effect<void>) | null = null;
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -767,6 +795,142 @@ const make = Effect.gen(function* () {
         turnId: input.turnId,
         baseKey: assistantSegmentBaseKeyFromEvent(input.event),
       });
+    });
+
+  const flushLiveAssistantDeltaBuffer = (input: {
+    key: string;
+    commandTag: string;
+    generation?: number;
+  }) =>
+    Effect.gen(function* () {
+      const buffer = liveAssistantDeltaBuffers.get(input.key);
+      if (!buffer || (input.generation !== undefined && buffer.generation !== input.generation)) {
+        return false;
+      }
+
+      if (buffer.text.length === 0) {
+        liveAssistantDeltaBuffers.delete(input.key);
+        return false;
+      }
+
+      yield* orchestrationEngine
+        .dispatch({
+          type: "thread.message.assistant.delta",
+          commandId: providerCommandId(buffer.event, input.commandTag),
+          threadId: buffer.threadId,
+          messageId: buffer.messageId,
+          delta: buffer.text,
+          ...(buffer.turnId ? { turnId: buffer.turnId } : {}),
+          createdAt: buffer.createdAt,
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.sync(() => {
+              const current = liveAssistantDeltaBuffers.get(input.key);
+              if (!current || current.generation === buffer.generation) {
+                liveAssistantDeltaBuffers.set(input.key, buffer);
+              }
+            }).pipe(Effect.andThen(Effect.failCause(cause))),
+          ),
+        );
+      if (liveAssistantDeltaBuffers.get(input.key) === buffer) {
+        liveAssistantDeltaBuffers.delete(input.key);
+      }
+      return true;
+    });
+
+  const flushLiveAssistantDeltaBuffers = (input: { commandTag: string; exceptKey?: string }) =>
+    Effect.forEach(
+      Array.from(liveAssistantDeltaBuffers.keys()).filter((key) => key !== input.exceptKey),
+      (key) => flushLiveAssistantDeltaBuffer({ key, commandTag: input.commandTag }),
+      { concurrency: 1 },
+    ).pipe(Effect.asVoid);
+
+  const flushLiveAssistantDeltaBuffersSafely = (input: {
+    commandTag: string;
+    exceptKey?: string;
+  }) =>
+    flushLiveAssistantDeltaBuffers(input).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("provider runtime ingestion failed to flush live assistant deltas", {
+          commandTag: input.commandTag,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
+
+  const clearLiveAssistantDeltaBuffersForThread = (threadId: ThreadId) =>
+    Effect.sync(() => {
+      for (const [key, buffer] of liveAssistantDeltaBuffers) {
+        if (buffer.threadId === threadId) {
+          liveAssistantDeltaBuffers.delete(key);
+        }
+      }
+    });
+
+  const scheduleLiveAssistantDeltaFlush = (key: string, generation: number) =>
+    Effect.gen(function* () {
+      const enqueue = enqueueRuntimeInput;
+      if (!enqueue) {
+        return;
+      }
+      yield* Effect.forkScoped(
+        Effect.sleep(LIVE_ASSISTANT_DELTA_FLUSH_INTERVAL).pipe(
+          Effect.andThen(
+            enqueue({
+              source: "liveAssistantFlush",
+              key,
+              generation,
+            }),
+          ),
+        ),
+      );
+    }).pipe(Effect.asVoid);
+
+  const appendLiveAssistantDelta = (input: {
+    event: ProviderRuntimeEvent;
+    threadId: ThreadId;
+    messageId: MessageId;
+    turnId?: TurnId;
+    delta: string;
+    createdAt: string;
+  }) =>
+    Effect.gen(function* () {
+      const key = liveAssistantDeltaBufferKey(input.threadId, input.messageId);
+      yield* flushLiveAssistantDeltaBuffersSafely({
+        commandTag: "assistant-delta-flush-before-interleaved-assistant-delta",
+        exceptKey: key,
+      });
+
+      const existingBuffer = liveAssistantDeltaBuffers.get(key);
+      if (existingBuffer) {
+        liveAssistantDeltaBuffers.set(key, {
+          ...existingBuffer,
+          event: input.event,
+          text: `${existingBuffer.text}${input.delta}`,
+        });
+      } else {
+        const generation = nextLiveAssistantDeltaBufferGeneration;
+        nextLiveAssistantDeltaBufferGeneration += 1;
+        liveAssistantDeltaBuffers.set(key, {
+          event: input.event,
+          threadId: input.threadId,
+          messageId: input.messageId,
+          ...(input.turnId ? { turnId: input.turnId } : {}),
+          text: input.delta,
+          createdAt: input.createdAt,
+          generation,
+        });
+        yield* scheduleLiveAssistantDeltaFlush(key, generation);
+      }
+
+      const buffer = liveAssistantDeltaBuffers.get(key);
+      if (buffer && buffer.text.length >= LIVE_ASSISTANT_DELTA_FLUSH_THRESHOLD_CHARS) {
+        yield* flushLiveAssistantDeltaBuffer({
+          key,
+          commandTag: "assistant-delta-coalesced-threshold",
+        });
+      }
     });
 
   const appendBufferedAssistantText = (messageId: MessageId, delta: string) =>
@@ -1095,6 +1259,7 @@ const make = Effect.gen(function* () {
             : Effect.void,
         { concurrency: 1 },
       ).pipe(Effect.asVoid);
+      yield* clearLiveAssistantDeltaBuffersForThread(threadId);
     });
 
   const getSourceProposedPlanReferenceForPendingTurnStart = Effect.fn(
@@ -1194,6 +1359,12 @@ const make = Effect.gen(function* () {
       const conflictsWithActiveTurn =
         activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
       const missingTurnForActiveTurn = activeTurnId !== null && eventTurnId === undefined;
+
+      if (!isAssistantTextDeltaEvent(event)) {
+        yield* flushLiveAssistantDeltaBuffersSafely({
+          commandTag: "assistant-delta-flush-before-runtime-event",
+        });
+      }
 
       const shouldApplyThreadLifecycle = (() => {
         if (!STRICT_PROVIDER_LIFECYCLE_GUARD) {
@@ -1312,10 +1483,7 @@ const make = Effect.gen(function* () {
         }
       }
 
-      const assistantDelta =
-        event.type === "content.delta" && event.payload.streamKind === "assistant_text"
-          ? event.payload.delta
-          : undefined;
+      const assistantDelta = isAssistantTextDeltaEvent(event) ? event.payload.delta : undefined;
       const proposedPlanDelta =
         event.type === "turn.proposed.delta" ? event.payload.delta : undefined;
 
@@ -1348,9 +1516,8 @@ const make = Effect.gen(function* () {
             });
           }
         } else {
-          yield* orchestrationEngine.dispatch({
-            type: "thread.message.assistant.delta",
-            commandId: providerCommandId(event, "assistant-delta"),
+          yield* appendLiveAssistantDelta({
+            event,
             threadId: thread.id,
             messageId: assistantMessageId,
             delta: assistantDelta,
@@ -1624,7 +1791,15 @@ const make = Effect.gen(function* () {
   const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;
 
   const processInput = (input: RuntimeIngestionInput) =>
-    input.source === "runtime" ? processRuntimeEvent(input.event) : processDomainEvent(input.event);
+    input.source === "runtime"
+      ? processRuntimeEvent(input.event)
+      : input.source === "domain"
+        ? processDomainEvent(input.event)
+        : flushLiveAssistantDeltaBuffer({
+            key: input.key,
+            generation: input.generation,
+            commandTag: "assistant-delta-coalesced-interval",
+          }).pipe(Effect.asVoid);
 
   const processInputSafely = (input: RuntimeIngestionInput) =>
     processInput(input).pipe(
@@ -1634,14 +1809,16 @@ const make = Effect.gen(function* () {
         }
         return Effect.logWarning("provider runtime ingestion failed to process event", {
           source: input.source,
-          eventId: input.event.eventId,
-          eventType: input.event.type,
+          ...(input.source === "liveAssistantFlush"
+            ? { flushKey: input.key, flushGeneration: input.generation }
+            : { eventId: input.event.eventId, eventType: input.event.type }),
           cause: Cause.pretty(cause),
         });
       }),
     );
 
   const worker = yield* makeDrainableWorker(processInputSafely);
+  enqueueRuntimeInput = worker.enqueue;
 
   const start: ProviderRuntimeIngestionShape["start"] = () =>
     Effect.gen(function* () {
@@ -1662,7 +1839,16 @@ const make = Effect.gen(function* () {
 
   return {
     start,
-    drain: worker.drain,
+    // Drain pending runtime work, flush any remaining live assistant text,
+    // then drain again for scheduled flush inputs that landed during shutdown.
+    drain: worker.drain.pipe(
+      Effect.andThen(
+        flushLiveAssistantDeltaBuffersSafely({
+          commandTag: "assistant-delta-flush-on-drain",
+        }),
+      ),
+      Effect.andThen(worker.drain),
+    ),
   } satisfies ProviderRuntimeIngestionShape;
 });
 
