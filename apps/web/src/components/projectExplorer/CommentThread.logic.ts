@@ -1,4 +1,8 @@
 import type { SourceControlCommentAuthorRole } from "@ryco/contracts";
+import {
+  classifySourceControlCommentAuthorRole,
+  parseGitHubRepositoryOwnerFromUrl,
+} from "@ryco/shared/sourceControl";
 
 const UNKNOWN_AUTHOR_PLACEHOLDER = "unknown";
 
@@ -13,6 +17,8 @@ const ASSOCIATION_LABELS: Record<string, string> = {
   OWNER: "Owner",
   MEMBER: "Member",
   COLLABORATOR: "Collaborator",
+  MEMBER_OF_REPOSITORY: "Maintainer",
+  MEMBER_OF_ORG: "Maintainer",
   CONTRIBUTOR: "Contributor",
   FIRST_TIME_CONTRIBUTOR: "First-time contributor",
   FIRST_TIMER: "First-time contributor",
@@ -32,14 +38,33 @@ export interface CommentRoleBadge {
   readonly tone: CommentRoleBadgeTone;
 }
 
+export interface OriginalPostAuthorRolePresentation {
+  readonly author: string;
+  readonly role: SourceControlCommentAuthorRole;
+}
+
 function normalizeAssociation(association: string | undefined): string | null {
   const trimmed = association?.trim() ?? "";
   return trimmed.length > 0 ? trimmed.toUpperCase() : null;
 }
 
+function associationTone(association: string | null): CommentRoleTone | null {
+  if (association === "OWNER") return "owner";
+  if (
+    association === "MEMBER" ||
+    association === "COLLABORATOR" ||
+    association === "MEMBER_OF_REPOSITORY" ||
+    association === "MEMBER_OF_ORG"
+  ) {
+    return "maintainer";
+  }
+  return null;
+}
+
 export function commentToneForAuthorRole(
   role: SourceControlCommentAuthorRole | undefined,
   isOriginalPost = false,
+  association?: string | undefined,
 ): CommentRoleTone {
   if (isOriginalPost || role?.primary === "author" || role?.isOriginalAuthor === true) {
     return "author";
@@ -50,6 +75,8 @@ export function commentToneForAuthorRole(
   if (role?.primary === "maintainer" || role?.isRepositoryMaintainer === true) {
     return "maintainer";
   }
+  const fallbackTone = associationTone(normalizeAssociation(association));
+  if (fallbackTone !== null) return fallbackTone;
   return "participant";
 }
 
@@ -89,10 +116,25 @@ export function commentRoleBadges(input: {
   const label = authorAssociationLabel(association ?? undefined);
   if (label === null) return [];
   if (association === "OWNER") return [{ label, tone: "owner" }];
-  if (association === "MEMBER" || association === "COLLABORATOR") {
+  if (associationTone(association) === "maintainer") {
     return [{ label: "Maintainer", tone: "maintainer" }];
   }
   return [{ label, tone: "default" }];
+}
+
+export function deriveOriginalPostAuthorRole(input: {
+  readonly url: string;
+  readonly author?: string | null | undefined;
+}): OriginalPostAuthorRolePresentation {
+  const author = input.author ?? "unknown";
+  return {
+    author,
+    role: classifySourceControlCommentAuthorRole({
+      commentAuthor: author,
+      itemAuthor: input.author,
+      repositoryOwner: parseGitHubRepositoryOwnerFromUrl(input.url),
+    }),
+  };
 }
 
 export function hashAuthorToHue(author: string): number {

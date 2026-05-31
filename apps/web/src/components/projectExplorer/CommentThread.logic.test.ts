@@ -4,6 +4,7 @@ import {
   avatarUrlForAuthor,
   commentRoleBadges,
   commentToneForAuthorRole,
+  deriveOriginalPostAuthorRole,
   hashAuthorToHue,
 } from "./CommentThread.logic";
 
@@ -48,6 +49,11 @@ describe("authorAssociationLabel", () => {
 
   it("returns 'Member' for MEMBER", () => {
     expect(authorAssociationLabel("MEMBER")).toBe("Member");
+  });
+
+  it("returns 'Maintainer' for GitHub member aliases", () => {
+    expect(authorAssociationLabel("MEMBER_OF_REPOSITORY")).toBe("Maintainer");
+    expect(authorAssociationLabel("MEMBER_OF_ORG")).toBe("Maintainer");
   });
 
   it("returns 'Collaborator' for COLLABORATOR", () => {
@@ -141,5 +147,50 @@ describe("comment roles", () => {
     };
     expect(commentToneForAuthorRole(role)).toBe("participant");
     expect(commentRoleBadges({ role, association: "NONE" })).toEqual([]);
+  });
+
+  it("uses authorAssociation as a tone fallback when structured role is absent", () => {
+    expect(commentToneForAuthorRole(undefined, false, "OWNER")).toBe("owner");
+    expect(commentToneForAuthorRole(undefined, false, "MEMBER")).toBe("maintainer");
+    expect(commentToneForAuthorRole(undefined, false, "COLLABORATOR")).toBe("maintainer");
+    expect(commentToneForAuthorRole(undefined, false, "MEMBER_OF_REPOSITORY")).toBe("maintainer");
+    expect(commentToneForAuthorRole(undefined, false, "MEMBER_OF_ORG")).toBe("maintainer");
+    expect(commentToneForAuthorRole(undefined, false, "NONE")).toBe("participant");
+  });
+});
+
+describe("deriveOriginalPostAuthorRole", () => {
+  it("derives a combined author-owner role for repository-owner authors", () => {
+    expect(
+      deriveOriginalPostAuthorRole({
+        url: "https://github.com/alice/repo/issues/42",
+        author: "alice",
+      }),
+    ).toEqual({
+      author: "alice",
+      role: {
+        primary: "author",
+        isOriginalAuthor: true,
+        isRepositoryOwner: true,
+        isRepositoryMaintainer: false,
+      },
+    });
+  });
+
+  it("uses a stable unknown fallback when the original author is missing", () => {
+    expect(
+      deriveOriginalPostAuthorRole({
+        url: "https://github.com/alice/repo/pull/9",
+        author: null,
+      }),
+    ).toEqual({
+      author: "unknown",
+      role: {
+        primary: "participant",
+        isOriginalAuthor: false,
+        isRepositoryOwner: false,
+        isRepositoryMaintainer: false,
+      },
+    });
   });
 });

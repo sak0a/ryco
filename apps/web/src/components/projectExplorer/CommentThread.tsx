@@ -177,7 +177,11 @@ function commentArticleToneClassName(tone: CommentRoleTone): string {
 export const CommentItem = memo(function CommentItem(props: CommentItemProps) {
   const [showRaw, setShowRaw] = useState(false);
   const isoDate = DateTime.toDate(props.createdAt).toISOString();
-  const roleTone = commentToneForAuthorRole(props.authorRole, props.isOriginalPost);
+  const roleTone = commentToneForAuthorRole(
+    props.authorRole,
+    props.isOriginalPost,
+    props.authorAssociation,
+  );
   const roleBadges = commentRoleBadges({
     role: props.authorRole,
     association: props.authorAssociation,

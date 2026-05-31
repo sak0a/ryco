@@ -5,6 +5,7 @@ import {
   type ChangeRequest,
   type ChangeRequestState,
   type SourceControlChangeRequestDetail,
+  type SourceControlIssueComment,
   type SourceControlIssueDetail,
   type SourceControlIssueSummary,
 } from "@ryco/contracts";
@@ -73,6 +74,34 @@ function toIssueSummary(raw: GitHubIssues.NormalizedGitHubIssueRecord): SourceCo
   };
 }
 
+function toSourceControlComment(
+  raw: {
+    readonly author: string;
+    readonly body: string;
+    readonly createdAt: string;
+    readonly authorAssociation?: string;
+    readonly reviewState?: SourceControlIssueComment["reviewState"];
+  },
+  context: {
+    readonly itemAuthor: string | null | undefined;
+    readonly repositoryOwner: string | null;
+  },
+): SourceControlIssueComment {
+  return {
+    author: raw.author,
+    body: raw.body,
+    createdAt: DateTime.fromDateUnsafe(new Date(raw.createdAt)),
+    ...(raw.authorAssociation ? { authorAssociation: raw.authorAssociation } : {}),
+    authorRole: classifySourceControlCommentAuthorRole({
+      commentAuthor: raw.author,
+      itemAuthor: context.itemAuthor,
+      repositoryOwner: context.repositoryOwner,
+      authorAssociation: raw.authorAssociation,
+    }),
+    ...(raw.reviewState ? { reviewState: raw.reviewState } : {}),
+  };
+}
+
 function toIssueDetail(
   raw: GitHubIssues.NormalizedGitHubIssueDetail,
   options: { readonly fullContent: boolean },
@@ -84,18 +113,9 @@ function toIssueDetail(
   return {
     ...toIssueSummary(raw),
     body: content.body,
-    comments: content.comments.map((c) => ({
-      author: c.author,
-      body: c.body,
-      createdAt: DateTime.fromDateUnsafe(new Date(c.createdAt)),
-      ...(c.authorAssociation ? { authorAssociation: c.authorAssociation } : {}),
-      authorRole: classifySourceControlCommentAuthorRole({
-        commentAuthor: c.author,
-        itemAuthor: raw.author,
-        repositoryOwner,
-        authorAssociation: c.authorAssociation,
-      }),
-    })),
+    comments: content.comments.map((c) =>
+      toSourceControlComment(c, { itemAuthor: raw.author, repositoryOwner }),
+    ),
     truncated: content.truncated,
   };
 }
@@ -111,19 +131,9 @@ function toChangeRequestDetail(
   return {
     ...toChangeRequest(raw),
     body: content.body,
-    comments: content.comments.map((c) => ({
-      author: c.author,
-      body: c.body,
-      createdAt: DateTime.fromDateUnsafe(new Date(c.createdAt)),
-      ...(c.authorAssociation ? { authorAssociation: c.authorAssociation } : {}),
-      authorRole: classifySourceControlCommentAuthorRole({
-        commentAuthor: c.author,
-        itemAuthor: raw.author,
-        repositoryOwner,
-        authorAssociation: c.authorAssociation,
-      }),
-      ...(c.reviewState ? { reviewState: c.reviewState } : {}),
-    })),
+    comments: content.comments.map((c) =>
+      toSourceControlComment(c, { itemAuthor: raw.author, repositoryOwner }),
+    ),
     truncated: content.truncated,
     ...(raw.linkedIssueNumbers.length > 0 ? { linkedIssueNumbers: raw.linkedIssueNumbers } : {}),
     ...(raw.reviewers && raw.reviewers.length > 0 ? { reviewers: raw.reviewers } : {}),
