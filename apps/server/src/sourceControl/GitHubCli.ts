@@ -907,7 +907,12 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
     listWorkflowRunJobs: (input) =>
       execute({
         cwd: input.cwd,
-        args: ["api", `repos/{owner}/{repo}/actions/runs/${input.runId}/jobs?per_page=100`],
+        args: [
+          "api",
+          "--paginate",
+          "--slurp",
+          `repos/{owner}/{repo}/actions/runs/${input.runId}/jobs?per_page=100`,
+        ],
         timeoutMs: 45_000,
       }).pipe(
         Effect.map((r) => r.stdout.trim()),

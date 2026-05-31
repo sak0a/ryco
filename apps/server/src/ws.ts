@@ -85,6 +85,7 @@ import { ProjectionWorktreeRepository } from "./persistence/Services/ProjectionW
 import { refreshWorktreeSourceControlState } from "./sourceControl/refreshWorktreeSourceControlState.ts";
 import * as SourceControlDiscoveryLayer from "./sourceControl/SourceControlDiscovery.ts";
 import { SourceControlRepositoryService } from "./sourceControl/SourceControlRepositoryService.ts";
+import type { SourceControlProviderShape } from "./sourceControl/SourceControlProvider.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as ForgejoApi from "./sourceControl/ForgejoApi.ts";
@@ -1477,6 +1478,38 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
           return {};
         });
 
+      const workflowProviderUnavailableDetail = {
+        listWorkflowRuns:
+          "Workflow runs are only available for source control providers that expose CI status.",
+        getWorkflowRunJobs:
+          "Workflow jobs are only available for source control providers that expose CI status.",
+        getWorkflowJobLog:
+          "Workflow logs are only available for source control providers that expose CI status.",
+      } as const;
+
+      type SourceControlWorkflowOperation = keyof typeof workflowProviderUnavailableDetail;
+
+      const callSourceControlWorkflowMethod = <A>(input: {
+        readonly cwd: string;
+        readonly operation: SourceControlWorkflowOperation;
+        readonly invoke: (
+          provider: SourceControlProviderShape,
+        ) => Effect.Effect<A, SourceControlProviderError> | undefined;
+      }) =>
+        sourceControlRegistry.resolve({ cwd: input.cwd }).pipe(
+          Effect.flatMap((provider) => {
+            const effect = input.invoke(provider);
+            if (effect) return effect;
+            return Effect.fail(
+              new SourceControlProviderError({
+                provider: provider.kind,
+                operation: input.operation,
+                detail: workflowProviderUnavailableDetail[input.operation],
+              }),
+            );
+          }),
+        );
+
       return WsRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
@@ -2203,26 +2236,18 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             WS_METHODS.sourceControlListWorkflowRuns,
             ownerEffect(
               WS_METHODS.sourceControlListWorkflowRuns,
-              sourceControlRegistry.resolve({ cwd }).pipe(
-                Effect.flatMap((provider) => {
+              callSourceControlWorkflowMethod({
+                cwd,
+                operation: "listWorkflowRuns",
+                invoke: (provider) => {
                   const method = provider.listWorkflowRuns;
-                  if (!method) {
-                    return Effect.fail(
-                      new SourceControlProviderError({
-                        provider: provider.kind,
-                        operation: "listWorkflowRuns",
-                        detail:
-                          "Workflow runs are only available for source control providers that expose CI status.",
-                      }),
-                    );
-                  }
-                  return method({
+                  return method?.({
                     cwd,
                     ...(pullRequestNumber !== undefined ? { pullRequestNumber } : {}),
                     ...(limit !== undefined ? { limit } : {}),
                   });
-                }),
-              ),
+                },
+              }),
             ),
             {
               "rpc.aggregate": "source-control",
@@ -2233,22 +2258,14 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             WS_METHODS.sourceControlGetWorkflowRunJobs,
             ownerEffect(
               WS_METHODS.sourceControlGetWorkflowRunJobs,
-              sourceControlRegistry.resolve({ cwd }).pipe(
-                Effect.flatMap((provider) => {
+              callSourceControlWorkflowMethod({
+                cwd,
+                operation: "getWorkflowRunJobs",
+                invoke: (provider) => {
                   const method = provider.getWorkflowRunJobs;
-                  if (!method) {
-                    return Effect.fail(
-                      new SourceControlProviderError({
-                        provider: provider.kind,
-                        operation: "getWorkflowRunJobs",
-                        detail:
-                          "Workflow jobs are only available for source control providers that expose CI status.",
-                      }),
-                    );
-                  }
-                  return method({ cwd, runId });
-                }),
-              ),
+                  return method?.({ cwd, runId });
+                },
+              }),
             ),
             {
               "rpc.aggregate": "source-control",
@@ -2259,22 +2276,14 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             WS_METHODS.sourceControlGetWorkflowJobLog,
             ownerEffect(
               WS_METHODS.sourceControlGetWorkflowJobLog,
-              sourceControlRegistry.resolve({ cwd }).pipe(
-                Effect.flatMap((provider) => {
+              callSourceControlWorkflowMethod({
+                cwd,
+                operation: "getWorkflowJobLog",
+                invoke: (provider) => {
                   const method = provider.getWorkflowJobLog;
-                  if (!method) {
-                    return Effect.fail(
-                      new SourceControlProviderError({
-                        provider: provider.kind,
-                        operation: "getWorkflowJobLog",
-                        detail:
-                          "Workflow logs are only available for source control providers that expose CI status.",
-                      }),
-                    );
-                  }
-                  return method({ cwd, runId, jobId });
-                }),
-              ),
+                  return method?.({ cwd, runId, jobId });
+                },
+              }),
             ),
             {
               "rpc.aggregate": "source-control",

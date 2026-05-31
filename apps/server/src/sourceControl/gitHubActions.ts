@@ -110,6 +110,11 @@ const RawGitHubWorkflowJobsResponseSchema = Schema.Struct({
   jobs: Schema.Array(RawGitHubWorkflowJobSchema),
 });
 
+const RawGitHubWorkflowJobsPayloadSchema = Schema.Union([
+  RawGitHubWorkflowJobsResponseSchema,
+  Schema.Array(RawGitHubWorkflowJobsResponseSchema),
+]);
+
 const RawGitHubPullRequestWorkflowContextSchema = Schema.Struct({
   number: PositiveInt,
   head: Schema.Struct({
@@ -230,7 +235,7 @@ function normalizePullRequestWorkflowContext(
 }
 
 const decodeWorkflowRunsResponse = decodeJsonResult(RawGitHubWorkflowRunsResponseSchema);
-const decodeWorkflowJobsResponse = decodeJsonResult(RawGitHubWorkflowJobsResponseSchema);
+const decodeWorkflowJobsResponse = decodeJsonResult(RawGitHubWorkflowJobsPayloadSchema);
 const decodePullRequestWorkflowContext = decodeJsonResult(
   RawGitHubPullRequestWorkflowContextSchema,
 );
@@ -250,9 +255,9 @@ export function decodeGitHubWorkflowJobsJson(
   raw: string,
 ): Result.Result<ReadonlyArray<NormalizedGitHubWorkflowJob>, Cause.Cause<Schema.SchemaError>> {
   const result = decodeWorkflowJobsResponse(raw);
-  return Result.isSuccess(result)
-    ? Result.succeed(result.success.jobs.map(normalizeWorkflowJob))
-    : Result.fail(result.failure);
+  if (!Result.isSuccess(result)) return Result.fail(result.failure);
+  const pages = Array.isArray(result.success) ? result.success : [result.success];
+  return Result.succeed(pages.flatMap((page) => page.jobs.map(normalizeWorkflowJob)));
 }
 
 export function decodeGitHubPullRequestWorkflowContextJson(

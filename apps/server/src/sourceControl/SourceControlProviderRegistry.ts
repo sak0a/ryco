@@ -106,9 +106,9 @@ function unsupportedProvider(
     listAssignees: () => unsupported("listAssignees"),
     getPullRequestState: () => unsupported("getPullRequestState"),
     getIssueState: () => unsupported("getIssueState"),
-    listWorkflowRuns: () => unsupported("listWorkflowRuns"),
-    getWorkflowRunJobs: () => unsupported("getWorkflowRunJobs"),
-    getWorkflowJobLog: () => unsupported("getWorkflowJobLog"),
+    listWorkflowRuns: () => unsupportedWorkflowOperation(kind, "listWorkflowRuns"),
+    getWorkflowRunJobs: () => unsupportedWorkflowOperation(kind, "getWorkflowRunJobs"),
+    getWorkflowJobLog: () => unsupportedWorkflowOperation(kind, "getWorkflowJobLog"),
   });
 }
 
