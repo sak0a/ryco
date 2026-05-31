@@ -659,6 +659,10 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
         Effect.fail(new GitHubCliError({ operation: "listWorkflowRunJobs", detail: "stub" })),
       getWorkflowJobLog: () =>
         Effect.fail(new GitHubCliError({ operation: "getWorkflowJobLog", detail: "stub" })),
+      rerunFailedWorkflowJobs: () =>
+        Effect.fail(new GitHubCliError({ operation: "rerunFailedWorkflowJobs", detail: "stub" })),
+      rerunWorkflowJob: () =>
+        Effect.fail(new GitHubCliError({ operation: "rerunWorkflowJob", detail: "stub" })),
     },
     ghCalls,
     createdPrBodies,

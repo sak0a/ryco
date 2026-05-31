@@ -13,6 +13,7 @@ import {
   type SourceControlIssueSummary,
   type SourceControlWorkflowJob,
   type SourceControlWorkflowJobLogResult,
+  type SourceControlWorkflowRerunResult,
   type SourceControlWorkflowRun,
   type SourceControlWorkflowRunJobsResult,
   type SourceControlWorkflowRunListResult,
@@ -666,6 +667,25 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
         }),
         Effect.mapError((cause) => providerError("getWorkflowJobLog", cause)),
       ),
+    rerunWorkflow: (input) =>
+      Effect.gen(function* () {
+        if (input.target === "job") {
+          yield* github.rerunWorkflowJob({ cwd: input.cwd, jobId: input.jobId });
+          return {
+            provider: "github",
+            runId: input.runId,
+            target: "job",
+            jobId: input.jobId,
+          } satisfies SourceControlWorkflowRerunResult;
+        }
+
+        yield* github.rerunFailedWorkflowJobs({ cwd: input.cwd, runId: input.runId });
+        return {
+          provider: "github",
+          runId: input.runId,
+          target: "failed-jobs",
+        } satisfies SourceControlWorkflowRerunResult;
+      }).pipe(Effect.mapError((cause) => providerError("rerunWorkflow", cause))),
   });
 });
 

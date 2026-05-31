@@ -150,6 +150,8 @@ import {
   SourceControlLabel,
   SourceControlWorkflowJobLogInput,
   SourceControlWorkflowJobLogResult,
+  SourceControlWorkflowRerunInput,
+  SourceControlWorkflowRerunResult,
   SourceControlWorkflowRunJobsInput,
   SourceControlWorkflowRunJobsResult,
   SourceControlWorkflowRunListInput,
@@ -267,6 +269,7 @@ export const WS_METHODS = {
   sourceControlListWorkflowRuns: "sourceControl.listWorkflowRuns",
   sourceControlGetWorkflowRunJobs: "sourceControl.getWorkflowRunJobs",
   sourceControlGetWorkflowJobLog: "sourceControl.getWorkflowJobLog",
+  sourceControlRerunWorkflow: "sourceControl.rerunWorkflow",
 
   // Text generation methods
   textGenerationGenerateIssueContent: "textGeneration.generateIssueContent",
@@ -697,6 +700,12 @@ export const WsSourceControlGetWorkflowJobLogRpc = Rpc.make(
   },
 );
 
+export const WsSourceControlRerunWorkflowRpc = Rpc.make(WS_METHODS.sourceControlRerunWorkflow, {
+  payload: SourceControlWorkflowRerunInput,
+  success: SourceControlWorkflowRerunResult,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+});
+
 export const WsTextGenerationGenerateIssueContentRpc = Rpc.make(
   WS_METHODS.textGenerationGenerateIssueContent,
   {
@@ -1118,6 +1127,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlListWorkflowRunsRpc,
   WsSourceControlGetWorkflowRunJobsRpc,
   WsSourceControlGetWorkflowJobLogRpc,
+  WsSourceControlRerunWorkflowRpc,
   WsTextGenerationGenerateIssueContentRpc,
   WsTextGenerationGenerateBranchNameRpc,
   WsAtlassianListConnectionsRpc,

@@ -313,6 +313,29 @@ export const SourceControlWorkflowJobLogResult = Schema.Struct({
 });
 export type SourceControlWorkflowJobLogResult = typeof SourceControlWorkflowJobLogResult.Type;
 
+export const SourceControlWorkflowRerunInput = Schema.Union([
+  Schema.Struct({
+    cwd: TrimmedNonEmptyString,
+    runId: TrimmedNonEmptyString,
+    target: Schema.Literal("failed-jobs"),
+  }),
+  Schema.Struct({
+    cwd: TrimmedNonEmptyString,
+    runId: TrimmedNonEmptyString,
+    target: Schema.Literal("job"),
+    jobId: TrimmedNonEmptyString,
+  }),
+]);
+export type SourceControlWorkflowRerunInput = typeof SourceControlWorkflowRerunInput.Type;
+
+export const SourceControlWorkflowRerunResult = Schema.Struct({
+  provider: SourceControlProviderKind,
+  runId: TrimmedNonEmptyString,
+  target: Schema.Literals(["failed-jobs", "job"]),
+  jobId: Schema.optional(TrimmedNonEmptyString),
+});
+export type SourceControlWorkflowRerunResult = typeof SourceControlWorkflowRerunResult.Type;
+
 export const SourceControlAddChangeRequestCommentInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   reference: TrimmedNonEmptyString,

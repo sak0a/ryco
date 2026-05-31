@@ -1485,6 +1485,8 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
           "Workflow jobs are only available for source control providers that expose CI status.",
         getWorkflowJobLog:
           "Workflow logs are only available for source control providers that expose CI status.",
+        rerunWorkflow:
+          "Workflow reruns are only available for source control providers that expose CI rerun actions.",
       } as const;
 
       type SourceControlWorkflowOperation = keyof typeof workflowProviderUnavailableDetail;
@@ -2282,6 +2284,24 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                 invoke: (provider) => {
                   const method = provider.getWorkflowJobLog;
                   return method?.({ cwd, runId, jobId });
+                },
+              }),
+            ),
+            {
+              "rpc.aggregate": "source-control",
+            },
+          ),
+        [WS_METHODS.sourceControlRerunWorkflow]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlRerunWorkflow,
+            ownerEffect(
+              WS_METHODS.sourceControlRerunWorkflow,
+              callSourceControlWorkflowMethod({
+                cwd: input.cwd,
+                operation: "rerunWorkflow",
+                invoke: (provider) => {
+                  const method = provider.rerunWorkflow;
+                  return method?.(input);
                 },
               }),
             ),
