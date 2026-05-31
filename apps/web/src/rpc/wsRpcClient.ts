@@ -102,6 +102,9 @@ export interface WsRpcClient {
     >;
     readonly listIssueLabels: RpcUnaryMethod<typeof WS_METHODS.sourceControlListIssueLabels>;
     readonly listIssueAssignees: RpcUnaryMethod<typeof WS_METHODS.sourceControlListIssueAssignees>;
+    readonly listWorkflowRuns: RpcUnaryMethod<typeof WS_METHODS.sourceControlListWorkflowRuns>;
+    readonly getWorkflowRunJobs: RpcUnaryMethod<typeof WS_METHODS.sourceControlGetWorkflowRunJobs>;
+    readonly getWorkflowJobLog: RpcUnaryMethod<typeof WS_METHODS.sourceControlGetWorkflowJobLog>;
   };
   readonly textGeneration: {
     readonly generateIssueContent: RpcUnaryMethod<
@@ -303,6 +306,12 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.sourceControlListIssueLabels](input)),
       listIssueAssignees: (input) =>
         transport.request((client) => client[WS_METHODS.sourceControlListIssueAssignees](input)),
+      listWorkflowRuns: (input) =>
+        transport.request((client) => client[WS_METHODS.sourceControlListWorkflowRuns](input)),
+      getWorkflowRunJobs: (input) =>
+        transport.request((client) => client[WS_METHODS.sourceControlGetWorkflowRunJobs](input)),
+      getWorkflowJobLog: (input) =>
+        transport.request((client) => client[WS_METHODS.sourceControlGetWorkflowJobLog](input)),
     },
     textGeneration: {
       generateIssueContent: (input) =>

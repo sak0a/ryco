@@ -148,6 +148,12 @@ import {
   SourceControlAddIssueCommentResult,
   SourceControlCreateIssueInput,
   SourceControlLabel,
+  SourceControlWorkflowJobLogInput,
+  SourceControlWorkflowJobLogResult,
+  SourceControlWorkflowRunJobsInput,
+  SourceControlWorkflowRunJobsResult,
+  SourceControlWorkflowRunListInput,
+  SourceControlWorkflowRunListResult,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
 import {
@@ -258,6 +264,9 @@ export const WS_METHODS = {
   sourceControlAddChangeRequestComment: "sourceControl.addChangeRequestComment",
   sourceControlListIssueLabels: "sourceControl.listIssueLabels",
   sourceControlListIssueAssignees: "sourceControl.listIssueAssignees",
+  sourceControlListWorkflowRuns: "sourceControl.listWorkflowRuns",
+  sourceControlGetWorkflowRunJobs: "sourceControl.getWorkflowRunJobs",
+  sourceControlGetWorkflowJobLog: "sourceControl.getWorkflowJobLog",
 
   // Text generation methods
   textGenerationGenerateIssueContent: "textGeneration.generateIssueContent",
@@ -657,6 +666,33 @@ export const WsSourceControlListIssueAssigneesRpc = Rpc.make(
   {
     payload: Schema.Struct({ cwd: Schema.String }),
     success: Schema.Array(SourceControlAssigneeCandidate),
+    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  },
+);
+
+export const WsSourceControlListWorkflowRunsRpc = Rpc.make(
+  WS_METHODS.sourceControlListWorkflowRuns,
+  {
+    payload: SourceControlWorkflowRunListInput,
+    success: SourceControlWorkflowRunListResult,
+    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  },
+);
+
+export const WsSourceControlGetWorkflowRunJobsRpc = Rpc.make(
+  WS_METHODS.sourceControlGetWorkflowRunJobs,
+  {
+    payload: SourceControlWorkflowRunJobsInput,
+    success: SourceControlWorkflowRunJobsResult,
+    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  },
+);
+
+export const WsSourceControlGetWorkflowJobLogRpc = Rpc.make(
+  WS_METHODS.sourceControlGetWorkflowJobLog,
+  {
+    payload: SourceControlWorkflowJobLogInput,
+    success: SourceControlWorkflowJobLogResult,
     error: Schema.Union([SourceControlProviderError, AuthRpcError]),
   },
 );
@@ -1079,6 +1115,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlAddChangeRequestCommentRpc,
   WsSourceControlListIssueLabelsRpc,
   WsSourceControlListIssueAssigneesRpc,
+  WsSourceControlListWorkflowRunsRpc,
+  WsSourceControlGetWorkflowRunJobsRpc,
+  WsSourceControlGetWorkflowJobLogRpc,
   WsTextGenerationGenerateIssueContentRpc,
   WsTextGenerationGenerateBranchNameRpc,
   WsAtlassianListConnectionsRpc,

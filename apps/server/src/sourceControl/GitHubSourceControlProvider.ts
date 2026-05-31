@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import {
   SourceControlProviderError,
+  SOURCE_CONTROL_WORKFLOW_LOG_MAX_BYTES,
   truncateSourceControlDetailContent,
   type ChangeRequest,
   type ChangeRequestState,
@@ -10,6 +11,12 @@ import {
   type SourceControlIssueComment,
   type SourceControlIssueDetail,
   type SourceControlIssueSummary,
+  type SourceControlWorkflowJob,
+  type SourceControlWorkflowJobLogResult,
+  type SourceControlWorkflowRun,
+  type SourceControlWorkflowRunJobsResult,
+  type SourceControlWorkflowRunListResult,
+  type SourceControlWorkflowStep,
 } from "@ryco/contracts";
 import {
   classifySourceControlCommentAuthorRole,
@@ -178,6 +185,93 @@ function toChangeRequestDetail(
     ...(typeof raw.changedFiles === "number" ? { changedFiles: raw.changedFiles } : {}),
     ...(raw.files && raw.files.length > 0 ? { files: raw.files } : {}),
   };
+}
+
+function optionFromString(value: string | null | undefined): Option.Option<string> {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? Option.some(trimmed) : Option.none();
+}
+
+function dateTimeOption(value: string | null | undefined): Option.Option<DateTime.Utc> {
+  const trimmed = value?.trim() ?? "";
+  if (trimmed.length === 0) return Option.none();
+  const date = new Date(trimmed);
+  if (!Number.isFinite(date.getTime())) return Option.none();
+  return Option.some(DateTime.fromDateUnsafe(date));
+}
+
+function durationMsOption(
+  startedAt: string | null | undefined,
+  finishedAt: string | null | undefined,
+): Option.Option<number> {
+  const started = startedAt ? new Date(startedAt) : null;
+  const finished = finishedAt ? new Date(finishedAt) : null;
+  if (
+    started === null ||
+    finished === null ||
+    !Number.isFinite(started.getTime()) ||
+    !Number.isFinite(finished.getTime())
+  ) {
+    return Option.none();
+  }
+  return Option.some(Math.max(0, finished.getTime() - started.getTime()));
+}
+
+function toWorkflowRun(raw: GitHubCli.GitHubWorkflowRun): SourceControlWorkflowRun {
+  return {
+    provider: "github",
+    runId: raw.runId,
+    workflowName: raw.workflowName,
+    ...(raw.displayTitle ? { displayTitle: raw.displayTitle } : {}),
+    branch: optionFromString(raw.branch),
+    ...(raw.event ? { event: raw.event } : {}),
+    commit: raw.commit,
+    actor: optionFromString(raw.actor),
+    status: raw.status,
+    conclusion: optionFromString(raw.conclusion),
+    startedAt: dateTimeOption(raw.startedAt),
+    updatedAt: dateTimeOption(raw.updatedAt),
+    durationMs: durationMsOption(raw.startedAt, raw.updatedAt),
+    url: raw.url,
+  };
+}
+
+function toWorkflowStep(
+  raw: GitHubCli.GitHubWorkflowJob["steps"][number],
+): SourceControlWorkflowStep {
+  return {
+    number: Math.max(0, Math.trunc(raw.number)),
+    name: raw.name,
+    status: raw.status,
+    conclusion: optionFromString(raw.conclusion),
+    startedAt: dateTimeOption(raw.startedAt),
+    completedAt: dateTimeOption(raw.completedAt),
+    durationMs: durationMsOption(raw.startedAt, raw.completedAt),
+  };
+}
+
+function toWorkflowJob(raw: GitHubCli.GitHubWorkflowJob): SourceControlWorkflowJob {
+  return {
+    jobId: raw.jobId,
+    name: raw.name,
+    status: raw.status,
+    conclusion: optionFromString(raw.conclusion),
+    startedAt: dateTimeOption(raw.startedAt),
+    completedAt: dateTimeOption(raw.completedAt),
+    durationMs: durationMsOption(raw.startedAt, raw.completedAt),
+    url: optionFromString(raw.url),
+    steps: raw.steps.map(toWorkflowStep),
+  };
+}
+
+function truncateWorkflowLog(
+  log: string,
+): Pick<SourceControlWorkflowJobLogResult, "log" | "truncated"> {
+  if (Buffer.byteLength(log, "utf8") <= SOURCE_CONTROL_WORKFLOW_LOG_MAX_BYTES) {
+    return { log, truncated: false };
+  }
+  const buffer = Buffer.from(log, "utf8").subarray(0, SOURCE_CONTROL_WORKFLOW_LOG_MAX_BYTES);
+  return { log: buffer.toString("utf8"), truncated: true };
 }
 
 export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
@@ -500,6 +594,67 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
       github.getIssue({ cwd: input.cwd, reference: String(input.number) }).pipe(
         Effect.map((detail) => ({ state: detail.state })),
         Effect.mapError((cause) => providerError("getIssueState", cause)),
+      ),
+    listWorkflowRuns: (input) =>
+      Effect.gen(function* () {
+        let repositoryNameWithOwner: string | null = null;
+        let headSha: string | null = null;
+
+        if (input.pullRequestNumber !== undefined) {
+          const context = yield* github.getPullRequestWorkflowContext({
+            cwd: input.cwd,
+            reference: String(input.pullRequestNumber),
+          });
+          repositoryNameWithOwner =
+            context.baseRepositoryNameWithOwner ?? context.headRepositoryNameWithOwner;
+          headSha = context.headSha;
+        }
+
+        const runs = yield* github.listWorkflowRuns({
+          cwd: input.cwd,
+          ...(headSha ? { headSha } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        });
+        repositoryNameWithOwner =
+          repositoryNameWithOwner ??
+          runs.find((run) => run.repositoryNameWithOwner !== null)?.repositoryNameWithOwner ??
+          null;
+
+        return {
+          provider: "github",
+          repository: optionFromString(repositoryNameWithOwner),
+          pullRequestNumber:
+            input.pullRequestNumber !== undefined
+              ? Option.some(input.pullRequestNumber)
+              : Option.none(),
+          headSha: optionFromString(headSha),
+          runs: runs.map(toWorkflowRun),
+        } satisfies SourceControlWorkflowRunListResult;
+      }).pipe(Effect.mapError((cause) => providerError("listWorkflowRuns", cause))),
+    getWorkflowRunJobs: (input) =>
+      github.listWorkflowRunJobs({ cwd: input.cwd, runId: input.runId }).pipe(
+        Effect.map(
+          (jobs) =>
+            ({
+              provider: "github",
+              runId: input.runId,
+              jobs: jobs.map(toWorkflowJob),
+            }) satisfies SourceControlWorkflowRunJobsResult,
+        ),
+        Effect.mapError((cause) => providerError("getWorkflowRunJobs", cause)),
+      ),
+    getWorkflowJobLog: (input) =>
+      github.getWorkflowJobLog(input).pipe(
+        Effect.map((log) => {
+          const truncated = truncateWorkflowLog(log);
+          return {
+            provider: "github",
+            runId: input.runId,
+            jobId: input.jobId,
+            ...truncated,
+          } satisfies SourceControlWorkflowJobLogResult;
+        }),
+        Effect.mapError((cause) => providerError("getWorkflowJobLog", cause)),
       ),
   });
 });

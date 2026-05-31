@@ -59,17 +59,30 @@ export class SourceControlProviderRegistry extends Context.Service<
   SourceControlProviderRegistryShape
 >()("s3/source-control/SourceControlProviderRegistry") {}
 
+function unsupportedProviderOperation(kind: SourceControlProviderKind, operation: string) {
+  return Effect.fail(
+    new SourceControlProviderError({
+      provider: kind,
+      operation,
+      detail: `No ${kind} source control provider is registered.`,
+    }),
+  );
+}
+
+function unsupportedWorkflowOperation(kind: SourceControlProviderKind, operation: string) {
+  return Effect.fail(
+    new SourceControlProviderError({
+      provider: kind,
+      operation,
+      detail: `Workflow status is not available for ${kind} repositories.`,
+    }),
+  );
+}
+
 function unsupportedProvider(
   kind: SourceControlProviderKind,
 ): SourceControlProvider.SourceControlProviderShape {
-  const unsupported = (operation: string) =>
-    Effect.fail(
-      new SourceControlProviderError({
-        provider: kind,
-        operation,
-        detail: `No ${kind} source control provider is registered.`,
-      }),
-    );
+  const unsupported = (operation: string) => unsupportedProviderOperation(kind, operation);
 
   return SourceControlProvider.SourceControlProvider.of({
     kind,
@@ -93,6 +106,9 @@ function unsupportedProvider(
     listAssignees: () => unsupported("listAssignees"),
     getPullRequestState: () => unsupported("getPullRequestState"),
     getIssueState: () => unsupported("getIssueState"),
+    listWorkflowRuns: () => unsupportedWorkflowOperation(kind, "listWorkflowRuns"),
+    getWorkflowRunJobs: () => unsupportedWorkflowOperation(kind, "getWorkflowRunJobs"),
+    getWorkflowJobLog: () => unsupportedWorkflowOperation(kind, "getWorkflowJobLog"),
   });
 }
 
@@ -157,6 +173,27 @@ const makeLazyProvider = Effect.fn("makeLazySourceControlProvider")(function* (
       provider.pipe(Effect.flatMap((loaded) => loaded.getPullRequestState(input))),
     getIssueState: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.getIssueState(input))),
+    listWorkflowRuns: (input) =>
+      provider.pipe(
+        Effect.flatMap((loaded) => {
+          const method = loaded.listWorkflowRuns;
+          return method ? method(input) : unsupportedWorkflowOperation(kind, "listWorkflowRuns");
+        }),
+      ),
+    getWorkflowRunJobs: (input) =>
+      provider.pipe(
+        Effect.flatMap((loaded) => {
+          const method = loaded.getWorkflowRunJobs;
+          return method ? method(input) : unsupportedWorkflowOperation(kind, "getWorkflowRunJobs");
+        }),
+      ),
+    getWorkflowJobLog: (input) =>
+      provider.pipe(
+        Effect.flatMap((loaded) => {
+          const method = loaded.getWorkflowJobLog;
+          return method ? method(input) : unsupportedWorkflowOperation(kind, "getWorkflowJobLog");
+        }),
+      ),
   });
 });
 
@@ -294,6 +331,42 @@ function bindProviderContext(
         ...input,
         context: input.context ?? context,
       }),
+    ...(provider.listWorkflowRuns
+      ? {
+          listWorkflowRuns: (input) => {
+            const method = provider.listWorkflowRuns;
+            if (!method) return unsupportedWorkflowOperation(provider.kind, "listWorkflowRuns");
+            return method({
+              ...input,
+              context: input.context ?? context,
+            });
+          },
+        }
+      : {}),
+    ...(provider.getWorkflowRunJobs
+      ? {
+          getWorkflowRunJobs: (input) => {
+            const method = provider.getWorkflowRunJobs;
+            if (!method) return unsupportedWorkflowOperation(provider.kind, "getWorkflowRunJobs");
+            return method({
+              ...input,
+              context: input.context ?? context,
+            });
+          },
+        }
+      : {}),
+    ...(provider.getWorkflowJobLog
+      ? {
+          getWorkflowJobLog: (input) => {
+            const method = provider.getWorkflowJobLog;
+            if (!method) return unsupportedWorkflowOperation(provider.kind, "getWorkflowJobLog");
+            return method({
+              ...input,
+              context: input.context ?? context,
+            });
+          },
+        }
+      : {}),
   });
 }
 
