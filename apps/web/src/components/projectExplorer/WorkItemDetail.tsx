@@ -17,6 +17,8 @@ import { Spinner } from "../ui/spinner";
 import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { CommentItem } from "./CommentThread";
+import { PrCheckStatusBadge } from "./PrCheckStatusBadge";
+import { getPrCheckStatusFromChangeRequest } from "./prCheckStatus";
 
 const dateFmt = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
@@ -223,7 +225,10 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
   );
 }
 
-type WorkItemLinkedChangeRequest = Pick<ChangeRequest, "number" | "title" | "url" | "state">;
+type WorkItemLinkedChangeRequest = Pick<
+  ChangeRequest,
+  "checkRollup" | "headSha" | "number" | "provider" | "state" | "title" | "url"
+>;
 
 function mergeLinkedChangeRequests(
   contractLinks: WorkItemDetailModel["linkedChangeRequests"],
@@ -234,6 +239,7 @@ function mergeLinkedChangeRequests(
   const merged = new Map<number, WorkItemLinkedChangeRequest>();
   for (const link of contractLinks) {
     merged.set(link.number, {
+      provider: link.provider,
       number: link.number,
       title: link.title,
       url: link.url,
@@ -244,10 +250,13 @@ function mergeLinkedChangeRequests(
     const haystack = `${link.title} ${link.headRefName} ${link.baseRefName}`.toLowerCase();
     if (!haystack.includes(key) && contractLinks.length > 0) continue;
     merged.set(link.number, {
+      provider: link.provider,
       number: link.number,
       title: link.title,
       url: link.url,
       state: link.state,
+      ...(link.headSha ? { headSha: link.headSha } : {}),
+      ...(link.checkRollup ? { checkRollup: link.checkRollup } : {}),
     });
   }
   return Array.from(merged.values()).toSorted((a, b) => b.number - a.number);
@@ -335,25 +344,29 @@ function WorkItemDetailBody(props: {
               <span className="text-muted-foreground/70 text-xs italic">Searching…</span>
             ) : props.linkedChangeRequests.length > 0 ? (
               <ul className="space-y-1.5">
-                {props.linkedChangeRequests.map((pr) => (
-                  <li key={pr.number}>
-                    <button
-                      type="button"
-                      onClick={() => props.onSelectLinkedChangeRequest?.(pr.number)}
-                      className="flex w-full items-start gap-2 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-left hover:bg-accent/50"
-                    >
-                      <GitPullRequestIcon className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-foreground text-xs">
-                          #{pr.number} {pr.title}
+                {props.linkedChangeRequests.map((pr) => {
+                  const checkStatus = getPrCheckStatusFromChangeRequest(pr);
+                  return (
+                    <li key={pr.number}>
+                      <button
+                        type="button"
+                        onClick={() => props.onSelectLinkedChangeRequest?.(pr.number)}
+                        className="flex w-full items-start gap-2 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-left hover:bg-accent/50"
+                      >
+                        <GitPullRequestIcon className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-foreground text-xs">
+                            #{pr.number} {pr.title}
+                          </span>
+                          <span className="mt-1 flex items-center gap-1 text-muted-foreground text-[10px] capitalize">
+                            {pr.state}
+                            <PrCheckStatusBadge view={checkStatus} mode="compact" />
+                          </span>
                         </span>
-                        <span className="block text-muted-foreground text-[10px] capitalize">
-                          {pr.state}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <span className="text-muted-foreground/70 text-xs italic">None found</span>
