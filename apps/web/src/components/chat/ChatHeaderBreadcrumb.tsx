@@ -26,7 +26,10 @@ export const ChatHeaderBreadcrumb = memo(function ChatHeaderBreadcrumb(
   const worktreeLabel = (props.worktreeTitle?.trim() || props.worktreeBranch?.trim()) ?? null;
 
   return (
-    <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
+    <nav
+      aria-label="Breadcrumb"
+      className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium"
+    >
       {props.projectName ? (
         <Segment label={props.projectName} onSelect={props.onSelectProject} prominent />
       ) : null}

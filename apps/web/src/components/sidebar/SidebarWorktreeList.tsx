@@ -10,10 +10,6 @@ import {
   RotateCcwIcon,
   Trash2Icon,
 } from "lucide-react";
-import {
-  resolveStateBadgeVariant,
-  type StateBadgeVariant,
-} from "../sourceControl/stateBadgeVariants";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
 import type { EnvironmentId } from "@ryco/contracts";
 import { cn } from "../../lib/utils";
@@ -37,7 +33,11 @@ import {
   type SidebarTreeWorktree,
   type SidebarWorktree,
 } from "./hooks/useSidebarTree";
-import { LinkedWorktreeItemDialog, type LinkedWorktreeItem } from "./LinkedWorktreeItemDialog";
+import {
+  LinkedWorktreeItemDialog,
+  type LinkedWorktreeItem,
+} from "../worktrees/LinkedWorktreeItemDialog";
+import { WorktreeSourceControlBadges } from "../worktrees/WorktreeSourceControlBadges";
 
 const WORKTREE_STATUS_CLASSNAMES: Record<SidebarStatusBucket, string> = {
   done: "bg-muted-foreground/45",
@@ -193,7 +193,11 @@ function ArchivedWorktreeRow(props: {
           {getWorktreeDisplayTitle(props.worktree)}
         </span>
         <WorktreeSourceControlBadges
-          worktree={props.worktree}
+          issueNumber={props.worktree.worktree.issueNumber}
+          issueState={props.worktree.worktree.issueState}
+          prNumber={props.worktree.worktree.prNumber}
+          prState={props.worktree.worktree.prState}
+          prIsDraft={props.worktree.worktree.prIsDraft}
           onOpenLinkedItem={props.onOpenLinkedItem}
         />
         <button
@@ -380,7 +384,11 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                   {displayTitle}
                 </span>
                 <WorktreeSourceControlBadges
-                  worktree={props.worktree}
+                  issueNumber={props.worktree.worktree.issueNumber}
+                  issueState={props.worktree.worktree.issueState}
+                  prNumber={props.worktree.worktree.prNumber}
+                  prState={props.worktree.worktree.prState}
+                  prIsDraft={props.worktree.worktree.prIsDraft}
                   onOpenLinkedItem={props.onOpenLinkedItem}
                 />
               </span>
@@ -595,104 +603,6 @@ function WorktreeOriginLabel({ worktree }: { worktree: SidebarTreeWorktree }) {
   return (
     <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
       {label}
-    </span>
-  );
-}
-
-function WorktreeSourceControlBadges({
-  worktree,
-  onOpenLinkedItem,
-}: {
-  worktree: SidebarTreeWorktree;
-  onOpenLinkedItem?: (item: LinkedWorktreeItem) => void;
-}) {
-  const issueNumber = worktree.worktree.issueNumber ?? null;
-  const prNumber = worktree.worktree.prNumber ?? null;
-
-  if (issueNumber === null && prNumber === null) {
-    return null;
-  }
-
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1">
-      {issueNumber !== null ? (
-        <WorktreeSourceControlBadge
-          variant={resolveStateBadgeVariant({
-            kind: "issue",
-            state: worktree.worktree.issueState ?? null,
-          })}
-          number={issueNumber}
-          kindLabel="Issue"
-          onClick={
-            onOpenLinkedItem
-              ? () => onOpenLinkedItem({ kind: "issue", number: issueNumber })
-              : undefined
-          }
-        />
-      ) : null}
-      {prNumber !== null ? (
-        <WorktreeSourceControlBadge
-          variant={resolveStateBadgeVariant({
-            kind: "pr",
-            state: worktree.worktree.prState ?? null,
-            isDraft: worktree.worktree.prIsDraft ?? null,
-          })}
-          number={prNumber}
-          kindLabel="Pull request"
-          onClick={
-            onOpenLinkedItem ? () => onOpenLinkedItem({ kind: "pr", number: prNumber }) : undefined
-          }
-        />
-      ) : null}
-    </span>
-  );
-}
-
-function WorktreeSourceControlBadge(props: {
-  variant: StateBadgeVariant;
-  number: number;
-  kindLabel: string;
-  onClick?: (() => void) | undefined;
-}) {
-  const Icon = props.variant.Icon;
-  const title = props.variant.label
-    ? `${props.kindLabel} #${props.number} — ${props.variant.label}`
-    : `${props.kindLabel} #${props.number}`;
-  const baseClass =
-    "inline-flex h-4 shrink-0 items-center justify-center gap-0.5 rounded-sm border px-1 text-[9px] font-semibold tabular-nums leading-none";
-
-  if (props.onClick) {
-    const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      props.onClick?.();
-    };
-    return (
-      <button
-        type="button"
-        className={cn(
-          baseClass,
-          props.variant.compactClassName,
-          "cursor-pointer hover:brightness-125 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-current",
-        )}
-        title={title}
-        aria-label={title}
-        onClick={handleClick}
-      >
-        <Icon className="size-2.5" />
-        <span>#{props.number}</span>
-      </button>
-    );
-  }
-
-  return (
-    <span
-      className={cn(baseClass, props.variant.compactClassName)}
-      title={title}
-      aria-label={title}
-    >
-      <Icon className="size-2.5" />
-      <span>#{props.number}</span>
     </span>
   );
 }
