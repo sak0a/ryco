@@ -8,11 +8,15 @@ import {
 } from "@ryco/contracts";
 import {
   formatShortcutLabel,
+  hasNoShortcutModifiers,
+  isBareModifierKeyEvent,
   isChatNewShortcut,
   isChatNewLocalShortcut,
+  isDialogShortcutTarget,
   isDiffToggleShortcut,
   modelPickerJumpCommandForIndex,
   modelPickerJumpIndexFromCommand,
+  matchesExactModShortcut,
   isOpenFavoriteEditorShortcut,
   isTerminalClearShortcut,
   isTerminalCloseShortcut,
@@ -556,7 +560,67 @@ describe("cross-command precedence", () => {
   });
 });
 
+describe("isDialogShortcutTarget", () => {
+  it("does not treat non-element event targets as dialog shortcuts", () => {
+    assert.isFalse(isDialogShortcutTarget(null));
+    assert.isFalse(isDialogShortcutTarget(new EventTarget()));
+  });
+});
+
 describe("resolveShortcutCommand", () => {
+  it("ignores bare modifier key events", () => {
+    assert.isTrue(isBareModifierKeyEvent(event({ key: "Meta", metaKey: true })));
+    assert.isTrue(isBareModifierKeyEvent(event({ key: "Alt", altKey: true })));
+    assert.isTrue(isBareModifierKeyEvent(event({ key: "Control", ctrlKey: true })));
+    assert.isTrue(isBareModifierKeyEvent(event({ key: "Shift", shiftKey: true })));
+    assert.isFalse(isBareModifierKeyEvent(event({ key: "1", metaKey: true })));
+
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "Meta", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+      }),
+    );
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "Alt", altKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+      }),
+    );
+  });
+
+  it("matches exact platform mod shortcuts only with the intended modifiers", () => {
+    assert.isTrue(
+      matchesExactModShortcut(event({ key: "1", metaKey: true }), "1", {
+        platform: "MacIntel",
+      }),
+    );
+    assert.isTrue(
+      matchesExactModShortcut(event({ key: "1", ctrlKey: true }), "1", {
+        platform: "Linux",
+      }),
+    );
+    assert.isFalse(
+      matchesExactModShortcut(event({ key: "1", metaKey: true, altKey: true }), "1", {
+        platform: "MacIntel",
+      }),
+    );
+    assert.isFalse(
+      matchesExactModShortcut(event({ key: "1", metaKey: true, ctrlKey: true }), "1", {
+        platform: "MacIntel",
+      }),
+    );
+    assert.isFalse(
+      matchesExactModShortcut(event({ key: "Meta", metaKey: true }), "meta", {
+        platform: "MacIntel",
+      }),
+    );
+  });
+
+  it("detects the no-modifier state exactly", () => {
+    assert.isTrue(hasNoShortcutModifiers(event()));
+    assert.isFalse(hasNoShortcutModifiers(event({ altKey: true })));
+    assert.isFalse(hasNoShortcutModifiers(event({ metaKey: true })));
+  });
+
   it("returns dynamic script commands", () => {
     const keybindings = compile([{ shortcut: modShortcut("r"), command: "script.setup.run" }]);
 

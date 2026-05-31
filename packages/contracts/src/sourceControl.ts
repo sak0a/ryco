@@ -22,6 +22,25 @@ export type SourceControlProviderInfo = typeof SourceControlProviderInfo.Type;
 export const ChangeRequestState = Schema.Literals(["open", "closed", "merged"]);
 export type ChangeRequestState = typeof ChangeRequestState.Type;
 
+export const SourceControlCheckRollupItemKind = Schema.Literals([
+  "check-run",
+  "status-context",
+  "unknown",
+]);
+export type SourceControlCheckRollupItemKind = typeof SourceControlCheckRollupItemKind.Type;
+
+export const SourceControlCheckRollupItem = Schema.Struct({
+  kind: SourceControlCheckRollupItemKind,
+  name: TrimmedNonEmptyString,
+  workflowName: Schema.optional(TrimmedNonEmptyString),
+  status: Schema.Option(TrimmedNonEmptyString),
+  conclusion: Schema.Option(TrimmedNonEmptyString),
+  url: Schema.Option(TrimmedNonEmptyString),
+  startedAt: Schema.Option(Schema.DateTimeUtc),
+  completedAt: Schema.Option(Schema.DateTimeUtc),
+});
+export type SourceControlCheckRollupItem = typeof SourceControlCheckRollupItem.Type;
+
 export const SourceControlLabel = Schema.Struct({
   name: TrimmedNonEmptyString,
   color: Schema.optional(TrimmedNonEmptyString),
@@ -46,6 +65,8 @@ export const ChangeRequest = Schema.Struct({
   commentsCount: Schema.optional(Schema.Number),
   headRepositoryNameWithOwner: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   headRepositoryOwnerLogin: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  headSha: Schema.optional(TrimmedNonEmptyString),
+  checkRollup: Schema.optional(Schema.Array(SourceControlCheckRollupItem)),
 });
 export type ChangeRequest = typeof ChangeRequest.Type;
 
@@ -201,6 +222,125 @@ export const SourceControlChangeRequestDetail = Schema.Struct({
   files: Schema.optional(Schema.Array(SourceControlChangeRequestFile)),
 });
 export type SourceControlChangeRequestDetail = typeof SourceControlChangeRequestDetail.Type;
+
+export const SOURCE_CONTROL_WORKFLOW_LOG_MAX_BYTES = 200 * 1024; // 200 KB
+
+export const SourceControlWorkflowRunCommit = Schema.Struct({
+  oid: TrimmedNonEmptyString,
+  shortOid: TrimmedNonEmptyString,
+  messageHeadline: Schema.optional(Schema.String),
+});
+export type SourceControlWorkflowRunCommit = typeof SourceControlWorkflowRunCommit.Type;
+
+export const SourceControlWorkflowRun = Schema.Struct({
+  provider: SourceControlProviderKind,
+  runId: TrimmedNonEmptyString,
+  workflowName: TrimmedNonEmptyString,
+  displayTitle: Schema.optional(TrimmedNonEmptyString),
+  branch: Schema.Option(TrimmedNonEmptyString),
+  event: Schema.optional(TrimmedNonEmptyString),
+  commit: SourceControlWorkflowRunCommit,
+  actor: Schema.Option(TrimmedNonEmptyString),
+  status: TrimmedNonEmptyString,
+  conclusion: Schema.Option(TrimmedNonEmptyString),
+  startedAt: Schema.Option(Schema.DateTimeUtc),
+  updatedAt: Schema.Option(Schema.DateTimeUtc),
+  durationMs: Schema.Option(NonNegativeInt),
+  url: TrimmedNonEmptyString,
+});
+export type SourceControlWorkflowRun = typeof SourceControlWorkflowRun.Type;
+
+export const SourceControlWorkflowRunListInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  pullRequestNumber: Schema.optional(PositiveInt),
+  limit: Schema.optional(PositiveInt),
+});
+export type SourceControlWorkflowRunListInput = typeof SourceControlWorkflowRunListInput.Type;
+
+export const SourceControlWorkflowRunListResult = Schema.Struct({
+  provider: SourceControlProviderKind,
+  repository: Schema.Option(TrimmedNonEmptyString),
+  pullRequestNumber: Schema.Option(PositiveInt),
+  headSha: Schema.Option(TrimmedNonEmptyString),
+  runs: Schema.Array(SourceControlWorkflowRun),
+});
+export type SourceControlWorkflowRunListResult = typeof SourceControlWorkflowRunListResult.Type;
+
+export const SourceControlWorkflowStep = Schema.Struct({
+  number: NonNegativeInt,
+  name: TrimmedNonEmptyString,
+  status: TrimmedNonEmptyString,
+  conclusion: Schema.Option(TrimmedNonEmptyString),
+  startedAt: Schema.Option(Schema.DateTimeUtc),
+  completedAt: Schema.Option(Schema.DateTimeUtc),
+  durationMs: Schema.Option(NonNegativeInt),
+});
+export type SourceControlWorkflowStep = typeof SourceControlWorkflowStep.Type;
+
+export const SourceControlWorkflowJob = Schema.Struct({
+  jobId: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  status: TrimmedNonEmptyString,
+  conclusion: Schema.Option(TrimmedNonEmptyString),
+  startedAt: Schema.Option(Schema.DateTimeUtc),
+  completedAt: Schema.Option(Schema.DateTimeUtc),
+  durationMs: Schema.Option(NonNegativeInt),
+  url: Schema.Option(TrimmedNonEmptyString),
+  steps: Schema.Array(SourceControlWorkflowStep),
+});
+export type SourceControlWorkflowJob = typeof SourceControlWorkflowJob.Type;
+
+export const SourceControlWorkflowRunJobsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  runId: TrimmedNonEmptyString,
+});
+export type SourceControlWorkflowRunJobsInput = typeof SourceControlWorkflowRunJobsInput.Type;
+
+export const SourceControlWorkflowRunJobsResult = Schema.Struct({
+  provider: SourceControlProviderKind,
+  runId: TrimmedNonEmptyString,
+  jobs: Schema.Array(SourceControlWorkflowJob),
+});
+export type SourceControlWorkflowRunJobsResult = typeof SourceControlWorkflowRunJobsResult.Type;
+
+export const SourceControlWorkflowJobLogInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  runId: TrimmedNonEmptyString,
+  jobId: TrimmedNonEmptyString,
+});
+export type SourceControlWorkflowJobLogInput = typeof SourceControlWorkflowJobLogInput.Type;
+
+export const SourceControlWorkflowJobLogResult = Schema.Struct({
+  provider: SourceControlProviderKind,
+  runId: TrimmedNonEmptyString,
+  jobId: TrimmedNonEmptyString,
+  log: Schema.String,
+  truncated: Schema.Boolean,
+});
+export type SourceControlWorkflowJobLogResult = typeof SourceControlWorkflowJobLogResult.Type;
+
+export const SourceControlWorkflowRerunInput = Schema.Union([
+  Schema.Struct({
+    cwd: TrimmedNonEmptyString,
+    runId: TrimmedNonEmptyString,
+    target: Schema.Literal("failed-jobs"),
+  }),
+  Schema.Struct({
+    cwd: TrimmedNonEmptyString,
+    runId: TrimmedNonEmptyString,
+    target: Schema.Literal("job"),
+    jobId: TrimmedNonEmptyString,
+  }),
+]);
+export type SourceControlWorkflowRerunInput = typeof SourceControlWorkflowRerunInput.Type;
+
+export const SourceControlWorkflowRerunResult = Schema.Struct({
+  provider: SourceControlProviderKind,
+  runId: TrimmedNonEmptyString,
+  target: Schema.Literals(["failed-jobs", "job"]),
+  jobId: Schema.optional(TrimmedNonEmptyString),
+});
+export type SourceControlWorkflowRerunResult = typeof SourceControlWorkflowRerunResult.Type;
 
 export const SourceControlAddChangeRequestCommentInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,

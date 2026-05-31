@@ -10,6 +10,7 @@ import { ChevronDownIcon, GitBranchIcon, RotateCwIcon, SparklesIcon } from "luci
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { requireEnvironmentConnection } from "../../environments/runtime";
 import { readEnvironmentApi } from "../../environmentApi";
+import { isEditableShortcutTarget, matchesExactModShortcut } from "../../keybindings";
 import { cn } from "~/lib/utils";
 import { ContextPickerTabs } from "../chat/ContextPickerTabs";
 import { IssuesTab } from "../projectExplorer/IssuesTab";
@@ -319,16 +320,19 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
   }, []);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!(event.metaKey || event.ctrlKey)) {
+    if (isEditableShortcutTarget(event.target)) {
       return;
     }
+
     const tabByKey: Record<string, NewWorktreeDialogTab> = {
       "1": "branches",
       "2": "newBranch",
       "3": "prs",
       "4": "issues",
     };
-    const nextTab = tabByKey[event.key];
+    const nextTab = Object.entries(tabByKey).find(([key]) =>
+      matchesExactModShortcut(event, key),
+    )?.[1];
     if (!nextTab) {
       return;
     }

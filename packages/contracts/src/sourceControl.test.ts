@@ -10,6 +10,7 @@ import {
   SourceControlAddChangeRequestCommentInput,
   SourceControlAddIssueCommentInput,
   SourceControlCreateIssueInput,
+  SourceControlWorkflowRerunInput,
 } from "./sourceControl.ts";
 
 describe("truncateSourceControlDetailContent", () => {
@@ -228,6 +229,24 @@ describe("SourceControlAddChangeRequestCommentInput", () => {
       body: "> quoted\n\n**ship it**",
     });
     expect(() => decode({ cwd: "/repo", reference: "42", body: "\n\t" })).toThrow();
+  });
+});
+
+describe("SourceControlWorkflowRerunInput", () => {
+  it("decodes run-level and job-level rerun requests", () => {
+    const decode = Schema.decodeUnknownSync(SourceControlWorkflowRerunInput);
+    expect(decode({ cwd: "/repo", runId: "123", target: "failed-jobs" })).toEqual({
+      cwd: "/repo",
+      runId: "123",
+      target: "failed-jobs",
+    });
+    expect(decode({ cwd: "/repo", runId: "123", target: "job", jobId: "456" })).toEqual({
+      cwd: "/repo",
+      runId: "123",
+      target: "job",
+      jobId: "456",
+    });
+    expect(() => decode({ cwd: "/repo", runId: "123", target: "job" })).toThrow();
   });
 });
 

@@ -7,6 +7,8 @@ import {
   COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
   COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME,
 } from "../composerInlineChip";
+import { PrCheckStatusBadge } from "../projectExplorer/PrCheckStatusBadge";
+import { getPrCheckStatusFromChangeRequest } from "../projectExplorer/prCheckStatus";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 interface SourceControlContextChipProps {
@@ -41,6 +43,10 @@ export function SourceControlContextChip(props: SourceControlContextChipProps) {
   const displayRef = getDisplayReference(context.reference);
   const title = context.detail.title;
   const isTruncated = context.detail.truncated;
+  const checkStatus =
+    context.kind === "change-request" && "baseRefName" in context.detail
+      ? getPrCheckStatusFromChangeRequest(context.detail)
+      : null;
 
   const Icon = context.kind === "change-request" ? GitBranchIcon : CircleDotIcon;
 
@@ -70,6 +76,7 @@ export function SourceControlContextChip(props: SourceControlContextChipProps) {
                 truncated
               </span>
             ) : null}
+            {checkStatus ? <PrCheckStatusBadge view={checkStatus} mode="compact" /> : null}
             <button
               type="button"
               aria-label="Remove context"

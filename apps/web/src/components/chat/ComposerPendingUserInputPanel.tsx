@@ -5,6 +5,7 @@ import {
   derivePendingUserInputProgress,
   type PendingUserInputDraftAnswer,
 } from "../../pendingUserInput";
+import { shouldIgnoreGlobalNavigationShortcut } from "../../keybindings";
 import { CheckIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 
@@ -95,6 +96,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   useEffect(() => {
     if (!activeQuestion || isResponding) return;
     const handler = (event: globalThis.KeyboardEvent) => {
+      if (shouldIgnoreGlobalNavigationShortcut(event)) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {

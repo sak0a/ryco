@@ -166,8 +166,8 @@ function quoteTimestamp(createdAt: DateTime.Utc): string {
 }
 
 function quoteBodyLines(body: string): ReadonlyArray<string> {
-  const normalized = body.replace(/\r\n?/gu, "\n").trim();
-  if (normalized.length === 0) return ["> _No comment body._"];
+  const normalized = body.replace(/\r\n?/gu, "\n").replace(/\n+$/u, "");
+  if (normalized.trim().length === 0) return ["> _No comment body._"];
   return normalized.split("\n").map((line) => (line.length > 0 ? `> ${line}` : ">"));
 }
 

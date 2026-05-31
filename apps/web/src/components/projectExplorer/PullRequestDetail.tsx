@@ -26,10 +26,14 @@ import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { CommentComposer, CommentItem, type CommentQuoteInsertion } from "./CommentThread";
 import { buildCommentQuoteMarkdown, deriveOriginalPostAuthorRole } from "./CommentThread.logic";
+import { PrCheckStatusBadge } from "./PrCheckStatusBadge";
 import { changeRequestStateKind, StateBadge } from "./StateBadge";
 import { type DiffLine, parseDiffLines } from "./diffLines";
+import { getPrCheckStatusFromChangeRequest } from "./prCheckStatus";
 import { splitUnifiedDiffByFile } from "./unifiedDiffSplit";
+import { usePrCheckPassNotifications } from "./usePrCheckPassNotifications";
 import { WorktreeItemSidebar } from "./WorktreeItemSidebar";
+import { WorkflowRunsSection } from "./WorkflowRunsSection";
 
 const dateFmt = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
@@ -39,7 +43,7 @@ const dateFmt = new Intl.DateTimeFormat(undefined, {
 
 const numberFmt = new Intl.NumberFormat(undefined);
 
-type PullRequestTab = "conversation" | "commits" | "files";
+type PullRequestTab = "conversation" | "checks" | "commits" | "files";
 
 interface PullRequestDetailProps {
   environmentId: EnvironmentId | null;
@@ -183,8 +187,21 @@ function PullRequestDetailBody(props: {
   const fileCount = detail.changedFiles ?? detail.files?.length ?? 0;
   const additions = detail.additions ?? 0;
   const deletions = detail.deletions ?? 0;
+  const checkStatus = getPrCheckStatusFromChangeRequest(detail);
   const onSubmitComment = props.onSubmitComment;
   const canComment = onSubmitComment !== undefined;
+
+  usePrCheckPassNotifications([
+    {
+      environmentId: props.environmentId,
+      cwd: props.cwd,
+      provider: detail.provider,
+      number: detail.number,
+      title: detail.title,
+      url: detail.url,
+      status: checkStatus,
+    },
+  ]);
 
   return (
     <div className="flex h-full min-h-0">
@@ -196,6 +213,16 @@ function PullRequestDetailBody(props: {
               <span className="font-normal text-muted-foreground">#{detail.number}</span>
             </h2>
             <DiffStatsBadge additions={additions} deletions={deletions} />
+            <PrCheckStatusBadge
+              view={checkStatus}
+              mode="compact"
+              onClick={() => setActiveTab("checks")}
+              title={
+                checkStatus.kind === "failed"
+                  ? "Open failed check details"
+                  : "Open pull request checks"
+              }
+            />
             <StateBadge
               kind={changeRequestStateKind(detail.state, detail.isDraft)}
               className="mt-1"
@@ -218,6 +245,7 @@ function PullRequestDetailBody(props: {
         <ContextPickerTabs
           tabs={[
             { id: "conversation", label: "Conversation", count: conversationCount },
+            { id: "checks", label: "Checks" },
             { id: "commits", label: "Commits", count: commitCount },
             { id: "files", label: "Files changed", count: fileCount },
           ]}
@@ -225,7 +253,12 @@ function PullRequestDetailBody(props: {
           onSelect={(id) => setActiveTab(id as PullRequestTab)}
         />
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto",
+            activeTab === "checks" ? "" : "px-5 py-4",
+          )}
+        >
           {activeTab === "conversation" ? (
             <ol className="space-y-4">
               <li>
@@ -283,6 +316,14 @@ function PullRequestDetailBody(props: {
                 </li>
               ) : null}
             </ol>
+          ) : activeTab === "checks" ? (
+            <WorkflowRunsSection
+              environmentId={props.environmentId}
+              cwd={props.cwd}
+              pullRequestNumber={detail.number}
+              title="Checks"
+              description="GitHub Actions workflow runs for this pull request head commit."
+            />
           ) : activeTab === "commits" ? (
             <CommitsTab commits={detail.commits ?? []} pullRequestUrl={detail.url} />
           ) : (

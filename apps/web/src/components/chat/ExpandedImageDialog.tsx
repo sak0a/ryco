@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, XIcon } from "lucide-react";
+import { hasNoShortcutModifiers } from "../../keybindings";
 import { Button } from "../ui/button";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 
@@ -31,6 +32,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!hasNoShortcutModifiers(event)) return;
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
@@ -86,7 +88,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
           type="button"
           size="icon-xs"
           variant="ghost"
-          className="absolute right-2 top-2"
+          className="absolute right-2 top-2 z-20"
           onClick={onClose}
           aria-label="Close image preview"
         >

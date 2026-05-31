@@ -232,6 +232,16 @@ describe("comment quote markdown", () => {
     ).toContain("> line one\n> line two");
   });
 
+  it("preserves leading indentation in quoted Markdown bodies", () => {
+    expect(
+      buildCommentQuoteMarkdown({
+        author: "alice",
+        createdAt,
+        body: "    const value = 1;\n\nparagraph",
+      }),
+    ).toContain(">     const value = 1;\n>\n> paragraph");
+  });
+
   it("appends quotes without replacing an existing draft", () => {
     const quote = buildCommentQuoteMarkdown({
       author: "alice",
