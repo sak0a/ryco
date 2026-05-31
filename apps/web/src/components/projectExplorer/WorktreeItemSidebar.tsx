@@ -4,7 +4,7 @@ import { cn } from "../../lib/utils";
 import { avatarUrlForAuthor, hashAuthorToHue } from "./CommentThread.logic";
 import { LabelChip } from "./LabelChip";
 import { PrCheckStatusBadge } from "./PrCheckStatusBadge";
-import { getPrCheckStatusFromChangeRequest, getPrCheckStatusFromRollup } from "./prCheckStatus";
+import { getPrCheckStatusFromChangeRequest } from "./prCheckStatus";
 
 type LinkedChangeRequestReference = Pick<
   ChangeRequest,
@@ -97,14 +97,12 @@ function PrRefList(props: {
   return (
     <ul className="flex flex-wrap gap-1">
       {entries.map(([number, pr]) => {
-        const status = pr
-          ? getPrCheckStatusFromChangeRequest(pr)
-          : getPrCheckStatusFromRollup({ rollup: undefined });
+        const status = pr ? getPrCheckStatusFromChangeRequest(pr) : null;
         const body = (
           <>
             <GitPullRequestIcon className="size-3" />
             <span>#{number}</span>
-            <PrCheckStatusBadge view={status} mode="icon" className="size-5" />
+            {status ? <PrCheckStatusBadge view={status} mode="icon" className="size-5" /> : null}
           </>
         );
         return (
@@ -114,14 +112,22 @@ function PrRefList(props: {
                 type="button"
                 onClick={() => props.onSelect?.(number)}
                 className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-foreground text-xs hover:bg-accent/60"
-                aria-label={`View pull request #${number}. ${status.ariaLabel}`}
+                aria-label={
+                  status
+                    ? `View pull request #${number}. ${status.ariaLabel}`
+                    : `View pull request #${number}`
+                }
               >
                 {body}
               </button>
             ) : (
               <span
                 className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-foreground text-xs"
-                aria-label={`Pull request #${number}. ${status.ariaLabel}`}
+                aria-label={
+                  status
+                    ? `Pull request #${number}. ${status.ariaLabel}`
+                    : `Pull request #${number}`
+                }
               >
                 {body}
               </span>

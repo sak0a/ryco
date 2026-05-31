@@ -113,7 +113,7 @@ function optionValue<T>(value: Option.Option<T> | T | null | undefined): T | nul
     "_tag" in value &&
     (value._tag === "Some" || value._tag === "None")
   ) {
-    return Option.isSome(value as Option.Option<T>) ? (value as { readonly value: T }).value : null;
+    return Option.getOrNull(value as Option.Option<T>);
   }
   return value ?? null;
 }

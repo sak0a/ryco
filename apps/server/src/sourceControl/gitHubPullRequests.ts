@@ -192,7 +192,10 @@ function optionFromTrimmedString(value: string | null | undefined): Option.Optio
 
 function optionFromIsoDateTime(value: string | null | undefined): Option.Option<DateTime.Utc> {
   const trimmed = trimOptionalString(value);
-  return trimmed ? Option.some(DateTime.fromDateUnsafe(new Date(trimmed))) : Option.none();
+  if (!trimmed) return Option.none();
+  const date = new Date(trimmed);
+  if (!Number.isFinite(date.getTime())) return Option.none();
+  return Option.some(DateTime.fromDateUnsafe(date));
 }
 
 function normalizeGitHubPullRequestState(input: {
