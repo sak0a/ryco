@@ -13,7 +13,7 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import { DateTime } from "effect";
-import { memo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { memo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
@@ -129,12 +129,15 @@ export interface CommentItemProps {
   authorRole?: SourceControlCommentAuthorRole | undefined;
   reviewState?: SourceControlReviewState | undefined;
   isOriginalPost?: boolean;
+  itemKind?: "body" | "comment" | "review" | undefined;
+  eyebrow?: string | undefined;
+  actions?: ReactNode | undefined;
   className?: string;
 }
 
 const REVIEW_STATE_META: Record<
   SourceControlReviewState,
-  { label: string; tone: string; icon: React.ReactNode }
+  { label: string; tone: string; icon: ReactNode }
 > = {
   approved: {
     label: "Approved",
@@ -191,9 +194,21 @@ function commentArticleToneClassName(tone: CommentRoleTone): string {
   }
 }
 
+function commentKindAccentClassName(kind: "body" | "comment" | "review"): string {
+  switch (kind) {
+    case "body":
+      return "border-l-4 border-l-primary/55";
+    case "review":
+      return "border-l-4 border-l-sky-500/55";
+    case "comment":
+      return "";
+  }
+}
+
 export const CommentItem = memo(function CommentItem(props: CommentItemProps) {
   const [showRaw, setShowRaw] = useState(false);
   const isoDate = DateTime.toDate(props.createdAt).toISOString();
+  const itemKind = props.itemKind ?? (props.reviewState ? "review" : "comment");
   const roleTone = commentToneForAuthorRole(
     props.authorRole,
     props.isOriginalPost,
@@ -207,34 +222,45 @@ export const CommentItem = memo(function CommentItem(props: CommentItemProps) {
   return (
     <article
       className={cn(
-        "rounded-xl border p-3",
+        "overflow-hidden rounded-lg border p-3",
         commentArticleToneClassName(roleTone),
+        commentKindAccentClassName(itemKind),
         props.className,
       )}
     >
-      <header className="mb-2 flex items-center gap-2">
-        <CommentAvatar author={props.author} />
-        <span className="font-medium text-sm">{props.author}</span>
-        {roleBadges.map((badge) => (
-          <AuthorAssociationBadge
-            key={`${badge.tone}-${badge.label}`}
-            override={badge.label}
-            tone={badge.tone}
-          />
-        ))}
-        {props.reviewState ? <ReviewStateBadge state={props.reviewState} /> : null}
-        <time dateTime={isoDate} className="text-muted-foreground text-xs" title={isoDate}>
-          {dateTimeFmt.format(DateTime.toDate(props.createdAt))}
-        </time>
-        <button
-          type="button"
-          onClick={() => setShowRaw((v) => !v)}
-          className="ml-auto inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground"
-          aria-label={showRaw ? "Show rendered markdown" : "Show raw source"}
-          title={showRaw ? "Show rendered markdown" : "Show raw source"}
-        >
-          {showRaw ? <FileTextIcon className="size-3.5" /> : <CodeIcon className="size-3.5" />}
-        </button>
+      <header className="mb-2 flex items-start gap-2">
+        <CommentAvatar author={props.author} size={itemKind === "body" ? 32 : 28} />
+        <div className="min-w-0 flex-1">
+          {props.eyebrow ? (
+            <div className="mb-0.5 text-muted-foreground text-[11px]">{props.eyebrow}</div>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="font-medium text-sm">{props.author}</span>
+            {roleBadges.map((badge) => (
+              <AuthorAssociationBadge
+                key={`${badge.tone}-${badge.label}`}
+                override={badge.label}
+                tone={badge.tone}
+              />
+            ))}
+            {props.reviewState ? <ReviewStateBadge state={props.reviewState} /> : null}
+          </div>
+          <time dateTime={isoDate} className="text-muted-foreground text-xs" title={isoDate}>
+            {dateTimeFmt.format(DateTime.toDate(props.createdAt))}
+          </time>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {props.actions}
+          <button
+            type="button"
+            onClick={() => setShowRaw((v) => !v)}
+            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={showRaw ? "Show rendered markdown" : "Show raw source"}
+            title={showRaw ? "Show rendered markdown" : "Show raw source"}
+          >
+            {showRaw ? <FileTextIcon className="size-3.5" /> : <CodeIcon className="size-3.5" />}
+          </button>
+        </div>
       </header>
       <MarkdownView text={props.body} raw={showRaw} />
     </article>
@@ -297,7 +323,7 @@ export function CommentComposer(props: {
   return (
     <form
       onSubmit={handleSubmit}
-      className={cn("rounded-xl border border-border/60 bg-muted/12 p-3", props.className)}
+      className={cn("rounded-lg border border-border/60 bg-background p-3", props.className)}
     >
       <Textarea
         aria-label="Comment body"
@@ -306,7 +332,7 @@ export function CommentComposer(props: {
         onChange={handleDraftChange}
         disabled={props.disabled || isSubmitting}
         size="sm"
-        className="bg-background/70"
+        className="min-h-28 bg-muted/12"
       />
       <div className="mt-2 flex min-h-7 items-center gap-2">
         <div className="min-w-0 flex-1 text-xs" aria-live="polite">

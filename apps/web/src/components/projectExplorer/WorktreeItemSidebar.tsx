@@ -18,7 +18,7 @@ interface WorktreeItemSidebarProps {
 
 export function WorktreeItemSidebar(props: WorktreeItemSidebarProps) {
   return (
-    <aside className="flex w-56 shrink-0 flex-col gap-4 border-border/60 border-l bg-muted/12 px-4 py-4 text-xs">
+    <aside className="flex max-h-56 w-full shrink-0 flex-col gap-4 overflow-y-auto border-border/60 border-t bg-muted/12 px-4 py-3 text-xs lg:max-h-none lg:w-72 lg:border-t-0 lg:border-l lg:py-4">
       {props.reviewers !== undefined ? (
         <SidebarSection title="Reviewers">
           <UserList logins={props.reviewers ?? []} emptyText="No reviewers" />

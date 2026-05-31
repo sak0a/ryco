@@ -1,12 +1,23 @@
 import type { EnvironmentId, SourceControlIssueDetail } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeftIcon, ExternalLinkIcon } from "lucide-react";
+import { CircleDotIcon, FileTextIcon, MessageSquareIcon, SendIcon } from "lucide-react";
 import { issueDetailQueryOptions, useAddIssueCommentMutation } from "~/lib/sourceControlContextRpc";
 import { Button } from "../ui/button";
-import { Spinner } from "../ui/spinner";
 import { CommentComposer, CommentItem } from "./CommentThread";
 import { deriveOriginalPostAuthorRole } from "./CommentThread.logic";
+import {
+  SourceControlDetailErrorState,
+  SourceControlDetailLayout,
+  SourceControlDetailLoadingState,
+  SourceControlDetailToolbar,
+  SourceControlMetricStrip,
+} from "./SourceControlDetailLayout";
+import {
+  SourceControlTimeline,
+  SourceControlTimelineEntry,
+  SourceControlTimelineNotice,
+} from "./SourceControlTimeline";
 import { StateBadge } from "./StateBadge";
 import { WorktreeItemSidebar } from "./WorktreeItemSidebar";
 
@@ -47,34 +58,17 @@ export function IssueDetail(props: IssueDetailProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-border/60 border-b py-2 pr-12 pl-4">
-        <Button type="button" size="sm" variant="ghost" onClick={props.onBack}>
-          <ArrowLeftIcon className="size-3.5" />
-          Back
-        </Button>
-        {detail ? (
-          <a
-            href={detail.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="ml-auto inline-flex items-center gap-1 text-muted-foreground text-xs hover:text-foreground"
-          >
-            <ExternalLinkIcon className="size-3" />
-            View on GitHub
-          </a>
-        ) : null}
-      </div>
+      <SourceControlDetailToolbar onBack={props.onBack} githubUrl={detail?.url} />
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {detailQuery.isLoading ? (
-          <div className="flex items-center gap-2 px-5 py-4 text-muted-foreground text-sm">
-            <Spinner className="size-4" />
-            Loading issue…
-          </div>
+          <SourceControlDetailLoadingState label="issue" />
         ) : detailQuery.isError ? (
-          <p className="px-5 py-4 text-destructive text-sm">
-            {detailQuery.error instanceof Error ? detailQuery.error.message : "Failed to load."}
-          </p>
+          <SourceControlDetailErrorState
+            message={
+              detailQuery.error instanceof Error ? detailQuery.error.message : "Failed to load."
+            }
+          />
         ) : detail ? (
           <IssueDetailBody
             detail={detail}
@@ -129,69 +123,114 @@ function IssueDetailBody(props: {
       ? detail.updatedAt.value
       : DateTime.fromDateUnsafe(new Date());
   const opAuthorRole = deriveOriginalPostAuthorRole(detail);
+  const commentsCount = detail.comments.length;
+  const labelsCount = detail.labels?.length ?? 0;
+  const assigneesCount = detail.assignees?.length ?? 0;
+  const updatedLabel =
+    detail.updatedAt && Option.isSome(detail.updatedAt)
+      ? dateFmt.format(DateTime.toDate(detail.updatedAt.value))
+      : null;
 
   return (
-    <div className="flex h-full min-h-0">
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4">
-        <header className="mb-5 space-y-2">
-          <div className="flex items-start gap-3">
-            <h2 className="flex-1 font-heading font-semibold text-xl leading-tight">
-              {detail.title}{" "}
-              <span className="font-normal text-muted-foreground">#{detail.number}</span>
-            </h2>
+    <SourceControlDetailLayout
+      sidebar={
+        <WorktreeItemSidebar
+          assignees={detail.assignees}
+          labels={detail.labels}
+          linkedChangeRequestNumbers={detail.linkedChangeRequestNumbers ?? []}
+          onSelectLinkedChangeRequest={props.onSelectLinkedChangeRequest}
+        />
+      }
+    >
+      <div className="flex min-h-0 flex-col lg:h-full">
+        <header className="border-border/60 border-b bg-background px-5 py-4 lg:px-6">
+          <div className="flex flex-wrap items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-balance font-heading font-semibold text-xl leading-tight lg:text-2xl">
+                {detail.title}{" "}
+                <span className="font-normal text-muted-foreground">#{detail.number}</span>
+              </h2>
+              <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-xs">
+                {detail.author ? <span>Opened by {detail.author}</span> : <span>Opened</span>}
+                {updatedLabel ? <span>Updated {updatedLabel}</span> : null}
+              </p>
+            </div>
             <StateBadge
               kind={detail.state === "open" ? "issue-open" : "issue-closed"}
               className="mt-1"
             />
           </div>
-          <p className="text-muted-foreground text-xs">
-            {detail.author ? `Opened by ${detail.author}` : "Opened"}
-            {detail.updatedAt && Option.isSome(detail.updatedAt) ? (
-              <> · updated {dateFmt.format(DateTime.toDate(detail.updatedAt.value))}</>
-            ) : null}
-          </p>
+          <SourceControlMetricStrip
+            className="mt-4"
+            items={[
+              { label: "Conversation", value: `${commentsCount} comments` },
+              { label: "Labels", value: labelsCount === 0 ? "None" : labelsCount },
+              { label: "Assignees", value: assigneesCount === 0 ? "Unassigned" : assigneesCount },
+              { label: "Linked PRs", value: detail.linkedChangeRequestNumbers?.length ?? 0 },
+            ]}
+          />
         </header>
 
-        <ol className="space-y-4">
-          <li>
-            <CommentItem
-              author={opAuthorRole.author}
-              body={detail.body}
-              createdAt={opCreatedAt}
-              authorRole={opAuthorRole.role}
-              isOriginalPost
-            />
-          </li>
-          {detail.comments.map((comment) => (
-            <li key={`${comment.author}-${comment.createdAt}-${comment.body}`}>
-              <CommentItem
-                author={comment.author}
-                body={comment.body}
-                createdAt={comment.createdAt}
-                authorAssociation={comment.authorAssociation}
-                authorRole={comment.authorRole}
-                reviewState={comment.reviewState}
-              />
-            </li>
-          ))}
-          {props.onSubmitComment ? (
-            <li key="comment-composer">
-              <CommentComposer
-                placeholder="Write a comment on this issue"
-                submitLabel="Comment"
-                onSubmit={props.onSubmitComment}
-              />
-            </li>
-          ) : null}
-        </ol>
+        <div className="min-h-0 overflow-visible bg-muted/8 px-4 py-5 sm:px-5 lg:flex-1 lg:overflow-y-auto lg:px-6">
+          <div className="mx-auto w-full max-w-[980px]">
+            <SourceControlTimeline>
+              <SourceControlTimelineEntry tone="body" icon={<FileTextIcon className="size-4" />}>
+                <CommentItem
+                  author={opAuthorRole.author}
+                  body={detail.body}
+                  createdAt={opCreatedAt}
+                  authorRole={opAuthorRole.role}
+                  isOriginalPost
+                  itemKind="body"
+                  eyebrow="Issue body"
+                />
+              </SourceControlTimelineEntry>
+              <SourceControlTimelineEntry tone="system" icon={<CircleDotIcon className="size-4" />}>
+                <SourceControlTimelineNotice
+                  tone="system"
+                  title="Current status"
+                  description={updatedLabel ? `Updated ${updatedLabel}` : undefined}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StateBadge kind={detail.state === "open" ? "issue-open" : "issue-closed"} />
+                    <span className="text-muted-foreground text-xs">
+                      {commentsCount === 1 ? "1 comment" : `${commentsCount} comments`}
+                    </span>
+                  </div>
+                </SourceControlTimelineNotice>
+              </SourceControlTimelineEntry>
+              {detail.comments.map((comment) => (
+                <SourceControlTimelineEntry
+                  key={`${comment.author}-${comment.createdAt}-${comment.body}`}
+                  tone={comment.reviewState ? "review" : "comment"}
+                  icon={<MessageSquareIcon className="size-4" />}
+                >
+                  <CommentItem
+                    author={comment.author}
+                    body={comment.body}
+                    createdAt={comment.createdAt}
+                    authorAssociation={comment.authorAssociation}
+                    authorRole={comment.authorRole}
+                    reviewState={comment.reviewState}
+                    itemKind={comment.reviewState ? "review" : "comment"}
+                    eyebrow={comment.reviewState ? "Review comment" : "Comment"}
+                  />
+                </SourceControlTimelineEntry>
+              ))}
+              {props.onSubmitComment ? (
+                <SourceControlTimelineEntry tone="composer" icon={<SendIcon className="size-4" />}>
+                  <CommentComposer
+                    placeholder="Write a comment on this issue"
+                    submitLabel="Comment"
+                    onSubmit={props.onSubmitComment}
+                    className="border-emerald-500/25 bg-emerald-500/5"
+                  />
+                </SourceControlTimelineEntry>
+              ) : null}
+            </SourceControlTimeline>
+          </div>
+        </div>
       </div>
-
-      <WorktreeItemSidebar
-        assignees={detail.assignees}
-        labels={detail.labels}
-        linkedChangeRequestNumbers={detail.linkedChangeRequestNumbers ?? []}
-        onSelectLinkedChangeRequest={props.onSelectLinkedChangeRequest}
-      />
-    </div>
+    </SourceControlDetailLayout>
   );
 }

@@ -8,12 +8,14 @@ import { DateTime, Option } from "effect";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import {
-  ArrowLeftIcon,
   ChevronRightIcon,
   ExternalLinkIcon,
   FileIcon,
+  FileTextIcon,
   GitBranchIcon,
+  MessageSquareIcon,
   MessagesSquareIcon,
+  SendIcon,
 } from "lucide-react";
 import {
   changeRequestDetailQueryOptions,
@@ -26,6 +28,18 @@ import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { CommentComposer, CommentItem } from "./CommentThread";
 import { deriveOriginalPostAuthorRole } from "./CommentThread.logic";
+import {
+  SourceControlDetailErrorState,
+  SourceControlDetailLayout,
+  SourceControlDetailLoadingState,
+  SourceControlDetailToolbar,
+  SourceControlMetricStrip,
+} from "./SourceControlDetailLayout";
+import {
+  SourceControlTimeline,
+  SourceControlTimelineEntry,
+  SourceControlTimelineNotice,
+} from "./SourceControlTimeline";
 import { changeRequestStateKind, StateBadge } from "./StateBadge";
 import { type DiffLine, parseDiffLines } from "./diffLines";
 import { splitUnifiedDiffByFile } from "./unifiedDiffSplit";
@@ -72,34 +86,17 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-border/60 border-b py-2 pr-12 pl-4">
-        <Button type="button" size="sm" variant="ghost" onClick={props.onBack}>
-          <ArrowLeftIcon className="size-3.5" />
-          Back
-        </Button>
-        {detail ? (
-          <a
-            href={detail.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="ml-auto inline-flex items-center gap-1 text-muted-foreground text-xs hover:text-foreground"
-          >
-            <ExternalLinkIcon className="size-3" />
-            View on GitHub
-          </a>
-        ) : null}
-      </div>
+      <SourceControlDetailToolbar onBack={props.onBack} githubUrl={detail?.url} />
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {detailQuery.isLoading ? (
-          <div className="flex items-center gap-2 px-5 py-4 text-muted-foreground text-sm">
-            <Spinner className="size-4" />
-            Loading pull request…
-          </div>
+          <SourceControlDetailLoadingState label="pull request" />
         ) : detailQuery.isError ? (
-          <p className="px-5 py-4 text-destructive text-sm">
-            {detailQuery.error instanceof Error ? detailQuery.error.message : "Failed to load."}
-          </p>
+          <SourceControlDetailErrorState
+            message={
+              detailQuery.error instanceof Error ? detailQuery.error.message : "Failed to load."
+            }
+          />
         ) : detail ? (
           <PullRequestDetailBody
             detail={detail}
@@ -168,34 +165,62 @@ function PullRequestDetailBody(props: {
   const fileCount = detail.changedFiles ?? detail.files?.length ?? 0;
   const additions = detail.additions ?? 0;
   const deletions = detail.deletions ?? 0;
+  const updatedLabel =
+    detail.updatedAt && Option.isSome(detail.updatedAt)
+      ? dateFmt.format(DateTime.toDate(detail.updatedAt.value))
+      : null;
+  const reviewersCount = detail.reviewers?.length ?? 0;
 
   return (
-    <div className="flex h-full min-h-0">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="space-y-2 border-border/60 border-b px-5 pt-4 pb-3">
-          <div className="flex items-start gap-3">
-            <h2 className="flex-1 font-heading font-semibold text-xl leading-tight">
-              {detail.title}{" "}
-              <span className="font-normal text-muted-foreground">#{detail.number}</span>
-            </h2>
-            <DiffStatsBadge additions={additions} deletions={deletions} />
-            <StateBadge
-              kind={changeRequestStateKind(detail.state, detail.isDraft)}
-              className="mt-1"
-            />
+    <SourceControlDetailLayout
+      sidebar={
+        <WorktreeItemSidebar
+          assignees={detail.assignees}
+          labels={detail.labels}
+          reviewers={detail.reviewers ?? []}
+          linkedIssueNumbers={detail.linkedIssueNumbers ?? []}
+          linkedWorkItemKeys={detail.linkedWorkItemKeys ?? []}
+          onSelectLinkedIssue={props.onSelectLinkedIssue}
+          onSelectLinkedWorkItem={props.onSelectLinkedWorkItem}
+        />
+      }
+    >
+      <div className="flex min-h-0 flex-col lg:h-full">
+        <header className="border-border/60 border-b bg-background px-5 py-4 lg:px-6">
+          <div className="flex flex-wrap items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-balance font-heading font-semibold text-xl leading-tight lg:text-2xl">
+                {detail.title}{" "}
+                <span className="font-normal text-muted-foreground">#{detail.number}</span>
+              </h2>
+              <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-xs">
+                {detail.author ? <span>Opened by {detail.author}</span> : <span>Opened</span>}
+                {updatedLabel ? <span>Updated {updatedLabel}</span> : null}
+                <span className="inline-flex min-w-0 items-center gap-1">
+                  <GitBranchIcon className="size-3 shrink-0" />
+                  <span className="truncate font-mono">
+                    {detail.headRefName} → {detail.baseRefName}
+                  </span>
+                </span>
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              <DiffStatsBadge additions={additions} deletions={deletions} />
+              <StateBadge kind={changeRequestStateKind(detail.state, detail.isDraft)} />
+            </div>
           </div>
-          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-xs">
-            {detail.author ? <span>Opened by {detail.author}</span> : <span>Opened</span>}
-            {detail.updatedAt && Option.isSome(detail.updatedAt) ? (
-              <span>updated {dateFmt.format(DateTime.toDate(detail.updatedAt.value))}</span>
-            ) : null}
-            <span className="inline-flex items-center gap-1">
-              <GitBranchIcon className="size-3" />
-              <span className="font-mono">
-                {detail.headRefName} → {detail.baseRefName}
-              </span>
-            </span>
-          </p>
+          <SourceControlMetricStrip
+            className="mt-4"
+            items={[
+              { label: "Conversation", value: `${detail.comments.length} comments` },
+              { label: "Commits", value: commitCount },
+              { label: "Files changed", value: fileCount },
+              {
+                label: "Net diff",
+                value: `+${numberFmt.format(additions)} / −${numberFmt.format(deletions)}`,
+              },
+            ]}
+          />
         </header>
 
         <ContextPickerTabs
@@ -208,64 +233,90 @@ function PullRequestDetailBody(props: {
           onSelect={(id) => setActiveTab(id as PullRequestTab)}
         />
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 overflow-visible bg-muted/8 px-4 py-5 sm:px-5 lg:flex-1 lg:overflow-y-auto lg:px-6">
           {activeTab === "conversation" ? (
-            <ol className="space-y-4">
-              <li>
-                <CommentItem
-                  author={opAuthorRole.author}
-                  body={detail.body}
-                  createdAt={opCreatedAt}
-                  authorRole={opAuthorRole.role}
-                  isOriginalPost
-                />
-              </li>
-              {detail.comments.map((comment) => (
-                <li key={`${comment.author}-${comment.createdAt}-${comment.body}`}>
+            <div className="mx-auto w-full max-w-[980px]">
+              <SourceControlTimeline>
+                <SourceControlTimelineEntry tone="body" icon={<FileTextIcon className="size-4" />}>
                   <CommentItem
-                    author={comment.author}
-                    body={comment.body}
-                    createdAt={comment.createdAt}
-                    authorAssociation={comment.authorAssociation}
-                    authorRole={comment.authorRole}
-                    reviewState={comment.reviewState}
+                    author={opAuthorRole.author}
+                    body={detail.body}
+                    createdAt={opCreatedAt}
+                    authorRole={opAuthorRole.role}
+                    isOriginalPost
+                    itemKind="body"
+                    eyebrow="Pull request body"
                   />
-                </li>
-              ))}
-              {props.onSubmitComment ? (
-                <li key="comment-composer">
-                  <CommentComposer
-                    placeholder="Write a conversation comment"
-                    submitLabel="Comment"
-                    onSubmit={props.onSubmitComment}
-                  />
-                </li>
-              ) : null}
-            </ol>
+                </SourceControlTimelineEntry>
+                <SourceControlTimelineEntry
+                  tone="workflow"
+                  icon={<GitBranchIcon className="size-4" />}
+                >
+                  <SourceControlTimelineNotice
+                    tone="workflow"
+                    title="Workflow overview"
+                    description={`${commitCount} commits · ${fileCount} files changed`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StateBadge kind={changeRequestStateKind(detail.state, detail.isDraft)} />
+                      <DiffStatsBadge additions={additions} deletions={deletions} />
+                      <span className="rounded-md border border-border/60 bg-background/70 px-2 py-0.5 text-muted-foreground text-xs">
+                        {reviewersCount === 1 ? "1 reviewer" : `${reviewersCount} reviewers`}
+                      </span>
+                    </div>
+                  </SourceControlTimelineNotice>
+                </SourceControlTimelineEntry>
+                {detail.comments.map((comment) => (
+                  <SourceControlTimelineEntry
+                    key={`${comment.author}-${comment.createdAt}-${comment.body}`}
+                    tone={comment.reviewState ? "review" : "comment"}
+                    icon={<MessageSquareIcon className="size-4" />}
+                  >
+                    <CommentItem
+                      author={comment.author}
+                      body={comment.body}
+                      createdAt={comment.createdAt}
+                      authorAssociation={comment.authorAssociation}
+                      authorRole={comment.authorRole}
+                      reviewState={comment.reviewState}
+                      itemKind={comment.reviewState ? "review" : "comment"}
+                      eyebrow={comment.reviewState ? "Review comment" : "Comment"}
+                    />
+                  </SourceControlTimelineEntry>
+                ))}
+                {props.onSubmitComment ? (
+                  <SourceControlTimelineEntry
+                    tone="composer"
+                    icon={<SendIcon className="size-4" />}
+                  >
+                    <CommentComposer
+                      placeholder="Write a conversation comment"
+                      submitLabel="Comment"
+                      onSubmit={props.onSubmitComment}
+                      className="border-emerald-500/25 bg-emerald-500/5"
+                    />
+                  </SourceControlTimelineEntry>
+                ) : null}
+              </SourceControlTimeline>
+            </div>
           ) : activeTab === "commits" ? (
-            <CommitsTab commits={detail.commits ?? []} pullRequestUrl={detail.url} />
+            <div className="mx-auto w-full max-w-[1100px]">
+              <CommitsTab commits={detail.commits ?? []} pullRequestUrl={detail.url} />
+            </div>
           ) : (
-            <FilesTab
-              files={detail.files ?? []}
-              environmentId={props.environmentId}
-              cwd={props.cwd}
-              reference={String(detail.number)}
-              active={activeTab === "files"}
-            />
+            <div className="mx-auto w-full max-w-[1180px]">
+              <FilesTab
+                files={detail.files ?? []}
+                environmentId={props.environmentId}
+                cwd={props.cwd}
+                reference={String(detail.number)}
+                active={activeTab === "files"}
+              />
+            </div>
           )}
         </div>
       </div>
-
-      <WorktreeItemSidebar
-        assignees={detail.assignees}
-        labels={detail.labels}
-        reviewers={detail.reviewers ?? []}
-        linkedIssueNumbers={detail.linkedIssueNumbers ?? []}
-        linkedWorkItemKeys={detail.linkedWorkItemKeys ?? []}
-        onSelectLinkedIssue={props.onSelectLinkedIssue}
-        onSelectLinkedWorkItem={props.onSelectLinkedWorkItem}
-      />
-    </div>
+    </SourceControlDetailLayout>
   );
 }
 
