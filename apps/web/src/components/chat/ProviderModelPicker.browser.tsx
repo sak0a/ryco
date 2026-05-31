@@ -1,4 +1,9 @@
-import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@ryco/contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ResolvedKeybindingsConfig,
+  type ServerProvider,
+} from "@ryco/contracts";
 import { EnvironmentId } from "@ryco/contracts";
 import { createModelCapabilities } from "@ryco/shared/model";
 import { page, userEvent } from "vitest/browser";
@@ -18,6 +23,7 @@ import {
   type UnifiedSettings,
 } from "@ryco/contracts/settings";
 import { __resetLocalApiForTests } from "../../localApi";
+import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 
 // Mock the environments/runtime module to provide a mock primary environment connection
 vi.mock("../../environments/runtime", () => {
@@ -254,6 +260,9 @@ async function mountPicker(props: {
   lockedContinuationGroupKey?: string | null;
   providers?: ReadonlyArray<ServerProvider>;
   settings?: UnifiedSettings;
+  keybindings?: ResolvedKeybindingsConfig;
+  insideOpenDialog?: boolean;
+  open?: boolean;
   triggerVariant?: "ghost" | "outline";
 }) {
   const host = document.createElement("div");
@@ -268,17 +277,31 @@ async function mountPicker(props: {
     activeInstanceId,
     props.model,
   );
-  const screen = await render(
+  const picker = (
     <ProviderModelPicker
       activeInstanceId={activeInstanceId}
       model={props.model}
       lockedProvider={props.lockedProvider}
       lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
       instanceEntries={instanceEntries}
+      {...(props.keybindings ? { keybindings: props.keybindings } : {})}
       modelOptionsByInstance={modelOptionsByInstance}
+      {...(props.open !== undefined ? { open: props.open } : {})}
       triggerVariant={props.triggerVariant}
       onInstanceModelChange={onInstanceModelChange}
-    />,
+    />
+  );
+  const screen = await render(
+    props.insideOpenDialog ? (
+      <Dialog open>
+        <DialogPopup>
+          <DialogTitle>Settings</DialogTitle>
+          {picker}
+        </DialogPopup>
+      </Dialog>
+    ) : (
+      picker
+    ),
     { container: host },
   );
 
@@ -736,6 +759,53 @@ describe("ProviderModelPicker", () => {
         "claudeAgent",
         "claude-sonnet-4-6",
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("supports model jump shortcuts when opened from inside a dialog", async () => {
+    const mounted = await mountPicker({
+      model: "gpt-5.3-codex",
+      lockedProvider: null,
+      insideOpenDialog: true,
+      open: true,
+      keybindings: [
+        {
+          command: "modelPicker.jump.1",
+          shortcut: {
+            key: "1",
+            metaKey: false,
+            ctrlKey: true,
+            shiftKey: false,
+            altKey: false,
+            modKey: false,
+          },
+          whenAst: { type: "identifier", name: "modelPickerOpen" },
+        },
+      ],
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector(".model-picker-list")).not.toBeNull();
+      });
+
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "1",
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(mounted.onInstanceModelChange).toHaveBeenCalledWith(
+          CODEX_INSTANCE_ID,
+          "gpt-5-codex",
+        );
+      });
     } finally {
       await mounted.cleanup();
     }
