@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { AlertCircleIcon, ArrowLeftIcon, ExternalLinkIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
+import { Skeleton } from "../ui/skeleton";
 import { Spinner } from "../ui/spinner";
 
 export function SourceControlDetailToolbar(props: {
@@ -50,31 +51,40 @@ export function SourceControlDetailLayout(props: {
 
 export function SourceControlDetailLoadingState(props: { label: string }) {
   return (
-    <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_18rem]">
+    <div
+      role="status"
+      aria-busy="true"
+      aria-live="polite"
+      className="grid h-full min-h-0 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_18rem]"
+    >
+      <span className="sr-only">Loading {props.label}...</span>
       <div className="flex min-h-0 flex-col">
         <div className="border-border/60 border-b px-5 py-4 lg:px-6">
-          <div className="h-5 w-3/4 rounded-md bg-muted animate-skeleton bg-[length:200%_100%]" />
+          <Skeleton className="h-5 w-3/4 rounded-md" />
           <div className="mt-3 flex gap-2">
-            <div className="h-4 w-24 rounded bg-muted animate-skeleton bg-[length:200%_100%]" />
-            <div className="h-4 w-32 rounded bg-muted animate-skeleton bg-[length:200%_100%]" />
+            <Skeleton className="h-4 w-24 rounded" />
+            <Skeleton className="h-4 w-32 rounded" />
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-hidden bg-muted/8 px-5 py-5 lg:px-6">
           <div className="mx-auto w-full max-w-[960px] space-y-4">
             {[0, 1, 2].map((index) => (
               <div key={index} className="grid grid-cols-[2rem_minmax(0,1fr)] gap-3">
-                <div className="size-8 rounded-lg bg-muted animate-skeleton bg-[length:200%_100%]" />
+                <Skeleton className="size-8 rounded-lg" />
                 <div className="rounded-lg border border-border/60 bg-background p-3">
-                  <div className="h-4 w-40 rounded bg-muted animate-skeleton bg-[length:200%_100%]" />
-                  <div className="mt-3 h-3 w-full rounded bg-muted animate-skeleton bg-[length:200%_100%]" />
-                  <div className="mt-2 h-3 w-5/6 rounded bg-muted animate-skeleton bg-[length:200%_100%]" />
+                  <Skeleton className="h-4 w-40 rounded" />
+                  <Skeleton className="mt-3 h-3 w-full rounded" />
+                  <Skeleton className="mt-2 h-3 w-5/6 rounded" />
                 </div>
               </div>
             ))}
           </div>
         </div>
       </div>
-      <aside className="hidden border-border/60 border-l bg-muted/12 px-4 py-4 lg:block">
+      <aside
+        aria-hidden="true"
+        className="hidden border-border/60 border-l bg-muted/12 px-4 py-4 lg:block"
+      >
         <div className="flex items-center gap-2 text-muted-foreground text-xs">
           <Spinner className="size-3.5" />
           Loading {props.label}...
@@ -87,7 +97,10 @@ export function SourceControlDetailLoadingState(props: { label: string }) {
 export function SourceControlDetailErrorState(props: { message: string }) {
   return (
     <div className="flex h-full min-h-0 items-start justify-center bg-muted/8 px-5 py-8">
-      <div className="flex w-full max-w-2xl items-start gap-3 rounded-lg border border-destructive/25 bg-destructive/6 px-4 py-3 text-destructive text-sm">
+      <div
+        role="alert"
+        className="flex w-full max-w-2xl items-start gap-3 rounded-lg border border-destructive/25 bg-destructive/6 px-4 py-3 text-destructive text-sm"
+      >
         <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
         <p className="min-w-0">{props.message}</p>
       </div>
