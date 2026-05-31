@@ -18,12 +18,13 @@ import {
 import {
   changeRequestDetailQueryOptions,
   changeRequestDiffQueryOptions,
+  useAddChangeRequestCommentMutation,
 } from "~/lib/sourceControlContextRpc";
 import { cn } from "~/lib/utils";
 import { ContextPickerTabs } from "../chat/ContextPickerTabs";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
-import { CommentItem } from "./CommentThread";
+import { CommentComposer, CommentItem } from "./CommentThread";
 import { deriveOriginalPostAuthorRole } from "./CommentThread.logic";
 import { changeRequestStateKind, StateBadge } from "./StateBadge";
 import { type DiffLine, parseDiffLines } from "./diffLines";
@@ -61,6 +62,11 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
       fullContent: true,
     }),
   );
+  const addCommentMutation = useAddChangeRequestCommentMutation({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    reference,
+  });
 
   const detail = detailQuery.data;
 
@@ -101,6 +107,11 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
             cwd={props.cwd}
             onSelectLinkedIssue={props.onSelectLinkedIssue}
             onSelectLinkedWorkItem={props.onSelectLinkedWorkItem}
+            onSubmitComment={
+              detail.provider === "github" && props.environmentId !== null && props.cwd !== null
+                ? (input) => addCommentMutation.mutateAsync(input).then(() => undefined)
+                : undefined
+            }
           />
         ) : null}
       </div>
@@ -139,6 +150,9 @@ function PullRequestDetailBody(props: {
   cwd: string | null;
   onSelectLinkedIssue: (issueNumber: number) => void;
   onSelectLinkedWorkItem?: ((workItemKey: string) => void) | undefined;
+  onSubmitComment?:
+    | ((input: { readonly body: string; readonly clientMutationId: string }) => Promise<void>)
+    | undefined;
 }) {
   const { detail } = props;
   const [activeTab, setActiveTab] = useState<PullRequestTab>("conversation");
@@ -218,6 +232,15 @@ function PullRequestDetailBody(props: {
                   />
                 </li>
               ))}
+              {props.onSubmitComment ? (
+                <li key="comment-composer">
+                  <CommentComposer
+                    placeholder="Write a conversation comment"
+                    submitLabel="Comment"
+                    onSubmit={props.onSubmitComment}
+                  />
+                </li>
+              ) : null}
             </ol>
           ) : activeTab === "commits" ? (
             <CommitsTab commits={detail.commits ?? []} pullRequestUrl={detail.url} />

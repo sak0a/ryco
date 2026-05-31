@@ -142,6 +142,10 @@ import {
   SourceControlIssueSummary,
   SourceControlProviderError,
   SourceControlAssigneeCandidate,
+  SourceControlAddChangeRequestCommentInput,
+  SourceControlAddChangeRequestCommentResult,
+  SourceControlAddIssueCommentInput,
+  SourceControlAddIssueCommentResult,
   SourceControlCreateIssueInput,
   SourceControlLabel,
 } from "./sourceControl.ts";
@@ -250,6 +254,8 @@ export const WS_METHODS = {
   sourceControlGetChangeRequestDetail: "sourceControl.getChangeRequestDetail",
   sourceControlGetChangeRequestDiff: "sourceControl.getChangeRequestDiff",
   sourceControlCreateIssue: "sourceControl.createIssue",
+  sourceControlAddIssueComment: "sourceControl.addIssueComment",
+  sourceControlAddChangeRequestComment: "sourceControl.addChangeRequestComment",
   sourceControlListIssueLabels: "sourceControl.listIssueLabels",
   sourceControlListIssueAssignees: "sourceControl.listIssueAssignees",
 
@@ -624,6 +630,21 @@ export const WsSourceControlCreateIssueRpc = Rpc.make(WS_METHODS.sourceControlCr
   success: SourceControlCreateIssueWithWorktreeResult,
   error: Schema.Union([SourceControlProviderError, AuthRpcError, GitManagerServiceError]),
 });
+
+export const WsSourceControlAddIssueCommentRpc = Rpc.make(WS_METHODS.sourceControlAddIssueComment, {
+  payload: SourceControlAddIssueCommentInput,
+  success: SourceControlAddIssueCommentResult,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+});
+
+export const WsSourceControlAddChangeRequestCommentRpc = Rpc.make(
+  WS_METHODS.sourceControlAddChangeRequestComment,
+  {
+    payload: SourceControlAddChangeRequestCommentInput,
+    success: SourceControlAddChangeRequestCommentResult,
+    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  },
+);
 
 export const WsSourceControlListIssueLabelsRpc = Rpc.make(WS_METHODS.sourceControlListIssueLabels, {
   payload: Schema.Struct({ cwd: Schema.String }),
@@ -1054,6 +1075,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlGetChangeRequestDetailRpc,
   WsSourceControlGetChangeRequestDiffRpc,
   WsSourceControlCreateIssueRpc,
+  WsSourceControlAddIssueCommentRpc,
+  WsSourceControlAddChangeRequestCommentRpc,
   WsSourceControlListIssueLabelsRpc,
   WsSourceControlListIssueAssigneesRpc,
   WsTextGenerationGenerateIssueContentRpc,

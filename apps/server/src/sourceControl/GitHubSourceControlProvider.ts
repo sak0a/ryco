@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import {
   SourceControlProviderError,
@@ -30,6 +32,31 @@ function providerError(
     detail: cause.detail,
     cause,
   });
+}
+
+const RYCO_COMMENT_MARKER_PATTERN = /\n{0,2}<!-- ryco-comment-id:[a-f0-9]{64} -->\s*$/u;
+
+function commentMutationMarker(clientMutationId: string): string {
+  const hashed = createHash("sha256").update(clientMutationId).digest("hex");
+  return `<!-- ryco-comment-id:${hashed} -->`;
+}
+
+function appendCommentMutationMarker(body: string, clientMutationId: string | undefined): string {
+  if (clientMutationId === undefined) return body;
+  return `${body.trimEnd()}\n\n${commentMutationMarker(clientMutationId)}`;
+}
+
+function stripCommentMutationMarker(body: string): string {
+  return body.replace(RYCO_COMMENT_MARKER_PATTERN, "").trimEnd();
+}
+
+function hasCommentMutationMarker(
+  comments: ReadonlyArray<{ readonly body: string }>,
+  clientMutationId: string | undefined,
+): boolean {
+  if (clientMutationId === undefined) return false;
+  const marker = commentMutationMarker(clientMutationId);
+  return comments.some((comment) => comment.body.includes(marker));
 }
 
 function toChangeRequest(summary: GitHubCli.GitHubPullRequestSummary): ChangeRequest {
@@ -89,7 +116,7 @@ function toSourceControlComment(
 ): SourceControlIssueComment {
   return {
     author: raw.author,
-    body: raw.body,
+    body: stripCommentMutationMarker(raw.body),
     createdAt: DateTime.fromDateUnsafe(new Date(raw.createdAt)),
     ...(raw.authorAssociation ? { authorAssociation: raw.authorAssociation } : {}),
     authorRole: classifySourceControlCommentAuthorRole({
@@ -106,9 +133,13 @@ function toIssueDetail(
   raw: GitHubIssues.NormalizedGitHubIssueDetail,
   options: { readonly fullContent: boolean },
 ): SourceControlIssueDetail {
+  const comments = raw.comments.map((comment) => ({
+    ...comment,
+    body: stripCommentMutationMarker(comment.body),
+  }));
   const content = options.fullContent
-    ? { body: raw.body, comments: raw.comments, truncated: false }
-    : truncateSourceControlDetailContent({ body: raw.body, comments: raw.comments });
+    ? { body: raw.body, comments, truncated: false }
+    : truncateSourceControlDetailContent({ body: raw.body, comments });
   const repositoryOwner = parseGitHubRepositoryOwnerFromUrl(raw.url);
   return {
     ...toIssueSummary(raw),
@@ -124,9 +155,13 @@ function toChangeRequestDetail(
   raw: GitHubCli.GitHubPullRequestDetail,
   options: { readonly fullContent: boolean },
 ): SourceControlChangeRequestDetail {
+  const comments = raw.comments.map((comment) => ({
+    ...comment,
+    body: stripCommentMutationMarker(comment.body),
+  }));
   const content = options.fullContent
-    ? { body: raw.body, comments: raw.comments, truncated: false }
-    : truncateSourceControlDetailContent({ body: raw.body, comments: raw.comments });
+    ? { body: raw.body, comments, truncated: false }
+    : truncateSourceControlDetailContent({ body: raw.body, comments });
   const repositoryOwner = parseGitHubRepositoryOwnerFromUrl(raw.url);
   return {
     ...toChangeRequest(raw),
@@ -148,6 +183,45 @@ function toChangeRequestDetail(
 export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
   const github = yield* GitHubCli.GitHubCli;
   const fileSystem = yield* FileSystem.FileSystem;
+
+  const withTempBodyFile = <A>(
+    input: {
+      readonly operation: string;
+      readonly prefix: string;
+      readonly body: string;
+    },
+    useBodyFile: (bodyFile: string) => Effect.Effect<A, SourceControlProviderError>,
+  ) =>
+    Effect.gen(function* () {
+      const bodyFile = yield* fileSystem.makeTempFile({ prefix: input.prefix, suffix: ".md" }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new SourceControlProviderError({
+              provider: "github",
+              operation: input.operation,
+              detail: "Failed to create temp file for GitHub body.",
+              cause,
+            }),
+        ),
+      );
+      const work = Effect.gen(function* () {
+        yield* fileSystem.writeFileString(bodyFile, input.body).pipe(
+          Effect.mapError(
+            (cause) =>
+              new SourceControlProviderError({
+                provider: "github",
+                operation: input.operation,
+                detail: "Failed to write GitHub body temp file.",
+                cause,
+              }),
+          ),
+        );
+        return yield* useBodyFile(bodyFile);
+      });
+      return yield* work.pipe(
+        Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void))),
+      );
+    });
 
   const listChangeRequests: SourceControlProvider.SourceControlProviderShape["listChangeRequests"] =
     (input) => {
@@ -265,6 +339,37 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
         Effect.map((raw) => toIssueDetail(raw, { fullContent: input.fullContent ?? false })),
         Effect.mapError((error) => providerError("getIssue", error)),
       ),
+    addIssueComment: (input) =>
+      Effect.gen(function* () {
+        const existing = input.clientMutationId
+          ? yield* github
+              .getIssue({ cwd: input.cwd, reference: input.reference })
+              .pipe(Effect.mapError((error) => providerError("addIssueComment", error)))
+          : null;
+        if (existing && hasCommentMutationMarker(existing.comments, input.clientMutationId)) {
+          return toIssueDetail(existing, { fullContent: true });
+        }
+
+        yield* withTempBodyFile(
+          {
+            operation: "addIssueComment",
+            prefix: "ryco-gh-comment-body-",
+            body: appendCommentMutationMarker(input.body, input.clientMutationId),
+          },
+          (bodyFile) =>
+            github
+              .addIssueComment({
+                cwd: input.cwd,
+                reference: input.reference,
+                bodyFile,
+              })
+              .pipe(Effect.mapError((error) => providerError("addIssueComment", error))),
+        );
+        const updated = yield* github
+          .getIssue({ cwd: input.cwd, reference: input.reference })
+          .pipe(Effect.mapError((error) => providerError("addIssueComment", error)));
+        return toIssueDetail(updated, { fullContent: true });
+      }),
     searchIssues: (input) =>
       github
         .searchIssues({
@@ -294,70 +399,80 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
         ),
         Effect.mapError((error) => providerError("getChangeRequestDetail", error)),
       ),
+    addChangeRequestComment: (input) =>
+      Effect.gen(function* () {
+        const existing = input.clientMutationId
+          ? yield* github
+              .getPullRequestDetail({ cwd: input.cwd, reference: input.reference })
+              .pipe(Effect.mapError((error) => providerError("addChangeRequestComment", error)))
+          : null;
+        if (existing && hasCommentMutationMarker(existing.comments, input.clientMutationId)) {
+          return toChangeRequestDetail(existing, { fullContent: true });
+        }
+
+        yield* withTempBodyFile(
+          {
+            operation: "addChangeRequestComment",
+            prefix: "ryco-gh-comment-body-",
+            body: appendCommentMutationMarker(input.body, input.clientMutationId),
+          },
+          (bodyFile) =>
+            github
+              .addPullRequestComment({
+                cwd: input.cwd,
+                reference: input.reference,
+                bodyFile,
+              })
+              .pipe(Effect.mapError((error) => providerError("addChangeRequestComment", error))),
+        );
+        const updated = yield* github
+          .getPullRequestDetail({ cwd: input.cwd, reference: input.reference })
+          .pipe(Effect.mapError((error) => providerError("addChangeRequestComment", error)));
+        return toChangeRequestDetail(updated, { fullContent: true });
+      }),
     getChangeRequestDiff: (input) =>
       github
         .getPullRequestDiff({ cwd: input.cwd, reference: input.reference })
         .pipe(Effect.mapError((error) => providerError("getChangeRequestDiff", error))),
     createIssue: (input) =>
-      Effect.gen(function* () {
-        const bodyFile = yield* fileSystem
-          .makeTempFile({ prefix: "ryco-gh-issue-body-", suffix: ".md" })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new SourceControlProviderError({
-                  provider: "github",
-                  operation: "createIssue",
-                  detail: "Failed to create temp file for issue body.",
-                  cause,
-                }),
-            ),
-          );
-        const work = Effect.gen(function* () {
-          yield* fileSystem.writeFileString(bodyFile, input.body).pipe(
-            Effect.mapError(
-              (cause) =>
-                new SourceControlProviderError({
-                  provider: "github",
-                  operation: "createIssue",
-                  detail: "Failed to write issue body temp file.",
-                  cause,
-                }),
-            ),
-          );
-          const created = yield* github
-            .createIssue({
-              cwd: input.cwd,
-              title: input.title,
-              bodyFile,
-              ...(input.labels ? { labels: input.labels } : {}),
-              ...(input.assignees ? { assignees: input.assignees } : {}),
-            })
-            .pipe(Effect.mapError((cause) => providerError("createIssue", cause)));
-          const detail = yield* github
-            .getIssue({ cwd: input.cwd, reference: String(created.number) })
-            .pipe(
-              Effect.mapError((cause) => providerError("createIssue", cause)),
-              Effect.catch(() =>
-                Effect.succeed({
-                  provider: "github",
-                  number: created.number,
-                  title: input.title,
-                  url: created.url,
-                  state: "open" as const,
-                  updatedAt: Option.none(),
-                } satisfies SourceControlIssueSummary),
-              ),
-            );
-          if ("body" in detail) {
-            return toIssueSummary(detail);
-          }
-          return detail;
-        });
-        return yield* work.pipe(
-          Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void))),
-        );
-      }),
+      withTempBodyFile(
+        {
+          operation: "createIssue",
+          prefix: "ryco-gh-issue-body-",
+          body: input.body,
+        },
+        (bodyFile) =>
+          Effect.gen(function* () {
+            const created = yield* github
+              .createIssue({
+                cwd: input.cwd,
+                title: input.title,
+                bodyFile,
+                ...(input.labels ? { labels: input.labels } : {}),
+                ...(input.assignees ? { assignees: input.assignees } : {}),
+              })
+              .pipe(Effect.mapError((cause) => providerError("createIssue", cause)));
+            const detail = yield* github
+              .getIssue({ cwd: input.cwd, reference: String(created.number) })
+              .pipe(
+                Effect.mapError((cause) => providerError("createIssue", cause)),
+                Effect.catch(() =>
+                  Effect.succeed({
+                    provider: "github",
+                    number: created.number,
+                    title: input.title,
+                    url: created.url,
+                    state: "open" as const,
+                    updatedAt: Option.none(),
+                  } satisfies SourceControlIssueSummary),
+                ),
+              );
+            if ("body" in detail) {
+              return toIssueSummary(detail);
+            }
+            return detail;
+          }),
+      ),
     listLabels: (input) =>
       github
         .listLabels({ cwd: input.cwd })

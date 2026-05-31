@@ -197,6 +197,14 @@ export const make = Effect.fn("makeBitbucketSourceControlProvider")(function* ()
           Effect.map((raw) => toIssueDetail(raw, { fullContent: input.fullContent ?? false })),
           Effect.mapError((error) => providerError("getIssue", error)),
         ),
+    addIssueComment: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "bitbucket",
+          operation: "addIssueComment",
+          detail: "Not implemented for bitbucket",
+        }),
+      ),
     searchIssues: (input) =>
       bitbucket
         .searchIssues({
@@ -234,6 +242,14 @@ export const make = Effect.fn("makeBitbucketSourceControlProvider")(function* ()
           ),
           Effect.mapError((error) => providerError("getChangeRequestDetail", error)),
         ),
+    addChangeRequestComment: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "bitbucket",
+          operation: "addChangeRequestComment",
+          detail: "Not implemented for bitbucket",
+        }),
+      ),
     getChangeRequestDiff: (input) =>
       bitbucket
         .getPullRequestDiff({

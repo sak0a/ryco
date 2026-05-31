@@ -1,5 +1,9 @@
-import type { EnvironmentId } from "@ryco/contracts";
-import { queryOptions } from "@tanstack/react-query";
+import type {
+  EnvironmentId,
+  SourceControlAddChangeRequestCommentInput,
+  SourceControlAddIssueCommentInput,
+} from "@ryco/contracts";
+import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { requireEnvironmentConnection } from "~/environments/runtime";
 
 export const sourceControlContextQueryKeys = {
@@ -316,5 +320,85 @@ export function changeRequestDetailQueryOptions(input: {
       input.cwd !== null &&
       input.reference !== null,
     staleTime: 300_000,
+  });
+}
+
+export function useAddIssueCommentMutation(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  reference: string;
+}) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (
+      payload: Pick<SourceControlAddIssueCommentInput, "body" | "clientMutationId">,
+    ) => {
+      if (!input.environmentId || !input.cwd) {
+        throw new Error("Issue comments are unavailable.");
+      }
+      const client = requireEnvironmentConnection(input.environmentId).client;
+      return client.sourceControl.addIssueComment({
+        cwd: input.cwd,
+        reference: input.reference,
+        body: payload.body,
+        ...(payload.clientMutationId !== undefined
+          ? { clientMutationId: payload.clientMutationId }
+          : {}),
+      });
+    },
+    onSuccess: (result) => {
+      qc.setQueryData(
+        sourceControlContextQueryKeys.issueDetail(
+          input.environmentId,
+          input.cwd,
+          input.reference,
+          true,
+        ),
+        result.detail,
+      );
+      qc.invalidateQueries({
+        queryKey: sourceControlContextQueryKeys.all,
+      });
+    },
+  });
+}
+
+export function useAddChangeRequestCommentMutation(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  reference: string;
+}) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (
+      payload: Pick<SourceControlAddChangeRequestCommentInput, "body" | "clientMutationId">,
+    ) => {
+      if (!input.environmentId || !input.cwd) {
+        throw new Error("Pull request comments are unavailable.");
+      }
+      const client = requireEnvironmentConnection(input.environmentId).client;
+      return client.sourceControl.addChangeRequestComment({
+        cwd: input.cwd,
+        reference: input.reference,
+        body: payload.body,
+        ...(payload.clientMutationId !== undefined
+          ? { clientMutationId: payload.clientMutationId }
+          : {}),
+      });
+    },
+    onSuccess: (result) => {
+      qc.setQueryData(
+        sourceControlContextQueryKeys.changeRequestDetail(
+          input.environmentId,
+          input.cwd,
+          input.reference,
+          true,
+        ),
+        result.detail,
+      );
+      qc.invalidateQueries({
+        queryKey: sourceControlContextQueryKeys.all,
+      });
+    },
   });
 }
