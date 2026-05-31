@@ -404,20 +404,6 @@ function normalizeGitHubCliError(
   }
 
   if (
-    lower.includes("http 422") ||
-    lower.includes("unprocessable entity") ||
-    lower.includes("cannot rerun") ||
-    lower.includes("cannot re-run") ||
-    lower.includes("no failed jobs")
-  ) {
-    return new GitHubCliError({
-      operation,
-      detail: "GitHub Actions cannot rerun this workflow run or job in its current state.",
-      cause: error,
-    });
-  }
-
-  if (
     lower.includes("could not resolve to a pullrequest") ||
     lower.includes("repository.pullrequest") ||
     lower.includes("no pull requests found for branch") ||
@@ -535,16 +521,32 @@ function workflowRunsEndpoint(input: { readonly headSha?: string; readonly limit
   return `repos/{owner}/{repo}/actions/runs?${params.toString()}`;
 }
 
+function isWorkflowRerunStateError(error: GitHubCliError): boolean {
+  const causeText = error.cause ? errorText(error.cause) : "";
+  const lower = `${errorText(error)}\n${causeText}`.toLowerCase();
+  return (
+    lower.includes("http 422") ||
+    lower.includes("unprocessable entity") ||
+    lower.includes("cannot rerun") ||
+    lower.includes("cannot re-run") ||
+    lower.includes("no failed jobs")
+  );
+}
+
 function withGitHubCliOperation<A>(
   operation: string,
   effect: Effect.Effect<A, GitHubCliError>,
+  options?: { readonly normalizeWorkflowRerunErrors?: boolean },
 ): Effect.Effect<A, GitHubCliError> {
   return effect.pipe(
     Effect.mapError(
       (error) =>
         new GitHubCliError({
           operation,
-          detail: error.detail,
+          detail:
+            options?.normalizeWorkflowRerunErrors === true && isWorkflowRerunStateError(error)
+              ? "GitHub Actions cannot rerun this workflow run or job in its current state."
+              : error.detail,
           cause: error,
         }),
     ),
@@ -1078,6 +1080,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           ],
           timeoutMs: 45_000,
         }),
+        { normalizeWorkflowRerunErrors: true },
       ).pipe(Effect.asVoid),
     rerunWorkflowJob: (input) =>
       withGitHubCliOperation(
@@ -1087,6 +1090,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           args: ["api", "-X", "POST", `repos/{owner}/{repo}/actions/jobs/${input.jobId}/rerun`],
           timeoutMs: 45_000,
         }),
+        { normalizeWorkflowRerunErrors: true },
       ).pipe(Effect.asVoid),
   });
 });

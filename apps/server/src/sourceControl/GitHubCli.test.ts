@@ -693,5 +693,27 @@ describe("GitHubCli.layer", () => {
         assert.equal(error.detail.includes("cannot rerun"), true);
       }).pipe(Effect.provide(layer)),
     );
+
+    it.effect("does not report non-rerun 422 errors as rerun failures", () =>
+      Effect.gen(function* () {
+        mockRun.mockReturnValueOnce(
+          Effect.fail(
+            new VcsProcessExitError({
+              operation: "GitHubCli.execute",
+              command: "gh api",
+              cwd: "/repo",
+              exitCode: 1,
+              detail: "HTTP 422: Unprocessable Entity",
+            }),
+          ),
+        );
+
+        const gh = yield* GitHubCli.GitHubCli;
+        const error = yield* gh.listWorkflowRuns({ cwd: "/repo" }).pipe(Effect.flip);
+
+        assert.equal(error.detail.includes("HTTP 422"), true);
+        assert.equal(error.detail.includes("cannot rerun"), false);
+      }).pipe(Effect.provide(layer)),
+    );
   });
 });
