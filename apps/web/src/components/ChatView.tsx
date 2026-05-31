@@ -2740,23 +2740,25 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
-      if (
-        !activeThreadId ||
-        useCommandPaletteStore.getState().open ||
-        event.defaultPrevented ||
-        shouldIgnoreGlobalNavigationShortcut(event)
-      ) {
+      if (!activeThreadId || useCommandPaletteStore.getState().open || event.defaultPrevented) {
         return;
       }
+      const modelPickerOpen = readComposer()?.isModelPickerOpen() ?? false;
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
-        modelPickerOpen: readComposer()?.isModelPickerOpen() ?? false,
+        modelPickerOpen,
       };
 
       const command = resolveShortcutCommand(event, keybindings, {
         context: shortcutContext,
       });
+      if (
+        shouldIgnoreGlobalNavigationShortcut(event) &&
+        (command !== "modelPicker.toggle" || !modelPickerOpen)
+      ) {
+        return;
+      }
       if (!command) return;
 
       if (command === "terminal.toggle") {

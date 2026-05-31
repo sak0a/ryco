@@ -12,6 +12,7 @@ import {
   isBareModifierKeyEvent,
   isChatNewShortcut,
   isChatNewLocalShortcut,
+  isDialogShortcutTarget,
   isDiffToggleShortcut,
   modelPickerJumpCommandForIndex,
   modelPickerJumpIndexFromCommand,
@@ -556,6 +557,13 @@ describe("cross-command precedence", () => {
         context: { terminalFocus: true },
       }),
     );
+  });
+});
+
+describe("isDialogShortcutTarget", () => {
+  it("does not treat non-element event targets as dialog shortcuts", () => {
+    assert.isFalse(isDialogShortcutTarget(null));
+    assert.isFalse(isDialogShortcutTarget(new EventTarget()));
   });
 });
 

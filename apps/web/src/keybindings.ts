@@ -180,7 +180,8 @@ function elementFromEventTarget(target: EventTarget | null | undefined): Element
 }
 
 export function isDialogShortcutTarget(target: EventTarget | null | undefined): boolean {
-  return elementFromEventTarget(target)?.closest(DIALOG_TARGET_SELECTOR) !== null;
+  const element = elementFromEventTarget(target);
+  return element !== null && element.closest(DIALOG_TARGET_SELECTOR) !== null;
 }
 
 function dialogShortcutElementForTarget(target: EventTarget | null | undefined): Element | null {
