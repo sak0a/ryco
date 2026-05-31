@@ -36,11 +36,7 @@ import {
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@ryco/shared/projectScripts";
 import { truncate } from "@ryco/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  changeRequestListQueryOptions,
-  issueListQueryOptions,
-} from "~/lib/sourceControlContextRpc";
+import { useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "effect";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -156,6 +152,10 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { NewWorktreeDialog, type NewWorktreeDialogTab } from "./worktrees/NewWorktreeDialog";
+import {
+  LinkedWorktreeItemDialog,
+  type LinkedWorktreeItem,
+} from "./worktrees/LinkedWorktreeItemDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { deriveRevertTurnCountByUserMessageId } from "./chat/MessagesTimeline.logic";
 import { ChatHeader } from "./chat/ChatHeader";
@@ -933,6 +933,15 @@ export default function ChatView(props: ChatViewProps) {
       [activeThread?.environmentId, activeThread?.worktreeId],
     ),
   );
+  const [headerLinkedItem, setHeaderLinkedItem] = useState<LinkedWorktreeItem | null>(null);
+  const handleOpenHeaderLinkedItem = useCallback((item: LinkedWorktreeItem) => {
+    setHeaderLinkedItem(item);
+  }, []);
+  const handleHeaderLinkedItemDialogOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      setHeaderLinkedItem(null);
+    }
+  }, []);
   const sessionTabsSelector = useMemo(() => createSessionTabsSelector(), []);
   const tabsWorktreeId = activeThread?.worktreeId;
   const tabsWorktreePath = activeThread?.worktreePath;
@@ -962,27 +971,6 @@ export default function ChatView(props: ChatViewProps) {
   const activeSessionTabKey = activeThread
     ? scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id))
     : null;
-  const activeProjectIssuesQuery = useQuery(
-    issueListQueryOptions({
-      environmentId: activeProject?.environmentId ?? null,
-      cwd: activeProject?.cwd ?? null,
-      state: "open",
-      limit: 100,
-      enabled: activeProject !== undefined,
-    }),
-  );
-  const activeProjectPullRequestsQuery = useQuery(
-    changeRequestListQueryOptions({
-      environmentId: activeProject?.environmentId ?? null,
-      cwd: activeProject?.cwd ?? null,
-      state: "open",
-      limit: 100,
-      enabled: activeProject !== undefined,
-    }),
-  );
-  const activeProjectIssueCount = activeProjectIssuesQuery.data?.length ?? 0;
-  const activeProjectPullRequestCount = activeProjectPullRequestsQuery.data?.length ?? 0;
-
   const handleSelectSessionTab = useCallback(
     (key: string) => {
       const target = parseScopedThreadKey(key);
@@ -3879,10 +3867,14 @@ export default function ChatView(props: ChatViewProps) {
           worktreeBranch={activeWorktreeSummary?.branch ?? activeThread.branch ?? null}
           worktreeTitle={activeWorktreeSummary?.title ?? null}
           worktreeOrigin={activeWorktreeSummary?.origin ?? null}
+          worktreeIssueNumber={activeWorktreeSummary?.issueNumber ?? null}
+          worktreeIssueState={activeWorktreeSummary?.issueState ?? null}
+          worktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
+          worktreePrState={activeWorktreeSummary?.prState ?? null}
+          worktreePrIsDraft={activeWorktreeSummary?.prIsDraft ?? null}
           sessionTabs={activeWorktreeSessionTabs}
           activeSessionTabKey={activeSessionTabKey}
-          issueCount={activeProjectIssueCount}
-          pullRequestCount={activeProjectPullRequestCount}
+          onOpenLinkedWorktreeItem={handleOpenHeaderLinkedItem}
           onSelectSessionTab={handleSelectSessionTab}
           onPrefetchTabEnter={handleTabPrefetchEnter}
           onPrefetchTabLeave={handleTabPrefetchLeave}
@@ -3894,6 +3886,13 @@ export default function ChatView(props: ChatViewProps) {
           onTogglePreview={onTogglePreview}
         />
       </header>
+      <LinkedWorktreeItemDialog
+        open={headerLinkedItem !== null}
+        item={headerLinkedItem}
+        environmentId={activeProject?.environmentId ?? activeThread.environmentId}
+        cwd={activeProject?.cwd ?? gitCwd}
+        onOpenChange={handleHeaderLinkedItemDialogOpenChange}
+      />
 
       {/* Error banner */}
       <ProviderStatusBanner status={activeProviderStatus} />

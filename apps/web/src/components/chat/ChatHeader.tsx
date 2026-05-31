@@ -19,6 +19,7 @@ import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { ChatHeaderBar } from "./ChatHeaderBar";
 import { ChatSessionTabs, type ChatSessionTabsItem } from "./ChatSessionTabs";
 import type { WorktreeOriginLike } from "./ChatSessionTabs.logic";
+import type { LinkedWorktreeItem } from "../worktrees/LinkedWorktreeItemDialog";
 import { usePerfMark, useDevPropDiff } from "../../perf/tabSwitchInstrumentation";
 
 interface ChatHeaderProps {
@@ -44,16 +45,20 @@ interface ChatHeaderProps {
   worktreeBranch?: string | null;
   worktreeTitle?: string | null;
   worktreeOrigin?: WorktreeOriginLike;
+  worktreeIssueNumber?: number | null;
+  worktreePrNumber?: number | null;
+  worktreeIssueState?: "open" | "closed" | null;
+  worktreePrState?: "open" | "closed" | "merged" | null;
+  worktreePrIsDraft?: boolean | null;
   sessionTabs?: ReadonlyArray<ChatSessionTabsItem>;
   activeSessionTabKey?: string | null;
-  issueCount?: number;
-  pullRequestCount?: number;
   onSelectSessionTab?: (key: string) => void;
   onPrefetchTabEnter?: (key: string) => void;
   onPrefetchTabLeave?: (key: string) => void;
   onNewSessionInWorktree?: () => void;
   onSelectProject?: () => void;
   onSelectWorktree?: () => void;
+  onOpenLinkedWorktreeItem?: (item: LinkedWorktreeItem) => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
@@ -177,13 +182,17 @@ export const ChatHeader = memo(function ChatHeader(props: ChatHeaderProps) {
           worktreeBranch={props.worktreeBranch}
           worktreeTitle={props.worktreeTitle}
           worktreeOrigin={props.worktreeOrigin}
+          worktreeIssueNumber={props.worktreeIssueNumber}
+          worktreeIssueState={props.worktreeIssueState}
+          worktreePrNumber={props.worktreePrNumber}
+          worktreePrState={props.worktreePrState}
+          worktreePrIsDraft={props.worktreePrIsDraft}
           sessionTitle={props.activeThreadTitle}
-          {...(typeof props.issueCount === "number" ? { issueCount: props.issueCount } : {})}
-          {...(typeof props.pullRequestCount === "number"
-            ? { pullRequestCount: props.pullRequestCount }
-            : {})}
           {...(props.onSelectProject ? { onSelectProject: props.onSelectProject } : {})}
           {...(props.onSelectWorktree ? { onSelectWorktree: props.onSelectWorktree } : {})}
+          {...(props.onOpenLinkedWorktreeItem
+            ? { onOpenLinkedWorktreeItem: props.onOpenLinkedWorktreeItem }
+            : {})}
           inlineActions={inlineActions}
         />
       </div>
