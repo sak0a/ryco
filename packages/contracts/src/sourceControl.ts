@@ -140,6 +140,19 @@ export const SourceControlCreateIssueInput = Schema.Struct({
 });
 export type SourceControlCreateIssueInput = typeof SourceControlCreateIssueInput.Type;
 
+export const SourceControlAddIssueCommentInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  reference: TrimmedNonEmptyString,
+  body: TrimmedNonEmptyString,
+  clientMutationId: Schema.optional(TrimmedNonEmptyString),
+});
+export type SourceControlAddIssueCommentInput = typeof SourceControlAddIssueCommentInput.Type;
+
+export const SourceControlAddIssueCommentResult = Schema.Struct({
+  detail: SourceControlIssueDetail,
+});
+export type SourceControlAddIssueCommentResult = typeof SourceControlAddIssueCommentResult.Type;
+
 export const SourceControlChangeRequestCommit = Schema.Struct({
   oid: TrimmedNonEmptyString,
   shortOid: TrimmedNonEmptyString,
@@ -182,6 +195,21 @@ export const SourceControlChangeRequestDetail = Schema.Struct({
   files: Schema.optional(Schema.Array(SourceControlChangeRequestFile)),
 });
 export type SourceControlChangeRequestDetail = typeof SourceControlChangeRequestDetail.Type;
+
+export const SourceControlAddChangeRequestCommentInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  reference: TrimmedNonEmptyString,
+  body: TrimmedNonEmptyString,
+  clientMutationId: Schema.optional(TrimmedNonEmptyString),
+});
+export type SourceControlAddChangeRequestCommentInput =
+  typeof SourceControlAddChangeRequestCommentInput.Type;
+
+export const SourceControlAddChangeRequestCommentResult = Schema.Struct({
+  detail: SourceControlChangeRequestDetail,
+});
+export type SourceControlAddChangeRequestCommentResult =
+  typeof SourceControlAddChangeRequestCommentResult.Type;
 
 export const ComposerSourceControlContextKind = Schema.Literals(["issue", "change-request"]);
 export type ComposerSourceControlContextKind = typeof ComposerSourceControlContextKind.Type;

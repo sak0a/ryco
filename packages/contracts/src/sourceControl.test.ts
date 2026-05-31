@@ -7,6 +7,7 @@ import {
   SourceControlChangeRequestDetail,
   SourceControlIssueComment,
   SourceControlAssigneeCandidate,
+  SourceControlAddIssueCommentInput,
   SourceControlCreateIssueInput,
 } from "./sourceControl.ts";
 
@@ -185,6 +186,28 @@ describe("SourceControlCreateIssueInput", () => {
     ).toMatchObject({ worktree: { enabled: true, branchName: "fix/bug" } });
     expect(() => decode({ cwd: "", title: "Bug", body: "" })).toThrow();
     expect(() => decode({ cwd: "/repo", title: "", body: "" })).toThrow();
+  });
+});
+
+describe("SourceControlAddIssueCommentInput", () => {
+  it("requires cwd, reference, and non-empty body", () => {
+    const decode = Schema.decodeUnknownSync(SourceControlAddIssueCommentInput);
+    expect(
+      decode({
+        cwd: "/repo",
+        reference: "42",
+        body: " Looks good. ",
+        clientMutationId: "mutation-1",
+      }),
+    ).toEqual({
+      cwd: "/repo",
+      reference: "42",
+      body: "Looks good.",
+      clientMutationId: "mutation-1",
+    });
+    expect(() => decode({ cwd: "/repo", reference: "42", body: "" })).toThrow();
+    expect(() => decode({ cwd: "", reference: "42", body: "x" })).toThrow();
+    expect(() => decode({ cwd: "/repo", reference: "", body: "x" })).toThrow();
   });
 });
 

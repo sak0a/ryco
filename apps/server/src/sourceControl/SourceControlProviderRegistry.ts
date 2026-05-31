@@ -82,9 +82,11 @@ function unsupportedProvider(
     checkoutChangeRequest: () => unsupported("checkoutChangeRequest"),
     listIssues: () => unsupported("listIssues"),
     getIssue: () => unsupported("getIssue"),
+    addIssueComment: () => unsupported("addIssueComment"),
     searchIssues: () => unsupported("searchIssues"),
     searchChangeRequests: () => unsupported("searchChangeRequests"),
     getChangeRequestDetail: () => unsupported("getChangeRequestDetail"),
+    addChangeRequestComment: () => unsupported("addChangeRequestComment"),
     getChangeRequestDiff: () => unsupported("getChangeRequestDiff"),
     createIssue: () => unsupported("createIssue"),
     listLabels: () => unsupported("listLabels"),
@@ -136,11 +138,15 @@ const makeLazyProvider = Effect.fn("makeLazySourceControlProvider")(function* (
       provider.pipe(Effect.flatMap((loaded) => loaded.checkoutChangeRequest(input))),
     listIssues: (input) => provider.pipe(Effect.flatMap((loaded) => loaded.listIssues(input))),
     getIssue: (input) => provider.pipe(Effect.flatMap((loaded) => loaded.getIssue(input))),
+    addIssueComment: (input) =>
+      provider.pipe(Effect.flatMap((loaded) => loaded.addIssueComment(input))),
     searchIssues: (input) => provider.pipe(Effect.flatMap((loaded) => loaded.searchIssues(input))),
     searchChangeRequests: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.searchChangeRequests(input))),
     getChangeRequestDetail: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.getChangeRequestDetail(input))),
+    addChangeRequestComment: (input) =>
+      provider.pipe(Effect.flatMap((loaded) => loaded.addChangeRequestComment(input))),
     getChangeRequestDiff: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.getChangeRequestDiff(input))),
     createIssue: (input) => provider.pipe(Effect.flatMap((loaded) => loaded.createIssue(input))),
@@ -233,6 +239,11 @@ function bindProviderContext(
         ...input,
         context: input.context ?? context,
       }),
+    addIssueComment: (input) =>
+      provider.addIssueComment({
+        ...input,
+        context: input.context ?? context,
+      }),
     searchIssues: (input) =>
       provider.searchIssues({
         ...input,
@@ -245,6 +256,11 @@ function bindProviderContext(
       }),
     getChangeRequestDetail: (input) =>
       provider.getChangeRequestDetail({
+        ...input,
+        context: input.context ?? context,
+      }),
+    addChangeRequestComment: (input) =>
+      provider.addChangeRequestComment({
         ...input,
         context: input.context ?? context,
       }),

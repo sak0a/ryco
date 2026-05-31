@@ -546,4 +546,48 @@ describe("GitHubCli.layer", () => {
       }).pipe(Effect.provide(layer)),
     );
   });
+
+  describe("add comments", () => {
+    it.effect("posts issue comments from a body file", () =>
+      Effect.gen(function* () {
+        mockRun.mockReturnValueOnce(Effect.succeed(processOutput("")));
+
+        const gh = yield* GitHubCli.GitHubCli;
+        yield* gh.addIssueComment({
+          cwd: "/tmp",
+          reference: "42",
+          bodyFile: "/tmp/comment.md",
+        });
+
+        expect(mockRun).toHaveBeenCalledWith({
+          operation: "GitHubCli.execute",
+          command: "gh",
+          args: ["issue", "comment", "42", "--body-file", "/tmp/comment.md"],
+          cwd: "/tmp",
+          timeoutMs: 30_000,
+        });
+      }).pipe(Effect.provide(layer)),
+    );
+
+    it.effect("posts pull request comments from a body file", () =>
+      Effect.gen(function* () {
+        mockRun.mockReturnValueOnce(Effect.succeed(processOutput("")));
+
+        const gh = yield* GitHubCli.GitHubCli;
+        yield* gh.addPullRequestComment({
+          cwd: "/tmp",
+          reference: "7",
+          bodyFile: "/tmp/comment.md",
+        });
+
+        expect(mockRun).toHaveBeenCalledWith({
+          operation: "GitHubCli.execute",
+          command: "gh",
+          args: ["pr", "comment", "7", "--body-file", "/tmp/comment.md"],
+          cwd: "/tmp",
+          timeoutMs: 30_000,
+        });
+      }).pipe(Effect.provide(layer)),
+    );
+  });
 });

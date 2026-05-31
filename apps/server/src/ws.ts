@@ -1941,6 +1941,28 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
               "rpc.aggregate": "source-control",
             },
           ),
+        [WS_METHODS.sourceControlAddIssueComment]: ({ cwd, reference, body, clientMutationId }) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlAddIssueComment,
+            ownerEffect(
+              WS_METHODS.sourceControlAddIssueComment,
+              sourceControlRegistry.resolve({ cwd }).pipe(
+                Effect.flatMap((provider) =>
+                  provider.addIssueComment({
+                    cwd,
+                    reference,
+                    body,
+                    ...(clientMutationId !== undefined ? { clientMutationId } : {}),
+                  }),
+                ),
+                Effect.map((detail) => ({ detail })),
+                Effect.tap(() => refreshStateForLinkedReference({ cwd, kind: "issue", reference })),
+              ),
+            ),
+            {
+              "rpc.aggregate": "source-control",
+            },
+          ),
         [WS_METHODS.sourceControlSearchIssues]: ({ cwd, query, limit }) =>
           observeRpcEffect(
             WS_METHODS.sourceControlSearchIssues,
@@ -2035,6 +2057,33 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                     ...(fullContent !== undefined ? { fullContent } : {}),
                   }),
                 ),
+                Effect.tap(() => refreshStateForLinkedReference({ cwd, kind: "pr", reference })),
+              ),
+            ),
+            {
+              "rpc.aggregate": "source-control",
+            },
+          ),
+        [WS_METHODS.sourceControlAddChangeRequestComment]: ({
+          cwd,
+          reference,
+          body,
+          clientMutationId,
+        }) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlAddChangeRequestComment,
+            ownerEffect(
+              WS_METHODS.sourceControlAddChangeRequestComment,
+              sourceControlRegistry.resolve({ cwd }).pipe(
+                Effect.flatMap((provider) =>
+                  provider.addChangeRequestComment({
+                    cwd,
+                    reference,
+                    body,
+                    ...(clientMutationId !== undefined ? { clientMutationId } : {}),
+                  }),
+                ),
+                Effect.map((detail) => ({ detail })),
                 Effect.tap(() => refreshStateForLinkedReference({ cwd, kind: "pr", reference })),
               ),
             ),

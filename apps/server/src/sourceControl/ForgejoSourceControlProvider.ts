@@ -201,6 +201,14 @@ export const make = Effect.fn("makeForgejoSourceControlProvider")(function* () {
           Effect.map((raw) => toIssueDetail(raw, { fullContent: input.fullContent ?? false })),
           Effect.mapError((error) => providerError("getIssue", error)),
         ),
+    addIssueComment: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "forgejo",
+          operation: "addIssueComment",
+          detail: "Not implemented for forgejo",
+        }),
+      ),
     searchIssues: (input) =>
       forgejo
         .searchIssues({
@@ -238,6 +246,14 @@ export const make = Effect.fn("makeForgejoSourceControlProvider")(function* () {
           ),
           Effect.mapError((error) => providerError("getChangeRequestDetail", error)),
         ),
+    addChangeRequestComment: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "forgejo",
+          operation: "addChangeRequestComment",
+          detail: "Not implemented for forgejo",
+        }),
+      ),
     getChangeRequestDiff: (input) =>
       forgejo
         .getPullRequestDiff({

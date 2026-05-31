@@ -4,15 +4,20 @@ import type {
   SourceControlReviewState,
 } from "@ryco/contracts";
 import {
+  AlertCircleIcon,
   CheckCircle2Icon,
   CodeIcon,
   FileTextIcon,
   MessageSquareIcon,
+  SendIcon,
   XCircleIcon,
 } from "lucide-react";
 import { DateTime } from "effect";
-import { memo, useState } from "react";
+import { memo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { cn } from "../../lib/utils";
+import { Button } from "../ui/button";
+import { Spinner } from "../ui/spinner";
+import { Textarea } from "../ui/textarea";
 import {
   authorAssociationLabel,
   avatarUrlForAuthor,
@@ -31,6 +36,18 @@ const dateTimeFmt = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
   minute: "2-digit",
 });
+
+function createClientMutationId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) return error.message;
+  return "Failed to post comment.";
+}
 
 function avatarInitials(author: string): string {
   const trimmed = author.trim();
@@ -223,6 +240,101 @@ export const CommentItem = memo(function CommentItem(props: CommentItemProps) {
     </article>
   );
 });
+
+export function CommentComposer(props: {
+  placeholder: string;
+  submitLabel: string;
+  onSubmit: (input: { readonly body: string; readonly clientMutationId: string }) => Promise<void>;
+  disabled?: boolean | undefined;
+  className?: string | undefined;
+}) {
+  const [draft, setDraft] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const mutationIdRef = useRef<string | null>(null);
+  const submittedBodyRef = useRef<string | null>(null);
+
+  const trimmedDraft = draft.trim();
+  const canSubmit = !props.disabled && !isSubmitting && trimmedDraft.length > 0;
+
+  const handleDraftChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    const nextDraft = event.target.value;
+    const nextBody = nextDraft.trim();
+    setDraft(nextDraft);
+    setSuccessMessage(null);
+    setSubmitError(null);
+    if (submittedBodyRef.current !== null && submittedBodyRef.current !== nextBody) {
+      mutationIdRef.current = null;
+    }
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canSubmit) return;
+
+    const body = trimmedDraft;
+    const clientMutationId = mutationIdRef.current ?? createClientMutationId();
+    mutationIdRef.current = clientMutationId;
+    submittedBodyRef.current = body;
+    setIsSubmitting(true);
+    setSubmitError(null);
+    setSuccessMessage(null);
+
+    try {
+      await props.onSubmit({ body, clientMutationId });
+      setDraft("");
+      mutationIdRef.current = null;
+      submittedBodyRef.current = null;
+      setSuccessMessage("Comment posted.");
+    } catch (error) {
+      setSubmitError(errorMessage(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className={cn("rounded-xl border border-border/60 bg-muted/12 p-3", props.className)}
+    >
+      <Textarea
+        aria-label="Comment body"
+        placeholder={props.placeholder}
+        value={draft}
+        onChange={handleDraftChange}
+        disabled={props.disabled || isSubmitting}
+        size="sm"
+        className="bg-background/70"
+      />
+      <div className="mt-2 flex min-h-7 items-center gap-2">
+        <div className="min-w-0 flex-1 text-xs" aria-live="polite">
+          {isSubmitting ? (
+            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+              <Spinner className="size-3" />
+              Posting comment...
+            </span>
+          ) : submitError ? (
+            <span className="inline-flex items-center gap-1.5 text-destructive">
+              <AlertCircleIcon className="size-3.5 shrink-0" />
+              <span className="truncate">{submitError}</span>
+            </span>
+          ) : successMessage ? (
+            <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2Icon className="size-3.5 shrink-0" />
+              {successMessage}
+            </span>
+          ) : null}
+        </div>
+        <Button type="submit" size="sm" disabled={!canSubmit}>
+          {isSubmitting ? <Spinner className="size-3.5" /> : <SendIcon className="size-3.5" />}
+          {submitError ? "Retry" : props.submitLabel}
+        </Button>
+      </div>
+    </form>
+  );
+}
 
 export const CommentThread = memo(function CommentThread(props: {
   comments: ReadonlyArray<SourceControlIssueComment>;

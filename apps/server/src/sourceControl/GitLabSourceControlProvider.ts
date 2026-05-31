@@ -170,6 +170,14 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
         Effect.map((raw) => toIssueDetail(raw, { fullContent: input.fullContent ?? false })),
         Effect.mapError((error) => providerError("getIssue", error)),
       ),
+    addIssueComment: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "gitlab",
+          operation: "addIssueComment",
+          detail: "Not implemented for gitlab",
+        }),
+      ),
     searchIssues: (input) =>
       gitlab
         .searchIssues({
@@ -198,6 +206,14 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
           toChangeRequestDetail(raw, { fullContent: input.fullContent ?? false }),
         ),
         Effect.mapError((error) => providerError("getChangeRequestDetail", error)),
+      ),
+    addChangeRequestComment: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "gitlab",
+          operation: "addChangeRequestComment",
+          detail: "Not implemented for gitlab",
+        }),
       ),
     getChangeRequestDiff: (_input) => Effect.succeed(""),
     createIssue: () =>

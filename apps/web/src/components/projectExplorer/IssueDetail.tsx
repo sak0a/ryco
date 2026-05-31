@@ -2,10 +2,10 @@ import type { EnvironmentId, SourceControlIssueDetail } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeftIcon, ExternalLinkIcon } from "lucide-react";
-import { issueDetailQueryOptions } from "~/lib/sourceControlContextRpc";
+import { issueDetailQueryOptions, useAddIssueCommentMutation } from "~/lib/sourceControlContextRpc";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
-import { CommentItem } from "./CommentThread";
+import { CommentComposer, CommentItem } from "./CommentThread";
 import { deriveOriginalPostAuthorRole } from "./CommentThread.logic";
 import { StateBadge } from "./StateBadge";
 import { WorktreeItemSidebar } from "./WorktreeItemSidebar";
@@ -37,6 +37,11 @@ export function IssueDetail(props: IssueDetailProps) {
       fullContent: true,
     }),
   );
+  const addCommentMutation = useAddIssueCommentMutation({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    reference,
+  });
 
   const detail = detailQuery.data;
 
@@ -74,6 +79,11 @@ export function IssueDetail(props: IssueDetailProps) {
           <IssueDetailBody
             detail={detail}
             onSelectLinkedChangeRequest={props.onSelectLinkedChangeRequest}
+            onSubmitComment={
+              detail.provider === "github" && props.environmentId !== null && props.cwd !== null
+                ? (input) => addCommentMutation.mutateAsync(input).then(() => undefined)
+                : undefined
+            }
           />
         ) : null}
       </div>
@@ -109,6 +119,9 @@ export function IssueDetail(props: IssueDetailProps) {
 function IssueDetailBody(props: {
   detail: SourceControlIssueDetail;
   onSelectLinkedChangeRequest?: ((number: number) => void) | undefined;
+  onSubmitComment?:
+    | ((input: { readonly body: string; readonly clientMutationId: string }) => Promise<void>)
+    | undefined;
 }) {
   const { detail } = props;
   const opCreatedAt =
@@ -161,6 +174,15 @@ function IssueDetailBody(props: {
               />
             </li>
           ))}
+          {props.onSubmitComment ? (
+            <li key="comment-composer">
+              <CommentComposer
+                placeholder="Write a comment on this issue"
+                submitLabel="Comment"
+                onSubmit={props.onSubmitComment}
+              />
+            </li>
+          ) : null}
         </ol>
       </div>
 

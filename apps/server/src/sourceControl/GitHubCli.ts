@@ -181,6 +181,18 @@ export interface GitHubCliShape {
     readonly assignees?: ReadonlyArray<string>;
   }) => Effect.Effect<{ url: string; number: number }, GitHubCliError>;
 
+  readonly addIssueComment: (input: {
+    readonly cwd: string;
+    readonly reference: string;
+    readonly bodyFile: string;
+  }) => Effect.Effect<void, GitHubCliError>;
+
+  readonly addPullRequestComment: (input: {
+    readonly cwd: string;
+    readonly reference: string;
+    readonly bodyFile: string;
+  }) => Effect.Effect<void, GitHubCliError>;
+
   readonly listLabels: (input: {
     readonly cwd: string;
   }) => Effect.Effect<ReadonlyArray<GitHubLabel>, GitHubCliError>;
@@ -657,6 +669,16 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
               );
         }),
       ),
+    addIssueComment: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: ["issue", "comment", input.reference, "--body-file", input.bodyFile],
+      }).pipe(Effect.asVoid),
+    addPullRequestComment: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: ["pr", "comment", input.reference, "--body-file", input.bodyFile],
+      }).pipe(Effect.asVoid),
     listLabels: (input) =>
       execute({
         cwd: input.cwd,

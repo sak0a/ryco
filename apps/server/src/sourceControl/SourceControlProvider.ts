@@ -112,6 +112,13 @@ export interface SourceControlProviderShape {
     readonly reference: string;
     readonly fullContent?: boolean;
   }) => Effect.Effect<SourceControlIssueDetail, SourceControlProviderError>;
+  readonly addIssueComment: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
+    readonly reference: string;
+    readonly body: string;
+    readonly clientMutationId?: string;
+  }) => Effect.Effect<SourceControlIssueDetail, SourceControlProviderError>;
   readonly searchIssues: (input: {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;
@@ -129,6 +136,13 @@ export interface SourceControlProviderShape {
     readonly context?: SourceControlProviderContext;
     readonly reference: string;
     readonly fullContent?: boolean;
+  }) => Effect.Effect<SourceControlChangeRequestDetail, SourceControlProviderError>;
+  readonly addChangeRequestComment: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
+    readonly reference: string;
+    readonly body: string;
+    readonly clientMutationId?: string;
   }) => Effect.Effect<SourceControlChangeRequestDetail, SourceControlProviderError>;
   readonly getChangeRequestDiff: (input: {
     readonly cwd: string;

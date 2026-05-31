@@ -13,6 +13,10 @@ describe("WS_METHODS Atlassian and work item names", () => {
     expect(WS_METHODS.atlassianSaveManualBitbucketToken).toBe("atlassian.saveManualBitbucketToken");
     expect(WS_METHODS.atlassianSaveManualJiraToken).toBe("atlassian.saveManualJiraToken");
     expect(WS_METHODS.sourceControlListChangeRequests).toBe("sourceControl.listChangeRequests");
+    expect(WS_METHODS.sourceControlAddIssueComment).toBe("sourceControl.addIssueComment");
+    expect(WS_METHODS.sourceControlAddChangeRequestComment).toBe(
+      "sourceControl.addChangeRequestComment",
+    );
     expect(WS_METHODS.workItemsList).toBe("workItems.list");
     expect(WS_METHODS.workItemsTransition).toBe("workItems.transition");
   });

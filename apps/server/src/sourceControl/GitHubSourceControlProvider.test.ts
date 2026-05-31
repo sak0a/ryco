@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { DateTime, Effect, Layer, Option } from "effect";
@@ -15,6 +17,10 @@ const processResult = (stdout: string): VcsProcess.VcsProcessOutput => ({
   stdoutTruncated: false,
   stderrTruncated: false,
 });
+
+function mutationMarker(clientMutationId: string): string {
+  return `<!-- ryco-comment-id:${createHash("sha256").update(clientMutationId).digest("hex")} -->`;
+}
 
 function makeProvider(github: Partial<GitHubCli.GitHubCliShape>) {
   return GitHubSourceControlProvider.make().pipe(
@@ -503,6 +509,110 @@ it.effect("createIssue maps GitHubCliError to SourceControlProviderError", () =>
     assert.strictEqual(result.operation, "createIssue");
     assert.strictEqual(result.provider, "github");
     assert.ok(result.detail.includes("gh: unauthorized"));
+  }),
+);
+
+it.effect("addIssueComment posts through gh and returns refreshed detail", () =>
+  Effect.gen(function* () {
+    const capturedAddInputs: Parameters<GitHubCli.GitHubCliShape["addIssueComment"]>[0][] = [];
+    let getCalls = 0;
+    const marker = mutationMarker("mutation-1");
+
+    const provider = yield* makeProvider({
+      getIssue: () => {
+        getCalls += 1;
+        return Effect.succeed({
+          number: 55,
+          title: "Bug",
+          url: "https://github.com/owner/repo/issues/55",
+          state: "open" as const,
+          author: "carol",
+          updatedAt: Option.none(),
+          labels: [],
+          assignees: [],
+          commentsCount: getCalls > 1 ? 1 : 0,
+          body: "Bug description",
+          comments:
+            getCalls > 1
+              ? [
+                  {
+                    author: "dave",
+                    body: `Thanks\n\n${marker}`,
+                    createdAt: "2026-03-14T10:00:00Z",
+                  },
+                ]
+              : [],
+        });
+      },
+      addIssueComment: (input) => {
+        capturedAddInputs.push(input);
+        return Effect.void;
+      },
+    });
+
+    const detail = yield* provider.addIssueComment({
+      cwd: "/repo",
+      reference: "55",
+      body: "Thanks",
+      clientMutationId: "mutation-1",
+    });
+
+    assert.strictEqual(capturedAddInputs[0]?.cwd, "/repo");
+    assert.strictEqual(capturedAddInputs[0]?.reference, "55");
+    assert.ok(capturedAddInputs[0]?.bodyFile);
+    assert.strictEqual(getCalls, 2);
+    assert.strictEqual(detail.comments[0]?.body, "Thanks");
+  }),
+);
+
+it.effect("addChangeRequestComment dedupes an already-posted client mutation", () =>
+  Effect.gen(function* () {
+    let addCalled = false;
+    const marker = mutationMarker("mutation-1");
+    const provider = yield* makeProvider({
+      getPullRequestDetail: () =>
+        Effect.succeed({
+          number: 7,
+          title: "PR",
+          url: "https://github.com/owner/repo/pull/7",
+          baseRefName: "main",
+          headRefName: "feature/pr",
+          state: "open",
+          author: "alice",
+          assignees: [],
+          labels: [],
+          commentsCount: 1,
+          body: "PR description",
+          comments: [
+            {
+              author: "bob",
+              body: `Already posted\n\n${marker}`,
+              createdAt: "2026-03-14T10:00:00Z",
+            },
+          ],
+          linkedIssueNumbers: [],
+          reviewers: [],
+          commits: [],
+          additions: 0,
+          deletions: 0,
+          changedFiles: 0,
+          files: [],
+        }),
+      addPullRequestComment: () => {
+        addCalled = true;
+        return Effect.void;
+      },
+    });
+
+    const detail = yield* provider.addChangeRequestComment({
+      cwd: "/repo",
+      reference: "7",
+      body: "Already posted",
+      clientMutationId: "mutation-1",
+    });
+
+    assert.strictEqual(addCalled, false);
+    assert.strictEqual(detail.comments[0]?.body, "Already posted");
   }),
 );
 

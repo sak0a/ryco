@@ -176,6 +176,14 @@ export const make = Effect.fn("makeAzureDevOpsSourceControlProvider")(function* 
         Effect.map((raw) => toIssueDetail(raw, { fullContent: input.fullContent ?? false })),
         Effect.mapError((error) => providerError("getIssue", error)),
       ),
+    addIssueComment: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "azure-devops",
+          operation: "addIssueComment",
+          detail: "Not implemented for azure-devops",
+        }),
+      ),
     searchIssues: (input) =>
       azure
         .searchWorkItems({
@@ -204,6 +212,14 @@ export const make = Effect.fn("makeAzureDevOpsSourceControlProvider")(function* 
           toChangeRequestDetail(raw, { fullContent: input.fullContent ?? false }),
         ),
         Effect.mapError((error) => providerError("getChangeRequestDetail", error)),
+      ),
+    addChangeRequestComment: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "azure-devops",
+          operation: "addChangeRequestComment",
+          detail: "Not implemented for azure-devops",
+        }),
       ),
     getChangeRequestDiff: (_input) => Effect.succeed(""),
     createIssue: () =>
