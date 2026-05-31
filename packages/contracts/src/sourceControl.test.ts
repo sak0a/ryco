@@ -5,6 +5,7 @@ import {
   SOURCE_CONTROL_DETAIL_BODY_MAX_BYTES,
   SOURCE_CONTROL_DETAIL_MAX_COMMENTS,
   SourceControlChangeRequestDetail,
+  SourceControlIssueComment,
   SourceControlAssigneeCandidate,
   SourceControlCreateIssueInput,
 } from "./sourceControl.ts";
@@ -123,6 +124,31 @@ describe("SourceControlChangeRequestDetail", () => {
     expect(decoded.linkedWorkItemKeys).toEqual(["PROJ-123"]);
     expect(decoded.participants?.[0]?.approved).toBe(true);
     expect(decoded.tasksCount).toBe(1);
+  });
+});
+
+describe("SourceControlIssueComment", () => {
+  it("decodes optional structured author role metadata", () => {
+    const createdAt = DateTime.fromDateUnsafe(new Date("2026-05-12T11:00:00.000Z"));
+    const decoded = Schema.decodeUnknownSync(SourceControlIssueComment)({
+      author: "alice",
+      body: "I opened this.",
+      createdAt,
+      authorAssociation: "OWNER",
+      authorRole: {
+        primary: "author",
+        isOriginalAuthor: true,
+        isRepositoryOwner: true,
+        isRepositoryMaintainer: false,
+      },
+    });
+
+    expect(decoded.authorRole).toEqual({
+      primary: "author",
+      isOriginalAuthor: true,
+      isRepositoryOwner: true,
+      isRepositoryMaintainer: false,
+    });
   });
 });
 

@@ -24,6 +24,7 @@ import { ContextPickerTabs } from "../chat/ContextPickerTabs";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { CommentItem } from "./CommentThread";
+import { deriveOriginalPostAuthorRole } from "./CommentThread.logic";
 import { changeRequestStateKind, StateBadge } from "./StateBadge";
 import { type DiffLine, parseDiffLines } from "./diffLines";
 import { splitUnifiedDiffByFile } from "./unifiedDiffSplit";
@@ -146,7 +147,7 @@ function PullRequestDetailBody(props: {
     detail.updatedAt && Option.isSome(detail.updatedAt)
       ? detail.updatedAt.value
       : DateTime.fromDateUnsafe(new Date());
-  const opAuthor = detail.author ?? "unknown";
+  const opAuthorRole = deriveOriginalPostAuthorRole(detail);
 
   const conversationCount = detail.comments.length + 1;
   const commitCount = detail.commits?.length ?? 0;
@@ -198,9 +199,10 @@ function PullRequestDetailBody(props: {
             <ol className="space-y-4">
               <li>
                 <CommentItem
-                  author={opAuthor}
+                  author={opAuthorRole.author}
                   body={detail.body}
                   createdAt={opCreatedAt}
+                  authorRole={opAuthorRole.role}
                   isOriginalPost
                 />
               </li>
@@ -211,6 +213,7 @@ function PullRequestDetailBody(props: {
                     body={comment.body}
                     createdAt={comment.createdAt}
                     authorAssociation={comment.authorAssociation}
+                    authorRole={comment.authorRole}
                     reviewState={comment.reviewState}
                   />
                 </li>

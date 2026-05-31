@@ -6,6 +6,7 @@ import { issueDetailQueryOptions } from "~/lib/sourceControlContextRpc";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { CommentItem } from "./CommentThread";
+import { deriveOriginalPostAuthorRole } from "./CommentThread.logic";
 import { StateBadge } from "./StateBadge";
 import { WorktreeItemSidebar } from "./WorktreeItemSidebar";
 
@@ -114,7 +115,7 @@ function IssueDetailBody(props: {
     detail.updatedAt && Option.isSome(detail.updatedAt)
       ? detail.updatedAt.value
       : DateTime.fromDateUnsafe(new Date());
-  const opAuthor = detail.author ?? "unknown";
+  const opAuthorRole = deriveOriginalPostAuthorRole(detail);
 
   return (
     <div className="flex h-full min-h-0">
@@ -141,9 +142,10 @@ function IssueDetailBody(props: {
         <ol className="space-y-4">
           <li>
             <CommentItem
-              author={opAuthor}
+              author={opAuthorRole.author}
               body={detail.body}
               createdAt={opCreatedAt}
+              authorRole={opAuthorRole.role}
               isOriginalPost
             />
           </li>
@@ -154,6 +156,7 @@ function IssueDetailBody(props: {
                 body={comment.body}
                 createdAt={comment.createdAt}
                 authorAssociation={comment.authorAssociation}
+                authorRole={comment.authorRole}
                 reviewState={comment.reviewState}
               />
             </li>

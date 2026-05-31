@@ -82,11 +82,28 @@ export const SourceControlReviewState = Schema.Literals([
 ]);
 export type SourceControlReviewState = typeof SourceControlReviewState.Type;
 
+export const SourceControlCommentAuthorRoleKind = Schema.Literals([
+  "author",
+  "owner",
+  "maintainer",
+  "participant",
+]);
+export type SourceControlCommentAuthorRoleKind = typeof SourceControlCommentAuthorRoleKind.Type;
+
+export const SourceControlCommentAuthorRole = Schema.Struct({
+  primary: SourceControlCommentAuthorRoleKind,
+  isOriginalAuthor: Schema.Boolean,
+  isRepositoryOwner: Schema.Boolean,
+  isRepositoryMaintainer: Schema.Boolean,
+});
+export type SourceControlCommentAuthorRole = typeof SourceControlCommentAuthorRole.Type;
+
 export const SourceControlIssueComment = Schema.Struct({
   author: Schema.String,
   body: Schema.String,
   createdAt: Schema.DateTimeUtc,
   authorAssociation: Schema.optional(Schema.String),
+  authorRole: Schema.optional(SourceControlCommentAuthorRole),
   reviewState: Schema.optional(SourceControlReviewState),
 });
 export type SourceControlIssueComment = typeof SourceControlIssueComment.Type;

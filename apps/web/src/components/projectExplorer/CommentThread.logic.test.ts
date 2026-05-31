@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { authorAssociationLabel, avatarUrlForAuthor, hashAuthorToHue } from "./CommentThread.logic";
+import {
+  authorAssociationLabel,
+  avatarUrlForAuthor,
+  commentRoleBadges,
+  commentToneForAuthorRole,
+  deriveOriginalPostAuthorRole,
+  hashAuthorToHue,
+} from "./CommentThread.logic";
 
 describe("avatarUrlForAuthor", () => {
   it("returns null for unknown author", () => {
@@ -44,6 +51,11 @@ describe("authorAssociationLabel", () => {
     expect(authorAssociationLabel("MEMBER")).toBe("Member");
   });
 
+  it("returns 'Maintainer' for GitHub member aliases", () => {
+    expect(authorAssociationLabel("MEMBER_OF_REPOSITORY")).toBe("Maintainer");
+    expect(authorAssociationLabel("MEMBER_OF_ORG")).toBe("Maintainer");
+  });
+
   it("returns 'Collaborator' for COLLABORATOR", () => {
     expect(authorAssociationLabel("COLLABORATOR")).toBe("Collaborator");
   });
@@ -76,5 +88,109 @@ describe("hashAuthorToHue", () => {
   it("handles empty author with a stable fallback", () => {
     expect(hashAuthorToHue("")).toBeGreaterThanOrEqual(0);
     expect(hashAuthorToHue("")).toBeLessThan(360);
+  });
+});
+
+describe("comment roles", () => {
+  it("uses author tone and badge for original author comments", () => {
+    const role = {
+      primary: "author" as const,
+      isOriginalAuthor: true,
+      isRepositoryOwner: false,
+      isRepositoryMaintainer: false,
+    };
+    expect(commentToneForAuthorRole(role)).toBe("author");
+    expect(commentRoleBadges({ role })).toEqual([{ label: "Author", tone: "author" }]);
+  });
+
+  it("uses owner or maintainer tone for privileged repository participants", () => {
+    const ownerRole = {
+      primary: "owner" as const,
+      isOriginalAuthor: false,
+      isRepositoryOwner: true,
+      isRepositoryMaintainer: false,
+    };
+    const maintainerRole = {
+      primary: "maintainer" as const,
+      isOriginalAuthor: false,
+      isRepositoryOwner: false,
+      isRepositoryMaintainer: true,
+    };
+    expect(commentToneForAuthorRole(ownerRole)).toBe("owner");
+    expect(commentRoleBadges({ role: ownerRole })).toEqual([{ label: "Owner", tone: "owner" }]);
+    expect(commentToneForAuthorRole(maintainerRole)).toBe("maintainer");
+    expect(commentRoleBadges({ role: maintainerRole })).toEqual([
+      { label: "Maintainer", tone: "maintainer" },
+    ]);
+  });
+
+  it("keeps author tone but exposes owner badge for combined author-owner comments", () => {
+    const role = {
+      primary: "author" as const,
+      isOriginalAuthor: true,
+      isRepositoryOwner: true,
+      isRepositoryMaintainer: false,
+    };
+    expect(commentToneForAuthorRole(role)).toBe("author");
+    expect(commentRoleBadges({ role })).toEqual([
+      { label: "Author", tone: "author" },
+      { label: "Owner", tone: "owner" },
+    ]);
+  });
+
+  it("keeps ordinary participants visually neutral", () => {
+    const role = {
+      primary: "participant" as const,
+      isOriginalAuthor: false,
+      isRepositoryOwner: false,
+      isRepositoryMaintainer: false,
+    };
+    expect(commentToneForAuthorRole(role)).toBe("participant");
+    expect(commentRoleBadges({ role, association: "NONE" })).toEqual([]);
+  });
+
+  it("uses authorAssociation as a tone fallback when structured role is absent", () => {
+    expect(commentToneForAuthorRole(undefined, false, "OWNER")).toBe("owner");
+    expect(commentToneForAuthorRole(undefined, false, "MEMBER")).toBe("maintainer");
+    expect(commentToneForAuthorRole(undefined, false, "COLLABORATOR")).toBe("maintainer");
+    expect(commentToneForAuthorRole(undefined, false, "MEMBER_OF_REPOSITORY")).toBe("maintainer");
+    expect(commentToneForAuthorRole(undefined, false, "MEMBER_OF_ORG")).toBe("maintainer");
+    expect(commentToneForAuthorRole(undefined, false, "NONE")).toBe("participant");
+  });
+});
+
+describe("deriveOriginalPostAuthorRole", () => {
+  it("derives a combined author-owner role for repository-owner authors", () => {
+    expect(
+      deriveOriginalPostAuthorRole({
+        url: "https://github.com/alice/repo/issues/42",
+        author: "alice",
+      }),
+    ).toEqual({
+      author: "alice",
+      role: {
+        primary: "author",
+        isOriginalAuthor: true,
+        isRepositoryOwner: true,
+        isRepositoryMaintainer: false,
+      },
+    });
+  });
+
+  it("uses a stable unknown fallback when the original author is missing", () => {
+    expect(
+      deriveOriginalPostAuthorRole({
+        url: "https://github.com/alice/repo/pull/9",
+        author: null,
+      }),
+    ).toEqual({
+      author: "unknown",
+      role: {
+        primary: "participant",
+        isOriginalAuthor: false,
+        isRepositoryOwner: false,
+        isRepositoryMaintainer: false,
+      },
+    });
   });
 });
