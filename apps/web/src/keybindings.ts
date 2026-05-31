@@ -183,12 +183,16 @@ export function isDialogShortcutTarget(target: EventTarget | null | undefined): 
   return elementFromEventTarget(target)?.closest(DIALOG_TARGET_SELECTOR) !== null;
 }
 
+function dialogShortcutElementForTarget(target: EventTarget | null | undefined): Element | null {
+  return elementFromEventTarget(target)?.closest(DIALOG_TARGET_SELECTOR) ?? null;
+}
+
 export function isDifferentDialogShortcutTarget(input: {
   currentTarget: EventTarget | null | undefined;
   target: EventTarget | null | undefined;
 }): boolean {
   const currentElement = elementFromEventTarget(input.currentTarget);
-  const targetDialog = elementFromEventTarget(input.target)?.closest(DIALOG_TARGET_SELECTOR);
+  const targetDialog = dialogShortcutElementForTarget(input.target);
   return currentElement !== null && targetDialog !== null && targetDialog !== currentElement;
 }
 
@@ -210,7 +214,8 @@ function isVisibleDialogElement(element: Element): boolean {
 
 export function hasOpenDialogShortcutTarget(): boolean {
   if (typeof document === "undefined") return false;
-  if (isDialogShortcutTarget(document.activeElement)) return true;
+  const activeDialog = dialogShortcutElementForTarget(document.activeElement);
+  if (activeDialog && isVisibleDialogElement(activeDialog)) return true;
   return Array.from(document.querySelectorAll(DIALOG_TARGET_SELECTOR)).some(isVisibleDialogElement);
 }
 
@@ -237,6 +242,7 @@ export function shouldIgnoreGlobalNavigationShortcut(
   if (event.type !== undefined && event.type !== "keydown") return true;
   if (event.isComposing) return true;
   if (isBareModifierKeyEvent(event)) return true;
+  if (isEditableShortcutTarget(event.target)) return true;
   return isDialogShortcutTarget(event.target) || hasOpenDialogShortcutTarget();
 }
 

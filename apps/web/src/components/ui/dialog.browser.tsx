@@ -6,6 +6,7 @@ import { render } from "vitest-browser-react";
 import { useEffect, useState } from "react";
 
 import {
+  hasOpenDialogShortcutTarget,
   isDifferentDialogShortcutTarget,
   matchesExactModShortcut,
   shouldIgnoreGlobalNavigationShortcut,
@@ -161,6 +162,39 @@ describe("Dialog", () => {
 
     await expect.element(page.getByTestId("dialog-state")).toHaveTextContent("open");
     await expect.element(page.getByTestId("global-navigation-count")).toHaveTextContent("0");
+  });
+
+  it("treats editable targets as global navigation shortcut boundaries", () => {
+    const input = document.createElement("input");
+    document.body.append(input);
+
+    expect(
+      shouldIgnoreGlobalNavigationShortcut({
+        type: "keydown",
+        key: "1",
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+        target: input,
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores hidden dialog nodes when checking global shortcut boundaries", () => {
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Hidden dialog focus";
+    dialog.append(button);
+    document.body.append(dialog);
+
+    button.focus();
+    expect(hasOpenDialogShortcutTarget()).toBe(true);
+
+    dialog.hidden = true;
+    expect(hasOpenDialogShortcutTarget()).toBe(false);
   });
 
   it("does not let nested dialog keyboard events trigger parent dialog shortcuts", async () => {

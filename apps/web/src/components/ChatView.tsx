@@ -756,6 +756,8 @@ export default function ChatView(props: ChatViewProps) {
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
   const [projectExplorerOpen, setProjectExplorerOpen] = useState(false);
+  const projectExplorerOpenRef = useRef(projectExplorerOpen);
+  projectExplorerOpenRef.current = projectExplorerOpen;
   const [projectExplorerInitialTab, setProjectExplorerInitialTab] =
     useState<NewWorktreeDialogTab>("prs");
   const [terminalLaunchContext, setTerminalLaunchContext] = useState<TerminalLaunchContext | null>(
@@ -2722,7 +2724,7 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      if (shouldIgnoreGlobalNavigationShortcut(event)) return;
+      if (shouldIgnoreGlobalNavigationShortcut(event) && !projectExplorerOpenRef.current) return;
       const isToggleProjectExplorer = matchesExactModShortcut(event, "p", {
         shiftKey: true,
       });
