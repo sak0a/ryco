@@ -1,8 +1,15 @@
-import type { SourceControlLabel } from "@ryco/contracts";
+import type { ChangeRequest, SourceControlLabel } from "@ryco/contracts";
 import { CircleDotIcon, GitPullRequestIcon, TicketCheckIcon, UsersIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { avatarUrlForAuthor, hashAuthorToHue } from "./CommentThread.logic";
 import { LabelChip } from "./LabelChip";
+import { PrCheckStatusBadge } from "./PrCheckStatusBadge";
+import { getPrCheckStatusFromChangeRequest } from "./prCheckStatus";
+
+type LinkedChangeRequestReference = Pick<
+  ChangeRequest,
+  "checkRollup" | "headSha" | "number" | "state" | "title" | "url"
+>;
 
 interface WorktreeItemSidebarProps {
   assignees?: ReadonlyArray<string> | null | undefined;
@@ -10,6 +17,7 @@ interface WorktreeItemSidebarProps {
   reviewers?: ReadonlyArray<string> | null | undefined;
   linkedIssueNumbers?: ReadonlyArray<number> | null | undefined;
   linkedChangeRequestNumbers?: ReadonlyArray<number> | null | undefined;
+  linkedChangeRequests?: ReadonlyArray<LinkedChangeRequestReference> | null | undefined;
   linkedWorkItemKeys?: ReadonlyArray<string> | null | undefined;
   onSelectLinkedIssue?: ((issueNumber: number) => void) | undefined;
   onSelectLinkedChangeRequest?: ((number: number) => void) | undefined;
@@ -58,15 +66,76 @@ export function WorktreeItemSidebar(props: WorktreeItemSidebarProps) {
       ) : null}
       {props.linkedChangeRequestNumbers !== undefined ? (
         <SidebarSection title="Linked pull requests">
-          <RefList
-            icon={<GitPullRequestIcon className="size-3" />}
-            kind="pr"
+          <PrRefList
             numbers={props.linkedChangeRequestNumbers ?? []}
+            changeRequests={props.linkedChangeRequests ?? []}
             onSelect={props.onSelectLinkedChangeRequest}
           />
         </SidebarSection>
       ) : null}
     </aside>
+  );
+}
+
+function PrRefList(props: {
+  numbers: ReadonlyArray<number>;
+  changeRequests: ReadonlyArray<LinkedChangeRequestReference>;
+  onSelect?: ((n: number) => void) | undefined;
+}) {
+  const merged = new Map<number, LinkedChangeRequestReference | null>();
+  for (const number of props.numbers) {
+    merged.set(number, null);
+  }
+  for (const pr of props.changeRequests) {
+    merged.set(pr.number, pr);
+  }
+  const entries = Array.from(merged.entries()).toSorted((a, b) => b[0] - a[0]);
+  if (entries.length === 0) {
+    return <span className="text-muted-foreground/70 text-xs italic">None</span>;
+  }
+
+  return (
+    <ul className="flex flex-wrap gap-1">
+      {entries.map(([number, pr]) => {
+        const status = pr ? getPrCheckStatusFromChangeRequest(pr) : null;
+        const body = (
+          <>
+            <GitPullRequestIcon className="size-3" />
+            <span>#{number}</span>
+            {status ? <PrCheckStatusBadge view={status} mode="icon" className="size-5" /> : null}
+          </>
+        );
+        return (
+          <li key={number}>
+            {props.onSelect ? (
+              <button
+                type="button"
+                onClick={() => props.onSelect?.(number)}
+                className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-foreground text-xs hover:bg-accent/60"
+                aria-label={
+                  status
+                    ? `View pull request #${number}. ${status.ariaLabel}`
+                    : `View pull request #${number}`
+                }
+              >
+                {body}
+              </button>
+            ) : (
+              <span
+                className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-foreground text-xs"
+                aria-label={
+                  status
+                    ? `Pull request #${number}. ${status.ariaLabel}`
+                    : `Pull request #${number}`
+                }
+              >
+                {body}
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

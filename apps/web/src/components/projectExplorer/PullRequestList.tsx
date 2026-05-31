@@ -4,7 +4,9 @@ import { memo } from "react";
 import { GitBranchIcon, MessageSquareIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { LabelChip } from "./LabelChip";
+import { PrCheckStatusBadge } from "./PrCheckStatusBadge";
 import { changeRequestStateKind, StateBadge } from "./StateBadge";
+import { getPrCheckStatusFromChangeRequest } from "./prCheckStatus";
 
 const dateFmt = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
@@ -40,6 +42,7 @@ export const PullRequestList = memo(function PullRequestList(props: {
         const labels = pr.labels ?? [];
         const visibleLabels = labels.slice(0, 3);
         const moreLabelCount = labels.length - visibleLabels.length;
+        const checkStatus = getPrCheckStatusFromChangeRequest(pr);
         return (
           <li key={itemKey}>
             <button
@@ -58,9 +61,10 @@ export const PullRequestList = memo(function PullRequestList(props: {
                 className="mt-0.5 shrink-0"
               />
               <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
+                <div className="flex items-center gap-2">
                   <span className="text-muted-foreground text-xs">#{pr.number}</span>
                   <span className="min-w-0 flex-1 truncate font-medium text-sm">{pr.title}</span>
+                  <PrCheckStatusBadge view={checkStatus} mode="compact" />
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5 text-muted-foreground text-xs">
                   {pr.author ? <span>by {pr.author}</span> : null}

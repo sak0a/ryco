@@ -36,11 +36,7 @@ import {
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@ryco/shared/projectScripts";
 import { truncate } from "@ryco/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  changeRequestListQueryOptions,
-  issueListQueryOptions,
-} from "~/lib/sourceControlContextRpc";
+import { useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "effect";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -113,7 +109,12 @@ import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
-import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import {
+  matchesExactModShortcut,
+  resolveShortcutCommand,
+  shouldIgnoreGlobalNavigationShortcut,
+  shortcutLabelForCommand,
+} from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
@@ -156,6 +157,10 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { NewWorktreeDialog, type NewWorktreeDialogTab } from "./worktrees/NewWorktreeDialog";
+import {
+  LinkedWorktreeItemDialog,
+  type LinkedWorktreeItem,
+} from "./worktrees/LinkedWorktreeItemDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { deriveRevertTurnCountByUserMessageId } from "./chat/MessagesTimeline.logic";
 import { ChatHeader } from "./chat/ChatHeader";
@@ -751,6 +756,8 @@ export default function ChatView(props: ChatViewProps) {
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
   const [projectExplorerOpen, setProjectExplorerOpen] = useState(false);
+  const projectExplorerOpenRef = useRef(projectExplorerOpen);
+  projectExplorerOpenRef.current = projectExplorerOpen;
   const [projectExplorerInitialTab, setProjectExplorerInitialTab] =
     useState<NewWorktreeDialogTab>("prs");
   const [terminalLaunchContext, setTerminalLaunchContext] = useState<TerminalLaunchContext | null>(
@@ -933,6 +940,15 @@ export default function ChatView(props: ChatViewProps) {
       [activeThread?.environmentId, activeThread?.worktreeId],
     ),
   );
+  const [headerLinkedItem, setHeaderLinkedItem] = useState<LinkedWorktreeItem | null>(null);
+  const handleOpenHeaderLinkedItem = useCallback((item: LinkedWorktreeItem) => {
+    setHeaderLinkedItem(item);
+  }, []);
+  const handleHeaderLinkedItemDialogOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      setHeaderLinkedItem(null);
+    }
+  }, []);
   const sessionTabsSelector = useMemo(() => createSessionTabsSelector(), []);
   const tabsWorktreeId = activeThread?.worktreeId;
   const tabsWorktreePath = activeThread?.worktreePath;
@@ -962,27 +978,6 @@ export default function ChatView(props: ChatViewProps) {
   const activeSessionTabKey = activeThread
     ? scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id))
     : null;
-  const activeProjectIssuesQuery = useQuery(
-    issueListQueryOptions({
-      environmentId: activeProject?.environmentId ?? null,
-      cwd: activeProject?.cwd ?? null,
-      state: "open",
-      limit: 100,
-      enabled: activeProject !== undefined,
-    }),
-  );
-  const activeProjectPullRequestsQuery = useQuery(
-    changeRequestListQueryOptions({
-      environmentId: activeProject?.environmentId ?? null,
-      cwd: activeProject?.cwd ?? null,
-      state: "open",
-      limit: 100,
-      enabled: activeProject !== undefined,
-    }),
-  );
-  const activeProjectIssueCount = activeProjectIssuesQuery.data?.length ?? 0;
-  const activeProjectPullRequestCount = activeProjectPullRequestsQuery.data?.length ?? 0;
-
   const handleSelectSessionTab = useCallback(
     (key: string) => {
       const target = parseScopedThreadKey(key);
@@ -2717,11 +2712,10 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      const isToggleProjectExplorer =
-        event.key.toLowerCase() === "p" &&
-        event.shiftKey &&
-        (event.metaKey || event.ctrlKey) &&
-        !event.altKey;
+      if (shouldIgnoreGlobalNavigationShortcut(event) && !projectExplorerOpenRef.current) return;
+      const isToggleProjectExplorer = matchesExactModShortcut(event, "p", {
+        shiftKey: true,
+      });
       if (!isToggleProjectExplorer) return;
       event.preventDefault();
       event.stopPropagation();
@@ -2737,15 +2731,22 @@ export default function ChatView(props: ChatViewProps) {
       if (!activeThreadId || useCommandPaletteStore.getState().open || event.defaultPrevented) {
         return;
       }
+      const modelPickerOpen = readComposer()?.isModelPickerOpen() ?? false;
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
-        modelPickerOpen: readComposer()?.isModelPickerOpen() ?? false,
+        modelPickerOpen,
       };
 
       const command = resolveShortcutCommand(event, keybindings, {
         context: shortcutContext,
       });
+      if (
+        shouldIgnoreGlobalNavigationShortcut(event) &&
+        (command !== "modelPicker.toggle" || !modelPickerOpen)
+      ) {
+        return;
+      }
       if (!command) return;
 
       if (command === "terminal.toggle") {
@@ -3879,10 +3880,14 @@ export default function ChatView(props: ChatViewProps) {
           worktreeBranch={activeWorktreeSummary?.branch ?? activeThread.branch ?? null}
           worktreeTitle={activeWorktreeSummary?.title ?? null}
           worktreeOrigin={activeWorktreeSummary?.origin ?? null}
+          worktreeIssueNumber={activeWorktreeSummary?.issueNumber ?? null}
+          worktreeIssueState={activeWorktreeSummary?.issueState ?? null}
+          worktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
+          worktreePrState={activeWorktreeSummary?.prState ?? null}
+          worktreePrIsDraft={activeWorktreeSummary?.prIsDraft ?? null}
           sessionTabs={activeWorktreeSessionTabs}
           activeSessionTabKey={activeSessionTabKey}
-          issueCount={activeProjectIssueCount}
-          pullRequestCount={activeProjectPullRequestCount}
+          onOpenLinkedWorktreeItem={handleOpenHeaderLinkedItem}
           onSelectSessionTab={handleSelectSessionTab}
           onPrefetchTabEnter={handleTabPrefetchEnter}
           onPrefetchTabLeave={handleTabPrefetchLeave}
@@ -3894,6 +3899,13 @@ export default function ChatView(props: ChatViewProps) {
           onTogglePreview={onTogglePreview}
         />
       </header>
+      <LinkedWorktreeItemDialog
+        open={headerLinkedItem !== null}
+        item={headerLinkedItem}
+        environmentId={activeProject?.environmentId ?? activeThread.environmentId}
+        cwd={activeProject?.cwd ?? gitCwd}
+        onOpenChange={handleHeaderLinkedItemDialogOpenChange}
+      />
 
       {/* Error banner */}
       <ProviderStatusBanner status={activeProviderStatus} />

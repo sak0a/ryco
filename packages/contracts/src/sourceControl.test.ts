@@ -7,8 +7,10 @@ import {
   SourceControlChangeRequestDetail,
   SourceControlIssueComment,
   SourceControlAssigneeCandidate,
+  SourceControlAddChangeRequestCommentInput,
   SourceControlAddIssueCommentInput,
   SourceControlCreateIssueInput,
+  SourceControlWorkflowRerunInput,
 } from "./sourceControl.ts";
 
 describe("truncateSourceControlDetailContent", () => {
@@ -190,24 +192,61 @@ describe("SourceControlCreateIssueInput", () => {
 });
 
 describe("SourceControlAddIssueCommentInput", () => {
-  it("requires cwd, reference, and non-empty body", () => {
+  it("requires cwd, reference, and a non-blank body without trimming Markdown", () => {
     const decode = Schema.decodeUnknownSync(SourceControlAddIssueCommentInput);
     expect(
       decode({
         cwd: "/repo",
         reference: "42",
-        body: " Looks good. ",
+        body: "    code block\n\nLooks good.\n",
         clientMutationId: "mutation-1",
       }),
     ).toEqual({
       cwd: "/repo",
       reference: "42",
-      body: "Looks good.",
+      body: "    code block\n\nLooks good.\n",
       clientMutationId: "mutation-1",
     });
     expect(() => decode({ cwd: "/repo", reference: "42", body: "" })).toThrow();
+    expect(() => decode({ cwd: "/repo", reference: "42", body: "   " })).toThrow();
     expect(() => decode({ cwd: "", reference: "42", body: "x" })).toThrow();
     expect(() => decode({ cwd: "/repo", reference: "", body: "x" })).toThrow();
+  });
+});
+
+describe("SourceControlAddChangeRequestCommentInput", () => {
+  it("validates PR comment bodies the same way as issue comments", () => {
+    const decode = Schema.decodeUnknownSync(SourceControlAddChangeRequestCommentInput);
+    expect(
+      decode({
+        cwd: "/repo",
+        reference: "42",
+        body: "> quoted\n\n**ship it**",
+      }),
+    ).toEqual({
+      cwd: "/repo",
+      reference: "42",
+      body: "> quoted\n\n**ship it**",
+    });
+    expect(() => decode({ cwd: "/repo", reference: "42", body: "\n\t" })).toThrow();
+  });
+});
+
+describe("SourceControlWorkflowRerunInput", () => {
+  it("decodes run-level and job-level rerun requests", () => {
+    const decode = Schema.decodeUnknownSync(SourceControlWorkflowRerunInput);
+    expect(decode({ cwd: "/repo", runId: "123", target: "failed-jobs" })).toEqual({
+      cwd: "/repo",
+      runId: "123",
+      target: "failed-jobs",
+    });
+    expect(decode({ cwd: "/repo", runId: "123", target: "job", jobId: "456" })).toEqual({
+      cwd: "/repo",
+      runId: "123",
+      target: "job",
+      jobId: "456",
+    });
+    expect(() => decode({ cwd: "/repo", runId: "123", target: "job" })).toThrow();
   });
 });
 

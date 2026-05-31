@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Result } from "effect";
+import { Option, Result } from "effect";
 import {
   decodeGitHubPullRequestListJson,
   decodeGitHubPullRequestJson,
@@ -315,6 +315,38 @@ describe("decodeGitHubPullRequestDetailJson", () => {
     expect(Result.isSuccess(result)).toBe(true);
     if (!Result.isSuccess(result)) return;
     expect(result.success[0]?.commentsCount).toBe(7);
+  });
+
+  it("ignores malformed check rollup timestamps", () => {
+    const raw = JSON.stringify([
+      {
+        number: 10,
+        title: "Check dates",
+        url: "https://x/10",
+        baseRefName: "main",
+        headRefName: "feature/check-dates",
+        state: "OPEN",
+        statusCheckRollup: [
+          {
+            __typename: "CheckRun",
+            name: "CI",
+            status: "COMPLETED",
+            conclusion: "SUCCESS",
+            startedAt: "not-a-date",
+            completedAt: "2026-05-31T12:00:00Z",
+          },
+        ],
+      },
+    ]);
+    const result = decodeGitHubPullRequestListJson(raw);
+    expect(Result.isSuccess(result)).toBe(true);
+    if (!Result.isSuccess(result)) return;
+    expect(Option.isNone(result.success[0]?.checkRollup?.[0]?.startedAt ?? Option.none())).toBe(
+      true,
+    );
+    expect(Option.isSome(result.success[0]?.checkRollup?.[0]?.completedAt ?? Option.none())).toBe(
+      true,
+    );
   });
 });
 

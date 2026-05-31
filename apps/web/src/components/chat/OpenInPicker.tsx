@@ -1,6 +1,10 @@
 import { EditorId, type ResolvedKeybindingsConfig } from "@ryco/contracts";
 import { memo, useCallback, useEffect, useMemo } from "react";
-import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from "../../keybindings";
+import {
+  isOpenFavoriteEditorShortcut,
+  shouldIgnoreGlobalNavigationShortcut,
+  shortcutLabelForCommand,
+} from "../../keybindings";
 import { usePreferredEditor } from "../../editorPreferences";
 import { ChevronDownIcon, FolderClosedIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -185,6 +189,7 @@ export const OpenInPicker = memo(function OpenInPicker({
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
       const api = readLocalApi();
+      if (shouldIgnoreGlobalNavigationShortcut(e)) return;
       if (!isOpenFavoriteEditorShortcut(e, keybindings)) return;
       if (!api || !openInCwd) return;
       if (!preferredEditor) return;

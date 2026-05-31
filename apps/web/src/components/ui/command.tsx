@@ -55,6 +55,7 @@ function CommandDialogViewport({ className, ...props }: CommandDialogPrimitive.V
 function CommandDialogPopup({
   className,
   children,
+  onKeyDown,
   onBackdropPointerDown,
   ...props
 }: CommandDialogPrimitive.Popup.Props & {
@@ -70,6 +71,10 @@ function CommandDialogPopup({
             className,
           )}
           data-slot="command-dialog-popup"
+          onKeyDown={(event) => {
+            onKeyDown?.(event);
+            event.stopPropagation();
+          }}
           {...props}
         >
           {children}

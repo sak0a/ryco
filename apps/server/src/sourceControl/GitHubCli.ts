@@ -10,10 +10,72 @@ import { formatSchemaError } from "@ryco/shared/schemaJson";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubIssues from "./gitHubIssues.ts";
 import type { NormalizedGitHubIssueDetail, NormalizedGitHubIssueRecord } from "./gitHubIssues.ts";
+import * as GitHubActions from "./gitHubActions.ts";
 import { buildGitHubIssueCreateArgv, parseGitHubIssueCreateOutput } from "./gitHubIssueCreate.ts";
 import * as GitHubPullRequests from "./gitHubPullRequests.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const STATUS_CHECK_ROLLUP_JSON_FIELD = "statusCheckRollup";
+
+const GITHUB_PULL_REQUEST_CORE_JSON_FIELDS = [
+  "number",
+  "title",
+  "url",
+  "baseRefName",
+  "headRefName",
+  "headRefOid",
+  "state",
+  "mergedAt",
+] as const;
+
+const GITHUB_PULL_REQUEST_METADATA_JSON_FIELDS = [
+  "isCrossRepository",
+  "isDraft",
+  "author",
+  "assignees",
+  "labels",
+  "comments",
+  "headRepository",
+  "headRepositoryOwner",
+] as const;
+
+export const GITHUB_PULL_REQUEST_SUMMARY_JSON_FIELDS = [
+  ...GITHUB_PULL_REQUEST_CORE_JSON_FIELDS,
+  ...GITHUB_PULL_REQUEST_METADATA_JSON_FIELDS,
+  STATUS_CHECK_ROLLUP_JSON_FIELD,
+] as const;
+
+export const GITHUB_PULL_REQUEST_LIST_JSON_FIELDS = [
+  ...GITHUB_PULL_REQUEST_CORE_JSON_FIELDS,
+  "updatedAt",
+  ...GITHUB_PULL_REQUEST_METADATA_JSON_FIELDS,
+  STATUS_CHECK_ROLLUP_JSON_FIELD,
+] as const;
+
+export const GITHUB_PULL_REQUEST_DETAIL_JSON_FIELDS = [
+  ...GITHUB_PULL_REQUEST_CORE_JSON_FIELDS,
+  ...GITHUB_PULL_REQUEST_METADATA_JSON_FIELDS,
+  STATUS_CHECK_ROLLUP_JSON_FIELD,
+  "body",
+  "comments",
+  "reviewRequests",
+  "reviews",
+  "commits",
+  "additions",
+  "deletions",
+  "changedFiles",
+  "files",
+] as const;
+
+export function formatGitHubJsonFields(fields: ReadonlyArray<string>): string {
+  return fields.join(",");
+}
+
+export function withoutStatusCheckRollupJsonField(
+  fields: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  return fields.filter((field) => field !== STATUS_CHECK_ROLLUP_JSON_FIELD);
+}
 
 export class GitHubCliError extends Schema.TaggedErrorClass<GitHubCliError>()("GitHubCliError", {
   operation: Schema.String,
@@ -46,6 +108,8 @@ export interface GitHubPullRequestSummary {
   readonly commentsCount?: number | null;
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
+  readonly headSha?: string;
+  readonly checkRollup?: ReadonlyArray<GitHubPullRequests.NormalizedGitHubCheckRollupItem>;
 }
 
 export interface GitHubPullRequestCommit {
@@ -92,6 +156,11 @@ export interface GitHubRepositoryCloneUrls {
   readonly url: string;
   readonly sshUrl: string;
 }
+
+export type GitHubWorkflowRun = GitHubActions.NormalizedGitHubWorkflowRun;
+export type GitHubWorkflowJob = GitHubActions.NormalizedGitHubWorkflowJob;
+export type GitHubPullRequestWorkflowContext =
+  GitHubActions.NormalizedGitHubPullRequestWorkflowContext;
 
 export interface GitHubCliShape {
   readonly execute: (input: {
@@ -203,6 +272,38 @@ export interface GitHubCliShape {
     ReadonlyArray<{ login: string; name?: string | null; avatarUrl?: string | null }>,
     GitHubCliError
   >;
+
+  readonly listWorkflowRuns: (input: {
+    readonly cwd: string;
+    readonly headSha?: string;
+    readonly limit?: number;
+  }) => Effect.Effect<ReadonlyArray<GitHubWorkflowRun>, GitHubCliError>;
+
+  readonly getPullRequestWorkflowContext: (input: {
+    readonly cwd: string;
+    readonly reference: string;
+  }) => Effect.Effect<GitHubPullRequestWorkflowContext, GitHubCliError>;
+
+  readonly listWorkflowRunJobs: (input: {
+    readonly cwd: string;
+    readonly runId: string;
+  }) => Effect.Effect<ReadonlyArray<GitHubWorkflowJob>, GitHubCliError>;
+
+  readonly getWorkflowJobLog: (input: {
+    readonly cwd: string;
+    readonly runId: string;
+    readonly jobId: string;
+  }) => Effect.Effect<string, GitHubCliError>;
+
+  readonly rerunFailedWorkflowJobs: (input: {
+    readonly cwd: string;
+    readonly runId: string;
+  }) => Effect.Effect<void, GitHubCliError>;
+
+  readonly rerunWorkflowJob: (input: {
+    readonly cwd: string;
+    readonly jobId: string;
+  }) => Effect.Effect<void, GitHubCliError>;
 }
 
 export class GitHubCli extends Context.Service<GitHubCli, GitHubCliShape>()(
@@ -218,6 +319,19 @@ function errorText(error: VcsError | unknown): string {
   }
 
   return String(error);
+}
+
+export function isStatusCheckRollupAccessError(error: GitHubCliError): boolean {
+  const causeText = error.cause ? errorText(error.cause) : "";
+  const lower = `${errorText(error)}\n${causeText}`.toLowerCase();
+  return (
+    lower.includes(STATUS_CHECK_ROLLUP_JSON_FIELD.toLowerCase()) &&
+    (lower.includes("resource not accessible by integration") ||
+      lower.includes("must have actions read permission") ||
+      lower.includes("permission") ||
+      lower.includes("forbidden") ||
+      lower.includes("http 403"))
+  );
 }
 
 function normalizeGitHubCliError(
@@ -249,6 +363,47 @@ function normalizeGitHubCliError(
   }
 
   if (
+    lower.includes("api rate limit exceeded") ||
+    lower.includes("secondary rate limit") ||
+    lower.includes("rate limit")
+  ) {
+    return new GitHubCliError({
+      operation,
+      detail: "GitHub API rate limit exceeded. Wait for the reset window and retry.",
+      cause: error,
+    });
+  }
+
+  if (
+    lower.includes("resource not accessible by integration") ||
+    lower.includes("must have actions read permission") ||
+    lower.includes("must have actions write permission") ||
+    lower.includes("permission denied") ||
+    lower.includes("forbidden") ||
+    lower.includes("http 403")
+  ) {
+    return new GitHubCliError({
+      operation,
+      detail:
+        "GitHub Actions is not accessible for this repository. Check token permissions, required Actions access, and repository Actions settings.",
+      cause: error,
+    });
+  }
+
+  if (
+    lower.includes("http 410") ||
+    lower.includes("gone") ||
+    lower.includes("expired") ||
+    lower.includes("logs are no longer available")
+  ) {
+    return new GitHubCliError({
+      operation,
+      detail: "GitHub Actions logs are no longer available for this run.",
+      cause: error,
+    });
+  }
+
+  if (
     lower.includes("could not resolve to a pullrequest") ||
     lower.includes("repository.pullrequest") ||
     lower.includes("no pull requests found for branch") ||
@@ -257,6 +412,18 @@ function normalizeGitHubCliError(
     return new GitHubCliError({
       operation,
       detail: "Pull request not found. Check the PR number or URL and try again.",
+      cause: error,
+    });
+  }
+
+  if (
+    lower.includes("not found") ||
+    lower.includes("http 404") ||
+    lower.includes("no workflow runs found")
+  ) {
+    return new GitHubCliError({
+      operation,
+      detail: "GitHub Actions run or repository was not found.",
       cause: error,
     });
   }
@@ -339,6 +506,68 @@ function decodeGitHubJson<S extends Schema.Top>(
   );
 }
 
+function workflowRunLimit(limit: number | undefined): number {
+  const value = Math.trunc(limit ?? 20);
+  if (!Number.isFinite(value)) return 20;
+  return Math.min(50, Math.max(1, value));
+}
+
+function workflowRunsEndpoint(input: { readonly headSha?: string; readonly limit?: number }) {
+  const params = new URLSearchParams();
+  params.set("per_page", String(workflowRunLimit(input.limit)));
+  if (input.headSha?.trim()) {
+    params.set("head_sha", input.headSha.trim());
+  }
+  return `repos/{owner}/{repo}/actions/runs?${params.toString()}`;
+}
+
+function isWorkflowRerunStateError(error: GitHubCliError): boolean {
+  const causeText = error.cause ? errorText(error.cause) : "";
+  const lower = `${errorText(error)}\n${causeText}`.toLowerCase();
+  return (
+    lower.includes("http 422") ||
+    lower.includes("unprocessable entity") ||
+    lower.includes("cannot rerun") ||
+    lower.includes("cannot re-run") ||
+    lower.includes("no failed jobs")
+  );
+}
+
+function withGitHubCliOperation<A>(
+  operation: string,
+  effect: Effect.Effect<A, GitHubCliError>,
+  options?: { readonly normalizeWorkflowRerunErrors?: boolean },
+): Effect.Effect<A, GitHubCliError> {
+  return effect.pipe(
+    Effect.mapError(
+      (error) =>
+        new GitHubCliError({
+          operation,
+          detail:
+            options?.normalizeWorkflowRerunErrors === true && isWorkflowRerunStateError(error)
+              ? "GitHub Actions cannot rerun this workflow run or job in its current state."
+              : error.detail,
+          cause: error,
+        }),
+    ),
+  );
+}
+
+function pullRequestApiReference(reference: string): string {
+  const trimmed = reference.trim();
+  if (/^\d+$/u.test(trimmed)) return trimmed;
+
+  try {
+    const url = new URL(trimmed);
+    const match = /\/pull\/(\d+)(?:\/|$)/u.exec(url.pathname);
+    if (match?.[1]) return match[1];
+  } catch {
+    // Fall through to the original input. GitHub will return a useful error.
+  }
+
+  return trimmed;
+}
+
 export const make = Effect.fn("makeGitHubCli")(function* () {
   const process = yield* VcsProcess.VcsProcess;
 
@@ -353,12 +582,32 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
       })
       .pipe(Effect.mapError((error) => normalizeGitHubCliError("execute", error)));
 
+  const executePrJson = (input: {
+    readonly cwd: string;
+    readonly argsBeforeJson: ReadonlyArray<string>;
+    readonly jsonFields: ReadonlyArray<string>;
+    readonly timeoutMs?: number;
+  }) => {
+    const run = (jsonFields: ReadonlyArray<string>) =>
+      execute({
+        cwd: input.cwd,
+        args: [...input.argsBeforeJson, "--json", formatGitHubJsonFields(jsonFields)],
+        ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+      });
+
+    return run(input.jsonFields).pipe(
+      Effect.catchIf(isStatusCheckRollupAccessError, () =>
+        run(withoutStatusCheckRollupJsonField(input.jsonFields)),
+      ),
+    );
+  };
+
   return GitHubCli.of({
     execute,
     listOpenPullRequests: (input) =>
-      execute({
+      executePrJson({
         cwd: input.cwd,
-        args: [
+        argsBeforeJson: [
           "pr",
           "list",
           "--head",
@@ -367,9 +616,8 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           "open",
           "--limit",
           String(input.limit ?? 1),
-          "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
         ],
+        jsonFields: GITHUB_PULL_REQUEST_SUMMARY_JSON_FIELDS,
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
         Effect.flatMap((raw) =>
@@ -395,15 +643,10 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         ),
       ),
     getPullRequest: (input) =>
-      execute({
+      executePrJson({
         cwd: input.cwd,
-        args: [
-          "pr",
-          "view",
-          input.reference,
-          "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
-        ],
+        argsBeforeJson: ["pr", "view", input.reference],
+        jsonFields: GITHUB_PULL_REQUEST_SUMMARY_JSON_FIELDS,
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
         Effect.flatMap((raw) =>
@@ -577,18 +820,17 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         ),
       ),
     searchPullRequests: (input) =>
-      execute({
+      executePrJson({
         cwd: input.cwd,
-        args: [
+        argsBeforeJson: [
           "pr",
           "list",
           "--search",
           input.query,
           "--limit",
           String(input.limit ?? 20),
-          "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
         ],
+        jsonFields: GITHUB_PULL_REQUEST_SUMMARY_JSON_FIELDS,
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
         Effect.flatMap((raw) =>
@@ -613,15 +855,10 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         ),
       ),
     getPullRequestDetail: (input) =>
-      execute({
+      executePrJson({
         cwd: input.cwd,
-        args: [
-          "pr",
-          "view",
-          input.reference,
-          "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,headRepository,headRepositoryOwner,body,comments,reviewRequests,reviews,commits,additions,deletions,changedFiles,files",
-        ],
+        argsBeforeJson: ["pr", "view", input.reference],
+        jsonFields: GITHUB_PULL_REQUEST_DETAIL_JSON_FIELDS,
       }).pipe(
         Effect.map((r) => r.stdout.trim()),
         Effect.flatMap((raw) =>
@@ -747,6 +984,114 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
               ),
         ),
       ),
+    listWorkflowRuns: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: ["api", workflowRunsEndpoint(input)],
+        timeoutMs: 45_000,
+      }).pipe(
+        Effect.map((r) => r.stdout.trim()),
+        Effect.flatMap((raw) =>
+          raw.length === 0
+            ? Effect.succeed([])
+            : Effect.sync(() => GitHubActions.decodeGitHubWorkflowRunsJson(raw)).pipe(
+                Effect.flatMap((decoded) =>
+                  Result.isSuccess(decoded)
+                    ? Effect.succeed(decoded.success)
+                    : Effect.fail(
+                        new GitHubCliError({
+                          operation: "listWorkflowRuns",
+                          detail: `Invalid workflow run output: ${GitHubActions.formatGitHubWorkflowDecodeError(decoded.failure)}`,
+                          cause: decoded.failure,
+                        }),
+                      ),
+                ),
+              ),
+        ),
+      ),
+    getPullRequestWorkflowContext: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: ["api", `repos/{owner}/{repo}/pulls/${pullRequestApiReference(input.reference)}`],
+      }).pipe(
+        Effect.map((r) => r.stdout.trim()),
+        Effect.flatMap((raw) =>
+          Effect.sync(() => GitHubActions.decodeGitHubPullRequestWorkflowContextJson(raw)).pipe(
+            Effect.flatMap((decoded) =>
+              Result.isSuccess(decoded)
+                ? Effect.succeed(decoded.success)
+                : Effect.fail(
+                    new GitHubCliError({
+                      operation: "getPullRequestWorkflowContext",
+                      detail: `Invalid pull request workflow context output: ${GitHubActions.formatGitHubWorkflowDecodeError(decoded.failure)}`,
+                      cause: decoded.failure,
+                    }),
+                  ),
+            ),
+          ),
+        ),
+      ),
+    listWorkflowRunJobs: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: [
+          "api",
+          "--paginate",
+          "--slurp",
+          `repos/{owner}/{repo}/actions/runs/${input.runId}/jobs?per_page=100`,
+        ],
+        timeoutMs: 45_000,
+      }).pipe(
+        Effect.map((r) => r.stdout.trim()),
+        Effect.flatMap((raw) =>
+          raw.length === 0
+            ? Effect.succeed([])
+            : Effect.sync(() => GitHubActions.decodeGitHubWorkflowJobsJson(raw)).pipe(
+                Effect.flatMap((decoded) =>
+                  Result.isSuccess(decoded)
+                    ? Effect.succeed(decoded.success)
+                    : Effect.fail(
+                        new GitHubCliError({
+                          operation: "listWorkflowRunJobs",
+                          detail: `Invalid workflow jobs output: ${GitHubActions.formatGitHubWorkflowDecodeError(decoded.failure)}`,
+                          cause: decoded.failure,
+                        }),
+                      ),
+                ),
+              ),
+        ),
+      ),
+    getWorkflowJobLog: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: ["run", "view", input.runId, "--job", input.jobId, "--log"],
+        timeoutMs: 60_000,
+      }).pipe(Effect.map((r) => r.stdout)),
+    rerunFailedWorkflowJobs: (input) =>
+      withGitHubCliOperation(
+        "rerunFailedWorkflowJobs",
+        execute({
+          cwd: input.cwd,
+          args: [
+            "api",
+            "-X",
+            "POST",
+            `repos/{owner}/{repo}/actions/runs/${input.runId}/rerun-failed-jobs`,
+          ],
+          timeoutMs: 45_000,
+        }),
+        { normalizeWorkflowRerunErrors: true },
+      ).pipe(Effect.asVoid),
+    rerunWorkflowJob: (input) =>
+      withGitHubCliOperation(
+        "rerunWorkflowJob",
+        execute({
+          cwd: input.cwd,
+          args: ["api", "-X", "POST", `repos/{owner}/{repo}/actions/jobs/${input.jobId}/rerun`],
+          timeoutMs: 45_000,
+        }),
+        { normalizeWorkflowRerunErrors: true },
+      ).pipe(Effect.asVoid),
   });
 });
 

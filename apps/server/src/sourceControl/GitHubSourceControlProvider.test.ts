@@ -18,6 +18,13 @@ const processResult = (stdout: string): VcsProcess.VcsProcessOutput => ({
   stderrTruncated: false,
 });
 
+const prListJsonFields = GitHubCli.formatGitHubJsonFields(
+  GitHubCli.GITHUB_PULL_REQUEST_LIST_JSON_FIELDS,
+);
+const prListJsonFieldsWithoutCheckRollup = GitHubCli.formatGitHubJsonFields(
+  GitHubCli.withoutStatusCheckRollupJsonField(GitHubCli.GITHUB_PULL_REQUEST_LIST_JSON_FIELDS),
+);
+
 function mutationMarker(clientMutationId: string): string {
   return `<!-- ryco-comment-id:${createHash("sha256").update(clientMutationId).digest("hex")} -->`;
 }
@@ -107,7 +114,7 @@ it.effect("uses gh json listing for non-open change request state queries", () =
       "--limit",
       "10",
       "--json",
-      "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
+      prListJsonFields,
     ]);
     assert.strictEqual(changeRequests[0]?.provider, "github");
     assert.strictEqual(changeRequests[0]?.state, "merged");
@@ -115,6 +122,55 @@ it.effect("uses gh json listing for non-open change request state queries", () =
       changeRequests[0]?.updatedAt,
       Option.some(DateTime.makeUnsafe("2026-01-02T00:00:00.000Z")),
     );
+  }),
+);
+
+it.effect("retries non-open PR listings without check rollup when GitHub denies that field", () =>
+  Effect.gen(function* () {
+    const executeArgs: ReadonlyArray<string>[] = [];
+    const provider = yield* makeProvider({
+      execute: (input) => {
+        executeArgs.push(input.args);
+        if (executeArgs.length === 1) {
+          return Effect.fail(
+            new GitHubCli.GitHubCliError({
+              operation: "execute",
+              detail:
+                "GraphQL: Resource not accessible by integration (repository.pullRequest.statusCheckRollup)",
+            }),
+          );
+        }
+        return Effect.succeed(
+          processResult(
+            JSON.stringify([
+              {
+                number: 7,
+                title: "Merged work",
+                url: "https://github.com/pingdotgg/ryco/pull/7",
+                baseRefName: "main",
+                headRefName: "feature/merged",
+                state: "merged",
+                updatedAt: "2026-01-02T00:00:00.000Z",
+              },
+            ]),
+          ),
+        );
+      },
+    });
+
+    const changeRequests = yield* provider.listChangeRequests({
+      cwd: "/repo",
+      headSelector: "feature/merged",
+      state: "all",
+      limit: 10,
+    });
+
+    assert.deepStrictEqual(
+      executeArgs.map((args) => args.at(-1)),
+      [prListJsonFields, prListJsonFieldsWithoutCheckRollup],
+    );
+    assert.strictEqual(changeRequests[0]?.number, 7);
+    assert.strictEqual(changeRequests[0]?.checkRollup, undefined);
   }),
 );
 
@@ -320,6 +376,62 @@ it.effect("searchChangeRequests passes query through to cli.searchPullRequests",
     yield* provider.searchChangeRequests({ cwd: "/repo", query: "fix memory" });
 
     assert.strictEqual(capturedQuery, "fix memory");
+  }),
+);
+
+it.effect("rerunWorkflow delegates failed-jobs reruns to GitHub Actions", () =>
+  Effect.gen(function* () {
+    let capturedRunId: string | undefined;
+    const provider = yield* makeProvider({
+      rerunFailedWorkflowJobs: (input) => {
+        capturedRunId = input.runId;
+        return Effect.void;
+      },
+    });
+
+    const rerunWorkflow = provider.rerunWorkflow;
+    assert.ok(rerunWorkflow);
+    const result = yield* rerunWorkflow({
+      cwd: "/repo",
+      runId: "123",
+      target: "failed-jobs",
+    });
+
+    assert.strictEqual(capturedRunId, "123");
+    assert.deepStrictEqual(result, {
+      provider: "github",
+      runId: "123",
+      target: "failed-jobs",
+    });
+  }),
+);
+
+it.effect("rerunWorkflow delegates job reruns to GitHub Actions", () =>
+  Effect.gen(function* () {
+    let capturedJobId: string | undefined;
+    const provider = yield* makeProvider({
+      rerunWorkflowJob: (input) => {
+        capturedJobId = input.jobId;
+        return Effect.void;
+      },
+    });
+
+    const rerunWorkflow = provider.rerunWorkflow;
+    assert.ok(rerunWorkflow);
+    const result = yield* rerunWorkflow({
+      cwd: "/repo",
+      runId: "123",
+      target: "job",
+      jobId: "456",
+    });
+
+    assert.strictEqual(capturedJobId, "456");
+    assert.deepStrictEqual(result, {
+      provider: "github",
+      runId: "123",
+      target: "job",
+      jobId: "456",
+    });
   }),
 );
 

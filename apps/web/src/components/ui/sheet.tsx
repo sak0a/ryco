@@ -43,7 +43,7 @@ function SheetViewport({
   return (
     <SheetPrimitive.Viewport
       className={cn(
-        "fixed inset-0 z-50 grid",
+        "pointer-events-none fixed inset-0 z-50 grid",
         side === "bottom" && "grid grid-rows-[1fr_auto] pt-12",
         side === "top" && "grid grid-rows-[auto_1fr] pb-12",
         side === "left" && "flex justify-start",
@@ -60,6 +60,7 @@ function SheetViewport({
 function SheetPopup({
   className,
   children,
+  onKeyDown,
   showCloseButton = true,
   keepMounted = false,
   side = "right",
@@ -77,7 +78,7 @@ function SheetPopup({
       <SheetViewport side={side} variant={variant}>
         <SheetPrimitive.Popup
           className={cn(
-            "relative flex max-h-full min-h-0 w-full min-w-0 flex-col bg-popover not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 transition-[opacity,translate] duration-200 ease-in-out will-change-transform before:pointer-events-none before:absolute before:inset-0 before:shadow-[0_1px_--theme(--color-black/4%)] data-ending-style:opacity-0 data-starting-style:opacity-0 max-sm:before:hidden dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+            "pointer-events-auto relative flex max-h-full min-h-0 w-full min-w-0 flex-col bg-popover not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 transition-[opacity,translate] duration-200 ease-in-out will-change-transform before:pointer-events-none before:absolute before:inset-0 before:shadow-[0_1px_--theme(--color-black/4%)] data-ending-style:opacity-0 data-starting-style:opacity-0 max-sm:before:hidden dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
             side === "bottom" &&
               "row-start-2 border-t data-ending-style:translate-y-8 data-starting-style:translate-y-8",
             side === "top" &&
@@ -91,13 +92,17 @@ function SheetPopup({
             className,
           )}
           data-slot="sheet-popup"
+          onKeyDown={(event) => {
+            onKeyDown?.(event);
+            event.stopPropagation();
+          }}
           {...props}
         >
           {children}
           {showCloseButton && (
             <SheetPrimitive.Close
               aria-label="Close"
-              className="absolute end-2 top-2"
+              className="absolute end-2 top-2 z-20"
               render={<Button size="icon" variant="ghost" />}
             >
               <XIcon />

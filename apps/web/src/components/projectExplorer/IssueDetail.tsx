@@ -1,11 +1,12 @@
 import type { EnvironmentId, SourceControlIssueDetail } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
 import { useQuery } from "@tanstack/react-query";
+import { useCallback, useRef, useState } from "react";
 import { CircleDotIcon, FileTextIcon, MessageSquareIcon, SendIcon } from "lucide-react";
 import { issueDetailQueryOptions, useAddIssueCommentMutation } from "~/lib/sourceControlContextRpc";
 import { Button } from "../ui/button";
-import { CommentComposer, CommentItem } from "./CommentThread";
-import { deriveOriginalPostAuthorRole } from "./CommentThread.logic";
+import { CommentComposer, CommentItem, type CommentQuoteInsertion } from "./CommentThread";
+import { buildCommentQuoteMarkdown, deriveOriginalPostAuthorRole } from "./CommentThread.logic";
 import {
   SourceControlDetailErrorState,
   SourceControlDetailLayout,
@@ -130,6 +131,23 @@ function IssueDetailBody(props: {
     detail.updatedAt && Option.isSome(detail.updatedAt)
       ? dateFmt.format(DateTime.toDate(detail.updatedAt.value))
       : null;
+  const [quoteInsertion, setQuoteInsertion] = useState<CommentQuoteInsertion | null>(null);
+  const nextQuoteInsertionIdRef = useRef(0);
+  const queueQuoteInsertion = useCallback(
+    (input: Parameters<typeof buildCommentQuoteMarkdown>[0]) => {
+      nextQuoteInsertionIdRef.current += 1;
+      setQuoteInsertion({
+        id: nextQuoteInsertionIdRef.current,
+        markdown: buildCommentQuoteMarkdown(input),
+      });
+    },
+    [],
+  );
+  const handleQuoteInsertionHandled = useCallback((id: number) => {
+    setQuoteInsertion((current) => (current?.id === id ? null : current));
+  }, []);
+  const onSubmitComment = props.onSubmitComment;
+  const canComment = onSubmitComment !== undefined;
 
   return (
     <SourceControlDetailLayout
@@ -183,6 +201,17 @@ function IssueDetailBody(props: {
                   isOriginalPost
                   itemKind="body"
                   eyebrow="Issue body"
+                  onQuote={
+                    canComment
+                      ? () =>
+                          queueQuoteInsertion({
+                            author: opAuthorRole.author,
+                            body: detail.body,
+                            createdAt: opCreatedAt,
+                            contextLabel: "issue description",
+                          })
+                      : undefined
+                  }
                 />
               </SourceControlTimelineEntry>
               <SourceControlTimelineEntry tone="system" icon={<CircleDotIcon className="size-4" />}>
@@ -214,15 +243,28 @@ function IssueDetailBody(props: {
                     reviewState={comment.reviewState}
                     itemKind={comment.reviewState ? "review" : "comment"}
                     eyebrow={comment.reviewState ? "Review comment" : "Comment"}
+                    onQuote={
+                      canComment
+                        ? () =>
+                            queueQuoteInsertion({
+                              author: comment.author,
+                              body: comment.body,
+                              createdAt: comment.createdAt,
+                              contextLabel: "issue comment",
+                            })
+                        : undefined
+                    }
                   />
                 </SourceControlTimelineEntry>
               ))}
-              {props.onSubmitComment ? (
+              {onSubmitComment ? (
                 <SourceControlTimelineEntry tone="composer" icon={<SendIcon className="size-4" />}>
                   <CommentComposer
                     placeholder="Write a comment on this issue"
                     submitLabel="Comment"
-                    onSubmit={props.onSubmitComment}
+                    onSubmit={onSubmitComment}
+                    quoteInsertion={quoteInsertion}
+                    onQuoteInsertionHandled={handleQuoteInsertionHandled}
                     className="border-emerald-500/25 bg-emerald-500/5"
                   />
                 </SourceControlTimelineEntry>

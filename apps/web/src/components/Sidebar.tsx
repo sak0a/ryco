@@ -108,6 +108,9 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../terminalSta
 import { useUiStateStore } from "../uiStateStore";
 import {
   resolveShortcutCommand,
+  hasNoShortcutModifiers,
+  hasOpenDialogShortcutTarget,
+  shouldIgnoreGlobalNavigationShortcut,
   shortcutLabelForCommand,
   shouldShowThreadJumpHintsForModifiers,
   threadJumpCommandForIndex,
@@ -4447,7 +4450,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 value={projectRenameTitle}
                 onChange={(event) => setProjectRenameTitle(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
+                  if (event.key === "Enter" && hasNoShortcutModifiers(event)) {
                     event.preventDefault();
                     void submitProjectRename();
                   }
@@ -5506,14 +5509,12 @@ export default function Sidebar() {
       }),
     [keybindings, platform, sidebarShortcutContext.terminalOpen, threadJumpCommandByKey],
   );
-  const shouldShowThreadJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
-    shortcutModifiers,
-    keybindings,
-    {
+  const shouldShowThreadJumpHintsNow =
+    !hasOpenDialogShortcutTarget() &&
+    shouldShowThreadJumpHintsForModifiers(shortcutModifiers, keybindings, {
       platform,
       context: sidebarShortcutContext,
-    },
-  );
+    });
   const visibleThreadJumpLabelByKey = showThreadJumpHints
     ? threadJumpLabelByKey
     : EMPTY_THREAD_JUMP_LABELS;
@@ -5552,6 +5553,9 @@ export default function Sidebar() {
       const shortcutContext = getCurrentSidebarShortcutContext();
 
       if (event.defaultPrevented || event.repeat) {
+        return;
+      }
+      if (shouldIgnoreGlobalNavigationShortcut(event)) {
         return;
       }
 

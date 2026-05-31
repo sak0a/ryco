@@ -6,7 +6,7 @@ import type {
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ChevronRightIcon,
   ExternalLinkIcon,
@@ -26,8 +26,9 @@ import { cn } from "~/lib/utils";
 import { ContextPickerTabs } from "../chat/ContextPickerTabs";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
-import { CommentComposer, CommentItem } from "./CommentThread";
-import { deriveOriginalPostAuthorRole } from "./CommentThread.logic";
+import { CommentComposer, CommentItem, type CommentQuoteInsertion } from "./CommentThread";
+import { buildCommentQuoteMarkdown, deriveOriginalPostAuthorRole } from "./CommentThread.logic";
+import { PrCheckStatusBadge } from "./PrCheckStatusBadge";
 import {
   SourceControlDetailErrorState,
   SourceControlDetailLayout,
@@ -42,8 +43,11 @@ import {
 } from "./SourceControlTimeline";
 import { changeRequestStateKind, StateBadge } from "./StateBadge";
 import { type DiffLine, parseDiffLines } from "./diffLines";
+import { getPrCheckStatusFromChangeRequest } from "./prCheckStatus";
 import { splitUnifiedDiffByFile } from "./unifiedDiffSplit";
+import { usePrCheckPassNotifications } from "./usePrCheckPassNotifications";
 import { WorktreeItemSidebar } from "./WorktreeItemSidebar";
+import { WorkflowRunsSection } from "./WorkflowRunsSection";
 
 const dateFmt = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
@@ -53,7 +57,7 @@ const dateFmt = new Intl.DateTimeFormat(undefined, {
 
 const numberFmt = new Intl.NumberFormat(undefined);
 
-type PullRequestTab = "conversation" | "commits" | "files";
+type PullRequestTab = "conversation" | "checks" | "commits" | "files";
 
 interface PullRequestDetailProps {
   environmentId: EnvironmentId | null;
@@ -153,6 +157,21 @@ function PullRequestDetailBody(props: {
 }) {
   const { detail } = props;
   const [activeTab, setActiveTab] = useState<PullRequestTab>("conversation");
+  const [quoteInsertion, setQuoteInsertion] = useState<CommentQuoteInsertion | null>(null);
+  const nextQuoteInsertionIdRef = useRef(0);
+  const queueQuoteInsertion = useCallback(
+    (input: Parameters<typeof buildCommentQuoteMarkdown>[0]) => {
+      nextQuoteInsertionIdRef.current += 1;
+      setQuoteInsertion({
+        id: nextQuoteInsertionIdRef.current,
+        markdown: buildCommentQuoteMarkdown(input),
+      });
+    },
+    [],
+  );
+  const handleQuoteInsertionHandled = useCallback((id: number) => {
+    setQuoteInsertion((current) => (current?.id === id ? null : current));
+  }, []);
 
   const opCreatedAt =
     detail.updatedAt && Option.isSome(detail.updatedAt)
@@ -170,6 +189,21 @@ function PullRequestDetailBody(props: {
       ? dateFmt.format(DateTime.toDate(detail.updatedAt.value))
       : null;
   const reviewersCount = detail.reviewers?.length ?? 0;
+  const checkStatus = getPrCheckStatusFromChangeRequest(detail);
+  const onSubmitComment = props.onSubmitComment;
+  const canComment = onSubmitComment !== undefined;
+
+  usePrCheckPassNotifications([
+    {
+      environmentId: props.environmentId,
+      cwd: props.cwd,
+      provider: detail.provider,
+      number: detail.number,
+      title: detail.title,
+      url: detail.url,
+      status: checkStatus,
+    },
+  ]);
 
   return (
     <SourceControlDetailLayout
@@ -206,6 +240,16 @@ function PullRequestDetailBody(props: {
             </div>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
               <DiffStatsBadge additions={additions} deletions={deletions} />
+              <PrCheckStatusBadge
+                view={checkStatus}
+                mode="compact"
+                onClick={() => setActiveTab("checks")}
+                title={
+                  checkStatus.kind === "failed"
+                    ? "Open failed check details"
+                    : "Open pull request checks"
+                }
+              />
               <StateBadge kind={changeRequestStateKind(detail.state, detail.isDraft)} />
             </div>
           </div>
@@ -226,6 +270,7 @@ function PullRequestDetailBody(props: {
         <ContextPickerTabs
           tabs={[
             { id: "conversation", label: "Conversation", count: conversationCount },
+            { id: "checks", label: "Checks" },
             { id: "commits", label: "Commits", count: commitCount },
             { id: "files", label: "Files changed", count: fileCount },
           ]}
@@ -233,7 +278,14 @@ function PullRequestDetailBody(props: {
           onSelect={(id) => setActiveTab(id as PullRequestTab)}
         />
 
-        <div className="min-h-0 overflow-visible bg-muted/8 px-4 py-5 sm:px-5 lg:flex-1 lg:overflow-y-auto lg:px-6">
+        <div
+          className={cn(
+            "min-h-0 bg-muted/8 lg:flex-1",
+            activeTab === "checks"
+              ? "overflow-hidden"
+              : "overflow-visible px-4 py-5 sm:px-5 lg:overflow-y-auto lg:px-6",
+          )}
+        >
           {activeTab === "conversation" ? (
             <div className="mx-auto w-full max-w-[980px]">
               <SourceControlTimeline>
@@ -246,6 +298,17 @@ function PullRequestDetailBody(props: {
                     isOriginalPost
                     itemKind="body"
                     eyebrow="Pull request body"
+                    onQuote={
+                      canComment
+                        ? () =>
+                            queueQuoteInsertion({
+                              author: opAuthorRole.author,
+                              body: detail.body,
+                              createdAt: opCreatedAt,
+                              contextLabel: "pull request description",
+                            })
+                        : undefined
+                    }
                   />
                 </SourceControlTimelineEntry>
                 <SourceControlTimelineEntry
@@ -260,6 +323,12 @@ function PullRequestDetailBody(props: {
                     <div className="flex flex-wrap items-center gap-2">
                       <StateBadge kind={changeRequestStateKind(detail.state, detail.isDraft)} />
                       <DiffStatsBadge additions={additions} deletions={deletions} />
+                      <PrCheckStatusBadge
+                        view={checkStatus}
+                        mode="compact"
+                        onClick={() => setActiveTab("checks")}
+                        title="Open pull request checks"
+                      />
                       <span className="rounded-md border border-border/60 bg-background/70 px-2 py-0.5 text-muted-foreground text-xs">
                         {reviewersCount === 1 ? "1 reviewer" : `${reviewersCount} reviewers`}
                       </span>
@@ -281,10 +350,21 @@ function PullRequestDetailBody(props: {
                       reviewState={comment.reviewState}
                       itemKind={comment.reviewState ? "review" : "comment"}
                       eyebrow={comment.reviewState ? "Review comment" : "Comment"}
+                      onQuote={
+                        canComment
+                          ? () =>
+                              queueQuoteInsertion({
+                                author: comment.author,
+                                body: comment.body,
+                                createdAt: comment.createdAt,
+                                contextLabel: "PR conversation",
+                              })
+                          : undefined
+                      }
                     />
                   </SourceControlTimelineEntry>
                 ))}
-                {props.onSubmitComment ? (
+                {onSubmitComment ? (
                   <SourceControlTimelineEntry
                     tone="composer"
                     icon={<SendIcon className="size-4" />}
@@ -292,13 +372,23 @@ function PullRequestDetailBody(props: {
                     <CommentComposer
                       placeholder="Write a conversation comment"
                       submitLabel="Comment"
-                      onSubmit={props.onSubmitComment}
+                      onSubmit={onSubmitComment}
+                      quoteInsertion={quoteInsertion}
+                      onQuoteInsertionHandled={handleQuoteInsertionHandled}
                       className="border-emerald-500/25 bg-emerald-500/5"
                     />
                   </SourceControlTimelineEntry>
                 ) : null}
               </SourceControlTimeline>
             </div>
+          ) : activeTab === "checks" ? (
+            <WorkflowRunsSection
+              environmentId={props.environmentId}
+              cwd={props.cwd}
+              pullRequestNumber={detail.number}
+              title="Checks"
+              description="GitHub Actions workflow runs for this pull request head commit."
+            />
           ) : activeTab === "commits" ? (
             <div className="mx-auto w-full max-w-[1100px]">
               <CommitsTab commits={detail.commits ?? []} pullRequestUrl={detail.url} />

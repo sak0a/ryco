@@ -24,6 +24,16 @@ const layer = GitHubCli.layer.pipe(
   ),
 );
 
+const prSummaryJsonFields = GitHubCli.formatGitHubJsonFields(
+  GitHubCli.GITHUB_PULL_REQUEST_SUMMARY_JSON_FIELDS,
+);
+const prSummaryJsonFieldsWithoutCheckRollup = GitHubCli.formatGitHubJsonFields(
+  GitHubCli.withoutStatusCheckRollupJsonField(GitHubCli.GITHUB_PULL_REQUEST_SUMMARY_JSON_FIELDS),
+);
+const prDetailJsonFields = GitHubCli.formatGitHubJsonFields(
+  GitHubCli.GITHUB_PULL_REQUEST_DETAIL_JSON_FIELDS,
+);
+
 afterEach(() => {
   mockRun.mockReset();
 });
@@ -78,13 +88,62 @@ describe("GitHubCli.layer", () => {
       expect(mockRun).toHaveBeenCalledWith({
         operation: "GitHubCli.execute",
         command: "gh",
-        args: [
-          "pr",
-          "view",
-          "#42",
-          "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
-        ],
+        args: ["pr", "view", "#42", "--json", prSummaryJsonFields],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("retries PR view without check rollup when GitHub denies that field", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(
+        Effect.fail(
+          new VcsProcessExitError({
+            operation: "GitHubCli.execute",
+            command: "gh pr view",
+            cwd: "/repo",
+            exitCode: 1,
+            detail:
+              "GraphQL: Resource not accessible by integration (repository.pullRequest.statusCheckRollup)",
+          }),
+        ),
+      );
+      mockRun.mockReturnValueOnce(
+        Effect.succeed(
+          processOutput(
+            JSON.stringify({
+              number: 42,
+              title: "Add PR thread creation",
+              url: "https://github.com/pingdotgg/codething-mvp/pull/42",
+              baseRefName: "main",
+              headRefName: "feature/pr-threads",
+              headRefOid: "abc123",
+              state: "OPEN",
+              mergedAt: null,
+            }),
+          ),
+        ),
+      );
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const result = yield* gh.getPullRequest({
+        cwd: "/repo",
+        reference: "#42",
+      });
+
+      assert.equal(result.headSha, "abc123");
+      expect(mockRun).toHaveBeenNthCalledWith(1, {
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: ["pr", "view", "#42", "--json", prSummaryJsonFields],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
+      expect(mockRun).toHaveBeenNthCalledWith(2, {
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: ["pr", "view", "#42", "--json", prSummaryJsonFieldsWithoutCheckRollup],
         cwd: "/repo",
         timeoutMs: 30_000,
       });
@@ -338,13 +397,7 @@ describe("GitHubCli.layer", () => {
         expect(mockRun).toHaveBeenCalledWith({
           operation: "GitHubCli.execute",
           command: "gh",
-          args: [
-            "pr",
-            "view",
-            "42",
-            "--json",
-            "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,headRepository,headRepositoryOwner,body,comments,reviewRequests,reviews,commits,additions,deletions,changedFiles,files",
-          ],
+          args: ["pr", "view", "42", "--json", prDetailJsonFields],
           cwd: "/tmp",
           timeoutMs: 30_000,
         });
@@ -416,16 +469,7 @@ describe("GitHubCli.layer", () => {
         expect(mockRun).toHaveBeenCalledWith({
           operation: "GitHubCli.execute",
           command: "gh",
-          args: [
-            "pr",
-            "list",
-            "--search",
-            "fix",
-            "--limit",
-            "20",
-            "--json",
-            "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
-          ],
+          args: ["pr", "list", "--search", "fix", "--limit", "20", "--json", prSummaryJsonFields],
           cwd: "/tmp",
           timeoutMs: 30_000,
         });
@@ -587,6 +631,88 @@ describe("GitHubCli.layer", () => {
           cwd: "/tmp",
           timeoutMs: 30_000,
         });
+      }).pipe(Effect.provide(layer)),
+    );
+  });
+
+  describe("workflow reruns", () => {
+    it.effect("requests rerun of failed jobs for a workflow run", () =>
+      Effect.gen(function* () {
+        mockRun.mockReturnValueOnce(Effect.succeed(processOutput("")));
+
+        const gh = yield* GitHubCli.GitHubCli;
+        yield* gh.rerunFailedWorkflowJobs({ cwd: "/tmp", runId: "12345" });
+
+        expect(mockRun).toHaveBeenCalledWith({
+          operation: "GitHubCli.execute",
+          command: "gh",
+          args: ["api", "-X", "POST", "repos/{owner}/{repo}/actions/runs/12345/rerun-failed-jobs"],
+          cwd: "/tmp",
+          timeoutMs: 45_000,
+        });
+      }).pipe(Effect.provide(layer)),
+    );
+
+    it.effect("requests rerun of a workflow job", () =>
+      Effect.gen(function* () {
+        mockRun.mockReturnValueOnce(Effect.succeed(processOutput("")));
+
+        const gh = yield* GitHubCli.GitHubCli;
+        yield* gh.rerunWorkflowJob({ cwd: "/tmp", jobId: "67890" });
+
+        expect(mockRun).toHaveBeenCalledWith({
+          operation: "GitHubCli.execute",
+          command: "gh",
+          args: ["api", "-X", "POST", "repos/{owner}/{repo}/actions/jobs/67890/rerun"],
+          cwd: "/tmp",
+          timeoutMs: 45_000,
+        });
+      }).pipe(Effect.provide(layer)),
+    );
+
+    it.effect("surfaces not-rerunnable workflow rerun errors clearly", () =>
+      Effect.gen(function* () {
+        mockRun.mockReturnValueOnce(
+          Effect.fail(
+            new VcsProcessExitError({
+              operation: "GitHubCli.execute",
+              command: "gh api",
+              cwd: "/repo",
+              exitCode: 1,
+              detail: "HTTP 422: Unprocessable Entity",
+            }),
+          ),
+        );
+
+        const gh = yield* GitHubCli.GitHubCli;
+        const error = yield* gh
+          .rerunFailedWorkflowJobs({ cwd: "/repo", runId: "123" })
+          .pipe(Effect.flip);
+
+        assert.equal(error.operation, "rerunFailedWorkflowJobs");
+        assert.equal(error.detail.includes("cannot rerun"), true);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    it.effect("does not report non-rerun 422 errors as rerun failures", () =>
+      Effect.gen(function* () {
+        mockRun.mockReturnValueOnce(
+          Effect.fail(
+            new VcsProcessExitError({
+              operation: "GitHubCli.execute",
+              command: "gh api",
+              cwd: "/repo",
+              exitCode: 1,
+              detail: "HTTP 422: Unprocessable Entity",
+            }),
+          ),
+        );
+
+        const gh = yield* GitHubCli.GitHubCli;
+        const error = yield* gh.listWorkflowRuns({ cwd: "/repo" }).pipe(Effect.flip);
+
+        assert.equal(error.detail.includes("HTTP 422"), true);
+        assert.equal(error.detail.includes("cannot rerun"), false);
       }).pipe(Effect.provide(layer)),
     );
   });

@@ -11,10 +11,12 @@ import { searchSourceControlSummaries } from "../chat/composerSourceControlConte
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { PullRequestList } from "./PullRequestList";
+import { getPrCheckStatusFromChangeRequest, shouldRefreshPrCheckStatus } from "./prCheckStatus";
 import {
   ChangeRequestStateFilterButtons,
   type ChangeRequestStateFilter,
 } from "./StateFilterButtons";
+import { usePrCheckPassNotifications } from "./usePrCheckPassNotifications";
 
 interface PullRequestsTabProps {
   environmentId: EnvironmentId | null;
@@ -31,14 +33,21 @@ interface PullRequestsTabProps {
 export function PullRequestsTab(props: PullRequestsTabProps) {
   const [debouncedQuery] = useDebouncedValue(props.query, { wait: 200 });
 
-  const listQuery = useQuery(
-    changeRequestListQueryOptions({
+  const listQuery = useQuery({
+    ...changeRequestListQueryOptions({
       environmentId: props.environmentId,
       cwd: props.cwd,
       state: props.stateFilter,
       limit: 100,
     }),
-  );
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return Array.isArray(data) &&
+        data.some((pr) => shouldRefreshPrCheckStatus(getPrCheckStatusFromChangeRequest(pr)))
+        ? 30_000
+        : false;
+    },
+  });
 
   const cachedItems = useMemo(() => listQuery.data ?? [], [listQuery.data]);
   const filteredItems = useMemo(
@@ -63,11 +72,27 @@ export function PullRequestsTab(props: PullRequestsTabProps) {
     }),
   );
 
-  const items: ReadonlyArray<ChangeRequest> = needsServerSearch
-    ? (serverSearchQuery.data ?? [])
-    : filteredItems;
+  const items = useMemo<ReadonlyArray<ChangeRequest>>(
+    () => (needsServerSearch ? (serverSearchQuery.data ?? []) : filteredItems),
+    [filteredItems, needsServerSearch, serverSearchQuery.data],
+  );
   const isLoading = listQuery.isLoading || (needsServerSearch && serverSearchQuery.isLoading);
   const error = listQuery.error ?? (needsServerSearch ? serverSearchQuery.error : null);
+  const notificationTargets = useMemo(
+    () =>
+      items.map((pr) => ({
+        environmentId: props.environmentId,
+        cwd: props.cwd,
+        provider: pr.provider,
+        number: pr.number,
+        title: pr.title,
+        url: pr.url,
+        status: getPrCheckStatusFromChangeRequest(pr),
+      })),
+    [items, props.cwd, props.environmentId],
+  );
+
+  usePrCheckPassNotifications(notificationTargets);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
