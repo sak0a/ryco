@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DateTime } from "effect";
 import type { SourceControlCommentAuthorRole, SourceControlIssueComment } from "@ryco/contracts";
-import { CommentThread } from "./CommentThread";
+import { CommentItem, CommentThread } from "./CommentThread";
 
 function comment(
   partial: Partial<SourceControlIssueComment> & { author: string },
@@ -136,5 +136,32 @@ describe("CommentThread", () => {
     expect(markup).not.toContain(">Owner<");
     expect(markup).not.toContain(">Maintainer<");
     expect(markup).toContain("border-border/60");
+  });
+
+  it("renders quote actions only when a quote handler is available", () => {
+    const withoutQuote = renderToStaticMarkup(
+      <CommentThread comments={[comment({ author: "alice" })]} />,
+    );
+    const withQuote = renderToStaticMarkup(
+      <CommentThread comments={[comment({ author: "alice" })]} onQuoteComment={() => undefined} />,
+    );
+    expect(withoutQuote).not.toContain("Quote alice&#x27;s comment");
+    expect(withQuote).toContain("Quote alice&#x27;s comment");
+  });
+});
+
+describe("CommentItem", () => {
+  it("renders a quote action for original issue or PR conversation posts", () => {
+    const markup = renderToStaticMarkup(
+      <CommentItem
+        author="octocat"
+        body="Original body"
+        createdAt={DateTime.fromDateUnsafe(new Date("2026-03-14T10:00:00Z"))}
+        isOriginalPost
+        onQuote={() => undefined}
+      />,
+    );
+    expect(markup).toContain("Quote octocat&#x27;s comment");
+    expect(markup).toContain("Quote reply");
   });
 });

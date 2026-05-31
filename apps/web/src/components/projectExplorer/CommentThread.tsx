@@ -9,21 +9,25 @@ import {
   CodeIcon,
   FileTextIcon,
   MessageSquareIcon,
+  QuoteIcon,
   SendIcon,
   XCircleIcon,
 } from "lucide-react";
 import { DateTime } from "effect";
-import { memo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { memo, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Textarea } from "../ui/textarea";
 import {
+  appendQuoteToCommentDraft,
   authorAssociationLabel,
   avatarUrlForAuthor,
   commentRoleBadges,
   commentToneForAuthorRole,
   hashAuthorToHue,
+  hasSubmittableCommentDraft,
+  normalizeCommentDraftForSubmit,
   type CommentRoleBadgeTone,
   type CommentRoleTone,
 } from "./CommentThread.logic";
@@ -129,7 +133,13 @@ export interface CommentItemProps {
   authorRole?: SourceControlCommentAuthorRole | undefined;
   reviewState?: SourceControlReviewState | undefined;
   isOriginalPost?: boolean;
+  onQuote?: (() => void) | undefined;
   className?: string;
+}
+
+export interface CommentQuoteInsertion {
+  readonly id: number;
+  readonly markdown: string;
 }
 
 const REVIEW_STATE_META: Record<
@@ -226,15 +236,28 @@ export const CommentItem = memo(function CommentItem(props: CommentItemProps) {
         <time dateTime={isoDate} className="text-muted-foreground text-xs" title={isoDate}>
           {dateTimeFmt.format(DateTime.toDate(props.createdAt))}
         </time>
-        <button
-          type="button"
-          onClick={() => setShowRaw((v) => !v)}
-          className="ml-auto inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground"
-          aria-label={showRaw ? "Show rendered markdown" : "Show raw source"}
-          title={showRaw ? "Show rendered markdown" : "Show raw source"}
-        >
-          {showRaw ? <FileTextIcon className="size-3.5" /> : <CodeIcon className="size-3.5" />}
-        </button>
+        <div className="ml-auto flex items-center gap-1">
+          {props.onQuote ? (
+            <button
+              type="button"
+              onClick={props.onQuote}
+              className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground"
+              aria-label={`Quote ${props.author}'s comment`}
+              title="Quote reply"
+            >
+              <QuoteIcon className="size-3.5" />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setShowRaw((v) => !v)}
+            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground"
+            aria-label={showRaw ? "Show rendered markdown" : "Show raw source"}
+            title={showRaw ? "Show rendered markdown" : "Show raw source"}
+          >
+            {showRaw ? <FileTextIcon className="size-3.5" /> : <CodeIcon className="size-3.5" />}
+          </button>
+        </div>
       </header>
       <MarkdownView text={props.body} raw={showRaw} />
     </article>
@@ -245,6 +268,8 @@ export function CommentComposer(props: {
   placeholder: string;
   submitLabel: string;
   onSubmit: (input: { readonly body: string; readonly clientMutationId: string }) => Promise<void>;
+  quoteInsertion?: CommentQuoteInsertion | null | undefined;
+  onQuoteInsertionHandled?: ((id: number) => void) | undefined;
   disabled?: boolean | undefined;
   className?: string | undefined;
 }) {
@@ -252,15 +277,63 @@ export function CommentComposer(props: {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mutationIdRef = useRef<string | null>(null);
   const submittedBodyRef = useRef<string | null>(null);
+  const handledQuoteInsertionIdRef = useRef<number | null>(null);
+  const pendingFocusPositionRef = useRef<number | null>(null);
+  const {
+    className,
+    disabled,
+    onQuoteInsertionHandled,
+    onSubmit,
+    placeholder,
+    quoteInsertion,
+    submitLabel,
+  } = props;
 
-  const trimmedDraft = draft.trim();
-  const canSubmit = !props.disabled && !isSubmitting && trimmedDraft.length > 0;
+  const submitBody = normalizeCommentDraftForSubmit(draft);
+  const canSubmit = !disabled && !isSubmitting && hasSubmittableCommentDraft(draft);
+
+  useEffect(() => {
+    const pendingQuoteInsertion = quoteInsertion ?? null;
+    if (
+      pendingQuoteInsertion === null ||
+      handledQuoteInsertionIdRef.current === pendingQuoteInsertion.id ||
+      disabled ||
+      isSubmitting
+    ) {
+      return;
+    }
+
+    handledQuoteInsertionIdRef.current = pendingQuoteInsertion.id;
+    setDraft((currentDraft) => {
+      const nextDraft = appendQuoteToCommentDraft(currentDraft, pendingQuoteInsertion.markdown);
+      pendingFocusPositionRef.current = nextDraft.length;
+      const nextBody = normalizeCommentDraftForSubmit(nextDraft);
+      if (submittedBodyRef.current !== null && submittedBodyRef.current !== nextBody) {
+        mutationIdRef.current = null;
+      }
+      return nextDraft;
+    });
+    setSuccessMessage(null);
+    setSubmitError(null);
+    onQuoteInsertionHandled?.(pendingQuoteInsertion.id);
+  }, [disabled, isSubmitting, onQuoteInsertionHandled, quoteInsertion]);
+
+  useEffect(() => {
+    const focusPosition = pendingFocusPositionRef.current;
+    if (focusPosition === null) return;
+    pendingFocusPositionRef.current = null;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(focusPosition, focusPosition);
+  }, [draft]);
 
   const handleDraftChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     const nextDraft = event.target.value;
-    const nextBody = nextDraft.trim();
+    const nextBody = normalizeCommentDraftForSubmit(nextDraft);
     setDraft(nextDraft);
     setSuccessMessage(null);
     setSubmitError(null);
@@ -273,7 +346,7 @@ export function CommentComposer(props: {
     event.preventDefault();
     if (!canSubmit) return;
 
-    const body = trimmedDraft;
+    const body = submitBody;
     const clientMutationId = mutationIdRef.current ?? createClientMutationId();
     mutationIdRef.current = clientMutationId;
     submittedBodyRef.current = body;
@@ -282,7 +355,7 @@ export function CommentComposer(props: {
     setSuccessMessage(null);
 
     try {
-      await props.onSubmit({ body, clientMutationId });
+      await onSubmit({ body, clientMutationId });
       setDraft("");
       mutationIdRef.current = null;
       submittedBodyRef.current = null;
@@ -297,14 +370,15 @@ export function CommentComposer(props: {
   return (
     <form
       onSubmit={handleSubmit}
-      className={cn("rounded-xl border border-border/60 bg-muted/12 p-3", props.className)}
+      className={cn("rounded-xl border border-border/60 bg-muted/12 p-3", className)}
     >
       <Textarea
+        ref={textareaRef}
         aria-label="Comment body"
-        placeholder={props.placeholder}
+        placeholder={placeholder}
         value={draft}
         onChange={handleDraftChange}
-        disabled={props.disabled || isSubmitting}
+        disabled={disabled || isSubmitting}
         size="sm"
         className="bg-background/70"
       />
@@ -329,7 +403,7 @@ export function CommentComposer(props: {
         </div>
         <Button type="submit" size="sm" disabled={!canSubmit}>
           {isSubmitting ? <Spinner className="size-3.5" /> : <SendIcon className="size-3.5" />}
-          {submitError ? "Retry" : props.submitLabel}
+          {submitError ? "Retry" : submitLabel}
         </Button>
       </div>
     </form>
@@ -338,6 +412,7 @@ export function CommentComposer(props: {
 
 export const CommentThread = memo(function CommentThread(props: {
   comments: ReadonlyArray<SourceControlIssueComment>;
+  onQuoteComment?: ((comment: SourceControlIssueComment) => void) | undefined;
 }) {
   if (props.comments.length === 0) {
     return null;
@@ -353,6 +428,9 @@ export const CommentThread = memo(function CommentThread(props: {
             authorAssociation={comment.authorAssociation}
             authorRole={comment.authorRole}
             reviewState={comment.reviewState}
+            onQuote={
+              props.onQuoteComment !== undefined ? () => props.onQuoteComment?.(comment) : undefined
+            }
           />
         </li>
       ))}
