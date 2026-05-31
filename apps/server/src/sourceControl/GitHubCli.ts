@@ -47,6 +47,8 @@ export interface GitHubPullRequestSummary {
   readonly commentsCount?: number | null;
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
+  readonly headSha?: string;
+  readonly checkRollup?: ReadonlyArray<GitHubPullRequests.NormalizedGitHubCheckRollupItem>;
 }
 
 export interface GitHubPullRequestCommit {
@@ -478,7 +480,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           "--limit",
           String(input.limit ?? 1),
           "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
+          "number,title,url,baseRefName,headRefName,headRefOid,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner,statusCheckRollup",
         ],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
@@ -512,7 +514,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           "view",
           input.reference,
           "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
+          "number,title,url,baseRefName,headRefName,headRefOid,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner,statusCheckRollup",
         ],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
@@ -697,7 +699,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           "--limit",
           String(input.limit ?? 20),
           "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
+          "number,title,url,baseRefName,headRefName,headRefOid,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner,statusCheckRollup",
         ],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
@@ -730,7 +732,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           "view",
           input.reference,
           "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,headRepository,headRepositoryOwner,body,comments,reviewRequests,reviews,commits,additions,deletions,changedFiles,files",
+          "number,title,url,baseRefName,headRefName,headRefOid,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,headRepository,headRepositoryOwner,statusCheckRollup,body,comments,reviewRequests,reviews,commits,additions,deletions,changedFiles,files",
         ],
       }).pipe(
         Effect.map((r) => r.stdout.trim()),

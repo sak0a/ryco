@@ -8,6 +8,17 @@ export interface NormalizedGitHubLabel {
   readonly description?: string;
 }
 
+export interface NormalizedGitHubCheckRollupItem {
+  readonly kind: "check-run" | "status-context" | "unknown";
+  readonly name: string;
+  readonly workflowName?: string;
+  readonly status: Option.Option<string>;
+  readonly conclusion: Option.Option<string>;
+  readonly url: Option.Option<string>;
+  readonly startedAt: Option.Option<DateTime.Utc>;
+  readonly completedAt: Option.Option<DateTime.Utc>;
+}
+
 export interface NormalizedGitHubPullRequestRecord {
   readonly number: number;
   readonly title: string;
@@ -24,6 +35,8 @@ export interface NormalizedGitHubPullRequestRecord {
   readonly commentsCount: number | null;
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
+  readonly headSha?: string;
+  readonly checkRollup?: ReadonlyArray<NormalizedGitHubCheckRollupItem>;
 }
 
 function normalizeLabels(
@@ -53,6 +66,7 @@ const GitHubPullRequestSchema = Schema.Struct({
   url: TrimmedNonEmptyString,
   baseRefName: TrimmedNonEmptyString,
   headRefName: TrimmedNonEmptyString,
+  headRefOid: Schema.optional(Schema.NullOr(Schema.String)),
   state: Schema.optional(Schema.NullOr(Schema.String)),
   mergedAt: Schema.optional(Schema.NullOr(Schema.String)),
   updatedAt: Schema.optional(Schema.OptionFromNullOr(Schema.DateTimeUtcFromString)),
@@ -81,6 +95,25 @@ const GitHubPullRequestSchema = Schema.Struct({
       Schema.Struct({
         login: Schema.String,
       }),
+    ),
+  ),
+  statusCheckRollup: Schema.optional(
+    Schema.NullOr(
+      Schema.Array(
+        Schema.Struct({
+          __typename: Schema.optional(Schema.String),
+          name: Schema.optional(Schema.NullOr(Schema.String)),
+          workflowName: Schema.optional(Schema.NullOr(Schema.String)),
+          context: Schema.optional(Schema.NullOr(Schema.String)),
+          status: Schema.optional(Schema.NullOr(Schema.String)),
+          conclusion: Schema.optional(Schema.NullOr(Schema.String)),
+          state: Schema.optional(Schema.NullOr(Schema.String)),
+          detailsUrl: Schema.optional(Schema.NullOr(Schema.String)),
+          targetUrl: Schema.optional(Schema.NullOr(Schema.String)),
+          startedAt: Schema.optional(Schema.NullOr(Schema.String)),
+          completedAt: Schema.optional(Schema.NullOr(Schema.String)),
+        }),
+      ),
     ),
   ),
   body: Schema.optional(Schema.NullOr(Schema.String)),
@@ -152,6 +185,16 @@ function trimOptionalString(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function optionFromTrimmedString(value: string | null | undefined): Option.Option<string> {
+  const trimmed = trimOptionalString(value);
+  return trimmed ? Option.some(trimmed) : Option.none();
+}
+
+function optionFromIsoDateTime(value: string | null | undefined): Option.Option<DateTime.Utc> {
+  const trimmed = trimOptionalString(value);
+  return trimmed ? Option.some(DateTime.fromDateUnsafe(new Date(trimmed))) : Option.none();
+}
+
 function normalizeGitHubPullRequestState(input: {
   state?: string | null | undefined;
   mergedAt?: string | null | undefined;
@@ -169,6 +212,35 @@ function normalizeGitHubPullRequestState(input: {
   return "open";
 }
 
+function normalizeCheckRollupKind(
+  value: string | null | undefined,
+): NormalizedGitHubCheckRollupItem["kind"] {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "checkrun") return "check-run";
+  if (normalized === "statuscontext") return "status-context";
+  return "unknown";
+}
+
+function normalizeCheckRollupItem(
+  raw: NonNullable<Schema.Schema.Type<typeof GitHubPullRequestSchema>["statusCheckRollup"]>[number],
+  index: number,
+): NormalizedGitHubCheckRollupItem {
+  const name =
+    trimOptionalString(raw.name) ?? trimOptionalString(raw.context) ?? `Status check ${index + 1}`;
+  const workflowName = trimOptionalString(raw.workflowName);
+  const url = trimOptionalString(raw.detailsUrl) ?? trimOptionalString(raw.targetUrl);
+  return {
+    kind: normalizeCheckRollupKind(raw.__typename),
+    name,
+    ...(workflowName ? { workflowName } : {}),
+    status: optionFromTrimmedString(raw.status ?? raw.state),
+    conclusion: optionFromTrimmedString(raw.conclusion),
+    url: optionFromTrimmedString(url),
+    startedAt: optionFromIsoDateTime(raw.startedAt),
+    completedAt: optionFromIsoDateTime(raw.completedAt),
+  };
+}
+
 function normalizeGitHubPullRequestRecord(
   raw: Schema.Schema.Type<typeof GitHubPullRequestSchema>,
 ): NormalizedGitHubPullRequestRecord {
@@ -184,6 +256,7 @@ function normalizeGitHubPullRequestRecord(
       : Array.isArray(raw.comments)
         ? raw.comments.length
         : null;
+  const headSha = trimOptionalString(raw.headRefOid);
 
   return {
     number: raw.number,
@@ -203,6 +276,14 @@ function normalizeGitHubPullRequestRecord(
     ...(typeof raw.isDraft === "boolean" ? { isDraft: raw.isDraft } : {}),
     ...(headRepositoryNameWithOwner ? { headRepositoryNameWithOwner } : {}),
     ...(headRepositoryOwnerLogin ? { headRepositoryOwnerLogin } : {}),
+    ...(headSha ? { headSha } : {}),
+    ...(raw.statusCheckRollup
+      ? {
+          checkRollup: raw.statusCheckRollup.map((item, index) =>
+            normalizeCheckRollupItem(item, index),
+          ),
+        }
+      : {}),
   };
 }
 

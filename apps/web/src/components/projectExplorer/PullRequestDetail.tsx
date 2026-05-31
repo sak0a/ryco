@@ -26,9 +26,12 @@ import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { CommentComposer, CommentItem } from "./CommentThread";
 import { deriveOriginalPostAuthorRole } from "./CommentThread.logic";
+import { PrCheckStatusBadge } from "./PrCheckStatusBadge";
 import { changeRequestStateKind, StateBadge } from "./StateBadge";
 import { type DiffLine, parseDiffLines } from "./diffLines";
+import { getPrCheckStatusFromChangeRequest } from "./prCheckStatus";
 import { splitUnifiedDiffByFile } from "./unifiedDiffSplit";
+import { usePrCheckPassNotifications } from "./usePrCheckPassNotifications";
 import { WorktreeItemSidebar } from "./WorktreeItemSidebar";
 import { WorkflowRunsSection } from "./WorkflowRunsSection";
 
@@ -169,6 +172,19 @@ function PullRequestDetailBody(props: {
   const fileCount = detail.changedFiles ?? detail.files?.length ?? 0;
   const additions = detail.additions ?? 0;
   const deletions = detail.deletions ?? 0;
+  const checkStatus = getPrCheckStatusFromChangeRequest(detail);
+
+  usePrCheckPassNotifications([
+    {
+      environmentId: props.environmentId,
+      cwd: props.cwd,
+      provider: detail.provider,
+      number: detail.number,
+      title: detail.title,
+      url: detail.url,
+      status: checkStatus,
+    },
+  ]);
 
   return (
     <div className="flex h-full min-h-0">
@@ -180,6 +196,16 @@ function PullRequestDetailBody(props: {
               <span className="font-normal text-muted-foreground">#{detail.number}</span>
             </h2>
             <DiffStatsBadge additions={additions} deletions={deletions} />
+            <PrCheckStatusBadge
+              view={checkStatus}
+              mode="compact"
+              onClick={() => setActiveTab("checks")}
+              title={
+                checkStatus.kind === "failed"
+                  ? "Open failed check details"
+                  : "Open pull request checks"
+              }
+            />
             <StateBadge
               kind={changeRequestStateKind(detail.state, detail.isDraft)}
               className="mt-1"
