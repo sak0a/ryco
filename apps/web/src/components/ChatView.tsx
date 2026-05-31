@@ -113,7 +113,12 @@ import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
-import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import {
+  matchesExactModShortcut,
+  resolveShortcutCommand,
+  shouldIgnoreGlobalNavigationShortcut,
+  shortcutLabelForCommand,
+} from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
@@ -751,6 +756,8 @@ export default function ChatView(props: ChatViewProps) {
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
   const [projectExplorerOpen, setProjectExplorerOpen] = useState(false);
+  const projectExplorerOpenRef = useRef(projectExplorerOpen);
+  projectExplorerOpenRef.current = projectExplorerOpen;
   const [projectExplorerInitialTab, setProjectExplorerInitialTab] =
     useState<NewWorktreeDialogTab>("prs");
   const [terminalLaunchContext, setTerminalLaunchContext] = useState<TerminalLaunchContext | null>(
@@ -2717,11 +2724,10 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      const isToggleProjectExplorer =
-        event.key.toLowerCase() === "p" &&
-        event.shiftKey &&
-        (event.metaKey || event.ctrlKey) &&
-        !event.altKey;
+      if (shouldIgnoreGlobalNavigationShortcut(event) && !projectExplorerOpenRef.current) return;
+      const isToggleProjectExplorer = matchesExactModShortcut(event, "p", {
+        shiftKey: true,
+      });
       if (!isToggleProjectExplorer) return;
       event.preventDefault();
       event.stopPropagation();
@@ -2737,15 +2743,22 @@ export default function ChatView(props: ChatViewProps) {
       if (!activeThreadId || useCommandPaletteStore.getState().open || event.defaultPrevented) {
         return;
       }
+      const modelPickerOpen = readComposer()?.isModelPickerOpen() ?? false;
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
-        modelPickerOpen: readComposer()?.isModelPickerOpen() ?? false,
+        modelPickerOpen,
       };
 
       const command = resolveShortcutCommand(event, keybindings, {
         context: shortcutContext,
       });
+      if (
+        shouldIgnoreGlobalNavigationShortcut(event) &&
+        (command !== "modelPicker.toggle" || !modelPickerOpen)
+      ) {
+        return;
+      }
       if (!command) return;
 
       if (command === "terminal.toggle") {

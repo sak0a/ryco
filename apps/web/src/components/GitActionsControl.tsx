@@ -78,6 +78,7 @@ import {
 } from "~/lib/gitReactQuery";
 import { refreshGitStatus, useGitStatus } from "~/lib/gitStatusState";
 import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
+import { hasNoShortcutModifiers } from "~/keybindings";
 import { newCommandId, randomUUID } from "~/lib/utils";
 import { resolvePathLinkTarget } from "~/terminal-links";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
@@ -698,7 +699,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                         setHasUserEditedPublishRepository(true);
                       }}
                       onKeyDown={(event) => {
-                        if (event.key === "Enter") {
+                        if (event.key === "Enter" && hasNoShortcutModifiers(event)) {
                           event.preventDefault();
                           submitPublishRepository();
                         }

@@ -5,6 +5,12 @@ import type {
   WorkItemSummary,
 } from "@ryco/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  hasNoShortcutModifiers,
+  isDifferentDialogShortcutTarget,
+  isEditableShortcutTarget,
+  matchesExactModShortcut,
+} from "~/keybindings";
 import type { SidebarProjectGroupMember } from "~/sidebarProjectGrouping";
 import { ContextPickerTabs } from "../chat/ContextPickerTabs";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
@@ -49,6 +55,14 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
   const issueInputRef = useRef<HTMLInputElement>(null);
   const prInputRef = useRef<HTMLInputElement>(null);
   const workItemInputRef = useRef<HTMLInputElement>(null);
+  const previousOpenRef = useRef(props.open);
+  const previousInitialTabRef = useRef(props.initialTab);
+  const memberProjectKeys = useMemo(
+    () => props.memberProjects.map((member) => member.physicalProjectKey),
+    [props.memberProjects],
+  );
+  const memberProjectKeySignature = memberProjectKeys.join("\0");
+  const firstMemberKey = memberProjectKeys[0] ?? "";
 
   const selectedMember = useMemo(
     () =>
@@ -65,16 +79,26 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
   }, [props.open]);
 
   useEffect(() => {
-    if (props.open) {
+    const wasOpen = previousOpenRef.current;
+    const previousInitialTab = previousInitialTabRef.current;
+    previousOpenRef.current = props.open;
+    previousInitialTabRef.current = props.initialTab;
+
+    if (props.open && (!wasOpen || props.initialTab !== previousInitialTab)) {
       setActiveTab(props.initialTab);
       setSelection(null);
-      const first = props.memberProjects[0]?.physicalProjectKey ?? "";
-      setSelectedMemberKey((current) => {
-        const stillPresent = props.memberProjects.some((m) => m.physicalProjectKey === current);
-        return stillPresent ? current : first;
-      });
+      setSelectedMemberKey((current) =>
+        memberProjectKeys.includes(current) ? current : firstMemberKey,
+      );
     }
-  }, [props.open, props.initialTab, props.memberProjects]);
+  }, [firstMemberKey, memberProjectKeys, props.initialTab, props.open]);
+
+  useEffect(() => {
+    if (!props.open) return;
+    setSelectedMemberKey((current) =>
+      memberProjectKeys.includes(current) ? current : firstMemberKey,
+    );
+  }, [firstMemberKey, memberProjectKeySignature, memberProjectKeys, props.open]);
 
   useEffect(() => {
     if (!props.open || selection !== null) return;
@@ -123,19 +147,32 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === "1") {
+      if (
+        isDifferentDialogShortcutTarget({
+          currentTarget: event.currentTarget,
+          target: event.target,
+        })
+      ) {
+        return;
+      }
+
+      if (isEditableShortcutTarget(event.target)) {
+        return;
+      }
+
+      if (matchesExactModShortcut(event, "1")) {
         event.preventDefault();
         setActiveTab("issues");
         setSelection(null);
         return;
       }
-      if ((event.metaKey || event.ctrlKey) && event.key === "2") {
+      if (matchesExactModShortcut(event, "2")) {
         event.preventDefault();
         setActiveTab("prs");
         setSelection(null);
         return;
       }
-      if ((event.metaKey || event.ctrlKey) && event.key === "3") {
+      if (matchesExactModShortcut(event, "3")) {
         event.preventDefault();
         setActiveTab("actions");
         setSelection(null);
@@ -147,7 +184,7 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
         setSelection(null);
         return;
       }
-      if (event.key === "/" && !(event.target instanceof HTMLInputElement)) {
+      if (event.key === "/" && hasNoShortcutModifiers(event)) {
         event.preventDefault();
         const target =
           activeTab === "issues"
