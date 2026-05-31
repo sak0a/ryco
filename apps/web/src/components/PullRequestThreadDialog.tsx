@@ -13,6 +13,7 @@ import {
   gitResolvePullRequestQueryOptions,
 } from "~/lib/gitReactQuery";
 import { useGitStatus } from "~/lib/gitStatusState";
+import { hasNoShortcutModifiers } from "~/keybindings";
 import { cn } from "~/lib/utils";
 import { parsePullRequestReference } from "~/pullRequestReference";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
@@ -227,7 +228,7 @@ export function PullRequestThreadDialog({
                 setReference(event.target.value);
               }}
               onKeyDown={(event) => {
-                if (event.key !== "Enter") {
+                if (event.key !== "Enter" || !hasNoShortcutModifiers(event)) {
                   return;
                 }
                 event.preventDefault();

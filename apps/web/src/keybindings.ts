@@ -41,6 +41,11 @@ interface ShortcutMatchOptions {
   context?: Partial<ShortcutMatchContext>;
 }
 
+interface ExactModShortcutOptions extends ShortcutMatchOptions {
+  shiftKey?: boolean;
+  altKey?: boolean;
+}
+
 interface ResolvedShortcutLabelOptions extends ShortcutMatchOptions {
   platform?: string;
 }
@@ -64,6 +69,8 @@ const EVENT_CODE_KEY_ALIASES: Readonly<Record<string, readonly string[]>> = {
   Digit8: ["8"],
   Digit9: ["9"],
 };
+
+const BARE_MODIFIER_KEYS = new Set(["alt", "altgraph", "control", "ctrl", "meta", "os", "shift"]);
 
 function normalizeEventKey(key: string): string {
   const normalized = key.toLowerCase();
@@ -105,6 +112,132 @@ function matchesShortcut(
 ): boolean {
   if (!matchesShortcutModifiers(event, shortcut, platform)) return false;
   return resolveEventKeys(event).has(shortcut.key);
+}
+
+export function isBareModifierKeyEvent(event: Pick<ShortcutEventLike, "key">): boolean {
+  return BARE_MODIFIER_KEYS.has(normalizeEventKey(event.key));
+}
+
+export function matchesExactShortcut(
+  event: ShortcutEventLike,
+  shortcut: KeybindingShortcut,
+  platform = navigator.platform,
+): boolean {
+  if (event.type !== undefined && event.type !== "keydown") return false;
+  if (isBareModifierKeyEvent(event)) return false;
+  return matchesShortcut(event, shortcut, platform);
+}
+
+export function matchesExactModShortcut(
+  event: ShortcutEventLike,
+  key: string,
+  options?: ExactModShortcutOptions,
+): boolean {
+  return matchesExactShortcut(
+    event,
+    {
+      key,
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: options?.shiftKey ?? false,
+      altKey: options?.altKey ?? false,
+      modKey: true,
+    },
+    resolvePlatform(options),
+  );
+}
+
+export function hasNoShortcutModifiers(event: ShortcutModifierStateLike): boolean {
+  return !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
+const DIALOG_TARGET_SELECTOR = [
+  '[data-slot="dialog-popup"]',
+  '[data-slot="alert-dialog-popup"]',
+  '[data-slot="sheet-popup"]',
+  '[data-slot="command-dialog-popup"]',
+  '[role="dialog"]',
+  '[role="alertdialog"]',
+].join(",");
+
+const EDITABLE_TARGET_SELECTOR = [
+  "input",
+  "select",
+  "textarea",
+  '[contenteditable=""]',
+  '[contenteditable="true"]',
+  '[contenteditable="plaintext-only"]',
+  '[role="textbox"]',
+  "[data-lexical-editor]",
+  ".cm-content",
+  ".cm-editor",
+  ".monaco-editor",
+].join(",");
+
+function elementFromEventTarget(target: EventTarget | null | undefined): Element | null {
+  if (typeof Element === "undefined") return null;
+  return target instanceof Element ? target : null;
+}
+
+export function isDialogShortcutTarget(target: EventTarget | null | undefined): boolean {
+  return elementFromEventTarget(target)?.closest(DIALOG_TARGET_SELECTOR) !== null;
+}
+
+export function isDifferentDialogShortcutTarget(input: {
+  currentTarget: EventTarget | null | undefined;
+  target: EventTarget | null | undefined;
+}): boolean {
+  const currentElement = elementFromEventTarget(input.currentTarget);
+  const targetDialog = elementFromEventTarget(input.target)?.closest(DIALOG_TARGET_SELECTOR);
+  return currentElement !== null && targetDialog !== null && targetDialog !== currentElement;
+}
+
+function isVisibleDialogElement(element: Element): boolean {
+  if (element.hasAttribute("hidden") || element.getAttribute("aria-hidden") === "true") {
+    return false;
+  }
+
+  if (typeof HTMLElement === "undefined" || !(element instanceof HTMLElement)) {
+    return true;
+  }
+
+  if (element.dataset.state === "closed") {
+    return false;
+  }
+
+  return element.getClientRects().length > 0;
+}
+
+export function hasOpenDialogShortcutTarget(): boolean {
+  if (typeof document === "undefined") return false;
+  if (isDialogShortcutTarget(document.activeElement)) return true;
+  return Array.from(document.querySelectorAll(DIALOG_TARGET_SELECTOR)).some(isVisibleDialogElement);
+}
+
+export function isEditableShortcutTarget(target: EventTarget | null | undefined): boolean {
+  const element = elementFromEventTarget(target);
+  if (!element) return false;
+
+  const editableElement = element.closest(EDITABLE_TARGET_SELECTOR);
+  if (!editableElement) return false;
+
+  if (typeof HTMLInputElement !== "undefined" && editableElement instanceof HTMLInputElement) {
+    return editableElement.type !== "hidden";
+  }
+
+  return true;
+}
+
+export function shouldIgnoreGlobalNavigationShortcut(
+  event: ShortcutEventLike & {
+    isComposing?: boolean;
+    target?: EventTarget | null;
+  },
+): boolean {
+  if (event.type !== undefined && event.type !== "keydown") return true;
+  if (event.isComposing) return true;
+  if (isBareModifierKeyEvent(event)) return true;
+  return isDialogShortcutTarget(event.target) || hasOpenDialogShortcutTarget();
 }
 
 function resolvePlatform(options: ShortcutMatchOptions | undefined): string {
@@ -201,6 +334,9 @@ export function resolveShortcutCommand(
   keybindings: ResolvedKeybindingsConfig,
   options?: ShortcutMatchOptions,
 ): KeybindingCommand | null {
+  if (event.type !== undefined && event.type !== "keydown") return null;
+  if (isBareModifierKeyEvent(event)) return null;
+
   const platform = resolvePlatform(options);
   const context = resolveContext(options);
 

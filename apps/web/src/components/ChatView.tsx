@@ -113,7 +113,12 @@ import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
-import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import {
+  matchesExactModShortcut,
+  resolveShortcutCommand,
+  shouldIgnoreGlobalNavigationShortcut,
+  shortcutLabelForCommand,
+} from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
@@ -2717,11 +2722,10 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      const isToggleProjectExplorer =
-        event.key.toLowerCase() === "p" &&
-        event.shiftKey &&
-        (event.metaKey || event.ctrlKey) &&
-        !event.altKey;
+      if (shouldIgnoreGlobalNavigationShortcut(event)) return;
+      const isToggleProjectExplorer = matchesExactModShortcut(event, "p", {
+        shiftKey: true,
+      });
       if (!isToggleProjectExplorer) return;
       event.preventDefault();
       event.stopPropagation();
@@ -2734,7 +2738,12 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
-      if (!activeThreadId || useCommandPaletteStore.getState().open || event.defaultPrevented) {
+      if (
+        !activeThreadId ||
+        useCommandPaletteStore.getState().open ||
+        event.defaultPrevented ||
+        shouldIgnoreGlobalNavigationShortcut(event)
+      ) {
         return;
       }
       const shortcutContext = {

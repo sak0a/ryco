@@ -16,6 +16,7 @@ import {
   modelPickerJumpCommandForIndex,
   modelPickerJumpIndexFromCommand,
   resolveShortcutCommand,
+  shouldIgnoreGlobalNavigationShortcut,
   shortcutLabelForCommand,
 } from "../../keybindings";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
@@ -443,6 +444,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   useEffect(() => {
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat) {
+        return;
+      }
+      if (shouldIgnoreGlobalNavigationShortcut(event)) {
         return;
       }
 

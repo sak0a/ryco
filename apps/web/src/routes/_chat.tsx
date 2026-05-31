@@ -10,7 +10,7 @@ import {
 import { isComposerFocused } from "../lib/composerFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { useModelPickerOpen } from "../modelPickerOpenState";
-import { resolveShortcutCommand } from "../keybindings";
+import { resolveShortcutCommand, shouldIgnoreGlobalNavigationShortcut } from "../keybindings";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
@@ -34,6 +34,7 @@ function ChatRouteGlobalShortcuts() {
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      if (shouldIgnoreGlobalNavigationShortcut(event)) return;
       // Read modal/palette state via `getState()` at event time so we always
       // see the latest value without having to re-bind the listener on every
       // toggle. The other booleans come from React-tracked stores or DOM
