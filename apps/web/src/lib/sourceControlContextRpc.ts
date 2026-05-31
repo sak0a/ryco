@@ -92,6 +92,29 @@ export const sourceControlContextQueryKeys = {
       query,
       limit ?? null,
     ] as const,
+  workflowRuns: (
+    environmentId: EnvironmentId | null,
+    cwd: string | null,
+    pullRequestNumber?: number | null,
+    limit?: number,
+  ) =>
+    [
+      "sourceControl",
+      "workflows",
+      environmentId ?? null,
+      cwd,
+      "runs",
+      pullRequestNumber ?? null,
+      limit ?? null,
+    ] as const,
+  workflowRunJobs: (environmentId: EnvironmentId | null, cwd: string | null, runId: string) =>
+    ["sourceControl", "workflows", environmentId ?? null, cwd, "jobs", runId] as const,
+  workflowJobLog: (
+    environmentId: EnvironmentId | null,
+    cwd: string | null,
+    runId: string,
+    jobId: string,
+  ) => ["sourceControl", "workflows", environmentId ?? null, cwd, "logs", runId, jobId] as const,
 };
 
 export function issueListQueryOptions(input: {
@@ -319,6 +342,101 @@ export function changeRequestDetailQueryOptions(input: {
       input.environmentId !== null &&
       input.cwd !== null &&
       input.reference !== null,
+    staleTime: 300_000,
+  });
+}
+
+export function workflowRunsQueryOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  pullRequestNumber?: number | null;
+  limit?: number;
+  enabled?: boolean;
+}) {
+  return queryOptions({
+    queryKey: sourceControlContextQueryKeys.workflowRuns(
+      input.environmentId,
+      input.cwd,
+      input.pullRequestNumber,
+      input.limit,
+    ),
+    queryFn: async () => {
+      if (!input.cwd || !input.environmentId) {
+        throw new Error("Workflow runs are unavailable.");
+      }
+      const client = requireEnvironmentConnection(input.environmentId).client;
+      return client.sourceControl.listWorkflowRuns({
+        cwd: input.cwd,
+        ...(input.pullRequestNumber !== undefined && input.pullRequestNumber !== null
+          ? { pullRequestNumber: input.pullRequestNumber }
+          : {}),
+        ...(input.limit !== undefined ? { limit: input.limit } : {}),
+      });
+    },
+    enabled: (input.enabled ?? true) && input.environmentId !== null && input.cwd !== null,
+    staleTime: 60_000,
+  });
+}
+
+export function workflowRunJobsQueryOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  runId: string | null;
+  enabled?: boolean;
+}) {
+  return queryOptions({
+    queryKey: sourceControlContextQueryKeys.workflowRunJobs(
+      input.environmentId,
+      input.cwd,
+      input.runId ?? "",
+    ),
+    queryFn: async () => {
+      if (!input.cwd || !input.environmentId || !input.runId) {
+        throw new Error("Workflow jobs are unavailable.");
+      }
+      const client = requireEnvironmentConnection(input.environmentId).client;
+      return client.sourceControl.getWorkflowRunJobs({ cwd: input.cwd, runId: input.runId });
+    },
+    enabled:
+      (input.enabled ?? true) &&
+      input.environmentId !== null &&
+      input.cwd !== null &&
+      input.runId !== null,
+    staleTime: 60_000,
+  });
+}
+
+export function workflowJobLogQueryOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  runId: string | null;
+  jobId: string | null;
+  enabled?: boolean;
+}) {
+  return queryOptions({
+    queryKey: sourceControlContextQueryKeys.workflowJobLog(
+      input.environmentId,
+      input.cwd,
+      input.runId ?? "",
+      input.jobId ?? "",
+    ),
+    queryFn: async () => {
+      if (!input.cwd || !input.environmentId || !input.runId || !input.jobId) {
+        throw new Error("Workflow logs are unavailable.");
+      }
+      const client = requireEnvironmentConnection(input.environmentId).client;
+      return client.sourceControl.getWorkflowJobLog({
+        cwd: input.cwd,
+        runId: input.runId,
+        jobId: input.jobId,
+      });
+    },
+    enabled:
+      (input.enabled ?? false) &&
+      input.environmentId !== null &&
+      input.cwd !== null &&
+      input.runId !== null &&
+      input.jobId !== null,
     staleTime: 300_000,
   });
 }

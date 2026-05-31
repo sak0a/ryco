@@ -30,6 +30,7 @@ import { changeRequestStateKind, StateBadge } from "./StateBadge";
 import { type DiffLine, parseDiffLines } from "./diffLines";
 import { splitUnifiedDiffByFile } from "./unifiedDiffSplit";
 import { WorktreeItemSidebar } from "./WorktreeItemSidebar";
+import { WorkflowRunsSection } from "./WorkflowRunsSection";
 
 const dateFmt = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
@@ -39,7 +40,7 @@ const dateFmt = new Intl.DateTimeFormat(undefined, {
 
 const numberFmt = new Intl.NumberFormat(undefined);
 
-type PullRequestTab = "conversation" | "commits" | "files";
+type PullRequestTab = "conversation" | "checks" | "commits" | "files";
 
 interface PullRequestDetailProps {
   environmentId: EnvironmentId | null;
@@ -201,6 +202,7 @@ function PullRequestDetailBody(props: {
         <ContextPickerTabs
           tabs={[
             { id: "conversation", label: "Conversation", count: conversationCount },
+            { id: "checks", label: "Checks" },
             { id: "commits", label: "Commits", count: commitCount },
             { id: "files", label: "Files changed", count: fileCount },
           ]}
@@ -208,7 +210,12 @@ function PullRequestDetailBody(props: {
           onSelect={(id) => setActiveTab(id as PullRequestTab)}
         />
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto",
+            activeTab === "checks" ? "" : "px-5 py-4",
+          )}
+        >
           {activeTab === "conversation" ? (
             <ol className="space-y-4">
               <li>
@@ -242,6 +249,14 @@ function PullRequestDetailBody(props: {
                 </li>
               ) : null}
             </ol>
+          ) : activeTab === "checks" ? (
+            <WorkflowRunsSection
+              environmentId={props.environmentId}
+              cwd={props.cwd}
+              pullRequestNumber={detail.number}
+              title="Checks"
+              description="GitHub Actions workflow runs for this pull request head commit."
+            />
           ) : activeTab === "commits" ? (
             <CommitsTab commits={detail.commits ?? []} pullRequestUrl={detail.url} />
           ) : (

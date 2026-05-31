@@ -6,6 +6,9 @@ import type {
   PullRequestState,
   SourceControlAssigneeCandidate,
   SourceControlChangeRequestDetail,
+  SourceControlWorkflowJobLogResult,
+  SourceControlWorkflowRunJobsResult,
+  SourceControlWorkflowRunListResult,
   SourceControlIssueDetail,
   SourceControlIssueSummary,
   SourceControlLabel,
@@ -178,6 +181,23 @@ export interface SourceControlProviderShape {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;
   }) => Effect.Effect<{ readonly state: IssueState }, SourceControlProviderError>;
+  readonly listWorkflowRuns?: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
+    readonly pullRequestNumber?: number;
+    readonly limit?: number;
+  }) => Effect.Effect<SourceControlWorkflowRunListResult, SourceControlProviderError>;
+  readonly getWorkflowRunJobs?: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
+    readonly runId: string;
+  }) => Effect.Effect<SourceControlWorkflowRunJobsResult, SourceControlProviderError>;
+  readonly getWorkflowJobLog?: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
+    readonly runId: string;
+    readonly jobId: string;
+  }) => Effect.Effect<SourceControlWorkflowJobLogResult, SourceControlProviderError>;
 }
 
 export class SourceControlProvider extends Context.Service<

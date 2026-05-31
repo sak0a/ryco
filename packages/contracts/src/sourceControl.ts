@@ -196,6 +196,102 @@ export const SourceControlChangeRequestDetail = Schema.Struct({
 });
 export type SourceControlChangeRequestDetail = typeof SourceControlChangeRequestDetail.Type;
 
+export const SOURCE_CONTROL_WORKFLOW_LOG_MAX_BYTES = 200 * 1024; // 200 KB
+
+export const SourceControlWorkflowRunCommit = Schema.Struct({
+  oid: TrimmedNonEmptyString,
+  shortOid: TrimmedNonEmptyString,
+  messageHeadline: Schema.optional(Schema.String),
+});
+export type SourceControlWorkflowRunCommit = typeof SourceControlWorkflowRunCommit.Type;
+
+export const SourceControlWorkflowRun = Schema.Struct({
+  provider: SourceControlProviderKind,
+  runId: TrimmedNonEmptyString,
+  workflowName: TrimmedNonEmptyString,
+  displayTitle: Schema.optional(TrimmedNonEmptyString),
+  branch: Schema.Option(TrimmedNonEmptyString),
+  event: Schema.optional(TrimmedNonEmptyString),
+  commit: SourceControlWorkflowRunCommit,
+  actor: Schema.Option(TrimmedNonEmptyString),
+  status: TrimmedNonEmptyString,
+  conclusion: Schema.Option(TrimmedNonEmptyString),
+  startedAt: Schema.Option(Schema.DateTimeUtc),
+  updatedAt: Schema.Option(Schema.DateTimeUtc),
+  durationMs: Schema.Option(NonNegativeInt),
+  url: TrimmedNonEmptyString,
+});
+export type SourceControlWorkflowRun = typeof SourceControlWorkflowRun.Type;
+
+export const SourceControlWorkflowRunListInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  pullRequestNumber: Schema.optional(PositiveInt),
+  limit: Schema.optional(PositiveInt),
+});
+export type SourceControlWorkflowRunListInput = typeof SourceControlWorkflowRunListInput.Type;
+
+export const SourceControlWorkflowRunListResult = Schema.Struct({
+  provider: SourceControlProviderKind,
+  repository: Schema.Option(TrimmedNonEmptyString),
+  pullRequestNumber: Schema.Option(PositiveInt),
+  headSha: Schema.Option(TrimmedNonEmptyString),
+  runs: Schema.Array(SourceControlWorkflowRun),
+});
+export type SourceControlWorkflowRunListResult = typeof SourceControlWorkflowRunListResult.Type;
+
+export const SourceControlWorkflowStep = Schema.Struct({
+  number: NonNegativeInt,
+  name: TrimmedNonEmptyString,
+  status: TrimmedNonEmptyString,
+  conclusion: Schema.Option(TrimmedNonEmptyString),
+  startedAt: Schema.Option(Schema.DateTimeUtc),
+  completedAt: Schema.Option(Schema.DateTimeUtc),
+  durationMs: Schema.Option(NonNegativeInt),
+});
+export type SourceControlWorkflowStep = typeof SourceControlWorkflowStep.Type;
+
+export const SourceControlWorkflowJob = Schema.Struct({
+  jobId: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  status: TrimmedNonEmptyString,
+  conclusion: Schema.Option(TrimmedNonEmptyString),
+  startedAt: Schema.Option(Schema.DateTimeUtc),
+  completedAt: Schema.Option(Schema.DateTimeUtc),
+  durationMs: Schema.Option(NonNegativeInt),
+  url: Schema.Option(TrimmedNonEmptyString),
+  steps: Schema.Array(SourceControlWorkflowStep),
+});
+export type SourceControlWorkflowJob = typeof SourceControlWorkflowJob.Type;
+
+export const SourceControlWorkflowRunJobsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  runId: TrimmedNonEmptyString,
+});
+export type SourceControlWorkflowRunJobsInput = typeof SourceControlWorkflowRunJobsInput.Type;
+
+export const SourceControlWorkflowRunJobsResult = Schema.Struct({
+  provider: SourceControlProviderKind,
+  runId: TrimmedNonEmptyString,
+  jobs: Schema.Array(SourceControlWorkflowJob),
+});
+export type SourceControlWorkflowRunJobsResult = typeof SourceControlWorkflowRunJobsResult.Type;
+
+export const SourceControlWorkflowJobLogInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  runId: TrimmedNonEmptyString,
+  jobId: TrimmedNonEmptyString,
+});
+export type SourceControlWorkflowJobLogInput = typeof SourceControlWorkflowJobLogInput.Type;
+
+export const SourceControlWorkflowJobLogResult = Schema.Struct({
+  provider: SourceControlProviderKind,
+  runId: TrimmedNonEmptyString,
+  jobId: TrimmedNonEmptyString,
+  log: Schema.String,
+  truncated: Schema.Boolean,
+});
+export type SourceControlWorkflowJobLogResult = typeof SourceControlWorkflowJobLogResult.Type;
+
 export const SourceControlAddChangeRequestCommentInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   reference: TrimmedNonEmptyString,

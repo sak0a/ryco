@@ -36,6 +36,7 @@ import {
   WorktreeId,
   WS_METHODS,
   WsRpcGroup,
+  SourceControlProviderError,
 } from "@ryco/contracts";
 import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";
 import { clamp } from "effect/Number";
@@ -2192,6 +2193,88 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
               sourceControlRegistry
                 .resolve({ cwd })
                 .pipe(Effect.flatMap((provider) => provider.listAssignees({ cwd }))),
+            ),
+            {
+              "rpc.aggregate": "source-control",
+            },
+          ),
+        [WS_METHODS.sourceControlListWorkflowRuns]: ({ cwd, pullRequestNumber, limit }) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlListWorkflowRuns,
+            ownerEffect(
+              WS_METHODS.sourceControlListWorkflowRuns,
+              sourceControlRegistry.resolve({ cwd }).pipe(
+                Effect.flatMap((provider) => {
+                  const method = provider.listWorkflowRuns;
+                  if (!method) {
+                    return Effect.fail(
+                      new SourceControlProviderError({
+                        provider: provider.kind,
+                        operation: "listWorkflowRuns",
+                        detail:
+                          "Workflow runs are only available for source control providers that expose CI status.",
+                      }),
+                    );
+                  }
+                  return method({
+                    cwd,
+                    ...(pullRequestNumber !== undefined ? { pullRequestNumber } : {}),
+                    ...(limit !== undefined ? { limit } : {}),
+                  });
+                }),
+              ),
+            ),
+            {
+              "rpc.aggregate": "source-control",
+            },
+          ),
+        [WS_METHODS.sourceControlGetWorkflowRunJobs]: ({ cwd, runId }) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlGetWorkflowRunJobs,
+            ownerEffect(
+              WS_METHODS.sourceControlGetWorkflowRunJobs,
+              sourceControlRegistry.resolve({ cwd }).pipe(
+                Effect.flatMap((provider) => {
+                  const method = provider.getWorkflowRunJobs;
+                  if (!method) {
+                    return Effect.fail(
+                      new SourceControlProviderError({
+                        provider: provider.kind,
+                        operation: "getWorkflowRunJobs",
+                        detail:
+                          "Workflow jobs are only available for source control providers that expose CI status.",
+                      }),
+                    );
+                  }
+                  return method({ cwd, runId });
+                }),
+              ),
+            ),
+            {
+              "rpc.aggregate": "source-control",
+            },
+          ),
+        [WS_METHODS.sourceControlGetWorkflowJobLog]: ({ cwd, runId, jobId }) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlGetWorkflowJobLog,
+            ownerEffect(
+              WS_METHODS.sourceControlGetWorkflowJobLog,
+              sourceControlRegistry.resolve({ cwd }).pipe(
+                Effect.flatMap((provider) => {
+                  const method = provider.getWorkflowJobLog;
+                  if (!method) {
+                    return Effect.fail(
+                      new SourceControlProviderError({
+                        provider: provider.kind,
+                        operation: "getWorkflowJobLog",
+                        detail:
+                          "Workflow logs are only available for source control providers that expose CI status.",
+                      }),
+                    );
+                  }
+                  return method({ cwd, runId, jobId });
+                }),
+              ),
             ),
             {
               "rpc.aggregate": "source-control",
