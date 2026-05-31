@@ -279,6 +279,7 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
             cwd={cwd}
             issueNumber={selection.number}
             onBack={handleBack}
+            onSelectLinkedChangeRequest={handleSelectLinkedChangeRequest}
           />
         ) : selection.kind === "pr" ? (
           <PullRequestDetail

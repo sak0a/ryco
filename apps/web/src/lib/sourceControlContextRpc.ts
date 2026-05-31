@@ -12,6 +12,8 @@ type SourceControlWorkflowRerunPayload =
 
 export const sourceControlContextQueryKeys = {
   all: ["sourceControl"] as const,
+  changeRequests: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["sourceControl", "changeRequests", environmentId ?? null, cwd] as const,
   issueList: (
     environmentId: EnvironmentId | null,
     cwd: string | null,
@@ -468,6 +470,9 @@ export function useRerunWorkflowMutation(input: {
     onSuccess: (result) => {
       qc.invalidateQueries({
         queryKey: sourceControlContextQueryKeys.workflows(input.environmentId, input.cwd),
+      });
+      qc.invalidateQueries({
+        queryKey: sourceControlContextQueryKeys.changeRequests(input.environmentId, input.cwd),
       });
       qc.invalidateQueries({
         queryKey: sourceControlContextQueryKeys.workflowRunJobs(

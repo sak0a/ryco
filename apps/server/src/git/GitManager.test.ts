@@ -18,9 +18,12 @@ import { GitCommandError, TextGenerationError } from "@ryco/contracts";
 import { type GitManagerShape } from "./GitManager.ts";
 import {
   GitHubCliError,
+  GITHUB_PULL_REQUEST_LIST_JSON_FIELDS,
+  GITHUB_PULL_REQUEST_SUMMARY_JSON_FIELDS,
   type GitHubCliShape,
   type GitHubPullRequestSummary,
   GitHubCli,
+  formatGitHubJsonFields,
 } from "../sourceControl/GitHubCli.ts";
 import { type TextGenerationShape, TextGeneration } from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -554,7 +557,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
             "--limit",
             String(input.limit ?? 1),
             "--json",
-            "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+            formatGitHubJsonFields(GITHUB_PULL_REQUEST_SUMMARY_JSON_FIELDS),
           ],
         }).pipe(
           Effect.map((result) => JSON.parse(result.stdout) as unknown[]),
@@ -605,7 +608,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
             "view",
             input.reference,
             "--json",
-            "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+            formatGitHubJsonFields(GITHUB_PULL_REQUEST_SUMMARY_JSON_FIELDS),
           ],
         }).pipe(Effect.map((result) => JSON.parse(result.stdout) as GitHubPullRequestSummary)),
       getRepositoryCloneUrls: (input) =>
@@ -1131,7 +1134,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           state: "open",
         });
         expect(ghCalls).toContain(
-          "pr list --head jasonLaster:statemachine --state all --limit 20 --json number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
+          `pr list --head jasonLaster:statemachine --state all --limit 20 --json ${formatGitHubJsonFields(GITHUB_PULL_REQUEST_LIST_JSON_FIELDS)}`,
         );
       }),
     20_000,

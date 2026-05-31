@@ -91,6 +91,8 @@ function toChangeRequest(summary: GitHubCli.GitHubPullRequestSummary): ChangeReq
     ...(summary.headRepositoryOwnerLogin !== undefined
       ? { headRepositoryOwnerLogin: summary.headRepositoryOwnerLogin }
       : {}),
+    ...(summary.headSha ? { headSha: summary.headSha } : {}),
+    ...(summary.checkRollup ? { checkRollup: summary.checkRollup } : {}),
   };
 }
 
@@ -335,8 +337,8 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
       }
 
       const stateArg: ChangeRequestState | "all" = input.state;
-      return github
-        .execute({
+      const executeListChangeRequests = (jsonFields: ReadonlyArray<string>) =>
+        github.execute({
           cwd: input.cwd,
           args: [
             "pr",
@@ -347,41 +349,49 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
             "--limit",
             String(input.limit ?? 20),
             "--json",
-            "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
+            GitHubCli.formatGitHubJsonFields(jsonFields),
           ],
-        })
-        .pipe(
-          Effect.flatMap((result) => {
-            const raw = result.stdout.trim();
-            if (raw.length === 0) {
-              return Effect.succeed([]);
-            }
-            return Effect.sync(() => GitHubPullRequests.decodeGitHubPullRequestListJson(raw)).pipe(
-              Effect.flatMap((decoded) =>
-                Result.isSuccess(decoded)
-                  ? Effect.succeed(
-                      decoded.success.map((item) => ({
-                        ...toChangeRequest(item),
-                        updatedAt: item.updatedAt,
-                      })),
-                    )
-                  : Effect.fail(
-                      new SourceControlProviderError({
-                        provider: "github",
-                        operation: "listChangeRequests",
-                        detail: "GitHub CLI returned invalid change request JSON.",
-                        cause: decoded.failure,
-                      }),
-                    ),
-              ),
-            );
-          }),
-          Effect.mapError((error) =>
-            Schema.is(SourceControlProviderError)(error)
-              ? error
-              : providerError("listChangeRequests", error),
+        });
+
+      return executeListChangeRequests(GitHubCli.GITHUB_PULL_REQUEST_LIST_JSON_FIELDS).pipe(
+        Effect.catchIf(GitHubCli.isStatusCheckRollupAccessError, () =>
+          executeListChangeRequests(
+            GitHubCli.withoutStatusCheckRollupJsonField(
+              GitHubCli.GITHUB_PULL_REQUEST_LIST_JSON_FIELDS,
+            ),
           ),
-        );
+        ),
+        Effect.flatMap((result) => {
+          const raw = result.stdout.trim();
+          if (raw.length === 0) {
+            return Effect.succeed([]);
+          }
+          return Effect.sync(() => GitHubPullRequests.decodeGitHubPullRequestListJson(raw)).pipe(
+            Effect.flatMap((decoded) =>
+              Result.isSuccess(decoded)
+                ? Effect.succeed(
+                    decoded.success.map((item) => ({
+                      ...toChangeRequest(item),
+                      updatedAt: item.updatedAt,
+                    })),
+                  )
+                : Effect.fail(
+                    new SourceControlProviderError({
+                      provider: "github",
+                      operation: "listChangeRequests",
+                      detail: "GitHub CLI returned invalid change request JSON.",
+                      cause: decoded.failure,
+                    }),
+                  ),
+            ),
+          );
+        }),
+        Effect.mapError((error) =>
+          Schema.is(SourceControlProviderError)(error)
+            ? error
+            : providerError("listChangeRequests", error),
+        ),
+      );
     };
 
   return SourceControlProvider.SourceControlProvider.of({

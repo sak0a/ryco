@@ -15,6 +15,67 @@ import { buildGitHubIssueCreateArgv, parseGitHubIssueCreateOutput } from "./gitH
 import * as GitHubPullRequests from "./gitHubPullRequests.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const STATUS_CHECK_ROLLUP_JSON_FIELD = "statusCheckRollup";
+
+const GITHUB_PULL_REQUEST_CORE_JSON_FIELDS = [
+  "number",
+  "title",
+  "url",
+  "baseRefName",
+  "headRefName",
+  "headRefOid",
+  "state",
+  "mergedAt",
+] as const;
+
+const GITHUB_PULL_REQUEST_METADATA_JSON_FIELDS = [
+  "isCrossRepository",
+  "isDraft",
+  "author",
+  "assignees",
+  "labels",
+  "comments",
+  "headRepository",
+  "headRepositoryOwner",
+] as const;
+
+export const GITHUB_PULL_REQUEST_SUMMARY_JSON_FIELDS = [
+  ...GITHUB_PULL_REQUEST_CORE_JSON_FIELDS,
+  ...GITHUB_PULL_REQUEST_METADATA_JSON_FIELDS,
+  STATUS_CHECK_ROLLUP_JSON_FIELD,
+] as const;
+
+export const GITHUB_PULL_REQUEST_LIST_JSON_FIELDS = [
+  ...GITHUB_PULL_REQUEST_CORE_JSON_FIELDS,
+  "updatedAt",
+  ...GITHUB_PULL_REQUEST_METADATA_JSON_FIELDS,
+  STATUS_CHECK_ROLLUP_JSON_FIELD,
+] as const;
+
+export const GITHUB_PULL_REQUEST_DETAIL_JSON_FIELDS = [
+  ...GITHUB_PULL_REQUEST_CORE_JSON_FIELDS,
+  ...GITHUB_PULL_REQUEST_METADATA_JSON_FIELDS,
+  STATUS_CHECK_ROLLUP_JSON_FIELD,
+  "body",
+  "comments",
+  "reviewRequests",
+  "reviews",
+  "commits",
+  "additions",
+  "deletions",
+  "changedFiles",
+  "files",
+] as const;
+
+export function formatGitHubJsonFields(fields: ReadonlyArray<string>): string {
+  return fields.join(",");
+}
+
+export function withoutStatusCheckRollupJsonField(
+  fields: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  return fields.filter((field) => field !== STATUS_CHECK_ROLLUP_JSON_FIELD);
+}
 
 export class GitHubCliError extends Schema.TaggedErrorClass<GitHubCliError>()("GitHubCliError", {
   operation: Schema.String,
@@ -47,6 +108,8 @@ export interface GitHubPullRequestSummary {
   readonly commentsCount?: number | null;
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
+  readonly headSha?: string;
+  readonly checkRollup?: ReadonlyArray<GitHubPullRequests.NormalizedGitHubCheckRollupItem>;
 }
 
 export interface GitHubPullRequestCommit {
@@ -258,6 +321,19 @@ function errorText(error: VcsError | unknown): string {
   return String(error);
 }
 
+export function isStatusCheckRollupAccessError(error: GitHubCliError): boolean {
+  const causeText = error.cause ? errorText(error.cause) : "";
+  const lower = `${errorText(error)}\n${causeText}`.toLowerCase();
+  return (
+    lower.includes(STATUS_CHECK_ROLLUP_JSON_FIELD.toLowerCase()) &&
+    (lower.includes("resource not accessible by integration") ||
+      lower.includes("must have actions read permission") ||
+      lower.includes("permission") ||
+      lower.includes("forbidden") ||
+      lower.includes("http 403"))
+  );
+}
+
 function normalizeGitHubCliError(
   operation: "execute" | "stdout",
   error: VcsError | unknown,
@@ -309,7 +385,7 @@ function normalizeGitHubCliError(
     return new GitHubCliError({
       operation,
       detail:
-        "GitHub Actions is not accessible for this repository. Check token permissions, Actions write access for reruns, and repository Actions settings.",
+        "GitHub Actions is not accessible for this repository. Check token permissions, required Actions access, and repository Actions settings.",
       cause: error,
     });
   }
@@ -504,12 +580,32 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
       })
       .pipe(Effect.mapError((error) => normalizeGitHubCliError("execute", error)));
 
+  const executePrJson = (input: {
+    readonly cwd: string;
+    readonly argsBeforeJson: ReadonlyArray<string>;
+    readonly jsonFields: ReadonlyArray<string>;
+    readonly timeoutMs?: number;
+  }) => {
+    const run = (jsonFields: ReadonlyArray<string>) =>
+      execute({
+        cwd: input.cwd,
+        args: [...input.argsBeforeJson, "--json", formatGitHubJsonFields(jsonFields)],
+        ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+      });
+
+    return run(input.jsonFields).pipe(
+      Effect.catchIf(isStatusCheckRollupAccessError, () =>
+        run(withoutStatusCheckRollupJsonField(input.jsonFields)),
+      ),
+    );
+  };
+
   return GitHubCli.of({
     execute,
     listOpenPullRequests: (input) =>
-      execute({
+      executePrJson({
         cwd: input.cwd,
-        args: [
+        argsBeforeJson: [
           "pr",
           "list",
           "--head",
@@ -518,9 +614,8 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           "open",
           "--limit",
           String(input.limit ?? 1),
-          "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
         ],
+        jsonFields: GITHUB_PULL_REQUEST_SUMMARY_JSON_FIELDS,
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
         Effect.flatMap((raw) =>
@@ -546,15 +641,10 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         ),
       ),
     getPullRequest: (input) =>
-      execute({
+      executePrJson({
         cwd: input.cwd,
-        args: [
-          "pr",
-          "view",
-          input.reference,
-          "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
-        ],
+        argsBeforeJson: ["pr", "view", input.reference],
+        jsonFields: GITHUB_PULL_REQUEST_SUMMARY_JSON_FIELDS,
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
         Effect.flatMap((raw) =>
@@ -728,18 +818,17 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         ),
       ),
     searchPullRequests: (input) =>
-      execute({
+      executePrJson({
         cwd: input.cwd,
-        args: [
+        argsBeforeJson: [
           "pr",
           "list",
           "--search",
           input.query,
           "--limit",
           String(input.limit ?? 20),
-          "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,comments,headRepository,headRepositoryOwner",
         ],
+        jsonFields: GITHUB_PULL_REQUEST_SUMMARY_JSON_FIELDS,
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
         Effect.flatMap((raw) =>
@@ -764,15 +853,10 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         ),
       ),
     getPullRequestDetail: (input) =>
-      execute({
+      executePrJson({
         cwd: input.cwd,
-        args: [
-          "pr",
-          "view",
-          input.reference,
-          "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,isDraft,author,assignees,labels,headRepository,headRepositoryOwner,body,comments,reviewRequests,reviews,commits,additions,deletions,changedFiles,files",
-        ],
+        argsBeforeJson: ["pr", "view", input.reference],
+        jsonFields: GITHUB_PULL_REQUEST_DETAIL_JSON_FIELDS,
       }).pipe(
         Effect.map((r) => r.stdout.trim()),
         Effect.flatMap((raw) =>

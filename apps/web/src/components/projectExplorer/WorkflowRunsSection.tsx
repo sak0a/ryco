@@ -12,16 +12,13 @@ import {
   AlertTriangleIcon,
   CheckCircle2Icon,
   ChevronRightIcon,
-  CircleDashedIcon,
   Clock3Icon,
   ExternalLinkIcon,
   FileTextIcon,
   GitBranchIcon,
   GitCommitIcon,
-  LoaderCircleIcon,
   RotateCwIcon,
   UserIcon,
-  XCircleIcon,
 } from "lucide-react";
 import {
   useRerunWorkflowMutation,
@@ -32,6 +29,18 @@ import {
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
+import { PrCheckStatusBadge } from "./PrCheckStatusBadge";
+import {
+  getCheckStatusFromRaw,
+  getCheckStatusFromWorkflowRun,
+  getPrCheckStatusForQuery,
+  getPrCheckStatusFromWorkflowRuns,
+  normalizeCheckToken,
+  primaryFailedCheckUrl,
+  shouldRefreshPrCheckStatus,
+  sourceControlOptionValue,
+} from "./prCheckStatus";
+import { usePrCheckPassNotifications } from "./usePrCheckPassNotifications";
 
 const dateTimeFmt = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -48,7 +57,6 @@ interface WorkflowRunsSectionProps {
   description?: string;
 }
 
-type WorkflowTone = "success" | "failure" | "running" | "waiting" | "neutral";
 type WorkflowRerunFeedbackTone = "success" | "permission-denied" | "not-rerunnable" | "error";
 
 interface WorkflowRerunFeedback {
@@ -60,81 +68,16 @@ type WorkflowRerunPayload =
   | { readonly target: "failed-jobs" }
   | { readonly target: "job"; readonly jobId: string };
 
-function optionValue<T>(value: Option.Option<T>): T | null {
-  return Option.isSome(value) ? value.value : null;
+function isCompletedStatus(status: string): boolean {
+  return normalizeCheckToken(status) === "completed";
 }
-
-function normalizeStatus(value: string | null | undefined): string {
-  return value?.trim().toLowerCase().replaceAll("_", " ") ?? "";
-}
-
-function isFailure(value: string | null | undefined): boolean {
-  return ["failure", "timed out", "action required", "startup failure"].includes(
-    normalizeStatus(value),
-  );
-}
-
-function isRerunnableFailure(input: {
-  readonly status: string;
-  readonly conclusion: string | null | undefined;
-}): boolean {
-  return isFailure(input.conclusion) && normalizeStatus(input.status) === "completed";
-}
-
-function workflowTone(input: {
-  readonly status: string;
-  readonly conclusion: string | null;
-}): WorkflowTone {
-  const status = normalizeStatus(input.status);
-  const conclusion = normalizeStatus(input.conclusion);
-  if (isFailure(conclusion)) return "failure";
-  if (conclusion === "success") return "success";
-  if (status === "in progress" || status === "queued") return "running";
-  if (status === "waiting" || status === "requested" || status === "pending") return "waiting";
-  return "neutral";
-}
-
-function toneClasses(tone: WorkflowTone): string {
-  switch (tone) {
-    case "success":
-      return "border-emerald-500/30 bg-emerald-500/8 text-emerald-700 dark:text-emerald-300";
-    case "failure":
-      return "border-rose-500/35 bg-rose-500/10 text-rose-700 dark:text-rose-300";
-    case "running":
-      return "border-sky-500/30 bg-sky-500/8 text-sky-700 dark:text-sky-300";
-    case "waiting":
-      return "border-amber-500/30 bg-amber-500/8 text-amber-700 dark:text-amber-300";
-    case "neutral":
-      return "border-border bg-muted/30 text-muted-foreground";
-  }
-}
-
-function WorkflowStatusIcon({ tone }: { tone: WorkflowTone }) {
-  switch (tone) {
-    case "success":
-      return <CheckCircle2Icon className="size-3.5" />;
-    case "failure":
-      return <XCircleIcon className="size-3.5" />;
-    case "running":
-      return <LoaderCircleIcon className="size-3.5 animate-spin" />;
-    case "waiting":
-      return <Clock3Icon className="size-3.5" />;
-    case "neutral":
-      return <CircleDashedIcon className="size-3.5" />;
-  }
-}
-
-function statusLabel(status: string, conclusion: string | null): string {
-  return conclusion ? normalizeStatus(conclusion) : normalizeStatus(status) || "unknown";
-}
-
 function formatDate(value: Option.Option<DateTime.Utc>): string | null {
-  const dateTime = optionValue(value);
+  const dateTime = sourceControlOptionValue(value);
   return dateTime ? dateTimeFmt.format(DateTime.toDate(dateTime)) : null;
 }
 
 function formatDuration(value: Option.Option<number>): string | null {
-  const ms = optionValue(value);
+  const ms = sourceControlOptionValue(value);
   if (ms === null) return null;
   const seconds = Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -228,17 +171,15 @@ function useWorkflowRerunAction(input: {
 }
 
 function StatusPill(props: { status: string; conclusion: string | null }) {
-  const tone = workflowTone(props);
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-medium text-[11px]",
-        toneClasses(tone),
-      )}
-    >
-      <WorkflowStatusIcon tone={tone} />
-      {statusLabel(props.status, props.conclusion)}
-    </span>
+    <PrCheckStatusBadge
+      view={getCheckStatusFromRaw({
+        name: "check",
+        status: props.status,
+        conclusion: props.conclusion,
+      })}
+      mode="compact"
+    />
   );
 }
 
@@ -253,8 +194,8 @@ function MetaItem(props: { icon: ReactNode; children: ReactNode }) {
 
 export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
-  const runsQuery = useQuery(
-    workflowRunsQueryOptions({
+  const runsQuery = useQuery({
+    ...workflowRunsQueryOptions({
       environmentId: props.environmentId,
       cwd: props.cwd,
       ...(props.pullRequestNumber !== undefined
@@ -262,10 +203,46 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
         : {}),
       limit: 20,
     }),
-  );
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      const status = getPrCheckStatusFromWorkflowRuns({
+        runs: data.runs,
+        headSha: sourceControlOptionValue(data.headSha),
+      });
+      return shouldRefreshPrCheckStatus(status) ? 30_000 : false;
+    },
+  });
 
   const runs = runsQuery.data?.runs ?? [];
-  const failedRuns = runs.filter((run) => isFailure(optionValue(run.conclusion)));
+  const headSha = runsQuery.data ? sourceControlOptionValue(runsQuery.data.headSha) : null;
+  const status = getPrCheckStatusForQuery({
+    isLoading: runsQuery.isLoading,
+    error: runsQuery.error,
+    status: runsQuery.data
+      ? getPrCheckStatusFromWorkflowRuns({
+          runs,
+          headSha,
+        })
+      : null,
+  });
+  const failedRuns = runs.filter((run) => getCheckStatusFromWorkflowRun(run).kind === "failed");
+  const failedUrl = primaryFailedCheckUrl(status);
+
+  usePrCheckPassNotifications(
+    props.pullRequestNumber && runsQuery.data
+      ? [
+          {
+            environmentId: props.environmentId,
+            cwd: props.cwd,
+            provider: runsQuery.data.provider,
+            number: props.pullRequestNumber,
+            title: `PR #${props.pullRequestNumber}`,
+            status,
+          },
+        ]
+      : [],
+  );
 
   return (
     <section className="flex h-full min-h-0 flex-col">
@@ -284,6 +261,7 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
             </p>
           ) : null}
         </div>
+        <PrCheckStatusBadge view={status} mode="compact" className="mt-0.5" />
         <Button
           type="button"
           size="sm"
@@ -297,11 +275,31 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
       </header>
 
       {failedRuns.length > 0 ? (
-        <div className="border-rose-500/20 border-b bg-rose-500/8 px-4 py-2 text-rose-700 text-xs dark:text-rose-300">
+        <div className="flex items-center gap-2 border-rose-500/20 border-b bg-rose-500/8 px-4 py-2 text-rose-700 text-xs dark:text-rose-300">
           <span className="inline-flex items-center gap-1.5 font-medium">
             <AlertTriangleIcon className="size-3.5" />
             {failedRuns.length} failed workflow {failedRuns.length === 1 ? "run" : "runs"}
           </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="ml-auto h-7 text-rose-700 hover:text-rose-800 dark:text-rose-300 dark:hover:text-rose-200"
+            onClick={() => setExpandedRunId(failedRuns[0]?.runId ?? null)}
+          >
+            Show failed jobs
+          </Button>
+          {failedUrl ? (
+            <a
+              href={failedUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-rose-700 hover:bg-rose-500/10 hover:text-rose-800 dark:text-rose-300 dark:hover:text-rose-200"
+            >
+              <ExternalLinkIcon className="size-3" />
+              Open run
+            </a>
+          ) : null}
         </div>
       ) : null}
 
@@ -329,18 +327,20 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
           <ol className="space-y-2">
             {runs.map((run) => {
               const isExpanded = expandedRunId === run.runId;
+              const runStatus = getCheckStatusFromWorkflowRun(run);
               return (
                 <li
                   key={run.runId}
                   className={cn(
                     "overflow-hidden rounded-lg border border-border/70 bg-muted/12",
-                    isFailure(optionValue(run.conclusion)) ? "border-rose-500/30" : "",
+                    runStatus.kind === "failed" ? "border-rose-500/30" : "",
                   )}
                 >
                   <WorkflowRunRow
                     environmentId={props.environmentId}
                     cwd={props.cwd}
                     run={run}
+                    status={runStatus}
                     expanded={isExpanded}
                     onToggle={() => setExpandedRunId(isExpanded ? null : run.runId)}
                   />
@@ -365,19 +365,16 @@ function WorkflowRunRow(props: {
   environmentId: EnvironmentId | null;
   cwd: string | null;
   run: SourceControlWorkflowRun;
+  status: ReturnType<typeof getCheckStatusFromWorkflowRun>;
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const conclusion = optionValue(props.run.conclusion);
-  const tone = workflowTone({ status: props.run.status, conclusion });
+  const conclusion = sourceControlOptionValue(props.run.conclusion);
   const startedAt = formatDate(props.run.startedAt);
   const duration = formatDuration(props.run.durationMs);
-  const actor = optionValue(props.run.actor);
-  const branch = optionValue(props.run.branch);
-  const canRerunFailedJobs = isRerunnableFailure({
-    status: props.run.status,
-    conclusion,
-  });
+  const actor = sourceControlOptionValue(props.run.actor);
+  const branch = sourceControlOptionValue(props.run.branch);
+  const canRerunFailedJobs = props.status.kind === "failed" && isCompletedStatus(props.run.status);
   const rerun = useWorkflowRerunAction({
     environmentId: props.environmentId,
     cwd: props.cwd,
@@ -400,9 +397,7 @@ function WorkflowRunRow(props: {
               props.expanded ? "rotate-90" : "",
             )}
           />
-          <span className={cn("mt-0.5 shrink-0", tone === "failure" ? "text-rose-500" : "")}>
-            <WorkflowStatusIcon tone={tone} />
-          </span>
+          <PrCheckStatusBadge view={props.status} mode="icon" className="mt-0.5 size-6" />
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <span className="truncate font-medium text-sm">{props.run.workflowName}</span>
@@ -479,7 +474,15 @@ function WorkflowRunJobsPanel(props: {
   );
 
   const jobs = jobsQuery.data?.jobs ?? [];
-  const failedJobs = jobs.filter((job) => isFailure(optionValue(job.conclusion)));
+  const failedJobs = jobs.filter(
+    (job) =>
+      getCheckStatusFromRaw({
+        name: job.name,
+        status: job.status,
+        conclusion: sourceControlOptionValue(job.conclusion),
+        url: sourceControlOptionValue(job.url),
+      }).kind === "failed",
+  );
 
   return (
     <div className="border-border/60 border-t bg-background/35 px-3 py-3">
@@ -531,11 +534,17 @@ function WorkflowJobItem(props: {
   cwd: string | null;
 }) {
   const [showLog, setShowLog] = useState(false);
-  const conclusion = optionValue(props.job.conclusion);
+  const conclusion = sourceControlOptionValue(props.job.conclusion);
   const startedAt = formatDate(props.job.startedAt);
   const duration = formatDuration(props.job.durationMs);
-  const failed = isFailure(conclusion);
-  const canRerunJob = isRerunnableFailure({ status: props.job.status, conclusion });
+  const status = getCheckStatusFromRaw({
+    name: props.job.name,
+    status: props.job.status,
+    conclusion,
+    url: sourceControlOptionValue(props.job.url),
+  });
+  const failed = status.kind === "failed";
+  const canRerunJob = failed && isCompletedStatus(props.job.status);
   const rerun = useWorkflowRerunAction({
     environmentId: props.environmentId,
     cwd: props.cwd,
@@ -621,7 +630,7 @@ function WorkflowStepList({ steps }: { steps: ReadonlyArray<SourceControlWorkflo
   return (
     <ol className="border-border/60 border-t divide-y divide-border/40">
       {steps.map((step) => {
-        const conclusion = optionValue(step.conclusion);
+        const conclusion = sourceControlOptionValue(step.conclusion);
         const duration = formatDuration(step.durationMs);
         return (
           <li

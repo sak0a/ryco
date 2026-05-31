@@ -22,6 +22,25 @@ export type SourceControlProviderInfo = typeof SourceControlProviderInfo.Type;
 export const ChangeRequestState = Schema.Literals(["open", "closed", "merged"]);
 export type ChangeRequestState = typeof ChangeRequestState.Type;
 
+export const SourceControlCheckRollupItemKind = Schema.Literals([
+  "check-run",
+  "status-context",
+  "unknown",
+]);
+export type SourceControlCheckRollupItemKind = typeof SourceControlCheckRollupItemKind.Type;
+
+export const SourceControlCheckRollupItem = Schema.Struct({
+  kind: SourceControlCheckRollupItemKind,
+  name: TrimmedNonEmptyString,
+  workflowName: Schema.optional(TrimmedNonEmptyString),
+  status: Schema.Option(TrimmedNonEmptyString),
+  conclusion: Schema.Option(TrimmedNonEmptyString),
+  url: Schema.Option(TrimmedNonEmptyString),
+  startedAt: Schema.Option(Schema.DateTimeUtc),
+  completedAt: Schema.Option(Schema.DateTimeUtc),
+});
+export type SourceControlCheckRollupItem = typeof SourceControlCheckRollupItem.Type;
+
 export const SourceControlLabel = Schema.Struct({
   name: TrimmedNonEmptyString,
   color: Schema.optional(TrimmedNonEmptyString),
@@ -46,6 +65,8 @@ export const ChangeRequest = Schema.Struct({
   commentsCount: Schema.optional(Schema.Number),
   headRepositoryNameWithOwner: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   headRepositoryOwnerLogin: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  headSha: Schema.optional(TrimmedNonEmptyString),
+  checkRollup: Schema.optional(Schema.Array(SourceControlCheckRollupItem)),
 });
 export type ChangeRequest = typeof ChangeRequest.Type;
 
