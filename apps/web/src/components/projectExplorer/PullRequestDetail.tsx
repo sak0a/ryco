@@ -6,7 +6,7 @@ import type {
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ArrowLeftIcon,
   ChevronRightIcon,
@@ -24,8 +24,8 @@ import { cn } from "~/lib/utils";
 import { ContextPickerTabs } from "../chat/ContextPickerTabs";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
-import { CommentComposer, CommentItem } from "./CommentThread";
-import { deriveOriginalPostAuthorRole } from "./CommentThread.logic";
+import { CommentComposer, CommentItem, type CommentQuoteInsertion } from "./CommentThread";
+import { buildCommentQuoteMarkdown, deriveOriginalPostAuthorRole } from "./CommentThread.logic";
 import { changeRequestStateKind, StateBadge } from "./StateBadge";
 import { type DiffLine, parseDiffLines } from "./diffLines";
 import { splitUnifiedDiffByFile } from "./unifiedDiffSplit";
@@ -156,6 +156,21 @@ function PullRequestDetailBody(props: {
 }) {
   const { detail } = props;
   const [activeTab, setActiveTab] = useState<PullRequestTab>("conversation");
+  const [quoteInsertion, setQuoteInsertion] = useState<CommentQuoteInsertion | null>(null);
+  const nextQuoteInsertionIdRef = useRef(0);
+  const queueQuoteInsertion = useCallback(
+    (input: Parameters<typeof buildCommentQuoteMarkdown>[0]) => {
+      nextQuoteInsertionIdRef.current += 1;
+      setQuoteInsertion({
+        id: nextQuoteInsertionIdRef.current,
+        markdown: buildCommentQuoteMarkdown(input),
+      });
+    },
+    [],
+  );
+  const handleQuoteInsertionHandled = useCallback((id: number) => {
+    setQuoteInsertion((current) => (current?.id === id ? null : current));
+  }, []);
 
   const opCreatedAt =
     detail.updatedAt && Option.isSome(detail.updatedAt)
@@ -168,6 +183,8 @@ function PullRequestDetailBody(props: {
   const fileCount = detail.changedFiles ?? detail.files?.length ?? 0;
   const additions = detail.additions ?? 0;
   const deletions = detail.deletions ?? 0;
+  const onSubmitComment = props.onSubmitComment;
+  const canComment = onSubmitComment !== undefined;
 
   return (
     <div className="flex h-full min-h-0">
@@ -218,6 +235,17 @@ function PullRequestDetailBody(props: {
                   createdAt={opCreatedAt}
                   authorRole={opAuthorRole.role}
                   isOriginalPost
+                  onQuote={
+                    canComment
+                      ? () =>
+                          queueQuoteInsertion({
+                            author: opAuthorRole.author,
+                            body: detail.body,
+                            createdAt: opCreatedAt,
+                            contextLabel: "pull request description",
+                          })
+                      : undefined
+                  }
                 />
               </li>
               {detail.comments.map((comment) => (
@@ -229,15 +257,28 @@ function PullRequestDetailBody(props: {
                     authorAssociation={comment.authorAssociation}
                     authorRole={comment.authorRole}
                     reviewState={comment.reviewState}
+                    onQuote={
+                      canComment
+                        ? () =>
+                            queueQuoteInsertion({
+                              author: comment.author,
+                              body: comment.body,
+                              createdAt: comment.createdAt,
+                              contextLabel: "PR conversation",
+                            })
+                        : undefined
+                    }
                   />
                 </li>
               ))}
-              {props.onSubmitComment ? (
+              {onSubmitComment !== undefined ? (
                 <li key="comment-composer">
                   <CommentComposer
                     placeholder="Write a conversation comment"
                     submitLabel="Comment"
-                    onSubmit={props.onSubmitComment}
+                    onSubmit={onSubmitComment}
+                    quoteInsertion={quoteInsertion}
+                    onQuoteInsertionHandled={handleQuoteInsertionHandled}
                   />
                 </li>
               ) : null}

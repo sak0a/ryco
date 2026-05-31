@@ -140,10 +140,16 @@ export const SourceControlCreateIssueInput = Schema.Struct({
 });
 export type SourceControlCreateIssueInput = typeof SourceControlCreateIssueInput.Type;
 
+const NonBlankMarkdownBody = Schema.String.check(
+  Schema.makeFilter((body: string) =>
+    body.trim().length > 0 ? undefined : "Expected a non-blank Markdown body",
+  ),
+);
+
 export const SourceControlAddIssueCommentInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   reference: TrimmedNonEmptyString,
-  body: TrimmedNonEmptyString,
+  body: NonBlankMarkdownBody,
   clientMutationId: Schema.optional(TrimmedNonEmptyString),
 });
 export type SourceControlAddIssueCommentInput = typeof SourceControlAddIssueCommentInput.Type;
@@ -199,7 +205,7 @@ export type SourceControlChangeRequestDetail = typeof SourceControlChangeRequest
 export const SourceControlAddChangeRequestCommentInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   reference: TrimmedNonEmptyString,
-  body: TrimmedNonEmptyString,
+  body: NonBlankMarkdownBody,
   clientMutationId: Schema.optional(TrimmedNonEmptyString),
 });
 export type SourceControlAddChangeRequestCommentInput =

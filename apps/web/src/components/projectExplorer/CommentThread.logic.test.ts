@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { DateTime } from "effect";
 import {
+  appendQuoteToCommentDraft,
   authorAssociationLabel,
   avatarUrlForAuthor,
+  buildCommentQuoteMarkdown,
   commentRoleBadges,
   commentToneForAuthorRole,
   deriveOriginalPostAuthorRole,
+  hasSubmittableCommentDraft,
   hashAuthorToHue,
+  normalizeCommentDraftForSubmit,
 } from "./CommentThread.logic";
 
 describe("avatarUrlForAuthor", () => {
@@ -192,5 +197,72 @@ describe("deriveOriginalPostAuthorRole", () => {
         isRepositoryMaintainer: false,
       },
     });
+  });
+});
+
+describe("comment quote markdown", () => {
+  const createdAt = DateTime.fromDateUnsafe(new Date("2026-03-14T10:05:30.000Z"));
+
+  it("builds a full-body blockquote with author, context, and UTC timestamp", () => {
+    expect(
+      buildCommentQuoteMarkdown({
+        author: "octocat",
+        contextLabel: "PR conversation",
+        createdAt,
+        body: "Looks good.\n\nOne follow-up.",
+      }),
+    ).toBe(
+      [
+        "> @octocat wrote in PR conversation on 2026-03-14 10:05 UTC:",
+        ">",
+        "> Looks good.",
+        ">",
+        "> One follow-up.",
+      ].join("\n"),
+    );
+  });
+
+  it("normalizes CRLF bodies before quoting", () => {
+    expect(
+      buildCommentQuoteMarkdown({
+        author: "alice",
+        createdAt,
+        body: "line one\r\nline two\r",
+      }),
+    ).toContain("> line one\n> line two");
+  });
+
+  it("appends quotes without replacing an existing draft", () => {
+    const quote = buildCommentQuoteMarkdown({
+      author: "alice",
+      contextLabel: "issue comment",
+      createdAt,
+      body: "Please add docs.",
+    });
+
+    expect(appendQuoteToCommentDraft("Existing draft", quote)).toBe(
+      `Existing draft\n\n${quote}\n\n`,
+    );
+  });
+
+  it("keeps a single blank line before appended quotes when the draft already ends with newline", () => {
+    const quote = "> quoted";
+    expect(appendQuoteToCommentDraft("Existing draft\n", quote)).toBe(
+      "Existing draft\n\n> quoted\n\n",
+    );
+    expect(appendQuoteToCommentDraft("Existing draft\n\n", quote)).toBe(
+      "Existing draft\n\n> quoted\n\n",
+    );
+  });
+});
+
+describe("comment draft submission", () => {
+  it("preserves leading markdown whitespace while trimming trailing blank space", () => {
+    expect(normalizeCommentDraftForSubmit("    code block\n")).toBe("    code block");
+  });
+
+  it("uses trimmed content only to decide whether a draft is submittable", () => {
+    expect(hasSubmittableCommentDraft("   ")).toBe(false);
+    expect(hasSubmittableCommentDraft("  **ship it**  ")).toBe(true);
   });
 });

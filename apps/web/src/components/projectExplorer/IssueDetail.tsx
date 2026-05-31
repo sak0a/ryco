@@ -1,12 +1,13 @@
 import type { EnvironmentId, SourceControlIssueDetail } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
 import { useQuery } from "@tanstack/react-query";
+import { useCallback, useRef, useState } from "react";
 import { ArrowLeftIcon, ExternalLinkIcon } from "lucide-react";
 import { issueDetailQueryOptions, useAddIssueCommentMutation } from "~/lib/sourceControlContextRpc";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
-import { CommentComposer, CommentItem } from "./CommentThread";
-import { deriveOriginalPostAuthorRole } from "./CommentThread.logic";
+import { CommentComposer, CommentItem, type CommentQuoteInsertion } from "./CommentThread";
+import { buildCommentQuoteMarkdown, deriveOriginalPostAuthorRole } from "./CommentThread.logic";
 import { StateBadge } from "./StateBadge";
 import { WorktreeItemSidebar } from "./WorktreeItemSidebar";
 
@@ -129,6 +130,23 @@ function IssueDetailBody(props: {
       ? detail.updatedAt.value
       : DateTime.fromDateUnsafe(new Date());
   const opAuthorRole = deriveOriginalPostAuthorRole(detail);
+  const [quoteInsertion, setQuoteInsertion] = useState<CommentQuoteInsertion | null>(null);
+  const nextQuoteInsertionIdRef = useRef(0);
+  const queueQuoteInsertion = useCallback(
+    (input: Parameters<typeof buildCommentQuoteMarkdown>[0]) => {
+      nextQuoteInsertionIdRef.current += 1;
+      setQuoteInsertion({
+        id: nextQuoteInsertionIdRef.current,
+        markdown: buildCommentQuoteMarkdown(input),
+      });
+    },
+    [],
+  );
+  const handleQuoteInsertionHandled = useCallback((id: number) => {
+    setQuoteInsertion((current) => (current?.id === id ? null : current));
+  }, []);
+  const onSubmitComment = props.onSubmitComment;
+  const canComment = onSubmitComment !== undefined;
 
   return (
     <div className="flex h-full min-h-0">
@@ -160,6 +178,17 @@ function IssueDetailBody(props: {
               createdAt={opCreatedAt}
               authorRole={opAuthorRole.role}
               isOriginalPost
+              onQuote={
+                canComment
+                  ? () =>
+                      queueQuoteInsertion({
+                        author: opAuthorRole.author,
+                        body: detail.body,
+                        createdAt: opCreatedAt,
+                        contextLabel: "issue description",
+                      })
+                  : undefined
+              }
             />
           </li>
           {detail.comments.map((comment) => (
@@ -171,15 +200,28 @@ function IssueDetailBody(props: {
                 authorAssociation={comment.authorAssociation}
                 authorRole={comment.authorRole}
                 reviewState={comment.reviewState}
+                onQuote={
+                  canComment
+                    ? () =>
+                        queueQuoteInsertion({
+                          author: comment.author,
+                          body: comment.body,
+                          createdAt: comment.createdAt,
+                          contextLabel: "issue comment",
+                        })
+                    : undefined
+                }
               />
             </li>
           ))}
-          {props.onSubmitComment ? (
+          {onSubmitComment !== undefined ? (
             <li key="comment-composer">
               <CommentComposer
                 placeholder="Write a comment on this issue"
                 submitLabel="Comment"
-                onSubmit={props.onSubmitComment}
+                onSubmit={onSubmitComment}
+                quoteInsertion={quoteInsertion}
+                onQuoteInsertionHandled={handleQuoteInsertionHandled}
               />
             </li>
           ) : null}

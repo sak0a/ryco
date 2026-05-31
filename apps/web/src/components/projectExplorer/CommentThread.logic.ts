@@ -1,4 +1,5 @@
 import type { SourceControlCommentAuthorRole } from "@ryco/contracts";
+import { DateTime } from "effect";
 import {
   classifySourceControlCommentAuthorRole,
   parseGitHubRepositoryOwnerFromUrl,
@@ -144,4 +145,56 @@ export function hashAuthorToHue(author: string): number {
     hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
   }
   return hash % 360;
+}
+
+export interface CommentQuoteMarkdownInput {
+  readonly author: string;
+  readonly body: string;
+  readonly createdAt: DateTime.Utc;
+  readonly contextLabel?: string | undefined;
+}
+
+function quoteAuthor(author: string): string {
+  const trimmed = author.trim();
+  if (trimmed.length === 0 || trimmed === UNKNOWN_AUTHOR_PLACEHOLDER) return "unknown author";
+  return `@${trimmed}`;
+}
+
+function quoteTimestamp(createdAt: DateTime.Utc): string {
+  const date = DateTime.toDate(createdAt);
+  return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+function quoteBodyLines(body: string): ReadonlyArray<string> {
+  const normalized = body.replace(/\r\n?/gu, "\n").trim();
+  if (normalized.length === 0) return ["> _No comment body._"];
+  return normalized.split("\n").map((line) => (line.length > 0 ? `> ${line}` : ">"));
+}
+
+export function buildCommentQuoteMarkdown(input: CommentQuoteMarkdownInput): string {
+  const contextLabel = input.contextLabel?.trim();
+  const context = contextLabel ? ` in ${contextLabel}` : "";
+  // First-pass quote replies quote the full comment body; selected-text quoting needs
+  // selection-to-source mapping from the rendered Markdown comments.
+  return [
+    `> ${quoteAuthor(input.author)} wrote${context} on ${quoteTimestamp(input.createdAt)}:`,
+    ">",
+    ...quoteBodyLines(input.body),
+  ].join("\n");
+}
+
+export function appendQuoteToCommentDraft(draft: string, quoteMarkdown: string): string {
+  const quote = quoteMarkdown.trimEnd();
+  if (quote.length === 0) return draft;
+  const separator =
+    draft.length === 0 ? "" : draft.endsWith("\n\n") ? "" : draft.endsWith("\n") ? "\n" : "\n\n";
+  return `${draft}${separator}${quote}\n\n`;
+}
+
+export function normalizeCommentDraftForSubmit(draft: string): string {
+  return draft.trimEnd();
+}
+
+export function hasSubmittableCommentDraft(draft: string): boolean {
+  return draft.trim().length > 0;
 }
