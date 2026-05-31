@@ -590,4 +590,64 @@ describe("GitHubCli.layer", () => {
       }).pipe(Effect.provide(layer)),
     );
   });
+
+  describe("workflow reruns", () => {
+    it.effect("requests rerun of failed jobs for a workflow run", () =>
+      Effect.gen(function* () {
+        mockRun.mockReturnValueOnce(Effect.succeed(processOutput("")));
+
+        const gh = yield* GitHubCli.GitHubCli;
+        yield* gh.rerunFailedWorkflowJobs({ cwd: "/tmp", runId: "12345" });
+
+        expect(mockRun).toHaveBeenCalledWith({
+          operation: "GitHubCli.execute",
+          command: "gh",
+          args: ["api", "-X", "POST", "repos/{owner}/{repo}/actions/runs/12345/rerun-failed-jobs"],
+          cwd: "/tmp",
+          timeoutMs: 45_000,
+        });
+      }).pipe(Effect.provide(layer)),
+    );
+
+    it.effect("requests rerun of a workflow job", () =>
+      Effect.gen(function* () {
+        mockRun.mockReturnValueOnce(Effect.succeed(processOutput("")));
+
+        const gh = yield* GitHubCli.GitHubCli;
+        yield* gh.rerunWorkflowJob({ cwd: "/tmp", jobId: "67890" });
+
+        expect(mockRun).toHaveBeenCalledWith({
+          operation: "GitHubCli.execute",
+          command: "gh",
+          args: ["api", "-X", "POST", "repos/{owner}/{repo}/actions/jobs/67890/rerun"],
+          cwd: "/tmp",
+          timeoutMs: 45_000,
+        });
+      }).pipe(Effect.provide(layer)),
+    );
+
+    it.effect("surfaces not-rerunnable workflow rerun errors clearly", () =>
+      Effect.gen(function* () {
+        mockRun.mockReturnValueOnce(
+          Effect.fail(
+            new VcsProcessExitError({
+              operation: "GitHubCli.execute",
+              command: "gh api",
+              cwd: "/repo",
+              exitCode: 1,
+              detail: "HTTP 422: Unprocessable Entity",
+            }),
+          ),
+        );
+
+        const gh = yield* GitHubCli.GitHubCli;
+        const error = yield* gh
+          .rerunFailedWorkflowJobs({ cwd: "/repo", runId: "123" })
+          .pipe(Effect.flip);
+
+        assert.equal(error.operation, "rerunFailedWorkflowJobs");
+        assert.equal(error.detail.includes("cannot rerun"), true);
+      }).pipe(Effect.provide(layer)),
+    );
+  });
 });

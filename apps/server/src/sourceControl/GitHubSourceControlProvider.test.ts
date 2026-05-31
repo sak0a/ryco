@@ -323,6 +323,62 @@ it.effect("searchChangeRequests passes query through to cli.searchPullRequests",
   }),
 );
 
+it.effect("rerunWorkflow delegates failed-jobs reruns to GitHub Actions", () =>
+  Effect.gen(function* () {
+    let capturedRunId: string | undefined;
+    const provider = yield* makeProvider({
+      rerunFailedWorkflowJobs: (input) => {
+        capturedRunId = input.runId;
+        return Effect.void;
+      },
+    });
+
+    const rerunWorkflow = provider.rerunWorkflow;
+    assert.ok(rerunWorkflow);
+    const result = yield* rerunWorkflow({
+      cwd: "/repo",
+      runId: "123",
+      target: "failed-jobs",
+    });
+
+    assert.strictEqual(capturedRunId, "123");
+    assert.deepStrictEqual(result, {
+      provider: "github",
+      runId: "123",
+      target: "failed-jobs",
+    });
+  }),
+);
+
+it.effect("rerunWorkflow delegates job reruns to GitHub Actions", () =>
+  Effect.gen(function* () {
+    let capturedJobId: string | undefined;
+    const provider = yield* makeProvider({
+      rerunWorkflowJob: (input) => {
+        capturedJobId = input.jobId;
+        return Effect.void;
+      },
+    });
+
+    const rerunWorkflow = provider.rerunWorkflow;
+    assert.ok(rerunWorkflow);
+    const result = yield* rerunWorkflow({
+      cwd: "/repo",
+      runId: "123",
+      target: "job",
+      jobId: "456",
+    });
+
+    assert.strictEqual(capturedJobId, "456");
+    assert.deepStrictEqual(result, {
+      provider: "github",
+      runId: "123",
+      target: "job",
+      jobId: "456",
+    });
+  }),
+);
+
 it.effect("getChangeRequestDetail returns body and comments", () =>
   Effect.gen(function* () {
     const provider = yield* makeProvider({

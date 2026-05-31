@@ -9,6 +9,7 @@ import {
   SourceControlAssigneeCandidate,
   SourceControlAddIssueCommentInput,
   SourceControlCreateIssueInput,
+  SourceControlWorkflowRerunInput,
 } from "./sourceControl.ts";
 
 describe("truncateSourceControlDetailContent", () => {
@@ -208,6 +209,24 @@ describe("SourceControlAddIssueCommentInput", () => {
     expect(() => decode({ cwd: "/repo", reference: "42", body: "" })).toThrow();
     expect(() => decode({ cwd: "", reference: "42", body: "x" })).toThrow();
     expect(() => decode({ cwd: "/repo", reference: "", body: "x" })).toThrow();
+  });
+});
+
+describe("SourceControlWorkflowRerunInput", () => {
+  it("decodes run-level and job-level rerun requests", () => {
+    const decode = Schema.decodeUnknownSync(SourceControlWorkflowRerunInput);
+    expect(decode({ cwd: "/repo", runId: "123", target: "failed-jobs" })).toEqual({
+      cwd: "/repo",
+      runId: "123",
+      target: "failed-jobs",
+    });
+    expect(decode({ cwd: "/repo", runId: "123", target: "job", jobId: "456" })).toEqual({
+      cwd: "/repo",
+      runId: "123",
+      target: "job",
+      jobId: "456",
+    });
+    expect(() => decode({ cwd: "/repo", runId: "123", target: "job" })).toThrow();
   });
 });
 

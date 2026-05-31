@@ -231,6 +231,16 @@ export interface GitHubCliShape {
     readonly runId: string;
     readonly jobId: string;
   }) => Effect.Effect<string, GitHubCliError>;
+
+  readonly rerunFailedWorkflowJobs: (input: {
+    readonly cwd: string;
+    readonly runId: string;
+  }) => Effect.Effect<void, GitHubCliError>;
+
+  readonly rerunWorkflowJob: (input: {
+    readonly cwd: string;
+    readonly jobId: string;
+  }) => Effect.Effect<void, GitHubCliError>;
 }
 
 export class GitHubCli extends Context.Service<GitHubCli, GitHubCliShape>()(
@@ -291,6 +301,7 @@ function normalizeGitHubCliError(
   if (
     lower.includes("resource not accessible by integration") ||
     lower.includes("must have actions read permission") ||
+    lower.includes("must have actions write permission") ||
     lower.includes("permission denied") ||
     lower.includes("forbidden") ||
     lower.includes("http 403")
@@ -298,7 +309,7 @@ function normalizeGitHubCliError(
     return new GitHubCliError({
       operation,
       detail:
-        "GitHub Actions is not accessible for this repository. Check token permissions and repository Actions settings.",
+        "GitHub Actions is not accessible for this repository. Check token permissions, Actions write access for reruns, and repository Actions settings.",
       cause: error,
     });
   }
@@ -312,6 +323,20 @@ function normalizeGitHubCliError(
     return new GitHubCliError({
       operation,
       detail: "GitHub Actions logs are no longer available for this run.",
+      cause: error,
+    });
+  }
+
+  if (
+    lower.includes("http 422") ||
+    lower.includes("unprocessable entity") ||
+    lower.includes("cannot rerun") ||
+    lower.includes("cannot re-run") ||
+    lower.includes("no failed jobs")
+  ) {
+    return new GitHubCliError({
+      operation,
+      detail: "GitHub Actions cannot rerun this workflow run or job in its current state.",
       cause: error,
     });
   }
@@ -432,6 +457,22 @@ function workflowRunsEndpoint(input: { readonly headSha?: string; readonly limit
     params.set("head_sha", input.headSha.trim());
   }
   return `repos/{owner}/{repo}/actions/runs?${params.toString()}`;
+}
+
+function withGitHubCliOperation<A>(
+  operation: string,
+  effect: Effect.Effect<A, GitHubCliError>,
+): Effect.Effect<A, GitHubCliError> {
+  return effect.pipe(
+    Effect.mapError(
+      (error) =>
+        new GitHubCliError({
+          operation,
+          detail: error.detail,
+          cause: error,
+        }),
+    ),
+  );
 }
 
 function pullRequestApiReference(reference: string): string {
@@ -940,6 +981,29 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         args: ["run", "view", input.runId, "--job", input.jobId, "--log"],
         timeoutMs: 60_000,
       }).pipe(Effect.map((r) => r.stdout)),
+    rerunFailedWorkflowJobs: (input) =>
+      withGitHubCliOperation(
+        "rerunFailedWorkflowJobs",
+        execute({
+          cwd: input.cwd,
+          args: [
+            "api",
+            "-X",
+            "POST",
+            `repos/{owner}/{repo}/actions/runs/${input.runId}/rerun-failed-jobs`,
+          ],
+          timeoutMs: 45_000,
+        }),
+      ).pipe(Effect.asVoid),
+    rerunWorkflowJob: (input) =>
+      withGitHubCliOperation(
+        "rerunWorkflowJob",
+        execute({
+          cwd: input.cwd,
+          args: ["api", "-X", "POST", `repos/{owner}/{repo}/actions/jobs/${input.jobId}/rerun`],
+          timeoutMs: 45_000,
+        }),
+      ).pipe(Effect.asVoid),
   });
 });
 

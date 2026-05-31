@@ -6,6 +6,10 @@ import type {
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { requireEnvironmentConnection } from "~/environments/runtime";
 
+type SourceControlWorkflowRerunPayload =
+  | { readonly target: "failed-jobs" }
+  | { readonly target: "job"; readonly jobId: string };
+
 export const sourceControlContextQueryKeys = {
   all: ["sourceControl"] as const,
   issueList: (
@@ -107,6 +111,8 @@ export const sourceControlContextQueryKeys = {
       pullRequestNumber ?? null,
       limit ?? null,
     ] as const,
+  workflows: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["sourceControl", "workflows", environmentId ?? null, cwd] as const,
   workflowRunJobs: (environmentId: EnvironmentId | null, cwd: string | null, runId: string) =>
     ["sourceControl", "workflows", environmentId ?? null, cwd, "jobs", runId] as const,
   workflowJobLog: (
@@ -438,6 +444,39 @@ export function workflowJobLogQueryOptions(input: {
       input.runId !== null &&
       input.jobId !== null,
     staleTime: 300_000,
+  });
+}
+
+export function useRerunWorkflowMutation(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  runId: string;
+}) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: SourceControlWorkflowRerunPayload) => {
+      if (!input.environmentId || !input.cwd) {
+        throw new Error("Workflow reruns are unavailable.");
+      }
+      const client = requireEnvironmentConnection(input.environmentId).client;
+      return client.sourceControl.rerunWorkflow({
+        cwd: input.cwd,
+        runId: input.runId,
+        ...payload,
+      });
+    },
+    onSuccess: (result) => {
+      qc.invalidateQueries({
+        queryKey: sourceControlContextQueryKeys.workflows(input.environmentId, input.cwd),
+      });
+      qc.invalidateQueries({
+        queryKey: sourceControlContextQueryKeys.workflowRunJobs(
+          input.environmentId,
+          input.cwd,
+          result.runId,
+        ),
+      });
+    },
   });
 }
 

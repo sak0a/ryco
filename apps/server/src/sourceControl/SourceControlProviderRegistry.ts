@@ -109,6 +109,7 @@ function unsupportedProvider(
     listWorkflowRuns: () => unsupportedWorkflowOperation(kind, "listWorkflowRuns"),
     getWorkflowRunJobs: () => unsupportedWorkflowOperation(kind, "getWorkflowRunJobs"),
     getWorkflowJobLog: () => unsupportedWorkflowOperation(kind, "getWorkflowJobLog"),
+    rerunWorkflow: () => unsupportedWorkflowOperation(kind, "rerunWorkflow"),
   });
 }
 
@@ -192,6 +193,13 @@ const makeLazyProvider = Effect.fn("makeLazySourceControlProvider")(function* (
         Effect.flatMap((loaded) => {
           const method = loaded.getWorkflowJobLog;
           return method ? method(input) : unsupportedWorkflowOperation(kind, "getWorkflowJobLog");
+        }),
+      ),
+    rerunWorkflow: (input) =>
+      provider.pipe(
+        Effect.flatMap((loaded) => {
+          const method = loaded.rerunWorkflow;
+          return method ? method(input) : unsupportedWorkflowOperation(kind, "rerunWorkflow");
         }),
       ),
   });
@@ -360,6 +368,18 @@ function bindProviderContext(
           getWorkflowJobLog: (input) => {
             const method = provider.getWorkflowJobLog;
             if (!method) return unsupportedWorkflowOperation(provider.kind, "getWorkflowJobLog");
+            return method({
+              ...input,
+              context: input.context ?? context,
+            });
+          },
+        }
+      : {}),
+    ...(provider.rerunWorkflow
+      ? {
+          rerunWorkflow: (input) => {
+            const method = provider.rerunWorkflow;
+            if (!method) return unsupportedWorkflowOperation(provider.kind, "rerunWorkflow");
             return method({
               ...input,
               context: input.context ?? context,

@@ -7,6 +7,8 @@ import type {
   SourceControlAssigneeCandidate,
   SourceControlChangeRequestDetail,
   SourceControlWorkflowJobLogResult,
+  SourceControlWorkflowRerunInput,
+  SourceControlWorkflowRerunResult,
   SourceControlWorkflowRunJobsResult,
   SourceControlWorkflowRunListResult,
   SourceControlIssueDetail,
@@ -198,6 +200,9 @@ export interface SourceControlProviderShape {
     readonly runId: string;
     readonly jobId: string;
   }) => Effect.Effect<SourceControlWorkflowJobLogResult, SourceControlProviderError>;
+  readonly rerunWorkflow?: (
+    input: SourceControlWorkflowRerunInput & { readonly context?: SourceControlProviderContext },
+  ) => Effect.Effect<SourceControlWorkflowRerunResult, SourceControlProviderError>;
 }
 
 export class SourceControlProvider extends Context.Service<

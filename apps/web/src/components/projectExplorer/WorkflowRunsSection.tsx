@@ -6,7 +6,7 @@ import type {
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AlertTriangleIcon,
@@ -24,6 +24,7 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import {
+  useRerunWorkflowMutation,
   workflowJobLogQueryOptions,
   workflowRunJobsQueryOptions,
   workflowRunsQueryOptions,
@@ -48,6 +49,16 @@ interface WorkflowRunsSectionProps {
 }
 
 type WorkflowTone = "success" | "failure" | "running" | "waiting" | "neutral";
+type WorkflowRerunFeedbackTone = "success" | "permission-denied" | "not-rerunnable" | "error";
+
+interface WorkflowRerunFeedback {
+  readonly tone: WorkflowRerunFeedbackTone;
+  readonly message: string;
+}
+
+type WorkflowRerunPayload =
+  | { readonly target: "failed-jobs" }
+  | { readonly target: "job"; readonly jobId: string };
 
 function optionValue<T>(value: Option.Option<T>): T | null {
   return Option.isSome(value) ? value.value : null;
@@ -61,6 +72,13 @@ function isFailure(value: string | null | undefined): boolean {
   return ["failure", "timed out", "action required", "startup failure"].includes(
     normalizeStatus(value),
   );
+}
+
+function isRerunnableFailure(input: {
+  readonly status: string;
+  readonly conclusion: string | null | undefined;
+}): boolean {
+  return isFailure(input.conclusion) && normalizeStatus(input.status) === "completed";
 }
 
 function workflowTone(input: {
@@ -133,6 +151,80 @@ function errorMessage(error: unknown, fallback: string): string {
   const raw = error instanceof Error ? error.message : fallback;
   const providerMatch = /^Source control provider [^ ]+ failed in [^:]+:\s*(.*)$/u.exec(raw);
   return providerMatch?.[1] ?? raw;
+}
+
+function workflowRerunTargetKey(payload: WorkflowRerunPayload): string {
+  return payload.target === "job" ? `job:${payload.jobId}` : "failed-jobs";
+}
+
+function workflowRerunErrorFeedback(error: unknown): WorkflowRerunFeedback {
+  const message = errorMessage(error, "Failed to request workflow rerun.");
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes("not accessible") ||
+    lower.includes("permission") ||
+    lower.includes("forbidden") ||
+    lower.includes("actions write") ||
+    lower.includes("token")
+  ) {
+    return {
+      tone: "permission-denied",
+      message:
+        "GitHub refused the rerun. Check repository permissions and that the token has Actions write access.",
+    };
+  }
+
+  if (
+    lower.includes("cannot rerun") ||
+    lower.includes("cannot re-run") ||
+    lower.includes("current state") ||
+    lower.includes("no failed jobs") ||
+    lower.includes("unprocessable") ||
+    lower.includes("422")
+  ) {
+    return {
+      tone: "not-rerunnable",
+      message: "GitHub says this workflow run or job is not rerunnable in its current state.",
+    };
+  }
+
+  return { tone: "error", message };
+}
+
+function useWorkflowRerunAction(input: {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+  readonly runId: string;
+}) {
+  const rerunMutation = useRerunWorkflowMutation(input);
+  const pendingTargetRef = useRef<string | null>(null);
+  const [pendingTarget, setPendingTarget] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<WorkflowRerunFeedback | null>(null);
+
+  const requestRerun = async (payload: WorkflowRerunPayload, successMessage: string) => {
+    const targetKey = workflowRerunTargetKey(payload);
+    if (pendingTargetRef.current === targetKey) return;
+
+    pendingTargetRef.current = targetKey;
+    setPendingTarget(targetKey);
+    setFeedback(null);
+    try {
+      await rerunMutation.mutateAsync(payload);
+      setFeedback({ tone: "success", message: successMessage });
+    } catch (error) {
+      setFeedback(workflowRerunErrorFeedback(error));
+    } finally {
+      pendingTargetRef.current = null;
+      setPendingTarget(null);
+    }
+  };
+
+  return {
+    feedback,
+    pendingTarget,
+    requestRerun,
+  };
 }
 
 function StatusPill(props: { status: string; conclusion: string | null }) {
@@ -246,6 +338,8 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
                   )}
                 >
                   <WorkflowRunRow
+                    environmentId={props.environmentId}
+                    cwd={props.cwd}
                     run={run}
                     expanded={isExpanded}
                     onToggle={() => setExpandedRunId(isExpanded ? null : run.runId)}
@@ -268,6 +362,8 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
 }
 
 function WorkflowRunRow(props: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
   run: SourceControlWorkflowRun;
   expanded: boolean;
   onToggle: () => void;
@@ -278,61 +374,93 @@ function WorkflowRunRow(props: {
   const duration = formatDuration(props.run.durationMs);
   const actor = optionValue(props.run.actor);
   const branch = optionValue(props.run.branch);
+  const canRerunFailedJobs = isRerunnableFailure({
+    status: props.run.status,
+    conclusion,
+  });
+  const rerun = useWorkflowRerunAction({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    runId: props.run.runId,
+  });
+  const isRerunningFailedJobs = rerun.pendingTarget === "failed-jobs";
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2">
-      <button
-        type="button"
-        className="flex min-w-0 flex-1 items-start gap-2 text-left"
-        onClick={props.onToggle}
-        aria-expanded={props.expanded}
-      >
-        <ChevronRightIcon
-          className={cn(
-            "mt-1 size-3.5 shrink-0 text-muted-foreground/70 transition-transform",
-            props.expanded ? "rotate-90" : "",
-          )}
-        />
-        <span className={cn("mt-0.5 shrink-0", tone === "failure" ? "text-rose-500" : "")}>
-          <WorkflowStatusIcon tone={tone} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="truncate font-medium text-sm">{props.run.workflowName}</span>
-            <StatusPill status={props.run.status} conclusion={conclusion} />
+    <>
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-start gap-2 text-left"
+          onClick={props.onToggle}
+          aria-expanded={props.expanded}
+        >
+          <ChevronRightIcon
+            className={cn(
+              "mt-1 size-3.5 shrink-0 text-muted-foreground/70 transition-transform",
+              props.expanded ? "rotate-90" : "",
+            )}
+          />
+          <span className={cn("mt-0.5 shrink-0", tone === "failure" ? "text-rose-500" : "")}>
+            <WorkflowStatusIcon tone={tone} />
           </span>
-          {props.run.displayTitle && props.run.displayTitle !== props.run.workflowName ? (
-            <span className="mt-0.5 block truncate text-muted-foreground text-xs">
-              {props.run.displayTitle}
+          <span className="min-w-0 flex-1">
+            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="truncate font-medium text-sm">{props.run.workflowName}</span>
+              <StatusPill status={props.run.status} conclusion={conclusion} />
             </span>
-          ) : null}
-          <span className="mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-[11px]">
-            {branch ? (
-              <MetaItem icon={<GitBranchIcon className="size-3" />}>
-                <span className="font-mono">{branch}</span>
+            {props.run.displayTitle && props.run.displayTitle !== props.run.workflowName ? (
+              <span className="mt-0.5 block truncate text-muted-foreground text-xs">
+                {props.run.displayTitle}
+              </span>
+            ) : null}
+            <span className="mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-[11px]">
+              {branch ? (
+                <MetaItem icon={<GitBranchIcon className="size-3" />}>
+                  <span className="font-mono">{branch}</span>
+                </MetaItem>
+              ) : null}
+              <MetaItem icon={<GitCommitIcon className="size-3" />}>
+                <span className="font-mono">{props.run.commit.shortOid}</span>
               </MetaItem>
-            ) : null}
-            <MetaItem icon={<GitCommitIcon className="size-3" />}>
-              <span className="font-mono">{props.run.commit.shortOid}</span>
-            </MetaItem>
-            {actor ? <MetaItem icon={<UserIcon className="size-3" />}>{actor}</MetaItem> : null}
-            {startedAt ? (
-              <MetaItem icon={<Clock3Icon className="size-3" />}>{startedAt}</MetaItem>
-            ) : null}
-            {duration ? <span className="text-muted-foreground">{duration}</span> : null}
+              {actor ? <MetaItem icon={<UserIcon className="size-3" />}>{actor}</MetaItem> : null}
+              {startedAt ? (
+                <MetaItem icon={<Clock3Icon className="size-3" />}>{startedAt}</MetaItem>
+              ) : null}
+              {duration ? <span className="text-muted-foreground">{duration}</span> : null}
+            </span>
           </span>
-        </span>
-      </button>
-      <a
-        href={props.run.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-muted-foreground text-xs hover:bg-secondary hover:text-foreground"
-      >
-        <ExternalLinkIcon className="size-3.5" />
-        GitHub
-      </a>
-    </div>
+        </button>
+        {canRerunFailedJobs ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={isRerunningFailedJobs}
+            onClick={() => {
+              void rerun.requestRerun(
+                { target: "failed-jobs" },
+                "Rerun requested for failed jobs. Refreshing workflow status.",
+              );
+            }}
+          >
+            <RotateCwIcon
+              className={isRerunningFailedJobs ? "size-3.5 animate-spin" : "size-3.5"}
+            />
+            {isRerunningFailedJobs ? "Rerunning..." : "Rerun failed jobs"}
+          </Button>
+        ) : null}
+        <a
+          href={props.run.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-muted-foreground text-xs hover:bg-secondary hover:text-foreground"
+        >
+          <ExternalLinkIcon className="size-3.5" />
+          GitHub
+        </a>
+      </div>
+      {rerun.feedback ? <WorkflowRerunFeedbackMessage feedback={rerun.feedback} compact /> : null}
+    </>
   );
 }
 
@@ -407,6 +535,14 @@ function WorkflowJobItem(props: {
   const startedAt = formatDate(props.job.startedAt);
   const duration = formatDuration(props.job.durationMs);
   const failed = isFailure(conclusion);
+  const canRerunJob = isRerunnableFailure({ status: props.job.status, conclusion });
+  const rerun = useWorkflowRerunAction({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    runId: props.runId,
+  });
+  const jobTargetKey = workflowRerunTargetKey({ target: "job", jobId: props.job.jobId });
+  const isRerunningJob = rerun.pendingTarget === jobTargetKey;
 
   return (
     <li
@@ -415,8 +551,8 @@ function WorkflowJobItem(props: {
         failed ? "border-rose-500/30 bg-rose-500/5" : "",
       )}
     >
-      <div className="flex items-start gap-2 px-3 py-2">
-        <div className="min-w-0 flex-1">
+      <div className="flex flex-wrap items-start gap-2 px-3 py-2">
+        <div className="min-w-0 flex-1 basis-64">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="truncate font-medium text-xs">{props.job.name}</span>
             <StatusPill status={props.job.status} conclusion={conclusion} />
@@ -437,11 +573,29 @@ function WorkflowJobItem(props: {
             {duration ? <span>{duration}</span> : null}
           </div>
         </div>
+        {canRerunJob ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={isRerunningJob}
+            onClick={() => {
+              void rerun.requestRerun(
+                { target: "job", jobId: props.job.jobId },
+                `Rerun requested for ${props.job.name}. Refreshing workflow status.`,
+              );
+            }}
+          >
+            <RotateCwIcon className={isRerunningJob ? "size-3.5 animate-spin" : "size-3.5"} />
+            {isRerunningJob ? "Rerunning..." : "Rerun job"}
+          </Button>
+        ) : null}
         <Button type="button" size="sm" variant="outline" onClick={() => setShowLog((v) => !v)}>
           <FileTextIcon className="size-3.5" />
           {showLog ? "Hide log" : "Load log"}
         </Button>
       </div>
+      {rerun.feedback ? <WorkflowRerunFeedbackMessage feedback={rerun.feedback} compact /> : null}
       <WorkflowStepList steps={props.job.steps} />
       {showLog ? (
         <WorkflowJobLog
@@ -532,6 +686,37 @@ function WorkflowJobLog(props: {
       ) : (
         <WorkflowStateMessage tone="empty" message="No log output returned for this job." compact />
       )}
+    </div>
+  );
+}
+
+function WorkflowRerunFeedbackMessage(props: {
+  feedback: WorkflowRerunFeedback;
+  compact?: boolean;
+}) {
+  const success = props.feedback.tone === "success";
+  const notRerunnable = props.feedback.tone === "not-rerunnable";
+  const permissionDenied = props.feedback.tone === "permission-denied";
+
+  return (
+    <div
+      role={success ? "status" : "alert"}
+      className={cn(
+        "mx-3 mb-2 flex items-start gap-2 rounded-md border px-2",
+        props.compact ? "py-1.5 text-xs" : "py-2 text-sm",
+        success
+          ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-700 dark:text-emerald-300"
+          : notRerunnable || permissionDenied
+            ? "border-amber-500/25 bg-amber-500/8 text-amber-700 dark:text-amber-300"
+            : "border-destructive/25 bg-destructive/8 text-destructive",
+      )}
+    >
+      {success ? (
+        <CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0" />
+      ) : (
+        <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+      )}
+      <span>{props.feedback.message}</span>
     </div>
   );
 }
