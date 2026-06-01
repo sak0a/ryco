@@ -37,7 +37,7 @@ function DialogViewport({ className, ...props }: DialogPrimitive.Viewport.Props)
   return (
     <DialogPrimitive.Viewport
       className={cn(
-        "pointer-events-none fixed inset-0 z-50 grid grid-rows-[1fr_auto_3fr] justify-items-center bg-white/48 p-4 backdrop-blur-[2px] dark:bg-black/28",
+        "pointer-events-auto fixed inset-0 z-50 grid grid-rows-[1fr_auto_3fr] justify-items-center bg-white/48 p-4 backdrop-blur-[2px] dark:bg-black/28",
         className,
       )}
       data-slot="dialog-viewport"

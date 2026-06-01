@@ -381,6 +381,132 @@ code {
   display: none;
 }
 
+@layer components {
+  .sidebar-status-text.sidebar-status-text {
+    --sidebar-status-text-duration: 2s;
+    --sidebar-status-text-spread: 20px;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    background-image:
+      linear-gradient(
+        90deg,
+        transparent calc(50% - var(--sidebar-status-text-spread)),
+        var(--sidebar-status-text-shimmer-color),
+        transparent calc(50% + var(--sidebar-status-text-spread))
+      ),
+      linear-gradient(var(--sidebar-status-text-base-color), var(--sidebar-status-text-base-color));
+    background-repeat: no-repeat, no-repeat;
+    background-size:
+      250% 100%,
+      auto;
+    background-position:
+      100% center,
+      center;
+    background-clip: text;
+    -webkit-background-clip: text;
+  }
+
+  .sidebar-status-text.sidebar-status-text:not(.sidebar-status-text--shimmer) {
+    background-image: linear-gradient(
+      var(--sidebar-status-text-base-color),
+      var(--sidebar-status-text-base-color)
+    );
+    background-size: auto;
+    background-position: center;
+  }
+
+  .sidebar-status-text--in-progress {
+    --sidebar-status-text-base-color: var(--color-sky-600);
+    --sidebar-status-text-shimmer-color: var(--color-cyan-400);
+  }
+
+  .sidebar-status-text--review {
+    --sidebar-status-text-base-color: var(--color-amber-600);
+    --sidebar-status-text-shimmer-color: var(--color-orange-300);
+  }
+
+  .sidebar-status-text--pending-approval {
+    --sidebar-status-text-base-color: var(--color-amber-600);
+    --sidebar-status-text-shimmer-color: var(--color-yellow-300);
+  }
+
+  .sidebar-status-text--awaiting-input {
+    --sidebar-status-text-base-color: var(--color-indigo-600);
+    --sidebar-status-text-shimmer-color: var(--color-indigo-300);
+  }
+
+  .sidebar-status-text--plan-ready {
+    --sidebar-status-text-base-color: var(--color-violet-600);
+    --sidebar-status-text-shimmer-color: var(--color-fuchsia-300);
+  }
+
+  .sidebar-status-text--done {
+    --sidebar-status-text-base-color: var(--color-emerald-600);
+    --sidebar-status-text-shimmer-color: var(--color-lime-400);
+  }
+
+  .dark .sidebar-status-text--in-progress {
+    --sidebar-status-text-base-color: var(--color-sky-300);
+    --sidebar-status-text-shimmer-color: var(--color-cyan-50);
+  }
+
+  .dark .sidebar-status-text--review {
+    --sidebar-status-text-base-color: var(--color-amber-300);
+    --sidebar-status-text-shimmer-color: var(--color-yellow-50);
+  }
+
+  .dark .sidebar-status-text--pending-approval {
+    --sidebar-status-text-base-color: var(--color-amber-300);
+    --sidebar-status-text-shimmer-color: var(--color-yellow-50);
+  }
+
+  .dark .sidebar-status-text--awaiting-input {
+    --sidebar-status-text-base-color: var(--color-indigo-300);
+    --sidebar-status-text-shimmer-color: var(--color-indigo-50);
+  }
+
+  .dark .sidebar-status-text--plan-ready {
+    --sidebar-status-text-base-color: var(--color-violet-300);
+    --sidebar-status-text-shimmer-color: var(--color-fuchsia-50);
+  }
+
+  .dark .sidebar-status-text--done {
+    --sidebar-status-text-base-color: var(--color-emerald-300);
+    --sidebar-status-text-shimmer-color: var(--color-lime-50);
+  }
+
+  .sidebar-status-text--shimmer {
+    animation: sidebar-status-text-shimmer var(--sidebar-status-text-duration) linear infinite;
+  }
+
+  @keyframes sidebar-status-text-shimmer {
+    from {
+      background-position:
+        100% center,
+        center;
+    }
+    to {
+      background-position:
+        0% center,
+        center;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar-status-text--shimmer {
+      animation: none;
+    }
+  }
+
+  @media (forced-colors: active) {
+    .sidebar-status-text.sidebar-status-text {
+      color: CanvasText;
+      -webkit-text-fill-color: currentColor;
+      background-image: none;
+    }
+  }
+}
+
 /* Terminal drawer scrollbar parity with chat */
 .thread-terminal-drawer .xterm .xterm-scrollable-element > .scrollbar.vertical {
   width: 6px !important;
