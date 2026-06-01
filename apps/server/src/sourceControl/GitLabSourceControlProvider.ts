@@ -178,6 +178,14 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
           detail: "Not implemented for gitlab",
         }),
       ),
+    addIssueCommentReaction: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "gitlab",
+          operation: "addIssueCommentReaction",
+          detail: "Not implemented for gitlab",
+        }),
+      ),
     searchIssues: (input) =>
       gitlab
         .searchIssues({
@@ -212,6 +220,14 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
         new SourceControlProviderError({
           provider: "gitlab",
           operation: "addChangeRequestComment",
+          detail: "Not implemented for gitlab",
+        }),
+      ),
+    addChangeRequestCommentReaction: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "gitlab",
+          operation: "addChangeRequestCommentReaction",
           detail: "Not implemented for gitlab",
         }),
       ),

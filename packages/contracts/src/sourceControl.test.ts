@@ -5,11 +5,13 @@ import {
   SOURCE_CONTROL_DETAIL_BODY_MAX_BYTES,
   SOURCE_CONTROL_DETAIL_MAX_COMMENTS,
   SourceControlChangeRequestDetail,
+  SourceControlAddCommentReactionInput,
   SourceControlIssueComment,
   SourceControlAssigneeCandidate,
   SourceControlAddChangeRequestCommentInput,
   SourceControlAddIssueCommentInput,
   SourceControlCreateIssueInput,
+  SourceControlWorkflowRunListInput,
   SourceControlWorkflowRerunInput,
 } from "./sourceControl.ts";
 
@@ -153,6 +155,35 @@ describe("SourceControlIssueComment", () => {
       isRepositoryMaintainer: false,
     });
   });
+
+  it("decodes optional comment ids and reactions", () => {
+    const createdAt = DateTime.fromDateUnsafe(new Date("2026-05-12T11:00:00.000Z"));
+    const decoded = Schema.decodeUnknownSync(SourceControlIssueComment)({
+      id: "IC_kwDOA1B2C84AAAAB",
+      author: "alice",
+      body: "Nice.",
+      createdAt,
+      reactions: [
+        { content: "thumbs-up", count: 3, viewerHasReacted: true },
+        { content: "rocket", count: 1 },
+      ],
+    });
+
+    expect(decoded.id).toBe("IC_kwDOA1B2C84AAAAB");
+    expect(decoded.reactions).toEqual([
+      { content: "thumbs-up", count: 3, viewerHasReacted: true },
+      { content: "rocket", count: 1 },
+    ]);
+    expect(() =>
+      Schema.decodeUnknownSync(SourceControlIssueComment)({
+        id: "IC_kwDOA1B2C84AAAAB",
+        author: "alice",
+        body: "Nice.",
+        createdAt,
+        reactions: [{ content: "invalid", count: 1 }],
+      }),
+    ).toThrow();
+  });
 });
 
 describe("SourceControlAssigneeCandidate", () => {
@@ -229,6 +260,48 @@ describe("SourceControlAddChangeRequestCommentInput", () => {
       body: "> quoted\n\n**ship it**",
     });
     expect(() => decode({ cwd: "/repo", reference: "42", body: "\n\t" })).toThrow();
+  });
+});
+
+describe("SourceControlAddCommentReactionInput", () => {
+  it("requires a GitHub comment id and supported reaction content", () => {
+    const decode = Schema.decodeUnknownSync(SourceControlAddCommentReactionInput);
+    expect(
+      decode({
+        cwd: "/repo",
+        reference: "42",
+        commentId: "IC_kwDOA1B2C84AAAAB",
+        content: "heart",
+      }),
+    ).toEqual({
+      cwd: "/repo",
+      reference: "42",
+      commentId: "IC_kwDOA1B2C84AAAAB",
+      content: "heart",
+    });
+    expect(() =>
+      decode({ cwd: "/repo", reference: "42", commentId: "", content: "heart" }),
+    ).toThrow();
+    expect(() =>
+      decode({ cwd: "/repo", reference: "42", commentId: "IC_1", content: "invalid" }),
+    ).toThrow();
+  });
+});
+
+describe("SourceControlWorkflowRunListInput", () => {
+  it("accepts commit-specific workflow run lookups", () => {
+    const decode = Schema.decodeUnknownSync(SourceControlWorkflowRunListInput);
+    expect(
+      decode({
+        cwd: "/repo",
+        commitSha: "abcdef1234567890",
+        limit: 10,
+      }),
+    ).toEqual({
+      cwd: "/repo",
+      commitSha: "abcdef1234567890",
+      limit: 10,
+    });
   });
 });
 

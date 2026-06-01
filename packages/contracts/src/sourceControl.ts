@@ -119,13 +119,34 @@ export const SourceControlCommentAuthorRole = Schema.Struct({
 });
 export type SourceControlCommentAuthorRole = typeof SourceControlCommentAuthorRole.Type;
 
+export const SourceControlCommentReactionContent = Schema.Literals([
+  "thumbs-up",
+  "thumbs-down",
+  "laugh",
+  "hooray",
+  "confused",
+  "heart",
+  "rocket",
+  "eyes",
+]);
+export type SourceControlCommentReactionContent = typeof SourceControlCommentReactionContent.Type;
+
+export const SourceControlCommentReaction = Schema.Struct({
+  content: SourceControlCommentReactionContent,
+  count: NonNegativeInt,
+  viewerHasReacted: Schema.optional(Schema.Boolean),
+});
+export type SourceControlCommentReaction = typeof SourceControlCommentReaction.Type;
+
 export const SourceControlIssueComment = Schema.Struct({
+  id: Schema.optional(TrimmedNonEmptyString),
   author: Schema.String,
   body: Schema.String,
   createdAt: Schema.DateTimeUtc,
   authorAssociation: Schema.optional(Schema.String),
   authorRole: Schema.optional(SourceControlCommentAuthorRole),
   reviewState: Schema.optional(SourceControlReviewState),
+  reactions: Schema.optional(Schema.Array(SourceControlCommentReaction)),
 });
 export type SourceControlIssueComment = typeof SourceControlIssueComment.Type;
 
@@ -179,6 +200,20 @@ export const SourceControlAddIssueCommentResult = Schema.Struct({
   detail: SourceControlIssueDetail,
 });
 export type SourceControlAddIssueCommentResult = typeof SourceControlAddIssueCommentResult.Type;
+
+export const SourceControlAddCommentReactionInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  reference: TrimmedNonEmptyString,
+  commentId: TrimmedNonEmptyString,
+  content: SourceControlCommentReactionContent,
+});
+export type SourceControlAddCommentReactionInput = typeof SourceControlAddCommentReactionInput.Type;
+
+export const SourceControlAddIssueCommentReactionResult = Schema.Struct({
+  detail: SourceControlIssueDetail,
+});
+export type SourceControlAddIssueCommentReactionResult =
+  typeof SourceControlAddIssueCommentReactionResult.Type;
 
 export const SourceControlChangeRequestCommit = Schema.Struct({
   oid: TrimmedNonEmptyString,
@@ -253,6 +288,7 @@ export type SourceControlWorkflowRun = typeof SourceControlWorkflowRun.Type;
 export const SourceControlWorkflowRunListInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   pullRequestNumber: Schema.optional(PositiveInt),
+  commitSha: Schema.optional(TrimmedNonEmptyString),
   limit: Schema.optional(PositiveInt),
 });
 export type SourceControlWorkflowRunListInput = typeof SourceControlWorkflowRunListInput.Type;
@@ -356,6 +392,12 @@ export const SourceControlAddChangeRequestCommentResult = Schema.Struct({
 });
 export type SourceControlAddChangeRequestCommentResult =
   typeof SourceControlAddChangeRequestCommentResult.Type;
+
+export const SourceControlAddChangeRequestCommentReactionResult = Schema.Struct({
+  detail: SourceControlChangeRequestDetail,
+});
+export type SourceControlAddChangeRequestCommentReactionResult =
+  typeof SourceControlAddChangeRequestCommentReactionResult.Type;
 
 export const ComposerSourceControlContextKind = Schema.Literals(["issue", "change-request"]);
 export type ComposerSourceControlContextKind = typeof ComposerSourceControlContextKind.Type;

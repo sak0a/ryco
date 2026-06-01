@@ -1,6 +1,11 @@
 import { Cause, Exit, Option, Result, Schema } from "effect";
 import { PositiveInt, TrimmedNonEmptyString } from "@ryco/contracts";
 import { decodeJsonResult, formatSchemaError } from "@ryco/shared/schemaJson";
+import {
+  normalizeReactionGroups,
+  RawGitHubReactionGroupSchema,
+  type NormalizedGitHubReaction,
+} from "./gitHubReactions.ts";
 
 export interface NormalizedGitHubLabel {
   readonly name: string;
@@ -44,10 +49,12 @@ function normalizeLabels(
 export interface NormalizedGitHubIssueDetail extends NormalizedGitHubIssueRecord {
   readonly body: string;
   readonly comments: ReadonlyArray<{
+    readonly id?: string;
     readonly author: string;
     readonly body: string;
     readonly createdAt: string;
     readonly authorAssociation?: string;
+    readonly reactions?: ReadonlyArray<NormalizedGitHubReaction>;
   }>;
 }
 
@@ -74,10 +81,12 @@ const GitHubIssueSchema = Schema.Struct({
       // `gh issue view` returns full comment objects.
       Schema.Array(
         Schema.Struct({
+          id: Schema.optional(Schema.NullOr(Schema.String)),
           author: Schema.optional(Schema.NullOr(Schema.Struct({ login: Schema.String }))),
           authorAssociation: Schema.optional(Schema.NullOr(Schema.String)),
           body: Schema.String,
           createdAt: Schema.String,
+          reactionGroups: Schema.optional(Schema.Array(RawGitHubReactionGroupSchema)),
         }),
       ),
       // `gh issue list` returns just the count.
@@ -91,15 +100,22 @@ function normalizeIssueState(raw: string | null | undefined): "open" | "closed" 
 }
 
 function normalizeIssueComment(raw: {
+  readonly id?: string | null;
   readonly author?: { readonly login: string } | null;
   readonly authorAssociation?: string | null;
   readonly body: string;
   readonly createdAt: string;
+  readonly reactionGroups?:
+    | ReadonlyArray<Schema.Schema.Type<typeof RawGitHubReactionGroupSchema>>
+    | undefined;
 }): NormalizedGitHubIssueDetail["comments"][number] {
+  const reactions = normalizeReactionGroups(raw.reactionGroups);
   const base = {
+    ...(raw.id ? { id: raw.id } : {}),
     author: raw.author?.login ?? "unknown",
     body: raw.body,
     createdAt: raw.createdAt,
+    ...(reactions.length > 0 ? { reactions } : {}),
   };
   if (raw.authorAssociation) {
     return { ...base, authorAssociation: raw.authorAssociation };

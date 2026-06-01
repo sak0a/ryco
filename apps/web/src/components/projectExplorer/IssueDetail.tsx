@@ -1,9 +1,17 @@
-import type { EnvironmentId, SourceControlIssueDetail } from "@ryco/contracts";
+import type {
+  EnvironmentId,
+  SourceControlCommentReactionContent,
+  SourceControlIssueDetail,
+} from "@ryco/contracts";
 import { DateTime, Option } from "effect";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
 import { CircleDotIcon, FileTextIcon, MessageSquareIcon, SendIcon } from "lucide-react";
-import { issueDetailQueryOptions, useAddIssueCommentMutation } from "~/lib/sourceControlContextRpc";
+import {
+  issueDetailQueryOptions,
+  useAddIssueCommentMutation,
+  useAddIssueCommentReactionMutation,
+} from "~/lib/sourceControlContextRpc";
 import { Button } from "../ui/button";
 import { CommentComposer, CommentItem, type CommentQuoteInsertion } from "./CommentThread";
 import { buildCommentQuoteMarkdown, deriveOriginalPostAuthorRole } from "./CommentThread.logic";
@@ -54,6 +62,11 @@ export function IssueDetail(props: IssueDetailProps) {
     cwd: props.cwd,
     reference,
   });
+  const addReactionMutation = useAddIssueCommentReactionMutation({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    reference,
+  });
 
   const detail = detailQuery.data;
 
@@ -77,6 +90,11 @@ export function IssueDetail(props: IssueDetailProps) {
             onSubmitComment={
               detail.provider === "github" && props.environmentId !== null && props.cwd !== null
                 ? (input) => addCommentMutation.mutateAsync(input).then(() => undefined)
+                : undefined
+            }
+            onAddCommentReaction={
+              detail.provider === "github" && props.environmentId !== null && props.cwd !== null
+                ? (input) => addReactionMutation.mutateAsync(input).then(() => undefined)
                 : undefined
             }
           />
@@ -117,6 +135,12 @@ function IssueDetailBody(props: {
   onSubmitComment?:
     | ((input: { readonly body: string; readonly clientMutationId: string }) => Promise<void>)
     | undefined;
+  onAddCommentReaction?:
+    | ((input: {
+        readonly commentId: string;
+        readonly content: SourceControlCommentReactionContent;
+      }) => Promise<void>)
+    | undefined;
 }) {
   const { detail } = props;
   const opCreatedAt =
@@ -148,6 +172,7 @@ function IssueDetailBody(props: {
   }, []);
   const onSubmitComment = props.onSubmitComment;
   const canComment = onSubmitComment !== undefined;
+  const onAddCommentReaction = props.onAddCommentReaction;
 
   return (
     <SourceControlDetailLayout
@@ -228,35 +253,44 @@ function IssueDetailBody(props: {
                   </div>
                 </SourceControlTimelineNotice>
               </SourceControlTimelineEntry>
-              {detail.comments.map((comment) => (
-                <SourceControlTimelineEntry
-                  key={`${comment.author}-${comment.createdAt}-${comment.body}`}
-                  tone={comment.reviewState ? "review" : "comment"}
-                  icon={<MessageSquareIcon className="size-4" />}
-                >
-                  <CommentItem
-                    author={comment.author}
-                    body={comment.body}
-                    createdAt={comment.createdAt}
-                    authorAssociation={comment.authorAssociation}
-                    authorRole={comment.authorRole}
-                    reviewState={comment.reviewState}
-                    itemKind={comment.reviewState ? "review" : "comment"}
-                    eyebrow={comment.reviewState ? "Review comment" : "Comment"}
-                    onQuote={
-                      canComment
-                        ? () =>
-                            queueQuoteInsertion({
-                              author: comment.author,
-                              body: comment.body,
-                              createdAt: comment.createdAt,
-                              contextLabel: "issue comment",
-                            })
-                        : undefined
-                    }
-                  />
-                </SourceControlTimelineEntry>
-              ))}
+              {detail.comments.map((comment) => {
+                const commentId = comment.id;
+                return (
+                  <SourceControlTimelineEntry
+                    key={`${comment.author}-${comment.createdAt}-${comment.body}`}
+                    tone={comment.reviewState ? "review" : "comment"}
+                    icon={<MessageSquareIcon className="size-4" />}
+                  >
+                    <CommentItem
+                      author={comment.author}
+                      body={comment.body}
+                      createdAt={comment.createdAt}
+                      authorAssociation={comment.authorAssociation}
+                      authorRole={comment.authorRole}
+                      reviewState={comment.reviewState}
+                      reactions={comment.reactions}
+                      itemKind={comment.reviewState ? "review" : "comment"}
+                      eyebrow={comment.reviewState ? "Review comment" : "Comment"}
+                      onAddReaction={
+                        onAddCommentReaction && commentId
+                          ? (content) => onAddCommentReaction({ commentId, content })
+                          : undefined
+                      }
+                      onQuote={
+                        canComment
+                          ? () =>
+                              queueQuoteInsertion({
+                                author: comment.author,
+                                body: comment.body,
+                                createdAt: comment.createdAt,
+                                contextLabel: "issue comment",
+                              })
+                          : undefined
+                      }
+                    />
+                  </SourceControlTimelineEntry>
+                );
+              })}
               {onSubmitComment ? (
                 <SourceControlTimelineEntry tone="composer" icon={<SendIcon className="size-4" />}>
                   <CommentComposer

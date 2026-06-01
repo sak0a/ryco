@@ -1999,6 +1999,33 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
               "rpc.aggregate": "source-control",
             },
           ),
+        [WS_METHODS.sourceControlAddIssueCommentReaction]: ({
+          cwd,
+          reference,
+          commentId,
+          content,
+        }) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlAddIssueCommentReaction,
+            ownerEffect(
+              WS_METHODS.sourceControlAddIssueCommentReaction,
+              sourceControlRegistry.resolve({ cwd }).pipe(
+                Effect.flatMap((provider) =>
+                  provider.addIssueCommentReaction({
+                    cwd,
+                    reference,
+                    commentId,
+                    content,
+                  }),
+                ),
+                Effect.map((detail) => ({ detail })),
+                Effect.tap(() => refreshStateForLinkedReference({ cwd, kind: "issue", reference })),
+              ),
+            ),
+            {
+              "rpc.aggregate": "source-control",
+            },
+          ),
         [WS_METHODS.sourceControlSearchIssues]: ({ cwd, query, limit }) =>
           observeRpcEffect(
             WS_METHODS.sourceControlSearchIssues,
@@ -2127,6 +2154,33 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
               "rpc.aggregate": "source-control",
             },
           ),
+        [WS_METHODS.sourceControlAddChangeRequestCommentReaction]: ({
+          cwd,
+          reference,
+          commentId,
+          content,
+        }) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlAddChangeRequestCommentReaction,
+            ownerEffect(
+              WS_METHODS.sourceControlAddChangeRequestCommentReaction,
+              sourceControlRegistry.resolve({ cwd }).pipe(
+                Effect.flatMap((provider) =>
+                  provider.addChangeRequestCommentReaction({
+                    cwd,
+                    reference,
+                    commentId,
+                    content,
+                  }),
+                ),
+                Effect.map((detail) => ({ detail })),
+                Effect.tap(() => refreshStateForLinkedReference({ cwd, kind: "pr", reference })),
+              ),
+            ),
+            {
+              "rpc.aggregate": "source-control",
+            },
+          ),
         [WS_METHODS.sourceControlGetChangeRequestDiff]: ({ cwd, reference }) =>
           observeRpcEffect(
             WS_METHODS.sourceControlGetChangeRequestDiff,
@@ -2233,7 +2287,12 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
               "rpc.aggregate": "source-control",
             },
           ),
-        [WS_METHODS.sourceControlListWorkflowRuns]: ({ cwd, pullRequestNumber, limit }) =>
+        [WS_METHODS.sourceControlListWorkflowRuns]: ({
+          cwd,
+          pullRequestNumber,
+          commitSha,
+          limit,
+        }) =>
           observeRpcEffect(
             WS_METHODS.sourceControlListWorkflowRuns,
             ownerEffect(
@@ -2246,6 +2305,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                   return method?.({
                     cwd,
                     ...(pullRequestNumber !== undefined ? { pullRequestNumber } : {}),
+                    ...(commitSha !== undefined ? { commitSha } : {}),
                     ...(limit !== undefined ? { limit } : {}),
                   });
                 },

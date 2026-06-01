@@ -184,6 +184,14 @@ export const make = Effect.fn("makeAzureDevOpsSourceControlProvider")(function* 
           detail: "Not implemented for azure-devops",
         }),
       ),
+    addIssueCommentReaction: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "azure-devops",
+          operation: "addIssueCommentReaction",
+          detail: "Not implemented for azure-devops",
+        }),
+      ),
     searchIssues: (input) =>
       azure
         .searchWorkItems({
@@ -218,6 +226,14 @@ export const make = Effect.fn("makeAzureDevOpsSourceControlProvider")(function* 
         new SourceControlProviderError({
           provider: "azure-devops",
           operation: "addChangeRequestComment",
+          detail: "Not implemented for azure-devops",
+        }),
+      ),
+    addChangeRequestCommentReaction: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "azure-devops",
+          operation: "addChangeRequestCommentReaction",
           detail: "Not implemented for azure-devops",
         }),
       ),

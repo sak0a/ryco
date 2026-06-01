@@ -15,6 +15,9 @@ function comment(
       ? { authorAssociation: partial.authorAssociation }
       : {}),
     ...(partial.authorRole !== undefined ? { authorRole: partial.authorRole } : {}),
+    ...(partial.id !== undefined ? { id: partial.id } : {}),
+    ...(partial.reactions !== undefined ? { reactions: partial.reactions } : {}),
+    ...(partial.reviewState !== undefined ? { reviewState: partial.reviewState } : {}),
   };
 }
 
@@ -148,6 +151,26 @@ describe("CommentThread", () => {
     expect(withoutQuote).not.toContain("Quote alice&#x27;s comment");
     expect(withQuote).toContain("Quote alice&#x27;s comment");
   });
+
+  it("renders comment reaction counts", () => {
+    const markup = renderToStaticMarkup(
+      <CommentThread
+        comments={[
+          comment({
+            author: "alice",
+            reactions: [
+              { content: "thumbs-up", count: 2, viewerHasReacted: true },
+              { content: "rocket", count: 1 },
+              { content: "heart", count: 0 },
+            ],
+          }),
+        ]}
+      />,
+    );
+    expect(markup).toContain(">2</span>");
+    expect(markup).toContain(">1</span>");
+    expect(markup).not.toContain(">0</span>");
+  });
 });
 
 describe("CommentItem", () => {
@@ -163,5 +186,19 @@ describe("CommentItem", () => {
     );
     expect(markup).toContain("Quote octocat&#x27;s comment");
     expect(markup).toContain("Quote reply");
+  });
+
+  it("renders selected reactions as removable toggles when reacting is available", () => {
+    const markup = renderToStaticMarkup(
+      <CommentItem
+        author="octocat"
+        body="Reaction body"
+        createdAt={DateTime.fromDateUnsafe(new Date("2026-03-14T10:00:00Z"))}
+        reactions={[{ content: "thumbs-up", count: 2, viewerHasReacted: true }]}
+        onAddReaction={() => undefined}
+      />,
+    );
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain("Remove thumbs up reaction");
   });
 });

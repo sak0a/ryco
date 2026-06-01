@@ -5,6 +5,7 @@ import type {
   IssueState,
   PullRequestState,
   SourceControlAssigneeCandidate,
+  SourceControlAddCommentReactionInput,
   SourceControlChangeRequestDetail,
   SourceControlWorkflowJobLogResult,
   SourceControlWorkflowRerunInput,
@@ -124,6 +125,11 @@ export interface SourceControlProviderShape {
     readonly body: string;
     readonly clientMutationId?: string;
   }) => Effect.Effect<SourceControlIssueDetail, SourceControlProviderError>;
+  readonly addIssueCommentReaction: (
+    input: SourceControlAddCommentReactionInput & {
+      readonly context?: SourceControlProviderContext;
+    },
+  ) => Effect.Effect<SourceControlIssueDetail, SourceControlProviderError>;
   readonly searchIssues: (input: {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;
@@ -149,6 +155,11 @@ export interface SourceControlProviderShape {
     readonly body: string;
     readonly clientMutationId?: string;
   }) => Effect.Effect<SourceControlChangeRequestDetail, SourceControlProviderError>;
+  readonly addChangeRequestCommentReaction: (
+    input: SourceControlAddCommentReactionInput & {
+      readonly context?: SourceControlProviderContext;
+    },
+  ) => Effect.Effect<SourceControlChangeRequestDetail, SourceControlProviderError>;
   readonly getChangeRequestDiff: (input: {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;
@@ -187,6 +198,7 @@ export interface SourceControlProviderShape {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;
     readonly pullRequestNumber?: number;
+    readonly commitSha?: string;
     readonly limit?: number;
   }) => Effect.Effect<SourceControlWorkflowRunListResult, SourceControlProviderError>;
   readonly getWorkflowRunJobs?: (input: {

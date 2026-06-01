@@ -83,7 +83,16 @@ describe("decodeGitHubPullRequestDetailJson", () => {
       mergedAt: null,
       body: "PR body text",
       comments: [
-        { author: { login: "alice" }, body: "looks good", createdAt: "2026-03-14T10:00:00Z" },
+        {
+          id: "IC_kwDOA1B2C84AAAAB",
+          author: { login: "alice" },
+          body: "looks good",
+          createdAt: "2026-03-14T10:00:00Z",
+          reactionGroups: [
+            { content: "THUMBS_UP", viewerHasReacted: true, users: { totalCount: 2 } },
+            { content: "EYES", users: { totalCount: 1 } },
+          ],
+        },
         { author: null, body: "second comment", createdAt: "2026-03-14T11:00:00Z" },
       ],
     });
@@ -92,7 +101,12 @@ describe("decodeGitHubPullRequestDetailJson", () => {
     if (!Result.isSuccess(result)) return;
     expect(result.success.body).toBe("PR body text");
     expect(result.success.comments).toHaveLength(2);
+    expect(result.success.comments[0]?.id).toBe("IC_kwDOA1B2C84AAAAB");
     expect(result.success.comments[0]?.author).toBe("alice");
+    expect(result.success.comments[0]?.reactions).toEqual([
+      { content: "thumbs-up", count: 2, viewerHasReacted: true },
+      { content: "eyes", count: 1 },
+    ]);
     expect(result.success.comments[1]?.author).toBe("unknown");
   });
 
@@ -175,10 +189,12 @@ describe("decodeGitHubPullRequestDetailJson", () => {
       ],
       reviews: [
         {
+          id: "PRR_kwDOA1B2C84AAAAC",
           author: { login: "alice" },
           authorAssociation: "MEMBER",
           state: "APPROVED",
           body: "LGTM",
+          reactionGroups: [{ content: "HOORAY", viewerHasReacted: true, users: { totalCount: 1 } }],
           submittedAt: "2026-03-14T10:00:00Z",
         },
         {
@@ -200,8 +216,12 @@ describe("decodeGitHubPullRequestDetailJson", () => {
     if (!Result.isSuccess(result)) return;
     expect(result.success.comments).toHaveLength(3);
     expect(result.success.comments[0]?.author).toBe("alice");
+    expect(result.success.comments[0]?.id).toBe("PRR_kwDOA1B2C84AAAAC");
     expect(result.success.comments[0]?.reviewState).toBe("approved");
     expect(result.success.comments[0]?.authorAssociation).toBe("MEMBER");
+    expect(result.success.comments[0]?.reactions).toEqual([
+      { content: "hooray", count: 1, viewerHasReacted: true },
+    ]);
     expect(result.success.comments[1]?.author).toBe("bob");
     expect(result.success.comments[1]?.reviewState).toBeUndefined();
     expect(result.success.comments[2]?.author).toBe("dave");

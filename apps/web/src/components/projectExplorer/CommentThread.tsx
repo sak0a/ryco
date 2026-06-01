@@ -1,5 +1,7 @@
 import type {
   SourceControlCommentAuthorRole,
+  SourceControlCommentReaction,
+  SourceControlCommentReactionContent,
   SourceControlIssueComment,
   SourceControlReviewState,
 } from "@ryco/contracts";
@@ -7,10 +9,19 @@ import {
   AlertCircleIcon,
   CheckCircle2Icon,
   CodeIcon,
+  CircleHelpIcon,
+  EyeIcon,
   FileTextIcon,
+  HeartIcon,
   MessageSquareIcon,
+  PartyPopperIcon,
+  PlusIcon,
   QuoteIcon,
+  RocketIcon,
   SendIcon,
+  SmileIcon,
+  ThumbsDownIcon,
+  ThumbsUpIcon,
   XCircleIcon,
 } from "lucide-react";
 import { DateTime } from "effect";
@@ -25,6 +36,7 @@ import {
 } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 import { Textarea } from "../ui/textarea";
 import {
@@ -49,6 +61,21 @@ const dateTimeFmt = new Intl.DateTimeFormat(undefined, {
   minute: "2-digit",
 });
 
+const COMMENT_REACTION_META: ReadonlyArray<{
+  content: SourceControlCommentReactionContent;
+  label: string;
+  icon: ReactNode;
+}> = [
+  { content: "thumbs-up", label: "Thumbs up", icon: <ThumbsUpIcon className="size-3.5" /> },
+  { content: "thumbs-down", label: "Thumbs down", icon: <ThumbsDownIcon className="size-3.5" /> },
+  { content: "laugh", label: "Laugh", icon: <SmileIcon className="size-3.5" /> },
+  { content: "hooray", label: "Hooray", icon: <PartyPopperIcon className="size-3.5" /> },
+  { content: "confused", label: "Confused", icon: <CircleHelpIcon className="size-3.5" /> },
+  { content: "heart", label: "Heart", icon: <HeartIcon className="size-3.5" /> },
+  { content: "rocket", label: "Rocket", icon: <RocketIcon className="size-3.5" /> },
+  { content: "eyes", label: "Eyes", icon: <EyeIcon className="size-3.5" /> },
+];
+
 function createClientMutationId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -59,6 +86,11 @@ function createClientMutationId(): string {
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) return error.message;
   return "Failed to post comment.";
+}
+
+function reactionErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) return error.message;
+  return "Failed to update reaction.";
 }
 
 function avatarInitials(author: string): string {
@@ -143,8 +175,12 @@ export interface CommentItemProps {
   isOriginalPost?: boolean;
   itemKind?: "body" | "comment" | "review" | undefined;
   eyebrow?: string | undefined;
+  reactions?: ReadonlyArray<SourceControlCommentReaction> | undefined;
   actions?: ReactNode | undefined;
   onQuote?: (() => void) | undefined;
+  onAddReaction?:
+    | ((content: SourceControlCommentReactionContent) => Promise<void> | void)
+    | undefined;
   className?: string;
 }
 
@@ -223,6 +259,132 @@ function commentKindAccentClassName(kind: "body" | "comment" | "review"): string
   }
 }
 
+function reactionMeta(content: SourceControlCommentReactionContent) {
+  return COMMENT_REACTION_META.find((meta) => meta.content === content);
+}
+
+function reactionTitle(input: {
+  readonly label: string;
+  readonly viewerHasReacted: boolean;
+}): string {
+  return `${input.viewerHasReacted ? "Remove" : "Add"} ${input.label.toLowerCase()} reaction`;
+}
+
+function CommentReactionBar(props: {
+  reactions: ReadonlyArray<SourceControlCommentReaction>;
+  onAddReaction?:
+    | ((content: SourceControlCommentReactionContent) => Promise<void> | void)
+    | undefined;
+}) {
+  const [pendingContent, setPendingContent] = useState<SourceControlCommentReactionContent | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const canReact = props.onAddReaction !== undefined;
+  const visibleReactions = props.reactions.filter((reaction) => reaction.count > 0);
+
+  if (visibleReactions.length === 0 && !canReact) {
+    return null;
+  }
+
+  const addReaction = async (content: SourceControlCommentReactionContent) => {
+    if (!props.onAddReaction || pendingContent !== null) return;
+    setPendingContent(content);
+    setError(null);
+    try {
+      await props.onAddReaction(content);
+    } catch (reactionError) {
+      setError(reactionErrorMessage(reactionError));
+    } finally {
+      setPendingContent(null);
+    }
+  };
+
+  return (
+    <footer className="mt-3 flex flex-wrap items-center gap-1.5">
+      {visibleReactions.map((reaction) => {
+        const meta = reactionMeta(reaction.content);
+        if (!meta) return null;
+        const isPending = pendingContent === reaction.content;
+        const viewerHasReacted = reaction.viewerHasReacted === true;
+        const content = (
+          <>
+            {isPending ? <Spinner className="size-3" /> : meta.icon}
+            <span className="font-medium tabular-nums">{reaction.count}</span>
+            <span className="sr-only">{meta.label}</span>
+          </>
+        );
+        if (!canReact) {
+          return (
+            <span
+              key={reaction.content}
+              className="inline-flex h-6 items-center gap-1 rounded-md border border-border/60 bg-muted/35 px-1.5 text-muted-foreground text-xs"
+              title={meta.label}
+            >
+              {content}
+            </span>
+          );
+        }
+        return (
+          <button
+            key={reaction.content}
+            type="button"
+            disabled={pendingContent !== null}
+            onClick={() => void addReaction(reaction.content)}
+            aria-pressed={viewerHasReacted}
+            className={cn(
+              "inline-flex h-6 items-center gap-1 rounded-md border px-1.5 text-xs transition-colors disabled:opacity-60",
+              viewerHasReacted
+                ? "border-primary/45 bg-primary/10 text-primary hover:bg-primary/15"
+                : "border-border/60 bg-muted/35 text-muted-foreground hover:bg-secondary hover:text-foreground",
+            )}
+            title={reactionTitle({ label: meta.label, viewerHasReacted })}
+          >
+            {content}
+          </button>
+        );
+      })}
+      {canReact ? (
+        <Menu>
+          <MenuTrigger
+            disabled={pendingContent !== null}
+            className="inline-flex size-6 items-center justify-center rounded-md border border-dashed border-border/70 text-muted-foreground/70 transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-60"
+            aria-label="Add reaction"
+            title="Add reaction"
+          >
+            <PlusIcon className="size-3.5" />
+          </MenuTrigger>
+          <MenuPopup align="start" className="min-w-44">
+            {COMMENT_REACTION_META.map((meta) => {
+              const reaction = props.reactions.find((item) => item.content === meta.content);
+              const viewerHasReacted = reaction?.viewerHasReacted === true;
+              return (
+                <MenuItem
+                  key={meta.content}
+                  disabled={pendingContent !== null}
+                  onClick={() => void addReaction(meta.content)}
+                >
+                  {pendingContent === meta.content ? <Spinner className="size-3.5" /> : meta.icon}
+                  {meta.label}
+                  {viewerHasReacted ? (
+                    <CheckCircle2Icon className="ms-auto size-3.5 text-primary" />
+                  ) : null}
+                </MenuItem>
+              );
+            })}
+          </MenuPopup>
+        </Menu>
+      ) : null}
+      {error ? (
+        <span className="inline-flex min-w-0 items-center gap-1 text-destructive text-xs">
+          <AlertCircleIcon className="size-3.5 shrink-0" />
+          <span className="truncate">{error}</span>
+        </span>
+      ) : null}
+    </footer>
+  );
+}
+
 export const CommentItem = memo(function CommentItem(props: CommentItemProps) {
   const [showRaw, setShowRaw] = useState(false);
   const isoDate = DateTime.toDate(props.createdAt).toISOString();
@@ -292,6 +454,7 @@ export const CommentItem = memo(function CommentItem(props: CommentItemProps) {
         </div>
       </header>
       <MarkdownView text={props.body} raw={showRaw} />
+      <CommentReactionBar reactions={props.reactions ?? []} onAddReaction={props.onAddReaction} />
     </article>
   );
 });
@@ -460,6 +623,7 @@ export const CommentThread = memo(function CommentThread(props: {
             authorAssociation={comment.authorAssociation}
             authorRole={comment.authorRole}
             reviewState={comment.reviewState}
+            reactions={comment.reactions}
             onQuote={
               props.onQuoteComment !== undefined ? () => props.onQuoteComment?.(comment) : undefined
             }

@@ -1,7 +1,13 @@
 import type {
+  SourceControlAddCommentReactionInput,
   EnvironmentId,
   SourceControlAddChangeRequestCommentInput,
   SourceControlAddIssueCommentInput,
+  SourceControlChangeRequestDetail,
+  SourceControlCommentReaction,
+  SourceControlCommentReactionContent,
+  SourceControlIssueComment,
+  SourceControlIssueDetail,
 } from "@ryco/contracts";
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { requireEnvironmentConnection } from "~/environments/runtime";
@@ -9,6 +15,40 @@ import { requireEnvironmentConnection } from "~/environments/runtime";
 type SourceControlWorkflowRerunPayload =
   | { readonly target: "failed-jobs" }
   | { readonly target: "job"; readonly jobId: string };
+
+type CommentReactionDetail = SourceControlIssueDetail | SourceControlChangeRequestDetail;
+
+function toggleReactionList(
+  reactions: ReadonlyArray<SourceControlCommentReaction> | undefined,
+  content: SourceControlCommentReactionContent,
+): ReadonlyArray<SourceControlCommentReaction> | undefined {
+  const existing = reactions?.find((reaction) => reaction.content === content);
+  const others = reactions?.filter((reaction) => reaction.content !== content) ?? [];
+  if (!existing) {
+    return [...others, { content, count: 1, viewerHasReacted: true }];
+  }
+  const viewerHasReacted = existing.viewerHasReacted === true;
+  const nextCount = viewerHasReacted ? Math.max(0, existing.count - 1) : existing.count + 1;
+  if (nextCount <= 0) return others.length > 0 ? others : undefined;
+  return [...others, { ...existing, count: nextCount, viewerHasReacted: !viewerHasReacted }];
+}
+
+function toggleCommentReactionInDetail<TDetail extends CommentReactionDetail>(
+  detail: TDetail | undefined,
+  input: Pick<SourceControlAddCommentReactionInput, "commentId" | "content">,
+): TDetail | undefined {
+  if (!detail) return detail;
+  let changed = false;
+  const comments = detail.comments.map((comment): SourceControlIssueComment => {
+    if (comment.id !== input.commentId) return comment;
+    changed = true;
+    const reactions = toggleReactionList(comment.reactions, input.content);
+    if (reactions) return { ...comment, reactions };
+    const { reactions: _reactions, ...rest } = comment;
+    return rest;
+  });
+  return changed ? ({ ...detail, comments } as TDetail) : detail;
+}
 
 export const sourceControlContextQueryKeys = {
   all: ["sourceControl"] as const,
@@ -102,6 +142,7 @@ export const sourceControlContextQueryKeys = {
     environmentId: EnvironmentId | null,
     cwd: string | null,
     pullRequestNumber?: number | null,
+    commitSha?: string | null,
     limit?: number,
   ) =>
     [
@@ -111,6 +152,7 @@ export const sourceControlContextQueryKeys = {
       cwd,
       "runs",
       pullRequestNumber ?? null,
+      commitSha ?? null,
       limit ?? null,
     ] as const,
   workflows: (environmentId: EnvironmentId | null, cwd: string | null) =>
@@ -358,6 +400,7 @@ export function workflowRunsQueryOptions(input: {
   environmentId: EnvironmentId | null;
   cwd: string | null;
   pullRequestNumber?: number | null;
+  commitSha?: string | null;
   limit?: number;
   enabled?: boolean;
 }) {
@@ -366,6 +409,7 @@ export function workflowRunsQueryOptions(input: {
       input.environmentId,
       input.cwd,
       input.pullRequestNumber,
+      input.commitSha,
       input.limit,
     ),
     queryFn: async () => {
@@ -377,6 +421,9 @@ export function workflowRunsQueryOptions(input: {
         cwd: input.cwd,
         ...(input.pullRequestNumber !== undefined && input.pullRequestNumber !== null
           ? { pullRequestNumber: input.pullRequestNumber }
+          : {}),
+        ...(input.commitSha !== undefined && input.commitSha !== null
+          ? { commitSha: input.commitSha }
           : {}),
         ...(input.limit !== undefined ? { limit: input.limit } : {}),
       });
@@ -525,6 +572,55 @@ export function useAddIssueCommentMutation(input: {
   });
 }
 
+export function useAddIssueCommentReactionMutation(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  reference: string;
+}) {
+  const qc = useQueryClient();
+  const detailKey = sourceControlContextQueryKeys.issueDetail(
+    input.environmentId,
+    input.cwd,
+    input.reference,
+    true,
+  );
+  return useMutation({
+    mutationFn: async (
+      payload: Pick<SourceControlAddCommentReactionInput, "commentId" | "content">,
+    ) => {
+      if (!input.environmentId || !input.cwd) {
+        throw new Error("Comment reactions are unavailable.");
+      }
+      const client = requireEnvironmentConnection(input.environmentId).client;
+      return client.sourceControl.addIssueCommentReaction({
+        cwd: input.cwd,
+        reference: input.reference,
+        commentId: payload.commentId,
+        content: payload.content,
+      });
+    },
+    onMutate: async (payload) => {
+      await qc.cancelQueries({ queryKey: detailKey });
+      const previous = qc.getQueryData<SourceControlIssueDetail>(detailKey);
+      qc.setQueryData<SourceControlIssueDetail>(detailKey, (current) =>
+        toggleCommentReactionInDetail(current, payload),
+      );
+      return { previous };
+    },
+    onError: (_error, _payload, context) => {
+      if (context?.previous) {
+        qc.setQueryData(detailKey, context.previous);
+      }
+    },
+    onSuccess: (result) => {
+      qc.setQueryData(detailKey, result.detail);
+      qc.invalidateQueries({
+        queryKey: sourceControlContextQueryKeys.all,
+      });
+    },
+  });
+}
+
 export function useAddChangeRequestCommentMutation(input: {
   environmentId: EnvironmentId | null;
   cwd: string | null;
@@ -558,6 +654,55 @@ export function useAddChangeRequestCommentMutation(input: {
         ),
         result.detail,
       );
+      qc.invalidateQueries({
+        queryKey: sourceControlContextQueryKeys.all,
+      });
+    },
+  });
+}
+
+export function useAddChangeRequestCommentReactionMutation(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  reference: string;
+}) {
+  const qc = useQueryClient();
+  const detailKey = sourceControlContextQueryKeys.changeRequestDetail(
+    input.environmentId,
+    input.cwd,
+    input.reference,
+    true,
+  );
+  return useMutation({
+    mutationFn: async (
+      payload: Pick<SourceControlAddCommentReactionInput, "commentId" | "content">,
+    ) => {
+      if (!input.environmentId || !input.cwd) {
+        throw new Error("Comment reactions are unavailable.");
+      }
+      const client = requireEnvironmentConnection(input.environmentId).client;
+      return client.sourceControl.addChangeRequestCommentReaction({
+        cwd: input.cwd,
+        reference: input.reference,
+        commentId: payload.commentId,
+        content: payload.content,
+      });
+    },
+    onMutate: async (payload) => {
+      await qc.cancelQueries({ queryKey: detailKey });
+      const previous = qc.getQueryData<SourceControlChangeRequestDetail>(detailKey);
+      qc.setQueryData<SourceControlChangeRequestDetail>(detailKey, (current) =>
+        toggleCommentReactionInDetail(current, payload),
+      );
+      return { previous };
+    },
+    onError: (_error, _payload, context) => {
+      if (context?.previous) {
+        qc.setQueryData(detailKey, context.previous);
+      }
+    },
+    onSuccess: (result) => {
+      qc.setQueryData(detailKey, result.detail);
       qc.invalidateQueries({
         queryKey: sourceControlContextQueryKeys.all,
       });

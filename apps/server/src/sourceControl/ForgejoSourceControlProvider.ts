@@ -209,6 +209,14 @@ export const make = Effect.fn("makeForgejoSourceControlProvider")(function* () {
           detail: "Not implemented for forgejo",
         }),
       ),
+    addIssueCommentReaction: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "forgejo",
+          operation: "addIssueCommentReaction",
+          detail: "Not implemented for forgejo",
+        }),
+      ),
     searchIssues: (input) =>
       forgejo
         .searchIssues({
@@ -251,6 +259,14 @@ export const make = Effect.fn("makeForgejoSourceControlProvider")(function* () {
         new SourceControlProviderError({
           provider: "forgejo",
           operation: "addChangeRequestComment",
+          detail: "Not implemented for forgejo",
+        }),
+      ),
+    addChangeRequestCommentReaction: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "forgejo",
+          operation: "addChangeRequestCommentReaction",
           detail: "Not implemented for forgejo",
         }),
       ),

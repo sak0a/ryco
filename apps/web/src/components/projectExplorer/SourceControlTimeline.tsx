@@ -4,6 +4,7 @@ import { cn } from "~/lib/utils";
 export type SourceControlTimelineTone =
   | "body"
   | "comment"
+  | "commit"
   | "review"
   | "system"
   | "workflow"
@@ -50,7 +51,7 @@ export function SourceControlTimelineEntry(props: {
 }
 
 export function SourceControlTimelineNotice(props: {
-  tone: Exclude<SourceControlTimelineTone, "body" | "comment" | "review" | "composer">;
+  tone: Exclude<SourceControlTimelineTone, "body" | "comment" | "commit" | "review" | "composer">;
   title: string;
   description?: string | undefined;
   children?: ReactNode | undefined;
@@ -79,6 +80,8 @@ function timelineMarkerToneClassName(tone: SourceControlTimelineTone): string {
       return "border-primary/28 bg-primary/8 text-primary";
     case "review":
       return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300";
+    case "commit":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
     case "system":
       return "border-violet-500/28 bg-violet-500/10 text-violet-700 dark:text-violet-300";
     case "workflow":

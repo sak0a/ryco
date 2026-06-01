@@ -144,8 +144,11 @@ import {
   SourceControlAssigneeCandidate,
   SourceControlAddChangeRequestCommentInput,
   SourceControlAddChangeRequestCommentResult,
+  SourceControlAddChangeRequestCommentReactionResult,
+  SourceControlAddCommentReactionInput,
   SourceControlAddIssueCommentInput,
   SourceControlAddIssueCommentResult,
+  SourceControlAddIssueCommentReactionResult,
   SourceControlCreateIssueInput,
   SourceControlLabel,
   SourceControlWorkflowJobLogInput,
@@ -263,7 +266,9 @@ export const WS_METHODS = {
   sourceControlGetChangeRequestDiff: "sourceControl.getChangeRequestDiff",
   sourceControlCreateIssue: "sourceControl.createIssue",
   sourceControlAddIssueComment: "sourceControl.addIssueComment",
+  sourceControlAddIssueCommentReaction: "sourceControl.addIssueCommentReaction",
   sourceControlAddChangeRequestComment: "sourceControl.addChangeRequestComment",
+  sourceControlAddChangeRequestCommentReaction: "sourceControl.addChangeRequestCommentReaction",
   sourceControlListIssueLabels: "sourceControl.listIssueLabels",
   sourceControlListIssueAssignees: "sourceControl.listIssueAssignees",
   sourceControlListWorkflowRuns: "sourceControl.listWorkflowRuns",
@@ -649,11 +654,29 @@ export const WsSourceControlAddIssueCommentRpc = Rpc.make(WS_METHODS.sourceContr
   error: Schema.Union([SourceControlProviderError, AuthRpcError]),
 });
 
+export const WsSourceControlAddIssueCommentReactionRpc = Rpc.make(
+  WS_METHODS.sourceControlAddIssueCommentReaction,
+  {
+    payload: SourceControlAddCommentReactionInput,
+    success: SourceControlAddIssueCommentReactionResult,
+    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  },
+);
+
 export const WsSourceControlAddChangeRequestCommentRpc = Rpc.make(
   WS_METHODS.sourceControlAddChangeRequestComment,
   {
     payload: SourceControlAddChangeRequestCommentInput,
     success: SourceControlAddChangeRequestCommentResult,
+    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  },
+);
+
+export const WsSourceControlAddChangeRequestCommentReactionRpc = Rpc.make(
+  WS_METHODS.sourceControlAddChangeRequestCommentReaction,
+  {
+    payload: SourceControlAddCommentReactionInput,
+    success: SourceControlAddChangeRequestCommentReactionResult,
     error: Schema.Union([SourceControlProviderError, AuthRpcError]),
   },
 );
@@ -1121,7 +1144,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlGetChangeRequestDiffRpc,
   WsSourceControlCreateIssueRpc,
   WsSourceControlAddIssueCommentRpc,
+  WsSourceControlAddIssueCommentReactionRpc,
   WsSourceControlAddChangeRequestCommentRpc,
+  WsSourceControlAddChangeRequestCommentReactionRpc,
   WsSourceControlListIssueLabelsRpc,
   WsSourceControlListIssueAssigneesRpc,
   WsSourceControlListWorkflowRunsRpc,

@@ -205,6 +205,14 @@ export const make = Effect.fn("makeBitbucketSourceControlProvider")(function* ()
           detail: "Not implemented for bitbucket",
         }),
       ),
+    addIssueCommentReaction: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "bitbucket",
+          operation: "addIssueCommentReaction",
+          detail: "Not implemented for bitbucket",
+        }),
+      ),
     searchIssues: (input) =>
       bitbucket
         .searchIssues({
@@ -247,6 +255,14 @@ export const make = Effect.fn("makeBitbucketSourceControlProvider")(function* ()
         new SourceControlProviderError({
           provider: "bitbucket",
           operation: "addChangeRequestComment",
+          detail: "Not implemented for bitbucket",
+        }),
+      ),
+    addChangeRequestCommentReaction: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "bitbucket",
+          operation: "addChangeRequestCommentReaction",
           detail: "Not implemented for bitbucket",
         }),
       ),

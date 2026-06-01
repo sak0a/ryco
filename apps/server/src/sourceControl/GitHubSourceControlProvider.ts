@@ -113,11 +113,13 @@ function toIssueSummary(raw: GitHubIssues.NormalizedGitHubIssueRecord): SourceCo
 
 function toSourceControlComment(
   raw: {
+    readonly id?: string;
     readonly author: string;
     readonly body: string;
     readonly createdAt: string;
     readonly authorAssociation?: string;
     readonly reviewState?: SourceControlIssueComment["reviewState"];
+    readonly reactions?: SourceControlIssueComment["reactions"];
   },
   context: {
     readonly itemAuthor: string | null | undefined;
@@ -125,6 +127,7 @@ function toSourceControlComment(
   },
 ): SourceControlIssueComment {
   return {
+    ...(raw.id ? { id: raw.id } : {}),
     author: raw.author,
     body: stripCommentMutationMarker(raw.body),
     createdAt: DateTime.fromDateUnsafe(new Date(raw.createdAt)),
@@ -136,6 +139,7 @@ function toSourceControlComment(
       authorAssociation: raw.authorAssociation,
     }),
     ...(raw.reviewState ? { reviewState: raw.reviewState } : {}),
+    ...(raw.reactions && raw.reactions.length > 0 ? { reactions: raw.reactions } : {}),
   };
 }
 
@@ -475,6 +479,27 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
           .pipe(Effect.mapError((error) => providerError("addIssueComment", error)));
         return toIssueDetail(updated, { fullContent: true });
       }),
+    addIssueCommentReaction: (input) =>
+      Effect.gen(function* () {
+        const reactionGroups = yield* github
+          .getCommentReactionGroups({ cwd: input.cwd, commentIds: [input.commentId] })
+          .pipe(Effect.mapError((error) => providerError("addIssueCommentReaction", error)));
+        const viewerHasReacted =
+          reactionGroups
+            .find((group) => group.id === input.commentId)
+            ?.reactions.find((reaction) => reaction.content === input.content)?.viewerHasReacted ===
+          true;
+        const reactionMutation = viewerHasReacted ? github.removeReaction : github.addReaction;
+        yield* reactionMutation({
+          cwd: input.cwd,
+          subjectId: input.commentId,
+          content: input.content,
+        }).pipe(Effect.mapError((error) => providerError("addIssueCommentReaction", error)));
+        const updated = yield* github
+          .getIssue({ cwd: input.cwd, reference: input.reference })
+          .pipe(Effect.mapError((error) => providerError("addIssueCommentReaction", error)));
+        return toIssueDetail(updated, { fullContent: true });
+      }),
     searchIssues: (input) =>
       github
         .searchIssues({
@@ -533,6 +558,33 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
         const updated = yield* github
           .getPullRequestDetail({ cwd: input.cwd, reference: input.reference })
           .pipe(Effect.mapError((error) => providerError("addChangeRequestComment", error)));
+        return toChangeRequestDetail(updated, { fullContent: true });
+      }),
+    addChangeRequestCommentReaction: (input) =>
+      Effect.gen(function* () {
+        const reactionGroups = yield* github
+          .getCommentReactionGroups({ cwd: input.cwd, commentIds: [input.commentId] })
+          .pipe(
+            Effect.mapError((error) => providerError("addChangeRequestCommentReaction", error)),
+          );
+        const viewerHasReacted =
+          reactionGroups
+            .find((group) => group.id === input.commentId)
+            ?.reactions.find((reaction) => reaction.content === input.content)?.viewerHasReacted ===
+          true;
+        const reactionMutation = viewerHasReacted ? github.removeReaction : github.addReaction;
+        yield* reactionMutation({
+          cwd: input.cwd,
+          subjectId: input.commentId,
+          content: input.content,
+        }).pipe(
+          Effect.mapError((error) => providerError("addChangeRequestCommentReaction", error)),
+        );
+        const updated = yield* github
+          .getPullRequestDetail({ cwd: input.cwd, reference: input.reference })
+          .pipe(
+            Effect.mapError((error) => providerError("addChangeRequestCommentReaction", error)),
+          );
         return toChangeRequestDetail(updated, { fullContent: true });
       }),
     getChangeRequestDiff: (input) =>
@@ -609,9 +661,9 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
     listWorkflowRuns: (input) =>
       Effect.gen(function* () {
         let repositoryNameWithOwner: string | null = null;
-        let headSha: string | null = null;
+        let headSha: string | null = input.commitSha?.trim() || null;
 
-        if (input.pullRequestNumber !== undefined) {
+        if (input.pullRequestNumber !== undefined && headSha === null) {
           const context = yield* github.getPullRequestWorkflowContext({
             cwd: input.cwd,
             reference: String(input.pullRequestNumber),

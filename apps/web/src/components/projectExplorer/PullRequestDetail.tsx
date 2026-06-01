@@ -1,5 +1,6 @@
 import type {
   EnvironmentId,
+  SourceControlCommentReactionContent,
   SourceControlChangeRequestCommit,
   SourceControlChangeRequestDetail,
   SourceControlChangeRequestFile,
@@ -9,10 +10,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ChevronRightIcon,
+  Clock3Icon,
   ExternalLinkIcon,
   FileIcon,
   FileTextIcon,
   GitBranchIcon,
+  GitCommitIcon,
   MessageSquareIcon,
   MessagesSquareIcon,
   SendIcon,
@@ -21,6 +24,8 @@ import {
   changeRequestDetailQueryOptions,
   changeRequestDiffQueryOptions,
   useAddChangeRequestCommentMutation,
+  useAddChangeRequestCommentReactionMutation,
+  workflowRunsQueryOptions,
 } from "~/lib/sourceControlContextRpc";
 import { cn } from "~/lib/utils";
 import { ContextPickerTabs } from "../chat/ContextPickerTabs";
@@ -43,7 +48,12 @@ import {
 } from "./SourceControlTimeline";
 import { changeRequestStateKind, StateBadge } from "./StateBadge";
 import { type DiffLine, parseDiffLines } from "./diffLines";
-import { getPrCheckStatusFromChangeRequest } from "./prCheckStatus";
+import {
+  getPrCheckStatusForQuery,
+  getPrCheckStatusFromChangeRequest,
+  getPrCheckStatusFromWorkflowRuns,
+  shouldRefreshPrCheckStatus,
+} from "./prCheckStatus";
 import { splitUnifiedDiffByFile } from "./unifiedDiffSplit";
 import { usePrCheckPassNotifications } from "./usePrCheckPassNotifications";
 import { WorktreeItemSidebar } from "./WorktreeItemSidebar";
@@ -55,7 +65,15 @@ const dateFmt = new Intl.DateTimeFormat(undefined, {
   day: "numeric",
 });
 
+const compactDateTimeFmt = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
 const numberFmt = new Intl.NumberFormat(undefined);
+const MAX_TIMELINE_COMMIT_ROWS = 12;
 
 type PullRequestTab = "conversation" | "checks" | "commits" | "files";
 
@@ -81,6 +99,11 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
     }),
   );
   const addCommentMutation = useAddChangeRequestCommentMutation({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    reference,
+  });
+  const addReactionMutation = useAddChangeRequestCommentReactionMutation({
     environmentId: props.environmentId,
     cwd: props.cwd,
     reference,
@@ -111,6 +134,11 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
             onSubmitComment={
               detail.provider === "github" && props.environmentId !== null && props.cwd !== null
                 ? (input) => addCommentMutation.mutateAsync(input).then(() => undefined)
+                : undefined
+            }
+            onAddCommentReaction={
+              detail.provider === "github" && props.environmentId !== null && props.cwd !== null
+                ? (input) => addReactionMutation.mutateAsync(input).then(() => undefined)
                 : undefined
             }
           />
@@ -154,6 +182,12 @@ function PullRequestDetailBody(props: {
   onSubmitComment?:
     | ((input: { readonly body: string; readonly clientMutationId: string }) => Promise<void>)
     | undefined;
+  onAddCommentReaction?:
+    | ((input: {
+        readonly commentId: string;
+        readonly content: SourceControlCommentReactionContent;
+      }) => Promise<void>)
+    | undefined;
 }) {
   const { detail } = props;
   const [activeTab, setActiveTab] = useState<PullRequestTab>("conversation");
@@ -192,6 +226,7 @@ function PullRequestDetailBody(props: {
   const checkStatus = getPrCheckStatusFromChangeRequest(detail);
   const onSubmitComment = props.onSubmitComment;
   const canComment = onSubmitComment !== undefined;
+  const onAddCommentReaction = props.onAddCommentReaction;
 
   usePrCheckPassNotifications([
     {
@@ -335,35 +370,59 @@ function PullRequestDetailBody(props: {
                     </div>
                   </SourceControlTimelineNotice>
                 </SourceControlTimelineEntry>
-                {detail.comments.map((comment) => (
+                {detail.commits && detail.commits.length > 0 ? (
                   <SourceControlTimelineEntry
-                    key={`${comment.author}-${comment.createdAt}-${comment.body}`}
-                    tone={comment.reviewState ? "review" : "comment"}
-                    icon={<MessageSquareIcon className="size-4" />}
+                    tone="commit"
+                    icon={<GitCommitIcon className="size-4" />}
                   >
-                    <CommentItem
-                      author={comment.author}
-                      body={comment.body}
-                      createdAt={comment.createdAt}
-                      authorAssociation={comment.authorAssociation}
-                      authorRole={comment.authorRole}
-                      reviewState={comment.reviewState}
-                      itemKind={comment.reviewState ? "review" : "comment"}
-                      eyebrow={comment.reviewState ? "Review comment" : "Comment"}
-                      onQuote={
-                        canComment
-                          ? () =>
-                              queueQuoteInsertion({
-                                author: comment.author,
-                                body: comment.body,
-                                createdAt: comment.createdAt,
-                                contextLabel: "PR conversation",
-                              })
-                          : undefined
-                      }
+                    <PullRequestTimelineCommits
+                      commits={detail.commits}
+                      provider={detail.provider}
+                      environmentId={props.environmentId}
+                      cwd={props.cwd}
+                      pullRequestUrl={detail.url}
+                      onOpenCommits={() => setActiveTab("commits")}
                     />
                   </SourceControlTimelineEntry>
-                ))}
+                ) : null}
+                {detail.comments.map((comment) => {
+                  const commentId = comment.id;
+                  return (
+                    <SourceControlTimelineEntry
+                      key={`${comment.author}-${comment.createdAt}-${comment.body}`}
+                      tone={comment.reviewState ? "review" : "comment"}
+                      icon={<MessageSquareIcon className="size-4" />}
+                    >
+                      <CommentItem
+                        author={comment.author}
+                        body={comment.body}
+                        createdAt={comment.createdAt}
+                        authorAssociation={comment.authorAssociation}
+                        authorRole={comment.authorRole}
+                        reviewState={comment.reviewState}
+                        reactions={comment.reactions}
+                        itemKind={comment.reviewState ? "review" : "comment"}
+                        eyebrow={comment.reviewState ? "Review comment" : "Comment"}
+                        onAddReaction={
+                          onAddCommentReaction && commentId
+                            ? (content) => onAddCommentReaction({ commentId, content })
+                            : undefined
+                        }
+                        onQuote={
+                          canComment
+                            ? () =>
+                                queueQuoteInsertion({
+                                  author: comment.author,
+                                  body: comment.body,
+                                  createdAt: comment.createdAt,
+                                  contextLabel: "PR conversation",
+                                })
+                            : undefined
+                        }
+                      />
+                    </SourceControlTimelineEntry>
+                  );
+                })}
                 {onSubmitComment ? (
                   <SourceControlTimelineEntry
                     tone="composer"
@@ -420,6 +479,136 @@ function DiffStatsBadge({ additions, deletions }: { additions: number; deletions
       <span className="text-emerald-600 dark:text-emerald-400">+{numberFmt.format(additions)}</span>
       <span className="text-rose-600 dark:text-rose-400">−{numberFmt.format(deletions)}</span>
     </span>
+  );
+}
+
+function formatCommitDate(value: string | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  return compactDateTimeFmt.format(date);
+}
+
+function PullRequestTimelineCommits(props: {
+  commits: ReadonlyArray<SourceControlChangeRequestCommit>;
+  provider: SourceControlChangeRequestDetail["provider"];
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  pullRequestUrl: string;
+  onOpenCommits: () => void;
+}) {
+  const commits =
+    props.commits.length > MAX_TIMELINE_COMMIT_ROWS
+      ? props.commits.slice(-MAX_TIMELINE_COMMIT_ROWS)
+      : props.commits;
+  const hiddenCount = props.commits.length - commits.length;
+  const commitLabel = props.commits.length === 1 ? "1 commit" : `${props.commits.length} commits`;
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-border/60 bg-background/80 text-sm">
+      <header className="flex flex-wrap items-center gap-2 border-border/60 border-b px-3 py-2.5">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-medium text-foreground/90 text-sm">Commits</h3>
+          <p className="mt-0.5 text-muted-foreground text-xs">
+            {hiddenCount > 0
+              ? `Latest ${commits.length} of ${commitLabel}`
+              : `${commitLabel} in this pull request`}
+          </p>
+        </div>
+        {hiddenCount > 0 ? (
+          <Button type="button" size="sm" variant="ghost" onClick={props.onOpenCommits}>
+            View all
+          </Button>
+        ) : null}
+      </header>
+      <ol className="divide-y divide-border/50">
+        {commits.map((commit) => (
+          <PullRequestTimelineCommitRow
+            key={commit.oid}
+            commit={commit}
+            provider={props.provider}
+            environmentId={props.environmentId}
+            cwd={props.cwd}
+            pullRequestUrl={props.pullRequestUrl}
+          />
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function PullRequestTimelineCommitRow(props: {
+  commit: SourceControlChangeRequestCommit;
+  provider: SourceControlChangeRequestDetail["provider"];
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  pullRequestUrl: string;
+}) {
+  const runsQuery = useQuery({
+    ...workflowRunsQueryOptions({
+      environmentId: props.environmentId,
+      cwd: props.cwd,
+      commitSha: props.commit.oid,
+      limit: 20,
+      enabled: props.provider === "github",
+    }),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      const status = getPrCheckStatusFromWorkflowRuns({
+        runs: data.runs,
+        headSha: props.commit.oid,
+      });
+      return shouldRefreshPrCheckStatus(status) ? 30_000 : false;
+    },
+  });
+  const status = getPrCheckStatusForQuery({
+    isLoading: runsQuery.isLoading,
+    error: runsQuery.error,
+    status: runsQuery.data
+      ? getPrCheckStatusFromWorkflowRuns({
+          runs: runsQuery.data.runs,
+          headSha: props.commit.oid,
+        })
+      : null,
+  });
+  const runCount = runsQuery.data?.runs.length ?? null;
+  const committedAt = formatCommitDate(props.commit.committedDate);
+
+  return (
+    <li className="flex min-w-0 items-start gap-3 bg-muted/10 px-3 py-2.5 text-xs">
+      <code className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+        {props.commit.shortOid}
+      </code>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="min-w-0 flex-1 truncate font-medium text-foreground/90">
+            {props.commit.messageHeadline || "No commit message"}
+          </span>
+          <PrCheckStatusBadge view={status} mode="compact" />
+        </div>
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-[11px]">
+          {props.commit.author ? <span>{props.commit.author}</span> : null}
+          {committedAt ? (
+            <span className="inline-flex items-center gap-1">
+              <Clock3Icon className="size-3" />
+              {committedAt}
+            </span>
+          ) : null}
+          {runCount !== null ? <span>{runCount === 1 ? "1 run" : `${runCount} runs`}</span> : null}
+        </div>
+      </div>
+      <a
+        href={`${props.pullRequestUrl}/changes/${props.commit.oid}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground"
+        aria-label={`Open commit ${props.commit.shortOid}`}
+        title={`Open commit ${props.commit.shortOid}`}
+      >
+        <ExternalLinkIcon className="size-3.5" />
+      </a>
+    </li>
   );
 }
 

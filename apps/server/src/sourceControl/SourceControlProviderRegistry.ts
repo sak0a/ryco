@@ -96,10 +96,12 @@ function unsupportedProvider(
     listIssues: () => unsupported("listIssues"),
     getIssue: () => unsupported("getIssue"),
     addIssueComment: () => unsupported("addIssueComment"),
+    addIssueCommentReaction: () => unsupported("addIssueCommentReaction"),
     searchIssues: () => unsupported("searchIssues"),
     searchChangeRequests: () => unsupported("searchChangeRequests"),
     getChangeRequestDetail: () => unsupported("getChangeRequestDetail"),
     addChangeRequestComment: () => unsupported("addChangeRequestComment"),
+    addChangeRequestCommentReaction: () => unsupported("addChangeRequestCommentReaction"),
     getChangeRequestDiff: () => unsupported("getChangeRequestDiff"),
     createIssue: () => unsupported("createIssue"),
     listLabels: () => unsupported("listLabels"),
@@ -157,6 +159,8 @@ const makeLazyProvider = Effect.fn("makeLazySourceControlProvider")(function* (
     getIssue: (input) => provider.pipe(Effect.flatMap((loaded) => loaded.getIssue(input))),
     addIssueComment: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.addIssueComment(input))),
+    addIssueCommentReaction: (input) =>
+      provider.pipe(Effect.flatMap((loaded) => loaded.addIssueCommentReaction(input))),
     searchIssues: (input) => provider.pipe(Effect.flatMap((loaded) => loaded.searchIssues(input))),
     searchChangeRequests: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.searchChangeRequests(input))),
@@ -164,6 +168,8 @@ const makeLazyProvider = Effect.fn("makeLazySourceControlProvider")(function* (
       provider.pipe(Effect.flatMap((loaded) => loaded.getChangeRequestDetail(input))),
     addChangeRequestComment: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.addChangeRequestComment(input))),
+    addChangeRequestCommentReaction: (input) =>
+      provider.pipe(Effect.flatMap((loaded) => loaded.addChangeRequestCommentReaction(input))),
     getChangeRequestDiff: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.getChangeRequestDiff(input))),
     createIssue: (input) => provider.pipe(Effect.flatMap((loaded) => loaded.createIssue(input))),
@@ -289,6 +295,11 @@ function bindProviderContext(
         ...input,
         context: input.context ?? context,
       }),
+    addIssueCommentReaction: (input) =>
+      provider.addIssueCommentReaction({
+        ...input,
+        context: input.context ?? context,
+      }),
     searchIssues: (input) =>
       provider.searchIssues({
         ...input,
@@ -306,6 +317,11 @@ function bindProviderContext(
       }),
     addChangeRequestComment: (input) =>
       provider.addChangeRequestComment({
+        ...input,
+        context: input.context ?? context,
+      }),
+    addChangeRequestCommentReaction: (input) =>
+      provider.addChangeRequestCommentReaction({
         ...input,
         context: input.context ?? context,
       }),

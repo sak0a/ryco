@@ -51,7 +51,17 @@ describe("decodeGitHubIssueDetailJson", () => {
       state: "OPEN",
       body: "issue body",
       comments: [
-        { author: { login: "bob" }, body: "first", createdAt: "2026-03-14T10:00:00Z" },
+        {
+          id: "IC_kwDOA1B2C84AAAAB",
+          author: { login: "bob" },
+          body: "first",
+          createdAt: "2026-03-14T10:00:00Z",
+          reactionGroups: [
+            { content: "THUMBS_UP", viewerHasReacted: true, users: { totalCount: 2 } },
+            { content: "ROCKET", users: { totalCount: 1 } },
+            { content: "HEART", users: { totalCount: 0 } },
+          ],
+        },
         { author: null, body: "second", createdAt: "2026-03-14T11:00:00Z" },
       ],
     });
@@ -60,7 +70,12 @@ describe("decodeGitHubIssueDetailJson", () => {
     if (!Result.isSuccess(result)) return;
     expect(result.success.body).toBe("issue body");
     expect(result.success.comments).toHaveLength(2);
+    expect(result.success.comments[0]?.id).toBe("IC_kwDOA1B2C84AAAAB");
     expect(result.success.comments[0]?.author).toBe("bob");
+    expect(result.success.comments[0]?.reactions).toEqual([
+      { content: "thumbs-up", count: 2, viewerHasReacted: true },
+      { content: "rocket", count: 1 },
+    ]);
     expect(result.success.comments[1]?.author).toBe("unknown");
   });
 

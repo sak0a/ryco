@@ -2,6 +2,7 @@ import { Context, Effect, Layer, Result, Schema, SchemaIssue } from "effect";
 
 import {
   TrimmedNonEmptyString,
+  type SourceControlCommentReactionContent,
   type SourceControlRepositoryVisibility,
   type VcsError,
 } from "@ryco/contracts";
@@ -13,6 +14,13 @@ import type { NormalizedGitHubIssueDetail, NormalizedGitHubIssueRecord } from ".
 import * as GitHubActions from "./gitHubActions.ts";
 import { buildGitHubIssueCreateArgv, parseGitHubIssueCreateOutput } from "./gitHubIssueCreate.ts";
 import * as GitHubPullRequests from "./gitHubPullRequests.ts";
+import {
+  decodeGitHubReactionGroupsBySubjectJson,
+  formatGitHubReactionGroupsDecodeError,
+  toGitHubReactionContent,
+  type NormalizedGitHubReaction,
+  type NormalizedGitHubSubjectReactions,
+} from "./gitHubReactions.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const STATUS_CHECK_ROLLUP_JSON_FIELD = "statusCheckRollup";
@@ -136,11 +144,13 @@ export interface GitHubPullRequestFile {
 export interface GitHubPullRequestDetail extends GitHubPullRequestSummary {
   readonly body: string;
   readonly comments: ReadonlyArray<{
+    readonly id?: string;
     readonly author: string;
     readonly body: string;
     readonly createdAt: string;
     readonly authorAssociation?: string;
     readonly reviewState?: GitHubReviewState;
+    readonly reactions?: ReadonlyArray<NormalizedGitHubReaction>;
   }>;
   readonly linkedIssueNumbers: ReadonlyArray<number>;
   readonly reviewers: ReadonlyArray<string>;
@@ -261,6 +271,23 @@ export interface GitHubCliShape {
     readonly reference: string;
     readonly bodyFile: string;
   }) => Effect.Effect<void, GitHubCliError>;
+
+  readonly addReaction: (input: {
+    readonly cwd: string;
+    readonly subjectId: string;
+    readonly content: SourceControlCommentReactionContent;
+  }) => Effect.Effect<void, GitHubCliError>;
+
+  readonly removeReaction: (input: {
+    readonly cwd: string;
+    readonly subjectId: string;
+    readonly content: SourceControlCommentReactionContent;
+  }) => Effect.Effect<void, GitHubCliError>;
+
+  readonly getCommentReactionGroups: (input: {
+    readonly cwd: string;
+    readonly commentIds: ReadonlyArray<string>;
+  }) => Effect.Effect<ReadonlyArray<NormalizedGitHubSubjectReactions>, GitHubCliError>;
 
   readonly listLabels: (input: {
     readonly cwd: string;
@@ -568,6 +595,28 @@ function pullRequestApiReference(reference: string): string {
   return trimmed;
 }
 
+const COMMENT_REACTION_GROUPS_QUERY =
+  "query($ids:[ID!]!){nodes(ids:$ids){id ... on Reactable{reactionGroups{content viewerHasReacted reactors{totalCount} users{totalCount}}}}}";
+
+function mergeCommentReactionGroups<
+  T extends { readonly id?: string; readonly reactions?: ReadonlyArray<NormalizedGitHubReaction> },
+>(
+  comments: ReadonlyArray<T>,
+  groups: ReadonlyArray<NormalizedGitHubSubjectReactions>,
+): ReadonlyArray<T> {
+  if (groups.length === 0) return comments;
+  const reactionsById = new Map(groups.map((group) => [group.id, group.reactions]));
+  return comments.map((comment) => {
+    if (!comment.id) return comment;
+    const reactions = reactionsById.get(comment.id);
+    if (!reactions) return comment;
+    return {
+      ...comment,
+      ...(reactions.length > 0 ? { reactions } : { reactions: [] }),
+    };
+  });
+}
+
 export const make = Effect.fn("makeGitHubCli")(function* () {
   const process = yield* VcsProcess.VcsProcess;
 
@@ -599,6 +648,63 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
       Effect.catchIf(isStatusCheckRollupAccessError, () =>
         run(withoutStatusCheckRollupJsonField(input.jsonFields)),
       ),
+    );
+  };
+
+  const getCommentReactionGroups: GitHubCliShape["getCommentReactionGroups"] = (input) => {
+    const commentIds = [...new Set(input.commentIds.map((id) => id.trim()).filter(Boolean))];
+    if (commentIds.length === 0) return Effect.succeed([]);
+    return execute({
+      cwd: input.cwd,
+      args: [
+        "api",
+        "graphql",
+        "-f",
+        `query=${COMMENT_REACTION_GROUPS_QUERY}`,
+        ...commentIds.flatMap((id) => ["-F", `ids[]=${id}`]),
+      ],
+    }).pipe(
+      Effect.map((r) => r.stdout.trim()),
+      Effect.flatMap((raw) =>
+        Effect.sync(() => decodeGitHubReactionGroupsBySubjectJson(raw)).pipe(
+          Effect.flatMap((decoded) =>
+            Result.isSuccess(decoded)
+              ? Effect.succeed(decoded.success)
+              : Effect.fail(
+                  new GitHubCliError({
+                    operation: "getCommentReactionGroups",
+                    detail: `GitHub CLI returned invalid reaction group JSON: ${formatGitHubReactionGroupsDecodeError(decoded.failure)}`,
+                    cause: decoded.failure,
+                  }),
+                ),
+          ),
+        ),
+      ),
+    );
+  };
+
+  const hydrateCommentReactionGroups = <
+    T extends {
+      readonly comments: ReadonlyArray<{
+        readonly id?: string;
+        readonly reactions?: ReadonlyArray<NormalizedGitHubReaction>;
+      }>;
+    },
+  >(
+    cwd: string,
+    detail: T,
+  ): Effect.Effect<T, GitHubCliError> => {
+    const commentIds = detail.comments.flatMap((comment) => (comment.id ? [comment.id] : []));
+    if (commentIds.length === 0) return Effect.succeed(detail);
+    return getCommentReactionGroups({ cwd, commentIds }).pipe(
+      Effect.map(
+        (groups) =>
+          ({
+            ...detail,
+            comments: mergeCommentReactionGroups(detail.comments, groups),
+          }) as T,
+      ),
+      Effect.catch(() => Effect.succeed(detail)),
     );
   };
 
@@ -774,7 +880,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           Effect.sync(() => GitHubIssues.decodeGitHubIssueDetailJson(raw)).pipe(
             Effect.flatMap((decoded) =>
               Result.isSuccess(decoded)
-                ? Effect.succeed(decoded.success)
+                ? hydrateCommentReactionGroups(input.cwd, decoded.success)
                 : Effect.fail(
                     new GitHubCliError({
                       operation: "getIssue",
@@ -874,7 +980,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
                 );
               }
               const { updatedAt: _updatedAt, ...rest } = decoded.success;
-              return Effect.succeed(rest);
+              return hydrateCommentReactionGroups(input.cwd, rest);
             }),
           ),
         ),
@@ -916,6 +1022,35 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         cwd: input.cwd,
         args: ["pr", "comment", input.reference, "--body-file", input.bodyFile],
       }).pipe(Effect.asVoid),
+    addReaction: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: [
+          "api",
+          "graphql",
+          "-f",
+          "query=mutation($subjectId:ID!,$content:ReactionContent!){addReaction(input:{subjectId:$subjectId,content:$content}){reaction{content}}}",
+          "-f",
+          `subjectId=${input.subjectId}`,
+          "-f",
+          `content=${toGitHubReactionContent(input.content)}`,
+        ],
+      }).pipe(Effect.asVoid),
+    removeReaction: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: [
+          "api",
+          "graphql",
+          "-f",
+          "query=mutation($subjectId:ID!,$content:ReactionContent!){removeReaction(input:{subjectId:$subjectId,content:$content}){reaction{content}}}",
+          "-f",
+          `subjectId=${input.subjectId}`,
+          "-f",
+          `content=${toGitHubReactionContent(input.content)}`,
+        ],
+      }).pipe(Effect.asVoid),
+    getCommentReactionGroups,
     listLabels: (input) =>
       execute({
         cwd: input.cwd,

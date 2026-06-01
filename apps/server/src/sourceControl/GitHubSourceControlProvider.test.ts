@@ -677,6 +677,122 @@ it.effect("addIssueComment posts through gh and returns refreshed detail", () =>
   }),
 );
 
+it.effect("addIssueCommentReaction posts through gh and returns refreshed detail", () =>
+  Effect.gen(function* () {
+    const capturedReactionInputs: Parameters<GitHubCli.GitHubCliShape["addReaction"]>[0][] = [];
+    const provider = yield* makeProvider({
+      getIssue: () =>
+        Effect.succeed({
+          number: 55,
+          title: "Bug",
+          url: "https://github.com/owner/repo/issues/55",
+          state: "open" as const,
+          author: "carol",
+          updatedAt: Option.none(),
+          labels: [],
+          assignees: [],
+          commentsCount: 1,
+          body: "Bug description",
+          comments: [
+            {
+              id: "IC_kwDOA1B2C84AAAAB",
+              author: "dave",
+              body: "Thanks",
+              createdAt: "2026-03-14T10:00:00Z",
+              reactions: [{ content: "heart", count: 1, viewerHasReacted: true }],
+            },
+          ],
+        }),
+      getCommentReactionGroups: () =>
+        Effect.succeed([
+          {
+            id: "IC_kwDOA1B2C84AAAAB",
+            reactions: [{ content: "heart", count: 0, viewerHasReacted: false }],
+          },
+        ]),
+      addReaction: (input) => {
+        capturedReactionInputs.push(input);
+        return Effect.void;
+      },
+    });
+
+    const detail = yield* provider.addIssueCommentReaction({
+      cwd: "/repo",
+      reference: "55",
+      commentId: "IC_kwDOA1B2C84AAAAB",
+      content: "heart",
+    });
+
+    assert.deepStrictEqual(capturedReactionInputs, [
+      {
+        cwd: "/repo",
+        subjectId: "IC_kwDOA1B2C84AAAAB",
+        content: "heart",
+      },
+    ]);
+    assert.deepStrictEqual(detail.comments[0]?.reactions, [
+      { content: "heart", count: 1, viewerHasReacted: true },
+    ]);
+  }),
+);
+
+it.effect("addIssueCommentReaction removes an existing viewer reaction", () =>
+  Effect.gen(function* () {
+    const capturedRemoveInputs: Parameters<GitHubCli.GitHubCliShape["removeReaction"]>[0][] = [];
+    const provider = yield* makeProvider({
+      getCommentReactionGroups: () =>
+        Effect.succeed([
+          {
+            id: "IC_kwDOA1B2C84AAAAB",
+            reactions: [{ content: "heart", count: 1, viewerHasReacted: true }],
+          },
+        ]),
+      removeReaction: (input) => {
+        capturedRemoveInputs.push(input);
+        return Effect.void;
+      },
+      getIssue: () =>
+        Effect.succeed({
+          number: 55,
+          title: "Bug",
+          url: "https://github.com/owner/repo/issues/55",
+          state: "open" as const,
+          author: "carol",
+          updatedAt: Option.none(),
+          labels: [],
+          assignees: [],
+          commentsCount: 1,
+          body: "Bug description",
+          comments: [
+            {
+              id: "IC_kwDOA1B2C84AAAAB",
+              author: "dave",
+              body: "Thanks",
+              createdAt: "2026-03-14T10:00:00Z",
+              reactions: [],
+            },
+          ],
+        }),
+    });
+
+    const detail = yield* provider.addIssueCommentReaction({
+      cwd: "/repo",
+      reference: "55",
+      commentId: "IC_kwDOA1B2C84AAAAB",
+      content: "heart",
+    });
+
+    assert.deepStrictEqual(capturedRemoveInputs, [
+      {
+        cwd: "/repo",
+        subjectId: "IC_kwDOA1B2C84AAAAB",
+        content: "heart",
+      },
+    ]);
+    assert.strictEqual(detail.comments[0]?.reactions, undefined);
+  }),
+);
+
 it.effect("addChangeRequestComment dedupes an already-posted client mutation", () =>
   Effect.gen(function* () {
     let addCalled = false;
@@ -725,6 +841,188 @@ it.effect("addChangeRequestComment dedupes an already-posted client mutation", (
 
     assert.strictEqual(addCalled, false);
     assert.strictEqual(detail.comments[0]?.body, "Already posted");
+  }),
+);
+
+it.effect("addChangeRequestCommentReaction posts through gh and returns refreshed detail", () =>
+  Effect.gen(function* () {
+    const capturedReactionInputs: Parameters<GitHubCli.GitHubCliShape["addReaction"]>[0][] = [];
+    const provider = yield* makeProvider({
+      getPullRequestDetail: () =>
+        Effect.succeed({
+          number: 7,
+          title: "PR",
+          url: "https://github.com/owner/repo/pull/7",
+          baseRefName: "main",
+          headRefName: "feature/pr",
+          state: "open" as const,
+          author: "alice",
+          assignees: [],
+          labels: [],
+          commentsCount: 1,
+          body: "PR description",
+          comments: [
+            {
+              id: "PRRC_kwDOA1B2C84AAAAC",
+              author: "bob",
+              body: "Looks good",
+              createdAt: "2026-03-14T10:00:00Z",
+              reactions: [{ content: "thumbs-up", count: 3, viewerHasReacted: true }],
+            },
+          ],
+          linkedIssueNumbers: [],
+          reviewers: [],
+          commits: [],
+          additions: 0,
+          deletions: 0,
+          changedFiles: 0,
+          files: [],
+        }),
+      getCommentReactionGroups: () =>
+        Effect.succeed([
+          {
+            id: "PRRC_kwDOA1B2C84AAAAC",
+            reactions: [{ content: "thumbs-up", count: 2, viewerHasReacted: false }],
+          },
+        ]),
+      addReaction: (input) => {
+        capturedReactionInputs.push(input);
+        return Effect.void;
+      },
+    });
+
+    const detail = yield* provider.addChangeRequestCommentReaction({
+      cwd: "/repo",
+      reference: "7",
+      commentId: "PRRC_kwDOA1B2C84AAAAC",
+      content: "thumbs-up",
+    });
+
+    assert.deepStrictEqual(capturedReactionInputs, [
+      {
+        cwd: "/repo",
+        subjectId: "PRRC_kwDOA1B2C84AAAAC",
+        content: "thumbs-up",
+      },
+    ]);
+    assert.deepStrictEqual(detail.comments[0]?.reactions, [
+      { content: "thumbs-up", count: 3, viewerHasReacted: true },
+    ]);
+  }),
+);
+
+it.effect("addChangeRequestCommentReaction removes an existing viewer reaction", () =>
+  Effect.gen(function* () {
+    const capturedRemoveInputs: Parameters<GitHubCli.GitHubCliShape["removeReaction"]>[0][] = [];
+    const provider = yield* makeProvider({
+      getCommentReactionGroups: () =>
+        Effect.succeed([
+          {
+            id: "PRRC_kwDOA1B2C84AAAAC",
+            reactions: [{ content: "thumbs-up", count: 2, viewerHasReacted: true }],
+          },
+        ]),
+      removeReaction: (input) => {
+        capturedRemoveInputs.push(input);
+        return Effect.void;
+      },
+      getPullRequestDetail: () =>
+        Effect.succeed({
+          number: 7,
+          title: "PR",
+          url: "https://github.com/owner/repo/pull/7",
+          baseRefName: "main",
+          headRefName: "feature/pr",
+          state: "open" as const,
+          author: "alice",
+          assignees: [],
+          labels: [],
+          commentsCount: 1,
+          body: "PR description",
+          comments: [
+            {
+              id: "PRRC_kwDOA1B2C84AAAAC",
+              author: "bob",
+              body: "Looks good",
+              createdAt: "2026-03-14T10:00:00Z",
+              reactions: [{ content: "thumbs-up", count: 1, viewerHasReacted: false }],
+            },
+          ],
+          linkedIssueNumbers: [],
+          reviewers: [],
+          commits: [],
+          additions: 0,
+          deletions: 0,
+          changedFiles: 0,
+          files: [],
+        }),
+    });
+
+    const detail = yield* provider.addChangeRequestCommentReaction({
+      cwd: "/repo",
+      reference: "7",
+      commentId: "PRRC_kwDOA1B2C84AAAAC",
+      content: "thumbs-up",
+    });
+
+    assert.deepStrictEqual(capturedRemoveInputs, [
+      {
+        cwd: "/repo",
+        subjectId: "PRRC_kwDOA1B2C84AAAAC",
+        content: "thumbs-up",
+      },
+    ]);
+    assert.deepStrictEqual(detail.comments[0]?.reactions, [
+      { content: "thumbs-up", count: 1, viewerHasReacted: false },
+    ]);
+  }),
+);
+
+it.effect("listWorkflowRuns filters directly by commit SHA", () =>
+  Effect.gen(function* () {
+    let capturedInput: Parameters<GitHubCli.GitHubCliShape["listWorkflowRuns"]>[0] | null = null;
+    const provider = yield* makeProvider({
+      listWorkflowRuns: (input) => {
+        capturedInput = input;
+        return Effect.succeed([
+          {
+            runId: "123",
+            workflowName: "CI",
+            branch: "feature/status",
+            commit: {
+              oid: "abcdef1234567890",
+              shortOid: "abcdef123456",
+              messageHeadline: "Add status timeline",
+            },
+            actor: "alice",
+            status: "completed",
+            conclusion: "success",
+            startedAt: "2026-05-20T10:00:00Z",
+            updatedAt: "2026-05-20T10:03:00Z",
+            url: "https://github.com/owner/repo/actions/runs/123",
+            repositoryNameWithOwner: "owner/repo",
+          },
+        ]);
+      },
+    });
+
+    const listWorkflowRuns = provider.listWorkflowRuns;
+    assert.ok(listWorkflowRuns);
+    const result = yield* listWorkflowRuns({
+      cwd: "/repo",
+      commitSha: "abcdef1234567890",
+      limit: 5,
+    });
+
+    assert.deepStrictEqual(capturedInput, {
+      cwd: "/repo",
+      headSha: "abcdef1234567890",
+      limit: 5,
+    });
+    assert.strictEqual(result.runs.length, 1);
+    assert.strictEqual(Option.isSome(result.headSha), true);
+    assert.strictEqual(Option.getOrNull(result.headSha), "abcdef1234567890");
+    assert.strictEqual(Option.isNone(result.pullRequestNumber), true);
   }),
 );
 

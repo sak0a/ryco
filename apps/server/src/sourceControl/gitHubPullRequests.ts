@@ -1,6 +1,11 @@
 import { Cause, DateTime, Exit, Option, Result, Schema } from "effect";
 import { PositiveInt, TrimmedNonEmptyString } from "@ryco/contracts";
 import { decodeJsonResult, formatSchemaError } from "@ryco/shared/schemaJson";
+import {
+  normalizeReactionGroups,
+  RawGitHubReactionGroupSchema,
+  type NormalizedGitHubReaction,
+} from "./gitHubReactions.ts";
 
 export interface NormalizedGitHubLabel {
   readonly name: string;
@@ -121,10 +126,12 @@ const GitHubPullRequestSchema = Schema.Struct({
     Schema.Union([
       Schema.Array(
         Schema.Struct({
+          id: Schema.optional(Schema.NullOr(Schema.String)),
           author: Schema.optional(Schema.NullOr(Schema.Struct({ login: Schema.String }))),
           authorAssociation: Schema.optional(Schema.NullOr(Schema.String)),
           body: Schema.String,
           createdAt: Schema.String,
+          reactionGroups: Schema.optional(Schema.Array(RawGitHubReactionGroupSchema)),
         }),
       ),
       Schema.Number,
@@ -145,6 +152,8 @@ const GitHubPullRequestSchema = Schema.Struct({
         authorAssociation: Schema.optional(Schema.NullOr(Schema.String)),
         state: Schema.optional(Schema.NullOr(Schema.String)),
         body: Schema.optional(Schema.NullOr(Schema.String)),
+        id: Schema.optional(Schema.NullOr(Schema.String)),
+        reactionGroups: Schema.optional(Schema.Array(RawGitHubReactionGroupSchema)),
         submittedAt: Schema.optional(Schema.NullOr(Schema.String)),
       }),
     ),
@@ -351,11 +360,13 @@ export interface NormalizedGitHubPullRequestFile {
 export interface NormalizedGitHubPullRequestDetail extends NormalizedGitHubPullRequestRecord {
   readonly body: string;
   readonly comments: ReadonlyArray<{
+    readonly id?: string;
     readonly author: string;
     readonly body: string;
     readonly createdAt: string;
     readonly authorAssociation?: string;
     readonly reviewState?: NormalizedGitHubReviewState;
+    readonly reactions?: ReadonlyArray<NormalizedGitHubReaction>;
   }>;
   readonly linkedIssueNumbers: ReadonlyArray<number>;
   readonly reviewers: ReadonlyArray<string>;
@@ -367,15 +378,22 @@ export interface NormalizedGitHubPullRequestDetail extends NormalizedGitHubPullR
 }
 
 function normalizePullRequestComment(raw: {
+  readonly id?: string | null;
   readonly author?: { readonly login: string } | null;
   readonly authorAssociation?: string | null;
   readonly body: string;
   readonly createdAt: string;
+  readonly reactionGroups?:
+    | ReadonlyArray<Schema.Schema.Type<typeof RawGitHubReactionGroupSchema>>
+    | undefined;
 }): NormalizedGitHubPullRequestDetail["comments"][number] {
+  const reactions = normalizeReactionGroups(raw.reactionGroups);
   const base = {
+    ...(raw.id ? { id: raw.id } : {}),
     author: raw.author?.login ?? "unknown",
     body: raw.body,
     createdAt: raw.createdAt,
+    ...(reactions.length > 0 ? { reactions } : {}),
   };
   if (raw.authorAssociation) {
     return { ...base, authorAssociation: raw.authorAssociation };
@@ -476,10 +494,14 @@ function normalizeReviewState(
 }
 
 function reviewToComment(raw: {
+  id?: string | null | undefined;
   author?: { login: string } | null | undefined;
   authorAssociation?: string | null | undefined;
   state?: string | null | undefined;
   body?: string | null | undefined;
+  reactionGroups?:
+    | ReadonlyArray<Schema.Schema.Type<typeof RawGitHubReactionGroupSchema>>
+    | undefined;
   submittedAt?: string | null | undefined;
 }): NormalizedGitHubPullRequestDetail["comments"][number] | null {
   const body = (raw.body ?? "").trim();
@@ -487,12 +509,15 @@ function reviewToComment(raw: {
   const submittedAt = trimNonEmpty(raw.submittedAt);
   if (submittedAt === null) return null;
   const reviewState = normalizeReviewState(raw.state);
+  const reactions = normalizeReactionGroups(raw.reactionGroups);
   return {
+    ...(raw.id ? { id: raw.id } : {}),
     author: raw.author?.login ?? "unknown",
     body: raw.body ?? "",
     createdAt: submittedAt,
     ...(raw.authorAssociation ? { authorAssociation: raw.authorAssociation } : {}),
     ...(reviewState ? { reviewState } : {}),
+    ...(reactions.length > 0 ? { reactions } : {}),
   };
 }
 

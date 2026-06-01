@@ -645,6 +645,12 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
         Effect.fail(new GitHubCliError({ operation: "addIssueComment", detail: "stub" })),
       addPullRequestComment: () =>
         Effect.fail(new GitHubCliError({ operation: "addPullRequestComment", detail: "stub" })),
+      addReaction: () =>
+        Effect.fail(new GitHubCliError({ operation: "addReaction", detail: "stub" })),
+      removeReaction: () =>
+        Effect.fail(new GitHubCliError({ operation: "removeReaction", detail: "stub" })),
+      getCommentReactionGroups: () =>
+        Effect.fail(new GitHubCliError({ operation: "getCommentReactionGroups", detail: "stub" })),
       listLabels: () =>
         Effect.fail(new GitHubCliError({ operation: "listLabels", detail: "stub" })),
       listAssignees: () =>

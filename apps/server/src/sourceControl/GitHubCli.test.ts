@@ -540,6 +540,81 @@ describe("GitHubCli.layer", () => {
         assert.equal(calledArgs?.args[2], "https://github.com/foo/bar/issues/9");
       }).pipe(Effect.provide(layer)),
     );
+
+    it.effect("hydrates comment reactions with viewer state from GraphQL", () =>
+      Effect.gen(function* () {
+        mockRun.mockReturnValueOnce(
+          Effect.succeed(
+            processOutput(
+              JSON.stringify({
+                number: 42,
+                title: "t",
+                url: "https://x/42",
+                state: "OPEN",
+                body: "BODY",
+                comments: [
+                  {
+                    id: "IC_kwDOA1B2C84AAAAB",
+                    author: { login: "bob" },
+                    body: "hi",
+                    createdAt: "2026-03-14T10:00:00Z",
+                  },
+                ],
+              }),
+            ),
+          ),
+        );
+        mockRun.mockReturnValueOnce(
+          Effect.succeed(
+            processOutput(
+              JSON.stringify({
+                data: {
+                  nodes: [
+                    {
+                      id: "IC_kwDOA1B2C84AAAAB",
+                      reactionGroups: [
+                        {
+                          content: "THUMBS_UP",
+                          viewerHasReacted: true,
+                          reactors: { totalCount: 2 },
+                        },
+                        {
+                          content: "ROCKET",
+                          viewerHasReacted: false,
+                          reactors: { totalCount: 1 },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              }),
+            ),
+          ),
+        );
+
+        const gh = yield* GitHubCli.GitHubCli;
+        const detail = yield* gh.getIssue({ cwd: "/tmp", reference: "42" });
+
+        assert.deepStrictEqual(detail.comments[0]?.reactions, [
+          { content: "thumbs-up", count: 2, viewerHasReacted: true },
+          { content: "rocket", count: 1, viewerHasReacted: false },
+        ]);
+        expect(mockRun).toHaveBeenNthCalledWith(2, {
+          operation: "GitHubCli.execute",
+          command: "gh",
+          args: [
+            "api",
+            "graphql",
+            "-f",
+            "query=query($ids:[ID!]!){nodes(ids:$ids){id ... on Reactable{reactionGroups{content viewerHasReacted reactors{totalCount} users{totalCount}}}}}",
+            "-F",
+            "ids[]=IC_kwDOA1B2C84AAAAB",
+          ],
+          cwd: "/tmp",
+          timeoutMs: 30_000,
+        });
+      }).pipe(Effect.provide(layer)),
+    );
   });
 
   describe("listIssues", () => {
@@ -628,6 +703,66 @@ describe("GitHubCli.layer", () => {
           operation: "GitHubCli.execute",
           command: "gh",
           args: ["pr", "comment", "7", "--body-file", "/tmp/comment.md"],
+          cwd: "/tmp",
+          timeoutMs: 30_000,
+        });
+      }).pipe(Effect.provide(layer)),
+    );
+
+    it.effect("adds a reaction to a comment node", () =>
+      Effect.gen(function* () {
+        mockRun.mockReturnValueOnce(Effect.succeed(processOutput("{}")));
+
+        const gh = yield* GitHubCli.GitHubCli;
+        yield* gh.addReaction({
+          cwd: "/tmp",
+          subjectId: "IC_kwDOA1B2C84AAAAB",
+          content: "thumbs-up",
+        });
+
+        expect(mockRun).toHaveBeenCalledWith({
+          operation: "GitHubCli.execute",
+          command: "gh",
+          args: [
+            "api",
+            "graphql",
+            "-f",
+            "query=mutation($subjectId:ID!,$content:ReactionContent!){addReaction(input:{subjectId:$subjectId,content:$content}){reaction{content}}}",
+            "-f",
+            "subjectId=IC_kwDOA1B2C84AAAAB",
+            "-f",
+            "content=THUMBS_UP",
+          ],
+          cwd: "/tmp",
+          timeoutMs: 30_000,
+        });
+      }).pipe(Effect.provide(layer)),
+    );
+
+    it.effect("removes a reaction from a comment node", () =>
+      Effect.gen(function* () {
+        mockRun.mockReturnValueOnce(Effect.succeed(processOutput("{}")));
+
+        const gh = yield* GitHubCli.GitHubCli;
+        yield* gh.removeReaction({
+          cwd: "/tmp",
+          subjectId: "IC_kwDOA1B2C84AAAAB",
+          content: "heart",
+        });
+
+        expect(mockRun).toHaveBeenCalledWith({
+          operation: "GitHubCli.execute",
+          command: "gh",
+          args: [
+            "api",
+            "graphql",
+            "-f",
+            "query=mutation($subjectId:ID!,$content:ReactionContent!){removeReaction(input:{subjectId:$subjectId,content:$content}){reaction{content}}}",
+            "-f",
+            "subjectId=IC_kwDOA1B2C84AAAAB",
+            "-f",
+            "content=HEART",
+          ],
           cwd: "/tmp",
           timeoutMs: 30_000,
         });

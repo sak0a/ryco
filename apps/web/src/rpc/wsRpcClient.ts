@@ -97,8 +97,14 @@ export interface WsRpcClient {
     >;
     readonly createIssue: RpcUnaryMethod<typeof WS_METHODS.sourceControlCreateIssue>;
     readonly addIssueComment: RpcUnaryMethod<typeof WS_METHODS.sourceControlAddIssueComment>;
+    readonly addIssueCommentReaction: RpcUnaryMethod<
+      typeof WS_METHODS.sourceControlAddIssueCommentReaction
+    >;
     readonly addChangeRequestComment: RpcUnaryMethod<
       typeof WS_METHODS.sourceControlAddChangeRequestComment
+    >;
+    readonly addChangeRequestCommentReaction: RpcUnaryMethod<
+      typeof WS_METHODS.sourceControlAddChangeRequestCommentReaction
     >;
     readonly listIssueLabels: RpcUnaryMethod<typeof WS_METHODS.sourceControlListIssueLabels>;
     readonly listIssueAssignees: RpcUnaryMethod<typeof WS_METHODS.sourceControlListIssueAssignees>;
@@ -299,9 +305,17 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.sourceControlCreateIssue](input)),
       addIssueComment: (input) =>
         transport.request((client) => client[WS_METHODS.sourceControlAddIssueComment](input)),
+      addIssueCommentReaction: (input) =>
+        transport.request((client) =>
+          client[WS_METHODS.sourceControlAddIssueCommentReaction](input),
+        ),
       addChangeRequestComment: (input) =>
         transport.request((client) =>
           client[WS_METHODS.sourceControlAddChangeRequestComment](input),
+        ),
+      addChangeRequestCommentReaction: (input) =>
+        transport.request((client) =>
+          client[WS_METHODS.sourceControlAddChangeRequestCommentReaction](input),
         ),
       listIssueLabels: (input) =>
         transport.request((client) => client[WS_METHODS.sourceControlListIssueLabels](input)),
