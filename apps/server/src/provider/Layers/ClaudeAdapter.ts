@@ -2904,8 +2904,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         systemPrompt: { type: "preset", preset: "claude_code" },
         ...(appendSystemPrompt ? ({ appendSystemPrompt } as Partial<ClaudeQueryOptions>) : {}),
         settingSources: [...CLAUDE_SETTING_SOURCES],
-        // The SDK type lags the CLI here: Opus 4.7 accepts `xhigh` even though
-        // the published `Options["effort"]` union currently stops at `max`.
         ...(effectiveEffort
           ? {
               effort: effectiveEffort as unknown as NonNullable<ClaudeQueryOptions["effort"]>,

@@ -45,41 +45,105 @@ const CLAUDE_PRESENTATION = {
   displayName: "Claude",
   showInteractionModeToggle: true,
 } as const;
+const MINIMUM_CLAUDE_OPUS_4_8_VERSION = "2.1.154";
 const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
+
+type ClaudeEffortLevel = "low" | "medium" | "high" | "xhigh" | "max" | "ultrathink";
+
+function buildClaudeEffortOption(value: ClaudeEffortLevel, defaultEffort: ClaudeEffortLevel) {
+  const label =
+    value === "xhigh" ? "Extra High" : value[0]!.toUpperCase() + value.slice(1).toLowerCase();
+  return value === defaultEffort ? { value, label, isDefault: true } : { value, label };
+}
+
+function buildClaudeEffortDescriptor(input: {
+  readonly levels: ReadonlyArray<ClaudeEffortLevel>;
+  readonly defaultEffort: ClaudeEffortLevel;
+}) {
+  const promptInjectedValues = input.levels.includes("ultrathink") ? ["ultrathink"] : undefined;
+  return buildSelectOptionDescriptor({
+    id: "effort",
+    label: "Reasoning",
+    options: input.levels.map((level) => buildClaudeEffortOption(level, input.defaultEffort)),
+    ...(promptInjectedValues ? { promptInjectedValues } : {}),
+  });
+}
+
+function buildClaudeContextWindowDescriptor() {
+  return buildSelectOptionDescriptor({
+    id: "contextWindow",
+    label: "Context Window",
+    options: [
+      { value: "200k", label: "200k", isDefault: true },
+      { value: "1m", label: "1M" },
+    ],
+  });
+}
+
+function buildClaudeOpusCapabilities(input: {
+  readonly effortLevels: ReadonlyArray<ClaudeEffortLevel>;
+  readonly defaultEffort: ClaudeEffortLevel;
+  readonly supportsFastMode: boolean;
+  readonly supportsContextWindow: boolean;
+}) {
+  return createModelCapabilities({
+    optionDescriptors: [
+      buildClaudeEffortDescriptor({
+        levels: input.effortLevels,
+        defaultEffort: input.defaultEffort,
+      }),
+      ...(input.supportsFastMode
+        ? [
+            buildBooleanOptionDescriptor({
+              id: "fastMode",
+              label: "Fast Mode",
+            }),
+          ]
+        : []),
+      ...(input.supportsContextWindow ? [buildClaudeContextWindowDescriptor()] : []),
+    ],
+  });
+}
+
+const CLAUDE_OPUS_ADAPTIVE_EFFORT_LEVELS = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultrathink",
+] as const satisfies ReadonlyArray<ClaudeEffortLevel>;
+
+const CLAUDE_OPUS_LEGACY_EFFORT_LEVELS = [
+  "low",
+  "medium",
+  "high",
+  "max",
+] as const satisfies ReadonlyArray<ClaudeEffortLevel>;
+
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
+  {
+    slug: "claude-opus-4-8",
+    name: "Claude Opus 4.8",
+    shortName: "Opus 4.8",
+    isCustom: false,
+    capabilities: buildClaudeOpusCapabilities({
+      effortLevels: CLAUDE_OPUS_ADAPTIVE_EFFORT_LEVELS,
+      defaultEffort: "high",
+      supportsFastMode: true,
+      supportsContextWindow: true,
+    }),
+  },
   {
     slug: "claude-opus-4-7",
     name: "Claude Opus 4.7",
     shortName: "Opus 4.7",
     isCustom: false,
-    capabilities: createModelCapabilities({
-      optionDescriptors: [
-        buildSelectOptionDescriptor({
-          id: "effort",
-          label: "Reasoning",
-          options: [
-            { value: "low", label: "Low" },
-            { value: "medium", label: "Medium" },
-            { value: "high", label: "High" },
-            { value: "xhigh", label: "Extra High", isDefault: true },
-            { value: "max", label: "Max" },
-            { value: "ultrathink", label: "Ultrathink" },
-          ],
-          promptInjectedValues: ["ultrathink"],
-        }),
-        buildBooleanOptionDescriptor({
-          id: "fastMode",
-          label: "Fast Mode",
-        }),
-        buildSelectOptionDescriptor({
-          id: "contextWindow",
-          label: "Context Window",
-          options: [
-            { value: "200k", label: "200k", isDefault: true },
-            { value: "1m", label: "1M" },
-          ],
-        }),
-      ],
+    capabilities: buildClaudeOpusCapabilities({
+      effortLevels: CLAUDE_OPUS_ADAPTIVE_EFFORT_LEVELS,
+      defaultEffort: "xhigh",
+      supportsFastMode: true,
+      supportsContextWindow: true,
     }),
   },
   {
@@ -87,33 +151,11 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     name: "Claude Opus 4.6",
     shortName: "Opus 4.6",
     isCustom: false,
-    capabilities: createModelCapabilities({
-      optionDescriptors: [
-        buildSelectOptionDescriptor({
-          id: "effort",
-          label: "Reasoning",
-          options: [
-            { value: "low", label: "Low" },
-            { value: "medium", label: "Medium" },
-            { value: "high", label: "High", isDefault: true },
-            { value: "max", label: "Max" },
-            { value: "ultrathink", label: "Ultrathink" },
-          ],
-          promptInjectedValues: ["ultrathink"],
-        }),
-        buildBooleanOptionDescriptor({
-          id: "fastMode",
-          label: "Fast Mode",
-        }),
-        buildSelectOptionDescriptor({
-          id: "contextWindow",
-          label: "Context Window",
-          options: [
-            { value: "200k", label: "200k", isDefault: true },
-            { value: "1m", label: "1M" },
-          ],
-        }),
-      ],
+    capabilities: buildClaudeOpusCapabilities({
+      effortLevels: [...CLAUDE_OPUS_LEGACY_EFFORT_LEVELS, "ultrathink"],
+      defaultEffort: "high",
+      supportsFastMode: true,
+      supportsContextWindow: true,
     }),
   },
   {
@@ -121,23 +163,11 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     name: "Claude Opus 4.5",
     shortName: "Opus 4.5",
     isCustom: false,
-    capabilities: createModelCapabilities({
-      optionDescriptors: [
-        buildSelectOptionDescriptor({
-          id: "effort",
-          label: "Reasoning",
-          options: [
-            { value: "low", label: "Low" },
-            { value: "medium", label: "Medium" },
-            { value: "high", label: "High", isDefault: true },
-            { value: "max", label: "Max" },
-          ],
-        }),
-        buildBooleanOptionDescriptor({
-          id: "fastMode",
-          label: "Fast Mode",
-        }),
-      ],
+    capabilities: buildClaudeOpusCapabilities({
+      effortLevels: CLAUDE_OPUS_LEGACY_EFFORT_LEVELS,
+      defaultEffort: "high",
+      supportsFastMode: true,
+      supportsContextWindow: false,
     }),
   },
   {
@@ -185,22 +215,49 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   },
 ];
 
+function supportsMinimumClaudeVersion(
+  version: string | null | undefined,
+  minimumVersion: string,
+): boolean {
+  return version ? compareCliVersions(version, minimumVersion) >= 0 : false;
+}
+
+function supportsClaudeOpus48(version: string | null | undefined): boolean {
+  return supportsMinimumClaudeVersion(version, MINIMUM_CLAUDE_OPUS_4_8_VERSION);
+}
+
 function supportsClaudeOpus47(version: string | null | undefined): boolean {
-  return version ? compareCliVersions(version, MINIMUM_CLAUDE_OPUS_4_7_VERSION) >= 0 : false;
+  return supportsMinimumClaudeVersion(version, MINIMUM_CLAUDE_OPUS_4_7_VERSION);
 }
 
 function getBuiltInClaudeModelsForVersion(
   version: string | null | undefined,
 ): ReadonlyArray<ServerProviderModel> {
-  if (supportsClaudeOpus47(version)) {
-    return BUILT_IN_MODELS;
-  }
-  return BUILT_IN_MODELS.filter((model) => model.slug !== "claude-opus-4-7");
+  return BUILT_IN_MODELS.filter((model) => {
+    if (model.slug === "claude-opus-4-8") {
+      return supportsClaudeOpus48(version);
+    }
+    if (model.slug === "claude-opus-4-7") {
+      return supportsClaudeOpus47(version);
+    }
+    return true;
+  });
 }
 
-function formatClaudeOpus47UpgradeMessage(version: string | null): string {
+function formatClaudeUpgradeMessages(version: string | null): ReadonlyArray<string> {
   const versionLabel = version ? `v${version}` : "the installed version";
-  return `Claude Code ${versionLabel} is too old for Claude Opus 4.7. Upgrade to v${MINIMUM_CLAUDE_OPUS_4_7_VERSION} or newer to access it.`;
+  const messages: Array<string> = [];
+  if (!supportsClaudeOpus47(version)) {
+    messages.push(
+      `Claude Code ${versionLabel} is too old for Claude Opus 4.7. Upgrade to v${MINIMUM_CLAUDE_OPUS_4_7_VERSION} or newer to access it.`,
+    );
+  }
+  if (!supportsClaudeOpus48(version)) {
+    messages.push(
+      `Claude Code ${versionLabel} is too old for Claude Opus 4.8. Upgrade to v${MINIMUM_CLAUDE_OPUS_4_8_VERSION} or newer to access it.`,
+    );
+  }
+  return messages;
 }
 
 export function getClaudeModelCapabilities(model: string | null | undefined): ModelCapabilities {
@@ -229,17 +286,13 @@ export function resolveClaudeEffort(
  * CLI's `--effort` flag.
  *
  * Mirrors the mapping used when invoking the Claude Agent SDK
- * ({@link getEffectiveClaudeAgentEffort} in ClaudeAdapter): the Opus 4.7
- * capability `"xhigh"` is rewritten to the accepted CLI value `"max"`, and
- * `"ultrathink"` is filtered out because it is a prompt-prefix mode rather
- * than a CLI-effort value. Returns `undefined` when no flag should be passed.
+ * ({@link getEffectiveClaudeAgentEffort} in ClaudeAdapter): `"ultrathink"`
+ * is filtered out because it is a prompt-prefix mode rather than a CLI-effort
+ * value. Returns `undefined` when no flag should be passed.
  */
 export function normalizeClaudeCliEffort(effort: string | null | undefined): string | undefined {
   if (!effort || effort === "ultrathink") {
     return undefined;
-  }
-  if (effort === "xhigh") {
-    return "max";
   }
   return effort;
 }
@@ -631,9 +684,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   );
-  const opus47UpgradeMessage = supportsClaudeOpus47(parsedVersion)
-    ? undefined
-    : formatClaudeOpus47UpgradeMessage(parsedVersion);
+  const upgradeMessage = formatClaudeUpgradeMessages(parsedVersion).join(" ");
 
   const capabilities = resolveCapabilities
     ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
@@ -684,7 +735,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         ...(capabilities.email ? { email: capabilities.email } : {}),
         ...(authMetadata ? authMetadata : {}),
       },
-      ...(opus47UpgradeMessage ? { message: opus47UpgradeMessage } : {}),
+      ...(upgradeMessage ? { message: upgradeMessage } : {}),
     },
   });
 });
