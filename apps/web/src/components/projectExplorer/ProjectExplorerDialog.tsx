@@ -226,7 +226,7 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup
-        className="flex h-[80vh] max-h-[800px] w-full max-w-6xl flex-col p-0 sm:max-w-6xl"
+        className="flex h-[92vh] max-h-[1120px] w-[96vw] max-w-[1440px] flex-col p-0 max-sm:h-[100dvh] max-sm:w-screen"
         onKeyDown={handleKeyDown}
       >
         <header className="flex items-center justify-between border-border/60 border-b py-3 pl-5 pr-14">
