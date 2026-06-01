@@ -115,6 +115,13 @@ describe("Dialog", () => {
     const closeButton = page.getByRole("button", { name: "Close" });
     await expect.element(closeButton).toBeInTheDocument();
 
+    const closeRect = closeButton.element().getBoundingClientRect();
+    const closeHitTarget = document.elementFromPoint(
+      closeRect.left + closeRect.width / 2,
+      closeRect.top + closeRect.height / 2,
+    );
+    expect(closeHitTarget?.closest("button")).toBe(closeButton.element());
+
     closeButton.element().focus();
     expect(document.activeElement).toBe(closeButton.element());
     await userEvent.keyboard("{Enter}");
@@ -127,6 +134,29 @@ describe("Dialog", () => {
     await page.getByRole("button", { name: "Reopen" }).click();
     await page.getByRole("button", { name: "Close" }).click();
     await expect.element(page.getByTestId("dialog-state")).toHaveTextContent("closed");
+  });
+
+  it("keeps outside app controls behind the modal hit target", async () => {
+    mounted = await render(<DialogHarness />);
+
+    const outsideButton = Array.from(document.querySelectorAll("button")).find(
+      (button) => button.textContent === "Reopen",
+    );
+    if (!(outsideButton instanceof HTMLButtonElement)) {
+      throw new Error("Expected outside Reopen button to be rendered.");
+    }
+    const outsideRect = outsideButton.getBoundingClientRect();
+    const hitTarget = document.elementFromPoint(
+      outsideRect.left + outsideRect.width / 2,
+      outsideRect.top + outsideRect.height / 2,
+    );
+
+    expect(hitTarget).not.toBe(outsideButton);
+    expect(
+      hitTarget?.closest(
+        "[data-slot=dialog-popup],[data-slot=dialog-viewport],[data-slot=dialog-backdrop]",
+      ),
+    ).not.toBeNull();
   });
 
   it("does not let dialog keyboard events reach global navigation handlers", async () => {

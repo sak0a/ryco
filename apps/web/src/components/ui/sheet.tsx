@@ -43,7 +43,7 @@ function SheetViewport({
   return (
     <SheetPrimitive.Viewport
       className={cn(
-        "pointer-events-none fixed inset-0 z-50 grid",
+        "pointer-events-auto fixed inset-0 z-50 grid",
         side === "bottom" && "grid grid-rows-[1fr_auto] pt-12",
         side === "top" && "grid grid-rows-[auto_1fr] pb-12",
         side === "left" && "flex justify-start",

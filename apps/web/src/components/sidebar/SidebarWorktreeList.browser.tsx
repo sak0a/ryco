@@ -75,7 +75,7 @@ describe("SidebarWorktreeList", () => {
     await expect.element(page.getByLabelText("Pull request #205")).toBeInTheDocument();
   });
 
-  it("hides the chat-activity dot when the worktree is idle and shows it for active states", async () => {
+  it("colors active worktree names instead of reserving a chat-activity dot slot", async () => {
     const treeProject = makeStatusDotTreeProject();
     await render(
       <SidebarWorktreeList
@@ -100,10 +100,12 @@ describe("SidebarWorktreeList", () => {
     const idleRow = idleToggle.element().closest(".group\\/worktree");
     expect(idleRow?.querySelector("span.rounded-full")).toBeNull();
 
-    const inProgressDots = document.querySelectorAll(
-      "span.rounded-full.bg-sky-500, span.rounded-full.dark\\:bg-sky-300\\/80",
-    );
-    expect(inProgressDots.length).toBeGreaterThan(0);
+    const inProgressTitle = page.getByText("working-feat").element();
+    expect(inProgressTitle.classList.contains("sidebar-status-text")).toBe(true);
+    expect(inProgressTitle.classList.contains("sidebar-status-text--in-progress")).toBe(true);
+    expect(inProgressTitle.classList.contains("sidebar-status-text--shimmer")).toBe(true);
+    expect(inProgressTitle.style.getPropertyValue("--sidebar-status-text-spread")).toBe("24px");
+    expect(inProgressTitle.getAttribute("aria-label")).toBe("In progress: working-feat");
   });
 });
 

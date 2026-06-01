@@ -216,6 +216,10 @@ import {
   type SidebarThreadGitStatusTarget,
 } from "./sidebar/SidebarWorktreeList";
 import {
+  resolveSidebarStatusTextStyle,
+  resolveThreadStatusTextClassName,
+} from "./sidebar/sidebarStatusText";
+import {
   adaptProjectForSidebarTree,
   createSidebarProjectDraftThreadsSelector,
 } from "./sidebar/sidebarTreeAdapters";
@@ -530,6 +534,10 @@ const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
     : !isThreadRunning
       ? "pointer-events-none transition-opacity duration-150 max-sm:pr-10 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
       : "pointer-events-none";
+  const threadStatusTextStyle = useMemo(
+    () => (threadStatus ? resolveSidebarStatusTextStyle(thread.title) : undefined),
+    [thread.title, threadStatus],
+  );
   const clearConfirmingArchive = useCallback(() => {
     setConfirmingArchiveThreadKey((current) => (current === threadKey ? null : current));
   }, [setConfirmingArchiveThreadKey, threadKey]);
@@ -752,7 +760,6 @@ const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
               <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
             </Tooltip>
           )}
-          {threadStatus && <ThreadStatusLabel status={threadStatus} />}
           {renamingThreadKey === threadKey ? (
             <input
               ref={handleRenameInputRef}
@@ -768,7 +775,14 @@ const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
               <TooltipTrigger
                 render={
                   <span
-                    className="min-w-0 flex-1 truncate text-xs"
+                    className={resolveThreadStatusTextClassName(
+                      threadStatus,
+                      "min-w-0 flex-1 truncate text-xs",
+                    )}
+                    aria-label={
+                      threadStatus ? `${threadStatus.label}: ${thread.title}` : thread.title
+                    }
+                    style={threadStatusTextStyle}
                     data-testid={`thread-title-${thread.id}`}
                   >
                     {thread.title}
@@ -776,7 +790,7 @@ const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
                 }
               />
               <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight">
-                {thread.title}
+                {threadStatus ? `${threadStatus.label}: ${thread.title}` : thread.title}
               </TooltipPopup>
             </Tooltip>
           )}

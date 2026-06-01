@@ -34,17 +34,15 @@ import {
   type SidebarWorktree,
 } from "./hooks/useSidebarTree";
 import {
+  resolveSidebarStatusTextClassName,
+  resolveSidebarStatusTextStyle,
+} from "./sidebarStatusText";
+import {
   LinkedWorktreeItemDialog,
   type LinkedWorktreeItem,
 } from "../worktrees/LinkedWorktreeItemDialog";
 import { WorktreeSourceControlBadges } from "../worktrees/WorktreeSourceControlBadges";
 
-const WORKTREE_STATUS_CLASSNAMES: Record<SidebarStatusBucket, string> = {
-  done: "bg-muted-foreground/45",
-  idle: "bg-muted-foreground/30",
-  in_progress: "bg-sky-500 dark:bg-sky-300/80",
-  review: "bg-amber-500 dark:bg-amber-300/90",
-};
 const WORKTREE_STATUS_LABELS: Record<SidebarStatusBucket, string> = {
   done: "Done",
   idle: "Idle",
@@ -260,6 +258,13 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
   const showSessions = !isCollapsed;
   const toggleCollapsed = () => setCollapsed((open) => !open);
   const displayTitle = getWorktreeDisplayTitle(props.worktree);
+  const statusTextStyle = useMemo(
+    () =>
+      props.worktree.aggregateStatus === "idle"
+        ? undefined
+        : resolveSidebarStatusTextStyle(displayTitle),
+    [displayTitle, props.worktree.aggregateStatus],
+  );
   const startRename = () => {
     setRenameTitle(displayTitle);
     setRenaming(true);
@@ -332,23 +337,6 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                 )}
               />
             </button>
-            <span
-              className={cn(
-                "inline-flex size-3 shrink-0 items-center justify-center",
-                props.worktree.aggregateStatus === "in_progress" ? "animate-pulse" : "",
-              )}
-              title={WORKTREE_STATUS_LABELS[props.worktree.aggregateStatus]}
-              aria-hidden={props.worktree.aggregateStatus === "idle"}
-            >
-              {props.worktree.aggregateStatus === "idle" ? null : (
-                <span
-                  className={cn(
-                    "size-2 rounded-full",
-                    WORKTREE_STATUS_CLASSNAMES[props.worktree.aggregateStatus],
-                  )}
-                />
-              )}
-            </span>
             {renaming ? (
               <input
                 value={renameTitle}
@@ -373,7 +361,21 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
             ) : (
               <span className="flex min-w-0 flex-1 items-center gap-1.5">
                 <span
-                  className="min-w-0 truncate text-xs font-medium text-foreground/85"
+                  className={resolveSidebarStatusTextClassName(
+                    props.worktree.aggregateStatus,
+                    "min-w-0 truncate text-xs font-medium text-foreground/85",
+                  )}
+                  title={
+                    props.worktree.aggregateStatus === "idle"
+                      ? displayTitle
+                      : `${WORKTREE_STATUS_LABELS[props.worktree.aggregateStatus]}: ${displayTitle}`
+                  }
+                  aria-label={
+                    props.worktree.aggregateStatus === "idle"
+                      ? displayTitle
+                      : `${WORKTREE_STATUS_LABELS[props.worktree.aggregateStatus]}: ${displayTitle}`
+                  }
+                  style={statusTextStyle}
                   onClick={(event) => event.stopPropagation()}
                   onDoubleClick={(event) => {
                     event.preventDefault();
