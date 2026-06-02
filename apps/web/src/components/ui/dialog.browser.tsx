@@ -122,9 +122,7 @@ describe("Dialog", () => {
     );
     expect(closeHitTarget?.closest("button")).toBe(closeButton.element());
 
-    closeButton.element().focus();
-    expect(document.activeElement).toBe(closeButton.element());
-    await userEvent.keyboard("{Enter}");
+    await userEvent.type(closeButton, "{Enter}");
     await expect.element(page.getByTestId("dialog-state")).toHaveTextContent("closed");
 
     await page.getByRole("button", { name: "Reopen" }).click();

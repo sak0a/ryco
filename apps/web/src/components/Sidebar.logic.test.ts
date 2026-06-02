@@ -24,7 +24,10 @@ import {
   shouldAutoAnimateSidebarProjectList,
   shouldAutoAnimateSidebarThreadLists,
   shouldSuggestArchive,
+  shouldConfirmSidebarThreadArchive,
   shouldConfirmCloseSidebarThread,
+  shouldConfirmSidebarThreadDelete,
+  shouldConfirmSidebarThreadSelectionDelete,
   shouldClearThreadSelectionOnMouseDown,
   shouldQuerySidebarSourceControlCounts,
   sortProjectsForSidebar,
@@ -91,6 +94,69 @@ describe("shouldConfirmCloseSidebarThread", () => {
     expect(
       shouldConfirmCloseSidebarThread({ latestUserMessageAt: "2026-05-09T10:00:00.000Z" }),
     ).toBe(true);
+  });
+});
+
+describe("shouldConfirmSidebarThreadDelete", () => {
+  it("requires both enabled delete confirmation and conversation history", () => {
+    const thread = { latestUserMessageAt: "2026-05-09T10:00:00.000Z" };
+    expect(shouldConfirmSidebarThreadDelete({ confirmThreadDelete: true, thread })).toBe(true);
+    expect(shouldConfirmSidebarThreadDelete({ confirmThreadDelete: false, thread })).toBe(false);
+    expect(
+      shouldConfirmSidebarThreadDelete({
+        confirmThreadDelete: true,
+        thread: { latestUserMessageAt: null },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldConfirmSidebarThreadSelectionDelete", () => {
+  it("confirms only when at least one selected thread has conversation history", () => {
+    expect(
+      shouldConfirmSidebarThreadSelectionDelete({
+        confirmThreadDelete: true,
+        threads: [{ latestUserMessageAt: null }, undefined],
+      }),
+    ).toBe(false);
+    expect(
+      shouldConfirmSidebarThreadSelectionDelete({
+        confirmThreadDelete: true,
+        threads: [
+          { latestUserMessageAt: null },
+          { latestUserMessageAt: "2026-05-09T10:00:00.000Z" },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      shouldConfirmSidebarThreadSelectionDelete({
+        confirmThreadDelete: false,
+        threads: [{ latestUserMessageAt: "2026-05-09T10:00:00.000Z" }],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldConfirmSidebarThreadArchive", () => {
+  it("requires an available archive action and enabled archive confirmation", () => {
+    expect(
+      shouldConfirmSidebarThreadArchive({
+        archiveAvailable: true,
+        confirmThreadArchive: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldConfirmSidebarThreadArchive({
+        archiveAvailable: true,
+        confirmThreadArchive: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldConfirmSidebarThreadArchive({
+        archiveAvailable: false,
+        confirmThreadArchive: true,
+      }),
+    ).toBe(false);
   });
 });
 
