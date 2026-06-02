@@ -12,7 +12,8 @@ export function ActionsTab(props: ActionsTabProps) {
       environmentId={props.environmentId}
       cwd={props.cwd}
       title="Actions"
-      description="Recent GitHub Actions workflow runs for this repository."
+      description="Recent GitHub Actions workflow runs grouped by pull request or branch."
+      groupRunsBySource
     />
   );
 }
