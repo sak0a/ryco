@@ -203,6 +203,7 @@ import {
   shouldAutoAnimateSidebarProjectList,
   shouldAutoAnimateSidebarThreadLists,
   shouldClearThreadSelectionOnMouseDown,
+  shouldConfirmSidebarThreadArchive,
   shouldConfirmSidebarThreadDelete,
   shouldQuerySidebarSourceControlCounts,
   sortProjectsForSidebar,
@@ -4166,6 +4167,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
       if (clicked === "archive") {
+        if (
+          shouldConfirmSidebarThreadArchive({
+            archiveAvailable,
+            confirmThreadArchive: appSettingsConfirmThreadArchive,
+          })
+        ) {
+          const confirmed = await api.dialogs.confirm(
+            [
+              `Archive session "${thread.title}"?`,
+              "You can restore archived sessions from Settings > Archive.",
+            ].join("\n"),
+          );
+          if (!confirmed) return;
+        }
         await attemptArchiveThread(threadRef);
         return;
       }
@@ -4174,6 +4189,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     },
     [
       attemptArchiveThread,
+      appSettingsConfirmThreadArchive,
       clearSelection,
       closeThread,
       copyPathToClipboard,

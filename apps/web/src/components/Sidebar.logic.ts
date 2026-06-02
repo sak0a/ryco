@@ -135,6 +135,13 @@ export function shouldConfirmSidebarThreadDelete(input: {
   return input.confirmThreadDelete && shouldConfirmCloseSidebarThread(input.thread);
 }
 
+export function shouldConfirmSidebarThreadArchive(input: {
+  readonly archiveAvailable: boolean;
+  readonly confirmThreadArchive: boolean;
+}): boolean {
+  return input.archiveAvailable && input.confirmThreadArchive;
+}
+
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Pending Approval": 5,
   "Awaiting Input": 4,

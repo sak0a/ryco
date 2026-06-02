@@ -24,6 +24,7 @@ import {
   shouldAutoAnimateSidebarProjectList,
   shouldAutoAnimateSidebarThreadLists,
   shouldSuggestArchive,
+  shouldConfirmSidebarThreadArchive,
   shouldConfirmCloseSidebarThread,
   shouldConfirmSidebarThreadDelete,
   shouldClearThreadSelectionOnMouseDown,
@@ -104,6 +105,29 @@ describe("shouldConfirmSidebarThreadDelete", () => {
       shouldConfirmSidebarThreadDelete({
         confirmThreadDelete: true,
         thread: { latestUserMessageAt: null },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldConfirmSidebarThreadArchive", () => {
+  it("requires an available archive action and enabled archive confirmation", () => {
+    expect(
+      shouldConfirmSidebarThreadArchive({
+        archiveAvailable: true,
+        confirmThreadArchive: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldConfirmSidebarThreadArchive({
+        archiveAvailable: true,
+        confirmThreadArchive: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldConfirmSidebarThreadArchive({
+        archiveAvailable: false,
+        confirmThreadArchive: true,
       }),
     ).toBe(false);
   });
