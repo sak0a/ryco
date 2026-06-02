@@ -39,7 +39,6 @@ import {
   SourceControlDetailLayout,
   SourceControlDetailLoadingState,
   SourceControlDetailToolbar,
-  SourceControlMetricStrip,
 } from "./SourceControlDetailLayout";
 import {
   SourceControlTimeline,
@@ -214,6 +213,7 @@ function PullRequestDetailBody(props: {
   const opAuthorRole = deriveOriginalPostAuthorRole(detail);
 
   const conversationCount = detail.comments.length + 1;
+  const checkCount = detail.checkRollup?.length ?? 0;
   const commitCount = detail.commits?.length ?? 0;
   const fileCount = detail.changedFiles ?? detail.files?.length ?? 0;
   const additions = detail.additions ?? 0;
@@ -288,24 +288,12 @@ function PullRequestDetailBody(props: {
               <StateBadge kind={changeRequestStateKind(detail.state, detail.isDraft)} />
             </div>
           </div>
-          <SourceControlMetricStrip
-            className="mt-4"
-            items={[
-              { label: "Conversation", value: `${detail.comments.length} comments` },
-              { label: "Commits", value: commitCount },
-              { label: "Files changed", value: fileCount },
-              {
-                label: "Net diff",
-                value: `+${numberFmt.format(additions)} / −${numberFmt.format(deletions)}`,
-              },
-            ]}
-          />
         </header>
 
         <ContextPickerTabs
           tabs={[
             { id: "conversation", label: "Conversation", count: conversationCount },
-            { id: "checks", label: "Checks" },
+            { id: "checks", label: "Checks", count: checkCount },
             { id: "commits", label: "Commits", count: commitCount },
             { id: "files", label: "Files changed", count: fileCount },
           ]}
@@ -332,7 +320,6 @@ function PullRequestDetailBody(props: {
                     authorRole={opAuthorRole.role}
                     isOriginalPost
                     itemKind="body"
-                    eyebrow="Pull request body"
                     onQuote={
                       canComment
                         ? () =>
