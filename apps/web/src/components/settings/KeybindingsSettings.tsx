@@ -45,15 +45,20 @@ import {
   formatShortcutTokens,
   serializeShortcut,
 } from "../../lib/shortcutCapture";
+import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
 import { ensureLocalApi } from "../../localApi";
-import { useServerConfig, useServerKeybindingsConfigPath } from "../../rpc/serverState";
+import {
+  useServerAvailableEditors,
+  useServerConfig,
+  useServerKeybindingsConfigPath,
+} from "../../rpc/serverState";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { stackedThreadToast, toastManager } from "../ui/toast";
-import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
+import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 type DraftRule = KeybindingRule & { __id: string };
 
@@ -162,8 +167,35 @@ interface PanelContextValue {
 export function KeybindingsSettingsPanel() {
   const serverConfig = useServerConfig();
   const keybindingsConfigPath = useServerKeybindingsConfigPath();
+  const availableEditors = useServerAvailableEditors();
   const platform = typeof navigator !== "undefined" ? navigator.platform : "";
   const isMac = isMacPlatform(platform);
+  const [isOpeningKeybindingsFile, setIsOpeningKeybindingsFile] = useState(false);
+  const [openKeybindingsFileError, setOpenKeybindingsFileError] = useState<string | null>(null);
+
+  const openKeybindingsFile = useCallback(() => {
+    if (!keybindingsConfigPath) return;
+    setOpenKeybindingsFileError(null);
+    setIsOpeningKeybindingsFile(true);
+
+    const editor = resolveAndPersistPreferredEditor(availableEditors ?? []);
+    if (!editor) {
+      setOpenKeybindingsFileError("No available editors found.");
+      setIsOpeningKeybindingsFile(false);
+      return;
+    }
+
+    void ensureLocalApi()
+      .shell.openInEditor(keybindingsConfigPath, editor)
+      .catch((error: unknown) => {
+        setOpenKeybindingsFileError(
+          error instanceof Error ? error.message : "Unable to open keybindings file.",
+        );
+      })
+      .finally(() => {
+        setIsOpeningKeybindingsFile(false);
+      });
+  }, [availableEditors, keybindingsConfigPath]);
 
   // Subscribe to the project list with shallow-equal compare (the array
   // identity is unstable across renders but its element references are stable
@@ -487,6 +519,35 @@ export function KeybindingsSettingsPanel() {
           Restore defaults
         </Button>
       </div>
+
+      <SettingsSection title="Configuration file">
+        <SettingsRow
+          title="Keybindings file"
+          description="Open the persisted `keybindings.json` file to edit advanced bindings directly."
+          status={
+            <>
+              <span className="block break-all font-mono text-[11px] text-foreground">
+                {keybindingsConfigPath ?? "Resolving keybindings path..."}
+              </span>
+              {openKeybindingsFileError ? (
+                <span className="mt-1 block text-destructive">{openKeybindingsFileError}</span>
+              ) : (
+                <span className="mt-1 block">Opens in your preferred editor.</span>
+              )}
+            </>
+          }
+          control={
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={!keybindingsConfigPath || isOpeningKeybindingsFile}
+              onClick={openKeybindingsFile}
+            >
+              {isOpeningKeybindingsFile ? "Opening..." : "Open file"}
+            </Button>
+          }
+        />
+      </SettingsSection>
 
       {issues.length > 0 ? (
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">

@@ -203,7 +203,7 @@ import {
   shouldAutoAnimateSidebarProjectList,
   shouldAutoAnimateSidebarThreadLists,
   shouldClearThreadSelectionOnMouseDown,
-  shouldConfirmCloseSidebarThread,
+  shouldConfirmSidebarThreadDelete,
   shouldQuerySidebarSourceControlCounts,
   sortProjectsForSidebar,
   useThreadJumpHintVisibility,
@@ -2363,7 +2363,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const appSettingsConfirmThreadDelete = useSettings<boolean>(
     (settings) => settings.confirmThreadDelete,
   );
-  const appSettingsConfirmThreadArchive = false;
+  const appSettingsConfirmThreadArchive = useSettings<boolean>(
+    (settings) => settings.confirmThreadArchive,
+  );
   const defaultThreadEnvMode = useSettings<ThreadEnvMode>(
     (settings) => settings.defaultThreadEnvMode,
   );
@@ -3211,7 +3213,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
       const threadRef = scopeThreadRef(thread.environmentId, thread.id);
-      const shouldConfirmClose = shouldConfirmCloseSidebarThread(thread);
+      const shouldConfirmClose = shouldConfirmSidebarThreadDelete({
+        confirmThreadDelete: appSettingsConfirmThreadDelete,
+        thread,
+      });
       if (shouldConfirmClose) {
         const message = [
           `Close session "${thread.title}"?`,
@@ -3234,7 +3239,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         optimistic: true,
       });
     },
-    [deleteThread, router],
+    [appSettingsConfirmThreadDelete, deleteThread, router],
   );
 
   const handleThreadClick = useCallback(

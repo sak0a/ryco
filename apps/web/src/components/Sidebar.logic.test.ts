@@ -25,6 +25,7 @@ import {
   shouldAutoAnimateSidebarThreadLists,
   shouldSuggestArchive,
   shouldConfirmCloseSidebarThread,
+  shouldConfirmSidebarThreadDelete,
   shouldClearThreadSelectionOnMouseDown,
   shouldQuerySidebarSourceControlCounts,
   sortProjectsForSidebar,
@@ -91,6 +92,20 @@ describe("shouldConfirmCloseSidebarThread", () => {
     expect(
       shouldConfirmCloseSidebarThread({ latestUserMessageAt: "2026-05-09T10:00:00.000Z" }),
     ).toBe(true);
+  });
+});
+
+describe("shouldConfirmSidebarThreadDelete", () => {
+  it("requires both enabled delete confirmation and conversation history", () => {
+    const thread = { latestUserMessageAt: "2026-05-09T10:00:00.000Z" };
+    expect(shouldConfirmSidebarThreadDelete({ confirmThreadDelete: true, thread })).toBe(true);
+    expect(shouldConfirmSidebarThreadDelete({ confirmThreadDelete: false, thread })).toBe(false);
+    expect(
+      shouldConfirmSidebarThreadDelete({
+        confirmThreadDelete: true,
+        thread: { latestUserMessageAt: null },
+      }),
+    ).toBe(false);
   });
 });
 

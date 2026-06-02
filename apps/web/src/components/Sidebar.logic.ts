@@ -128,6 +128,13 @@ export function shouldConfirmCloseSidebarThread(
   return thread.latestUserMessageAt !== null;
 }
 
+export function shouldConfirmSidebarThreadDelete(input: {
+  readonly confirmThreadDelete: boolean;
+  readonly thread: Pick<SidebarThreadSummary, "latestUserMessageAt">;
+}): boolean {
+  return input.confirmThreadDelete && shouldConfirmCloseSidebarThread(input.thread);
+}
+
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Pending Approval": 5,
   "Awaiting Input": 4,
