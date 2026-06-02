@@ -225,7 +225,6 @@ function IssueDetailBody(props: {
                   authorRole={opAuthorRole.role}
                   isOriginalPost
                   itemKind="body"
-                  eyebrow="Issue body"
                   onQuote={
                     canComment
                       ? () =>

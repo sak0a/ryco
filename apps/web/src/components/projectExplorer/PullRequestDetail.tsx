@@ -39,7 +39,6 @@ import {
   SourceControlDetailLayout,
   SourceControlDetailLoadingState,
   SourceControlDetailToolbar,
-  SourceControlMetricStrip,
 } from "./SourceControlDetailLayout";
 import {
   SourceControlTimeline,
@@ -288,18 +287,6 @@ function PullRequestDetailBody(props: {
               <StateBadge kind={changeRequestStateKind(detail.state, detail.isDraft)} />
             </div>
           </div>
-          <SourceControlMetricStrip
-            className="mt-4"
-            items={[
-              { label: "Conversation", value: `${detail.comments.length} comments` },
-              { label: "Commits", value: commitCount },
-              { label: "Files changed", value: fileCount },
-              {
-                label: "Net diff",
-                value: `+${numberFmt.format(additions)} / −${numberFmt.format(deletions)}`,
-              },
-            ]}
-          />
         </header>
 
         <ContextPickerTabs
@@ -332,7 +319,6 @@ function PullRequestDetailBody(props: {
                     authorRole={opAuthorRole.role}
                     isOriginalPost
                     itemKind="body"
-                    eyebrow="Pull request body"
                     onQuote={
                       canComment
                         ? () =>
