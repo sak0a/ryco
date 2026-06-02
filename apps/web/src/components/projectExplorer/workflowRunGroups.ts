@@ -3,7 +3,7 @@ import { DateTime, Option } from "effect";
 
 type WorkflowGroupChangeRequest = Pick<
   ChangeRequest,
-  "headRefName" | "headSha" | "number" | "provider" | "title" | "url"
+  "headRefName" | "headSha" | "number" | "provider" | "state" | "title" | "url"
 >;
 
 export type WorkflowRunGroupSource =
@@ -72,7 +72,7 @@ function buildChangeRequestIndexes(changeRequests: ReadonlyArray<WorkflowGroupCh
     }
 
     const headRefName = trimmedOrNull(changeRequest.headRefName);
-    if (headRefName && !byBranch.has(headRefName)) {
+    if (changeRequest.state === "open" && headRefName && !byBranch.has(headRefName)) {
       byBranch.set(headRefName, changeRequest);
     }
   }

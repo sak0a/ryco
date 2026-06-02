@@ -47,10 +47,12 @@ function changeRequest(input: {
   readonly number: number;
   readonly headRefName: string;
   readonly headSha?: string;
+  readonly state?: TestChangeRequest["state"];
 }): TestChangeRequest {
   return {
     provider: "github",
     number: input.number,
+    state: input.state ?? "open",
     title: `PR ${input.number}`,
     url: `https://github.com/acme/repo/pull/${input.number}`,
     headRefName: input.headRefName,
@@ -83,6 +85,38 @@ describe("groupWorkflowRunsBySource", () => {
     });
 
     expect(groups[0]?.id).toBe("pr:github:7");
+  });
+
+  it("does not use closed pull requests as branch fallback matches", () => {
+    const groups = groupWorkflowRunsBySource({
+      runs: [workflowRun({ runId: "1", branch: "reused-branch", commitOid: "new-sha" })],
+      changeRequests: [
+        changeRequest({
+          number: 11,
+          headRefName: "reused-branch",
+          headSha: "old-sha",
+          state: "merged",
+        }),
+      ],
+    });
+
+    expect(groups[0]?.id).toBe("branch:reused-branch");
+  });
+
+  it("still matches closed pull requests by exact head SHA", () => {
+    const groups = groupWorkflowRunsBySource({
+      runs: [workflowRun({ runId: "1", branch: "deleted-branch", commitOid: "historical-sha" })],
+      changeRequests: [
+        changeRequest({
+          number: 12,
+          headRefName: "deleted-branch",
+          headSha: "historical-sha",
+          state: "closed",
+        }),
+      ],
+    });
+
+    expect(groups[0]?.id).toBe("pr:github:12");
   });
 
   it("falls back to branch and unknown groups without pull request matches", () => {
