@@ -213,7 +213,6 @@ function PullRequestDetailBody(props: {
   const opAuthorRole = deriveOriginalPostAuthorRole(detail);
 
   const conversationCount = detail.comments.length + 1;
-  const checkCount = detail.checkRollup?.length ?? 0;
   const commitCount = detail.commits?.length ?? 0;
   const fileCount = detail.changedFiles ?? detail.files?.length ?? 0;
   const additions = detail.additions ?? 0;
@@ -293,7 +292,7 @@ function PullRequestDetailBody(props: {
         <ContextPickerTabs
           tabs={[
             { id: "conversation", label: "Conversation", count: conversationCount },
-            { id: "checks", label: "Checks", count: checkCount },
+            { id: "checks", label: "Checks" },
             { id: "commits", label: "Commits", count: commitCount },
             { id: "files", label: "Files changed", count: fileCount },
           ]}
