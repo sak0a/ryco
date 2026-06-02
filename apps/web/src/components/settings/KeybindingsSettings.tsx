@@ -493,6 +493,7 @@ export function KeybindingsSettingsPanel() {
 
   const issues =
     serverConfig?.issues.filter((issue) => issue.kind.startsWith("keybindings.")) ?? [];
+  const hasAvailableEditors = (availableEditors ?? []).length > 0;
 
   return (
     <SettingsPageContainer>
@@ -532,7 +533,11 @@ export function KeybindingsSettingsPanel() {
               {openKeybindingsFileError ? (
                 <span className="mt-1 block text-destructive">{openKeybindingsFileError}</span>
               ) : (
-                <span className="mt-1 block">Opens in your preferred editor.</span>
+                <span className="mt-1 block">
+                  {hasAvailableEditors
+                    ? "Opens in your preferred editor."
+                    : "No available editors found."}
+                </span>
               )}
             </>
           }
@@ -540,7 +545,7 @@ export function KeybindingsSettingsPanel() {
             <Button
               size="xs"
               variant="outline"
-              disabled={!keybindingsConfigPath || isOpeningKeybindingsFile}
+              disabled={!keybindingsConfigPath || !hasAvailableEditors || isOpeningKeybindingsFile}
               onClick={openKeybindingsFile}
             >
               {isOpeningKeybindingsFile ? "Opening..." : "Open file"}

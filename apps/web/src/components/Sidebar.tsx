@@ -205,6 +205,7 @@ import {
   shouldClearThreadSelectionOnMouseDown,
   shouldConfirmSidebarThreadArchive,
   shouldConfirmSidebarThreadDelete,
+  shouldConfirmSidebarThreadSelectionDelete,
   shouldQuerySidebarSourceControlCounts,
   sortProjectsForSidebar,
   useThreadJumpHintVisibility,
@@ -3317,7 +3318,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
       if (clicked !== "delete") return;
 
-      if (appSettingsConfirmThreadDelete) {
+      const shouldConfirmDelete = shouldConfirmSidebarThreadSelectionDelete({
+        confirmThreadDelete: appSettingsConfirmThreadDelete,
+        threads: threadKeys.map((threadKey) => sidebarThreadByKeyRef.current.get(threadKey)),
+      });
+
+      if (shouldConfirmDelete) {
         const confirmed = await api.dialogs.confirm(
           [
             `Delete ${count} thread${count === 1 ? "" : "s"}?`,

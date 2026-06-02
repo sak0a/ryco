@@ -135,6 +135,24 @@ export function shouldConfirmSidebarThreadDelete(input: {
   return input.confirmThreadDelete && shouldConfirmCloseSidebarThread(input.thread);
 }
 
+export function shouldConfirmSidebarThreadSelectionDelete(input: {
+  readonly confirmThreadDelete: boolean;
+  readonly threads: Iterable<Pick<SidebarThreadSummary, "latestUserMessageAt"> | null | undefined>;
+}): boolean {
+  for (const thread of input.threads) {
+    if (
+      thread &&
+      shouldConfirmSidebarThreadDelete({
+        confirmThreadDelete: input.confirmThreadDelete,
+        thread,
+      })
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function shouldConfirmSidebarThreadArchive(input: {
   readonly archiveAvailable: boolean;
   readonly confirmThreadArchive: boolean;
