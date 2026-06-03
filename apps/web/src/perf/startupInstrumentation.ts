@@ -1,4 +1,4 @@
-const STARTUP_PREFIX = "s3:startup:";
+const STARTUP_PREFIX = "ryco:startup:";
 
 export type StartupPhase =
   | "root-before-load-start"

@@ -1,6 +1,6 @@
 /**
  * Optional integration check against a real `agent acp` install.
- * Enable with: S3_CURSOR_ACP_PROBE=1 bun run test --filter CursorAcpCliProbe
+ * Enable with: RYCO_CURSOR_ACP_PROBE=1 bun run test --filter CursorAcpCliProbe
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
@@ -10,7 +10,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { AcpSessionRuntime } from "./AcpSessionRuntime.ts";
 
-describe.runIf(process.env.S3_CURSOR_ACP_PROBE === "1")("Cursor ACP CLI probe", () => {
+describe.runIf(process.env.RYCO_CURSOR_ACP_PROBE === "1")("Cursor ACP CLI probe", () => {
   it.effect("initialize and authenticate against real agent acp", () =>
     Effect.gen(function* () {
       const runtime = yield* AcpSessionRuntime;
@@ -30,7 +30,7 @@ describe.runIf(process.env.S3_CURSOR_ACP_PROBE === "1")("Cursor ACP CLI probe", 
               parameterizedModelPicker: true,
             },
           },
-          clientInfo: { name: "s3-probe", version: "0.0.0" },
+          clientInfo: { name: "ryco-probe", version: "0.0.0" },
           authMethodId: "cursor_login",
         }),
       ),
@@ -82,7 +82,7 @@ describe.runIf(process.env.S3_CURSOR_ACP_PROBE === "1")("Cursor ACP CLI probe", 
               parameterizedModelPicker: true,
             },
           },
-          clientInfo: { name: "s3-probe", version: "0.0.0" },
+          clientInfo: { name: "ryco-probe", version: "0.0.0" },
         }),
       ),
       Effect.scoped,
@@ -138,7 +138,7 @@ describe.runIf(process.env.S3_CURSOR_ACP_PROBE === "1")("Cursor ACP CLI probe", 
               parameterizedModelPicker: true,
             },
           },
-          clientInfo: { name: "s3-probe", version: "0.0.0" },
+          clientInfo: { name: "ryco-probe", version: "0.0.0" },
         }),
       ),
       Effect.scoped,

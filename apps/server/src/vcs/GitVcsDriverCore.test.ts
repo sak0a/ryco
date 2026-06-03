@@ -10,7 +10,7 @@ import * as GitVcsDriver from "./GitVcsDriver.ts";
 import { makeGitVcsDriverCore } from "./GitVcsDriverCore.ts";
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
-  prefix: "s3-git-vcs-driver-test-",
+  prefix: "ryco-git-vcs-driver-test-",
 });
 const TestLayer = GitVcsDriver.layer.pipe(
   Layer.provide(ServerConfigLayer),

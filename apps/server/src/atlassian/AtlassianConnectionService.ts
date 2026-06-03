@@ -58,7 +58,7 @@ export interface AtlassianConnectionServiceShape {
 export class AtlassianConnectionService extends Context.Service<
   AtlassianConnectionService,
   AtlassianConnectionServiceShape
->()("s3/atlassian/AtlassianConnectionService") {}
+>()("ryco/atlassian/AtlassianConnectionService") {}
 
 function atlassianError(
   operation: string,

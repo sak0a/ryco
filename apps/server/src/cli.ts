@@ -73,7 +73,7 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   mode: Schema.optional(RuntimeMode),
   port: Schema.optional(PortSchema),
   host: Schema.optional(Schema.String),
-  t3Home: Schema.optional(Schema.String),
+  rycoHome: Schema.optional(Schema.String),
   devUrl: Schema.optional(Schema.URLFromString),
   noBrowser: Schema.optional(Schema.Boolean),
   desktopBootstrapToken: Schema.optional(Schema.String),
@@ -161,14 +161,14 @@ const EnvServerConfig = Config.all({
     Config.map(Option.getOrUndefined),
   ),
   otlpExportIntervalMs: Config.int("RYCO_OTLP_EXPORT_INTERVAL_MS").pipe(Config.withDefault(10_000)),
-  otlpServiceName: Config.string("RYCO_OTLP_SERVICE_NAME").pipe(Config.withDefault("s3-server")),
+  otlpServiceName: Config.string("RYCO_OTLP_SERVICE_NAME").pipe(Config.withDefault("ryco-server")),
   mode: Config.schema(RuntimeMode, "RYCO_MODE").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
   port: Config.port("RYCO_PORT").pipe(Config.option, Config.map(Option.getOrUndefined)),
   host: Config.string("RYCO_HOST").pipe(Config.option, Config.map(Option.getOrUndefined)),
-  t3Home: Config.string("RYCO_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  rycoHome: Config.string("RYCO_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
   devUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option, Config.map(Option.getOrUndefined)),
   noBrowser: Config.boolean("RYCO_NO_BROWSER").pipe(
     Config.option,
@@ -308,8 +308,8 @@ export const resolveServerConfig = (
       Option.getOrUndefined(
         resolveOptionPrecedence(
           normalizedFlags.baseDir,
-          Option.fromUndefinedOr(env.t3Home),
-          Option.fromUndefinedOr(bootstrap?.t3Home),
+          Option.fromUndefinedOr(env.rycoHome),
+          Option.fromUndefinedOr(bootstrap?.rycoHome),
         ),
       ),
     );
@@ -580,7 +580,7 @@ const withProjectCliSessionToken = <A, E, R>(
   Effect.acquireUseRelease(
     authControlPlane.issueSession({
       role: "owner",
-      label: "s3 project cli",
+      label: "ryco project cli",
     }),
     (issued) => run(issued.token),
     (issued) => authControlPlane.revokeSession(issued.sessionId).pipe(Effect.ignore({ log: true })),
@@ -1199,7 +1199,7 @@ const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe
   ),
 );
 
-export const cli = Command.make("s3", { ...sharedServerCommandFlags }).pipe(
+export const cli = Command.make("ryco", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the Ryco server."),
   Command.withHandler((flags) => runServerCommand(flags)),
   Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand]),

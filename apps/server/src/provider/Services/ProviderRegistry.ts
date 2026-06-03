@@ -76,5 +76,5 @@ export interface ProviderRegistryShape {
 }
 
 export class ProviderRegistry extends Context.Service<ProviderRegistry, ProviderRegistryShape>()(
-  "s3/provider/Services/ProviderRegistry",
+  "ryco/provider/Services/ProviderRegistry",
 ) {}

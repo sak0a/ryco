@@ -9,4 +9,4 @@ export interface RepositoryIdentityResolverShape {
 export class RepositoryIdentityResolver extends Context.Service<
   RepositoryIdentityResolver,
   RepositoryIdentityResolverShape
->()("s3/project/Services/RepositoryIdentityResolver") {}
+>()("ryco/project/Services/RepositoryIdentityResolver") {}

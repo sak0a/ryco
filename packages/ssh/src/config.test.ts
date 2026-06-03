@@ -11,7 +11,7 @@ import {
 function makeTempHomeDir() {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    return yield* fs.makeTempDirectoryScoped({ prefix: "s3-ssh-test-" });
+    return yield* fs.makeTempDirectoryScoped({ prefix: "ryco-ssh-test-" });
   });
 }
 

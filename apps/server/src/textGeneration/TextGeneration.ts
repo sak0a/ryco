@@ -144,7 +144,7 @@ export interface TextGenerationShape {
  * TextGeneration - Service tag for commit and PR text generation.
  */
 export class TextGeneration extends Context.Service<TextGeneration, TextGenerationShape>()(
-  "s3/text-generation/TextGeneration",
+  "ryco/text-generation/TextGeneration",
 ) {}
 
 type TextGenerationOp =

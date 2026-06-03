@@ -46,7 +46,7 @@ describe("AcpSessionRuntime", () => {
               parameterizedModelPicker: true,
             },
           },
-          clientInfo: { name: "s3-test", version: "0.0.0" },
+          clientInfo: { name: "ryco-test", version: "0.0.0" },
           authMethodId: "test",
           requestLogger: (event) =>
             Effect.sync(() => {
@@ -101,7 +101,7 @@ describe("AcpSessionRuntime", () => {
             args: [mockAgentPath],
           },
           cwd: process.cwd(),
-          clientInfo: { name: "s3-test", version: "0.0.0" },
+          clientInfo: { name: "ryco-test", version: "0.0.0" },
           authMethodId: "test",
         }),
       ),
@@ -158,11 +158,11 @@ describe("AcpSessionRuntime", () => {
             command: bunExe,
             args: [mockAgentPath],
             env: {
-              S3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS: "1",
+              RYCO_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS: "1",
             },
           },
           cwd: process.cwd(),
-          clientInfo: { name: "s3-test", version: "0.0.0" },
+          clientInfo: { name: "ryco-test", version: "0.0.0" },
           authMethodId: "test",
         }),
       ),
@@ -196,11 +196,11 @@ describe("AcpSessionRuntime", () => {
             command: bunExe,
             args: [mockAgentPath],
             env: {
-              S3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS: "1",
+              RYCO_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS: "1",
             },
           },
           cwd: process.cwd(),
-          clientInfo: { name: "s3-test", version: "0.0.0" },
+          clientInfo: { name: "ryco-test", version: "0.0.0" },
           authMethodId: "test",
         }),
       ),
@@ -249,7 +249,7 @@ describe("AcpSessionRuntime", () => {
             args: [mockAgentPath],
           },
           cwd: process.cwd(),
-          clientInfo: { name: "s3-test", version: "0.0.0" },
+          clientInfo: { name: "ryco-test", version: "0.0.0" },
           requestLogger: (event) =>
             Effect.sync(() => {
               requestEvents.push(event);
@@ -284,7 +284,7 @@ describe("AcpSessionRuntime", () => {
             args: [mockAgentPath],
           },
           cwd: process.cwd(),
-          clientInfo: { name: "s3-test", version: "0.0.0" },
+          clientInfo: { name: "ryco-test", version: "0.0.0" },
           requestLogger: (event) =>
             Effect.sync(() => {
               requestEvents.push(event);
@@ -327,7 +327,7 @@ describe("AcpSessionRuntime", () => {
             args: [mockAgentPath],
           },
           cwd: process.cwd(),
-          clientInfo: { name: "s3-test", version: "0.0.0" },
+          clientInfo: { name: "ryco-test", version: "0.0.0" },
           protocolLogging: {
             logIncoming: true,
             logOutgoing: true,
@@ -380,11 +380,11 @@ describe("AcpSessionRuntime", () => {
             command: bunExe,
             args: [mockAgentPath],
             env: {
-              S3_ACP_REQUEST_LOG_PATH: requestLogPath,
+              RYCO_ACP_REQUEST_LOG_PATH: requestLogPath,
             },
           },
           cwd: process.cwd(),
-          clientInfo: { name: "s3-test", version: "0.0.0" },
+          clientInfo: { name: "ryco-test", version: "0.0.0" },
         }),
       ),
       Effect.scoped,

@@ -144,4 +144,4 @@ export interface ProjectionSnapshotQueryShape {
 export class ProjectionSnapshotQuery extends Context.Service<
   ProjectionSnapshotQuery,
   ProjectionSnapshotQueryShape
->()("s3/orchestration/Services/ProjectionSnapshotQuery") {}
+>()("ryco/orchestration/Services/ProjectionSnapshotQuery") {}

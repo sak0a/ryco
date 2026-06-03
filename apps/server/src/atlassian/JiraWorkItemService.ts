@@ -43,7 +43,7 @@ export interface JiraWorkItemServiceShape {
 export class JiraWorkItemService extends Context.Service<
   JiraWorkItemService,
   JiraWorkItemServiceShape
->()("s3/atlassian/JiraWorkItemService") {}
+>()("ryco/atlassian/JiraWorkItemService") {}
 
 const textDecoder = new TextDecoder();
 

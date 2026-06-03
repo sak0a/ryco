@@ -128,7 +128,7 @@ const DIFF_PANEL_UNSAFE_CSS = `
   cursor: pointer;
 }
 
-::highlight(s3-diff-search-match) {
+::highlight(ryco-diff-search-match) {
   background-color: color-mix(in srgb, var(--warning) 60%, transparent);
   color: var(--foreground);
 }
@@ -185,7 +185,7 @@ function buildFileDiffRenderKey(fileDiff: FileDiffMetadata): string {
   return fileDiff.cacheKey ?? `${fileDiff.prevName ?? "none"}:${fileDiff.name}`;
 }
 
-const DIFF_SEARCH_HIGHLIGHT_NAME = "s3-diff-search-match";
+const DIFF_SEARCH_HIGHLIGHT_NAME = "ryco-diff-search-match";
 const DIFF_SEARCH_DEBOUNCE_MS = 150;
 const DIFF_SEARCH_HIGHLIGHT_REFRESH_DELAY_MS = 80;
 const DIFF_SEARCH_HIGHLIGHT_VIEWPORT_MARGIN_PX = 1600;

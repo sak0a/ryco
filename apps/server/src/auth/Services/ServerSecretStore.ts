@@ -17,5 +17,5 @@ export interface ServerSecretStoreShape {
 }
 
 export class ServerSecretStore extends Context.Service<ServerSecretStore, ServerSecretStoreShape>()(
-  "s3/auth/Services/ServerSecretStore",
+  "ryco/auth/Services/ServerSecretStore",
 ) {}

@@ -302,9 +302,9 @@ const makeBrowserOtlpPayload = (spanName: string) =>
         url: collector.url,
         exportInterval: "10 millis",
         resource: {
-          serviceName: "s3-web",
+          serviceName: "ryco-web",
           attributes: {
-            "service.runtime": "s3-web",
+            "service.runtime": "ryco-web",
             "service.mode": "browser",
             "service.version": "test",
           },
@@ -361,7 +361,7 @@ const buildAppUnderTest = (options?: {
 }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    const tempBaseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "s3-router-test-" });
+    const tempBaseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "ryco-router-test-" });
     const baseDir = options?.config?.baseDir ?? tempBaseDir;
     const devUrl = options?.config?.devUrl;
     const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
@@ -375,7 +375,7 @@ const buildAppUnderTest = (options?: {
       otlpTracesUrl: undefined,
       otlpMetricsUrl: undefined,
       otlpExportIntervalMs: 10_000,
-      otlpServiceName: "s3-server",
+      otlpServiceName: "ryco-server",
       mode: "desktop",
       port: 0,
       host: "127.0.0.1",
@@ -986,7 +986,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "s3-router-static-" });
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "ryco-router-static-",
+      });
       const indexPath = path.join(staticDir, "index.html");
       yield* fileSystem.writeFileString(indexPath, "<html>router-static-ok</html>");
 
@@ -1003,7 +1005,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "s3-router-static-" });
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "ryco-router-static-",
+      });
       const assetsDir = path.join(staticDir, "assets");
       yield* fileSystem.makeDirectory(assetsDir);
       yield* fileSystem.writeFileString(path.join(staticDir, "index.html"), "<html></html>");
@@ -1040,7 +1044,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const projectDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "s3-router-project-favicon-",
+        prefix: "ryco-router-project-favicon-",
       });
       yield* fileSystem.writeFileString(
         path.join(projectDir, "favicon.svg"),
@@ -1069,7 +1073,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const projectDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "s3-router-project-favicon-fallback-",
+        prefix: "ryco-router-project-favicon-fallback-",
       });
 
       yield* buildAppUnderTest({
@@ -1094,7 +1098,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const url = yield* getHttpServerUrl("/.well-known/s3/environment");
+      const url = yield* getHttpServerUrl("/.well-known/ryco/environment");
       const response = yield* Effect.promise(() => fetch(url));
       const body = (yield* Effect.promise(() =>
         response.json(),
@@ -1129,7 +1133,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         "browser-session-cookie",
         "bearer-session-token",
       ]);
-      assert.isTrue(body.auth.sessionCookieName.startsWith("t3_session_"));
+      assert.isTrue(body.auth.sessionCookieName.startsWith("ryco_session_"));
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -1592,7 +1596,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const projectDir = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "s3-router-project-favicon-query-token-",
+          prefix: "ryco-router-project-favicon-query-token-",
         });
 
         yield* buildAppUnderTest();
@@ -1791,7 +1795,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               attributes: [
                 {
                   key: "service.name",
-                  value: { stringValue: "s3-web" },
+                  value: { stringValue: "ryco-web" },
                 },
               ],
             },
@@ -1932,7 +1936,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             "rpc.method": "server.getSettings",
           },
           resourceAttributes: {
-            "service.name": "s3-web",
+            "service.name": "ryco-web",
           },
           scope: {
             name: "effect",
@@ -2062,7 +2066,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(record.links, []);
         assert.equal(record.scope.name, scopeSpan.scope.name);
         assert.deepEqual(record.scope.attributes, {});
-        assert.equal(record.resourceAttributes["service.name"], "s3-web");
+        assert.equal(record.resourceAttributes["service.name"], "ryco-web");
         assert.equal(record.status?.code, String(span.status.code));
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -2123,7 +2127,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-ws-auth-required-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-ws-auth-required-" });
       yield* fs.writeFileString(
         path.join(workspaceDir, "needle-file.ts"),
         "export const needle = 1;",
@@ -2158,7 +2162,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const workspaceDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "s3-ws-client-role-",
+        prefix: "ryco-ws-client-role-",
       });
       yield* buildAppUnderTest();
 
@@ -2190,7 +2194,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const workspaceDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "s3-ws-paired-dispatch-",
+        prefix: "ryco-ws-paired-dispatch-",
       });
       yield* buildAppUnderTest();
 
@@ -2399,7 +2403,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-ws-project-search-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-ws-project-search-" });
       yield* fs.writeFileString(
         path.join(workspaceDir, "needle-file.ts"),
         "export const needle = 1;",
@@ -2429,7 +2433,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const workspaceDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "s3-ws-project-search-gitignored-",
+        prefix: "ryco-ws-project-search-gitignored-",
       });
       yield* fs.writeFileString(path.join(workspaceDir, ".gitignore"), ".venv/\n");
       yield* fs.makeDirectory(path.join(workspaceDir, ".venv", "lib"), { recursive: true });
@@ -2509,7 +2513,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-ws-project-write-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-ws-project-write-" });
 
       yield* buildAppUnderTest();
 
@@ -2534,7 +2538,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const parentDir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-ws-project-create-" });
+      const parentDir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-ws-project-create-" });
       const missingWorkspaceRoot = path.join(parentDir, "nested", "new-project");
 
       yield* buildAppUnderTest();
@@ -2567,7 +2571,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   it.effect("routes websocket rpc projects.writeFile errors", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-ws-project-write-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-ws-project-write-" });
 
       yield* buildAppUnderTest();
 
@@ -3669,7 +3673,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const projectId = ProjectId.make("project-stale-worktree");
       const worktreeId = WorktreeId.make("worktree-stale-delete");
-      const missingWorktreePath = "/tmp/s3-missing-worktree-delete";
+      const missingWorktreePath = "/tmp/ryco-missing-worktree-delete";
       const dispatchedCommands: Array<OrchestrationCommand> = [];
       let removeWorktreeCalls = 0;
 
@@ -3710,7 +3714,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 Option.some({
                   id: projectId,
                   title: "Stale Worktree Project",
-                  workspaceRoot: "/tmp/s3-stale-worktree-project",
+                  workspaceRoot: "/tmp/ryco-stale-worktree-project",
                   defaultModelSelection: defaultModelSelection,
                   scripts: [],
                   createdAt: "2026-05-10T00:00:00.000Z",
@@ -3770,7 +3774,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const missingBranchError = new GitCommandError({
         operation: "GitVcsDriver.deleteBranch",
         command: "git branch -D feature/stale-archive",
-        cwd: "/tmp/s3-stale-branch-project",
+        cwd: "/tmp/ryco-stale-branch-project",
         detail: "error: branch 'feature/stale-archive' not found.",
       });
 
@@ -3811,7 +3815,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 Option.some({
                   id: projectId,
                   title: "Stale Branch Project",
-                  workspaceRoot: "/tmp/s3-stale-branch-project",
+                  workspaceRoot: "/tmp/ryco-stale-branch-project",
                   defaultModelSelection: defaultModelSelection,
                   scripts: [],
                   createdAt: "2026-05-10T00:00:00.000Z",
@@ -4371,7 +4375,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   it.effect("enriches replayed project events with repository identity metadata", () =>
     Effect.gen(function* () {
       const repositoryIdentity = {
-        canonicalKey: "github.com/t3tools/ryco",
+        canonicalKey: "github.com/rycotools/ryco",
         locator: {
           source: "git-remote" as const,
           remoteName: "origin",

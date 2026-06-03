@@ -701,7 +701,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               Layer.provideMerge(instanceRegistryLayer),
               Layer.provideMerge(
                 ServerConfig.layerTest(process.cwd(), {
-                  prefix: "t3-provider-registry-merged-persist-",
+                  prefix: "ryco-provider-registry-merged-persist-",
                 }),
               ),
               Layer.provideMerge(NodeServices.layer),
@@ -794,7 +794,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               Layer.provideMerge(instanceRegistryLayer),
               Layer.provideMerge(
                 ServerConfig.layerTest(process.cwd(), {
-                  prefix: "s3-provider-registry-refresh-failure-",
+                  prefix: "ryco-provider-registry-refresh-failure-",
                 }),
               ),
               Layer.provideMerge(NodeServices.layer),
@@ -875,7 +875,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               Layer.provideMerge(instanceRegistryLayer),
               Layer.provideMerge(
                 ServerConfig.layerTest(process.cwd(), {
-                  prefix: "s3-provider-registry-initial-refresh-",
+                  prefix: "ryco-provider-registry-initial-refresh-",
                 }),
               ),
               Layer.provideMerge(NodeServices.layer),
@@ -988,7 +988,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               Layer.provideMerge(instanceRegistryLayer),
               Layer.provideMerge(
                 ServerConfig.layerTest(process.cwd(), {
-                  prefix: "s3-provider-registry-sync-failure-",
+                  prefix: "ryco-provider-registry-sync-failure-",
                 }),
               ),
               Layer.provideMerge(NodeServices.layer),
@@ -1058,7 +1058,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
                 // accepts + decodes them. Cast the patch to `unknown` so
                 // the `Schema.decodeSync` below does the real validation.
                 providerInstances: {
-                  // Matches the shape the user had in `.s3/dev/settings.json`
+                  // Matches the shape the user had in `.ryco/dev/settings.json`
                   // when the bug was reported: a custom enabled Codex instance
                   // pointing at a binary the server has to actually spawn.
                   codex_personal: {
@@ -1081,7 +1081,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             Layer.provideMerge(Layer.succeed(ServerSettingsService, serverSettings)),
             Layer.provideMerge(
               ServerConfig.layerTest(process.cwd(), {
-                prefix: "s3-provider-registry-",
+                prefix: "ryco-provider-registry-",
               }),
             ),
             Layer.provideMerge(TestHttpClientLive),
@@ -1176,7 +1176,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             Layer.provideMerge(Layer.succeed(ServerSettingsService, serverSettings)),
             Layer.provideMerge(
               ServerConfig.layerTest(process.cwd(), {
-                prefix: "s3-provider-registry-",
+                prefix: "ryco-provider-registry-",
               }),
             ),
             Layer.provideMerge(TestHttpClientLive),
@@ -1291,7 +1291,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             Layer.provideMerge(Layer.succeed(ServerSettingsService, serverSettings)),
             Layer.provideMerge(
               ServerConfig.layerTest(process.cwd(), {
-                prefix: "s3-provider-registry-",
+                prefix: "ryco-provider-registry-",
               }),
             ),
             Layer.provideMerge(TestHttpClientLive),
@@ -1342,7 +1342,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               Layer.provideMerge(Layer.succeed(ServerSettingsService, serverSettings)),
               Layer.provideMerge(
                 ServerConfig.layerTest(process.cwd(), {
-                  prefix: "s3-provider-registry-",
+                  prefix: "ryco-provider-registry-",
                 }),
               ),
               Layer.provideMerge(TestHttpClientLive),

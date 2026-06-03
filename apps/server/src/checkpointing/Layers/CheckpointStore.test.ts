@@ -15,7 +15,7 @@ import { ServerConfig } from "../../config.ts";
 import { ThreadId } from "@ryco/contracts";
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
-  prefix: "s3-checkpoint-store-test-",
+  prefix: "ryco-checkpoint-store-test-",
 });
 const VcsProcessTestLayer = VcsProcess.layer.pipe(Layer.provide(NodeServices.layer));
 const VcsDriverTestLayer = VcsDriverRegistry.layer.pipe(Layer.provide(VcsProcessTestLayer));

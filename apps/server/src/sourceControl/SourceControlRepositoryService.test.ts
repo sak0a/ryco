@@ -89,7 +89,7 @@ function makeLayer(input: {
         ...input.git,
       }),
     ),
-    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "s3-source-control-repos-" })),
+    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "ryco-source-control-repos-" })),
     Layer.provideMerge(NodeServices.layer),
   );
 }
@@ -121,7 +121,7 @@ it.effect("clones a looked-up repository into the requested destination", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const parent = yield* fs.makeTempDirectoryScoped({
-      prefix: "s3-source-control-clone-parent-",
+      prefix: "ryco-source-control-clone-parent-",
     });
     const destinationPath = `${parent}/ryco`;
     const cloneCalls: Array<{ cwd: string; args: ReadonlyArray<string> }> = [];
@@ -166,14 +166,14 @@ it.effect("rejects clone URLs that could be parsed as git options", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const parent = yield* fs.makeTempDirectoryScoped({
-      prefix: "s3-source-control-clone-parent-",
+      prefix: "ryco-source-control-clone-parent-",
     });
     const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
 
     const result = yield* service
       .cloneRepository({
         remoteUrl: "--upload-pack=/tmp/pwn",
-        destinationPath: `${parent}/s3code`,
+        destinationPath: `${parent}/ryco`,
       })
       .pipe(Effect.result);
 
@@ -186,14 +186,14 @@ it.effect("accepts explicit HTTPS, SSH, and SCP-style clone URLs", () => {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const parent = yield* fs.makeTempDirectoryScoped({
-      prefix: "s3-source-control-clone-parent-",
+      prefix: "ryco-source-control-clone-parent-",
     });
     const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
 
     for (const [index, remoteUrl] of [
-      "https://github.com/octocat/s3code.git",
-      "ssh://git@github.com/octocat/s3code.git",
-      "git@github.com:octocat/s3code.git",
+      "https://github.com/octocat/ryco.git",
+      "ssh://git@github.com/octocat/ryco.git",
+      "git@github.com:octocat/ryco.git",
     ].entries()) {
       yield* service.cloneRepository({
         remoteUrl,
@@ -202,9 +202,9 @@ it.effect("accepts explicit HTTPS, SSH, and SCP-style clone URLs", () => {
     }
 
     assert.deepStrictEqual(cloneCalls, [
-      ["clone", "--", "https://github.com/octocat/s3code.git", "repo-0"],
-      ["clone", "--", "ssh://git@github.com/octocat/s3code.git", "repo-1"],
-      ["clone", "--", "git@github.com:octocat/s3code.git", "repo-2"],
+      ["clone", "--", "https://github.com/octocat/ryco.git", "repo-0"],
+      ["clone", "--", "ssh://git@github.com/octocat/ryco.git", "repo-1"],
+      ["clone", "--", "git@github.com:octocat/ryco.git", "repo-2"],
     ]);
   }).pipe(
     Effect.provide(
@@ -225,14 +225,14 @@ it.effect("rejects unsupported clone URL schemes", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const parent = yield* fs.makeTempDirectoryScoped({
-      prefix: "s3-source-control-clone-parent-",
+      prefix: "ryco-source-control-clone-parent-",
     });
     const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
 
     const result = yield* service
       .cloneRepository({
         remoteUrl: "file:///tmp/repo.git",
-        destinationPath: `${parent}/s3code`,
+        destinationPath: `${parent}/ryco`,
       })
       .pipe(Effect.result);
 

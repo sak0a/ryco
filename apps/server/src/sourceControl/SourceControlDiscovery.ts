@@ -64,7 +64,7 @@ export interface SourceControlDiscoveryShape {
 export class SourceControlDiscovery extends Context.Service<
   SourceControlDiscovery,
   SourceControlDiscoveryShape
->()("s3/source-control/SourceControlDiscovery") {}
+>()("ryco/source-control/SourceControlDiscovery") {}
 
 export const layer = Layer.effect(
   SourceControlDiscovery,

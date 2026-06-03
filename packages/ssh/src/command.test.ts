@@ -8,7 +8,7 @@ import {
   baseSshArgs,
   getLastNonEmptyOutputLine,
   parseSshResolveOutput,
-  resolveRemoteS3CliPackageSpec,
+  resolveRemoteRycoCliPackageSpec,
   runSshCommand,
 } from "./command.ts";
 
@@ -72,24 +72,24 @@ describe("ssh command", () => {
     }),
   );
 
-  it.effect("resolves the remote s3 package spec from the desktop release channel", () =>
+  it.effect("resolves the remote ryco package spec from the desktop release channel", () =>
     Effect.sync(() => {
       assert.equal(
-        resolveRemoteS3CliPackageSpec({
+        resolveRemoteRycoCliPackageSpec({
           appVersion: "0.0.17",
           updateChannel: "latest",
         }),
         "ryco@0.0.17",
       );
       assert.equal(
-        resolveRemoteS3CliPackageSpec({
+        resolveRemoteRycoCliPackageSpec({
           appVersion: "0.0.17-nightly.20260415.44",
           updateChannel: "nightly",
         }),
         "ryco@0.0.17-nightly.20260415.44",
       );
       assert.equal(
-        resolveRemoteS3CliPackageSpec({
+        resolveRemoteRycoCliPackageSpec({
           appVersion: "0.0.0-dev",
           updateChannel: "nightly",
           isDevelopment: true,
@@ -97,7 +97,7 @@ describe("ssh command", () => {
         "ryco@nightly",
       );
       assert.equal(
-        resolveRemoteS3CliPackageSpec({
+        resolveRemoteRycoCliPackageSpec({
           appVersion: "0.0.0-dev",
           updateChannel: "latest",
           isDevelopment: true,

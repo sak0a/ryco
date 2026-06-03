@@ -57,4 +57,4 @@ export interface AtlassianResourceRepositoryShape {
 export class AtlassianResourceRepository extends Context.Service<
   AtlassianResourceRepository,
   AtlassianResourceRepositoryShape
->()("s3/persistence/Services/AtlassianResources/AtlassianResourceRepository") {}
+>()("ryco/persistence/Services/AtlassianResources/AtlassianResourceRepository") {}

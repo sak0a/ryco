@@ -7,5 +7,5 @@ export interface ServerAuthPolicyShape {
 }
 
 export class ServerAuthPolicy extends Context.Service<ServerAuthPolicy, ServerAuthPolicyShape>()(
-  "s3/auth/Services/ServerAuthPolicy",
+  "ryco/auth/Services/ServerAuthPolicy",
 ) {}

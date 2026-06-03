@@ -35,7 +35,7 @@ export const ObservabilityLive = Layer.unwrap(
                 resource: {
                   serviceName: config.otlpServiceName,
                   attributes: {
-                    "service.runtime": "s3-server",
+                    "service.runtime": "ryco-server",
                     "service.mode": config.mode,
                   },
                 },
@@ -73,7 +73,7 @@ export const ObservabilityLive = Layer.unwrap(
             resource: {
               serviceName: config.otlpServiceName,
               attributes: {
-                "service.runtime": "s3-server",
+                "service.runtime": "ryco-server",
                 "service.mode": config.mode,
               },
             },

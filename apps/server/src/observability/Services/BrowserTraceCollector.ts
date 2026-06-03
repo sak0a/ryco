@@ -10,4 +10,4 @@ export interface BrowserTraceCollectorShape {
 export class BrowserTraceCollector extends Context.Service<
   BrowserTraceCollector,
   BrowserTraceCollectorShape
->()("s3/observability/Services/BrowserTraceCollector") {}
+>()("ryco/observability/Services/BrowserTraceCollector") {}

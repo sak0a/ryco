@@ -195,7 +195,7 @@ function createBaseServerConfig(): ServerConfig {
       policy: "loopback-browser",
       bootstrapMethods: ["one-time-token"],
       sessionMethods: ["browser-session-cookie", "bearer-session-token"],
-      sessionCookieName: "t3_session",
+      sessionCookieName: "ryco_session",
     },
     cwd: "/repo/project",
     keybindingsConfigPath: "/repo/project/.ryco-keybindings.json",
@@ -204,7 +204,7 @@ function createBaseServerConfig(): ServerConfig {
     providers: [],
     availableEditors: ["cursor"],
     observability: {
-      logsDirectoryPath: "/repo/project/.s3/logs",
+      logsDirectoryPath: "/repo/project/.ryco/logs",
       localTracingEnabled: true,
       otlpTracesUrl: "http://localhost:4318/v1/traces",
       otlpTracesEnabled: true,
@@ -417,7 +417,7 @@ const createDesktopBridgeStub = (overrides?: {
         policy: "remote-reachable",
         bootstrapMethods: ["one-time-token"],
         sessionMethods: ["browser-session-cookie", "bearer-session-token"],
-        sessionCookieName: "t3_session",
+        sessionCookieName: "ryco_session",
       },
       role: "owner",
       sessionMethod: "bearer-session-token",
@@ -766,7 +766,7 @@ describe("GeneralSettingsPanel observability", () => {
     await expect.element(page.getByText("Diagnostics")).toBeInTheDocument();
     await expect.element(page.getByText("Open logs folder")).toBeInTheDocument();
     await expect
-      .element(page.getByText("/repo/project/.s3/logs", { exact: true }))
+      .element(page.getByText("/repo/project/.ryco/logs", { exact: true }))
       .toBeInTheDocument();
     await expect
       .element(
@@ -1201,7 +1201,7 @@ describe("GeneralSettingsPanel observability", () => {
     const openLogsButton = page.getByText("Open logs folder");
     await openLogsButton.click();
 
-    expect(openInEditor).toHaveBeenCalledWith("/repo/project/.s3/logs", "cursor");
+    expect(openInEditor).toHaveBeenCalledWith("/repo/project/.ryco/logs", "cursor");
   });
 
   it("shows an OpenCode server URL field in provider settings", async () => {

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const tempRoots: string[] = [];
 
 function makeTempDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-rotating-log-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-rotating-log-"));
   tempRoots.push(dir);
   return dir;
 }

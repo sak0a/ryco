@@ -28,4 +28,4 @@ export interface OrchestrationReactorShape {
 export class OrchestrationReactor extends Context.Service<
   OrchestrationReactor,
   OrchestrationReactorShape
->()("s3/orchestration/Services/OrchestrationReactor") {}
+>()("ryco/orchestration/Services/OrchestrationReactor") {}

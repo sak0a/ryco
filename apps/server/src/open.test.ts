@@ -465,7 +465,7 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-open-test-" });
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-open-test-" });
       yield* fs.writeFileString(path.join(dir, "zeditor"), "#!/bin/sh\nexit 0\n");
       yield* fs.chmod(path.join(dir, "zeditor"), 0o755);
 
@@ -554,7 +554,7 @@ it.layer(NodeServices.layer)("isCommandAvailable", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-open-test-" });
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-open-test-" });
       yield* fs.writeFileString(path.join(dir, "code.CMD"), "@echo off\r\n");
       const env = {
         PATH: dir,
@@ -576,7 +576,7 @@ it.layer(NodeServices.layer)("isCommandAvailable", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-open-test-" });
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-open-test-" });
       yield* fs.writeFileString(path.join(dir, "npm"), "echo nope\r\n");
       const env = {
         PATH: dir,
@@ -590,7 +590,7 @@ it.layer(NodeServices.layer)("isCommandAvailable", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-open-test-" });
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-open-test-" });
       yield* fs.writeFileString(path.join(dir, "my.tool.CMD"), "@echo off\r\n");
       const env = {
         PATH: dir,
@@ -604,8 +604,8 @@ it.layer(NodeServices.layer)("isCommandAvailable", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const firstDir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-open-test-" });
-      const secondDir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-open-test-" });
+      const firstDir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-open-test-" });
+      const secondDir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-open-test-" });
       yield* fs.writeFileString(path.join(firstDir, "code.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(secondDir, "code.CMD"), "MZ");
       const env = {
@@ -622,7 +622,7 @@ it.layer(NodeServices.layer)("resolveAvailableEditors", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-editors-" });
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-editors-" });
 
       yield* fs.writeFileString(path.join(dir, "trae.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(dir, "kiro.CMD"), "@echo off\r\n");
@@ -669,7 +669,7 @@ it.layer(NodeServices.layer)("resolveAvailableEditors", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-editors-" });
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-editors-" });
 
       yield* fs.writeFileString(path.join(dir, "zeditor"), "#!/bin/sh\nexit 0\n");
       yield* fs.writeFileString(path.join(dir, "xdg-open"), "#!/bin/sh\nexit 0\n");
@@ -694,13 +694,13 @@ it.layer(NodeServices.layer)("resolveAvailableEditors", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const appRoot = yield* fs.makeTempDirectoryScoped({ prefix: "s3-darwin-apps-" });
+      const appRoot = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-darwin-apps-" });
       const bundleDir = path.join(appRoot, "Cursor.app/Contents/Resources/app/bin");
       yield* fs.makeDirectory(bundleDir, { recursive: true });
       yield* fs.writeFileString(path.join(bundleDir, "cursor"), "#!/bin/sh\nexit 0\n");
       yield* fs.chmod(path.join(bundleDir, "cursor"), 0o755);
 
-      const opener = yield* fs.makeTempDirectoryScoped({ prefix: "s3-darwin-bin-" });
+      const opener = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-darwin-bin-" });
       yield* fs.writeFileString(path.join(opener, "open"), "#!/bin/sh\nexit 0\n");
       yield* fs.chmod(path.join(opener, "open"), 0o755);
 
@@ -722,7 +722,7 @@ it.layer(NodeServices.layer)("resolveAvailableEditors", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const appRoot = yield* fs.makeTempDirectoryScoped({ prefix: "s3-darwin-apps-" });
+      const appRoot = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-darwin-apps-" });
 
       const bundles: ReadonlyArray<readonly [string, string]> = [
         ["IntelliJ IDEA.app/Contents/MacOS", "idea"],
@@ -746,7 +746,7 @@ it.layer(NodeServices.layer)("resolveAvailableEditors", (it) => {
         yield* fs.chmod(cli, 0o755);
       }
 
-      const opener = yield* fs.makeTempDirectoryScoped({ prefix: "s3-darwin-bin-" });
+      const opener = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-darwin-bin-" });
       yield* fs.writeFileString(path.join(opener, "open"), "#!/bin/sh\nexit 0\n");
       yield* fs.chmod(path.join(opener, "open"), 0o755);
 
@@ -765,13 +765,13 @@ it.layer(NodeServices.layer)("resolveAvailableEditors", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const appRoot = yield* fs.makeTempDirectoryScoped({ prefix: "s3-darwin-apps-" });
+      const appRoot = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-darwin-apps-" });
       const bundleDir = path.join(appRoot, "PyCharm Professional Edition.app/Contents/MacOS");
       yield* fs.makeDirectory(bundleDir, { recursive: true });
       yield* fs.writeFileString(path.join(bundleDir, "pycharm"), "#!/bin/sh\nexit 0\n");
       yield* fs.chmod(path.join(bundleDir, "pycharm"), 0o755);
 
-      const opener = yield* fs.makeTempDirectoryScoped({ prefix: "s3-darwin-bin-" });
+      const opener = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-darwin-bin-" });
       yield* fs.writeFileString(path.join(opener, "open"), "#!/bin/sh\nexit 0\n");
       yield* fs.chmod(path.join(opener, "open"), 0o755);
 
@@ -790,7 +790,7 @@ it.layer(NodeServices.layer)("resolveEditorLaunch (darwin app bundle)", (it) => 
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const appRoot = yield* fs.makeTempDirectoryScoped({ prefix: "s3-darwin-apps-" });
+      const appRoot = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-darwin-apps-" });
       const bundleDir = path.join(appRoot, "Cursor.app/Contents/Resources/app/bin");
       yield* fs.makeDirectory(bundleDir, { recursive: true });
       const bundleCli = path.join(bundleDir, "cursor");
@@ -811,7 +811,7 @@ it.layer(NodeServices.layer)("resolveEditorLaunch (darwin app bundle)", (it) => 
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const appRoot = yield* fs.makeTempDirectoryScoped({ prefix: "s3-darwin-apps-" });
+      const appRoot = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-darwin-apps-" });
       const bundleDir = path.join(appRoot, "PyCharm.app/Contents/MacOS");
       yield* fs.makeDirectory(bundleDir, { recursive: true });
       const bundleCli = path.join(bundleDir, "pycharm");

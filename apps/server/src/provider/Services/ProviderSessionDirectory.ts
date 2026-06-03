@@ -66,4 +66,4 @@ export interface ProviderSessionDirectoryShape {
 export class ProviderSessionDirectory extends Context.Service<
   ProviderSessionDirectory,
   ProviderSessionDirectoryShape
->()("s3/provider/Services/ProviderSessionDirectory") {}
+>()("ryco/provider/Services/ProviderSessionDirectory") {}

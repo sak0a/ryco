@@ -1,6 +1,6 @@
 import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "./pairingUrl";
 
-const DEFAULT_HOSTED_APP_URL = "https://app.s3.codes";
+const DEFAULT_HOSTED_APP_URL = "https://app.ryco.dev";
 
 export interface HostedPairingRequest {
   readonly host: string;

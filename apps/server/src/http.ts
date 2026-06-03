@@ -35,6 +35,8 @@ const STATIC_INDEX_CACHE_CONTROL = "no-cache";
 const STATIC_IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
+export const SERVER_ENVIRONMENT_DESCRIPTOR_PATH = "/.well-known/ryco/environment";
+export const LEGACY_SERVER_ENVIRONMENT_DESCRIPTOR_PATH = "/.well-known/s3/environment";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const STATIC_CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".css": "text/css; charset=utf-8",
@@ -118,7 +120,13 @@ const serverEnvironmentRouteHandler = Effect.gen(function* () {
 
 export const serverEnvironmentRouteLayer = HttpRouter.add(
   "GET",
-  "/.well-known/s3/environment",
+  SERVER_ENVIRONMENT_DESCRIPTOR_PATH,
+  serverEnvironmentRouteHandler,
+);
+
+export const legacyServerEnvironmentRouteLayer = HttpRouter.add(
+  "GET",
+  LEGACY_SERVER_ENVIRONMENT_DESCRIPTOR_PATH,
   serverEnvironmentRouteHandler,
 );
 

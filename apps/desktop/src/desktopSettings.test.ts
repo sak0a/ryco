@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 function makeSettingsPath() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "s3-desktop-settings-test-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-desktop-settings-test-"));
   tempDirectories.push(directory);
   return path.join(directory, "desktop-settings.json");
 }

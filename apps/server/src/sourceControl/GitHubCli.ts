@@ -334,7 +334,7 @@ export interface GitHubCliShape {
 }
 
 export class GitHubCli extends Context.Service<GitHubCli, GitHubCliShape>()(
-  "s3/source-control/GitHubCli",
+  "ryco/source-control/GitHubCli",
 ) {}
 
 function errorText(error: VcsError | unknown): string {

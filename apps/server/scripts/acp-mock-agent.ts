@@ -11,16 +11,16 @@ import * as EffectAcpAgent from "effect-acp/agent";
 import * as AcpError from "effect-acp/errors";
 import type * as AcpSchema from "effect-acp/schema";
 
-const requestLogPath = readEnv("S3_ACP_REQUEST_LOG_PATH");
-const exitLogPath = readEnv("S3_ACP_EXIT_LOG_PATH");
-const emitToolCalls = readEnv("S3_ACP_EMIT_TOOL_CALLS") === "1";
+const requestLogPath = readEnv("RYCO_ACP_REQUEST_LOG_PATH");
+const exitLogPath = readEnv("RYCO_ACP_EXIT_LOG_PATH");
+const emitToolCalls = readEnv("RYCO_ACP_EMIT_TOOL_CALLS") === "1";
 const emitInterleavedAssistantToolCalls =
-  readEnv("S3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS") === "1";
-const emitGenericToolPlaceholders = readEnv("S3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS") === "1";
-const emitAskQuestion = readEnv("S3_ACP_EMIT_ASK_QUESTION") === "1";
-const failSetConfigOption = readEnv("S3_ACP_FAIL_SET_CONFIG_OPTION") === "1";
-const exitOnSetConfigOption = readEnv("S3_ACP_EXIT_ON_SET_CONFIG_OPTION") === "1";
-const promptResponseText = readEnv("S3_ACP_PROMPT_RESPONSE_TEXT");
+  readEnv("RYCO_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS") === "1";
+const emitGenericToolPlaceholders = readEnv("RYCO_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS") === "1";
+const emitAskQuestion = readEnv("RYCO_ACP_EMIT_ASK_QUESTION") === "1";
+const failSetConfigOption = readEnv("RYCO_ACP_FAIL_SET_CONFIG_OPTION") === "1";
+const exitOnSetConfigOption = readEnv("RYCO_ACP_EXIT_ON_SET_CONFIG_OPTION") === "1";
+const promptResponseText = readEnv("RYCO_ACP_PROMPT_RESPONSE_TEXT");
 const sessionId = "mock-session-1";
 
 let currentModeId = "ask";
@@ -410,7 +410,7 @@ const program = Effect.gen(function* () {
             status: "completed",
             rawOutput: {
               exitCode: 0,
-              stdout: '{ "name": "s3" }',
+              stdout: '{ "name": "ryco" }',
               stderr: "",
             },
           },

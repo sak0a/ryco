@@ -187,7 +187,7 @@ export function createWsRpcProtocolLayer(
       socket.addEventListener(
         "error",
         () => {
-          lifecycle.onError("Unable to connect to the S3 server WebSocket.");
+          lifecycle.onError("Unable to connect to the Ryco server WebSocket.");
         },
         { once: true },
       );

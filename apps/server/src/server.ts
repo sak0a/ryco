@@ -9,6 +9,7 @@ import {
   projectAvatarUploadRouteLayer,
   projectAvatarServeRouteLayer,
   serverEnvironmentRouteLayer,
+  legacyServerEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   browserApiCorsLayer,
 } from "./http.ts";
@@ -353,6 +354,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   otlpTracesProxyRouteLayer,
   projectAssetRoutesLayer,
   serverEnvironmentRouteLayer,
+  legacyServerEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));

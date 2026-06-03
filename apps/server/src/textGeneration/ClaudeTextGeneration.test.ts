@@ -28,33 +28,33 @@ function makeFakeClaudeBinary(dir: string) {
         "#!/bin/sh",
         'args="$*"',
         'stdin_content="$(cat)"',
-        'if [ -n "$S3_FAKE_CLAUDE_ARGS_MUST_CONTAIN" ]; then',
-        '  printf "%s" "$args" | grep -F -- "$S3_FAKE_CLAUDE_ARGS_MUST_CONTAIN" >/dev/null || {',
+        'if [ -n "$RYCO_FAKE_CLAUDE_ARGS_MUST_CONTAIN" ]; then',
+        '  printf "%s" "$args" | grep -F -- "$RYCO_FAKE_CLAUDE_ARGS_MUST_CONTAIN" >/dev/null || {',
         '    printf "%s\\n" "args missing expected content" >&2',
         "    exit 2",
         "  }",
         "fi",
-        'if [ -n "$S3_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN" ]; then',
-        '  if printf "%s" "$args" | grep -F -- "$S3_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN" >/dev/null; then',
+        'if [ -n "$RYCO_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN" ]; then',
+        '  if printf "%s" "$args" | grep -F -- "$RYCO_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN" >/dev/null; then',
         '    printf "%s\\n" "args contained forbidden content" >&2',
         "    exit 3",
         "  fi",
         "fi",
-        'if [ -n "$S3_FAKE_CLAUDE_STDIN_MUST_CONTAIN" ]; then',
-        '  printf "%s" "$stdin_content" | grep -F -- "$S3_FAKE_CLAUDE_STDIN_MUST_CONTAIN" >/dev/null || {',
+        'if [ -n "$RYCO_FAKE_CLAUDE_STDIN_MUST_CONTAIN" ]; then',
+        '  printf "%s" "$stdin_content" | grep -F -- "$RYCO_FAKE_CLAUDE_STDIN_MUST_CONTAIN" >/dev/null || {',
         '    printf "%s\\n" "stdin missing expected content" >&2',
         "    exit 4",
         "  }",
         "fi",
-        'if [ -n "$S3_FAKE_CLAUDE_HOME_MUST_BE" ] && [ "$HOME" != "$S3_FAKE_CLAUDE_HOME_MUST_BE" ]; then',
+        'if [ -n "$RYCO_FAKE_CLAUDE_HOME_MUST_BE" ] && [ "$HOME" != "$RYCO_FAKE_CLAUDE_HOME_MUST_BE" ]; then',
         '  printf "%s\\n" "HOME was $HOME" >&2',
         "  exit 5",
         "fi",
-        'if [ -n "$S3_FAKE_CLAUDE_STDERR" ]; then',
-        '  printf "%s\\n" "$S3_FAKE_CLAUDE_STDERR" >&2',
+        'if [ -n "$RYCO_FAKE_CLAUDE_STDERR" ]; then',
+        '  printf "%s\\n" "$RYCO_FAKE_CLAUDE_STDERR" >&2',
         "fi",
-        'printf "%s" "$S3_FAKE_CLAUDE_OUTPUT"',
-        'exit "${S3_FAKE_CLAUDE_EXIT_CODE:-0}"',
+        'printf "%s" "$RYCO_FAKE_CLAUDE_OUTPUT"',
+        'exit "${RYCO_FAKE_CLAUDE_EXIT_CODE:-0}"',
         "",
       ].join("\n"),
     );
@@ -81,53 +81,53 @@ function withFakeClaudeEnv<A, E, R>(
     const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-claude-text-" });
     const binDir = yield* makeFakeClaudeBinary(tempDir);
     const previousPath = process.env.PATH;
-    const previousOutput = process.env.S3_FAKE_CLAUDE_OUTPUT;
-    const previousExitCode = process.env.S3_FAKE_CLAUDE_EXIT_CODE;
-    const previousStderr = process.env.S3_FAKE_CLAUDE_STDERR;
-    const previousArgsMustContain = process.env.S3_FAKE_CLAUDE_ARGS_MUST_CONTAIN;
-    const previousArgsMustNotContain = process.env.S3_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN;
-    const previousStdinMustContain = process.env.S3_FAKE_CLAUDE_STDIN_MUST_CONTAIN;
-    const previousHomeMustBe = process.env.S3_FAKE_CLAUDE_HOME_MUST_BE;
+    const previousOutput = process.env.RYCO_FAKE_CLAUDE_OUTPUT;
+    const previousExitCode = process.env.RYCO_FAKE_CLAUDE_EXIT_CODE;
+    const previousStderr = process.env.RYCO_FAKE_CLAUDE_STDERR;
+    const previousArgsMustContain = process.env.RYCO_FAKE_CLAUDE_ARGS_MUST_CONTAIN;
+    const previousArgsMustNotContain = process.env.RYCO_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN;
+    const previousStdinMustContain = process.env.RYCO_FAKE_CLAUDE_STDIN_MUST_CONTAIN;
+    const previousHomeMustBe = process.env.RYCO_FAKE_CLAUDE_HOME_MUST_BE;
 
     yield* Effect.acquireRelease(
       Effect.sync(() => {
         process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-        process.env.S3_FAKE_CLAUDE_OUTPUT = input.output;
+        process.env.RYCO_FAKE_CLAUDE_OUTPUT = input.output;
 
         if (input.exitCode !== undefined) {
-          process.env.S3_FAKE_CLAUDE_EXIT_CODE = String(input.exitCode);
+          process.env.RYCO_FAKE_CLAUDE_EXIT_CODE = String(input.exitCode);
         } else {
-          delete process.env.S3_FAKE_CLAUDE_EXIT_CODE;
+          delete process.env.RYCO_FAKE_CLAUDE_EXIT_CODE;
         }
 
         if (input.stderr !== undefined) {
-          process.env.S3_FAKE_CLAUDE_STDERR = input.stderr;
+          process.env.RYCO_FAKE_CLAUDE_STDERR = input.stderr;
         } else {
-          delete process.env.S3_FAKE_CLAUDE_STDERR;
+          delete process.env.RYCO_FAKE_CLAUDE_STDERR;
         }
 
         if (input.argsMustContain !== undefined) {
-          process.env.S3_FAKE_CLAUDE_ARGS_MUST_CONTAIN = input.argsMustContain;
+          process.env.RYCO_FAKE_CLAUDE_ARGS_MUST_CONTAIN = input.argsMustContain;
         } else {
-          delete process.env.S3_FAKE_CLAUDE_ARGS_MUST_CONTAIN;
+          delete process.env.RYCO_FAKE_CLAUDE_ARGS_MUST_CONTAIN;
         }
 
         if (input.argsMustNotContain !== undefined) {
-          process.env.S3_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN = input.argsMustNotContain;
+          process.env.RYCO_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN = input.argsMustNotContain;
         } else {
-          delete process.env.S3_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN;
+          delete process.env.RYCO_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN;
         }
 
         if (input.stdinMustContain !== undefined) {
-          process.env.S3_FAKE_CLAUDE_STDIN_MUST_CONTAIN = input.stdinMustContain;
+          process.env.RYCO_FAKE_CLAUDE_STDIN_MUST_CONTAIN = input.stdinMustContain;
         } else {
-          delete process.env.S3_FAKE_CLAUDE_STDIN_MUST_CONTAIN;
+          delete process.env.RYCO_FAKE_CLAUDE_STDIN_MUST_CONTAIN;
         }
 
         if (input.homeMustBe !== undefined) {
-          process.env.S3_FAKE_CLAUDE_HOME_MUST_BE = input.homeMustBe;
+          process.env.RYCO_FAKE_CLAUDE_HOME_MUST_BE = input.homeMustBe;
         } else {
-          delete process.env.S3_FAKE_CLAUDE_HOME_MUST_BE;
+          delete process.env.RYCO_FAKE_CLAUDE_HOME_MUST_BE;
         }
       }),
       () =>
@@ -135,45 +135,45 @@ function withFakeClaudeEnv<A, E, R>(
           process.env.PATH = previousPath;
 
           if (previousOutput === undefined) {
-            delete process.env.S3_FAKE_CLAUDE_OUTPUT;
+            delete process.env.RYCO_FAKE_CLAUDE_OUTPUT;
           } else {
-            process.env.S3_FAKE_CLAUDE_OUTPUT = previousOutput;
+            process.env.RYCO_FAKE_CLAUDE_OUTPUT = previousOutput;
           }
 
           if (previousExitCode === undefined) {
-            delete process.env.S3_FAKE_CLAUDE_EXIT_CODE;
+            delete process.env.RYCO_FAKE_CLAUDE_EXIT_CODE;
           } else {
-            process.env.S3_FAKE_CLAUDE_EXIT_CODE = previousExitCode;
+            process.env.RYCO_FAKE_CLAUDE_EXIT_CODE = previousExitCode;
           }
 
           if (previousStderr === undefined) {
-            delete process.env.S3_FAKE_CLAUDE_STDERR;
+            delete process.env.RYCO_FAKE_CLAUDE_STDERR;
           } else {
-            process.env.S3_FAKE_CLAUDE_STDERR = previousStderr;
+            process.env.RYCO_FAKE_CLAUDE_STDERR = previousStderr;
           }
 
           if (previousArgsMustContain === undefined) {
-            delete process.env.S3_FAKE_CLAUDE_ARGS_MUST_CONTAIN;
+            delete process.env.RYCO_FAKE_CLAUDE_ARGS_MUST_CONTAIN;
           } else {
-            process.env.S3_FAKE_CLAUDE_ARGS_MUST_CONTAIN = previousArgsMustContain;
+            process.env.RYCO_FAKE_CLAUDE_ARGS_MUST_CONTAIN = previousArgsMustContain;
           }
 
           if (previousArgsMustNotContain === undefined) {
-            delete process.env.S3_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN;
+            delete process.env.RYCO_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN;
           } else {
-            process.env.S3_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN = previousArgsMustNotContain;
+            process.env.RYCO_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN = previousArgsMustNotContain;
           }
 
           if (previousStdinMustContain === undefined) {
-            delete process.env.S3_FAKE_CLAUDE_STDIN_MUST_CONTAIN;
+            delete process.env.RYCO_FAKE_CLAUDE_STDIN_MUST_CONTAIN;
           } else {
-            process.env.S3_FAKE_CLAUDE_STDIN_MUST_CONTAIN = previousStdinMustContain;
+            process.env.RYCO_FAKE_CLAUDE_STDIN_MUST_CONTAIN = previousStdinMustContain;
           }
 
           if (previousHomeMustBe === undefined) {
-            delete process.env.S3_FAKE_CLAUDE_HOME_MUST_BE;
+            delete process.env.RYCO_FAKE_CLAUDE_HOME_MUST_BE;
           } else {
-            process.env.S3_FAKE_CLAUDE_HOME_MUST_BE = previousHomeMustBe;
+            process.env.RYCO_FAKE_CLAUDE_HOME_MUST_BE = previousHomeMustBe;
           }
         }),
     );

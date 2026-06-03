@@ -60,7 +60,7 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
     Effect.gen(function* () {
       const capturedRequests: Array<RecordedBatchRequest> = [];
       const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
-        prefix: "s3-telemetry-base-",
+        prefix: "ryco-telemetry-base-",
       });
 
       const telemetryLayer = AnalyticsServiceLayerLive.pipe(Layer.provideMerge(serverConfigLayer));
@@ -142,7 +142,7 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
     Effect.gen(function* () {
       const capturedRequests: Array<RecordedBatchRequest> = [];
       const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
-        prefix: "s3-telemetry-scheduled-",
+        prefix: "ryco-telemetry-scheduled-",
       });
 
       const telemetryLayer = AnalyticsServiceLayerLive.pipe(Layer.provideMerge(serverConfigLayer));
@@ -202,7 +202,7 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       let activeRequests = 0;
       let maxActiveRequests = 0;
       const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
-        prefix: "s3-telemetry-single-flight-",
+        prefix: "ryco-telemetry-single-flight-",
       });
 
       const telemetryLayer = AnalyticsServiceLayerLive.pipe(Layer.provideMerge(serverConfigLayer));

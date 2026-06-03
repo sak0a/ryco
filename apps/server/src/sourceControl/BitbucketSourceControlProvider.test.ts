@@ -227,7 +227,7 @@ it.effect("getChangeRequestDetail returns body and comments", () =>
           reviewers: ["reviewer"],
           participants: [{ displayName: "reviewer", role: "REVIEWER", approved: true }],
           tasksCount: 1,
-          linkedWorkItemKeys: ["S3-123"],
+          linkedWorkItemKeys: ["RYCO-123"],
         }),
     });
     const detail = yield* provider.getChangeRequestDetail({ cwd: "/repo", reference: "99" });
@@ -246,7 +246,7 @@ it.effect("getChangeRequestDetail returns body and comments", () =>
       approved: true,
     });
     assert.strictEqual(detail.tasksCount, 1);
-    assert.deepStrictEqual(detail.linkedWorkItemKeys, ["S3-123"]);
+    assert.deepStrictEqual(detail.linkedWorkItemKeys, ["RYCO-123"]);
     assert.strictEqual(detail.truncated, false);
   }),
 );

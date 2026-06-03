@@ -22,7 +22,9 @@ const TEST_ENVIRONMENT_DESCRIPTOR: ExecutionEnvironmentDescriptor = {
 
 export function createAuthenticatedSessionHandlers(getAuthDescriptor: () => ServerAuthDescriptor) {
   return [
-    http.get("*/.well-known/s3/environment", () => HttpResponse.json(TEST_ENVIRONMENT_DESCRIPTOR)),
+    http.get("*/.well-known/ryco/environment", () =>
+      HttpResponse.json(TEST_ENVIRONMENT_DESCRIPTOR),
+    ),
     http.get("*/api/auth/session", () =>
       HttpResponse.json({
         authenticated: true,

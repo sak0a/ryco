@@ -89,8 +89,8 @@ it.layer(CursorTextGenerationTestLayer)("CursorTextGeneration", (it) => {
 
     return withFakeAcpAgent(
       {
-        S3_ACP_REQUEST_LOG_PATH: requestLogPath,
-        S3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+        RYCO_ACP_REQUEST_LOG_PATH: requestLogPath,
+        RYCO_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
           subject: "Add generated commit message",
           body: "- verify cursor acp model config path",
         }),
@@ -181,7 +181,7 @@ it.layer(CursorTextGenerationTestLayer)("CursorTextGeneration", (it) => {
   it.effect("accepts json objects with extra assistant text around them", () =>
     withFakeAcpAgent(
       {
-        S3_ACP_PROMPT_RESPONSE_TEXT:
+        RYCO_ACP_PROMPT_RESPONSE_TEXT:
           'Sure, here is the JSON:\n```json\n{\n  "subject": "Update README dummy comment with attribution and date",\n  "body": ""\n}\n```\nDone.',
       },
       (textGeneration) =>
@@ -206,7 +206,7 @@ it.layer(CursorTextGenerationTestLayer)("CursorTextGeneration", (it) => {
   it.effect("generates thread titles through Cursor ACP text generation", () =>
     withFakeAcpAgent(
       {
-        S3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+        RYCO_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
           title: '"Trim reconnect spinner status after resume."',
         }),
       },
@@ -229,7 +229,7 @@ it.layer(CursorTextGenerationTestLayer)("CursorTextGeneration", (it) => {
   it.effect("generateIssueContent polish mode returns title and body via Cursor ACP", () =>
     withFakeAcpAgent(
       {
-        S3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+        RYCO_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
           title: "Fix null pointer in parser",
           body: "## Steps to reproduce\n- Parse an empty file",
         }),
@@ -255,7 +255,7 @@ it.layer(CursorTextGenerationTestLayer)("CursorTextGeneration", (it) => {
   it.effect("generateIssueContent title mode returns title only via Cursor ACP", () =>
     withFakeAcpAgent(
       {
-        S3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+        RYCO_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
           title: "Add keyboard shortcut for search",
         }),
       },
@@ -282,7 +282,7 @@ it.layer(CursorTextGenerationTestLayer)("CursorTextGeneration", (it) => {
     () =>
       withFakeAcpAgent(
         {
-          S3_ACP_PROMPT_RESPONSE_TEXT: "not valid json at all",
+          RYCO_ACP_PROMPT_RESPONSE_TEXT: "not valid json at all",
         },
         (textGeneration) =>
           Effect.gen(function* () {
@@ -313,8 +313,8 @@ it.layer(CursorTextGenerationTestLayer)("CursorTextGeneration", (it) => {
 
     return withFakeAcpAgent(
       {
-        S3_ACP_EXIT_LOG_PATH: exitLogPath,
-        S3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+        RYCO_ACP_EXIT_LOG_PATH: exitLogPath,
+        RYCO_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
           subject: "Close runtime after generation",
           body: "",
         }),

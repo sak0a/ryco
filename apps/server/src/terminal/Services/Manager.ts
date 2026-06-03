@@ -123,5 +123,5 @@ export interface TerminalManagerShape {
  * TerminalManager - Service tag for terminal session orchestration.
  */
 export class TerminalManager extends Context.Service<TerminalManager, TerminalManagerShape>()(
-  "s3/terminal/Services/Manager/TerminalManager",
+  "ryco/terminal/Services/Manager/TerminalManager",
 ) {}

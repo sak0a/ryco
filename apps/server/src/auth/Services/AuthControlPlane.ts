@@ -65,5 +65,5 @@ export interface AuthControlPlaneShape {
 }
 
 export class AuthControlPlane extends Context.Service<AuthControlPlane, AuthControlPlaneShape>()(
-  "s3/AuthControlPlane",
+  "ryco/AuthControlPlane",
 ) {}

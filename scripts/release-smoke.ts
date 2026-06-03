@@ -178,7 +178,7 @@ function assertMissing(path: string, message: string): void {
   }
 }
 
-const tempRoot = mkdtempSync(join(tmpdir(), "s3-release-smoke-"));
+const tempRoot = mkdtempSync(join(tmpdir(), "ryco-release-smoke-"));
 
 try {
   copyWorkspaceManifestFixture(tempRoot);

@@ -282,7 +282,7 @@ it.effect("populates all remotes in addition to the auto-picked locator", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const cwd = yield* fileSystem.makeTempDirectoryScoped({
-      prefix: "s3-repository-identity-remotes-test-",
+      prefix: "ryco-repository-identity-remotes-test-",
     });
 
     yield* git(cwd, ["init"]);
@@ -681,7 +681,7 @@ it.layer(NodeServices.layer)("ProjectAvatarStoreLive", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const dataDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "s3-project-avatars-test-",
+        prefix: "ryco-project-avatars-test-",
       });
 
       const store = yield* ProjectAvatarStore;

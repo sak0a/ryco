@@ -17,7 +17,7 @@ Close the security gaps found in the May 12, 2026 review by making server author
 - Replacing the current auth/session system.
 - Introducing multi-tenant project ACLs beyond `owner` vs `client`.
 - Removing remote environments or browser pairing flows.
-- Sandboxing agent/provider execution. This plan narrows S3Code control-plane authority; it does not make arbitrary agent code safe.
+- Sandboxing agent/provider execution. This plan narrows Ryco control-plane authority; it does not make arbitrary agent code safe.
 - Implementing a full browser secret vault. Browser token storage gets hardening and documentation, but desktop secret storage remains the preferred secure path.
 
 ## Scope
@@ -49,9 +49,9 @@ The server runs with the local user's privileges and can read/write local files,
 Primary attackers:
 
 - A paired `client` session that should not have owner management authority.
-- A malicious website trying to reach a locally authenticated S3Code server from the browser.
+- A malicious website trying to reach a locally authenticated Ryco server from the browser.
 - A remote browser profile or extension that can read browser `localStorage`.
-- A malicious repository URL or local path entered into S3Code.
+- A malicious repository URL or local path entered into Ryco.
 
 Trusted:
 

@@ -108,18 +108,18 @@ What shipped:
 - **`themes/transport.ts`** — single module that owns all serialization:
   - `serializeTheme(theme)` — strips `builtIn`, emits stable JSON (id, name, description?, light?, dark?)
   - `parseTheme(raw)` — reuses `isValidTheme`, returns a fresh `ThemeDefinition` with `builtIn: false`
-  - `themeFilename(theme)` — slugifies name into `<slug>.t3theme.json`
+  - `themeFilename(theme)` — slugifies name into `<slug>.rycotheme.json`
   - `downloadTheme(theme)` — uses a `Blob` + `<a download>` to push the file to disk
   - `importTheme(raw, collision)` — `"rename"` (default; always safe) or `"replace"`. Built-in id collisions are always renamed since you can't replace a built-in. Returns `{ theme, action }` where action is `added | renamed | replaced`.
   - `importThemeFromFile(file, { collision, activate })` — async helper; can immediately switch the active theme to the imported one
   - `encodeThemeToBase64` / `decodeThemeFromBase64` — UTF-8-safe round-trip; works in both browser (`btoa`/`atob` + `TextEncoder`) and Node (`Buffer`)
   - `copyThemeToClipboard(theme)` — `navigator.clipboard.writeText(serializeTheme(theme))`
 - **Appearance row "Share & sync"** in `AppearanceSettings.tsx`:
-  - **Export** — downloads `<name>.t3theme.json`
+  - **Export** — downloads `<name>.rycotheme.json`
   - **Import** — hidden `<input type="file">` triggered from the button; on success the imported theme becomes active and a toast announces add/rename
   - **Copy JSON** — clipboard copy with a success toast
   - All errors surface through `toastManager.add({ type: "error", ... })`
-- **Schema documentation** added below — authors can hand-write `.t3theme.json` files
+- **Schema documentation** added below — authors can hand-write `.rycotheme.json` files
 - **Tests** (`themes/transport.test.ts`): 18 new tests covering filename slugging, serialize/parse round-trips, parse error paths, base64 round-trips (including UTF-8 names), `importTheme` for added/renamed/replaced (including built-in id collision), and `getCustomThemes` reflecting writes after import
 
 Verified: `bun --cwd apps/web run test` → 1051/1051 pass; `bun --cwd apps/web run typecheck` clean (only pre-existing Sidebar.tsx error). Live browser eval confirmed the round-trip end-to-end: export the active theme to a string → wipe localStorage → import the string → activate → reload → identical computed `--primary` value.
@@ -128,7 +128,7 @@ Verified: `bun --cwd apps/web run test` → 1051/1051 pass; `bun --cwd apps/web 
 
 ## Theme JSON schema
 
-Files use the `.t3theme.json` extension and follow this shape:
+Files use the `.rycotheme.json` extension and follow this shape:
 
 ```json
 {

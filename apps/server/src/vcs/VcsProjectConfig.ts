@@ -32,7 +32,7 @@ export interface VcsProjectConfigShape {
 }
 
 export class VcsProjectConfig extends Context.Service<VcsProjectConfig, VcsProjectConfigShape>()(
-  "s3/vcs/VcsProjectConfig",
+  "ryco/vcs/VcsProjectConfig",
 ) {}
 
 function configuredKind(config: ProjectVcsConfigFile): VcsDriverKindType | "auto" {

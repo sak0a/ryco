@@ -27,4 +27,4 @@ export interface ProjectFaviconResolverShape {
 export class ProjectFaviconResolver extends Context.Service<
   ProjectFaviconResolver,
   ProjectFaviconResolverShape
->()("s3/project/Services/ProjectFaviconResolver") {}
+>()("ryco/project/Services/ProjectFaviconResolver") {}

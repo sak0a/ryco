@@ -145,7 +145,7 @@ const makeExitLogFixture = Effect.fn("makeExitLogFixture")(function* (prefix: st
   return {
     exitLogPath,
     wrapperPath: yield* makeMockAgentWrapper({
-      S3_ACP_EXIT_LOG_PATH: exitLogPath,
+      RYCO_ACP_EXIT_LOG_PATH: exitLogPath,
     }),
   };
 });
@@ -511,7 +511,7 @@ describe("checkCursorProviderStatus", () => {
         },
         {
           ...process.env,
-          S3_ACP_REQUEST_LOG_PATH: requestLogPath,
+          RYCO_ACP_REQUEST_LOG_PATH: requestLogPath,
         },
       ).pipe(Effect.provide(NodeServices.layer)),
     );

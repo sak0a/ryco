@@ -110,4 +110,4 @@ export interface ProjectionWorktreeRepositoryShape {
 export class ProjectionWorktreeRepository extends Context.Service<
   ProjectionWorktreeRepository,
   ProjectionWorktreeRepositoryShape
->()("s3/persistence/Services/ProjectionWorktrees/ProjectionWorktreeRepository") {}
+>()("ryco/persistence/Services/ProjectionWorktrees/ProjectionWorktreeRepository") {}

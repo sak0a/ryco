@@ -75,4 +75,4 @@ export interface ProjectionThreadSessionRepositoryShape {
 export class ProjectionThreadSessionRepository extends Context.Service<
   ProjectionThreadSessionRepository,
   ProjectionThreadSessionRepositoryShape
->()("s3/persistence/Services/ProjectionThreadSessions/ProjectionThreadSessionRepository") {}
+>()("ryco/persistence/Services/ProjectionThreadSessions/ProjectionThreadSessionRepository") {}

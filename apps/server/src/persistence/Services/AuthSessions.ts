@@ -90,4 +90,4 @@ export interface AuthSessionRepositoryShape {
 export class AuthSessionRepository extends Context.Service<
   AuthSessionRepository,
   AuthSessionRepositoryShape
->()("s3/persistence/Services/AuthSessions/AuthSessionRepository") {}
+>()("ryco/persistence/Services/AuthSessions/AuthSessionRepository") {}

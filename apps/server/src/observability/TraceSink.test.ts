@@ -33,7 +33,7 @@ describe("TraceSink", () => {
   it.effect("arms the batch-window timer only after records are buffered", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-trace-sink-"));
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-trace-sink-"));
         const tracePath = path.join(tempDir, "server.trace.ndjson");
         const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
 
@@ -64,7 +64,7 @@ describe("TraceSink", () => {
   it.effect("re-arms the batch-window timer when a write fails", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-trace-sink-"));
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-trace-sink-"));
         const tracePath = path.join(tempDir, "server.trace.ndjson");
         const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
         const appendFileSyncSpy = vi.spyOn(fs, "appendFileSync").mockImplementationOnce(() => {
@@ -96,7 +96,7 @@ describe("TraceSink", () => {
   it.effect("flushes buffered records on close", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-trace-sink-"));
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-trace-sink-"));
         const tracePath = path.join(tempDir, "server.trace.ndjson");
 
         try {
@@ -130,7 +130,7 @@ describe("TraceSink", () => {
   it.effect("rotates the trace file when the configured max size is exceeded", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-trace-sink-"));
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-trace-sink-"));
         const tracePath = path.join(tempDir, "server.trace.ndjson");
 
         try {
@@ -173,7 +173,7 @@ describe("TraceSink", () => {
   it.effect("drops only the invalid record when serialization fails", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-trace-sink-"));
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-trace-sink-"));
         const tracePath = path.join(tempDir, "server.trace.ndjson");
 
         try {

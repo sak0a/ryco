@@ -134,7 +134,7 @@ describe("providerMaintenance", () => {
     "switches package-managed providers to vite-plus updates when the resolved binary lives in vite-plus global bin",
     () =>
       Effect.gen(function* () {
-        const tempDir = yield* makeTempDir("t3-vite-plus-capabilities");
+        const tempDir = yield* makeTempDir("ryco-vite-plus-capabilities");
         const vitePlusBinDir = path.join(tempDir, ".vite-plus", "bin");
         mkdirSync(vitePlusBinDir, { recursive: true });
         const packageToolPath = path.join(vitePlusBinDir, "package-tool");
@@ -169,7 +169,7 @@ describe("providerMaintenance", () => {
     "switches package-managed providers to bun updates when the resolved binary lives in bun's global bin",
     () =>
       Effect.gen(function* () {
-        const tempDir = yield* makeTempDir("t3-bun-capabilities");
+        const tempDir = yield* makeTempDir("ryco-bun-capabilities");
         const bunBinDir = path.join(tempDir, ".bun", "bin");
         mkdirSync(bunBinDir, { recursive: true });
         writeFileSync(path.join(bunBinDir, "native-package-tool.exe"), "MZ");
@@ -203,7 +203,7 @@ describe("providerMaintenance", () => {
     "switches package-managed providers to pnpm updates when the resolved binary lives in pnpm's global bin",
     () =>
       Effect.gen(function* () {
-        const tempDir = yield* makeTempDir("t3-pnpm-capabilities");
+        const tempDir = yield* makeTempDir("ryco-pnpm-capabilities");
         const pnpmHomeDir = path.join(tempDir, ".local", "share", "pnpm");
         mkdirSync(pnpmHomeDir, { recursive: true });
         const scopedPackageToolPath = path.join(pnpmHomeDir, "scoped-package-tool");
@@ -262,7 +262,7 @@ describe("providerMaintenance", () => {
     "switches native-package-tool to native updates when the binary resolves through the native installer",
     () =>
       Effect.gen(function* () {
-        const tempDir = yield* makeTempDir("t3-native-package-tool-native-capabilities");
+        const tempDir = yield* makeTempDir("ryco-native-package-tool-native-capabilities");
         const nativeBinDir = path.join(tempDir, ".local", "bin");
         mkdirSync(nativeBinDir, { recursive: true });
         const nativePackageToolPath = path.join(nativeBinDir, "native-package-tool");
@@ -297,7 +297,7 @@ describe("providerMaintenance", () => {
     "switches scoped-package-tool to native upgrades when the binary resolves through the standalone installer",
     () =>
       Effect.gen(function* () {
-        const tempDir = yield* makeTempDir("t3-scoped-package-tool-native-capabilities");
+        const tempDir = yield* makeTempDir("ryco-scoped-package-tool-native-capabilities");
         const nativeBinDir = path.join(tempDir, ".scoped-package-tool", "bin");
         mkdirSync(nativeBinDir, { recursive: true });
         const scopedPackageToolPath = path.join(nativeBinDir, "scoped-package-tool");
@@ -378,7 +378,7 @@ describe("providerMaintenance", () => {
 
   it.effect("keeps npm updates for binaries symlinked into npm's global node_modules tree", () =>
     Effect.gen(function* () {
-      const tempDir = yield* makeTempDir("t3-npm-capabilities");
+      const tempDir = yield* makeTempDir("ryco-npm-capabilities");
       const binDir = path.join(tempDir, "bin");
       const packageBinDir = path.join(
         tempDir,
@@ -422,7 +422,7 @@ describe("providerMaintenance", () => {
 
   it.effect("uses Effect FileSystem realPath when detecting pnpm global symlinks", () =>
     Effect.gen(function* () {
-      const tempDir = yield* makeTempDir("t3-pnpm-realpath-capabilities");
+      const tempDir = yield* makeTempDir("ryco-pnpm-realpath-capabilities");
       const binDir = path.join(tempDir, "bin");
       const packageBinDir = path.join(
         tempDir,

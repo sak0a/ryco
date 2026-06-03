@@ -8,5 +8,5 @@ export interface ServerEnvironmentShape {
 }
 
 export class ServerEnvironment extends Context.Service<ServerEnvironment, ServerEnvironmentShape>()(
-  "s3/environment/Services/ServerEnvironment",
+  "ryco/environment/Services/ServerEnvironment",
 ) {}

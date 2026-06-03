@@ -76,5 +76,5 @@ export interface WorkspaceEntriesShape {
  * WorkspaceEntries - Service tag for cached workspace entry search.
  */
 export class WorkspaceEntries extends Context.Service<WorkspaceEntries, WorkspaceEntriesShape>()(
-  "s3/workspace/Services/WorkspaceEntries",
+  "ryco/workspace/Services/WorkspaceEntries",
 ) {}

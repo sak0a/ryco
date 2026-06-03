@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 function makeTempPath(fileName: string): string {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "s3-shell-env-cache-test-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-shell-env-cache-test-"));
   tempDirectories.push(directory);
   return path.join(directory, fileName);
 }

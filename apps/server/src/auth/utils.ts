@@ -2,7 +2,8 @@ import type { AuthClientMetadata, AuthClientMetadataDeviceType } from "@ryco/con
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as Crypto from "node:crypto";
 
-const SESSION_COOKIE_NAME = "t3_session";
+const SESSION_COOKIE_NAME = "ryco_session";
+const LEGACY_SESSION_COOKIE_NAME = "t3_session";
 
 export function resolveSessionCookieName(input: {
   readonly mode: "web" | "desktop";
@@ -13,6 +14,17 @@ export function resolveSessionCookieName(input: {
   }
 
   return `${SESSION_COOKIE_NAME}_${input.port}`;
+}
+
+export function resolveLegacySessionCookieNames(input: {
+  readonly mode: "web" | "desktop";
+  readonly port: number;
+}): readonly string[] {
+  if (input.mode !== "desktop") {
+    return [LEGACY_SESSION_COOKIE_NAME];
+  }
+
+  return [`${LEGACY_SESSION_COOKIE_NAME}_${input.port}`];
 }
 
 export function base64UrlEncode(input: string | Uint8Array): string {

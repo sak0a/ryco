@@ -45,6 +45,7 @@ export class SessionCredentialError extends Data.TaggedError("SessionCredentialE
 
 export interface SessionCredentialServiceShape {
   readonly cookieName: string;
+  readonly legacyCookieNames: readonly string[];
   readonly issue: (input?: {
     readonly ttl?: Duration.Duration;
     readonly subject?: string;
@@ -84,4 +85,4 @@ export interface SessionCredentialServiceShape {
 export class SessionCredentialService extends Context.Service<
   SessionCredentialService,
   SessionCredentialServiceShape
->()("s3/auth/Services/SessionCredentialService") {}
+>()("ryco/auth/Services/SessionCredentialService") {}

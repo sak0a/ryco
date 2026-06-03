@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 function makeTempHomeDir(): string {
-  const directory = FS.mkdtempSync(Path.join(OS.tmpdir(), "s3-ssh-env-test-"));
+  const directory = FS.mkdtempSync(Path.join(OS.tmpdir(), "ryco-ssh-env-test-"));
   tempDirectories.push(directory);
   return directory;
 }
