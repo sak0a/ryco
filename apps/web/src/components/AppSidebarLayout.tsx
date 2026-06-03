@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 
 import ThreadSidebar from "./Sidebar";
 import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
@@ -6,12 +6,37 @@ import {
   clearShortcutModifierState,
   syncShortcutModifierStateFromKeyboardEvent,
 } from "../shortcutModifierState";
-import { SettingsDialog } from "./settings/SettingsDialog";
 import { useSettingsDialogStore } from "../settingsDialogStore";
 
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
 const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
+
+const LazySettingsDialog = lazy(() =>
+  import("./settings/SettingsDialog").then((module) => ({ default: module.SettingsDialog })),
+);
+
+function LazySettingsDialogMount() {
+  const open = useSettingsDialogStore((s) => s.open);
+  const [hasOpened, setHasOpened] = useState(open);
+
+  useEffect(() => {
+    if (open) {
+      setHasOpened(true);
+    }
+  }, [open]);
+
+  if (!hasOpened) {
+    return null;
+  }
+
+  return (
+    <Suspense fallback={null}>
+      <LazySettingsDialog />
+    </Suspense>
+  );
+}
+
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const openSettings = useSettingsDialogStore((s) => s.openSettings);
 
@@ -71,7 +96,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <SidebarRail />
       </Sidebar>
       {children}
-      <SettingsDialog />
+      <LazySettingsDialogMount />
     </SidebarProvider>
   );
 }

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { ThreadId } from "@ryco/contracts";
 import { assert, describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Metric } from "effect";
 
 import { makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
@@ -26,6 +26,17 @@ function parseLogLine(line: string) {
     payload,
   };
 }
+
+const hasMetricSnapshot = (
+  snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
+  id: string,
+  attributes: Readonly<Record<string, string>>,
+) =>
+  snapshots.some(
+    (snapshot) =>
+      snapshot.id === id &&
+      Object.entries(attributes).every(([key, value]) => snapshot.attributes?.[key] === value),
+  );
 
 describe("EventNdjsonLogger", () => {
   it.effect("writes effect-style lines to thread-scoped files", () =>
@@ -201,6 +212,52 @@ describe("EventNdjsonLogger", () => {
           matchingFiles.some((entry) => entry === `${fileStem}.3`),
           false,
         );
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("drops and counts records when the bounded logging queue is full", () =>
+    Effect.gen(function* () {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-provider-log-"));
+      const basePath = path.join(tempDir, "provider-native.ndjson");
+
+      try {
+        const logger = yield* makeEventNdjsonLogger(basePath, {
+          stream: "native",
+          batchWindowMs: 100,
+          maxQueueSize: 1,
+        });
+        assert.notEqual(logger, undefined);
+        if (!logger) {
+          return;
+        }
+
+        const attempts = 200;
+        yield* Effect.all(
+          Array.from({ length: attempts }, (_, index) =>
+            logger.write({ id: `evt-drop-${index}` }, null),
+          ),
+          { concurrency: "unbounded", discard: true },
+        );
+        yield* logger.close();
+
+        const snapshots = yield* Metric.snapshot;
+        assert.equal(
+          hasMetricSnapshot(snapshots, "t3_provider_event_log_records_dropped_total", {
+            stream: "native",
+            reason: "queue_full",
+            maxQueueSize: "1",
+          }),
+          true,
+        );
+
+        const globalPath = path.join(tempDir, "_global.log");
+        const lines = fs.existsSync(globalPath)
+          ? fs.readFileSync(globalPath, "utf8").trim().split("\n").filter(Boolean)
+          : [];
+        assert.equal(lines.length < attempts, true);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }

@@ -93,6 +93,7 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { PREFERS_REDUCED_MOTION_QUERY, shouldEnableAutoAnimate } from "../lib/perf/motion";
 import { cn, isMacPlatform, newCommandId } from "../lib/utils";
 import {
   selectProjectByRef,
@@ -124,6 +125,7 @@ import { readLocalApi } from "../localApi";
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 
 import { useThreadActions } from "../hooks/useThreadActions";
 import {
@@ -5351,10 +5353,17 @@ export default function Sidebar() {
     dragInProgressRef.current = false;
   }, []);
 
-  const shouldAnimateProjectLists = shouldAutoAnimateSidebarProjectList(projects.length);
-  const shouldAnimateThreadLists = shouldAutoAnimateSidebarThreadLists({
-    projectCount: projects.length,
-    visibleThreadCount: sidebarThreads.length,
+  const prefersReducedMotion = useMediaQuery(PREFERS_REDUCED_MOTION_QUERY);
+  const shouldAnimateProjectLists = shouldEnableAutoAnimate({
+    prefersReducedMotion,
+    withinThreshold: shouldAutoAnimateSidebarProjectList(projects.length),
+  });
+  const shouldAnimateThreadLists = shouldEnableAutoAnimate({
+    prefersReducedMotion,
+    withinThreshold: shouldAutoAnimateSidebarThreadLists({
+      projectCount: projects.length,
+      visibleThreadCount: sidebarThreads.length,
+    }),
   });
   const projectListAnimationControllersRef = useRef<SidebarAutoAnimateControllers>(new Map());
   const attachProjectListAutoAnimateRef = useCallback(

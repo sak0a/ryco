@@ -116,4 +116,55 @@ layer("OrchestrationEventStore", (it) => {
       }
     }),
   );
+
+  it.effect("reads bounded event pages with next sequence and hasMore metadata", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const now = new Date().toISOString();
+      const maxSequenceRows = yield* sql<{ readonly maxSequence: number | null }>`
+        SELECT MAX(sequence) AS "maxSequence" FROM orchestration_events
+      `;
+      const startSequence = maxSequenceRows[0]?.maxSequence ?? 0;
+
+      for (const index of [1, 2, 3]) {
+        yield* eventStore.append({
+          type: "project.created",
+          eventId: EventId.make(`evt-store-page-${index}`),
+          aggregateKind: "project",
+          aggregateId: ProjectId.make(`project-page-${index}`),
+          occurredAt: now,
+          commandId: CommandId.make(`cmd-store-page-${index}`),
+          causationEventId: null,
+          correlationId: CommandId.make(`cmd-store-page-${index}`),
+          metadata: {},
+          payload: {
+            projectId: ProjectId.make(`project-page-${index}`),
+            title: `Paged Project ${index}`,
+            workspaceRoot: `/tmp/project-page-${index}`,
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      }
+
+      const firstPage = yield* eventStore.readPage(startSequence, 2);
+      assert.deepEqual(
+        firstPage.events.map((event) => event.sequence),
+        [startSequence + 1, startSequence + 2],
+      );
+      assert.equal(firstPage.nextSequence, startSequence + 2);
+      assert.equal(firstPage.hasMore, true);
+
+      const secondPage = yield* eventStore.readPage(firstPage.nextSequence, 2);
+      assert.deepEqual(
+        secondPage.events.map((event) => event.sequence),
+        [startSequence + 3],
+      );
+      assert.equal(secondPage.nextSequence, startSequence + 3);
+      assert.equal(secondPage.hasMore, false);
+    }),
+  );
 });

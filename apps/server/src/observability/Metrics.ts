@@ -54,6 +54,57 @@ export const providerRuntimeEventsTotal = Metric.counter("t3_provider_runtime_ev
   description: "Total canonical provider runtime events processed.",
 });
 
+export const providerEventLogRecordsDroppedTotal = Metric.counter(
+  "t3_provider_event_log_records_dropped_total",
+  {
+    description: "Total provider observability log records dropped by bounded logging queues.",
+  },
+);
+
+export const startupCommandGateEnqueuesTotal = Metric.counter(
+  "t3_startup_command_gate_enqueues_total",
+  {
+    description: "Total startup command gate enqueue attempts by outcome.",
+  },
+);
+
+export const startupCommandGateQueueDepth = Metric.gauge("t3_startup_command_gate_queue_depth", {
+  description: "Current number of commands waiting for startup command readiness.",
+});
+
+export const startupCommandGateQueueHighWater = Metric.gauge(
+  "t3_startup_command_gate_queue_high_water",
+  {
+    description: "Highest observed startup command gate queue depth.",
+  },
+);
+
+export const startupCommandGateQueueWaitDuration = Metric.timer(
+  "t3_startup_command_gate_queue_wait_duration",
+  {
+    description: "Time startup commands spent waiting for command readiness.",
+  },
+);
+
+export const providerStartupAdmissionTotal = Metric.counter("t3_provider_startup_admission_total", {
+  description: "Total provider startup admission attempts by outcome.",
+});
+
+export const providerStartupQueueDepth = Metric.gauge("t3_provider_startup_queue_depth", {
+  description: "Current number of provider session starts in admission per provider instance.",
+});
+
+export const providerStartupQueueHighWater = Metric.gauge("t3_provider_startup_queue_high_water", {
+  description: "Highest observed provider startup admission depth per provider instance.",
+});
+
+export const providerStartupQueueWaitDuration = Metric.timer(
+  "t3_provider_startup_queue_wait_duration",
+  {
+    description: "Time provider session starts spent waiting for startup admission.",
+  },
+);
+
 export const gitCommandsTotal = Metric.counter("t3_git_commands_total", {
   description: "Total git commands executed by the server runtime.",
 });

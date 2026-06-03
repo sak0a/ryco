@@ -15,6 +15,7 @@ import {
   type GitManagerServiceError,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
+  type OrchestrationShellSnapshot,
   type OrchestrationShellStreamEvent,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
@@ -32,6 +33,7 @@ import {
   FilesystemBrowseError,
   TextGenerationError,
   ThreadId,
+  type OrchestrationThreadDetailSnapshot,
   type TerminalEvent,
   WorktreeId,
   WS_METHODS,
@@ -108,6 +110,7 @@ import { respondToAuthError } from "./auth/http.ts";
 import { authorizeWsRpc, type WsRpcAccess } from "./auth/wsAuthorization.ts";
 import { AtlassianConnectionService } from "./atlassian/AtlassianConnectionService.ts";
 import { JiraWorkItemService } from "./atlassian/JiraWorkItemService.ts";
+import { makeWsReplayMetrics } from "./wsReplayMetrics.ts";
 
 function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   OrchestrationEvent,
@@ -133,6 +136,7 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
 
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 const SOURCE_CONTROL_LINKED_REFRESH_DEBOUNCE_MS = 5_000;
+const ORCHESTRATION_REPLAY_PAGE_MAX_LIMIT = 1_000;
 const randomShortId = (length = 8) =>
   Array.from({ length }, () =>
     "abcdefghijklmnopqrstuvwxyz0123456789".charAt(Math.floor(Math.random() * 36)),
@@ -562,6 +566,164 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
               );
         }
       };
+
+      const dedupeBySequence =
+        <A>(getSequence: (item: A) => number, sequenceRef: Ref.Ref<number>) =>
+        <E, R>(stream: Stream.Stream<A, E, R>): Stream.Stream<A, E, R> =>
+          stream.pipe(
+            Stream.filterEffect((item) =>
+              Ref.modify(sequenceRef, (lastSequence) => {
+                const nextSequence = getSequence(item);
+                if (nextSequence <= lastSequence) {
+                  return [false, lastSequence] as const;
+                }
+                return [true, nextSequence] as const;
+              }),
+            ),
+          );
+
+      const shellEventsFromDomainEvents = <E, R>(
+        stream: Stream.Stream<OrchestrationEvent, E, R>,
+      ): Stream.Stream<OrchestrationShellStreamEvent, E, R> =>
+        stream.pipe(
+          Stream.mapEffect(toShellStreamEvent),
+          Stream.flatMap((event) =>
+            Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
+          ),
+        );
+
+      const makeReplayableShellStream = (
+        snapshot: Effect.Effect<OrchestrationShellSnapshot, OrchestrationGetSnapshotError>,
+      ) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const loadedSnapshot = yield* snapshot;
+            const snapshotSequence = loadedSnapshot.snapshotSequence;
+            const liveSubscription = yield* orchestrationEngine.subscribeDomainEvents;
+            const liveQueue = yield* Queue.unbounded<OrchestrationEvent>();
+            const lastSequenceRef = yield* Ref.make(snapshotSequence);
+            const replayMetrics = yield* makeWsReplayMetrics({
+              stream: "shell",
+              subscriptionId: randomShortId(),
+              snapshotSequence,
+            });
+
+            yield* Stream.fromSubscription(liveSubscription).pipe(
+              Stream.runForEach((event) =>
+                Queue.offer(liveQueue, event).pipe(
+                  Effect.tap(() => replayMetrics.recordLiveEnqueued(event.sequence)),
+                  Effect.asVoid,
+                ),
+              ),
+              Effect.ensuring(Queue.shutdown(liveQueue)),
+              Effect.ignoreCause({ log: true }),
+              Effect.forkScoped,
+            );
+
+            const replayStream = orchestrationEngine
+              .readEvents(snapshotSequence, Number.MAX_SAFE_INTEGER)
+              .pipe(
+                Stream.tap((event) => replayMetrics.recordReplayEvent(event.sequence)),
+                Stream.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: "Failed to replay orchestration shell events",
+                      cause,
+                    }),
+                ),
+              );
+            const liveStream = Stream.fromQueue(liveQueue).pipe(
+              Stream.tap((event) => replayMetrics.recordLiveDequeued(event.sequence)),
+            );
+
+            const eventStream = Stream.concat(
+              shellEventsFromDomainEvents(replayStream),
+              shellEventsFromDomainEvents(liveStream),
+            ).pipe(dedupeBySequence((event) => event.sequence, lastSequenceRef));
+
+            return Stream.concat(
+              Stream.make({
+                kind: "snapshot" as const,
+                snapshot: loadedSnapshot,
+              }),
+              eventStream,
+            ).pipe(Stream.ensuring(replayMetrics.reset));
+          }),
+        );
+
+      const makeReplayableThreadStream = (
+        snapshot: Effect.Effect<OrchestrationThreadDetailSnapshot, OrchestrationGetSnapshotError>,
+        threadId: ThreadId,
+      ) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const loadedSnapshot = yield* snapshot;
+            const snapshotSequence = loadedSnapshot.snapshotSequence;
+            const liveSubscription = yield* orchestrationEngine.subscribeDomainEvents;
+            const liveQueue = yield* Queue.unbounded<OrchestrationEvent>();
+            const lastSequenceRef = yield* Ref.make(snapshotSequence);
+            const replayMetrics = yield* makeWsReplayMetrics({
+              stream: "thread",
+              subscriptionId: randomShortId(),
+              snapshotSequence,
+            });
+
+            const threadEvents = <E, R>(stream: Stream.Stream<OrchestrationEvent, E, R>) =>
+              stream.pipe(
+                Stream.filter(
+                  (event) =>
+                    event.aggregateKind === "thread" &&
+                    event.aggregateId === threadId &&
+                    isThreadDetailEvent(event),
+                ),
+                Stream.map((event) => ({
+                  kind: "event" as const,
+                  event,
+                })),
+              );
+
+            yield* Stream.fromSubscription(liveSubscription).pipe(
+              Stream.runForEach((event) =>
+                Queue.offer(liveQueue, event).pipe(
+                  Effect.tap(() => replayMetrics.recordLiveEnqueued(event.sequence)),
+                  Effect.asVoid,
+                ),
+              ),
+              Effect.ensuring(Queue.shutdown(liveQueue)),
+              Effect.ignoreCause({ log: true }),
+              Effect.forkScoped,
+            );
+
+            const replayStream = orchestrationEngine
+              .readEvents(snapshotSequence, Number.MAX_SAFE_INTEGER)
+              .pipe(
+                Stream.tap((event) => replayMetrics.recordReplayEvent(event.sequence)),
+                Stream.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: "Failed to replay orchestration thread events",
+                      cause,
+                    }),
+                ),
+              );
+            const liveStream = Stream.fromQueue(liveQueue).pipe(
+              Stream.tap((event) => replayMetrics.recordLiveDequeued(event.sequence)),
+            );
+
+            const eventStream = Stream.concat(
+              threadEvents(replayStream),
+              threadEvents(liveStream),
+            ).pipe(dedupeBySequence((item) => item.event.sequence, lastSequenceRef));
+
+            return Stream.concat(
+              Stream.make({
+                kind: "snapshot" as const,
+                snapshot: loadedSnapshot,
+              }),
+              eventStream,
+            ).pipe(Stream.ensuring(replayMetrics.reset));
+          }),
+        );
 
       const dispatchBootstrapTurnStart = (
         command: Extract<OrchestrationCommand, { type: "thread.turn.start" }>,
@@ -1634,109 +1796,116 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             ),
             { "rpc.aggregate": "orchestration" },
           ),
-        [ORCHESTRATION_WS_METHODS.subscribeShell]: (_input) =>
-          observeRpcStreamEffect(
-            ORCHESTRATION_WS_METHODS.subscribeShell,
-            Effect.gen(function* () {
-              const snapshot = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
-                Effect.tapError((cause) =>
-                  Effect.logError("orchestration shell snapshot load failed", { cause }),
+        [ORCHESTRATION_WS_METHODS.replayEventsPage]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.replayEventsPage,
+            orchestrationEngine
+              .readEventsPage(
+                clamp(input.fromSequenceExclusive, {
+                  maximum: Number.MAX_SAFE_INTEGER,
+                  minimum: 0,
+                }),
+                clamp(input.limit, {
+                  maximum: ORCHESTRATION_REPLAY_PAGE_MAX_LIMIT,
+                  minimum: 1,
+                }),
+              )
+              .pipe(
+                Effect.flatMap((page) =>
+                  enrichOrchestrationEvents(page.events).pipe(
+                    Effect.map((events) => ({
+                      events,
+                      nextSequence: page.nextSequence,
+                      hasMore: page.hasMore,
+                    })),
+                  ),
                 ),
                 Effect.mapError(
                   (cause) =>
-                    new OrchestrationGetSnapshotError({
-                      message: "Failed to load orchestration shell snapshot",
+                    new OrchestrationReplayEventsError({
+                      message: "Failed to replay orchestration events page",
                       cause,
                     }),
                 ),
-              );
-
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-                Stream.mapEffect(toShellStreamEvent),
-                Stream.flatMap((event) =>
-                  Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
+              ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.subscribeShell]: (_input) =>
+          observeRpcStreamEffect(
+            ORCHESTRATION_WS_METHODS.subscribeShell,
+            Effect.succeed(
+              makeReplayableShellStream(
+                projectionSnapshotQuery.getShellSnapshot().pipe(
+                  Effect.tapError((cause) =>
+                    Effect.logError("orchestration shell snapshot load failed", { cause }),
+                  ),
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: "Failed to load orchestration shell snapshot",
+                        cause,
+                      }),
+                  ),
                 ),
-              );
-
-              return Stream.concat(
-                Stream.make({
-                  kind: "snapshot" as const,
-                  snapshot,
-                }),
-                liveStream,
               ).pipe(
                 Stream.tap((item) =>
                   Effect.sync(() =>
                     recordServerPerfPayload("server.ws.orchestration.subscribeShell", item),
                   ),
                 ),
-              );
-            }),
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.subscribeThread]: (input) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeThread,
-            Effect.gen(function* () {
-              const [threadDetail, snapshotSequence] = yield* Effect.all([
-                projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationGetSnapshotError({
-                        message: `Failed to load thread ${input.threadId}`,
-                        cause,
-                      }),
-                  ),
-                ),
-                projectionSnapshotQuery.getSnapshotSequence().pipe(
-                  Effect.map(({ snapshotSequence }) => snapshotSequence),
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationGetSnapshotError({
-                        message: "Failed to load orchestration snapshot sequence",
-                        cause,
-                      }),
-                  ),
-                ),
-              ]);
+            Effect.succeed(
+              makeReplayableThreadStream(
+                Effect.gen(function* () {
+                  const [threadDetail, snapshotSequence] = yield* Effect.all([
+                    projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new OrchestrationGetSnapshotError({
+                            message: `Failed to load thread ${input.threadId}`,
+                            cause,
+                          }),
+                      ),
+                    ),
+                    projectionSnapshotQuery.getSnapshotSequence().pipe(
+                      Effect.map(({ snapshotSequence }) => snapshotSequence),
+                      Effect.mapError(
+                        (cause) =>
+                          new OrchestrationGetSnapshotError({
+                            message: "Failed to load orchestration snapshot sequence",
+                            cause,
+                          }),
+                      ),
+                    ),
+                  ]);
 
-              if (Option.isNone(threadDetail)) {
-                return yield* new OrchestrationGetSnapshotError({
-                  message: `Thread ${input.threadId} was not found`,
-                  cause: input.threadId,
-                });
-              }
+                  if (Option.isNone(threadDetail)) {
+                    return yield* new OrchestrationGetSnapshotError({
+                      message: `Thread ${input.threadId} was not found`,
+                      cause: input.threadId,
+                    });
+                  }
 
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-                Stream.filter(
-                  (event) =>
-                    event.aggregateKind === "thread" &&
-                    event.aggregateId === input.threadId &&
-                    isThreadDetailEvent(event),
-                ),
-                Stream.map((event) => ({
-                  kind: "event" as const,
-                  event,
-                })),
-              );
-
-              return Stream.concat(
-                Stream.make({
-                  kind: "snapshot" as const,
-                  snapshot: {
+                  return {
                     snapshotSequence,
                     thread: threadDetail.value,
-                  },
+                  };
                 }),
-                liveStream,
+                input.threadId,
               ).pipe(
                 Stream.tap((item) =>
                   Effect.sync(() =>
                     recordServerPerfPayload("server.ws.orchestration.subscribeThread", item),
                   ),
                 ),
-              );
-            }),
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [WS_METHODS.serverGetConfig]: (_input) =>

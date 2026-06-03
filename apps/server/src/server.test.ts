@@ -39,6 +39,7 @@ import {
   ManagedRuntime,
   Option,
   Path,
+  PubSub,
   Stream,
 } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -633,8 +634,18 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.mock(OrchestrationEngineService)({
           readEvents: () => Stream.empty,
+          readEventsPage: (fromSequenceExclusive) =>
+            Effect.succeed({
+              events: [],
+              nextSequence: fromSequenceExclusive,
+              hasMore: false,
+            }),
           dispatch: () => Effect.succeed({ sequence: 0 }),
           streamDomainEvents: Stream.empty,
+          subscribeDomainEvents: Effect.gen(function* () {
+            const pubsub = yield* PubSub.unbounded<OrchestrationEvent>();
+            return yield* PubSub.subscribe(pubsub);
+          }),
           ...options?.layers?.orchestrationEngine,
         }),
       ),
@@ -4365,6 +4376,211 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertTrue(result.failure._tag === "OrchestrationGetSnapshotError");
       assertTrue(result.failure.cause instanceof Error);
       assert.include(result.failure.cause.message, projectionError.message);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("replays shell handoff events and dedupes overlapping live events", () =>
+    Effect.gen(function* () {
+      const now = "2026-04-05T00:00:00.000Z";
+      const threadId = ThreadId.make("thread-shell-handoff");
+      const makeDeletedEvent = (sequence: number) =>
+        ({
+          sequence,
+          eventId: EventId.make(`event-shell-handoff-${sequence}`),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "thread.deleted",
+          payload: {
+            threadId,
+            deletedAt: now,
+          },
+        }) satisfies Extract<OrchestrationEvent, { type: "thread.deleted" }>;
+      const replayedEvent = makeDeletedEvent(11);
+      const liveEvent = makeDeletedEvent(12);
+      const livePubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            readEvents: (fromSequenceExclusive) => {
+              assert.equal(fromSequenceExclusive, 10);
+              return Stream.make(replayedEvent);
+            },
+            subscribeDomainEvents: Effect.gen(function* () {
+              const subscription = yield* PubSub.subscribe(livePubSub);
+              yield* PubSub.publish(livePubSub, replayedEvent);
+              yield* PubSub.publish(livePubSub, liveEvent);
+              return subscription;
+            }),
+          },
+          projectionSnapshotQuery: {
+            getShellSnapshot: () =>
+              Effect.succeed({
+                snapshotSequence: 10,
+                projects: [],
+                threads: [],
+                updatedAt: now,
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeShell]({}).pipe(
+            Stream.take(3),
+            Stream.runCollect,
+            Effect.map((items) => Array.from(items)),
+          ),
+        ),
+      );
+
+      assert.deepEqual(
+        result.map((item) => (item.kind === "snapshot" ? "snapshot" : item.sequence)),
+        ["snapshot", 11, 12],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("replays thread handoff events and dedupes overlapping live events", () =>
+    Effect.gen(function* () {
+      const now = "2026-04-05T00:00:00.000Z";
+      const threadId = ThreadId.make("thread-detail-handoff");
+      const makeActivityEvent = (sequence: number) =>
+        ({
+          sequence,
+          eventId: EventId.make(`event-thread-handoff-${sequence}`),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "thread.activity-appended",
+          payload: {
+            threadId,
+            activity: {
+              id: EventId.make(`activity-thread-handoff-${sequence}`),
+              tone: "info",
+              kind: "handoff.test",
+              summary: `handoff event ${sequence}`,
+              payload: {},
+              turnId: null,
+              sequence,
+              createdAt: now,
+            },
+          },
+        }) satisfies Extract<OrchestrationEvent, { type: "thread.activity-appended" }>;
+      const replayedEvent = makeActivityEvent(11);
+      const liveEvent = makeActivityEvent(12);
+      const livePubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            readEvents: (fromSequenceExclusive) => {
+              assert.equal(fromSequenceExclusive, 10);
+              return Stream.make(replayedEvent);
+            },
+            subscribeDomainEvents: Effect.gen(function* () {
+              const subscription = yield* PubSub.subscribe(livePubSub);
+              yield* PubSub.publish(livePubSub, replayedEvent);
+              yield* PubSub.publish(livePubSub, liveEvent);
+              return subscription;
+            }),
+          },
+          projectionSnapshotQuery: {
+            getThreadDetailById: (requestedThreadId) =>
+              Effect.succeed(
+                requestedThreadId === threadId
+                  ? Option.some({
+                      ...makeDefaultOrchestrationReadModel().threads[0]!,
+                      id: threadId,
+                    })
+                  : Option.none(),
+              ),
+            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 10 }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeThread]({ threadId }).pipe(
+            Stream.take(3),
+            Stream.runCollect,
+            Effect.map((items) => Array.from(items)),
+          ),
+        ),
+      );
+
+      assert.deepEqual(
+        result.map((item) => (item.kind === "snapshot" ? "snapshot" : item.event.sequence)),
+        ["snapshot", 11, 12],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc orchestration paginated replay", () =>
+    Effect.gen(function* () {
+      const now = "2026-04-05T00:00:00.000Z";
+      const event = {
+        sequence: 8,
+        eventId: EventId.make("event-replay-page-8"),
+        aggregateKind: "thread",
+        aggregateId: defaultThreadId,
+        occurredAt: now,
+        commandId: null,
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        type: "thread.deleted",
+        payload: {
+          threadId: defaultThreadId,
+          deletedAt: now,
+        },
+      } satisfies Extract<OrchestrationEvent, { type: "thread.deleted" }>;
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            readEventsPage: (fromSequenceExclusive, limit) => {
+              assert.equal(fromSequenceExclusive, 7);
+              assert.equal(limit, 2);
+              return Effect.succeed({
+                events: [event],
+                nextSequence: 8,
+                hasMore: false,
+              });
+            },
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const replayResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.replayEventsPage]({
+            fromSequenceExclusive: 7,
+            limit: 2,
+          }),
+        ),
+      );
+
+      assert.equal(replayResult.nextSequence, 8);
+      assert.equal(replayResult.hasMore, false);
+      assert.deepEqual(
+        replayResult.events.map((item) => item.sequence),
+        [8],
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

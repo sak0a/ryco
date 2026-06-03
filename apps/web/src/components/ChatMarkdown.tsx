@@ -70,6 +70,7 @@ const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "d
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
 const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
+const STREAMING_MARKDOWN_THROTTLE_MS = 75;
 const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_ENTRIES,
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
@@ -375,6 +376,63 @@ function normalizeMarkdownLinkHrefKey(href: string): string {
   return rewriteMarkdownFileUriHref(href.trim()) ?? href.trim();
 }
 
+function useThrottledStreamingMarkdownText(text: string, isStreaming: boolean): string {
+  const [displayText, setDisplayText] = useState(text);
+  const latestTextRef = useRef(text);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastFlushAtRef = useRef(0);
+  const wasStreamingRef = useRef(isStreaming);
+
+  const clearScheduledFlush = useCallback(() => {
+    if (timeoutRef.current !== null) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    latestTextRef.current = text;
+
+    if (!isStreaming) {
+      clearScheduledFlush();
+      lastFlushAtRef.current = Date.now();
+      setDisplayText(text);
+      return;
+    }
+
+    const now = Date.now();
+    const elapsedMs = now - lastFlushAtRef.current;
+    if (lastFlushAtRef.current === 0 || elapsedMs >= STREAMING_MARKDOWN_THROTTLE_MS) {
+      clearScheduledFlush();
+      lastFlushAtRef.current = now;
+      setDisplayText(text);
+      return;
+    }
+
+    if (timeoutRef.current !== null) {
+      return;
+    }
+
+    timeoutRef.current = setTimeout(() => {
+      timeoutRef.current = null;
+      lastFlushAtRef.current = Date.now();
+      setDisplayText(latestTextRef.current);
+    }, STREAMING_MARKDOWN_THROTTLE_MS - elapsedMs);
+  }, [clearScheduledFlush, isStreaming, text]);
+
+  useEffect(() => {
+    wasStreamingRef.current = isStreaming;
+  }, [isStreaming]);
+
+  useEffect(() => clearScheduledFlush, [clearScheduledFlush]);
+
+  if (!isStreaming || !wasStreamingRef.current) {
+    return text;
+  }
+
+  return displayText;
+}
+
 const MarkdownFileLink = memo(function MarkdownFileLink({
   href,
   targetPath,
@@ -520,7 +578,13 @@ function areMarkdownFileLinkPropsEqual(
   );
 }
 
-function ChatMarkdown({
+function ChatMarkdown(props: ChatMarkdownProps) {
+  const displayText = useThrottledStreamingMarkdownText(props.text, Boolean(props.isStreaming));
+
+  return <RenderedChatMarkdown {...props} text={displayText} />;
+}
+
+const RenderedChatMarkdown = memo(function RenderedChatMarkdown({
   text,
   cwd,
   isStreaming = false,
@@ -643,6 +707,6 @@ function ChatMarkdown({
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 export default memo(ChatMarkdown);

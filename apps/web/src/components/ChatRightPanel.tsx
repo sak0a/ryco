@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback } from "react";
 
 import { stripDiffSearchParams } from "../diffRouteSearch";
+import { resolveInactivePanelContentVisibilityStyle } from "../lib/perf/motion";
 import { stripPreviewSearchParams } from "../previewRouteSearch";
 import type { RightPanelMode, RightPanelRouteSearch } from "../rightPanelRouteSearch";
 import { Sidebar, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
@@ -72,6 +73,10 @@ export const RightPanelInlineSidebar = (props: {
   renderContent: boolean;
 }) => {
   const { open, onClose, onOpen, panelMode, renderContent } = props;
+  const panelContentVisibilityStyle = resolveInactivePanelContentVisibilityStyle({
+    active: open,
+    containIntrinsicSize: "28rem 100vh",
+  });
   const onOpenChange = useCallback(
     (open: boolean) => {
       if (open) {
@@ -147,7 +152,9 @@ export const RightPanelInlineSidebar = (props: {
           storageKey: DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >
-        {renderContent ? <LazyRightPanel mode="sidebar" panelMode={panelMode} /> : null}
+        <div className="flex min-h-0 w-full flex-1" style={panelContentVisibilityStyle}>
+          {renderContent ? <LazyRightPanel mode="sidebar" panelMode={panelMode} /> : null}
+        </div>
         <SidebarRail />
       </Sidebar>
     </SidebarProvider>
