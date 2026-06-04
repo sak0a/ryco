@@ -105,6 +105,12 @@ describe("OrchestrationEngine", () => {
           return savedEvent;
         }),
       readFromSequence: () => Stream.empty,
+      readPage: (sequenceExclusive) =>
+        Effect.succeed({
+          events: [],
+          nextSequence: sequenceExclusive,
+          hasMore: false,
+        }),
       readAll: () =>
         Stream.fail(
           new PersistenceSqlError({
@@ -735,6 +741,21 @@ describe("OrchestrationEngine", () => {
       readFromSequence(sequenceExclusive) {
         return Stream.fromIterable(events.filter((event) => event.sequence > sequenceExclusive));
       },
+      readPage(sequenceExclusive, limit) {
+        const pageEvents = events
+          .filter((event) => event.sequence > sequenceExclusive)
+          .slice(0, limit);
+        return Effect.succeed({
+          events: pageEvents,
+          nextSequence:
+            pageEvents.length === 0
+              ? sequenceExclusive
+              : pageEvents[pageEvents.length - 1]!.sequence,
+          hasMore: events.some(
+            (event) => event.sequence > (pageEvents.at(-1)?.sequence ?? sequenceExclusive),
+          ),
+        });
+      },
       readAll() {
         return Stream.fromIterable(events);
       },
@@ -966,6 +987,21 @@ describe("OrchestrationEngine", () => {
       },
       readFromSequence(sequenceExclusive) {
         return Stream.fromIterable(events.filter((event) => event.sequence > sequenceExclusive));
+      },
+      readPage(sequenceExclusive, limit) {
+        const pageEvents = events
+          .filter((event) => event.sequence > sequenceExclusive)
+          .slice(0, limit);
+        return Effect.succeed({
+          events: pageEvents,
+          nextSequence:
+            pageEvents.length === 0
+              ? sequenceExclusive
+              : pageEvents[pageEvents.length - 1]!.sequence,
+          hasMore: events.some(
+            (event) => event.sequence > (pageEvents.at(-1)?.sequence ?? sequenceExclusive),
+          ),
+        });
       },
       readAll() {
         return Stream.fromIterable(events);

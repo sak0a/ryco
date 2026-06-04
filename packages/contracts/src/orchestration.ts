@@ -9,6 +9,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  PositiveInt,
   ProjectId,
   ProviderItemId,
   ThreadId,
@@ -31,6 +32,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   replayEvents: "orchestration.replayEvents",
+  replayEventsPage: "orchestration.replayEventsPage",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
 } as const;
@@ -1581,6 +1583,19 @@ export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInp
 const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
+export const OrchestrationReplayEventsPageInput = Schema.Struct({
+  fromSequenceExclusive: NonNegativeInt,
+  limit: PositiveInt,
+});
+export type OrchestrationReplayEventsPageInput = typeof OrchestrationReplayEventsPageInput.Type;
+
+export const OrchestrationReplayEventsPageResult = Schema.Struct({
+  events: Schema.Array(OrchestrationEvent),
+  nextSequence: NonNegativeInt,
+  hasMore: Schema.Boolean,
+});
+export type OrchestrationReplayEventsPageResult = typeof OrchestrationReplayEventsPageResult.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -1597,6 +1612,10 @@ export const OrchestrationRpcSchemas = {
   replayEvents: {
     input: OrchestrationReplayEventsInput,
     output: OrchestrationReplayEventsResult,
+  },
+  replayEventsPage: {
+    input: OrchestrationReplayEventsPageInput,
+    output: OrchestrationReplayEventsPageResult,
   },
   subscribeThread: {
     input: OrchestrationSubscribeThreadInput,

@@ -71,6 +71,29 @@ describe("shellEnvironmentCache", () => {
     ).toEqual({ kind: "miss", reason: "stale" });
   });
 
+  it("misses cache records captured from a different known shell", () => {
+    const cachePath = makeTempPath("shell-env.json");
+    writeShellEnvironmentCache(
+      cachePath,
+      createShellEnvironmentCacheRecord({
+        env: {
+          SHELL: "/bin/zsh",
+          PATH: "/usr/bin",
+        },
+        platform: "darwin",
+        now: new Date("2026-05-12T00:00:00.000Z"),
+      }),
+    );
+
+    expect(
+      readShellEnvironmentCache(cachePath, {
+        platform: "darwin",
+        currentShell: "/bin/fish",
+        now: new Date("2026-05-12T01:00:00.000Z"),
+      }),
+    ).toEqual({ kind: "miss", reason: "shell" });
+  });
+
   it("applies cached values without overwriting existing non-PATH values", () => {
     const env: NodeJS.ProcessEnv = {
       PATH: "/usr/bin",

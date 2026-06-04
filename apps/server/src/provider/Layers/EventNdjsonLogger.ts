@@ -10,13 +10,15 @@ import path from "node:path";
 
 import type { ThreadId } from "@ryco/contracts";
 import { RotatingFileSink } from "@ryco/shared/logging";
-import { Effect, Exit, Logger, Scope, SynchronizedRef } from "effect";
+import { Effect, SynchronizedRef } from "effect";
 
 import { toSafeThreadAttachmentSegment } from "../../attachmentStore.ts";
+import { increment, providerEventLogRecordsDroppedTotal } from "../../observability/Metrics.ts";
 
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_FILES = 10;
 const DEFAULT_BATCH_WINDOW_MS = 200;
+const DEFAULT_MAX_QUEUE_SIZE = 2_048;
 const GLOBAL_THREAD_SEGMENT = "_global";
 const LOG_SCOPE = "provider-observability";
 
@@ -33,6 +35,7 @@ export interface EventNdjsonLoggerOptions {
   readonly maxBytes?: number;
   readonly maxFiles?: number;
   readonly batchWindowMs?: number;
+  readonly maxQueueSize?: number;
 }
 
 interface ThreadWriter {
@@ -43,6 +46,12 @@ interface ThreadWriter {
 interface LoggerState {
   readonly threadWriters: Map<string, ThreadWriter>;
   readonly failedSegments: Set<string>;
+}
+
+interface ThreadWriterState {
+  readonly buffer: Array<string>;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  closed: boolean;
 }
 
 function logWarning(message: string, context: Record<string, unknown>): Effect.Effect<void> {
@@ -61,11 +70,8 @@ function formatLoggerMessage(message: unknown): string {
   return typeof message === "string" ? message : String(message);
 }
 
-function makeLineLogger(streamLabel: string): Logger.Logger<unknown, string> {
-  return Logger.make(
-    ({ date, message }) =>
-      `[${date.toISOString()}] ${streamLabel}: ${formatLoggerMessage(message)}\n`,
-  );
+function makeLogLine(streamLabel: string, message: string): string {
+  return `[${new Date().toISOString()}] ${streamLabel}: ${formatLoggerMessage(message)}\n`;
 }
 
 function resolveStreamLabel(stream: EventNdjsonStream): string {
@@ -109,6 +115,8 @@ const makeThreadWriter = Effect.fn("makeThreadWriter")(function* (input: {
   readonly maxBytes: number;
   readonly maxFiles: number;
   readonly batchWindowMs: number;
+  readonly maxQueueSize: number;
+  readonly stream: EventNdjsonStream;
   readonly streamLabel: string;
 }): Effect.fn.Return<ThreadWriter | undefined> {
   const sinkResult = yield* Effect.sync(() => {
@@ -136,42 +144,124 @@ const makeThreadWriter = Effect.fn("makeThreadWriter")(function* (input: {
   }
 
   const sink = sinkResult.sink;
-  const scope = yield* Scope.make();
-  const lineLogger = makeLineLogger(input.streamLabel);
-  const batchedLogger = yield* Logger.batched(lineLogger, {
-    window: input.batchWindowMs,
-    flush: Effect.fn("makeThreadWriter.flush")(function* (messages) {
-      const flushResult = yield* Effect.sync(() => {
-        try {
-          for (const message of messages) {
-            sink.write(message);
-          }
-          return { ok: true as const };
-        } catch (error) {
-          return { ok: false as const, error };
-        }
-      });
+  const services = yield* Effect.context();
+  const runWarning = (effect: Effect.Effect<void>) => {
+    Effect.runForkWith(services)(effect);
+  };
+  const state: ThreadWriterState = {
+    buffer: [],
+    timer: undefined,
+    closed: false,
+  };
 
-      if (!flushResult.ok) {
-        yield* logWarning("provider event log batch flush failed", {
-          filePath: input.filePath,
-          error: flushResult.error,
-        });
+  const recordDropped = (reason: "queue_closed" | "queue_full") =>
+    increment(providerEventLogRecordsDroppedTotal, {
+      stream: input.stream,
+      reason,
+      maxQueueSize: input.maxQueueSize,
+    });
+
+  const flushBufferedSync = () => {
+    if (state.timer !== undefined) {
+      clearTimeout(state.timer);
+      state.timer = undefined;
+    }
+
+    if (state.buffer.length === 0) {
+      return;
+    }
+
+    const messages = state.buffer.splice(0, state.buffer.length);
+    try {
+      for (const message of messages) {
+        sink.write(message);
       }
-    }),
-  }).pipe(Effect.provideService(Scope.Scope, scope));
+    } catch (error) {
+      runWarning(
+        logWarning("provider event log batch flush failed", {
+          filePath: input.filePath,
+          error,
+        }),
+      );
+    }
+  };
 
-  const loggerLayer = Logger.layer([batchedLogger], { mergeWithExisting: false });
+  const scheduleFlush = () => {
+    if (state.timer !== undefined) {
+      return;
+    }
+
+    state.timer = setTimeout(flushBufferedSync, input.batchWindowMs);
+    if (typeof state.timer === "object" && "unref" in state.timer) {
+      state.timer.unref();
+    }
+  };
+
+  const enqueueLine = (line: string): "queue_closed" | "queue_full" | undefined => {
+    if (state.closed) {
+      return "queue_closed";
+    }
+
+    if (state.buffer.length >= input.maxQueueSize) {
+      return "queue_full";
+    }
+
+    state.buffer.push(line);
+    scheduleFlush();
+    return undefined;
+  };
+
+  const closeSync = () => {
+    state.closed = true;
+    flushBufferedSync();
+  };
+
+  const flushOnWriteFailure = (error: unknown) =>
+    logWarning("provider event log enqueue failed", {
+      filePath: input.filePath,
+      error,
+    });
+
+  const safelyEnqueueLine = (line: string) =>
+    Effect.sync(() => {
+      try {
+        return enqueueLine(line);
+      } catch (error) {
+        runWarning(flushOnWriteFailure(error));
+        return "queue_full" as const;
+      }
+    });
+
+  const safelyClose = Effect.sync(() => {
+    try {
+      closeSync();
+    } catch (error) {
+      runWarning(
+        logWarning("provider event log close failed", {
+          filePath: input.filePath,
+          error,
+        }),
+      );
+    }
+  });
 
   return {
     writeMessage(message: string) {
-      return Effect.log(message).pipe(Effect.provide(loggerLayer));
+      return Effect.gen(function* () {
+        const droppedReason = yield* safelyEnqueueLine(makeLogLine(input.streamLabel, message));
+        if (droppedReason) {
+          yield* recordDropped(droppedReason);
+        }
+      });
     },
     close() {
-      return Scope.close(scope, Exit.void);
+      return safelyClose;
     },
   } satisfies ThreadWriter;
 });
+
+const normalizePositiveInt = (value: number | undefined, fallback: number): number =>
+  value === undefined || !Number.isFinite(value) ? fallback : Math.max(1, Math.floor(value));
 
 export const makeEventNdjsonLogger = Effect.fn("makeEventNdjsonLogger")(function* (
   filePath: string,
@@ -180,6 +270,7 @@ export const makeEventNdjsonLogger = Effect.fn("makeEventNdjsonLogger")(function
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
   const batchWindowMs = options.batchWindowMs ?? DEFAULT_BATCH_WINDOW_MS;
+  const maxQueueSize = normalizePositiveInt(options.maxQueueSize, DEFAULT_MAX_QUEUE_SIZE);
   const streamLabel = resolveStreamLabel(options.stream);
 
   const directoryReady = yield* Effect.sync(() => {
@@ -221,6 +312,8 @@ export const makeEventNdjsonLogger = Effect.fn("makeEventNdjsonLogger")(function
         maxBytes,
         maxFiles,
         batchWindowMs,
+        maxQueueSize,
+        stream: options.stream,
         streamLabel,
       }).pipe(
         Effect.map((writer) => {

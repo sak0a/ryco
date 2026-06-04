@@ -20,6 +20,9 @@ import {
   Scope,
   Context,
   Console,
+  Duration,
+  Clock,
+  Metric,
 } from "effect";
 
 import { ServerConfig } from "./config.ts";
@@ -35,14 +38,28 @@ import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper.ts";
 import {
+  increment,
+  metricAttributes,
+  startupCommandGateEnqueuesTotal,
+  startupCommandGateQueueDepth,
+  startupCommandGateQueueHighWater,
+  startupCommandGateQueueWaitDuration,
+} from "./observability/Metrics.ts";
+import {
   formatHeadlessServeOutput,
   formatHostForUrl,
   isWildcardHost,
   issueHeadlessServeAccessInfo,
 } from "./startupAccess.ts";
 
+export const DEFAULT_STARTUP_COMMAND_GATE_MAX_PENDING = 2_048;
+export const DEFAULT_STARTUP_COMMAND_GATE_READY_TIMEOUT_MS = 30_000;
+
+export type ServerRuntimeStartupErrorReason = "startup" | "busy" | "timeout";
+
 export class ServerRuntimeStartupError extends Data.TaggedError("ServerRuntimeStartupError")<{
   readonly message: string;
+  readonly reason?: ServerRuntimeStartupErrorReason;
   readonly cause?: unknown;
 }> {}
 
@@ -65,6 +82,11 @@ interface QueuedCommand {
 
 type CommandReadinessState = "pending" | "ready" | ServerRuntimeStartupError;
 
+export interface CommandGateOptions {
+  readonly maxPendingCommands?: number;
+  readonly readyTimeoutMs?: number;
+}
+
 interface CommandGate {
   readonly awaitCommandReady: Effect.Effect<void, ServerRuntimeStartupError>;
   readonly signalCommandReady: Effect.Effect<void>;
@@ -79,49 +101,220 @@ const settleQueuedCommand = <A, E>(deferred: Deferred.Deferred<A, E>, exit: Exit
     ? Deferred.succeed(deferred, exit.value)
     : Deferred.failCause(deferred, exit.cause);
 
-export const makeCommandGate = Effect.gen(function* () {
-  const commandReady = yield* Deferred.make<void, ServerRuntimeStartupError>();
-  const commandQueue = yield* Queue.unbounded<QueuedCommand>();
-  const commandReadinessState = yield* Ref.make<CommandReadinessState>("pending");
+const normalizePositiveInt = (value: number | undefined, fallback: number): number =>
+  value === undefined || !Number.isFinite(value) ? fallback : Math.max(1, Math.floor(value));
 
-  const commandWorker = Effect.forever(
-    Queue.take(commandQueue).pipe(Effect.flatMap((command) => command.run)),
-  );
-  yield* Effect.forkScoped(commandWorker);
+const recordStartupCommandGateDepth = (input: {
+  readonly depth: number;
+  readonly highWater: number;
+  readonly maxPendingCommands: number;
+}) =>
+  Effect.gen(function* () {
+    const attributes = metricAttributes({
+      maxPendingCommands: input.maxPendingCommands,
+    });
+    yield* Metric.update(
+      Metric.withAttributes(startupCommandGateQueueDepth, attributes),
+      input.depth,
+    );
+    yield* Metric.update(
+      Metric.withAttributes(startupCommandGateQueueHighWater, attributes),
+      input.highWater,
+    );
+  });
 
-  return {
-    awaitCommandReady: Deferred.await(commandReady),
-    signalCommandReady: Effect.gen(function* () {
-      yield* Ref.set(commandReadinessState, "ready");
-      yield* Deferred.succeed(commandReady, undefined).pipe(Effect.orDie);
-    }),
-    failCommandReady: (error) =>
-      Effect.gen(function* () {
-        yield* Ref.set(commandReadinessState, error);
-        yield* Deferred.fail(commandReady, error).pipe(Effect.orDie);
+const recordStartupCommandGateWait = (input: {
+  readonly queuedAtMs: number;
+  readonly outcome: string;
+  readonly maxPendingCommands: number;
+}) =>
+  Effect.gen(function* () {
+    const nowMs = yield* Clock.currentTimeMillis;
+    yield* Metric.update(
+      Metric.withAttributes(
+        startupCommandGateQueueWaitDuration,
+        metricAttributes({
+          outcome: input.outcome,
+          maxPendingCommands: input.maxPendingCommands,
+        }),
+      ),
+      Duration.millis(Math.max(0, nowMs - input.queuedAtMs)),
+    );
+  });
+
+export const makeCommandGate = (options: CommandGateOptions = {}) =>
+  Effect.gen(function* () {
+    const maxPendingCommands = normalizePositiveInt(
+      options.maxPendingCommands,
+      DEFAULT_STARTUP_COMMAND_GATE_MAX_PENDING,
+    );
+    const readyTimeoutMs = normalizePositiveInt(
+      options.readyTimeoutMs,
+      DEFAULT_STARTUP_COMMAND_GATE_READY_TIMEOUT_MS,
+    );
+    const commandReady = yield* Deferred.make<void, ServerRuntimeStartupError>();
+    const commandQueue = yield* Queue.unbounded<QueuedCommand>();
+    const commandReadinessState = yield* Ref.make<CommandReadinessState>("pending");
+    const pendingCommandCount = yield* Ref.make(0);
+    const pendingCommandHighWater = yield* Ref.make(0);
+
+    const commandWorker = Effect.forever(
+      Queue.take(commandQueue).pipe(Effect.flatMap((command) => command.run)),
+    );
+    yield* Effect.forkScoped(commandWorker);
+
+    return {
+      awaitCommandReady: Deferred.await(commandReady),
+      signalCommandReady: Effect.gen(function* () {
+        yield* Ref.set(commandReadinessState, "ready");
+        yield* Deferred.succeed(commandReady, undefined).pipe(Effect.orDie);
       }),
-    enqueueCommand: <A, E>(effect: Effect.Effect<A, E>) =>
-      Effect.gen(function* () {
-        const readinessState = yield* Ref.get(commandReadinessState);
-        if (readinessState === "ready") {
-          return yield* effect;
-        }
-        if (readinessState !== "pending") {
-          return yield* readinessState;
-        }
+      failCommandReady: (error) =>
+        Effect.gen(function* () {
+          yield* Ref.set(commandReadinessState, error);
+          yield* Deferred.fail(commandReady, error).pipe(Effect.orDie);
+        }),
+      enqueueCommand: <A, E>(effect: Effect.Effect<A, E>) =>
+        Effect.gen(function* () {
+          const readinessState = yield* Ref.get(commandReadinessState);
+          if (readinessState === "ready") {
+            return yield* effect;
+          }
+          if (readinessState !== "pending") {
+            return yield* readinessState;
+          }
 
-        const result = yield* Deferred.make<A, E | ServerRuntimeStartupError>();
-        yield* Queue.offer(commandQueue, {
-          run: Deferred.await(commandReady).pipe(
-            Effect.flatMap(() => effect),
-            Effect.exit,
-            Effect.flatMap((exit) => settleQueuedCommand(result, exit)),
-          ),
-        });
-        return yield* Deferred.await(result);
-      }),
-  } satisfies CommandGate;
-});
+          const reservation = yield* Ref.modify(pendingCommandCount, (count) => {
+            if (count >= maxPendingCommands) {
+              return [Option.none<number>(), count] as const;
+            }
+            const nextCount = count + 1;
+            return [Option.some(nextCount), nextCount] as const;
+          });
+          if (Option.isNone(reservation)) {
+            yield* increment(startupCommandGateEnqueuesTotal, {
+              outcome: "busy",
+              maxPendingCommands,
+            });
+            return yield* new ServerRuntimeStartupError({
+              reason: "busy",
+              message: `Server startup command gate is busy (${maxPendingCommands} pending commands).`,
+            });
+          }
+
+          const highWater = yield* Ref.updateAndGet(pendingCommandHighWater, (current) =>
+            Math.max(current, reservation.value),
+          );
+          yield* increment(startupCommandGateEnqueuesTotal, {
+            outcome: "queued",
+            maxPendingCommands,
+          });
+          yield* recordStartupCommandGateDepth({
+            depth: reservation.value,
+            highWater,
+            maxPendingCommands,
+          });
+
+          const result = yield* Deferred.make<A, E | ServerRuntimeStartupError>();
+          const queuedAtMs = yield* Clock.currentTimeMillis;
+          const releaseReservation = Effect.gen(function* () {
+            const depth = yield* Ref.updateAndGet(pendingCommandCount, (count) =>
+              Math.max(0, count - 1),
+            );
+            const currentHighWater = yield* Ref.get(pendingCommandHighWater);
+            yield* recordStartupCommandGateDepth({
+              depth,
+              highWater: currentHighWater,
+              maxPendingCommands,
+            });
+          });
+          yield* Queue.offer(commandQueue, {
+            run: Effect.gen(function* () {
+              const latestReadinessState = yield* Ref.get(commandReadinessState);
+              if (latestReadinessState === "ready") {
+                const exit = yield* effect.pipe(Effect.exit);
+                yield* increment(startupCommandGateEnqueuesTotal, {
+                  outcome: Exit.isSuccess(exit) ? "drained_success" : "drained_failure",
+                  maxPendingCommands,
+                });
+                yield* recordStartupCommandGateWait({
+                  queuedAtMs,
+                  outcome: Exit.isSuccess(exit) ? "success" : "failure",
+                  maxPendingCommands,
+                });
+                yield* settleQueuedCommand(result, exit);
+                return;
+              }
+              if (latestReadinessState !== "pending") {
+                yield* increment(startupCommandGateEnqueuesTotal, {
+                  outcome: "readiness_failure",
+                  maxPendingCommands,
+                });
+                yield* recordStartupCommandGateWait({
+                  queuedAtMs,
+                  outcome: "readiness_failure",
+                  maxPendingCommands,
+                });
+                yield* Deferred.fail(result, latestReadinessState).pipe(Effect.orDie);
+                return;
+              }
+
+              const nowMs = yield* Clock.currentTimeMillis;
+              const elapsedMs = Math.max(0, nowMs - queuedAtMs);
+              const remainingReadyTimeoutMs = Math.max(0, readyTimeoutMs - elapsedMs);
+              const readyExit = yield* Deferred.await(commandReady).pipe(
+                Effect.timeoutOption(Duration.millis(remainingReadyTimeoutMs)),
+                Effect.exit,
+              );
+              if (Exit.isFailure(readyExit)) {
+                yield* increment(startupCommandGateEnqueuesTotal, {
+                  outcome: "readiness_failure",
+                  maxPendingCommands,
+                });
+                yield* recordStartupCommandGateWait({
+                  queuedAtMs,
+                  outcome: "readiness_failure",
+                  maxPendingCommands,
+                });
+                yield* Deferred.failCause(result, readyExit.cause).pipe(Effect.orDie);
+                return;
+              }
+              const ready = readyExit.value;
+              if (Option.isNone(ready)) {
+                const error = new ServerRuntimeStartupError({
+                  reason: "timeout",
+                  message: `Server startup command gate timed out after ${readyTimeoutMs}ms waiting for command readiness.`,
+                });
+                yield* increment(startupCommandGateEnqueuesTotal, {
+                  outcome: "timeout",
+                  maxPendingCommands,
+                });
+                yield* recordStartupCommandGateWait({
+                  queuedAtMs,
+                  outcome: "timeout",
+                  maxPendingCommands,
+                });
+                yield* Deferred.fail(result, error).pipe(Effect.orDie);
+                return;
+              }
+
+              const exit = yield* effect.pipe(Effect.exit);
+              yield* increment(startupCommandGateEnqueuesTotal, {
+                outcome: Exit.isSuccess(exit) ? "drained_success" : "drained_failure",
+                maxPendingCommands,
+              });
+              yield* recordStartupCommandGateWait({
+                queuedAtMs,
+                outcome: Exit.isSuccess(exit) ? "success" : "failure",
+                maxPendingCommands,
+              });
+              yield* settleQueuedCommand(result, exit);
+            }).pipe(Effect.ensuring(releaseReservation)),
+          });
+          return yield* Deferred.await(result);
+        }),
+    } satisfies CommandGate;
+  });
 
 export const recordStartupHeartbeat = Effect.gen(function* () {
   const analytics = yield* AnalyticsService;
@@ -289,7 +482,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
   const serverSettings = yield* ServerSettingsService;
   const serverEnvironment = yield* ServerEnvironment;
 
-  const commandGate = yield* makeCommandGate;
+  const commandGate = yield* makeCommandGate();
   const httpListening = yield* Deferred.make<void>();
   const reactorScope = yield* Scope.make("sequential");
 

@@ -1,0 +1,37 @@
+import { readFile } from "node:fs/promises";
+import { describe, expect, it } from "vitest";
+
+async function readSource(relativePath: string): Promise<string> {
+  return readFile(new URL(relativePath, import.meta.url), "utf8");
+}
+
+describe("web bundle splitting boundaries", () => {
+  it("keeps chat route files limited to eager route metadata", async () => {
+    const serverRoute = await readSource("../routes/_chat.$environmentId.$threadId.tsx");
+    const draftRoute = await readSource("../routes/_chat.draft.$draftId.tsx");
+
+    for (const routeSource of [serverRoute, draftRoute]) {
+      expect(routeSource).toContain("lazy(");
+      expect(routeSource).not.toContain("../components/ChatView");
+      expect(routeSource).not.toContain("../components/ChatRightPanel");
+    }
+  });
+
+  it("keeps optional shell surfaces behind lazy imports", async () => {
+    const appSidebarLayout = await readSource("../components/AppSidebarLayout.tsx");
+    const commandPalette = await readSource("../components/CommandPalette.tsx");
+
+    expect(appSidebarLayout).toContain('import("./settings/SettingsDialog")');
+    expect(appSidebarLayout).not.toContain("import { SettingsDialog }");
+    expect(commandPalette).toContain('import("./CommandPaletteDialog")');
+    expect(commandPalette).not.toContain("./CommandPalette.logic");
+  });
+
+  it("loads xterm css from the terminal drawer chunk instead of the app entry", async () => {
+    const mainEntry = await readSource("../main.tsx");
+    const terminalDrawer = await readSource("../components/ThreadTerminalDrawer.tsx");
+
+    expect(mainEntry).not.toContain("@xterm/xterm/css/xterm.css");
+    expect(terminalDrawer).toContain("@xterm/xterm/css/xterm.css");
+  });
+});

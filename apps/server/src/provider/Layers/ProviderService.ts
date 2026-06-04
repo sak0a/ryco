@@ -24,13 +24,32 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSession,
 } from "@ryco/contracts";
-import { Cause, Effect, Layer, Option, PubSub, Ref, Schema, SchemaIssue, Stream } from "effect";
+import {
+  Cause,
+  Duration,
+  Effect,
+  Layer,
+  Metric,
+  Option,
+  PubSub,
+  Ref,
+  Schema,
+  SchemaIssue,
+  Stream,
+  SynchronizedRef,
+} from "effect";
+import * as Semaphore from "effect/Semaphore";
 
 import {
   increment,
+  metricAttributes,
   providerMetricAttributes,
   providerRuntimeEventsTotal,
   providerSessionsTotal,
+  providerStartupAdmissionTotal,
+  providerStartupQueueDepth,
+  providerStartupQueueHighWater,
+  providerStartupQueueWaitDuration,
   providerTurnDuration,
   providerTurnsTotal,
   providerTurnMetricAttributes,
@@ -55,6 +74,19 @@ import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
  */
 export interface ProviderServiceLiveOptions {
   readonly canonicalEventLogger?: EventNdjsonLogger;
+  readonly providerStartupAdmission?: {
+    readonly maxConcurrentStartsPerInstance?: number;
+    readonly maxPendingStartsPerInstance?: number;
+  };
+}
+
+const DEFAULT_MAX_CONCURRENT_PROVIDER_STARTS_PER_INSTANCE = 4;
+const DEFAULT_MAX_PENDING_PROVIDER_STARTS_PER_INSTANCE = 64;
+
+interface ProviderStartupAdmissionState {
+  readonly semaphores: Map<ProviderInstanceId, Semaphore.Semaphore>;
+  readonly pendingByInstance: Map<ProviderInstanceId, number>;
+  readonly highWaterByInstance: Map<ProviderInstanceId, number>;
 }
 
 const ProviderRollbackConversationInput = Schema.Struct({
@@ -89,6 +121,9 @@ const decodeInputOrValidationError = <S extends Schema.Top>(input: {
         }),
     ),
   );
+
+const normalizePositiveInt = (value: number | undefined, fallback: number): number =>
+  value === undefined || !Number.isFinite(value) ? fallback : Math.max(1, Math.floor(value));
 
 function toRuntimeStatus(session: ProviderSession): "starting" | "running" | "stopped" | "error" {
   switch (session.status) {
@@ -199,6 +234,22 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const registry = yield* ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+  const maxConcurrentProviderStartsPerInstance = normalizePositiveInt(
+    options?.providerStartupAdmission?.maxConcurrentStartsPerInstance,
+    DEFAULT_MAX_CONCURRENT_PROVIDER_STARTS_PER_INSTANCE,
+  );
+  const maxPendingProviderStartsPerInstance = Math.max(
+    maxConcurrentProviderStartsPerInstance,
+    normalizePositiveInt(
+      options?.providerStartupAdmission?.maxPendingStartsPerInstance,
+      DEFAULT_MAX_PENDING_PROVIDER_STARTS_PER_INSTANCE,
+    ),
+  );
+  const startupAdmissionState = yield* SynchronizedRef.make<ProviderStartupAdmissionState>({
+    semaphores: new Map(),
+    pendingByInstance: new Map(),
+    highWaterByInstance: new Map(),
+  });
 
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Effect.succeed(event).pipe(
@@ -210,6 +261,168 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       Effect.flatMap((canonicalEvent) => PubSub.publish(runtimeEventPubSub, canonicalEvent)),
       Effect.asVoid,
     );
+
+  const providerStartupMetricAttrs = (input: {
+    readonly provider: ProviderDriverKind | string;
+    readonly providerInstanceId: ProviderInstanceId;
+  }) =>
+    metricAttributes({
+      provider: input.provider,
+      providerInstanceId: input.providerInstanceId,
+      maxConcurrentStartsPerInstance: maxConcurrentProviderStartsPerInstance,
+      maxPendingStartsPerInstance: maxPendingProviderStartsPerInstance,
+    });
+
+  const recordProviderStartupDepth = (input: {
+    readonly provider: ProviderDriverKind | string;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly depth: number;
+    readonly highWater: number;
+  }) =>
+    Effect.gen(function* () {
+      const attributes = providerStartupMetricAttrs(input);
+      yield* Metric.update(
+        Metric.withAttributes(providerStartupQueueDepth, attributes),
+        input.depth,
+      );
+      yield* Metric.update(
+        Metric.withAttributes(providerStartupQueueHighWater, attributes),
+        input.highWater,
+      );
+    });
+
+  const withProviderStartupAdmission = <A, E, R>(input: {
+    readonly operation: string;
+    readonly provider: ProviderDriverKind | string;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly run: () => Effect.Effect<A, E, R>;
+  }): Effect.Effect<A, E | ProviderValidationError, R> =>
+    Effect.gen(function* () {
+      const reservation = yield* SynchronizedRef.modifyEffect(startupAdmissionState, (state) => {
+        const pending = state.pendingByInstance.get(input.providerInstanceId) ?? 0;
+        if (pending >= maxPendingProviderStartsPerInstance) {
+          return Effect.succeed([
+            Option.none<{
+              readonly semaphore: Semaphore.Semaphore;
+              readonly depth: number;
+              readonly highWater: number;
+            }>(),
+            state,
+          ] as const);
+        }
+
+        const semaphoreEffect = state.semaphores.get(input.providerInstanceId)
+          ? Effect.succeed(state.semaphores.get(input.providerInstanceId) as Semaphore.Semaphore)
+          : Semaphore.make(maxConcurrentProviderStartsPerInstance);
+
+        return semaphoreEffect.pipe(
+          Effect.map((semaphore) => {
+            const nextDepth = pending + 1;
+            const nextHighWater = Math.max(
+              state.highWaterByInstance.get(input.providerInstanceId) ?? 0,
+              nextDepth,
+            );
+            const semaphores = new Map(state.semaphores);
+            semaphores.set(input.providerInstanceId, semaphore);
+            const pendingByInstance = new Map(state.pendingByInstance);
+            pendingByInstance.set(input.providerInstanceId, nextDepth);
+            const highWaterByInstance = new Map(state.highWaterByInstance);
+            highWaterByInstance.set(input.providerInstanceId, nextHighWater);
+            return [
+              Option.some({
+                semaphore,
+                depth: nextDepth,
+                highWater: nextHighWater,
+              }),
+              {
+                semaphores,
+                pendingByInstance,
+                highWaterByInstance,
+              },
+            ] as const;
+          }),
+        );
+      });
+
+      if (Option.isNone(reservation)) {
+        yield* increment(providerStartupAdmissionTotal, {
+          provider: input.provider,
+          providerInstanceId: input.providerInstanceId,
+          operation: input.operation,
+          outcome: "busy",
+          maxConcurrentStartsPerInstance: maxConcurrentProviderStartsPerInstance,
+          maxPendingStartsPerInstance: maxPendingProviderStartsPerInstance,
+        });
+        return yield* toValidationError(
+          input.operation,
+          `Provider startup admission is busy for instance '${input.providerInstanceId}' (${maxPendingProviderStartsPerInstance} pending starts).`,
+        );
+      }
+
+      yield* recordProviderStartupDepth({
+        provider: input.provider,
+        providerInstanceId: input.providerInstanceId,
+        depth: reservation.value.depth,
+        highWater: reservation.value.highWater,
+      });
+      yield* increment(providerStartupAdmissionTotal, {
+        provider: input.provider,
+        providerInstanceId: input.providerInstanceId,
+        operation: input.operation,
+        outcome: "accepted",
+        maxConcurrentStartsPerInstance: maxConcurrentProviderStartsPerInstance,
+        maxPendingStartsPerInstance: maxPendingProviderStartsPerInstance,
+      });
+
+      const queuedAtMs = Date.now();
+      const releaseReservation = SynchronizedRef.modify(startupAdmissionState, (state) => {
+        const currentDepth = state.pendingByInstance.get(input.providerInstanceId) ?? 0;
+        const nextDepth = Math.max(0, currentDepth - 1);
+        const pendingByInstance = new Map(state.pendingByInstance);
+        if (nextDepth === 0) {
+          pendingByInstance.delete(input.providerInstanceId);
+        } else {
+          pendingByInstance.set(input.providerInstanceId, nextDepth);
+        }
+        return [
+          {
+            depth: nextDepth,
+            highWater: state.highWaterByInstance.get(input.providerInstanceId) ?? 0,
+          },
+          {
+            ...state,
+            pendingByInstance,
+          },
+        ] as const;
+      }).pipe(
+        Effect.flatMap((snapshot) =>
+          recordProviderStartupDepth({
+            provider: input.provider,
+            providerInstanceId: input.providerInstanceId,
+            depth: snapshot.depth,
+            highWater: snapshot.highWater,
+          }),
+        ),
+      );
+
+      return yield* reservation.value.semaphore
+        .withPermits(1)(
+          Effect.gen(function* () {
+            yield* Metric.update(
+              Metric.withAttributes(
+                providerStartupQueueWaitDuration,
+                metricAttributes({
+                  ...Object.fromEntries(providerStartupMetricAttrs(input)),
+                  operation: input.operation,
+                }),
+              ),
+              Duration.millis(Math.max(0, Date.now() - queuedAtMs)),
+            );
+            return yield* input.run();
+          }),
+        )
+        .pipe(Effect.ensuring(releaseReservation));
+    });
 
   const requireBindingInstanceId = (
     operation: string,
@@ -370,14 +583,20 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
 
-      const resumed = yield* adapter.startSession({
-        threadId: input.binding.threadId,
+      const resumed = yield* withProviderStartupAdmission({
+        operation: input.operation,
         provider: input.binding.provider,
         providerInstanceId: bindingInstanceId,
-        ...(persistedCwd ? { cwd: persistedCwd } : {}),
-        ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
-        ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
-        runtimeMode: input.binding.runtimeMode ?? "full-access",
+        run: () =>
+          adapter.startSession({
+            threadId: input.binding.threadId,
+            provider: input.binding.provider,
+            providerInstanceId: bindingInstanceId,
+            ...(persistedCwd ? { cwd: persistedCwd } : {}),
+            ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
+            ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
+            runtimeMode: input.binding.runtimeMode ?? "full-access",
+          }),
       });
       if (resumed.provider !== adapter.provider) {
         return yield* toValidationError(
@@ -559,11 +778,17 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.cwd.effective": effectiveCwd ?? "",
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
-        const session = yield* adapter.startSession({
+        const startInput = {
           ...input,
           providerInstanceId: resolvedInstanceId,
           ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
           ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
+        };
+        const session = yield* withProviderStartupAdmission({
+          operation: "ProviderService.startSession",
+          provider: resolvedProvider,
+          providerInstanceId: resolvedInstanceId,
+          run: () => adapter.startSession(startInput),
         });
 
         if (session.provider !== adapter.provider) {

@@ -3,9 +3,10 @@ import {
   SourceControlProviderError,
   WorktreeId,
   type OrchestrationCommand,
+  type OrchestrationEvent,
 } from "@ryco/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Option, Ref, Stream } from "effect";
+import { Effect, Option, PubSub, Ref, Stream } from "effect";
 
 import type { OrchestrationEngineShape } from "../orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -102,9 +103,19 @@ function makeEngine(
 ): OrchestrationEngineShape {
   return {
     readEvents: () => Stream.empty,
+    readEventsPage: (fromSequenceExclusive) =>
+      Effect.succeed({
+        events: [],
+        nextSequence: fromSequenceExclusive,
+        hasMore: false,
+      }),
     dispatch: (command) =>
       Ref.update(dispatchRef, (calls) => [...calls, command]).pipe(Effect.as({ sequence: 1 })),
     streamDomainEvents: Stream.empty,
+    subscribeDomainEvents: Effect.gen(function* () {
+      const pubsub = yield* PubSub.unbounded<OrchestrationEvent>();
+      return yield* PubSub.subscribe(pubsub);
+    }),
   } satisfies OrchestrationEngineShape;
 }
 
