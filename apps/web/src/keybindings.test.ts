@@ -110,6 +110,21 @@ const DEFAULT_BINDINGS = compile([
     whenAst: whenNot(whenIdentifier("terminalFocus")),
   },
   {
+    shortcut: modShortcut("p"),
+    command: "workspace.files",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: { ...modShortcut("g"), modKey: false, ctrlKey: true, shiftKey: true },
+    command: "workspace.review",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: { ...modShortcut("`"), modKey: false, ctrlKey: true },
+    command: "workspace.terminal",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
     shortcut: modShortcut("k"),
     command: "commandPalette.toggle",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
@@ -291,6 +306,14 @@ describe("shortcutLabelForCommand", () => {
   it("returns effective labels for non-terminal commands", () => {
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "chat.new", "MacIntel"), "⇧⌘O");
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "diff.toggle", "Linux"), "Ctrl+D");
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "workspace.files", "MacIntel"),
+      "⌘P",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "workspace.review", "MacIntel"),
+      "⌃⇧G",
+    );
     assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "commandPalette.toggle", "MacIntel"),
       "⌘K",

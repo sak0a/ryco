@@ -36,7 +36,7 @@ import {
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@ryco/shared/projectScripts";
 import { truncate } from "@ryco/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "effect";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -45,14 +45,22 @@ import { useGitStatus } from "~/lib/gitStatusState";
 import {
   issueDetailQueryOptions,
   changeRequestDetailQueryOptions,
+  workflowRunsQueryOptions,
 } from "~/lib/sourceControlContextRpc";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
-import { buildOpenDiffSearch, stripDiffSearchParams } from "../diffRouteSearch";
-import { buildOpenPreviewSearch, stripPreviewSearchParams } from "../previewRouteSearch";
-import { parseRightPanelRouteSearch } from "../rightPanelRouteSearch";
+import { isRightPanelOpen, parseRightPanelRouteSearch } from "../rightPanelRouteSearch";
+import {
+  buildOpenAgentSearch,
+  buildOpenFilesSearch,
+  buildOpenReviewSearch,
+  buildOpenTerminalSearch,
+  buildOpenWorkspaceSearch,
+  stripWorkspacePanelSearchParams,
+} from "../workspaceRouteSearch";
+import { deriveThreadSubagents, type ThreadSubagentView } from "../threadWorkspaceViewModel";
 import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
@@ -109,13 +117,27 @@ import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
+import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
+import GitActionsControl from "./GitActionsControl";
 import {
   matchesExactModShortcut,
   resolveShortcutCommand,
   shouldIgnoreGlobalNavigationShortcut,
   shortcutLabelForCommand,
 } from "../keybindings";
-import PlanSidebar from "./PlanSidebar";
+import PlanSidebar, {
+  type OverviewPanelItem,
+  type OverviewPullRequestCheckRun,
+  type OverviewPullRequestState,
+} from "./PlanSidebar";
+import {
+  getCheckStatusFromWorkflowRun,
+  getPrCheckStatusForQuery,
+  getPrCheckStatusFromChangeRequest,
+  getPrCheckStatusFromWorkflowRuns,
+  shouldRefreshPrCheckStatus,
+  sourceControlOptionValue,
+} from "./projectExplorer/prCheckStatus";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
@@ -238,6 +260,13 @@ type EnvironmentUnavailableState = {
 };
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
+
+function compactQueryErrorMessage(error: unknown): string | undefined {
+  if (!error) return undefined;
+  const message = error instanceof Error ? error.message : "Failed to load.";
+  const providerMatch = /^Source control provider [^ ]+ failed in [^:]+:\s*(.*)$/u.exec(message);
+  return providerMatch?.[1] ?? message;
+}
 
 function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalogEntry[] {
   return useStore(
@@ -372,6 +401,10 @@ type ChatViewProps =
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
       onPreviewPanelOpen?: () => void;
+      onTerminalPanelOpen?: () => void;
+      onAgentPanelOpen?: () => void;
+      workspacePanelOpen?: boolean;
+      onToggleWorkspacePanel?: () => void;
       reserveTitleBarControlInset?: boolean;
       routeKind: "server";
       draftId?: never;
@@ -381,6 +414,10 @@ type ChatViewProps =
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
       onPreviewPanelOpen?: () => void;
+      onTerminalPanelOpen?: () => void;
+      onAgentPanelOpen?: () => void;
+      workspacePanelOpen?: boolean;
+      onToggleWorkspacePanel?: () => void;
       reserveTitleBarControlInset?: boolean;
       routeKind: "draft";
       draftId: DraftId;
@@ -646,6 +683,9 @@ export default function ChatView(props: ChatViewProps) {
     routeKind,
     onDiffPanelOpen,
     onPreviewPanelOpen,
+    onTerminalPanelOpen,
+    onAgentPanelOpen,
+    onToggleWorkspacePanel: externalToggleWorkspacePanel,
     reserveTitleBarControlInset = true,
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
@@ -745,7 +785,8 @@ export default function ChatView(props: ChatViewProps) {
   >({});
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
-  const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  const [planSidebarOpen, setPlanSidebarOpen] = useState(true);
+  const [overviewFloatingOpen, setOverviewFloatingOpen] = useState(false);
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
@@ -870,7 +911,7 @@ export default function ChatView(props: ChatViewProps) {
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const diffOpen = rawSearch.diff === "1";
-  const previewOpen = rawSearch.preview === "1";
+  const workspacePanelOpen = props.workspacePanelOpen ?? isRightPanelOpen(rawSearch);
   const activeThreadId = activeThread?.id ?? null;
   const activeThreadRef = useMemo(
     () => (activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null),
@@ -1500,6 +1541,10 @@ export default function ChatView(props: ChatViewProps) {
     pendingUserInputs,
     activePlan,
   } = threadActivityViewModel;
+  const threadSubagents = useMemo(
+    () => deriveThreadSubagents(threadActivities),
+    [threadActivities],
+  );
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const activePendingDraftAnswers = useMemo(
     () =>
@@ -1552,7 +1597,7 @@ export default function ChatView(props: ChatViewProps) {
       }),
     [activeLatestTurn, activeThread?.id, latestTurnSettled, threadPlanCatalog],
   );
-  const planSidebarLabel = sidebarProposedPlan || interactionMode === "plan" ? "Plan" : "Tasks";
+  const planSidebarLabel = "Overview";
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
@@ -1851,6 +1896,150 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+  const overviewPullRequestNumber =
+    activeWorktreeSummary?.prNumber ?? gitStatusQuery.data?.pr?.number ?? null;
+  const overviewPullRequestReference =
+    overviewPullRequestNumber !== null ? String(overviewPullRequestNumber) : null;
+  const overviewPullRequestProvider = gitStatusQuery.data?.sourceControlProvider?.kind ?? null;
+  const overviewPullRequestDetailQuery = useQuery({
+    ...changeRequestDetailQueryOptions({
+      environmentId,
+      cwd: gitCwd,
+      reference: overviewPullRequestReference,
+      enabled: overviewPullRequestNumber !== null,
+    }),
+    refetchInterval: (query) => {
+      const detail = query.state.data;
+      return detail?.state === "open" ? 60_000 : false;
+    },
+  });
+  const overviewWorkflowRunsQuery = useQuery({
+    ...workflowRunsQueryOptions({
+      environmentId,
+      cwd: gitCwd,
+      pullRequestNumber: overviewPullRequestNumber,
+      limit: 20,
+      enabled: overviewPullRequestProvider === "github" && overviewPullRequestNumber !== null,
+    }),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      const status = getPrCheckStatusFromWorkflowRuns({
+        runs: data.runs,
+        headSha: sourceControlOptionValue(data.headSha),
+      });
+      return shouldRefreshPrCheckStatus(status) ? 30_000 : false;
+    },
+  });
+  const overviewPullRequest = useMemo<OverviewPullRequestState | null>(() => {
+    if (overviewPullRequestNumber === null) {
+      return null;
+    }
+    const gitPr = gitStatusQuery.data?.pr ?? null;
+    const detail = overviewPullRequestDetailQuery.data ?? null;
+    const workflowData = overviewWorkflowRunsQuery.data ?? null;
+    const checkStatus =
+      workflowData && overviewPullRequestProvider === "github"
+        ? getPrCheckStatusForQuery({
+            isLoading: overviewWorkflowRunsQuery.isLoading,
+            error: overviewWorkflowRunsQuery.error,
+            status: getPrCheckStatusFromWorkflowRuns({
+              runs: workflowData.runs,
+              headSha: sourceControlOptionValue(workflowData.headSha),
+            }),
+          })
+        : detail
+          ? getPrCheckStatusFromChangeRequest(detail)
+          : getPrCheckStatusForQuery({
+              isLoading:
+                overviewWorkflowRunsQuery.isLoading || overviewPullRequestDetailQuery.isLoading,
+              error: overviewWorkflowRunsQuery.error ?? overviewPullRequestDetailQuery.error,
+              status: null,
+            });
+    const runs =
+      workflowData?.runs.map((run) => {
+        const status = getCheckStatusFromWorkflowRun(run);
+        const row: OverviewPullRequestCheckRun = {
+          id: run.runId,
+          name: run.workflowName,
+          statusLabel: status.shortLabel,
+          tone: status.tone,
+          url: run.url,
+        };
+        if (run.displayTitle) {
+          row.detail = run.displayTitle;
+        }
+        return row;
+      }) ?? [];
+    const pullRequestUrl = detail?.url ?? gitPr?.url ?? null;
+    const pullRequestState =
+      detail?.state ?? activeWorktreeSummary?.prState ?? gitPr?.state ?? null;
+    const checksError = compactQueryErrorMessage(
+      overviewWorkflowRunsQuery.error ?? overviewPullRequestDetailQuery.error,
+    );
+
+    return {
+      number: overviewPullRequestNumber,
+      title:
+        detail?.title ??
+        gitPr?.title ??
+        activeWorktreeSummary?.title ??
+        `Pull request #${overviewPullRequestNumber}`,
+      ...(pullRequestUrl ? { url: pullRequestUrl } : {}),
+      ...(pullRequestState ? { state: pullRequestState } : {}),
+      ...(typeof detail?.commentsCount === "number"
+        ? { commentsCount: detail.commentsCount }
+        : detail
+          ? { commentsCount: detail.comments.length }
+          : {}),
+      checkStatus,
+      checksLoading:
+        overviewWorkflowRunsQuery.isLoading || overviewPullRequestDetailQuery.isLoading,
+      ...(checksError ? { checksError } : {}),
+      runs,
+    };
+  }, [
+    activeWorktreeSummary?.prState,
+    activeWorktreeSummary?.title,
+    gitStatusQuery.data?.pr,
+    overviewPullRequestDetailQuery.data,
+    overviewPullRequestDetailQuery.error,
+    overviewPullRequestDetailQuery.isLoading,
+    overviewPullRequestNumber,
+    overviewPullRequestProvider,
+    overviewWorkflowRunsQuery.data,
+    overviewWorkflowRunsQuery.error,
+    overviewWorkflowRunsQuery.isLoading,
+  ]);
+  const overviewItems = useMemo<OverviewPanelItem[]>(() => {
+    const items: OverviewPanelItem[] = [];
+    const gitStatus = gitStatusQuery.data;
+    if (gitStatus) {
+      const changedFileCount = gitStatus.workingTree.files.length;
+      items.push({
+        label: "Changes",
+        value:
+          changedFileCount === 0
+            ? "No local changes"
+            : `${changedFileCount} ${changedFileCount === 1 ? "file" : "files"}`,
+        additions: gitStatus.workingTree.insertions,
+        deletions: gitStatus.workingTree.deletions,
+        action: "review",
+        icon: "changes",
+      });
+    }
+
+    items.push({
+      label: "Environment",
+      value: activeEnvironmentUnavailableState?.label ?? "Local",
+      ...(activeEnvironmentUnavailableState
+        ? { detail: activeEnvironmentUnavailableState.connectionState }
+        : {}),
+      icon: "environment",
+    });
+
+    return items;
+  }, [activeEnvironmentUnavailableState, gitStatusQuery.data]);
   const activeTerminalLaunchContext =
     terminalLaunchContext?.threadId === activeThreadId
       ? terminalLaunchContext
@@ -1861,15 +2050,6 @@ export default function ChatView(props: ChatViewProps) {
     () => ({
       context: {
         terminalFocus: true,
-        terminalOpen: Boolean(terminalState.terminalOpen),
-      },
-    }),
-    [terminalState.terminalOpen],
-  );
-  const nonTerminalShortcutLabelOptions = useMemo(
-    () => ({
-      context: {
-        terminalFocus: false,
         terminalOpen: Boolean(terminalState.terminalOpen),
       },
     }),
@@ -1891,16 +2071,28 @@ export default function ChatView(props: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "terminal.close", terminalShortcutLabelOptions),
     [keybindings, terminalShortcutLabelOptions],
   );
-  const diffPanelShortcutLabel = useMemo(
-    () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
-    [keybindings, nonTerminalShortcutLabelOptions],
-  );
+  const onOpenReviewPanel = useEvent(() => {
+    if (!isServerThread) {
+      return;
+    }
+    onDiffPanelOpen?.();
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId,
+        threadId,
+      },
+      replace: true,
+      search: (previous) => buildOpenReviewSearch(previous),
+    });
+  });
   const onToggleDiff = useEvent(() => {
     if (!isServerThread) {
       return;
     }
     if (!diffOpen) {
-      onDiffPanelOpen?.();
+      onOpenReviewPanel();
+      return;
     }
     void navigate({
       to: "/$environmentId/$threadId",
@@ -1912,32 +2104,24 @@ export default function ChatView(props: ChatViewProps) {
       search: (previous) =>
         diffOpen
           ? {
-              ...stripPreviewSearchParams(stripDiffSearchParams(previous)),
+              ...stripWorkspacePanelSearchParams(previous),
               diff: undefined,
               diffTurnId: undefined,
               diffFilePath: undefined,
               preview: undefined,
+              workspaceOpen: undefined,
+              workspaceTab: undefined,
+              workspaceAgentKey: undefined,
             }
-          : buildOpenDiffSearch(previous),
+          : buildOpenReviewSearch(previous),
     });
   });
-  const onTogglePreview = useEvent(() => {
+  const onOpenFilesPanel = useEvent(() => {
     if (!activeProject) {
       return;
     }
-    if (!previewOpen) {
-      onPreviewPanelOpen?.();
-    }
-    const nextSearch = (previous: Record<string, unknown>) =>
-      previewOpen
-        ? {
-            ...stripPreviewSearchParams(stripDiffSearchParams(previous)),
-            diff: undefined,
-            diffTurnId: undefined,
-            diffFilePath: undefined,
-            preview: undefined,
-          }
-        : buildOpenPreviewSearch(previous);
+    onPreviewPanelOpen?.();
+    const nextSearch = (previous: Record<string, unknown>) => buildOpenFilesSearch(previous);
     if (routeKind === "draft" && draftId) {
       void navigate({
         to: "/draft/$draftId",
@@ -1957,7 +2141,73 @@ export default function ChatView(props: ChatViewProps) {
       search: nextSearch,
     });
   });
+  const onOpenTerminalPanel = useEvent(() => {
+    onTerminalPanelOpen?.();
+    const nextSearch = (previous: Record<string, unknown>) => buildOpenTerminalSearch(previous);
+    if (routeKind === "draft" && draftId) {
+      void navigate({
+        to: "/draft/$draftId",
+        params: { draftId },
+        replace: true,
+        search: nextSearch,
+      });
+      return;
+    }
+    if (!isServerThread) {
+      return;
+    }
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId,
+        threadId,
+      },
+      replace: true,
+      search: nextSearch,
+    });
+  });
+  const onToggleWorkspacePanel = useEvent(() => {
+    if (externalToggleWorkspacePanel) {
+      externalToggleWorkspacePanel();
+      return;
+    }
+    const nextSearch = (previous: Record<string, unknown>) =>
+      workspacePanelOpen
+        ? {
+            ...stripWorkspacePanelSearchParams(previous),
+            diff: undefined,
+            diffTurnId: undefined,
+            diffFilePath: undefined,
+            preview: undefined,
+            workspaceOpen: undefined,
+            workspaceTab: undefined,
+            workspaceAgentKey: undefined,
+          }
+        : buildOpenWorkspaceSearch(previous);
 
+    if (routeKind === "draft" && draftId) {
+      void navigate({
+        to: "/draft/$draftId",
+        params: { draftId },
+        replace: true,
+        search: nextSearch,
+      });
+      return;
+    }
+
+    if (!isServerThread) {
+      return;
+    }
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId,
+        threadId,
+      },
+      replace: true,
+      search: nextSearch,
+    });
+  });
   const envLocked = Boolean(
     activeThread &&
     (activeThread.messages.length > 0 ||
@@ -2375,22 +2625,34 @@ export default function ChatView(props: ChatViewProps) {
   const toggleInteractionMode = useCallback(() => {
     handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
   }, [handleInteractionModeChange, interactionMode]);
-  const togglePlanSidebar = useCallback(() => {
-    setPlanSidebarOpen((open) => {
-      if (open) {
-        planSidebarDismissedForTurnRef.current =
-          activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-      } else {
-        planSidebarDismissedForTurnRef.current = null;
-      }
-      return !open;
-    });
-  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+  const setOverviewSidebarOpen = useCallback(
+    (open: boolean) => {
+      setPlanSidebarOpen(open);
+      planSidebarDismissedForTurnRef.current = open
+        ? null
+        : (activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__");
+    },
+    [activePlan?.turnId, sidebarProposedPlan?.turnId],
+  );
   const closePlanSidebar = useCallback(() => {
-    setPlanSidebarOpen(false);
-    planSidebarDismissedForTurnRef.current =
-      activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+    setOverviewFloatingOpen(false);
+    setOverviewSidebarOpen(false);
+  }, [setOverviewSidebarOpen]);
+  const toggleOverviewSidebar = useCallback(
+    (nextOpen?: boolean) => {
+      if (workspacePanelOpen) {
+        const wantsOpen = typeof nextOpen === "boolean" ? nextOpen : !overviewFloatingOpen;
+        setOverviewFloatingOpen(wantsOpen);
+        setOverviewSidebarOpen(wantsOpen);
+        return;
+      }
+
+      const wantsOpen = typeof nextOpen === "boolean" ? nextOpen : !planSidebarOpen;
+      setOverviewFloatingOpen(false);
+      setOverviewSidebarOpen(wantsOpen);
+    },
+    [overviewFloatingOpen, planSidebarOpen, setOverviewSidebarOpen, workspacePanelOpen],
+  );
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -2484,15 +2746,10 @@ export default function ChatView(props: ChatViewProps) {
     isAtEndRef.current = true;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
-    if (planSidebarOpenOnNextThreadRef.current) {
-      planSidebarOpenOnNextThreadRef.current = false;
-      setPlanSidebarOpen(true);
-    } else {
-      planSidebarOpenOnNextThreadRef.current = false;
-      setPlanSidebarOpen(false);
-    }
+    planSidebarOpenOnNextThreadRef.current = false;
+    setPlanSidebarOpen(!shouldUsePlanSidebarSheet);
     planSidebarDismissedForTurnRef.current = null;
-  }, [activeThread?.id]);
+  }, [activeThread?.id, shouldUsePlanSidebarSheet]);
 
   // Auto-open the plan sidebar when plan/todo steps arrive for the current turn.
   // Don't auto-open for plans carried over from a previous turn (the user can open manually).
@@ -2587,6 +2844,35 @@ export default function ChatView(props: ChatViewProps) {
     canOverrideServerThreadBranch && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
+  const overviewSourceControlActions =
+    gitCwd && activeThreadRef ? (
+      <GitActionsControl
+        gitCwd={gitCwd}
+        activeThreadRef={activeThreadRef}
+        {...(routeKind === "draft" && draftId ? { draftId } : {})}
+        showLabels
+      />
+    ) : null;
+  const overviewBranchControl =
+    activeThread && isGitRepo ? (
+      <BranchToolbarBranchSelector
+        className="max-w-[168px] justify-end px-1.5"
+        environmentId={activeThread.environmentId}
+        threadId={activeThread.id}
+        {...(routeKind === "draft" && draftId ? { draftId } : {})}
+        {...(canOverrideServerThreadBranch
+          ? {
+              activeThreadBranchOverride: activeThreadBranch,
+              onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+            }
+          : {})}
+        envLocked={envLocked}
+        onComposerFocusRequest={scheduleComposerFocus}
+        {...(canCheckoutPullRequestIntoThread
+          ? { onCheckoutPullRequestRequest: openPullRequestDialog }
+          : {})}
+      />
+    ) : null;
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
     isGitRepo,
@@ -2791,6 +3077,27 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "workspace.files") {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenFilesPanel();
+        return;
+      }
+
+      if (command === "workspace.review") {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenReviewPanel();
+        return;
+      }
+
+      if (command === "workspace.terminal") {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenTerminalPanel();
+        return;
+      }
+
       if (command === "modelPicker.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -2820,6 +3127,9 @@ export default function ChatView(props: ChatViewProps) {
     splitTerminal,
     keybindings,
     onToggleDiff,
+    onOpenFilesPanel,
+    onOpenReviewPanel,
+    onOpenTerminalPanel,
     readComposer,
     toggleTerminalVisibility,
   ]);
@@ -3797,7 +4107,7 @@ export default function ChatView(props: ChatViewProps) {
           threadId,
         },
         search: (previous) =>
-          buildOpenDiffSearch(previous, {
+          buildOpenReviewSearch(previous, {
             diffTurnId: turnId,
             diffFilePath: filePath ?? undefined,
           }),
@@ -3816,14 +4126,46 @@ export default function ChatView(props: ChatViewProps) {
         threadId,
       },
       search: (previous) => ({
-        ...stripPreviewSearchParams(stripDiffSearchParams(previous)),
+        ...stripWorkspacePanelSearchParams(previous),
         diff: undefined,
         diffTurnId: undefined,
         diffFilePath: undefined,
         preview: undefined,
+        workspaceOpen: undefined,
+        workspaceTab: undefined,
+        workspaceAgentKey: undefined,
       }),
     });
   }, [environmentId, isServerThread, navigate, threadId]);
+  const onOpenSubagentPanel = useCallback(
+    (subagent: ThreadSubagentView) => {
+      onAgentPanelOpen?.();
+      const nextSearch = (previous: Record<string, unknown>) =>
+        buildOpenAgentSearch(previous, subagent.key);
+
+      if (routeKind === "draft" && draftId) {
+        void navigate({
+          to: "/draft/$draftId",
+          params: { draftId },
+          search: nextSearch,
+        });
+        return;
+      }
+
+      if (!isServerThread) {
+        return;
+      }
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId,
+          threadId,
+        },
+        search: nextSearch,
+      });
+    },
+    [draftId, environmentId, isServerThread, navigate, onAgentPanelOpen, routeKind, threadId],
+  );
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
@@ -3837,6 +4179,22 @@ export default function ChatView(props: ChatViewProps) {
     }
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
+
+  useEffect(() => {
+    if (!workspacePanelOpen) {
+      setOverviewFloatingOpen(false);
+    }
+  }, [workspacePanelOpen]);
+
+  useEffect(() => {
+    setOverviewFloatingOpen(false);
+  }, [activeThread?.id]);
+
+  const overviewSidebarVisible = planSidebarOpen && !workspacePanelOpen;
+  const showFloatingOverviewSidebar = overviewFloatingOpen && workspacePanelOpen;
+  const overviewControlOpen = overviewSidebarVisible || showFloatingOverviewSidebar;
+  const showInlineOverviewSidebar = overviewSidebarVisible && !shouldUsePlanSidebarSheet;
+  const showOverviewSidebarSheet = overviewSidebarVisible && shouldUsePlanSidebarSheet;
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -3860,8 +4218,6 @@ export default function ChatView(props: ChatViewProps) {
       >
         <ChatHeader
           activeThreadEnvironmentId={activeThread.environmentId}
-          activeThreadId={activeThread.id}
-          {...(routeKind === "draft" && draftId ? { draftId } : {})}
           activeThreadTitle={activeThread.title}
           activeProjectName={activeProject?.name}
           isGitRepo={isGitRepo}
@@ -3872,11 +4228,6 @@ export default function ChatView(props: ChatViewProps) {
           }
           keybindings={keybindings}
           availableEditors={availableEditors}
-          diffToggleShortcutLabel={diffPanelShortcutLabel}
-          gitCwd={gitCwd}
-          previewAvailable={activeProject !== undefined}
-          diffOpen={diffOpen}
-          previewOpen={previewOpen}
           worktreeBranch={activeWorktreeSummary?.branch ?? activeThread.branch ?? null}
           worktreeTitle={activeWorktreeSummary?.title ?? null}
           worktreeOrigin={activeWorktreeSummary?.origin ?? null}
@@ -3891,12 +4242,14 @@ export default function ChatView(props: ChatViewProps) {
           onSelectSessionTab={handleSelectSessionTab}
           onPrefetchTabEnter={handleTabPrefetchEnter}
           onPrefetchTabLeave={handleTabPrefetchLeave}
+          workspacePanelOpen={workspacePanelOpen}
+          onToggleWorkspacePanel={onToggleWorkspacePanel}
+          overviewSidebarOpen={overviewControlOpen}
+          onToggleOverviewSidebar={toggleOverviewSidebar}
           onRunProjectScript={runProjectScript}
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
-          onToggleDiff={onToggleDiff}
-          onTogglePreview={onTogglePreview}
         />
       </header>
       <LinkedWorktreeItemDialog
@@ -3954,6 +4307,28 @@ export default function ChatView(props: ChatViewProps) {
             ) : (
               <div aria-hidden className="flex min-h-0 flex-1" />
             )}
+
+            {showFloatingOverviewSidebar ? (
+              <PlanSidebar
+                activePlan={activePlan}
+                activeProposedPlan={sidebarProposedPlan}
+                overviewItems={overviewItems}
+                pullRequest={overviewPullRequest}
+                subagents={threadSubagents}
+                sourceControlActions={overviewSourceControlActions}
+                branchControl={overviewBranchControl}
+                label={planSidebarLabel}
+                environmentId={environmentId}
+                markdownCwd={gitCwd ?? undefined}
+                workspaceRoot={activeWorkspaceRoot}
+                timestampFormat={timestampFormat}
+                mode="floating"
+                onOpenFiles={onOpenFilesPanel}
+                onOpenReview={onOpenReviewPanel}
+                onOpenSubagent={onOpenSubagentPanel}
+                onClose={closePlanSidebar}
+              />
+            ) : null}
 
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
             {showScrollToBottom && (
@@ -4019,7 +4394,7 @@ export default function ChatView(props: ChatViewProps) {
                   activePlan={activePlan as { turnId?: TurnId } | null}
                   sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
                   planSidebarLabel={planSidebarLabel}
-                  planSidebarOpen={planSidebarOpen}
+                  planSidebarOpen={overviewControlOpen}
                   runtimeMode={runtimeMode}
                   interactionMode={interactionMode}
                   tokenMode={tokenMode}
@@ -4055,7 +4430,7 @@ export default function ChatView(props: ChatViewProps) {
                   handleRuntimeModeChange={handleRuntimeModeChange}
                   handleInteractionModeChange={handleInteractionModeChange}
                   handleTokenModeChange={handleTokenModeChange}
-                  togglePlanSidebar={togglePlanSidebar}
+                  togglePlanSidebar={toggleOverviewSidebar}
                   focusComposer={focusComposer}
                   scheduleComposerFocus={scheduleComposerFocus}
                   setThreadError={setThreadError}
@@ -4126,18 +4501,24 @@ export default function ChatView(props: ChatViewProps) {
           />
         </div>
         {/* end chat column */}
-
-        {/* Plan sidebar */}
-        {planSidebarOpen && !shouldUsePlanSidebarSheet ? (
+        {showInlineOverviewSidebar ? (
           <PlanSidebar
             activePlan={activePlan}
             activeProposedPlan={sidebarProposedPlan}
+            overviewItems={overviewItems}
+            pullRequest={overviewPullRequest}
+            subagents={threadSubagents}
+            sourceControlActions={overviewSourceControlActions}
+            branchControl={overviewBranchControl}
             label={planSidebarLabel}
             environmentId={environmentId}
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeWorkspaceRoot}
             timestampFormat={timestampFormat}
             mode="sidebar"
+            onOpenFiles={onOpenFilesPanel}
+            onOpenReview={onOpenReviewPanel}
+            onOpenSubagent={onOpenSubagentPanel}
             onClose={closePlanSidebar}
           />
         ) : null}
@@ -4162,16 +4543,24 @@ export default function ChatView(props: ChatViewProps) {
         />
       ))}
       {shouldUsePlanSidebarSheet ? (
-        <RightPanelSheet open={planSidebarOpen} onClose={closePlanSidebar}>
+        <RightPanelSheet open={showOverviewSidebarSheet} onClose={closePlanSidebar}>
           <PlanSidebar
             activePlan={activePlan}
             activeProposedPlan={sidebarProposedPlan}
+            overviewItems={overviewItems}
+            pullRequest={overviewPullRequest}
+            subagents={threadSubagents}
+            sourceControlActions={overviewSourceControlActions}
+            branchControl={overviewBranchControl}
             label={planSidebarLabel}
             environmentId={environmentId}
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeWorkspaceRoot}
             timestampFormat={timestampFormat}
             mode="sheet"
+            onOpenFiles={onOpenFilesPanel}
+            onOpenReview={onOpenReviewPanel}
+            onOpenSubagent={onOpenSubagentPanel}
             onClose={closePlanSidebar}
           />
         </RightPanelSheet>

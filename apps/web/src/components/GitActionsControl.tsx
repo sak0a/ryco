@@ -93,6 +93,7 @@ interface GitActionsControlProps {
   gitCwd: string | null;
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
+  showLabels?: boolean;
 }
 
 interface PendingDefaultBranchAction {
@@ -965,6 +966,7 @@ export default function GitActionsControl({
   gitCwd,
   activeThreadRef,
   draftId,
+  showLabels = false,
 }: GitActionsControlProps) {
   const activeEnvironmentId = activeThreadRef?.environmentId ?? null;
   const threadToastData = useMemo(
@@ -1648,6 +1650,10 @@ export default function GitActionsControl({
   );
 
   const canPublishRepository = isRepo && gitStatusForActions !== null && !hasPrimaryRemote;
+  const quickActionLabelClassName = showLabels
+    ? "ml-0.5"
+    : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5";
+  const groupSeparatorClassName = showLabels ? "block" : "hidden @3xl/header-actions:block";
 
   if (!gitCwd) return null;
 
@@ -1681,9 +1687,7 @@ export default function GitActionsControl({
                   quickAction={quickAction}
                   SourceControlIcon={SourceControlIcon}
                 />
-                <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-                  {quickAction.label}
-                </span>
+                <span className={quickActionLabelClassName}>{quickAction.label}</span>
               </PopoverTrigger>
               <PopoverPopup tooltipStyle side="bottom" align="start">
                 {quickActionDisabledReason}
@@ -1697,12 +1701,10 @@ export default function GitActionsControl({
               onClick={runQuickAction}
             >
               <GitQuickActionIcon quickAction={quickAction} SourceControlIcon={SourceControlIcon} />
-              <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-                {quickAction.label}
-              </span>
+              <span className={quickActionLabelClassName}>{quickAction.label}</span>
             </Button>
           )}
-          <GroupSeparator className="hidden @3xl/header-actions:block" />
+          <GroupSeparator className={groupSeparatorClassName} />
           <Menu
             onOpenChange={(open) => {
               if (open) {

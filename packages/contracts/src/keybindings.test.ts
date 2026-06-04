@@ -41,6 +41,18 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsedDiffToggle.command, "diff.toggle");
 
+    const parsedWorkspaceFiles = yield* decode(KeybindingRule, {
+      key: "mod+p",
+      command: "workspace.files",
+    });
+    assert.strictEqual(parsedWorkspaceFiles.command, "workspace.files");
+
+    const parsedWorkspaceReview = yield* decode(KeybindingRule, {
+      key: "ctrl+shift+g",
+      command: "workspace.review",
+    });
+    assert.strictEqual(parsedWorkspaceReview.command, "workspace.review");
+
     const parsedCommandPalette = yield* decode(KeybindingRule, {
       key: "mod+k",
       command: "commandPalette.toggle",

@@ -8,13 +8,14 @@ export interface KeybindingCategory {
 
 export const KEYBINDING_CATEGORIES: Record<string, KeybindingCategory> = {
   terminal: { id: "terminal", label: "Terminal", sortWeight: 10 },
-  diff: { id: "diff", label: "Diff", sortWeight: 20 },
-  commandPalette: { id: "commandPalette", label: "Command palette", sortWeight: 30 },
-  chat: { id: "chat", label: "Chat", sortWeight: 40 },
-  editor: { id: "editor", label: "Editor", sortWeight: 50 },
-  modelPicker: { id: "modelPicker", label: "Model picker", sortWeight: 60 },
-  thread: { id: "thread", label: "Threads", sortWeight: 70 },
-  script: { id: "script", label: "Project scripts", sortWeight: 80 },
+  workspace: { id: "workspace", label: "Workspace", sortWeight: 20 },
+  diff: { id: "diff", label: "Diff", sortWeight: 30 },
+  commandPalette: { id: "commandPalette", label: "Command palette", sortWeight: 40 },
+  chat: { id: "chat", label: "Chat", sortWeight: 50 },
+  editor: { id: "editor", label: "Editor", sortWeight: 60 },
+  modelPicker: { id: "modelPicker", label: "Model picker", sortWeight: 70 },
+  thread: { id: "thread", label: "Threads", sortWeight: 80 },
+  script: { id: "script", label: "Project scripts", sortWeight: 90 },
 } as const;
 
 export interface KeybindingCommandMeta {
@@ -28,6 +29,9 @@ const STATIC_COMMAND_META: Record<string, Omit<KeybindingCommandMeta, "category"
   "terminal.split": { title: "Split terminal", sortWeight: 2 },
   "terminal.new": { title: "New terminal", sortWeight: 3 },
   "terminal.close": { title: "Close terminal", sortWeight: 4 },
+  "workspace.files": { title: "Open workspace files", sortWeight: 1 },
+  "workspace.review": { title: "Open workspace review", sortWeight: 2 },
+  "workspace.terminal": { title: "Open workspace terminal", sortWeight: 3 },
   "diff.toggle": { title: "Toggle diff view", sortWeight: 1 },
   "commandPalette.toggle": { title: "Open command palette", sortWeight: 1 },
   "chat.new": { title: "New chat", sortWeight: 1 },

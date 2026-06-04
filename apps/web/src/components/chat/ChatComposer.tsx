@@ -655,8 +655,6 @@ export const ChatComposer = memo(
       respondingRequestIds,
       showPlanFollowUpPrompt,
       activeProposedPlan,
-      activePlan,
-      sidebarProposedPlan,
       planSidebarLabel,
       planSidebarOpen,
       runtimeMode,
@@ -1156,7 +1154,7 @@ export const ChatComposer = memo(
       isComposerCollapsedMobile && !isComposerApprovalState && pendingUserInputs.length === 0;
 
     const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
-    const showPlanSidebarToggle = Boolean(activePlan || sidebarProposedPlan || planSidebarOpen);
+    const showPlanSidebarToggle = false;
     const composerFooterActionLayoutKey = useMemo(() => {
       if (activePendingProgress) {
         return `pending:${activePendingProgress.questionIndex}:${activePendingProgress.isLastQuestion}:${activePendingIsResponding}`;

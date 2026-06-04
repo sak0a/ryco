@@ -1,4 +1,4 @@
-import { memo, useState, useCallback } from "react";
+import { memo, useState, useCallback, type ReactNode } from "react";
 import type { EnvironmentId } from "@ryco/contracts";
 import { type TimestampFormat } from "@ryco/contracts/settings";
 import { Badge } from "./ui/badge";
@@ -6,10 +6,17 @@ import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
 import ChatMarkdown from "./ChatMarkdown";
 import {
+  BotIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   EllipsisIcon,
+  ExternalLinkIcon,
+  FileDiffIcon,
+  GitBranchIcon,
+  GitCommitIcon,
+  GitPullRequestIcon,
+  LaptopIcon,
   LoaderIcon,
   PanelRightCloseIcon,
 } from "lucide-react";
@@ -28,6 +35,44 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { readEnvironmentApi } from "~/environmentApi";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import type { ThreadSubagentView } from "../threadWorkspaceViewModel";
+import {
+  resolveSidebarStatusTextClassName,
+  resolveSidebarStatusTextStyle,
+} from "./sidebar/sidebarStatusText";
+import type { PrCheckStatusView } from "./projectExplorer/prCheckStatus";
+import { PrCheckStatusBadge } from "./projectExplorer/PrCheckStatusBadge";
+
+export interface OverviewPanelItem {
+  label: string;
+  value: string;
+  detail?: string;
+  additions?: number;
+  deletions?: number;
+  action?: "files" | "review";
+  icon?: "changes" | "environment";
+}
+
+export interface OverviewPullRequestCheckRun {
+  id: string;
+  name: string;
+  detail?: string;
+  statusLabel: string;
+  tone: PrCheckStatusView["tone"];
+  url?: string;
+}
+
+export interface OverviewPullRequestState {
+  number: number;
+  title: string;
+  url?: string;
+  state?: string;
+  commentsCount?: number;
+  checkStatus: PrCheckStatusView | null;
+  checksLoading: boolean;
+  checksError?: string;
+  runs: ReadonlyArray<OverviewPullRequestCheckRun>;
+}
 
 function stepStatusIcon(status: string): React.ReactNode {
   if (status === "completed") {
@@ -54,24 +99,63 @@ function stepStatusIcon(status: string): React.ReactNode {
 interface PlanSidebarProps {
   activePlan: ActivePlanState | null;
   activeProposedPlan: LatestProposedPlanState | null;
+  overviewItems?: ReadonlyArray<OverviewPanelItem>;
+  pullRequest?: OverviewPullRequestState | null;
+  subagents?: ReadonlyArray<ThreadSubagentView>;
+  sourceControlActions?: ReactNode;
+  branchControl?: ReactNode;
   label?: string;
   environmentId: EnvironmentId;
   markdownCwd: string | undefined;
   workspaceRoot: string | undefined;
   timestampFormat: TimestampFormat;
-  mode?: "sheet" | "sidebar";
+  mode?: "floating" | "sheet" | "sidebar";
+  onOpenFiles?: () => void;
+  onOpenReview?: () => void;
+  onOpenSubagent?: (subagent: ThreadSubagentView) => void;
   onClose: () => void;
+}
+
+function subagentStatusBucket(
+  status: ThreadSubagentView["status"],
+): "idle" | "in_progress" | "review" | "done" {
+  if (status === "running") return "in_progress";
+  if (status === "failed") return "review";
+  if (status === "finished") return "done";
+  return "idle";
+}
+
+function subagentStatusLabel(status: ThreadSubagentView["status"]): string {
+  if (status === "running") return "Working";
+  if (status === "failed") return "Needs review";
+  if (status === "finished") return "Finished";
+  return "Idle";
+}
+
+function overviewItemIcon(icon: OverviewPanelItem["icon"]): React.ReactNode {
+  if (icon === "changes") {
+    return <FileDiffIcon className="size-3.5" />;
+  }
+  return <LaptopIcon className="size-3.5" />;
 }
 
 const PlanSidebar = memo(function PlanSidebar({
   activePlan,
   activeProposedPlan,
-  label = "Plan",
+  overviewItems = [],
+  pullRequest = null,
+  subagents = [],
+  sourceControlActions,
+  branchControl,
+  label = "Overview",
   environmentId,
   markdownCwd,
   workspaceRoot,
   timestampFormat,
   mode = "sidebar",
+  onOpenFiles,
+  onOpenReview,
+  onOpenSubagent,
   onClose,
 }: PlanSidebarProps) {
   const [proposedPlanExpanded, setProposedPlanExpanded] = useState(false);
@@ -129,10 +213,12 @@ const PlanSidebar = memo(function PlanSidebar({
   return (
     <div
       className={cn(
-        "flex min-h-0 flex-col bg-card/50",
-        mode === "sidebar"
-          ? "h-full w-[340px] shrink-0 border-l border-border/70"
-          : "h-full w-full",
+        "flex min-h-0 flex-col backdrop-blur",
+        mode === "sidebar" &&
+          "my-3 mr-3 max-h-[min(calc(100%-1.5rem),42rem)] w-[340px] shrink-0 self-start overflow-hidden rounded-lg border border-border/70 bg-card/90 shadow-xl supports-[backdrop-filter]:bg-card/75",
+        mode === "sheet" && "h-full w-full bg-card/90 supports-[backdrop-filter]:bg-card/75",
+        mode === "floating" &&
+          "pointer-events-auto absolute top-3 right-3 z-40 max-h-[min(72vh,42rem)] w-[min(360px,calc(100%-1.5rem))] rounded-lg border border-border/50 bg-card/55 shadow-xl backdrop-blur-xl backdrop-saturate-150 supports-[backdrop-filter]:bg-card/45",
       )}
     >
       {/* Header */}
@@ -193,7 +279,184 @@ const PlanSidebar = memo(function PlanSidebar({
 
       {/* Content */}
       <ScrollArea className="min-h-0 flex-1">
-        <div className="p-3 space-y-4">
+        <div className="space-y-3 p-2.5">
+          {sourceControlActions || branchControl ? (
+            <div className="space-y-1.5">
+              <p className="px-1 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                Source control
+              </p>
+              <div className="space-y-1 rounded-md border border-border/50 bg-background/35 p-2">
+                {sourceControlActions ? (
+                  <div className="@container/header-actions flex min-w-0 items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground/60">
+                      <GitCommitIcon className="size-3.5 shrink-0" />
+                      <span className="text-[11px]">Actions</span>
+                    </div>
+                    <div className="flex shrink-0 items-center">{sourceControlActions}</div>
+                  </div>
+                ) : null}
+                {branchControl ? (
+                  <div className="flex min-w-0 items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground/60">
+                      <GitBranchIcon className="size-3.5 shrink-0" />
+                      <span className="text-[11px]">Branch</span>
+                    </div>
+                    <div className="flex min-w-0 flex-1 justify-end">{branchControl}</div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {overviewItems.length > 0 ? (
+            <div className="space-y-1">
+              <p className="px-1 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                Status
+              </p>
+              {overviewItems.map((item) => {
+                const onAction =
+                  item.action === "files"
+                    ? onOpenFiles
+                    : item.action === "review"
+                      ? onOpenReview
+                      : undefined;
+                const content = (
+                  <>
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/45 text-muted-foreground/65">
+                      {overviewItemIcon(item.icon)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] text-muted-foreground/45">{item.label}</p>
+                      <p className="truncate text-[12px] text-foreground/90">{item.value}</p>
+                      {item.detail ? (
+                        <p className="mt-0.5 truncate text-[10px] text-muted-foreground/45">
+                          {item.detail}
+                        </p>
+                      ) : null}
+                    </div>
+                    {typeof item.additions === "number" || typeof item.deletions === "number" ? (
+                      <div className="flex shrink-0 items-center gap-1 font-mono text-[11px] tabular-nums">
+                        {typeof item.additions === "number" ? (
+                          <span className="text-success">+{item.additions}</span>
+                        ) : null}
+                        {typeof item.deletions === "number" ? (
+                          <span className="text-destructive">-{item.deletions}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </>
+                );
+                return onAction ? (
+                  <button
+                    key={`${item.label}:${item.value}`}
+                    type="button"
+                    className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted/50"
+                    onClick={onAction}
+                  >
+                    {content}
+                  </button>
+                ) : (
+                  <div
+                    key={`${item.label}:${item.value}`}
+                    className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5"
+                  >
+                    {content}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {pullRequest ? (
+            <div className="space-y-1.5">
+              <p className="px-1 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                Pull Request
+              </p>
+              <div className="rounded-md border border-border/50 bg-background/35 p-2">
+                <div className="flex min-w-0 items-start gap-2">
+                  <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/45 text-muted-foreground/65">
+                    <GitPullRequestIcon className="size-3.5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[12px] font-medium text-foreground/90">
+                      #{pullRequest.number} {pullRequest.title}
+                    </p>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground/55">
+                      {pullRequest.state ? <span>{pullRequest.state}</span> : null}
+                      {typeof pullRequest.commentsCount === "number" ? (
+                        <span>
+                          {pullRequest.commentsCount}{" "}
+                          {pullRequest.commentsCount === 1 ? "comment" : "comments"}
+                        </span>
+                      ) : null}
+                    </p>
+                  </div>
+                  {pullRequest.url ? (
+                    <a
+                      href={pullRequest.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/55 transition-colors hover:bg-muted/60 hover:text-foreground"
+                      aria-label={`Open pull request #${pullRequest.number}`}
+                    >
+                      <ExternalLinkIcon className="size-3.5" />
+                    </a>
+                  ) : null}
+                </div>
+                <div className="mt-2 flex min-w-0 items-center gap-2">
+                  {pullRequest.checkStatus ? (
+                    <PrCheckStatusBadge view={pullRequest.checkStatus} mode="compact" />
+                  ) : pullRequest.checksLoading ? (
+                    <span className="inline-flex items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/8 px-1.5 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">
+                      <LoaderIcon className="size-3 animate-spin" />
+                      loading checks
+                    </span>
+                  ) : null}
+                  {pullRequest.checksError ? (
+                    <span className="truncate text-[11px] text-destructive">
+                      {pullRequest.checksError}
+                    </span>
+                  ) : null}
+                </div>
+                {pullRequest.runs.length > 0 ? (
+                  <div className="mt-2 space-y-1">
+                    {pullRequest.runs.slice(0, 6).map((run) => (
+                      <a
+                        key={run.id}
+                        href={run.url}
+                        target={run.url ? "_blank" : undefined}
+                        rel={run.url ? "noreferrer" : undefined}
+                        className={cn(
+                          "flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-[11px]",
+                          run.url && "transition-colors hover:bg-muted/50",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "size-1.5 shrink-0 rounded-full",
+                            run.tone === "success"
+                              ? "bg-emerald-500"
+                              : run.tone === "failure" || run.tone === "error"
+                                ? "bg-rose-500"
+                                : run.tone === "running"
+                                  ? "bg-sky-500"
+                                  : run.tone === "pending"
+                                    ? "bg-amber-500"
+                                    : "bg-muted-foreground/45",
+                          )}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-foreground/80">
+                          {run.name}
+                        </span>
+                        <span className="shrink-0 text-muted-foreground/55">{run.statusLabel}</span>
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           {/* Explanation */}
           {activePlan?.explanation ? (
             <p className="text-[13px] leading-relaxed text-muted-foreground/80">
@@ -264,12 +527,63 @@ const PlanSidebar = memo(function PlanSidebar({
           ) : null}
 
           {/* Empty state */}
-          {!activePlan && !planMarkdown ? (
+          {!activePlan &&
+          !planMarkdown &&
+          subagents.length === 0 &&
+          overviewItems.length === 0 &&
+          !pullRequest &&
+          !sourceControlActions &&
+          !branchControl ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <p className="text-[13px] text-muted-foreground/40">No active plan yet.</p>
               <p className="mt-1 text-[11px] text-muted-foreground/30">
-                Plans will appear here when generated.
+                Plans and subagents will appear here as the thread runs.
               </p>
+            </div>
+          ) : null}
+
+          {/* Subagents */}
+          {subagents.length > 0 ? (
+            <div className="space-y-1.5">
+              <p className="mb-2 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                Subagents
+              </p>
+              {subagents.map((subagent) => {
+                const bucket = subagentStatusBucket(subagent.status);
+                return (
+                  <button
+                    key={subagent.key}
+                    type="button"
+                    className="group flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-muted/50"
+                    onClick={() => onOpenSubagent?.(subagent)}
+                  >
+                    <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground group-hover:text-foreground">
+                      <BotIcon className="size-3.5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className={resolveSidebarStatusTextClassName(
+                          bucket,
+                          "block truncate text-[13px] font-medium",
+                        )}
+                        style={resolveSidebarStatusTextStyle(subagent.name, {
+                          durationSeconds: 2.2,
+                        })}
+                      >
+                        {subagent.name}
+                      </span>
+                      {subagent.detail ? (
+                        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/50">
+                          {subagent.detail}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-muted-foreground/45">
+                      {subagentStatusLabel(subagent.status)}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           ) : null}
         </div>

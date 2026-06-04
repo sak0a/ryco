@@ -1,8 +1,7 @@
 import { Suspense, lazy, useCallback } from "react";
 
-import { stripDiffSearchParams } from "../diffRouteSearch";
-import { stripPreviewSearchParams } from "../previewRouteSearch";
 import type { RightPanelMode, RightPanelRouteSearch } from "../rightPanelRouteSearch";
+import { stripWorkspacePanelSearchParams } from "../workspaceRouteSearch";
 import { Sidebar, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import {
@@ -12,25 +11,49 @@ import {
   type DiffPanelMode,
 } from "./DiffPanelShell";
 
-const DiffPanel = lazy(() => import("./DiffPanel"));
-const PreviewPanel = lazy(() => import("./PreviewPanel"));
+const ThreadWorkspacePanel = lazy(() => import("./ThreadWorkspacePanel"));
 
-const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
-const DIFF_INLINE_DEFAULT_WIDTH = "clamp(24rem,34vw,36rem)";
-const DIFF_INLINE_SIDEBAR_MIN_WIDTH = 22 * 16;
-const DIFF_INLINE_SIDEBAR_MAX_WIDTH = 256 * 16;
+const RIGHT_PANEL_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
+const RIGHT_PANEL_INLINE_DEFAULT_WIDTH = "clamp(24rem,34vw,36rem)";
+const RIGHT_PANEL_INLINE_SIDEBAR_MIN_WIDTH = 22 * 16;
+const RIGHT_PANEL_INLINE_SIDEBAR_MAX_WIDTH = 256 * 16;
+const RIGHT_PANEL_RESIZE_RAIL_CLASS_NAME =
+  "w-5 cursor-ew-resize after:w-px after:bg-border/50 hover:after:bg-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-0";
 const COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX = 208;
 
 export function closeRightPanelSearch<T extends Record<string, unknown>>(
   params: T,
-): Omit<T, "diff" | "diffTurnId" | "diffFilePath" | "preview"> & RightPanelRouteSearch {
+): Omit<
+  T,
+  | "diff"
+  | "diffTurnId"
+  | "diffFilePath"
+  | "preview"
+  | "workspaceOpen"
+  | "workspaceTab"
+  | "workspaceAgentKey"
+> &
+  RightPanelRouteSearch {
   return {
-    ...stripPreviewSearchParams(stripDiffSearchParams(params)),
+    ...stripWorkspacePanelSearchParams(params),
     diff: undefined,
     diffTurnId: undefined,
     diffFilePath: undefined,
     preview: undefined,
-  } as Omit<T, "diff" | "diffTurnId" | "diffFilePath" | "preview"> & RightPanelRouteSearch;
+    workspaceOpen: undefined,
+    workspaceTab: undefined,
+    workspaceAgentKey: undefined,
+  } as Omit<
+    T,
+    | "diff"
+    | "diffTurnId"
+    | "diffFilePath"
+    | "preview"
+    | "workspaceOpen"
+    | "workspaceTab"
+    | "workspaceAgentKey"
+  > &
+    RightPanelRouteSearch;
 }
 
 const RightPanelLoadingFallback = (props: { mode: DiffPanelMode; label: string }) => {
@@ -41,7 +64,12 @@ const RightPanelLoadingFallback = (props: { mode: DiffPanelMode; label: string }
   );
 };
 
-export const LazyRightPanel = (props: { mode: DiffPanelMode; panelMode: RightPanelMode }) => {
+export const LazyRightPanel = (props: {
+  mode: DiffPanelMode;
+  panelMode: RightPanelMode | null;
+  openedPanelModes: ReadonlyArray<RightPanelMode>;
+  onClosePanelTab: (input: { mode: RightPanelMode; agentKey?: string }) => void;
+}) => {
   return (
     <DiffWorkerPoolProvider>
       <Suspense
@@ -49,16 +77,25 @@ export const LazyRightPanel = (props: { mode: DiffPanelMode; panelMode: RightPan
           <RightPanelLoadingFallback
             mode={props.mode}
             label={
-              props.panelMode === "diff" ? "Loading diff viewer..." : "Loading file preview..."
+              props.panelMode === "review"
+                ? "Loading diff viewer..."
+                : props.panelMode === "files"
+                  ? "Loading file preview..."
+                  : props.panelMode === "terminal"
+                    ? "Loading terminal..."
+                    : props.panelMode === "agent"
+                      ? "Loading subagent thread..."
+                      : "Loading workspace..."
             }
           />
         }
       >
-        {props.panelMode === "diff" ? (
-          <DiffPanel mode={props.mode} />
-        ) : (
-          <PreviewPanel mode={props.mode} />
-        )}
+        <ThreadWorkspacePanel
+          mode={props.mode}
+          panelMode={props.panelMode}
+          openedPanelModes={props.openedPanelModes}
+          onClosePanelTab={props.onClosePanelTab}
+        />
       </Suspense>
     </DiffWorkerPoolProvider>
   );
@@ -66,7 +103,9 @@ export const LazyRightPanel = (props: { mode: DiffPanelMode; panelMode: RightPan
 
 export const RightPanelInlineSidebar = (props: {
   open: boolean;
-  panelMode: RightPanelMode;
+  panelMode: RightPanelMode | null;
+  openedPanelModes: ReadonlyArray<RightPanelMode>;
+  onClosePanelTab: (input: { mode: RightPanelMode; agentKey?: string }) => void;
   onClose: () => void;
   onOpen: () => void;
   renderContent: boolean;
@@ -134,21 +173,32 @@ export const RightPanelInlineSidebar = (props: {
       open={open}
       onOpenChange={onOpenChange}
       className="w-auto min-h-0 flex-none bg-transparent"
-      style={{ "--sidebar-width": DIFF_INLINE_DEFAULT_WIDTH } as React.CSSProperties}
+      style={{ "--sidebar-width": RIGHT_PANEL_INLINE_DEFAULT_WIDTH } as React.CSSProperties}
     >
       <Sidebar
         side="right"
         collapsible="offcanvas"
         className="border-l border-border bg-card text-foreground"
         resizable={{
-          maxWidth: DIFF_INLINE_SIDEBAR_MAX_WIDTH,
-          minWidth: DIFF_INLINE_SIDEBAR_MIN_WIDTH,
+          maxWidth: RIGHT_PANEL_INLINE_SIDEBAR_MAX_WIDTH,
+          minWidth: RIGHT_PANEL_INLINE_SIDEBAR_MIN_WIDTH,
           shouldAcceptWidth: shouldAcceptInlineSidebarWidth,
-          storageKey: DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
+          storageKey: RIGHT_PANEL_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >
-        {renderContent ? <LazyRightPanel mode="sidebar" panelMode={panelMode} /> : null}
-        <SidebarRail />
+        {renderContent ? (
+          <LazyRightPanel
+            mode="sidebar"
+            panelMode={panelMode}
+            openedPanelModes={props.openedPanelModes}
+            onClosePanelTab={props.onClosePanelTab}
+          />
+        ) : null}
+        <SidebarRail
+          aria-label="Resize workspace panel"
+          className={RIGHT_PANEL_RESIZE_RAIL_CLASS_NAME}
+          title="Drag to resize workspace panel"
+        />
       </Sidebar>
     </SidebarProvider>
   );
