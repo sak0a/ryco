@@ -1,9 +1,18 @@
-import { memo, useState, useCallback, type ReactNode } from "react";
+import {
+  forwardRef,
+  memo,
+  useState,
+  useCallback,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+  type Ref,
+} from "react";
 import type { EnvironmentId, SourceControlChangeRequestMergeability } from "@ryco/contracts";
 import { type TimestampFormat } from "@ryco/contracts/settings";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
+import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import ChatMarkdown from "./ChatMarkdown";
 import {
   BotIcon,
@@ -44,6 +53,7 @@ import {
   resolveSidebarStatusTextStyle,
 } from "./sidebar/sidebarStatusText";
 import type { PrCheckStatusView } from "./projectExplorer/prCheckStatus";
+import type { OverviewWorkflowCheckRow } from "./overviewPullRequestChecks.logic";
 
 export interface OverviewPanelItem {
   label: string;
@@ -63,16 +73,7 @@ export interface OverviewPanelItem {
   icon?: "changes" | "environment";
 }
 
-export interface OverviewPullRequestCheckRun {
-  id: string;
-  name: string;
-  detail?: string;
-  activeDetail?: string;
-  statusLabel: string;
-  statusKind: PrCheckStatusView["kind"];
-  tone: PrCheckStatusView["tone"];
-  url?: string;
-}
+export type OverviewPullRequestCheckRun = OverviewWorkflowCheckRow;
 
 export interface OverviewPullRequestState {
   number: number;
@@ -87,6 +88,7 @@ export interface OverviewPullRequestState {
   hasMergeConflicts: boolean;
   activeCheckCount: number;
   runs: ReadonlyArray<OverviewPullRequestCheckRun>;
+  latestRuns: ReadonlyArray<OverviewPullRequestCheckRun>;
 }
 
 function stepStatusIcon(status: string): React.ReactNode {
@@ -197,44 +199,131 @@ function pullRequestStatusTextClassName(kind: PrCheckStatusView["kind"] | "merge
   return "text-muted-foreground/70";
 }
 
-function PullRequestStatusRow(props: {
+interface PullRequestStatusRowProps extends Omit<
+  ComponentPropsWithoutRef<"div">,
+  "children" | "title"
+> {
   icon: React.ReactNode;
   label: string;
   detail?: string | undefined;
-  className?: string | undefined;
   trailing?: React.ReactNode | undefined;
   href?: string | undefined;
-}) {
-  const content = (
-    <>
-      <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">{props.icon}</span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[12px] leading-5">{props.label}</span>
-        {props.detail ? (
-          <span className="block truncate text-[10px] leading-4 text-muted-foreground/45">
-            {props.detail}
-          </span>
-        ) : null}
-      </span>
-      {props.trailing ? <span className="shrink-0 text-[11px]">{props.trailing}</span> : null}
-    </>
-  );
+  interactive?: boolean | undefined;
+}
 
-  const className = cn(
-    "flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-left",
-    props.href && "transition-colors hover:bg-muted/45",
-    props.className,
-  );
-
-  if (props.href) {
-    return (
-      <a href={props.href} target="_blank" rel="noreferrer" className={className}>
-        {content}
-      </a>
+const PullRequestStatusRow = forwardRef<HTMLElement, PullRequestStatusRowProps>(
+  function PullRequestStatusRow(
+    { icon, label, detail, className, trailing, href, interactive, ...domProps },
+    ref,
+  ) {
+    const content = (
+      <>
+        <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">{icon}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[12px] leading-5">{label}</span>
+          {detail ? (
+            <span className="block truncate text-[10px] leading-4 text-muted-foreground/45">
+              {detail}
+            </span>
+          ) : null}
+        </span>
+        {trailing ? <span className="shrink-0 text-[11px]">{trailing}</span> : null}
+      </>
     );
-  }
 
-  return <div className={className}>{content}</div>;
+    const rowClassName = cn(
+      "flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-left",
+      (href || interactive) &&
+        "transition-colors hover:bg-muted/45 focus-visible:bg-muted/45 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring",
+      className,
+    );
+
+    if (href) {
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className={rowClassName}
+          ref={ref as Ref<HTMLAnchorElement>}
+        >
+          {content}
+        </a>
+      );
+    }
+
+    if (interactive) {
+      return (
+        <button
+          {...(domProps as ComponentPropsWithoutRef<"button">)}
+          type="button"
+          className={cn(rowClassName, "appearance-none bg-transparent")}
+          ref={ref as Ref<HTMLButtonElement>}
+        >
+          {content}
+        </button>
+      );
+    }
+
+    return (
+      <div {...domProps} className={rowClassName} ref={ref as Ref<HTMLDivElement>}>
+        {content}
+      </div>
+    );
+  },
+);
+
+function PullRequestChecksTooltipContent({
+  runs,
+}: {
+  runs: ReadonlyArray<OverviewPullRequestCheckRun>;
+}) {
+  return (
+    <div className="max-h-80 w-[28rem] max-w-[calc(100vw-2rem)] overflow-y-auto py-1">
+      <div className="mb-1 px-1 text-[10px] font-medium tracking-widest text-muted-foreground/45 uppercase">
+        Latest checks
+      </div>
+      <div className="space-y-0.5">
+        {runs.map((run) => (
+          <a
+            key={run.id}
+            href={run.url}
+            target={run.url ? "_blank" : undefined}
+            rel={run.url ? "noreferrer" : undefined}
+            className={cn(
+              "flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-[12px]",
+              run.url && "transition-colors hover:bg-muted/45",
+            )}
+          >
+            {run.statusLabel === "Skipped" ? (
+              <span className="size-4 shrink-0 rounded-full border-2 border-dashed border-muted-foreground/35" />
+            ) : (
+              pullRequestStatusIcon(run.statusKind)
+            )}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-foreground/90">{run.name}</span>
+              {run.detail ? (
+                <span className="block truncate text-[10px] leading-4 text-muted-foreground/45">
+                  {run.detail}
+                </span>
+              ) : null}
+            </span>
+            <span
+              className={cn(
+                "shrink-0 text-muted-foreground/60",
+                run.tone === "success" && run.statusLabel !== "Skipped" && "text-emerald-500/90",
+                run.tone === "failure" || run.tone === "error" ? "text-destructive/90" : undefined,
+                run.tone === "running" && "text-emerald-500/80",
+                run.tone === "pending" && "text-amber-500/85",
+              )}
+            >
+              {run.statusLabel}
+            </span>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 const PlanSidebar = memo(function PlanSidebar({
@@ -580,12 +669,38 @@ const PlanSidebar = memo(function PlanSidebar({
                 </div>
                 <div className="mt-2 space-y-0.5">
                   {pullRequestSummaryKind ? (
-                    <PullRequestStatusRow
-                      icon={pullRequestStatusIcon(pullRequestSummaryKind)}
-                      label={pullRequestSummaryLabel}
-                      detail={pullRequestSummaryDetail}
-                      className={pullRequestStatusTextClassName(pullRequestSummaryKind)}
-                    />
+                    pullRequest.latestRuns.length > 0 ? (
+                      <TooltipProvider delay={80} closeDelay={120}>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <PullRequestStatusRow
+                                icon={pullRequestStatusIcon(pullRequestSummaryKind)}
+                                label={pullRequestSummaryLabel}
+                                detail={pullRequestSummaryDetail}
+                                interactive
+                                tabIndex={0}
+                                aria-label={`${pullRequestSummaryLabel}. Show latest checks.`}
+                                className={cn(
+                                  "cursor-pointer",
+                                  pullRequestStatusTextClassName(pullRequestSummaryKind),
+                                )}
+                              />
+                            }
+                          />
+                          <TooltipPopup side="left" align="start" className="p-0">
+                            <PullRequestChecksTooltipContent runs={pullRequest.latestRuns} />
+                          </TooltipPopup>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : (
+                      <PullRequestStatusRow
+                        icon={pullRequestStatusIcon(pullRequestSummaryKind)}
+                        label={pullRequestSummaryLabel}
+                        detail={pullRequestSummaryDetail}
+                        className={pullRequestStatusTextClassName(pullRequestSummaryKind)}
+                      />
+                    )
                   ) : null}
                   {pullRequest.hasMergeConflicts ? (
                     <PullRequestStatusRow

@@ -135,6 +135,19 @@ export function refreshGitStatus(
   target: GitStatusTarget,
   client?: GitStatusClient,
 ): Promise<VcsStatusResult | null> {
+  return requestGitStatusRefresh(target, client).then((status) => {
+    const targetKey = getGitStatusTargetKey(target);
+    if (targetKey !== null && status !== null) {
+      commitGitStatusRefresh(targetKey, status);
+    }
+    return status;
+  });
+}
+
+function requestGitStatusRefresh(
+  target: GitStatusTarget,
+  client?: GitStatusClient,
+): Promise<VcsStatusResult | null> {
   const targetKey = getGitStatusTargetKey(target);
   if (targetKey === null || target.cwd === null) {
     return Promise.resolve(null);
@@ -161,6 +174,15 @@ export function refreshGitStatus(
   });
   gitStatusRefreshInFlight.set(targetKey, refreshPromise);
   return refreshPromise;
+}
+
+function commitGitStatusRefresh(targetKey: string, status: VcsStatusResult): void {
+  appAtomRegistry.set(gitStatusStateAtom(targetKey), {
+    data: status,
+    error: null,
+    cause: null,
+    isPending: false,
+  });
 }
 
 export function resetGitStatusStateForTests(): void {
@@ -247,7 +269,12 @@ function subscribeToGitStatusTarget(
 
     currentUnsubscribe();
     currentClientIdentity = resolved.clientIdentity;
-    currentUnsubscribe = subscribeToGitStatus(targetKey, cwd, resolved.client, options);
+    currentUnsubscribe = subscribeToGitStatus(
+      targetKey,
+      { ...target, cwd },
+      resolved.client,
+      options,
+    );
   };
 
   const unsubscribeRegistry = providedClient
@@ -263,13 +290,14 @@ function subscribeToGitStatusTarget(
 
 function subscribeToGitStatus(
   targetKey: string,
-  cwd: string,
+  target: GitStatusTarget & { readonly cwd: string },
   client: GitStatusClient,
   options?: GitStatusWatchOptions,
 ): () => void {
   markGitStatusPending(targetKey);
+  const cwd = target.cwd;
   const automaticRemoteRefreshIntervalMs = options?.automaticRemoteRefreshIntervalMs ?? 0;
-  return client.onStatus(
+  const unsubscribe = client.onStatus(
     {
       cwd,
       ...(automaticRemoteRefreshIntervalMs > 0 ? { automaticRemoteRefreshIntervalMs } : {}),
@@ -288,6 +316,18 @@ function subscribeToGitStatus(
       },
     },
   );
+  let disposed = false;
+  void requestGitStatusRefresh(target, client)
+    .then((status) => {
+      if (!disposed && status !== null) {
+        commitGitStatusRefresh(targetKey, status);
+      }
+    })
+    .catch(() => undefined);
+  return () => {
+    disposed = true;
+    unsubscribe();
+  };
 }
 
 function markGitStatusPending(targetKey: string): void {

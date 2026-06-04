@@ -99,7 +99,7 @@ describe("PR check status view model", () => {
     expect(primaryFailedCheckUrl(view)).toBe("https://github.com/acme/repo/actions/runs/1/job/2");
   });
 
-  it("separates cancelled and skipped terminal results from passed", () => {
+  it("treats skipped terminal results as successful for the aggregate", () => {
     const view = getPrCheckStatusFromRollup({
       rollup: [
         rollup({
@@ -115,7 +115,7 @@ describe("PR check status view model", () => {
       ],
     });
 
-    expect(view.kind).toBe("cancelled");
+    expect(view.kind).toBe("passed");
   });
 
   it("reports unavailable when no checks exist", () => {

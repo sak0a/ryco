@@ -68,6 +68,13 @@ function emitGitStatus(event: VcsStatusResult) {
   }
 }
 
+async function flushRefreshPromises(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
   const listeners = new Set<(event: VcsStatusResult) => void>();
   const client = {
@@ -197,6 +204,7 @@ describe("gitStatusState", () => {
     const releaseB = watchGitStatus(TARGET, gitClient);
 
     expect(gitClient.onStatus).toHaveBeenCalledOnce();
+    expect(gitClient.refreshStatus).toHaveBeenCalledOnce();
     expect(getGitStatusSnapshot(TARGET)).toEqual({
       data: null,
       error: null,
@@ -220,6 +228,23 @@ describe("gitStatusState", () => {
     expect(gitStatusListeners.size).toBe(0);
   });
 
+  it("requests a full local and remote status refresh when a cwd is first watched", async () => {
+    const release = watchGitStatus(TARGET, gitClient);
+
+    expect(gitClient.refreshStatus).toHaveBeenCalledWith({ cwd: "/repo" });
+
+    await flushRefreshPromises();
+
+    expect(getGitStatusSnapshot(TARGET)).toEqual({
+      data: { ...BASE_STATUS, refName: "/repo-refreshed" },
+      error: null,
+      cause: null,
+      isPending: false,
+    });
+
+    release();
+  });
+
   it("refreshes git status through the unary RPC without restarting the stream", async () => {
     const release = watchGitStatus(TARGET, gitClient);
 
@@ -230,7 +255,7 @@ describe("gitStatusState", () => {
     expect(gitClient.refreshStatus).toHaveBeenCalledWith({ cwd: "/repo" });
     expect(refreshed).toEqual({ ...BASE_STATUS, refName: "/repo-refreshed" });
     expect(getGitStatusSnapshot(TARGET)).toEqual({
-      data: BASE_STATUS,
+      data: { ...BASE_STATUS, refName: "/repo-refreshed" },
       error: null,
       cause: null,
       isPending: false,
@@ -243,13 +268,13 @@ describe("gitStatusState", () => {
     const localListeners = new Set<(event: VcsStatusResult) => void>();
     const remoteListeners = new Set<(event: VcsStatusResult) => void>();
     const localClient = {
-      refreshStatus: vi.fn(),
+      refreshStatus: vi.fn(async () => BASE_STATUS),
       onStatus: vi.fn((_: { cwd: string }, listener: (event: VcsStatusResult) => void) =>
         registerListener(localListeners, listener),
       ),
     };
     const remoteClient = {
-      refreshStatus: vi.fn(),
+      refreshStatus: vi.fn(async () => BASE_STATUS),
       onStatus: vi.fn((_: { cwd: string }, listener: (event: VcsStatusResult) => void) =>
         registerListener(remoteListeners, listener),
       ),
