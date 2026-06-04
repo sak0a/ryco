@@ -4477,18 +4477,31 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const liveBoundaryEvent = makeDeletedEvent(12);
       const shouldNotReplayEvent = makeDeletedEvent(13);
       const livePubSub = yield* PubSub.unbounded<OrchestrationEvent>();
-      let replayPageCalls = 0;
+      const replayPageCursors: number[] = [];
 
       yield* buildAppUnderTest({
         layers: {
           orchestrationEngine: {
             readEventsPage: (fromSequenceExclusive) => {
-              replayPageCalls += 1;
-              assert.equal(fromSequenceExclusive, 10);
+              replayPageCursors.push(fromSequenceExclusive);
+              if (fromSequenceExclusive === 10) {
+                return Effect.succeed({
+                  events: [replayedEvent],
+                  nextSequence: replayedEvent.sequence,
+                  hasMore: true,
+                });
+              }
+              if (fromSequenceExclusive === replayedEvent.sequence) {
+                return Effect.succeed({
+                  events: [shouldNotReplayEvent],
+                  nextSequence: shouldNotReplayEvent.sequence,
+                  hasMore: false,
+                });
+              }
               return Effect.succeed({
-                events: [replayedEvent, shouldNotReplayEvent],
-                nextSequence: shouldNotReplayEvent.sequence,
-                hasMore: true,
+                events: [],
+                nextSequence: fromSequenceExclusive,
+                hasMore: false,
               });
             },
             subscribeDomainEvents: Effect.gen(function* () {
@@ -4520,7 +4533,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
 
-      assert.equal(replayPageCalls, 1);
+      assert.deepEqual(replayPageCursors, [10, 11]);
       assert.deepEqual(
         result.map((item) => (item.kind === "snapshot" ? "snapshot" : item.sequence)),
         ["snapshot", 11, 12],
