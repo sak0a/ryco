@@ -2,6 +2,7 @@ import { Context, Effect, Layer, Result, Schema, SchemaIssue } from "effect";
 
 import {
   TrimmedNonEmptyString,
+  type SourceControlChangeRequestMergeability,
   type SourceControlCommentReactionContent,
   type SourceControlRepositoryVisibility,
   type VcsError,
@@ -32,6 +33,7 @@ const GITHUB_PULL_REQUEST_CORE_JSON_FIELDS = [
   "baseRefName",
   "headRefName",
   "headRefOid",
+  "mergeable",
   "state",
   "mergedAt",
 ] as const;
@@ -117,6 +119,7 @@ export interface GitHubPullRequestSummary {
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
   readonly headSha?: string;
+  readonly mergeability?: SourceControlChangeRequestMergeability;
   readonly checkRollup?: ReadonlyArray<GitHubPullRequests.NormalizedGitHubCheckRollupItem>;
 }
 

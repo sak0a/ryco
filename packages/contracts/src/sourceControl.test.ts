@@ -85,6 +85,7 @@ describe("SourceControlChangeRequestDetail", () => {
       state: "open",
       updatedAt: Option.some(updatedAt),
       isDraft: false,
+      mergeability: "conflicting",
       author: "Alice",
       assignees: ["Bob"],
       labels: [{ name: "backend", color: "0052cc" }],
@@ -127,6 +128,7 @@ describe("SourceControlChangeRequestDetail", () => {
     });
 
     expect(decoded.linkedWorkItemKeys).toEqual(["PROJ-123"]);
+    expect(decoded.mergeability).toBe("conflicting");
     expect(decoded.participants?.[0]?.approved).toBe(true);
     expect(decoded.tasksCount).toBe(1);
   });

@@ -1,5 +1,5 @@
 import { memo, useState, useCallback, type ReactNode } from "react";
-import type { EnvironmentId } from "@ryco/contracts";
+import type { EnvironmentId, SourceControlChangeRequestMergeability } from "@ryco/contracts";
 import { type TimestampFormat } from "@ryco/contracts/settings";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -7,6 +7,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import ChatMarkdown from "./ChatMarkdown";
 import {
   BotIcon,
+  CircleCheckIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -17,8 +18,10 @@ import {
   GitCommitIcon,
   GitPullRequestIcon,
   LaptopIcon,
+  LoaderCircleIcon,
   LoaderIcon,
   PanelRightCloseIcon,
+  XCircleIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
 import type { ActivePlanState } from "../session-logic";
@@ -41,7 +44,6 @@ import {
   resolveSidebarStatusTextStyle,
 } from "./sidebar/sidebarStatusText";
 import type { PrCheckStatusView } from "./projectExplorer/prCheckStatus";
-import { PrCheckStatusBadge } from "./projectExplorer/PrCheckStatusBadge";
 
 export interface OverviewPanelItem {
   label: string;
@@ -49,6 +51,14 @@ export interface OverviewPanelItem {
   detail?: string;
   additions?: number;
   deletions?: number;
+  breakdown?: ReadonlyArray<{
+    label: string;
+    value: string;
+    detail?: string;
+    additions?: number;
+    deletions?: number;
+    muted?: boolean;
+  }>;
   action?: "files" | "review";
   icon?: "changes" | "environment";
 }
@@ -57,7 +67,9 @@ export interface OverviewPullRequestCheckRun {
   id: string;
   name: string;
   detail?: string;
+  activeDetail?: string;
   statusLabel: string;
+  statusKind: PrCheckStatusView["kind"];
   tone: PrCheckStatusView["tone"];
   url?: string;
 }
@@ -71,6 +83,9 @@ export interface OverviewPullRequestState {
   checkStatus: PrCheckStatusView | null;
   checksLoading: boolean;
   checksError?: string;
+  mergeability?: SourceControlChangeRequestMergeability;
+  hasMergeConflicts: boolean;
+  activeCheckCount: number;
   runs: ReadonlyArray<OverviewPullRequestCheckRun>;
 }
 
@@ -137,6 +152,89 @@ function overviewItemIcon(icon: OverviewPanelItem["icon"]): React.ReactNode {
     return <FileDiffIcon className="size-3.5" />;
   }
   return <LaptopIcon className="size-3.5" />;
+}
+
+function PendingCheckRing(): React.ReactNode {
+  return (
+    <span className="relative flex size-4 shrink-0 items-center justify-center">
+      <span className="absolute inset-0 rounded-full border-2 border-muted-foreground/20" />
+      <span className="absolute inset-0 animate-spin rounded-full border-2 border-emerald-500 border-r-amber-400 border-b-transparent" />
+      <span className="size-1 rounded-full bg-muted-foreground/45" />
+    </span>
+  );
+}
+
+function pullRequestCheckCountLabel(count: number): string {
+  return `${count} pending ${count === 1 ? "check" : "checks"}`;
+}
+
+function pullRequestStatusIcon(
+  kind: PrCheckStatusView["kind"] | "merge-conflicts",
+): React.ReactNode {
+  if (kind === "loading") {
+    return <LoaderCircleIcon className="size-4 shrink-0 animate-spin text-muted-foreground/55" />;
+  }
+  if (kind === "pending" || kind === "running") {
+    return PendingCheckRing();
+  }
+  if (kind === "passed") {
+    return <CircleCheckIcon className="size-4 shrink-0 text-emerald-500" />;
+  }
+  if (kind === "merge-conflicts" || kind === "failed" || kind === "api-error") {
+    return <XCircleIcon className="size-4 shrink-0 text-destructive" />;
+  }
+  if (kind === "cancelled") {
+    return <XCircleIcon className="size-4 shrink-0 text-muted-foreground/55" />;
+  }
+  return <span className="size-4 shrink-0 rounded-full border border-muted-foreground/35" />;
+}
+
+function pullRequestStatusTextClassName(kind: PrCheckStatusView["kind"] | "merge-conflicts") {
+  if (kind === "passed") return "text-foreground/90";
+  if (kind === "merge-conflicts" || kind === "failed" || kind === "api-error") {
+    return "text-muted-foreground/70";
+  }
+  return "text-muted-foreground/70";
+}
+
+function PullRequestStatusRow(props: {
+  icon: React.ReactNode;
+  label: string;
+  detail?: string | undefined;
+  className?: string | undefined;
+  trailing?: React.ReactNode | undefined;
+  href?: string | undefined;
+}) {
+  const content = (
+    <>
+      <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">{props.icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[12px] leading-5">{props.label}</span>
+        {props.detail ? (
+          <span className="block truncate text-[10px] leading-4 text-muted-foreground/45">
+            {props.detail}
+          </span>
+        ) : null}
+      </span>
+      {props.trailing ? <span className="shrink-0 text-[11px]">{props.trailing}</span> : null}
+    </>
+  );
+
+  const className = cn(
+    "flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-left",
+    props.href && "transition-colors hover:bg-muted/45",
+    props.className,
+  );
+
+  if (props.href) {
+    return (
+      <a href={props.href} target="_blank" rel="noreferrer" className={className}>
+        {content}
+      </a>
+    );
+  }
+
+  return <div className={className}>{content}</div>;
 }
 
 const PlanSidebar = memo(function PlanSidebar({
@@ -209,6 +307,28 @@ const PlanSidebar = memo(function PlanSidebar({
         () => setIsSavingToWorkspace(false),
       );
   }, [environmentId, planMarkdown, workspaceRoot]);
+
+  const pullRequestActiveCheckCount = pullRequest?.activeCheckCount ?? 0;
+  const pullRequestSummaryKind: PrCheckStatusView["kind"] | null =
+    pullRequestActiveCheckCount > 0
+      ? "running"
+      : (pullRequest?.checkStatus?.kind ?? (pullRequest?.checksLoading ? "loading" : null));
+  const pullRequestSummaryLabel = pullRequest
+    ? pullRequestActiveCheckCount > 0
+      ? pullRequestCheckCountLabel(pullRequestActiveCheckCount)
+      : (pullRequest.checkStatus?.label ?? "Loading checks")
+    : "";
+  const primaryActiveRun = pullRequest?.runs[0] ?? null;
+  const pullRequestSummaryDetail =
+    pullRequestActiveCheckCount > 0
+      ? (primaryActiveRun?.activeDetail ?? primaryActiveRun?.detail ?? primaryActiveRun?.name)
+      : pullRequest?.checkStatus?.kind === "failed" && pullRequest.checkStatus.failedChecks[0]
+        ? pullRequest.checkStatus.failedChecks[0].workflowName
+          ? `${pullRequest.checkStatus.failedChecks[0].workflowName} / ${pullRequest.checkStatus.failedChecks[0].name}`
+          : pullRequest.checkStatus.failedChecks[0].name
+        : pullRequest?.checkStatus?.kind === "api-error"
+          ? pullRequest.checksError
+          : undefined;
 
   return (
     <div
@@ -326,24 +446,79 @@ const PlanSidebar = memo(function PlanSidebar({
                       {overviewItemIcon(item.icon)}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-[10px] text-muted-foreground/45">{item.label}</p>
-                      <p className="truncate text-[12px] text-foreground/90">{item.value}</p>
-                      {item.detail ? (
-                        <p className="mt-0.5 truncate text-[10px] text-muted-foreground/45">
-                          {item.detail}
-                        </p>
-                      ) : null}
-                    </div>
-                    {typeof item.additions === "number" || typeof item.deletions === "number" ? (
-                      <div className="flex shrink-0 items-center gap-1 font-mono text-[11px] tabular-nums">
-                        {typeof item.additions === "number" ? (
-                          <span className="text-success">+{item.additions}</span>
-                        ) : null}
-                        {typeof item.deletions === "number" ? (
-                          <span className="text-destructive">-{item.deletions}</span>
+                      <div className="flex min-w-0 items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[10px] text-muted-foreground/45">{item.label}</p>
+                          <p className="truncate text-[12px] text-foreground/90">{item.value}</p>
+                          {item.detail ? (
+                            <p className="mt-0.5 truncate text-[10px] text-muted-foreground/45">
+                              {item.detail}
+                            </p>
+                          ) : null}
+                        </div>
+                        {typeof item.additions === "number" ||
+                        typeof item.deletions === "number" ? (
+                          <div className="flex shrink-0 items-center gap-1 pt-3 font-mono text-[11px] tabular-nums">
+                            {typeof item.additions === "number" ? (
+                              <span className="text-success">+{item.additions}</span>
+                            ) : null}
+                            {typeof item.deletions === "number" ? (
+                              <span className="text-destructive">-{item.deletions}</span>
+                            ) : null}
+                          </div>
                         ) : null}
                       </div>
-                    ) : null}
+                      {item.breakdown && item.breakdown.length > 0 ? (
+                        <div className="mt-1 space-y-0.5">
+                          {item.breakdown.map((entry) => (
+                            <div
+                              key={`${entry.label}:${entry.value}`}
+                              className={cn(
+                                "flex min-w-0 items-center justify-between gap-2 rounded-sm py-0.5 pl-0.5 text-[10px]",
+                                entry.muted
+                                  ? "text-muted-foreground/35"
+                                  : "text-muted-foreground/60",
+                              )}
+                            >
+                              <div className="min-w-0">
+                                <span className="font-medium">{entry.label}</span>
+                                <span className="mx-1 text-muted-foreground/30">·</span>
+                                <span>{entry.value}</span>
+                                {entry.detail ? (
+                                  <>
+                                    <span className="mx-1 text-muted-foreground/30">·</span>
+                                    <span className="truncate">{entry.detail}</span>
+                                  </>
+                                ) : null}
+                              </div>
+                              {typeof entry.additions === "number" ||
+                              typeof entry.deletions === "number" ? (
+                                <div className="flex shrink-0 items-center gap-1 font-mono tabular-nums">
+                                  {typeof entry.additions === "number" ? (
+                                    <span
+                                      className={cn(
+                                        entry.muted ? "text-success/45" : "text-success",
+                                      )}
+                                    >
+                                      +{entry.additions}
+                                    </span>
+                                  ) : null}
+                                  {typeof entry.deletions === "number" ? (
+                                    <span
+                                      className={cn(
+                                        entry.muted ? "text-destructive/45" : "text-destructive",
+                                      )}
+                                    >
+                                      -{entry.deletions}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
                   </>
                 );
                 return onAction ? (
@@ -403,56 +578,57 @@ const PlanSidebar = memo(function PlanSidebar({
                     </a>
                   ) : null}
                 </div>
-                <div className="mt-2 flex min-w-0 items-center gap-2">
-                  {pullRequest.checkStatus ? (
-                    <PrCheckStatusBadge view={pullRequest.checkStatus} mode="compact" />
-                  ) : pullRequest.checksLoading ? (
-                    <span className="inline-flex items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/8 px-1.5 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">
-                      <LoaderIcon className="size-3 animate-spin" />
-                      loading checks
-                    </span>
+                <div className="mt-2 space-y-0.5">
+                  {pullRequestSummaryKind ? (
+                    <PullRequestStatusRow
+                      icon={pullRequestStatusIcon(pullRequestSummaryKind)}
+                      label={pullRequestSummaryLabel}
+                      detail={pullRequestSummaryDetail}
+                      className={pullRequestStatusTextClassName(pullRequestSummaryKind)}
+                    />
                   ) : null}
-                  {pullRequest.checksError ? (
-                    <span className="truncate text-[11px] text-destructive">
-                      {pullRequest.checksError}
-                    </span>
+                  {pullRequest.hasMergeConflicts ? (
+                    <PullRequestStatusRow
+                      icon={pullRequestStatusIcon("merge-conflicts")}
+                      label="Merge conflicts"
+                      className={pullRequestStatusTextClassName("merge-conflicts")}
+                      trailing={<span className="text-muted-foreground/45">Fix</span>}
+                    />
+                  ) : null}
+                  {pullRequest.runs.length > 1
+                    ? pullRequest.runs
+                        .slice(0, 4)
+                        .map((run) => (
+                          <PullRequestStatusRow
+                            key={run.id}
+                            href={run.url}
+                            icon={pullRequestStatusIcon(run.statusKind)}
+                            label={run.name}
+                            detail={run.activeDetail ?? run.detail}
+                            className="text-foreground/80"
+                            trailing={
+                              <span
+                                className={cn(
+                                  "text-muted-foreground/50",
+                                  run.tone === "running" && "text-emerald-500/80",
+                                  run.tone === "pending" && "text-amber-500/85",
+                                )}
+                              >
+                                {run.statusLabel}
+                              </span>
+                            }
+                          />
+                        ))
+                    : null}
+                  {pullRequest.checksError && pullRequestSummaryKind !== "api-error" ? (
+                    <PullRequestStatusRow
+                      icon={pullRequestStatusIcon("api-error")}
+                      label="Checks unavailable"
+                      detail={pullRequest.checksError}
+                      className="text-destructive/90"
+                    />
                   ) : null}
                 </div>
-                {pullRequest.runs.length > 0 ? (
-                  <div className="mt-2 space-y-1">
-                    {pullRequest.runs.slice(0, 6).map((run) => (
-                      <a
-                        key={run.id}
-                        href={run.url}
-                        target={run.url ? "_blank" : undefined}
-                        rel={run.url ? "noreferrer" : undefined}
-                        className={cn(
-                          "flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-[11px]",
-                          run.url && "transition-colors hover:bg-muted/50",
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            "size-1.5 shrink-0 rounded-full",
-                            run.tone === "success"
-                              ? "bg-emerald-500"
-                              : run.tone === "failure" || run.tone === "error"
-                                ? "bg-rose-500"
-                                : run.tone === "running"
-                                  ? "bg-sky-500"
-                                  : run.tone === "pending"
-                                    ? "bg-amber-500"
-                                    : "bg-muted-foreground/45",
-                          )}
-                        />
-                        <span className="min-w-0 flex-1 truncate text-foreground/80">
-                          {run.name}
-                        </span>
-                        <span className="shrink-0 text-muted-foreground/55">{run.statusLabel}</span>
-                      </a>
-                    ))}
-                  </div>
-                ) : null}
               </div>
             </div>
           ) : null}

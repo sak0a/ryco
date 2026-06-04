@@ -92,6 +92,7 @@ function toChangeRequest(summary: GitHubCli.GitHubPullRequestSummary): ChangeReq
       ? { headRepositoryOwnerLogin: summary.headRepositoryOwnerLogin }
       : {}),
     ...(summary.headSha ? { headSha: summary.headSha } : {}),
+    ...(summary.mergeability ? { mergeability: summary.mergeability } : {}),
     ...(summary.checkRollup ? { checkRollup: summary.checkRollup } : {}),
   };
 }
