@@ -1,5 +1,5 @@
 // apps/web/src/components/settings/SettingsDialog.tsx
-import { useCallback, useState, type ComponentType } from "react";
+import { lazy, Suspense, useCallback, useState, type ComponentType } from "react";
 import {
   ArchiveIcon,
   BlocksIcon,
@@ -18,14 +18,7 @@ import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ScrollArea } from "../ui/scroll-area";
-import { AppearanceSettingsPanel } from "./AppearanceSettings";
-import { ConnectionsSettings } from "./ConnectionsSettings";
-import { KeybindingsSettingsPanel } from "./KeybindingsSettings";
-import { McpServersSettings } from "./McpServersSettings";
-import { OpinionatedPluginsSettingsPanel } from "./OpinionatedPluginsSettings";
-import { ProvidersSettingsPanel } from "./ProvidersSettingsPanel";
 import { ArchivedThreadsPanel, GeneralSettingsPanel, useSettingsRestore } from "./SettingsPanels";
-import { SourceControlSettingsPanel } from "./SourceControlSettings";
 
 interface NavItem {
   id: SettingsSectionId;
@@ -51,6 +44,36 @@ const SECTIONS_WITH_RESTORE: ReadonlySet<SettingsSectionId> = new Set([
   "appearance",
 ]);
 
+const LazyProvidersSettingsPanel = lazy(() =>
+  import("./ProvidersSettingsPanel").then((module) => ({
+    default: module.ProvidersSettingsPanel,
+  })),
+);
+const LazyOpinionatedPluginsSettingsPanel = lazy(() =>
+  import("./OpinionatedPluginsSettings").then((module) => ({
+    default: module.OpinionatedPluginsSettingsPanel,
+  })),
+);
+const LazyMcpServersSettings = lazy(() =>
+  import("./McpServersSettings").then((module) => ({ default: module.McpServersSettings })),
+);
+const LazyAppearanceSettingsPanel = lazy(() =>
+  import("./AppearanceSettings").then((module) => ({ default: module.AppearanceSettingsPanel })),
+);
+const LazyKeybindingsSettingsPanel = lazy(() =>
+  import("./KeybindingsSettings").then((module) => ({
+    default: module.KeybindingsSettingsPanel,
+  })),
+);
+const LazySourceControlSettingsPanel = lazy(() =>
+  import("./SourceControlSettings").then((module) => ({
+    default: module.SourceControlSettingsPanel,
+  })),
+);
+const LazyConnectionsSettings = lazy(() =>
+  import("./ConnectionsSettings").then((module) => ({ default: module.ConnectionsSettings })),
+);
+
 function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
   return (
@@ -67,26 +90,25 @@ function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
 }
 
 function SectionPanel({ section }: { section: SettingsSectionId }) {
-  switch (section) {
-    case "general":
-      return <GeneralSettingsPanel />;
-    case "providers":
-      return <ProvidersSettingsPanel />;
-    case "opinionated-plugins":
-      return <OpinionatedPluginsSettingsPanel />;
-    case "mcp-servers":
-      return <McpServersSettings />;
-    case "appearance":
-      return <AppearanceSettingsPanel />;
-    case "keybindings":
-      return <KeybindingsSettingsPanel />;
-    case "source-control":
-      return <SourceControlSettingsPanel />;
-    case "connections":
-      return <ConnectionsSettings />;
-    case "archived":
-      return <ArchivedThreadsPanel />;
-  }
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-80 items-center justify-center text-muted-foreground text-sm">
+          Loading settings...
+        </div>
+      }
+    >
+      {section === "general" ? <GeneralSettingsPanel /> : null}
+      {section === "providers" ? <LazyProvidersSettingsPanel /> : null}
+      {section === "opinionated-plugins" ? <LazyOpinionatedPluginsSettingsPanel /> : null}
+      {section === "mcp-servers" ? <LazyMcpServersSettings /> : null}
+      {section === "appearance" ? <LazyAppearanceSettingsPanel /> : null}
+      {section === "keybindings" ? <LazyKeybindingsSettingsPanel /> : null}
+      {section === "source-control" ? <LazySourceControlSettingsPanel /> : null}
+      {section === "connections" ? <LazyConnectionsSettings /> : null}
+      {section === "archived" ? <ArchivedThreadsPanel /> : null}
+    </Suspense>
+  );
 }
 
 export function SettingsDialog() {

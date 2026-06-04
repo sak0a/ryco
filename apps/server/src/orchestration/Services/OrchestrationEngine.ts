@@ -12,7 +12,7 @@
  */
 import type { OrchestrationCommand, OrchestrationEvent } from "@ryco/contracts";
 import { Context } from "effect";
-import type { Effect, Stream } from "effect";
+import type { Effect, PubSub, Scope, Stream } from "effect";
 
 import type { OrchestrationDispatchError } from "../Errors.ts";
 import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
@@ -29,7 +29,28 @@ export interface OrchestrationEngineShape {
    */
   readonly readEvents: (
     fromSequenceExclusive: number,
+    limit?: number,
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError, never>;
+
+  /**
+   * Replay one persisted page of orchestration events from an exclusive sequence cursor.
+   *
+   * @param fromSequenceExclusive - Sequence cursor (exclusive).
+   * @param limit - Maximum number of events to return.
+   * @returns Effect containing ordered events and pagination metadata.
+   */
+  readonly readEventsPage: (
+    fromSequenceExclusive: number,
+    limit: number,
+  ) => Effect.Effect<
+    {
+      readonly events: ReadonlyArray<OrchestrationEvent>;
+      readonly nextSequence: number;
+      readonly hasMore: boolean;
+    },
+    OrchestrationEventStoreError,
+    never
+  >;
 
   /**
    * Dispatch a validated orchestration command.
@@ -50,6 +71,18 @@ export interface OrchestrationEngineShape {
    * This is a hot runtime stream (new events only), not a historical replay.
    */
   readonly streamDomainEvents: Stream.Stream<OrchestrationEvent>;
+
+  /**
+   * Acquire a live domain event subscription synchronously in the caller's fiber.
+   *
+   * Use this when follow-up work forks a consumer and must not miss a publish
+   * between subscription setup and the forked consumer actually starting.
+   */
+  readonly subscribeDomainEvents: Effect.Effect<
+    PubSub.Subscription<OrchestrationEvent>,
+    never,
+    Scope.Scope
+  >;
 }
 
 /**

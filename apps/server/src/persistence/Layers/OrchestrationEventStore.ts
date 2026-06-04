@@ -258,8 +258,51 @@ const makeEventStore = Effect.gen(function* () {
     return readPage(sequenceExclusive, normalizedLimit);
   };
 
+  const readPage: OrchestrationEventStoreShape["readPage"] = (sequenceExclusive, limit) => {
+    const normalizedLimit = Math.max(0, Math.floor(limit));
+    const normalizedSequenceExclusive = Math.max(0, Math.floor(sequenceExclusive));
+    if (normalizedLimit === 0) {
+      return Effect.succeed({
+        events: [],
+        nextSequence: normalizedSequenceExclusive,
+        hasMore: false,
+      });
+    }
+
+    return readEventRowsFromSequence({
+      sequenceExclusive: normalizedSequenceExclusive,
+      limit: normalizedLimit + 1,
+    }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "OrchestrationEventStore.readPage:query",
+          "OrchestrationEventStore.readPage:decodeRows",
+        ),
+      ),
+      Effect.flatMap((rows) =>
+        Effect.forEach(rows.slice(0, normalizedLimit), (row) =>
+          decodeEvent(row).pipe(
+            Effect.mapError(
+              toPersistenceDecodeError("OrchestrationEventStore.readPage:rowToEvent"),
+            ),
+          ),
+        ).pipe(
+          Effect.map((events) => ({
+            events,
+            nextSequence:
+              events.length === 0
+                ? normalizedSequenceExclusive
+                : events[events.length - 1]!.sequence,
+            hasMore: rows.length > normalizedLimit,
+          })),
+        ),
+      ),
+    );
+  };
+
   return {
     append,
+    readPage,
     readFromSequence,
     readAll: () => readFromSequence(0, Number.MAX_SAFE_INTEGER),
   } satisfies OrchestrationEventStoreShape;

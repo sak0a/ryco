@@ -28,6 +28,7 @@ import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/ser
 import { useUiStateStore } from "../../uiStateStore";
 import { DEFAULT_CLIENT_SETTINGS } from "@ryco/contracts/settings";
 import { ConnectionsSettings } from "./ConnectionsSettings";
+import { KeybindingsSettingsPanel } from "./KeybindingsSettings";
 import { ProvidersSettingsPanel } from "./ProvidersSettingsPanel";
 import { GeneralSettingsPanel } from "./SettingsPanels";
 import { SourceControlSettingsPanel } from "./SourceControlSettings";
@@ -775,6 +776,23 @@ describe("GeneralSettingsPanel observability", () => {
         ),
       )
       .toBeInTheDocument();
+  });
+
+  it("disables the keybindings file opener when no editor is available", async () => {
+    installSettingsNativeApi();
+    setServerConfigSnapshot({
+      ...createBaseServerConfig(),
+      availableEditors: [],
+    });
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <KeybindingsSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByText("No available editors found.")).toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Open file" })).toBeDisabled();
   });
 
   it("labels the default editor file-manager option as Finder on macOS", async () => {

@@ -166,7 +166,7 @@ const DEFAULT_VIEWPORT: ViewportSpec = {
 };
 const WIDE_FOOTER_VIEWPORT: ViewportSpec = {
   name: "wide-footer",
-  width: 1_400,
+  width: 1_680,
   height: 1_100,
   textTolerancePx: 44,
   attachmentTolerancePx: 56,

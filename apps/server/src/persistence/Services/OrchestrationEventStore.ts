@@ -46,6 +46,25 @@ export interface OrchestrationEventStoreShape {
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
 
   /**
+   * Read a single ordered page of events after the provided sequence.
+   *
+   * @param sequenceExclusive - Sequence cursor (exclusive).
+   * @param limit - Maximum number of events to return.
+   * @returns Effect containing the page, the next exclusive cursor, and whether more rows exist.
+   */
+  readonly readPage: (
+    sequenceExclusive: number,
+    limit: number,
+  ) => Effect.Effect<
+    {
+      readonly events: ReadonlyArray<OrchestrationEvent>;
+      readonly nextSequence: number;
+      readonly hasMore: boolean;
+    },
+    OrchestrationEventStoreError
+  >;
+
+  /**
    * Read all events from the beginning of the stream.
    *
    * @returns Stream containing all stored events.

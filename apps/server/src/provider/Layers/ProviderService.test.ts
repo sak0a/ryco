@@ -21,7 +21,19 @@ import {
 import { createModelSelection } from "@ryco/shared/model";
 import { it, assert, vi } from "@effect/vitest";
 
-import { Effect, Exit, Fiber, Layer, Metric, Option, PubSub, Ref, Scope, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Metric,
+  Option,
+  PubSub,
+  Ref,
+  Scope,
+  Stream,
+} from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
@@ -77,31 +89,43 @@ type LegacyProviderRuntimeEvent = {
   readonly [key: string]: unknown;
 };
 
-function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
+function makeFakeCodexAdapter(
+  provider: ProviderDriverKind = CODEX_DRIVER,
+  options: {
+    readonly startSessionEffect?: (
+      input: ProviderSessionStartInput,
+      makeSession: (input: ProviderSessionStartInput) => ProviderSession,
+    ) => Effect.Effect<ProviderSession, ProviderAdapterError>;
+  } = {},
+) {
   const sessions = new Map<ThreadId, ProviderSession>();
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
 
+  const makeSession = (input: ProviderSessionStartInput): ProviderSession => {
+    const now = new Date().toISOString();
+    const session: ProviderSession = {
+      provider,
+      ...(input.providerInstanceId !== undefined
+        ? { providerInstanceId: input.providerInstanceId }
+        : {}),
+      status: "ready",
+      runtimeMode: input.runtimeMode,
+      threadId: input.threadId,
+      resumeCursor: input.resumeCursor ?? {
+        opaque: `resume-${String(input.threadId)}`,
+      },
+      cwd: input.cwd ?? process.cwd(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    sessions.set(session.threadId, session);
+    return session;
+  };
+
   const startSession = vi.fn((input: ProviderSessionStartInput) =>
-    Effect.sync(() => {
-      const now = new Date().toISOString();
-      const session: ProviderSession = {
-        provider,
-        ...(input.providerInstanceId !== undefined
-          ? { providerInstanceId: input.providerInstanceId }
-          : {}),
-        status: "ready",
-        runtimeMode: input.runtimeMode,
-        threadId: input.threadId,
-        resumeCursor: input.resumeCursor ?? {
-          opaque: `resume-${String(input.threadId)}`,
-        },
-        cwd: input.cwd ?? process.cwd(),
-        createdAt: now,
-        updatedAt: now,
-      };
-      sessions.set(session.threadId, session);
-      return session;
-    }),
+    options.startSessionEffect
+      ? options.startSessionEffect(input, makeSession)
+      : Effect.sync(() => makeSession(input)),
   );
 
   const sendTurn = vi.fn(
@@ -398,6 +422,95 @@ it.effect("ProviderServiceLive rejects new sessions for disabled providers", () 
     assert.include(failure.issue, "Provider instance 'claudeAgent' is disabled");
     assert.equal(claude.startSession.mock.calls.length, 0);
   }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "ProviderServiceLive rejects provider starts beyond per-instance admission capacity",
+  () =>
+    Effect.gen(function* () {
+      const firstStartEntered = yield* Deferred.make<void, never>();
+      const releaseFirstStart = yield* Deferred.make<void, never>();
+      const codex = makeFakeCodexAdapter(CODEX_DRIVER, {
+        startSessionEffect: (input, makeSession) =>
+          input.threadId === asThreadId("thread-admission-blocked")
+            ? Effect.gen(function* () {
+                yield* Deferred.succeed(firstStartEntered, undefined);
+                yield* Deferred.await(releaseFirstStart);
+                return makeSession(input);
+              })
+            : Effect.sync(() => makeSession(input)),
+      });
+      const registry = makeAdapterRegistryMock({
+        [CODEX_DRIVER]: codex.adapter,
+      });
+      const providerAdapterLayer = Layer.succeed(ProviderAdapterRegistry, registry);
+      const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+        Layer.provide(SqlitePersistenceMemory),
+      );
+      const directoryLayer = ProviderSessionDirectoryLive.pipe(
+        Layer.provide(runtimeRepositoryLayer),
+      );
+      const providerLayer = makeProviderServiceLive({
+        providerStartupAdmission: {
+          maxConcurrentStartsPerInstance: 1,
+          maxPendingStartsPerInstance: 1,
+        },
+      }).pipe(
+        Layer.provide(providerAdapterLayer),
+        Layer.provide(directoryLayer),
+        Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(AnalyticsService.layerTest),
+        Layer.provide(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+      );
+
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService;
+        const firstStartFiber = yield* provider
+          .startSession(asThreadId("thread-admission-blocked"), {
+            provider: CODEX_DRIVER,
+            providerInstanceId: codexInstanceId,
+            threadId: asThreadId("thread-admission-blocked"),
+            runtimeMode: "full-access",
+          })
+          .pipe(Effect.forkScoped);
+
+        yield* Deferred.await(firstStartEntered);
+
+        const failure = yield* provider
+          .startSession(asThreadId("thread-admission-rejected"), {
+            provider: CODEX_DRIVER,
+            providerInstanceId: codexInstanceId,
+            threadId: asThreadId("thread-admission-rejected"),
+            runtimeMode: "full-access",
+          })
+          .pipe(Effect.flip);
+
+        assert.instanceOf(failure, ProviderValidationError);
+        assert.include(failure.issue, "Provider startup admission is busy");
+        assert.equal(codex.startSession.mock.calls.length, 1);
+
+        yield* Deferred.succeed(releaseFirstStart, undefined);
+        const firstSession = yield* Fiber.join(firstStartFiber);
+        assert.equal(firstSession.threadId, asThreadId("thread-admission-blocked"));
+
+        const snapshots = yield* Metric.snapshot;
+        assert.equal(
+          hasMetricSnapshot(snapshots, "t3_provider_startup_admission_total", {
+            provider: CODEX_DRIVER,
+            providerInstanceId: codexInstanceId,
+            outcome: "busy",
+          }),
+          true,
+        );
+        assert.equal(
+          hasMetricSnapshot(snapshots, "t3_provider_startup_queue_high_water", {
+            provider: CODEX_DRIVER,
+            providerInstanceId: codexInstanceId,
+          }),
+          true,
+        );
+      }).pipe(Effect.scoped, Effect.provide(providerLayer));
+    }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect(

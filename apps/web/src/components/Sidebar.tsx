@@ -93,6 +93,7 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { PREFERS_REDUCED_MOTION_QUERY, shouldEnableAutoAnimate } from "../lib/perf/motion";
 import { cn, isMacPlatform, newCommandId } from "../lib/utils";
 import {
   selectProjectByRef,
@@ -124,6 +125,7 @@ import { readLocalApi } from "../localApi";
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 
 import { useThreadActions } from "../hooks/useThreadActions";
 import {
@@ -203,7 +205,9 @@ import {
   shouldAutoAnimateSidebarProjectList,
   shouldAutoAnimateSidebarThreadLists,
   shouldClearThreadSelectionOnMouseDown,
-  shouldConfirmCloseSidebarThread,
+  shouldConfirmSidebarThreadArchive,
+  shouldConfirmSidebarThreadDelete,
+  shouldConfirmSidebarThreadSelectionDelete,
   shouldQuerySidebarSourceControlCounts,
   sortProjectsForSidebar,
   useThreadJumpHintVisibility,
@@ -2363,7 +2367,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const appSettingsConfirmThreadDelete = useSettings<boolean>(
     (settings) => settings.confirmThreadDelete,
   );
-  const appSettingsConfirmThreadArchive = false;
+  const appSettingsConfirmThreadArchive = useSettings<boolean>(
+    (settings) => settings.confirmThreadArchive,
+  );
   const defaultThreadEnvMode = useSettings<ThreadEnvMode>(
     (settings) => settings.defaultThreadEnvMode,
   );
@@ -3211,7 +3217,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
       const threadRef = scopeThreadRef(thread.environmentId, thread.id);
-      const shouldConfirmClose = shouldConfirmCloseSidebarThread(thread);
+      const shouldConfirmClose = shouldConfirmSidebarThreadDelete({
+        confirmThreadDelete: appSettingsConfirmThreadDelete,
+        thread,
+      });
       if (shouldConfirmClose) {
         const message = [
           `Close session "${thread.title}"?`,
@@ -3234,7 +3243,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         optimistic: true,
       });
     },
-    [deleteThread, router],
+    [appSettingsConfirmThreadDelete, deleteThread, router],
   );
 
   const handleThreadClick = useCallback(
@@ -3311,7 +3320,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
       if (clicked !== "delete") return;
 
-      if (appSettingsConfirmThreadDelete) {
+      const shouldConfirmDelete = shouldConfirmSidebarThreadSelectionDelete({
+        confirmThreadDelete: appSettingsConfirmThreadDelete,
+        threads: threadKeys.map((threadKey) => sidebarThreadByKeyRef.current.get(threadKey)),
+      });
+
+      if (shouldConfirmDelete) {
         const confirmed = await api.dialogs.confirm(
           [
             `Delete ${count} thread${count === 1 ? "" : "s"}?`,
@@ -4161,6 +4175,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
       if (clicked === "archive") {
+        if (
+          shouldConfirmSidebarThreadArchive({
+            archiveAvailable,
+            confirmThreadArchive: appSettingsConfirmThreadArchive,
+          })
+        ) {
+          const confirmed = await api.dialogs.confirm(
+            [
+              `Archive session "${thread.title}"?`,
+              "You can restore archived sessions from Settings > Archive.",
+            ].join("\n"),
+          );
+          if (!confirmed) return;
+        }
         await attemptArchiveThread(threadRef);
         return;
       }
@@ -4169,6 +4197,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     },
     [
       attemptArchiveThread,
+      appSettingsConfirmThreadArchive,
       clearSelection,
       closeThread,
       copyPathToClipboard,
@@ -5351,47 +5380,6 @@ export default function Sidebar() {
     dragInProgressRef.current = false;
   }, []);
 
-  const shouldAnimateProjectLists = shouldAutoAnimateSidebarProjectList(projects.length);
-  const shouldAnimateThreadLists = shouldAutoAnimateSidebarThreadLists({
-    projectCount: projects.length,
-    visibleThreadCount: sidebarThreads.length,
-  });
-  const projectListAnimationControllersRef = useRef<SidebarAutoAnimateControllers>(new Map());
-  const attachProjectListAutoAnimateRef = useCallback(
-    (node: HTMLElement | null) => {
-      attachSidebarAutoAnimateNode(
-        projectListAnimationControllersRef.current,
-        node,
-        shouldAnimateProjectLists,
-      );
-    },
-    [shouldAnimateProjectLists],
-  );
-  useEffect(() => {
-    setSidebarAutoAnimateControllersEnabled(
-      projectListAnimationControllersRef.current,
-      shouldAnimateProjectLists,
-    );
-  }, [shouldAnimateProjectLists]);
-
-  const threadListAnimationControllersRef = useRef<SidebarAutoAnimateControllers>(new Map());
-  const attachThreadListAutoAnimateRef = useCallback(
-    (node: HTMLElement | null) => {
-      attachSidebarAutoAnimateNode(
-        threadListAnimationControllersRef.current,
-        node,
-        shouldAnimateThreadLists,
-      );
-    },
-    [shouldAnimateThreadLists],
-  );
-  useEffect(() => {
-    setSidebarAutoAnimateControllersEnabled(
-      threadListAnimationControllersRef.current,
-      shouldAnimateThreadLists,
-    );
-  }, [shouldAnimateThreadLists]);
-
   const visibleThreads = useMemo(
     () => sidebarThreads.filter((thread) => thread.archivedAt === null),
     [sidebarThreads],
@@ -5484,6 +5472,53 @@ export default function Sidebar() {
       worktreesByProjectKey,
     ],
   );
+  const prefersReducedMotion = useMediaQuery(PREFERS_REDUCED_MOTION_QUERY);
+  const shouldAnimateProjectLists = shouldEnableAutoAnimate({
+    prefersReducedMotion,
+    withinThreshold: shouldAutoAnimateSidebarProjectList(sortedProjects.length),
+  });
+  const shouldAnimateThreadLists = shouldEnableAutoAnimate({
+    prefersReducedMotion,
+    withinThreshold: shouldAutoAnimateSidebarThreadLists({
+      projectCount: sortedProjects.length,
+      visibleThreadCount: visibleSidebarThreadKeys.length,
+    }),
+  });
+  const projectListAnimationControllersRef = useRef<SidebarAutoAnimateControllers>(new Map());
+  const attachProjectListAutoAnimateRef = useCallback(
+    (node: HTMLElement | null) => {
+      attachSidebarAutoAnimateNode(
+        projectListAnimationControllersRef.current,
+        node,
+        shouldAnimateProjectLists,
+      );
+    },
+    [shouldAnimateProjectLists],
+  );
+  useEffect(() => {
+    setSidebarAutoAnimateControllersEnabled(
+      projectListAnimationControllersRef.current,
+      shouldAnimateProjectLists,
+    );
+  }, [shouldAnimateProjectLists]);
+
+  const threadListAnimationControllersRef = useRef<SidebarAutoAnimateControllers>(new Map());
+  const attachThreadListAutoAnimateRef = useCallback(
+    (node: HTMLElement | null) => {
+      attachSidebarAutoAnimateNode(
+        threadListAnimationControllersRef.current,
+        node,
+        shouldAnimateThreadLists,
+      );
+    },
+    [shouldAnimateThreadLists],
+  );
+  useEffect(() => {
+    setSidebarAutoAnimateControllersEnabled(
+      threadListAnimationControllersRef.current,
+      shouldAnimateThreadLists,
+    );
+  }, [shouldAnimateThreadLists]);
   const threadJumpCommandByKey = useMemo(() => {
     const mapping = new Map<string, NonNullable<ReturnType<typeof threadJumpCommandForIndex>>>();
     for (const [visibleThreadIndex, threadKey] of visibleSidebarThreadKeys.entries()) {

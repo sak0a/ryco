@@ -6,6 +6,8 @@ import {
   ApprovalRequestId,
   CodexSettings,
   EventId,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderItemId,
@@ -25,6 +27,7 @@ import { Context, Effect, Exit, Fiber, Layer, Option, Queue, Schema, Scope, Stre
 import * as CodexErrors from "effect-codex-app-server/errors";
 
 import { ServerConfig } from "../../config.ts";
+import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { buildAgentTokenModeInstructions } from "../../tokenReduction.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
@@ -199,6 +202,26 @@ function makeScopedRuntimeFactory(options?: { readonly failConstruction?: boolea
       return runtimes.at(-1);
     },
   };
+}
+
+function makeCodexAdapterTestLayer(input: {
+  readonly runtimeFactory: ReturnType<typeof makeRuntimeFactory>;
+  readonly prefix: string;
+}) {
+  return Layer.effect(
+    CodexAdapter,
+    Effect.gen(function* () {
+      const codexConfig = Schema.decodeSync(CodexSettings)({});
+      return yield* makeCodexAdapter(codexConfig, {
+        makeRuntime: input.runtimeFactory.factory,
+      });
+    }),
+  ).pipe(
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: input.prefix })),
+    Layer.provideMerge(ServerSettingsService.layerTest()),
+    Layer.provideMerge(providerSessionDirectoryTestLayer),
+    Layer.provideMerge(NodeServices.layer),
+  );
 }
 
 const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory, {
@@ -409,6 +432,150 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       });
     }).pipe(Effect.provide(customLayer));
   });
+
+  it.effect("stats and embeds small image attachments before sending a turn", () => {
+    const attachmentRuntimeFactory = makeRuntimeFactory();
+    const attachmentLayer = makeCodexAdapterTestLayer({
+      runtimeFactory: attachmentRuntimeFactory,
+      prefix: "ryco-codex-attachment-small-",
+    });
+
+    return Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const { attachmentsDir } = yield* ServerConfig;
+      const attachment = {
+        type: "image" as const,
+        id: "thread-codex-attachment-12345678-1234-1234-1234-123456789abc",
+        name: "diagram.png",
+        mimeType: "image/png",
+        sizeBytes: 4,
+      };
+      const attachmentPath = path.join(attachmentsDir, attachmentRelativePath(attachment));
+      fs.mkdirSync(path.dirname(attachmentPath), { recursive: true });
+      fs.writeFileSync(attachmentPath, Uint8Array.from([1, 2, 3, 4]));
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("sess-attachment-small"),
+        runtimeMode: "full-access",
+      });
+      const runtime = attachmentRuntimeFactory.lastRuntime;
+      assert.ok(runtime);
+      runtime.sendTurnImpl.mockClear();
+
+      yield* adapter.sendTurn({
+        threadId: asThreadId("sess-attachment-small"),
+        input: "What's in this image?",
+        attachments: [attachment],
+      });
+
+      assert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
+        input: "What's in this image?",
+        attachments: [
+          {
+            type: "image",
+            url: "data:image/png;base64,AQIDBA==",
+          },
+        ],
+      });
+    }).pipe(Effect.provide(attachmentLayer));
+  });
+
+  it.effect("rejects turns that exceed the provider attachment count before reading files", () => {
+    const attachmentRuntimeFactory = makeRuntimeFactory();
+    const attachmentLayer = makeCodexAdapterTestLayer({
+      runtimeFactory: attachmentRuntimeFactory,
+      prefix: "ryco-codex-attachment-count-",
+    });
+
+    return Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("sess-attachment-count"),
+        runtimeMode: "full-access",
+      });
+      const runtime = attachmentRuntimeFactory.lastRuntime;
+      assert.ok(runtime);
+      runtime.sendTurnImpl.mockClear();
+
+      const attachments = Array.from(
+        { length: PROVIDER_SEND_TURN_MAX_ATTACHMENTS + 1 },
+        (_, index) => ({
+          type: "image" as const,
+          id: `thread-codex-count-${index}`,
+          name: `image-${index}.png`,
+          mimeType: "image/png",
+          sizeBytes: 1,
+        }),
+      );
+      const result = yield* adapter
+        .sendTurn({
+          threadId: asThreadId("sess-attachment-count"),
+          input: "too many",
+          attachments,
+        })
+        .pipe(Effect.result);
+
+      assert.equal(result._tag, "Failure");
+      assert.equal(result.failure._tag, "ProviderAdapterRequestError");
+      assert.match(result.failure.detail, /Turn has 9 attachments; limit is 8\./);
+      assert.equal(runtime.sendTurnImpl.mock.calls.length, 0);
+    }).pipe(Effect.provide(attachmentLayer));
+  });
+
+  it.effect(
+    "rejects persisted attachments that exceed the provider byte limit before base64",
+    () => {
+      const attachmentRuntimeFactory = makeRuntimeFactory();
+      const attachmentLayer = makeCodexAdapterTestLayer({
+        runtimeFactory: attachmentRuntimeFactory,
+        prefix: "ryco-codex-attachment-large-",
+      });
+
+      return Effect.gen(function* () {
+        const adapter = yield* CodexAdapter;
+        const { attachmentsDir } = yield* ServerConfig;
+        const attachment = {
+          type: "image" as const,
+          id: "thread-codex-large-12345678-1234-1234-1234-123456789abc",
+          name: "large.png",
+          mimeType: "image/png",
+          sizeBytes: 1,
+        };
+        const attachmentPath = path.join(attachmentsDir, attachmentRelativePath(attachment));
+        fs.mkdirSync(path.dirname(attachmentPath), { recursive: true });
+        fs.writeFileSync(attachmentPath, Buffer.alloc(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES + 1));
+
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("sess-attachment-large"),
+          runtimeMode: "full-access",
+        });
+        const runtime = attachmentRuntimeFactory.lastRuntime;
+        assert.ok(runtime);
+        runtime.sendTurnImpl.mockClear();
+
+        const result = yield* adapter
+          .sendTurn({
+            threadId: asThreadId("sess-attachment-large"),
+            input: "too large",
+            attachments: [attachment],
+          })
+          .pipe(Effect.result);
+
+        assert.equal(result._tag, "Failure");
+        assert.equal(result.failure._tag, "ProviderAdapterRequestError");
+        assert.match(
+          result.failure.detail,
+          new RegExp(
+            `Attachment 'large\\.png' is ${PROVIDER_SEND_TURN_MAX_IMAGE_BYTES + 1} bytes; limit is ${PROVIDER_SEND_TURN_MAX_IMAGE_BYTES} bytes\\.`,
+          ),
+        );
+        assert.equal(runtime.sendTurnImpl.mock.calls.length, 0);
+      }).pipe(Effect.provide(attachmentLayer));
+    },
+  );
 });
 
 const lifecycleRuntimeFactory = makeRuntimeFactory();

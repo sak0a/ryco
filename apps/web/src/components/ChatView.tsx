@@ -40,7 +40,17 @@ import { truncate } from "@ryco/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "effect";
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
@@ -146,7 +156,6 @@ import {
   summarizeActiveWorkflowJob,
 } from "./overviewPullRequestChecks.logic";
 import { buildOverviewChangesItem } from "./overviewChanges.logic";
-import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -261,6 +270,7 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 const EMPTY_SESSION_TABS: ReadonlyArray<ChatSessionTabsItem> = Object.freeze([]);
+const ThreadTerminalDrawer = lazy(() => import("./ThreadTerminalDrawer"));
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -684,31 +694,42 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
 
   return (
     <div className={visible ? undefined : "hidden"}>
-      <ThreadTerminalDrawer
-        threadRef={threadRef}
-        threadId={threadId}
-        cwd={cwd}
-        worktreePath={effectiveWorktreePath}
-        runtimeEnv={runtimeEnv}
-        visible={visible}
-        height={terminalState.terminalHeight}
-        terminalIds={terminalState.terminalIds}
-        runningTerminalIds={terminalState.runningTerminalIds}
-        activeTerminalId={terminalState.activeTerminalId}
-        terminalGroups={terminalState.terminalGroups}
-        activeTerminalGroupId={terminalState.activeTerminalGroupId}
-        focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
-        onSplitTerminal={splitTerminal}
-        onNewTerminal={createNewTerminal}
-        splitShortcutLabel={visible ? splitShortcutLabel : undefined}
-        newShortcutLabel={visible ? newShortcutLabel : undefined}
-        closeShortcutLabel={visible ? closeShortcutLabel : undefined}
-        keybindings={keybindings}
-        onActiveTerminalChange={activateTerminal}
-        onCloseTerminal={closeTerminal}
-        onHeightChange={setTerminalHeight}
-        onAddTerminalContext={handleAddTerminalContext}
-      />
+      <Suspense
+        fallback={
+          <div
+            className="thread-terminal-drawer relative flex min-w-0 shrink-0 items-center border-border/80 border-t bg-background px-4 text-muted-foreground text-sm"
+            style={{ height: terminalState.terminalHeight }}
+          >
+            Loading terminal...
+          </div>
+        }
+      >
+        <ThreadTerminalDrawer
+          threadRef={threadRef}
+          threadId={threadId}
+          cwd={cwd}
+          worktreePath={effectiveWorktreePath}
+          runtimeEnv={runtimeEnv}
+          visible={visible}
+          height={terminalState.terminalHeight}
+          terminalIds={terminalState.terminalIds}
+          runningTerminalIds={terminalState.runningTerminalIds}
+          activeTerminalId={terminalState.activeTerminalId}
+          terminalGroups={terminalState.terminalGroups}
+          activeTerminalGroupId={terminalState.activeTerminalGroupId}
+          focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
+          onSplitTerminal={splitTerminal}
+          onNewTerminal={createNewTerminal}
+          splitShortcutLabel={visible ? splitShortcutLabel : undefined}
+          newShortcutLabel={visible ? newShortcutLabel : undefined}
+          closeShortcutLabel={visible ? closeShortcutLabel : undefined}
+          keybindings={keybindings}
+          onActiveTerminalChange={activateTerminal}
+          onCloseTerminal={closeTerminal}
+          onHeightChange={setTerminalHeight}
+          onAddTerminalContext={handleAddTerminalContext}
+        />
+      </Suspense>
     </div>
   );
 });

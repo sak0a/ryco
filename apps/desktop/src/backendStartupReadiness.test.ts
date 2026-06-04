@@ -46,13 +46,16 @@ describe("waitForBackendStartupReady", () => {
   it("rejects when the listening signal fails before HTTP readiness", async () => {
     const error = new Error("backend exited");
     const waitForHttpReady = vi.fn(() => new Promise<void>(() => {}));
+    const cancelHttpWait = vi.fn();
 
     await expect(
       waitForBackendStartupReady({
         listeningPromise: Promise.reject(error),
         waitForHttpReady,
-        cancelHttpWait: vi.fn(),
+        cancelHttpWait,
       }),
     ).rejects.toBe(error);
+
+    expect(cancelHttpWait).toHaveBeenCalledTimes(1);
   });
 });

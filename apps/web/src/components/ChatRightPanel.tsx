@@ -1,5 +1,6 @@
 import { Suspense, lazy, useCallback } from "react";
 
+import { resolveInactivePanelContentVisibilityStyle } from "../lib/perf/motion";
 import type { RightPanelMode, RightPanelRouteSearch } from "../rightPanelRouteSearch";
 import { stripWorkspacePanelSearchParams } from "../workspaceRouteSearch";
 import { Sidebar, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
@@ -111,6 +112,10 @@ export const RightPanelInlineSidebar = (props: {
   renderContent: boolean;
 }) => {
   const { open, onClose, onOpen, panelMode, renderContent } = props;
+  const panelContentVisibilityStyle = resolveInactivePanelContentVisibilityStyle({
+    active: open,
+    containIntrinsicSize: "28rem 100vh",
+  });
   const onOpenChange = useCallback(
     (open: boolean) => {
       if (open) {
@@ -186,14 +191,16 @@ export const RightPanelInlineSidebar = (props: {
           storageKey: RIGHT_PANEL_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >
-        {renderContent ? (
-          <LazyRightPanel
-            mode="sidebar"
-            panelMode={panelMode}
-            openedPanelModes={props.openedPanelModes}
-            onClosePanelTab={props.onClosePanelTab}
-          />
-        ) : null}
+        <div className="flex min-h-0 w-full flex-1" style={panelContentVisibilityStyle}>
+          {renderContent ? (
+            <LazyRightPanel
+              mode="sidebar"
+              panelMode={panelMode}
+              openedPanelModes={props.openedPanelModes}
+              onClosePanelTab={props.onClosePanelTab}
+            />
+          ) : null}
+        </div>
         <SidebarRail
           aria-label="Resize workspace panel"
           className={RIGHT_PANEL_RESIZE_RAIL_CLASS_NAME}

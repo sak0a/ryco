@@ -323,8 +323,13 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     Effect.annotateLogs({ sequence: commandReadModel.snapshotSequence }),
   );
 
-  const readEvents: OrchestrationEngineShape["readEvents"] = (fromSequenceExclusive) =>
-    eventStore.readFromSequence(fromSequenceExclusive);
+  const readEvents: OrchestrationEngineShape["readEvents"] = (fromSequenceExclusive, limit) =>
+    eventStore.readFromSequence(fromSequenceExclusive, limit);
+
+  const readEventsPage: OrchestrationEngineShape["readEventsPage"] = (
+    fromSequenceExclusive,
+    limit,
+  ) => eventStore.readPage(fromSequenceExclusive, limit);
 
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Effect.gen(function* () {
@@ -335,12 +340,16 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   return {
     readEvents,
+    readEventsPage,
     dispatch,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
     // each independently receive all domain events.
     get streamDomainEvents(): OrchestrationEngineShape["streamDomainEvents"] {
       return Stream.fromPubSub(eventPubSub);
+    },
+    get subscribeDomainEvents(): OrchestrationEngineShape["subscribeDomainEvents"] {
+      return PubSub.subscribe(eventPubSub);
     },
   } satisfies OrchestrationEngineShape;
 });

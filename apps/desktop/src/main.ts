@@ -59,6 +59,7 @@ import {
   writeSavedEnvironmentSecret,
 } from "./clientPersistence.ts";
 import { isBackendReadinessAborted, waitForHttpReady } from "./backendReadiness.ts";
+import { createBackendRestartBackoff } from "./backendRestartBackoff.ts";
 import { showDesktopConfirmDialog } from "./confirmDialog.ts";
 import {
   resolveDesktopCoreAdvertisedEndpoints,
@@ -268,7 +269,10 @@ let backendReadinessAbortController: AbortController | null = null;
 let backendInitialWindowOpenInFlight: Promise<void> | null = null;
 let developmentInitialWindowOpenInFlight: Promise<void> | null = null;
 let backendListeningDetector: ServerListeningDetector | null = null;
-let restartAttempt = 0;
+const backendRestartBackoff = createBackendRestartBackoff({
+  initialDelayMs: 500,
+  maxDelayMs: 10_000,
+});
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let isQuitting = false;
 let desktopProtocolRegistered = false;
@@ -429,7 +433,9 @@ function synchronizeDesktopShellEnvironment(reason: string): void {
 
 function prepareDesktopShellEnvironmentForBackend(): "cache-hit" | "cache-miss" {
   markDesktopStartupPhase("desktop.shell-env.prepare.start");
-  const cached = readShellEnvironmentCache(SHELL_ENVIRONMENT_CACHE_PATH);
+  const cached = readShellEnvironmentCache(SHELL_ENVIRONMENT_CACHE_PATH, {
+    currentShell: process.env.SHELL ?? null,
+  });
   if (cached.kind === "hit") {
     applyShellEnvironmentCache(process.env, cached.record);
     markDesktopStartupPhase(
@@ -680,7 +686,7 @@ function cancelBackendReadinessWait(): void {
 }
 
 async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" | "http"> {
-  return await waitForBackendStartupReady({
+  const readySource = await waitForBackendStartupReady({
     listeningPromise: backendListeningDetector?.promise ?? null,
     waitForHttpReady: () =>
       waitForBackendHttpReady(baseUrl, {
@@ -689,6 +695,8 @@ async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" |
       }),
     cancelHttpWait: cancelBackendReadinessWait,
   });
+  backendRestartBackoff.reset();
+  return readySource;
 }
 
 async function waitForDevelopmentWindowReady(): Promise<"listening" | "http"> {
@@ -1919,8 +1927,7 @@ function configureAutoUpdater(): void {
 function scheduleBackendRestart(reason: string): void {
   if (isQuitting || restartTimer) return;
 
-  const delayMs = Math.min(500 * 2 ** restartAttempt, 10_000);
-  restartAttempt += 1;
+  const delayMs = backendRestartBackoff.nextDelayMs();
   console.error(`[desktop] backend exited unexpectedly (${reason}); restarting in ${delayMs}ms`);
 
   restartTimer = setTimeout(() => {
@@ -1994,7 +2001,6 @@ function startBackend(): void {
 
   child.once("spawn", () => {
     markDesktopStartupPhase("desktop.backend.spawned", `pid=${child.pid ?? "unknown"}`);
-    restartAttempt = 0;
   });
 
   child.on("error", (error) => {

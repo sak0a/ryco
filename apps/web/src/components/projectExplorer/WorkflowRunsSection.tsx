@@ -6,7 +6,7 @@ import type {
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
 import { useQuery } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AlertTriangleIcon,
@@ -17,10 +17,12 @@ import {
   FileTextIcon,
   GitBranchIcon,
   GitCommitIcon,
+  GitPullRequestIcon,
   RotateCwIcon,
   UserIcon,
 } from "lucide-react";
 import {
+  changeRequestListQueryOptions,
   useRerunWorkflowMutation,
   workflowJobLogQueryOptions,
   workflowRunJobsQueryOptions,
@@ -41,6 +43,7 @@ import {
   sourceControlOptionValue,
 } from "./prCheckStatus";
 import { usePrCheckPassNotifications } from "./usePrCheckPassNotifications";
+import { groupWorkflowRunsBySource, type WorkflowRunGroup } from "./workflowRunGroups";
 
 const dateTimeFmt = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -49,12 +52,15 @@ const dateTimeFmt = new Intl.DateTimeFormat(undefined, {
   minute: "2-digit",
 });
 
+const EMPTY_WORKFLOW_RUNS: ReadonlyArray<SourceControlWorkflowRun> = [];
+
 interface WorkflowRunsSectionProps {
   environmentId: EnvironmentId | null;
   cwd: string | null;
   pullRequestNumber?: number | null;
   title?: string;
   description?: string;
+  groupRunsBySource?: boolean;
 }
 
 type WorkflowRerunFeedbackTone = "success" | "permission-denied" | "not-rerunnable" | "error";
@@ -192,8 +198,32 @@ function MetaItem(props: { icon: ReactNode; children: ReactNode }) {
   );
 }
 
+function formatRunTimestamp(run: SourceControlWorkflowRun): string | null {
+  return formatDate(run.updatedAt) ?? formatDate(run.startedAt);
+}
+
+function formatRunCount(count: number): string {
+  return `${count} ${count === 1 ? "run" : "runs"}`;
+}
+
+function isWorkflowRunGroupDefaultExpanded(group: WorkflowRunGroup): boolean {
+  const status = getPrCheckStatusFromWorkflowRuns({ runs: group.runs });
+  return status.kind === "failed" || status.kind === "running" || status.kind === "pending";
+}
+
 export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [expandedGroupOverrides, setExpandedGroupOverrides] = useState<Record<string, boolean>>({});
+  const shouldGroupRuns = props.groupRunsBySource === true && props.pullRequestNumber == null;
+  const changeRequestsQuery = useQuery(
+    changeRequestListQueryOptions({
+      environmentId: props.environmentId,
+      cwd: props.cwd,
+      state: "all",
+      limit: 100,
+      enabled: shouldGroupRuns,
+    }),
+  );
   const runsQuery = useQuery({
     ...workflowRunsQueryOptions({
       environmentId: props.environmentId,
@@ -214,7 +244,17 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
     },
   });
 
-  const runs = runsQuery.data?.runs ?? [];
+  const runs = runsQuery.data?.runs ?? EMPTY_WORKFLOW_RUNS;
+  const runGroups = useMemo(
+    () =>
+      shouldGroupRuns
+        ? groupWorkflowRunsBySource({
+            runs,
+            changeRequests: changeRequestsQuery.data ?? [],
+          })
+        : [],
+    [changeRequestsQuery.data, runs, shouldGroupRuns],
+  );
   const headSha = runsQuery.data ? sourceControlOptionValue(runsQuery.data.headSha) : null;
   const status = getPrCheckStatusForQuery({
     isLoading: runsQuery.isLoading,
@@ -228,6 +268,18 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
   });
   const failedRuns = runs.filter((run) => getCheckStatusFromWorkflowRun(run).kind === "failed");
   const failedUrl = primaryFailedCheckUrl(status);
+  const expandRun = (runId: string | null) => {
+    setExpandedRunId(runId);
+    if (!runId || !shouldGroupRuns) return;
+
+    const group = runGroups.find((candidate) => candidate.runs.some((run) => run.runId === runId));
+    if (!group) return;
+
+    setExpandedGroupOverrides((current) => ({
+      ...current,
+      [group.id]: true,
+    }));
+  };
 
   usePrCheckPassNotifications(
     props.pullRequestNumber && runsQuery.data
@@ -285,7 +337,7 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
             size="sm"
             variant="ghost"
             className="ml-auto h-7 text-rose-700 hover:text-rose-800 dark:text-rose-300 dark:hover:text-rose-200"
-            onClick={() => setExpandedRunId(failedRuns[0]?.runId ?? null)}
+            onClick={() => expandRun(failedRuns[0]?.runId ?? null)}
           >
             Show failed jobs
           </Button>
@@ -323,41 +375,203 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
                 : "No recent GitHub Actions workflow runs were found."
             }
           />
+        ) : shouldGroupRuns ? (
+          <WorkflowRunGroupList
+            groups={runGroups}
+            expandedRunId={expandedRunId}
+            expandedGroupOverrides={expandedGroupOverrides}
+            environmentId={props.environmentId}
+            cwd={props.cwd}
+            onToggleGroup={(group) => {
+              const isExpanded =
+                expandedGroupOverrides[group.id] ?? isWorkflowRunGroupDefaultExpanded(group);
+              setExpandedGroupOverrides((current) => ({
+                ...current,
+                [group.id]: !isExpanded,
+              }));
+            }}
+            onToggleRun={(runId) => setExpandedRunId(expandedRunId === runId ? null : runId)}
+          />
         ) : (
           <ol className="space-y-2">
-            {runs.map((run) => {
-              const isExpanded = expandedRunId === run.runId;
-              const runStatus = getCheckStatusFromWorkflowRun(run);
-              return (
-                <li
-                  key={run.runId}
-                  className={cn(
-                    "overflow-hidden rounded-lg border border-border/70 bg-muted/12",
-                    runStatus.kind === "failed" ? "border-rose-500/30" : "",
-                  )}
-                >
-                  <WorkflowRunRow
-                    environmentId={props.environmentId}
-                    cwd={props.cwd}
-                    run={run}
-                    status={runStatus}
-                    expanded={isExpanded}
-                    onToggle={() => setExpandedRunId(isExpanded ? null : run.runId)}
-                  />
-                  {isExpanded ? (
-                    <WorkflowRunJobsPanel
-                      environmentId={props.environmentId}
-                      cwd={props.cwd}
-                      run={run}
-                    />
-                  ) : null}
-                </li>
-              );
-            })}
+            {runs.map((run) => (
+              <WorkflowRunListItem
+                key={run.runId}
+                environmentId={props.environmentId}
+                cwd={props.cwd}
+                run={run}
+                expanded={expandedRunId === run.runId}
+                onToggle={() => setExpandedRunId(expandedRunId === run.runId ? null : run.runId)}
+              />
+            ))}
           </ol>
         )}
       </div>
     </section>
+  );
+}
+
+function WorkflowRunListItem(props: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  run: SourceControlWorkflowRun;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const runStatus = getCheckStatusFromWorkflowRun(props.run);
+
+  return (
+    <li
+      className={cn(
+        "overflow-hidden rounded-lg border border-border/70 bg-muted/12",
+        runStatus.kind === "failed" ? "border-rose-500/30" : "",
+      )}
+    >
+      <WorkflowRunRow
+        environmentId={props.environmentId}
+        cwd={props.cwd}
+        run={props.run}
+        status={runStatus}
+        expanded={props.expanded}
+        onToggle={props.onToggle}
+      />
+      {props.expanded ? (
+        <WorkflowRunJobsPanel environmentId={props.environmentId} cwd={props.cwd} run={props.run} />
+      ) : null}
+    </li>
+  );
+}
+
+function WorkflowRunGroupList(props: {
+  groups: ReadonlyArray<WorkflowRunGroup>;
+  expandedRunId: string | null;
+  expandedGroupOverrides: Readonly<Record<string, boolean>>;
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  onToggleGroup: (group: WorkflowRunGroup) => void;
+  onToggleRun: (runId: string) => void;
+}) {
+  return (
+    <ol className="space-y-3">
+      {props.groups.map((group) => {
+        const status = getPrCheckStatusFromWorkflowRuns({ runs: group.runs });
+        const isExpanded =
+          props.expandedGroupOverrides[group.id] ?? isWorkflowRunGroupDefaultExpanded(group);
+
+        return (
+          <li
+            key={group.id}
+            className={cn(
+              "overflow-hidden rounded-lg border border-border/70 bg-muted/10",
+              status.kind === "failed" ? "border-rose-500/30" : "",
+              status.kind === "running" || status.kind === "pending" ? "border-amber-500/30" : "",
+            )}
+          >
+            <WorkflowRunGroupHeader
+              group={group}
+              status={status}
+              expanded={isExpanded}
+              onToggle={() => props.onToggleGroup(group)}
+            />
+            {isExpanded ? (
+              <ol className="space-y-2 border-border/60 border-t bg-background/35 p-2">
+                {group.runs.map((run) => (
+                  <WorkflowRunListItem
+                    key={run.runId}
+                    environmentId={props.environmentId}
+                    cwd={props.cwd}
+                    run={run}
+                    expanded={props.expandedRunId === run.runId}
+                    onToggle={() => props.onToggleRun(run.runId)}
+                  />
+                ))}
+              </ol>
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function WorkflowRunGroupHeader(props: {
+  group: WorkflowRunGroup;
+  status: ReturnType<typeof getPrCheckStatusFromWorkflowRuns>;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const source = props.group.source;
+  const pullRequest = source.kind === "pull-request" ? source.changeRequest : null;
+  const branchName =
+    source.kind === "pull-request"
+      ? (source.branchName ?? source.changeRequest.headRefName)
+      : source.kind === "branch"
+        ? source.branchName
+        : null;
+  const title = pullRequest ? `PR #${pullRequest.number}` : (branchName ?? "Unknown branch");
+  const subtitle = pullRequest
+    ? pullRequest.title
+    : branchName
+      ? "Branch workflow runs"
+      : "Runs without branch metadata";
+  const latestTimestamp = formatRunTimestamp(props.group.latestRun);
+
+  return (
+    <div className="flex items-start gap-2 px-3 py-2">
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-start gap-2 rounded-md text-left outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={props.onToggle}
+        aria-expanded={props.expanded}
+        aria-label={`${props.expanded ? "Collapse" : "Expand"} ${title}`}
+      >
+        <ChevronRightIcon
+          className={cn(
+            "mt-1 size-3.5 shrink-0 text-muted-foreground/70 transition-transform",
+            props.expanded ? "rotate-90" : "",
+          )}
+        />
+        {pullRequest ? (
+          <GitPullRequestIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <GitBranchIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="truncate font-medium text-sm">{title}</span>
+            {branchName ? (
+              <span className="min-w-0 truncate font-mono text-muted-foreground text-xs">
+                {branchName}
+              </span>
+            ) : null}
+            <span className="rounded-md border border-border/60 px-1.5 py-0.5 text-muted-foreground text-[11px] leading-none">
+              {formatRunCount(props.group.runs.length)}
+            </span>
+          </span>
+          <span className="mt-0.5 block truncate text-muted-foreground text-xs">{subtitle}</span>
+          <span className="mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-[11px]">
+            <MetaItem icon={<GitCommitIcon className="size-3" />}>
+              <span className="font-mono">{props.group.latestRun.commit.shortOid}</span>
+            </MetaItem>
+            {latestTimestamp ? (
+              <MetaItem icon={<Clock3Icon className="size-3" />}>{latestTimestamp}</MetaItem>
+            ) : null}
+          </span>
+        </span>
+      </button>
+      <PrCheckStatusBadge view={props.status} mode="compact" className="mt-0.5" />
+      {pullRequest ? (
+        <a
+          href={pullRequest.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-muted-foreground text-xs hover:bg-secondary hover:text-foreground"
+        >
+          <ExternalLinkIcon className="size-3.5" />
+          PR
+        </a>
+      ) : null}
+    </div>
   );
 }
 

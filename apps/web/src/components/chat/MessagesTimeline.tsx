@@ -62,6 +62,7 @@ import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@ryco/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
 import { usePerfMark } from "../../perf/tabSwitchInstrumentation";
+import { visibleSecondTicker } from "../../lib/perf/ticker";
 
 import {
   buildInlineTerminalContextText,
@@ -529,14 +530,12 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
   const initialText = formatWorkingTimerNow(createdAt);
 
   useEffect(() => {
-    const updateText = () => {
+    const updateText = (nowMs: number) => {
       if (textRef.current) {
-        textRef.current.textContent = formatWorkingTimerNow(createdAt);
+        textRef.current.textContent = formatWorkingTimerNow(createdAt, nowMs);
       }
     };
-    updateText();
-    const id = setInterval(updateText, 1000);
-    return () => clearInterval(id);
+    return visibleSecondTicker.subscribe(updateText);
   }, [createdAt]);
 
   return <span ref={textRef}>{initialText}</span>;
@@ -556,21 +555,21 @@ function LiveMessageMeta({
   const initialText = formatLiveMessageMetaNow(createdAt, durationStart, timestampFormat);
 
   useEffect(() => {
-    const updateText = () => {
+    const updateText = (nowMs: number) => {
       if (textRef.current) {
         textRef.current.textContent = formatLiveMessageMetaNow(
           createdAt,
           durationStart,
           timestampFormat,
+          nowMs,
         );
       }
     };
-    updateText();
     if (!durationStart) {
+      updateText(Date.now());
       return;
     }
-    const id = setInterval(updateText, 1000);
-    return () => clearInterval(id);
+    return visibleSecondTicker.subscribe(updateText);
   }, [createdAt, durationStart, timestampFormat]);
 
   return <span ref={textRef}>{initialText}</span>;
@@ -926,16 +925,19 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-function formatWorkingTimerNow(startIso: string): string {
-  return formatWorkingTimer(startIso, new Date().toISOString()) ?? "0s";
+function formatWorkingTimerNow(startIso: string, nowMs: number = Date.now()): string {
+  return formatWorkingTimer(startIso, new Date(nowMs).toISOString()) ?? "0s";
 }
 
 function formatLiveMessageMetaNow(
   createdAt: string,
   durationStart: string | null | undefined,
   timestampFormat: TimestampFormat,
+  nowMs: number = Date.now(),
 ): string {
-  const elapsed = durationStart ? formatElapsed(durationStart, new Date().toISOString()) : null;
+  const elapsed = durationStart
+    ? formatElapsed(durationStart, new Date(nowMs).toISOString())
+    : null;
   return formatMessageMeta(createdAt, elapsed, timestampFormat);
 }
 

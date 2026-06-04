@@ -31,17 +31,23 @@ export async function waitForBackendStartupReady(
       resolve(source);
     };
 
-    const settleReject = (error: unknown) => {
+    const settleReject = (
+      error: unknown,
+      settleOptions?: { readonly cancelHttpWait?: boolean },
+    ) => {
       if (settled) {
         return;
       }
       settled = true;
+      if (settleOptions?.cancelHttpWait) {
+        options.cancelHttpWait();
+      }
       reject(error);
     };
 
     listeningPromise.then(
       () => settleResolve("listening"),
-      (error) => settleReject(error),
+      (error) => settleReject(error, { cancelHttpWait: true }),
     );
     httpReadyPromise.then(
       () => settleResolve("http"),

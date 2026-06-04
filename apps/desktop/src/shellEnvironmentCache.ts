@@ -46,6 +46,10 @@ function normalizeEnvironment(value: unknown) {
   return environment;
 }
 
+function normalizeShell(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
 export function pickShellEnvironment(env: NodeJS.ProcessEnv) {
   const environment: ShellEnvironmentCacheRecord["environment"] = {};
   for (const name of CACHE_ENV_NAMES) {
@@ -66,7 +70,7 @@ export function createShellEnvironmentCacheRecord(input: {
     version: CACHE_VERSION,
     capturedAt: (input.now ?? new Date()).toISOString(),
     platform: input.platform ?? process.platform,
-    shell: input.env.SHELL ?? null,
+    shell: normalizeShell(input.env.SHELL),
     environment: pickShellEnvironment(input.env),
   };
 }
@@ -75,6 +79,7 @@ export function readShellEnvironmentCache(
   cachePath: string,
   options: {
     readonly platform?: NodeJS.Platform;
+    readonly currentShell?: string | null;
     readonly now?: Date;
     readonly maxAgeMs?: number;
   } = {},
@@ -115,13 +120,19 @@ export function readShellEnvironmentCache(
     return { kind: "miss", reason: "environment" };
   }
 
+  const cachedShell = normalizeShell(parsed.shell);
+  const currentShell = normalizeShell(options.currentShell);
+  if (cachedShell !== null && currentShell !== null && cachedShell !== currentShell) {
+    return { kind: "miss", reason: "shell" };
+  }
+
   return {
     kind: "hit",
     record: {
       version: CACHE_VERSION,
       capturedAt: parsed.capturedAt,
       platform,
-      shell: typeof parsed.shell === "string" && parsed.shell.length > 0 ? parsed.shell : null,
+      shell: cachedShell,
       environment,
     },
   };

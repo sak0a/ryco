@@ -25,6 +25,8 @@ import {
   ThreadId,
   ProviderSendTurnInput,
   DEFAULT_AGENT_TOKEN_MODE,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@ryco/contracts";
 import { Effect, Exit, Fiber, FileSystem, Queue, Schema, Scope, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -60,6 +62,8 @@ import {
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = ProviderDriverKind.make("codex");
+const PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES =
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS * PROVIDER_SEND_TURN_MAX_IMAGE_BYTES;
 
 export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
@@ -81,6 +85,12 @@ interface CodexAdapterSessionContext {
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
   stopped: boolean;
+}
+
+interface ResolvedCodexAttachment {
+  readonly attachment: NonNullable<ProviderSendTurnInput["attachments"]>[number];
+  readonly path: string;
+  readonly sizeBytes: number;
 }
 
 function formatCodexRuntimeErrorDetail(error: Error): string {
@@ -146,6 +156,13 @@ function readPayload<A>(
 function trimText(value: string | undefined | null): string | undefined {
   const trimmed = value?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeFileSizeBytes(size: number | bigint | undefined): number {
+  if (typeof size === "bigint") {
+    return size > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(size);
+  }
+  return typeof size === "number" && Number.isFinite(size) ? size : 0;
 }
 
 const FATAL_CODEX_STDERR_SNIPPETS = ["failed to connect to websocket"];
@@ -1483,8 +1500,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       }),
     );
 
-  const resolveAttachment = Effect.fn("resolveAttachment")(function* (
-    input: ProviderSendTurnInput,
+  const resolveAttachmentForPreflight = Effect.fn("resolveAttachmentForPreflight")(function* (
     attachment: NonNullable<ProviderSendTurnInput["attachments"]>[number],
   ) {
     const attachmentPath = resolveAttachmentPath({
@@ -1498,7 +1514,97 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         detail: `Invalid attachment id '${attachment.id}'.`,
       });
     }
-    const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
+
+    const fileInfo = yield* fileSystem.stat(attachmentPath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "turn/start",
+            detail: `Failed to stat attachment file: ${cause.message}.`,
+            cause,
+          }),
+      ),
+    );
+    if (fileInfo.type !== "File") {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "turn/start",
+        detail: `Attachment '${attachment.name}' is not a regular file.`,
+      });
+    }
+
+    const sizeBytes = normalizeFileSizeBytes(fileInfo.size);
+    if (sizeBytes <= 0) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "turn/start",
+        detail: `Attachment '${attachment.name}' is empty.`,
+      });
+    }
+    if (sizeBytes > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "turn/start",
+        detail: `Attachment '${attachment.name}' is ${sizeBytes} bytes; limit is ${PROVIDER_SEND_TURN_MAX_IMAGE_BYTES} bytes.`,
+      });
+    }
+
+    return {
+      attachment,
+      path: attachmentPath,
+      sizeBytes,
+    };
+  });
+
+  const preflightAttachments = Effect.fn("preflightAttachments")(function* (
+    input: ProviderSendTurnInput,
+  ) {
+    const attachments = input.attachments ?? [];
+    if (attachments.length > PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "turn/start",
+        detail: `Turn has ${attachments.length} attachments; limit is ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS}.`,
+      });
+    }
+
+    const resolved = yield* Effect.forEach(attachments, resolveAttachmentForPreflight, {
+      concurrency: 1,
+    });
+    const totalBytes = resolved.reduce((total, entry) => total + entry.sizeBytes, 0);
+    if (totalBytes > PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "turn/start",
+        detail: `Turn attachments total ${totalBytes} bytes; limit is ${PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES} bytes.`,
+      });
+    }
+
+    if (resolved.length > 0) {
+      yield* Effect.annotateCurrentSpan({
+        "provider.attachment_count": resolved.length,
+        "provider.attachment_total_bytes": totalBytes,
+      });
+      yield* Effect.logDebug("resolved Codex turn attachments", {
+        threadId: input.threadId,
+        attachmentCount: resolved.length,
+        attachmentTotalBytes: totalBytes,
+        attachmentBytes: resolved.map((entry) => ({
+          id: entry.attachment.id,
+          name: entry.attachment.name,
+          sizeBytes: entry.sizeBytes,
+        })),
+      });
+    }
+
+    return resolved;
+  });
+
+  const toCodexAttachment = Effect.fn("toCodexAttachment")(function* (
+    resolved: ResolvedCodexAttachment,
+  ) {
+    const bytes = yield* fileSystem.readFile(resolved.path).pipe(
       Effect.mapError(
         (cause) =>
           new ProviderAdapterRequestError({
@@ -1509,6 +1615,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           }),
       ),
     );
+    const attachment = resolved.attachment;
     return {
       type: "image" as const,
       url: `data:${attachment.mimeType};base64,${Buffer.from(bytes).toString("base64")}`,
@@ -1516,11 +1623,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   });
 
   const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
-    const codexAttachments = yield* Effect.forEach(
-      input.attachments ?? [],
-      (attachment) => resolveAttachment(input, attachment),
-      { concurrency: 1 },
-    );
+    const resolvedAttachments = yield* preflightAttachments(input);
+    const codexAttachments = yield* Effect.forEach(resolvedAttachments, toCodexAttachment, {
+      concurrency: 1,
+    });
 
     const session = yield* requireSession(input.threadId);
     const reasoningEffort =
