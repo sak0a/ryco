@@ -5353,54 +5353,6 @@ export default function Sidebar() {
     dragInProgressRef.current = false;
   }, []);
 
-  const prefersReducedMotion = useMediaQuery(PREFERS_REDUCED_MOTION_QUERY);
-  const shouldAnimateProjectLists = shouldEnableAutoAnimate({
-    prefersReducedMotion,
-    withinThreshold: shouldAutoAnimateSidebarProjectList(projects.length),
-  });
-  const shouldAnimateThreadLists = shouldEnableAutoAnimate({
-    prefersReducedMotion,
-    withinThreshold: shouldAutoAnimateSidebarThreadLists({
-      projectCount: projects.length,
-      visibleThreadCount: sidebarThreads.length,
-    }),
-  });
-  const projectListAnimationControllersRef = useRef<SidebarAutoAnimateControllers>(new Map());
-  const attachProjectListAutoAnimateRef = useCallback(
-    (node: HTMLElement | null) => {
-      attachSidebarAutoAnimateNode(
-        projectListAnimationControllersRef.current,
-        node,
-        shouldAnimateProjectLists,
-      );
-    },
-    [shouldAnimateProjectLists],
-  );
-  useEffect(() => {
-    setSidebarAutoAnimateControllersEnabled(
-      projectListAnimationControllersRef.current,
-      shouldAnimateProjectLists,
-    );
-  }, [shouldAnimateProjectLists]);
-
-  const threadListAnimationControllersRef = useRef<SidebarAutoAnimateControllers>(new Map());
-  const attachThreadListAutoAnimateRef = useCallback(
-    (node: HTMLElement | null) => {
-      attachSidebarAutoAnimateNode(
-        threadListAnimationControllersRef.current,
-        node,
-        shouldAnimateThreadLists,
-      );
-    },
-    [shouldAnimateThreadLists],
-  );
-  useEffect(() => {
-    setSidebarAutoAnimateControllersEnabled(
-      threadListAnimationControllersRef.current,
-      shouldAnimateThreadLists,
-    );
-  }, [shouldAnimateThreadLists]);
-
   const visibleThreads = useMemo(
     () => sidebarThreads.filter((thread) => thread.archivedAt === null),
     [sidebarThreads],
@@ -5493,6 +5445,53 @@ export default function Sidebar() {
       worktreesByProjectKey,
     ],
   );
+  const prefersReducedMotion = useMediaQuery(PREFERS_REDUCED_MOTION_QUERY);
+  const shouldAnimateProjectLists = shouldEnableAutoAnimate({
+    prefersReducedMotion,
+    withinThreshold: shouldAutoAnimateSidebarProjectList(sortedProjects.length),
+  });
+  const shouldAnimateThreadLists = shouldEnableAutoAnimate({
+    prefersReducedMotion,
+    withinThreshold: shouldAutoAnimateSidebarThreadLists({
+      projectCount: sortedProjects.length,
+      visibleThreadCount: visibleSidebarThreadKeys.length,
+    }),
+  });
+  const projectListAnimationControllersRef = useRef<SidebarAutoAnimateControllers>(new Map());
+  const attachProjectListAutoAnimateRef = useCallback(
+    (node: HTMLElement | null) => {
+      attachSidebarAutoAnimateNode(
+        projectListAnimationControllersRef.current,
+        node,
+        shouldAnimateProjectLists,
+      );
+    },
+    [shouldAnimateProjectLists],
+  );
+  useEffect(() => {
+    setSidebarAutoAnimateControllersEnabled(
+      projectListAnimationControllersRef.current,
+      shouldAnimateProjectLists,
+    );
+  }, [shouldAnimateProjectLists]);
+
+  const threadListAnimationControllersRef = useRef<SidebarAutoAnimateControllers>(new Map());
+  const attachThreadListAutoAnimateRef = useCallback(
+    (node: HTMLElement | null) => {
+      attachSidebarAutoAnimateNode(
+        threadListAnimationControllersRef.current,
+        node,
+        shouldAnimateThreadLists,
+      );
+    },
+    [shouldAnimateThreadLists],
+  );
+  useEffect(() => {
+    setSidebarAutoAnimateControllersEnabled(
+      threadListAnimationControllersRef.current,
+      shouldAnimateThreadLists,
+    );
+  }, [shouldAnimateThreadLists]);
   const threadJumpCommandByKey = useMemo(() => {
     const mapping = new Map<string, NonNullable<ReturnType<typeof threadJumpCommandForIndex>>>();
     for (const [visibleThreadIndex, threadKey] of visibleSidebarThreadKeys.entries()) {

@@ -169,6 +169,27 @@ describe("ChatMarkdown", () => {
     }
   });
 
+  it("does not show the previous finalized message when a new stream is throttled", async () => {
+    vi.useFakeTimers();
+    const screen = await render(
+      <ChatMarkdown text="previous completed message" cwd="/repo/project" />,
+    );
+
+    try {
+      await screen.rerender(
+        <ChatMarkdown text="fresh streaming token" cwd="/repo/project" isStreaming />,
+      );
+      await screen.rerender(
+        <ChatMarkdown text="fresh streaming token continued" cwd="/repo/project" isStreaming />,
+      );
+
+      expect(document.body.textContent).not.toContain("previous completed message");
+    } finally {
+      vi.useRealTimers();
+      await screen.unmount();
+    }
+  });
+
   it("uses Shiki for finalized code blocks", async () => {
     const screen = await render(
       <ChatMarkdown text={"```ts\nconst finalValue = 1;\n```"} cwd="/repo/project" />,

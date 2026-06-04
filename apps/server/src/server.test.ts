@@ -4407,9 +4407,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       yield* buildAppUnderTest({
         layers: {
           orchestrationEngine: {
-            readEvents: (fromSequenceExclusive) => {
+            readEventsPage: (fromSequenceExclusive) => {
               assert.equal(fromSequenceExclusive, 10);
-              return Stream.make(replayedEvent);
+              return Effect.succeed({
+                events: [replayedEvent],
+                nextSequence: replayedEvent.sequence,
+                hasMore: false,
+              });
             },
             subscribeDomainEvents: Effect.gen(function* () {
               const subscription = yield* PubSub.subscribe(livePubSub);
@@ -4441,6 +4445,82 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
 
+      assert.deepEqual(
+        result.map((item) => (item.kind === "snapshot" ? "snapshot" : item.sequence)),
+        ["snapshot", 11, 12],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("bounds shell replay to the captured live high-water sequence", () =>
+    Effect.gen(function* () {
+      const now = "2026-04-05T00:00:00.000Z";
+      const threadId = ThreadId.make("thread-shell-bounded-replay");
+      const makeDeletedEvent = (sequence: number) =>
+        ({
+          sequence,
+          eventId: EventId.make(`event-shell-bounded-replay-${sequence}`),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "thread.deleted",
+          payload: {
+            threadId,
+            deletedAt: now,
+          },
+        }) satisfies Extract<OrchestrationEvent, { type: "thread.deleted" }>;
+      const replayedEvent = makeDeletedEvent(11);
+      const liveBoundaryEvent = makeDeletedEvent(12);
+      const shouldNotReplayEvent = makeDeletedEvent(13);
+      const livePubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+      let replayPageCalls = 0;
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            readEventsPage: (fromSequenceExclusive) => {
+              replayPageCalls += 1;
+              assert.equal(fromSequenceExclusive, 10);
+              return Effect.succeed({
+                events: [replayedEvent, shouldNotReplayEvent],
+                nextSequence: shouldNotReplayEvent.sequence,
+                hasMore: true,
+              });
+            },
+            subscribeDomainEvents: Effect.gen(function* () {
+              const subscription = yield* PubSub.subscribe(livePubSub);
+              yield* PubSub.publish(livePubSub, liveBoundaryEvent);
+              return subscription;
+            }),
+          },
+          projectionSnapshotQuery: {
+            getShellSnapshot: () =>
+              Effect.succeed({
+                snapshotSequence: 10,
+                projects: [],
+                threads: [],
+                updatedAt: now,
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeShell]({}).pipe(
+            Stream.take(3),
+            Stream.runCollect,
+            Effect.map((items) => Array.from(items)),
+          ),
+        ),
+      );
+
+      assert.equal(replayPageCalls, 1);
       assert.deepEqual(
         result.map((item) => (item.kind === "snapshot" ? "snapshot" : item.sequence)),
         ["snapshot", 11, 12],
@@ -4485,9 +4565,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       yield* buildAppUnderTest({
         layers: {
           orchestrationEngine: {
-            readEvents: (fromSequenceExclusive) => {
+            readEventsPage: (fromSequenceExclusive) => {
               assert.equal(fromSequenceExclusive, 10);
-              return Stream.make(replayedEvent);
+              return Effect.succeed({
+                events: [replayedEvent],
+                nextSequence: replayedEvent.sequence,
+                hasMore: false,
+              });
             },
             subscribeDomainEvents: Effect.gen(function* () {
               const subscription = yield* PubSub.subscribe(livePubSub);

@@ -28,4 +28,18 @@ describe("createBackendRestartBackoff", () => {
 
     expect(delays).toEqual([500, 1_000, 2_000, 4_000, 8_000, 10_000, 10_000, 10_000]);
   });
+
+  it.each([
+    { initialDelayMs: 0, maxDelayMs: 10_000 },
+    { initialDelayMs: -1, maxDelayMs: 10_000 },
+    { initialDelayMs: Number.POSITIVE_INFINITY, maxDelayMs: 10_000 },
+    { initialDelayMs: 1_000, maxDelayMs: 0 },
+    { initialDelayMs: 1_000, maxDelayMs: Number.NaN },
+    { initialDelayMs: 10_000, maxDelayMs: 1_000 },
+  ])("rejects invalid backoff options %#", (options) => {
+    expect(() => createBackendRestartBackoff(options)).toThrow(RangeError);
+    expect(() => createBackendRestartBackoff(options)).toThrow(
+      `initialDelayMs=${options.initialDelayMs}, maxDelayMs=${options.maxDelayMs}`,
+    );
+  });
 });

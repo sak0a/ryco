@@ -582,6 +582,89 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             ),
           );
 
+      const makeReplayBoundaryTracker = (snapshotSequence: number) =>
+        Effect.gen(function* () {
+          const latestLiveSequence = yield* Ref.make(snapshotSequence);
+          const replayUpperBound = yield* Ref.make<Option.Option<number>>(Option.none());
+
+          const captureReplayUpperBound = Effect.gen(function* () {
+            const existingUpperBound = yield* Ref.get(replayUpperBound);
+            if (Option.isSome(existingUpperBound)) {
+              return existingUpperBound;
+            }
+
+            const latestSequence = yield* Ref.get(latestLiveSequence);
+            if (latestSequence <= snapshotSequence) {
+              return Option.none<number>();
+            }
+
+            const upperBound = Option.some(latestSequence);
+            yield* Ref.set(replayUpperBound, upperBound);
+            return upperBound;
+          });
+
+          return {
+            recordLiveSequence: (sequence: number) =>
+              Ref.update(latestLiveSequence, (current) => Math.max(current, sequence)),
+            captureReplayUpperBound,
+          };
+        });
+
+      const makeBoundedReplayStream = (input: {
+        readonly snapshotSequence: number;
+        readonly captureReplayUpperBound: Effect.Effect<Option.Option<number>>;
+        readonly errorMessage: string;
+      }): Stream.Stream<OrchestrationEvent, OrchestrationGetSnapshotError> => {
+        const readPage = (
+          fromSequenceExclusive: number,
+        ): Stream.Stream<OrchestrationEvent, OrchestrationGetSnapshotError> =>
+          Stream.unwrap(
+            Effect.gen(function* () {
+              const upperBoundBeforeRead = yield* input.captureReplayUpperBound;
+              if (
+                Option.isSome(upperBoundBeforeRead) &&
+                fromSequenceExclusive >= upperBoundBeforeRead.value
+              ) {
+                return Stream.empty;
+              }
+
+              const page = yield* orchestrationEngine
+                .readEventsPage(fromSequenceExclusive, ORCHESTRATION_REPLAY_PAGE_MAX_LIMIT)
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: input.errorMessage,
+                        cause,
+                      }),
+                  ),
+                );
+              const upperBound = Option.isSome(upperBoundBeforeRead)
+                ? upperBoundBeforeRead
+                : yield* input.captureReplayUpperBound;
+              const replayEvents = Option.isSome(upperBound)
+                ? page.events.filter((event) => event.sequence <= upperBound.value)
+                : page.events;
+
+              if (replayEvents.length === 0) {
+                return Stream.empty;
+              }
+
+              const nextSequence =
+                replayEvents[replayEvents.length - 1]?.sequence ?? page.nextSequence;
+              const reachedUpperBound =
+                Option.isSome(upperBound) && nextSequence >= upperBound.value;
+              const reachedReplayEnd = !page.hasMore || page.nextSequence <= fromSequenceExclusive;
+              const currentPageStream = Stream.fromIterable(replayEvents);
+              return reachedUpperBound || reachedReplayEnd
+                ? currentPageStream
+                : Stream.concat(currentPageStream, readPage(page.nextSequence));
+            }),
+          );
+
+        return readPage(input.snapshotSequence);
+      };
+
       const shellEventsFromDomainEvents = <E, R>(
         stream: Stream.Stream<OrchestrationEvent, E, R>,
       ): Stream.Stream<OrchestrationShellStreamEvent, E, R> =>
@@ -602,6 +685,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             const liveSubscription = yield* orchestrationEngine.subscribeDomainEvents;
             const liveQueue = yield* Queue.unbounded<OrchestrationEvent>();
             const lastSequenceRef = yield* Ref.make(snapshotSequence);
+            const replayBoundary = yield* makeReplayBoundaryTracker(snapshotSequence);
             const replayMetrics = yield* makeWsReplayMetrics({
               stream: "shell",
               subscriptionId: randomShortId(),
@@ -610,28 +694,22 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
 
             yield* Stream.fromSubscription(liveSubscription).pipe(
               Stream.runForEach((event) =>
-                Queue.offer(liveQueue, event).pipe(
-                  Effect.tap(() => replayMetrics.recordLiveEnqueued(event.sequence)),
-                  Effect.asVoid,
-                ),
+                Effect.gen(function* () {
+                  yield* replayBoundary.recordLiveSequence(event.sequence);
+                  yield* Queue.offer(liveQueue, event);
+                  yield* replayMetrics.recordLiveEnqueued(event.sequence);
+                }),
               ),
               Effect.ensuring(Queue.shutdown(liveQueue)),
               Effect.ignoreCause({ log: true }),
               Effect.forkScoped,
             );
 
-            const replayStream = orchestrationEngine
-              .readEvents(snapshotSequence, Number.MAX_SAFE_INTEGER)
-              .pipe(
-                Stream.tap((event) => replayMetrics.recordReplayEvent(event.sequence)),
-                Stream.mapError(
-                  (cause) =>
-                    new OrchestrationGetSnapshotError({
-                      message: "Failed to replay orchestration shell events",
-                      cause,
-                    }),
-                ),
-              );
+            const replayStream = makeBoundedReplayStream({
+              snapshotSequence,
+              captureReplayUpperBound: replayBoundary.captureReplayUpperBound,
+              errorMessage: "Failed to replay orchestration shell events",
+            }).pipe(Stream.tap((event) => replayMetrics.recordReplayEvent(event.sequence)));
             const liveStream = Stream.fromQueue(liveQueue).pipe(
               Stream.tap((event) => replayMetrics.recordLiveDequeued(event.sequence)),
             );
@@ -662,6 +740,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             const liveSubscription = yield* orchestrationEngine.subscribeDomainEvents;
             const liveQueue = yield* Queue.unbounded<OrchestrationEvent>();
             const lastSequenceRef = yield* Ref.make(snapshotSequence);
+            const replayBoundary = yield* makeReplayBoundaryTracker(snapshotSequence);
             const replayMetrics = yield* makeWsReplayMetrics({
               stream: "thread",
               subscriptionId: randomShortId(),
@@ -684,28 +763,22 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
 
             yield* Stream.fromSubscription(liveSubscription).pipe(
               Stream.runForEach((event) =>
-                Queue.offer(liveQueue, event).pipe(
-                  Effect.tap(() => replayMetrics.recordLiveEnqueued(event.sequence)),
-                  Effect.asVoid,
-                ),
+                Effect.gen(function* () {
+                  yield* replayBoundary.recordLiveSequence(event.sequence);
+                  yield* Queue.offer(liveQueue, event);
+                  yield* replayMetrics.recordLiveEnqueued(event.sequence);
+                }),
               ),
               Effect.ensuring(Queue.shutdown(liveQueue)),
               Effect.ignoreCause({ log: true }),
               Effect.forkScoped,
             );
 
-            const replayStream = orchestrationEngine
-              .readEvents(snapshotSequence, Number.MAX_SAFE_INTEGER)
-              .pipe(
-                Stream.tap((event) => replayMetrics.recordReplayEvent(event.sequence)),
-                Stream.mapError(
-                  (cause) =>
-                    new OrchestrationGetSnapshotError({
-                      message: "Failed to replay orchestration thread events",
-                      cause,
-                    }),
-                ),
-              );
+            const replayStream = makeBoundedReplayStream({
+              snapshotSequence,
+              captureReplayUpperBound: replayBoundary.captureReplayUpperBound,
+              errorMessage: "Failed to replay orchestration thread events",
+            }).pipe(Stream.tap((event) => replayMetrics.recordReplayEvent(event.sequence)));
             const liveStream = Stream.fromQueue(liveQueue).pipe(
               Stream.tap((event) => replayMetrics.recordLiveDequeued(event.sequence)),
             );

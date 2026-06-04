@@ -393,6 +393,13 @@ function useThrottledStreamingMarkdownText(text: string, isStreaming: boolean): 
   useEffect(() => {
     latestTextRef.current = text;
 
+    if (isStreaming && !wasStreamingRef.current) {
+      clearScheduledFlush();
+      lastFlushAtRef.current = 0;
+      setDisplayText(latestTextRef.current);
+      return;
+    }
+
     if (!isStreaming) {
       clearScheduledFlush();
       lastFlushAtRef.current = Date.now();

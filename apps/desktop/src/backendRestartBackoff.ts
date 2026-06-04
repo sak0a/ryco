@@ -11,6 +11,18 @@ export interface BackendRestartBackoffOptions {
 export function createBackendRestartBackoff(
   options: BackendRestartBackoffOptions,
 ): BackendRestartBackoff {
+  if (
+    !Number.isFinite(options.initialDelayMs) ||
+    options.initialDelayMs <= 0 ||
+    !Number.isFinite(options.maxDelayMs) ||
+    options.maxDelayMs <= 0 ||
+    options.maxDelayMs < options.initialDelayMs
+  ) {
+    throw new RangeError(
+      `Invalid backend restart backoff options: initialDelayMs=${options.initialDelayMs}, maxDelayMs=${options.maxDelayMs}. Expected finite positive delays with maxDelayMs >= initialDelayMs.`,
+    );
+  }
+
   let restartAttempt = 0;
 
   return {
