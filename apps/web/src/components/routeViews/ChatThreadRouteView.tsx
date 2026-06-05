@@ -342,7 +342,6 @@ export function ChatThreadRouteView({
             onAgentPanelOpen={() => markRightPanelOpened("agent")}
             workspacePanelOpen={rightPanelOpen}
             onToggleWorkspacePanel={toggleRightPanel}
-            reserveTitleBarControlInset={!rightPanelOpen}
             routeKind="server"
           />
         </SidebarInset>

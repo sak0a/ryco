@@ -4,6 +4,7 @@ import * as Semaphore from "effect/Semaphore";
 
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
 import { ServerSettingsError } from "@ryco/contracts";
+import { ignoreProviderBackgroundCause } from "./ignoreProviderBackgroundCause.ts";
 
 interface ProviderSnapshotState {
   readonly snapshot: ServerProvider;
@@ -85,7 +86,10 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
         getSnapshot: Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot)),
         publishSnapshot: (nextSnapshot) => publishEnrichedSnapshot(generation, nextSnapshot),
       })
-      .pipe(Effect.ignoreCause({ log: true }), Effect.forkIn(scope));
+      .pipe(
+        ignoreProviderBackgroundCause("provider snapshot enrichment failed"),
+        Effect.forkIn(scope),
+      );
 
     yield* Ref.set(enrichmentFiberRef, fiber);
   });
@@ -135,13 +139,13 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     yield* Effect.forever(
       Effect.sleep(input.refreshInterval).pipe(
         Effect.flatMap(() => refreshSnapshot()),
-        Effect.ignoreCause({ log: true }),
+        ignoreProviderBackgroundCause("provider automatic refresh failed"),
       ),
     ).pipe(Effect.forkScoped);
   }
 
   yield* applySnapshot(initialSettings, { forceRefresh: true }).pipe(
-    Effect.ignoreCause({ log: true }),
+    ignoreProviderBackgroundCause("provider initial refresh failed"),
     Effect.forkScoped,
   );
 

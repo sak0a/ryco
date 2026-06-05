@@ -103,6 +103,8 @@ const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const MESSAGE_ACTION_BUTTON_CLASS_NAME =
+  "size-6 min-w-6 rounded-md border-0 bg-transparent px-0 text-muted-foreground/45 shadow-none transition-[background-color,color,box-shadow] before:hidden hover:bg-foreground/8 hover:text-foreground/75 hover:shadow-sm/5 focus-visible:ring-1 focus-visible:ring-ring/60 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/35";
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -340,7 +342,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           return (
             <div className="flex justify-end">
               <div className="group flex max-w-[80%] flex-col items-end">
-                <div className="relative rounded-2xl rounded-br-sm border border-border bg-secondary px-3 py-2">
+                <div className="relative rounded-2xl rounded-br-sm bg-foreground/8 px-3 py-2 shadow-md/5 transition-[background-color,box-shadow] duration-200 group-hover:bg-foreground/10 group-hover:shadow-lg/8">
                   {userImages.length > 0 && (
                     <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                       {userImages.map(
@@ -388,13 +390,20 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                 <div className="mt-1 flex items-center justify-end gap-2">
                   <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
                     {displayedUserMessage.copyText && (
-                      <MessageCopyButton text={displayedUserMessage.copyText} />
+                      <MessageCopyButton
+                        text={displayedUserMessage.copyText}
+                        size="icon-xs"
+                        variant="ghost"
+                        className={MESSAGE_ACTION_BUTTON_CLASS_NAME}
+                        ariaLabel="Copy message"
+                      />
                     )}
                     {canRevertAgentWork && (
                       <Button
                         type="button"
-                        size="xs"
-                        variant="outline"
+                        size="icon-xs"
+                        variant="ghost"
+                        className={MESSAGE_ACTION_BUTTON_CLASS_NAME}
                         disabled={ctx.isRevertingCheckpoint || ctx.isWorking}
                         onClick={() => ctx.onRevertUserMessage(row.message.id)}
                         title="Revert to this message"
@@ -421,10 +430,19 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
             ctx.activeTurnId !== null &&
             ctx.activeTurnId !== undefined &&
             row.message.turnId === ctx.activeTurnId;
+          const assistantSummaryStillInProgress =
+            ctx.activeTurnInProgress &&
+            ctx.activeTurnId !== null &&
+            ctx.activeTurnId !== undefined &&
+            row.assistantTurnDiffSummary?.turnId === ctx.activeTurnId;
+          const assistantResponseStillInProgress =
+            row.message.streaming ||
+            assistantTurnStillInProgress ||
+            assistantSummaryStillInProgress;
           const assistantCopyState = resolveAssistantMessageCopyState({
             text: row.message.text ?? null,
             showCopyButton: row.showAssistantCopyButton,
-            streaming: row.message.streaming || assistantTurnStillInProgress,
+            streaming: assistantResponseStillInProgress,
           });
           return (
             <>
@@ -441,17 +459,19 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                 <ChatMarkdown
                   text={messageText}
                   cwd={ctx.markdownCwd}
-                  isStreaming={Boolean(row.message.streaming)}
+                  isStreaming={assistantResponseStillInProgress}
                   skills={ctx.skills}
                 />
-                <AssistantChangedFilesSection
-                  turnSummary={row.assistantTurnDiffSummary}
-                  routeThreadKey={ctx.routeThreadKey}
-                  resolvedTheme={ctx.resolvedTheme}
-                  openDiffTurnId={ctx.openDiffTurnId}
-                  onOpenTurnDiff={ctx.onOpenTurnDiff}
-                  onCloseDiff={ctx.onCloseDiff}
-                />
+                {!assistantResponseStillInProgress && (
+                  <AssistantChangedFilesSection
+                    turnSummary={row.assistantTurnDiffSummary}
+                    routeThreadKey={ctx.routeThreadKey}
+                    resolvedTheme={ctx.resolvedTheme}
+                    openDiffTurnId={ctx.openDiffTurnId}
+                    onOpenTurnDiff={ctx.onOpenTurnDiff}
+                    onCloseDiff={ctx.onCloseDiff}
+                  />
+                )}
                 <div className="mt-1.5 flex items-center gap-2">
                   <p className="text-[10px] text-muted-foreground/30">
                     {row.message.streaming ? (
@@ -473,8 +493,9 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                       <MessageCopyButton
                         text={assistantCopyState.text ?? ""}
                         size="icon-xs"
-                        variant="outline"
-                        className="border-border/50 bg-background/35 text-muted-foreground/45 shadow-none hover:border-border/70 hover:bg-background/55 hover:text-muted-foreground/70"
+                        variant="ghost"
+                        className={MESSAGE_ACTION_BUTTON_CLASS_NAME}
+                        ariaLabel="Copy response"
                       />
                     </div>
                   ) : null}
@@ -587,7 +608,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
 }: {
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
 }) {
-  const { workspaceRoot } = use(TimelineRowCtx);
+  const { activeTurnId, isWorking, workspaceRoot } = use(TimelineRowCtx);
   const [isExpanded, setIsExpanded] = useState(false);
   const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
   const visibleEntries =
@@ -600,9 +621,9 @@ const WorkGroupSection = memo(function WorkGroupSection({
   const groupLabel = onlyToolEntries ? "Tool calls" : "Work log";
 
   return (
-    <div className="rounded-xl border border-border/45 bg-card/25 px-2 py-1.5">
+    <div className="space-y-1">
       {showHeader && (
-        <div className="mb-1.5 flex items-center justify-between gap-2 px-0.5">
+        <div className="flex items-center justify-between gap-2 px-2">
           <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/55">
             {groupLabel} ({groupedEntries.length})
           </p>
@@ -618,13 +639,32 @@ const WorkGroupSection = memo(function WorkGroupSection({
         </div>
       )}
       <div className="space-y-0.5">
-        {visibleEntries.map((workEntry) => (
-          <ExpandableWorkEntryRow
-            key={`work-row:${workEntry.id}`}
-            workEntry={workEntry}
-            workspaceRoot={workspaceRoot}
-          />
-        ))}
+        {visibleEntries.map((workEntry) => {
+          const isActive =
+            isWorking &&
+            activeTurnId !== null &&
+            activeTurnId !== undefined &&
+            workEntry.turnId === activeTurnId;
+
+          if (isFileEditWorkEntry(workEntry) && (workEntry.changedFiles?.length ?? 0) > 0) {
+            return (
+              <FileEditWorkEntryRow
+                key={`work-row:${workEntry.id}`}
+                isEditing={isActive && !workEntry.completed && !isErroredWorkEntry(workEntry)}
+                workEntry={workEntry}
+                workspaceRoot={workspaceRoot}
+              />
+            );
+          }
+
+          return (
+            <ExpandableWorkEntryRow
+              key={`work-row:${workEntry.id}`}
+              workEntry={workEntry}
+              workspaceRoot={workspaceRoot}
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -717,7 +757,7 @@ function AssistantChangedFilesSectionInner({
   const diffOpenForTurn = openDiffTurnId === turnSummary.turnId;
 
   return (
-    <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
+    <div className="chat-final-diff-section mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
           <span>Changed files ({changedFileCountLabel})</span>
@@ -1050,6 +1090,59 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
 }
 
+function isFileEditWorkEntry(workEntry: TimelineWorkEntry): boolean {
+  return (
+    workEntry.requestKind === "file-change" ||
+    workEntry.itemType === "file_change" ||
+    (workEntry.changedFiles?.length ?? 0) > 0
+  );
+}
+
+type ChangedFileStatInput = {
+  additions?: number | undefined;
+  deletions?: number | undefined;
+};
+
+function fileStatHasValues(file: ChangedFileStatInput): boolean {
+  return typeof file.additions === "number" || typeof file.deletions === "number";
+}
+
+function summarizeChangedFileStats(
+  files: ReadonlyArray<ChangedFileStatInput> | undefined,
+): { additions: number; deletions: number } | null {
+  if (!files?.some(fileStatHasValues)) {
+    return null;
+  }
+  return files.reduce<{ additions: number; deletions: number }>(
+    (stat, file) => ({
+      additions: stat.additions + (file.additions ?? 0),
+      deletions: stat.deletions + (file.deletions ?? 0),
+    }),
+    { additions: 0, deletions: 0 },
+  );
+}
+
+function basenameFromPath(filePath: string): string {
+  const normalized = filePath.replaceAll("\\", "/");
+  const segments = normalized.split("/");
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    const segment = segments[index];
+    if (segment) {
+      return segment;
+    }
+  }
+  return filePath;
+}
+
+function CompactDiffStatLabel(props: { additions: number; deletions: number }) {
+  return (
+    <>
+      <span className="text-success">+{props.additions}</span>
+      <span className="ml-1 text-destructive">-{props.deletions}</span>
+    </>
+  );
+}
+
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
@@ -1167,6 +1260,103 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           )}
         </div>
       )}
+    </div>
+  );
+});
+
+const FileEditWorkEntryRow = memo(function FileEditWorkEntryRow(props: {
+  isEditing: boolean;
+  workEntry: TimelineWorkEntry;
+  workspaceRoot: string | undefined;
+}) {
+  const { isEditing, workEntry, workspaceRoot } = props;
+  const changedFiles = workEntry.changedFiles ?? [];
+  const statsByPath = new Map(
+    (workEntry.changedFileStats ?? []).map((file) => [file.path, file] as const),
+  );
+  const visibleFiles = changedFiles.slice(0, 3);
+  const hiddenCount = Math.max(0, changedFiles.length - visibleFiles.length);
+  const firstFile = changedFiles[0];
+  const firstDisplayPath = firstFile ? formatWorkspaceRelativePath(firstFile, workspaceRoot) : null;
+  const primaryLabel =
+    changedFiles.length === 1 && firstDisplayPath
+      ? `${workEntry.completed ? "Edited" : "Editing"} ${firstDisplayPath}`
+      : `${workEntry.completed ? "Edited" : "Editing"} ${changedFiles.length} files`;
+  const firstFileStat = firstFile ? statsByPath.get(firstFile) : undefined;
+  const stat = workEntry.completed
+    ? changedFiles.length === 1 && firstFile
+      ? summarizeChangedFileStats(firstFileStat ? [firstFileStat] : undefined)
+      : summarizeChangedFileStats(workEntry.changedFileStats)
+    : null;
+
+  return (
+    <div
+      className={cn(
+        "chat-file-edit-row rounded-lg border border-border/50 bg-background/55 px-2 py-1.5 shadow-sm/5 transition-[border-color,box-shadow] duration-200",
+        isEditing && "border-success/25 shadow-md/8",
+      )}
+      data-file-edit-work-row="true"
+      data-file-edit-work-state={workEntry.completed ? "completed" : "editing"}
+    >
+      <div className="relative flex min-w-0 items-center gap-2">
+        <span
+          className={cn(
+            "flex size-5 shrink-0 items-center justify-center rounded-md border border-border/45 bg-card/65 text-muted-foreground/75",
+            isEditing && "border-success/20 text-success/85",
+          )}
+        >
+          <SquarePenIcon className="size-3" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <p
+              className={cn(
+                "chat-file-edit-text truncate text-[11px] leading-5 font-medium text-foreground/80",
+                isEditing && "chat-file-edit-text--active",
+              )}
+              title={primaryLabel}
+            >
+              {primaryLabel}
+            </p>
+            {stat && (
+              <span className="shrink-0 font-mono text-[10px]">
+                <CompactDiffStatLabel additions={stat.additions} deletions={stat.deletions} />
+              </span>
+            )}
+          </div>
+          {changedFiles.length > 1 && (
+            <div className="mt-0.5 flex min-w-0 flex-wrap gap-1">
+              {visibleFiles.map((filePath) => {
+                const displayPath = formatWorkspaceRelativePath(filePath, workspaceRoot);
+                const rawFileStat = statsByPath.get(filePath);
+                const fileStat = summarizeChangedFileStats(rawFileStat ? [rawFileStat] : undefined);
+                return (
+                  <span
+                    key={`${workEntry.id}:edit-chip:${filePath}`}
+                    className="inline-flex max-w-[15rem] items-center gap-1 rounded-md border border-border/45 bg-card/55 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
+                    title={displayPath}
+                  >
+                    <span className="truncate">{basenameFromPath(displayPath)}</span>
+                    {fileStat && (
+                      <span className="shrink-0">
+                        <CompactDiffStatLabel
+                          additions={fileStat.additions}
+                          deletions={fileStat.deletions}
+                        />
+                      </span>
+                    )}
+                  </span>
+                );
+              })}
+              {hiddenCount > 0 && (
+                <span className="px-1 text-[10px] leading-5 text-muted-foreground/55">
+                  +{hiddenCount}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 });

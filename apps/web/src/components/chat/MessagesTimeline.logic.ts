@@ -357,13 +357,45 @@ function areWorkLogEntriesUnchanged(previous: WorkLogEntry, next: WorkLogEntry):
       previous.command === next.command &&
       previous.rawCommand === next.rawCommand &&
       areStringArraysUnchanged(previous.changedFiles, next.changedFiles) &&
+      areChangedFileStatsUnchanged(previous.changedFileStats, next.changedFileStats) &&
+      previous.completed === next.completed &&
       previous.tone === next.tone &&
       previous.toolTitle === next.toolTitle &&
       previous.itemType === next.itemType &&
       previous.requestKind === next.requestKind &&
+      previous.turnId === next.turnId &&
       previous.output === next.output &&
       previous.exitCode === next.exitCode)
   );
+}
+
+function areChangedFileStatsUnchanged(
+  previous: WorkLogEntry["changedFileStats"],
+  next: WorkLogEntry["changedFileStats"],
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+  const previousLength = previous?.length ?? 0;
+  const nextLength = next?.length ?? 0;
+  if (previousLength !== nextLength) {
+    return false;
+  }
+  for (let index = 0; index < previousLength; index += 1) {
+    const previousStat = previous?.[index];
+    const nextStat = next?.[index];
+    if (
+      !previousStat ||
+      !nextStat ||
+      previousStat.path !== nextStat.path ||
+      previousStat.kind !== nextStat.kind ||
+      previousStat.additions !== nextStat.additions ||
+      previousStat.deletions !== nextStat.deletions
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function areStringArraysUnchanged(

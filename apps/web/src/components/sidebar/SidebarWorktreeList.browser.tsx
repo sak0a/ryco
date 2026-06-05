@@ -45,6 +45,35 @@ describe("SidebarWorktreeList", () => {
     await expect.element(page.getByText("Release checklist")).toBeInTheDocument();
   });
 
+  it("expands a worktree when clicking its title without opening it", async () => {
+    const onOpenWorktree = vi.fn();
+    await render(
+      <SidebarWorktreeList
+        attachThreadListAutoAnimateRef={() => undefined}
+        projectExpanded
+        resolveThreadGitStatusTarget={() => null}
+        renderThread={(thread) => <div>{thread.title}</div>}
+        treeProject={makeTreeProject()}
+        visibleThreadKeys={null}
+        onArchiveWorktree={vi.fn()}
+        onCopyWorktreePath={vi.fn()}
+        onDeleteWorktree={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenInEditor={vi.fn()}
+        onOpenWorktree={onOpenWorktree}
+        onRenameWorktree={vi.fn()}
+        onRestoreWorktree={vi.fn()}
+      />,
+    );
+
+    expect(document.body.textContent).not.toContain("Release checklist");
+
+    await page.getByText("main").click();
+
+    await expect.element(page.getByText("Release checklist")).toBeInTheDocument();
+    expect(onOpenWorktree).not.toHaveBeenCalled();
+  });
+
   it("renders state-aware chips for every linked PR/issue lifecycle state", async () => {
     const treeProject = makeVariantsTreeProject();
     await render(

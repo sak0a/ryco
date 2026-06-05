@@ -18,6 +18,7 @@ import type {
   SessionPhase,
   Thread,
   ThreadSession,
+  TurnDiffFileChange,
   TurnDiffSummary,
 } from "./types";
 
@@ -59,10 +60,13 @@ export interface WorkLogEntry {
   command?: string;
   rawCommand?: string;
   changedFiles?: ReadonlyArray<string>;
+  changedFileStats?: ReadonlyArray<TurnDiffFileChange>;
+  completed?: boolean;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
+  turnId?: TurnId | null;
   /** Full untruncated output text for the expanded panel. */
   output?: string;
   /** Process exit code when the activity reported one. */
@@ -625,6 +629,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       : null;
   const commandPreview = extractToolCommand(payload);
   const changedFiles = extractChangedFiles(payload);
+  const changedFileStats = extractChangedFileStats(payload);
   const title = extractToolTitle(payload);
   const isTaskActivity = activity.kind === "task.progress" || activity.kind === "task.completed";
   const taskSummary =
@@ -676,6 +681,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
   }
+  if (changedFileStats.length > 0) {
+    entry.changedFileStats = changedFileStats;
+  }
   if (title) {
     entry.toolTitle = title;
   }
@@ -693,6 +701,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (exitCode !== null) {
     entry.exitCode = exitCode;
+  }
+  if (activity.turnId !== null) {
+    entry.turnId = activity.turnId;
+  }
+  if (activity.kind === "tool.completed" || activity.kind === "task.completed") {
+    entry.completed = true;
   }
   const collapseKey = deriveToolLifecycleCollapseKey(entry);
   if (collapseKey) {
@@ -746,6 +760,7 @@ function mergeDerivedWorkLogEntries(
   next: DerivedWorkLogEntry,
 ): DerivedWorkLogEntry {
   const changedFiles = mergeChangedFiles(previous.changedFiles, next.changedFiles);
+  const changedFileStats = mergeChangedFileStats(previous.changedFileStats, next.changedFileStats);
   const detail = next.detail ?? previous.detail;
   const command = next.command ?? previous.command;
   const rawCommand = next.rawCommand ?? previous.rawCommand;
@@ -763,6 +778,7 @@ function mergeDerivedWorkLogEntries(
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
+    ...(changedFileStats.length > 0 ? { changedFileStats } : {}),
     ...(toolTitle ? { toolTitle } : {}),
     ...(itemType ? { itemType } : {}),
     ...(requestKind ? { requestKind } : {}),
@@ -782,6 +798,23 @@ function mergeChangedFiles(
     return [];
   }
   return [...new Set(merged)];
+}
+
+function mergeChangedFileStats(
+  previous: ReadonlyArray<TurnDiffFileChange> | undefined,
+  next: ReadonlyArray<TurnDiffFileChange> | undefined,
+): TurnDiffFileChange[] {
+  const byPath = new Map<string, TurnDiffFileChange>();
+  for (const entry of [...(previous ?? []), ...(next ?? [])]) {
+    const existing = byPath.get(entry.path);
+    byPath.set(entry.path, {
+      path: entry.path,
+      kind: entry.kind ?? existing?.kind,
+      additions: entry.additions ?? existing?.additions,
+      deletions: entry.deletions ?? existing?.deletions,
+    });
+  }
+  return Array.from(byPath.values());
 }
 
 function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | undefined {
@@ -1314,6 +1347,50 @@ function pushChangedFile(target: string[], seen: Set<string>, value: unknown) {
   target.push(normalized);
 }
 
+function readChangedFilePath(record: Record<string, unknown>): string | null {
+  for (const key of ["path", "filePath", "relativePath", "filename", "newPath", "oldPath"]) {
+    const normalized = asTrimmedString(record[key]);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
+function readChangedFileCount(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.trunc(value));
+}
+
+function readChangedFileStat(record: Record<string, unknown>): TurnDiffFileChange | null {
+  const path = readChangedFilePath(record);
+  if (!path) {
+    return null;
+  }
+
+  const additions = readChangedFileCount(
+    record.additions ?? record.insertions ?? record.addedLines ?? record.additionLines,
+  );
+  const deletions = readChangedFileCount(
+    record.deletions ??
+      record.deletedLines ??
+      record.deletionLines ??
+      record.removedLines ??
+      record.removals,
+  );
+  if (additions === undefined && deletions === undefined) {
+    return null;
+  }
+
+  return {
+    path,
+    ...(additions !== undefined ? { additions } : {}),
+    ...(deletions !== undefined ? { deletions } : {}),
+  };
+}
+
 function collectChangedFiles(value: unknown, target: string[], seen: Set<string>, depth: number) {
   if (depth > 4 || target.length >= 12) {
     return;
@@ -1362,11 +1439,70 @@ function collectChangedFiles(value: unknown, target: string[], seen: Set<string>
   }
 }
 
+function collectChangedFileStats(
+  value: unknown,
+  target: TurnDiffFileChange[],
+  seen: Set<string>,
+  depth: number,
+) {
+  if (depth > 4 || target.length >= 12) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      collectChangedFileStats(entry, target, seen, depth + 1);
+      if (target.length >= 12) {
+        return;
+      }
+    }
+    return;
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    return;
+  }
+
+  const stat = readChangedFileStat(record);
+  if (stat && !seen.has(stat.path)) {
+    seen.add(stat.path);
+    target.push(stat);
+  }
+
+  for (const nestedKey of [
+    "item",
+    "result",
+    "input",
+    "data",
+    "changes",
+    "files",
+    "edits",
+    "patch",
+    "patches",
+    "operations",
+  ]) {
+    if (!(nestedKey in record)) {
+      continue;
+    }
+    collectChangedFileStats(record[nestedKey], target, seen, depth + 1);
+    if (target.length >= 12) {
+      return;
+    }
+  }
+}
+
 function extractChangedFiles(payload: Record<string, unknown> | null): string[] {
   const changedFiles: string[] = [];
   const seen = new Set<string>();
   collectChangedFiles(asRecord(payload?.data), changedFiles, seen, 0);
   return changedFiles;
+}
+
+function extractChangedFileStats(payload: Record<string, unknown> | null): TurnDiffFileChange[] {
+  const changedFileStats: TurnDiffFileChange[] = [];
+  const seen = new Set<string>();
+  collectChangedFileStats(asRecord(payload?.data), changedFileStats, seen, 0);
+  return changedFileStats;
 }
 
 function compareActivitiesByOrder(

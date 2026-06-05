@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArchiveIcon,
   ChevronRightIcon,
@@ -49,6 +49,7 @@ const WORKTREE_STATUS_LABELS: Record<SidebarStatusBucket, string> = {
   in_progress: "In progress",
   review: "Review",
 };
+const WORKTREE_TITLE_CLICK_TOGGLE_DELAY_MS = 180;
 
 export interface SidebarWorktreeListProps {
   attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void;
@@ -253,10 +254,19 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
   const [collapsed, setCollapsed] = useState(true);
   const [renaming, setRenaming] = useState(false);
   const [renameTitle, setRenameTitle] = useState(() => getWorktreeDisplayTitle(props.worktree));
+  const pendingTitleClickRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCollapsed = props.visibleThreadKeys ? false : collapsed;
   const showEmptyState = props.projectExpanded && !isCollapsed && visibleThreads.length === 0;
   const showSessions = !isCollapsed;
-  const toggleCollapsed = () => setCollapsed((open) => !open);
+  const toggleCollapsed = useCallback(() => setCollapsed((open) => !open), []);
+  const clearPendingTitleClick = useCallback(() => {
+    if (pendingTitleClickRef.current === null) {
+      return;
+    }
+    clearTimeout(pendingTitleClickRef.current);
+    pendingTitleClickRef.current = null;
+  }, []);
+  useEffect(() => clearPendingTitleClick, [clearPendingTitleClick]);
   const displayTitle = getWorktreeDisplayTitle(props.worktree);
   const statusTextStyle = useMemo(
     () =>
@@ -266,6 +276,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
     [displayTitle, props.worktree.aggregateStatus],
   );
   const startRename = () => {
+    clearPendingTitleClick();
     setRenameTitle(displayTitle);
     setRenaming(true);
   };
@@ -283,6 +294,20 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
       setRenaming(false);
     });
   };
+  const handleTitleClick = useCallback(
+    (event: React.MouseEvent<HTMLSpanElement>) => {
+      event.stopPropagation();
+      clearPendingTitleClick();
+      if (event.detail > 1) {
+        return;
+      }
+      pendingTitleClickRef.current = setTimeout(() => {
+        pendingTitleClickRef.current = null;
+        toggleCollapsed();
+      }, WORKTREE_TITLE_CLICK_TOGGLE_DELAY_MS);
+    },
+    [clearPendingTitleClick, toggleCollapsed],
+  );
 
   return (
     <>
@@ -295,7 +320,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                 tabIndex={0}
                 aria-expanded={!isCollapsed}
                 className="group/worktree flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                onClick={() => props.onOpenWorktree(props.worktree)}
+                onClick={toggleCollapsed}
                 onKeyDown={(event) => {
                   if (event.key === "ArrowLeft") {
                     event.preventDefault();
@@ -311,7 +336,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                     return;
                   }
                   event.preventDefault();
-                  props.onOpenWorktree(props.worktree);
+                  toggleCollapsed();
                 }}
               />
             }
@@ -363,7 +388,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                 <span
                   className={resolveSidebarStatusTextClassName(
                     props.worktree.aggregateStatus,
-                    "min-w-0 truncate text-xs font-medium text-foreground/85",
+                    "min-w-0 cursor-default truncate text-xs font-medium text-foreground/85",
                   )}
                   title={
                     props.worktree.aggregateStatus === "idle"
@@ -376,7 +401,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                       : `${WORKTREE_STATUS_LABELS[props.worktree.aggregateStatus]}: ${displayTitle}`
                   }
                   style={statusTextStyle}
-                  onClick={(event) => event.stopPropagation()}
+                  onClick={handleTitleClick}
                   onDoubleClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();

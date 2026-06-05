@@ -1454,7 +1454,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     function* (cwd) {
       yield* refreshStatusUpstreamIfStale(cwd).pipe(
         Effect.catchIf(isMissingGitCwdError, () => Effect.void),
-        Effect.ignoreCause({ log: true }),
+        Effect.ignoreCause({ log: false }),
       );
       return yield* readStatusDetailsLocal(cwd);
     },

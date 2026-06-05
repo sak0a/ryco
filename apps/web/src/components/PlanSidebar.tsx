@@ -218,7 +218,7 @@ const PullRequestStatusRow = forwardRef<HTMLElement, PullRequestStatusRowProps>(
   ) {
     const content = (
       <>
-        <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">{icon}</span>
+        <span className="flex size-5 shrink-0 items-center justify-center">{icon}</span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[12px] leading-5">{label}</span>
           {detail ? (
@@ -232,7 +232,7 @@ const PullRequestStatusRow = forwardRef<HTMLElement, PullRequestStatusRowProps>(
     );
 
     const rowClassName = cn(
-      "flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-left",
+      "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left",
       (href || interactive) &&
         "transition-colors hover:bg-muted/45 focus-visible:bg-muted/45 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring",
       className,
@@ -427,7 +427,7 @@ const PlanSidebar = memo(function PlanSidebar({
           "my-3 mr-3 max-h-[min(calc(100%-1.5rem),42rem)] w-[340px] shrink-0 self-start overflow-hidden rounded-lg border border-border/70 bg-card/90 shadow-xl supports-[backdrop-filter]:bg-card/75",
         mode === "sheet" && "h-full w-full bg-card/90 supports-[backdrop-filter]:bg-card/75",
         mode === "floating" &&
-          "pointer-events-auto absolute top-3 right-3 z-40 max-h-[min(72vh,42rem)] w-[min(360px,calc(100%-1.5rem))] rounded-lg border border-border/50 bg-card/55 shadow-xl backdrop-blur-xl backdrop-saturate-150 supports-[backdrop-filter]:bg-card/45",
+          "pointer-events-auto max-h-[min(72vh,42rem)] w-[min(360px,calc(100vw_-_1.5rem))] rounded-lg border border-border/60 bg-card/95 shadow-xl dark:bg-card/90",
       )}
     >
       {/* Header */}
@@ -637,8 +637,8 @@ const PlanSidebar = memo(function PlanSidebar({
                 Pull Request
               </p>
               <div className="rounded-md border border-border/50 bg-background/35 p-2">
-                <div className="flex min-w-0 items-start gap-2">
-                  <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/45 text-muted-foreground/65">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/45 text-muted-foreground/65">
                     <GitPullRequestIcon className="size-3.5" />
                   </span>
                   <div className="min-w-0 flex-1">
@@ -660,7 +660,7 @@ const PlanSidebar = memo(function PlanSidebar({
                       href={pullRequest.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/55 transition-colors hover:bg-muted/60 hover:text-foreground"
+                      className="shrink-0 rounded-md p-1 text-muted-foreground/55 transition-colors hover:bg-muted/60 hover:text-foreground"
                       aria-label={`Open pull request #${pullRequest.number}`}
                     >
                       <ExternalLinkIcon className="size-3.5" />

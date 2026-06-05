@@ -15,6 +15,7 @@ import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { ChatHeaderBar } from "./ChatHeaderBar";
 import { ChatSessionTabs, type ChatSessionTabsItem } from "./ChatSessionTabs";
 import type { WorktreeOriginLike } from "./ChatSessionTabs.logic";
+import { HEADER_CHROME_ICON_BUTTON_CLASS_NAME } from "./headerChrome";
 import type { LinkedWorktreeItem } from "../worktrees/LinkedWorktreeItemDialog";
 import { usePerfMark, useDevPropDiff } from "../../perf/tabSwitchInstrumentation";
 
@@ -86,14 +87,13 @@ export const ChatHeader = memo(function ChatHeader(props: ChatHeaderProps) {
         <TooltipTrigger
           render={
             <Toggle
-              className="shrink-0"
               pressed={props.overviewSidebarOpen}
               onPressedChange={props.onToggleOverviewSidebar}
               aria-label="Toggle overview panel"
-              variant="outline"
-              size="xs"
+              className={HEADER_CHROME_ICON_BUTTON_CLASS_NAME}
+              size="sm"
             >
-              <ListChecksIcon className="size-3" />
+              <ListChecksIcon className="size-4" />
             </Toggle>
           }
         />
@@ -103,14 +103,13 @@ export const ChatHeader = memo(function ChatHeader(props: ChatHeaderProps) {
         <TooltipTrigger
           render={
             <Toggle
-              className="shrink-0"
               pressed={props.workspacePanelOpen}
               onPressedChange={props.onToggleWorkspacePanel}
               aria-label="Toggle workspace panel"
-              variant="outline"
-              size="xs"
+              className={HEADER_CHROME_ICON_BUTTON_CLASS_NAME}
+              size="sm"
             >
-              <PanelRightIcon className="size-3" />
+              <PanelRightIcon className="size-4" />
             </Toggle>
           }
         />

@@ -560,6 +560,7 @@ describe("computeStableMessagesTimelineRows", () => {
       label: "Read file",
       detail: "src/index.ts",
       changedFiles: ["src/index.ts"],
+      changedFileStats: [{ path: "src/index.ts", additions: 4, deletions: 1 }],
     });
     const secondWorkEntry = makeWorkEntry({
       id: "work-2",
@@ -598,7 +599,11 @@ describe("computeStableMessagesTimelineRows", () => {
       timelineEntries: [
         {
           ...timelineEntries[0]!,
-          entry: { ...firstWorkEntry, changedFiles: [...(firstWorkEntry.changedFiles ?? [])] },
+          entry: {
+            ...firstWorkEntry,
+            changedFiles: [...(firstWorkEntry.changedFiles ?? [])],
+            changedFileStats: [...(firstWorkEntry.changedFileStats ?? [])],
+          },
         },
         {
           ...timelineEntries[1]!,

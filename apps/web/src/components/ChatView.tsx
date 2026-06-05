@@ -50,6 +50,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
+  type ReactNode,
 } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
@@ -126,6 +128,8 @@ import {
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
+import { PREFERS_REDUCED_MOTION_QUERY } from "../lib/perf/motion";
+import { useDelayedUnmount } from "../hooks/useDelayedUnmount";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -270,7 +274,100 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 const EMPTY_SESSION_TABS: ReadonlyArray<ChatSessionTabsItem> = Object.freeze([]);
+const OVERVIEW_FLOATING_EXIT_DURATION_MS = 260;
+const OVERVIEW_SIDEBAR_EXIT_DURATION_MS = 320;
+const OVERVIEW_SIDEBAR_FRAME_WIDTH = "calc(340px + 0.75rem)";
 const ThreadTerminalDrawer = lazy(() => import("./ThreadTerminalDrawer"));
+
+function OverviewSidebarMotionFrame(props: {
+  animate: boolean;
+  children: ReactNode;
+  open: boolean;
+}) {
+  const [entered, setEntered] = useState(!props.animate && props.open);
+
+  useEffect(() => {
+    if (!props.animate) {
+      setEntered(props.open);
+      return;
+    }
+
+    if (!props.open) {
+      setEntered(false);
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(frameId);
+  }, [props.animate, props.open]);
+
+  const active = props.animate ? props.open && entered : props.open;
+
+  return (
+    <div
+      aria-hidden={props.open ? undefined : true}
+      inert={props.open ? undefined : true}
+      className={cn(
+        "min-h-0 shrink-0 overflow-hidden transition-[width,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+        active ? "w-(--overview-sidebar-frame-width) opacity-100" : "w-0 opacity-0",
+      )}
+      style={
+        {
+          "--overview-sidebar-frame-width": OVERVIEW_SIDEBAR_FRAME_WIDTH,
+        } as CSSProperties
+      }
+    >
+      <div
+        className={cn(
+          "min-h-0 w-(--overview-sidebar-frame-width) transition-[translate,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transition-none",
+          active ? "translate-x-0 opacity-100" : "translate-x-5 opacity-0",
+        )}
+      >
+        {props.children}
+      </div>
+    </div>
+  );
+}
+
+function FloatingOverviewMotionFrame(props: {
+  animate: boolean;
+  children: ReactNode;
+  open: boolean;
+}) {
+  const [entered, setEntered] = useState(!props.animate && props.open);
+
+  useEffect(() => {
+    if (!props.animate) {
+      setEntered(props.open);
+      return;
+    }
+
+    if (!props.open) {
+      setEntered(false);
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(frameId);
+  }, [props.animate, props.open]);
+
+  const active = props.animate ? props.open && entered : props.open;
+
+  return (
+    <div className="pointer-events-none absolute top-3 right-3 z-40">
+      <div
+        aria-hidden={props.open ? undefined : true}
+        inert={props.open ? undefined : true}
+        className={cn(
+          "origin-top-right transition-[translate,opacity] duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transition-none",
+          active ? "translate-x-0 opacity-100" : "translate-x-3 opacity-0",
+        )}
+      >
+        {props.children}
+      </div>
+    </div>
+  );
+}
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -847,6 +944,7 @@ export default function ChatView(props: ChatViewProps) {
   const [planSidebarOpen, setPlanSidebarOpen] = useState(true);
   const [overviewFloatingOpen, setOverviewFloatingOpen] = useState(false);
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const prefersReducedMotion = useMediaQuery(PREFERS_REDUCED_MOTION_QUERY);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
@@ -4374,6 +4472,16 @@ export default function ChatView(props: ChatViewProps) {
   const overviewControlOpen = overviewSidebarVisible || showFloatingOverviewSidebar;
   const showInlineOverviewSidebar = overviewSidebarVisible && !shouldUsePlanSidebarSheet;
   const showOverviewSidebarSheet = overviewSidebarVisible && shouldUsePlanSidebarSheet;
+  const renderFloatingOverviewSidebar = useDelayedUnmount(
+    showFloatingOverviewSidebar,
+    prefersReducedMotion || !workspacePanelOpen ? 0 : OVERVIEW_FLOATING_EXIT_DURATION_MS,
+  );
+  const renderInlineOverviewSidebar = useDelayedUnmount(
+    showInlineOverviewSidebar,
+    prefersReducedMotion || shouldUsePlanSidebarSheet || workspacePanelOpen
+      ? 0
+      : OVERVIEW_SIDEBAR_EXIT_DURATION_MS,
+  );
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -4487,26 +4595,31 @@ export default function ChatView(props: ChatViewProps) {
               <div aria-hidden className="flex min-h-0 flex-1" />
             )}
 
-            {showFloatingOverviewSidebar ? (
-              <PlanSidebar
-                activePlan={activePlan}
-                activeProposedPlan={sidebarProposedPlan}
-                overviewItems={overviewItems}
-                pullRequest={overviewPullRequest}
-                subagents={threadSubagents}
-                sourceControlActions={overviewSourceControlActions}
-                branchControl={overviewBranchControl}
-                label={planSidebarLabel}
-                environmentId={environmentId}
-                markdownCwd={gitCwd ?? undefined}
-                workspaceRoot={activeWorkspaceRoot}
-                timestampFormat={timestampFormat}
-                mode="floating"
-                onOpenFiles={onOpenFilesPanel}
-                onOpenReview={onOpenReviewPanel}
-                onOpenSubagent={onOpenSubagentPanel}
-                onClose={closePlanSidebar}
-              />
+            {renderFloatingOverviewSidebar ? (
+              <FloatingOverviewMotionFrame
+                animate={!prefersReducedMotion}
+                open={showFloatingOverviewSidebar}
+              >
+                <PlanSidebar
+                  activePlan={activePlan}
+                  activeProposedPlan={sidebarProposedPlan}
+                  overviewItems={overviewItems}
+                  pullRequest={overviewPullRequest}
+                  subagents={threadSubagents}
+                  sourceControlActions={overviewSourceControlActions}
+                  branchControl={overviewBranchControl}
+                  label={planSidebarLabel}
+                  environmentId={environmentId}
+                  markdownCwd={gitCwd ?? undefined}
+                  workspaceRoot={activeWorkspaceRoot}
+                  timestampFormat={timestampFormat}
+                  mode="floating"
+                  onOpenFiles={onOpenFilesPanel}
+                  onOpenReview={onOpenReviewPanel}
+                  onOpenSubagent={onOpenSubagentPanel}
+                  onClose={closePlanSidebar}
+                />
+              </FloatingOverviewMotionFrame>
             ) : null}
 
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
@@ -4515,7 +4628,7 @@ export default function ChatView(props: ChatViewProps) {
                 <button
                   type="button"
                   onClick={() => scrollToEnd(true)}
-                  className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
+                  className="pointer-events-auto flex items-center gap-1.5 rounded-full border-0 bg-card/80 px-3 py-1 text-muted-foreground text-xs shadow-md/5 ring-1 ring-inset ring-foreground/6 backdrop-blur transition-[background-color,color,box-shadow] hover:bg-card hover:text-foreground hover:shadow-lg/8 hover:cursor-pointer"
                 >
                   <ChevronDownIcon className="size-3.5" />
                   Scroll to bottom
@@ -4680,26 +4793,31 @@ export default function ChatView(props: ChatViewProps) {
           />
         </div>
         {/* end chat column */}
-        {showInlineOverviewSidebar ? (
-          <PlanSidebar
-            activePlan={activePlan}
-            activeProposedPlan={sidebarProposedPlan}
-            overviewItems={overviewItems}
-            pullRequest={overviewPullRequest}
-            subagents={threadSubagents}
-            sourceControlActions={overviewSourceControlActions}
-            branchControl={overviewBranchControl}
-            label={planSidebarLabel}
-            environmentId={environmentId}
-            markdownCwd={gitCwd ?? undefined}
-            workspaceRoot={activeWorkspaceRoot}
-            timestampFormat={timestampFormat}
-            mode="sidebar"
-            onOpenFiles={onOpenFilesPanel}
-            onOpenReview={onOpenReviewPanel}
-            onOpenSubagent={onOpenSubagentPanel}
-            onClose={closePlanSidebar}
-          />
+        {renderInlineOverviewSidebar ? (
+          <OverviewSidebarMotionFrame
+            animate={!prefersReducedMotion}
+            open={showInlineOverviewSidebar}
+          >
+            <PlanSidebar
+              activePlan={activePlan}
+              activeProposedPlan={sidebarProposedPlan}
+              overviewItems={overviewItems}
+              pullRequest={overviewPullRequest}
+              subagents={threadSubagents}
+              sourceControlActions={overviewSourceControlActions}
+              branchControl={overviewBranchControl}
+              label={planSidebarLabel}
+              environmentId={environmentId}
+              markdownCwd={gitCwd ?? undefined}
+              workspaceRoot={activeWorkspaceRoot}
+              timestampFormat={timestampFormat}
+              mode="sidebar"
+              onOpenFiles={onOpenFilesPanel}
+              onOpenReview={onOpenReviewPanel}
+              onOpenSubagent={onOpenSubagentPanel}
+              onClose={closePlanSidebar}
+            />
+          </OverviewSidebarMotionFrame>
         ) : null}
       </div>
       {/* end horizontal flex container */}
