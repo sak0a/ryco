@@ -197,6 +197,7 @@ function ArchivedWorktreeRow(props: {
           prNumber={props.worktree.worktree.prNumber}
           prState={props.worktree.worktree.prState}
           prIsDraft={props.worktree.worktree.prIsDraft}
+          displayMode="prefer-pr"
           onOpenLinkedItem={props.onOpenLinkedItem}
         />
         <button
@@ -416,6 +417,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                   prNumber={props.worktree.worktree.prNumber}
                   prState={props.worktree.worktree.prState}
                   prIsDraft={props.worktree.worktree.prIsDraft}
+                  displayMode="prefer-pr"
                   onOpenLinkedItem={props.onOpenLinkedItem}
                 />
               </span>
