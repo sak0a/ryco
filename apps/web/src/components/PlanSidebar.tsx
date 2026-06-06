@@ -8,8 +8,6 @@ import {
   type Ref,
 } from "react";
 import type { EnvironmentId, SourceControlChangeRequestMergeability } from "@ryco/contracts";
-import { type TimestampFormat } from "@ryco/contracts/settings";
-import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -29,13 +27,11 @@ import {
   LaptopIcon,
   LoaderCircleIcon,
   LoaderIcon,
-  PanelRightCloseIcon,
   XCircleIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
 import type { ActivePlanState } from "../session-logic";
 import type { LatestProposedPlanState } from "../session-logic";
-import { formatTimestamp } from "../timestampFormat";
 import {
   proposedPlanTitle,
   buildProposedPlanMarkdownFilename,
@@ -121,16 +117,13 @@ interface PlanSidebarProps {
   subagents?: ReadonlyArray<ThreadSubagentView>;
   sourceControlActions?: ReactNode;
   branchControl?: ReactNode;
-  label?: string;
   environmentId: EnvironmentId;
   markdownCwd: string | undefined;
   workspaceRoot: string | undefined;
-  timestampFormat: TimestampFormat;
   mode?: "floating" | "sheet" | "sidebar";
   onOpenFiles?: () => void;
   onOpenReview?: () => void;
   onOpenSubagent?: (subagent: ThreadSubagentView) => void;
-  onClose: () => void;
 }
 
 function subagentStatusBucket(
@@ -334,16 +327,13 @@ const PlanSidebar = memo(function PlanSidebar({
   subagents = [],
   sourceControlActions,
   branchControl,
-  label = "Overview",
   environmentId,
   markdownCwd,
   workspaceRoot,
-  timestampFormat,
   mode = "sidebar",
   onOpenFiles,
   onOpenReview,
   onOpenSubagent,
-  onClose,
 }: PlanSidebarProps) {
   const [proposedPlanExpanded, setProposedPlanExpanded] = useState(false);
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
@@ -430,62 +420,6 @@ const PlanSidebar = memo(function PlanSidebar({
           "pointer-events-auto max-h-[min(72vh,42rem)] w-[min(360px,calc(100vw_-_1.5rem))] rounded-lg border border-border/60 bg-card/95 shadow-xl dark:bg-card/90",
       )}
     >
-      {/* Header */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/60 px-3">
-        <div className="flex items-center gap-2">
-          <Badge
-            variant="secondary"
-            className="rounded-md bg-blue-500/10 px-1.5 py-0 text-[10px] font-semibold tracking-wide text-blue-400 uppercase"
-          >
-            {label}
-          </Badge>
-          {activePlan ? (
-            <span className="text-[11px] text-muted-foreground/60">
-              {formatTimestamp(activePlan.createdAt, timestampFormat)}
-            </span>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-1">
-          {planMarkdown ? (
-            <Menu>
-              <MenuTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    className="text-muted-foreground/50 hover:text-foreground/70"
-                    aria-label="Plan actions"
-                  />
-                }
-              >
-                <EllipsisIcon className="size-3.5" />
-              </MenuTrigger>
-              <MenuPopup align="end">
-                <MenuItem onClick={handleCopyPlan}>
-                  {isCopied ? "Copied!" : "Copy to clipboard"}
-                </MenuItem>
-                <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
-                <MenuItem
-                  onClick={handleSaveToWorkspace}
-                  disabled={!workspaceRoot || isSavingToWorkspace}
-                >
-                  Save to workspace
-                </MenuItem>
-              </MenuPopup>
-            </Menu>
-          ) : null}
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            onClick={onClose}
-            aria-label={`Close ${label.toLowerCase()} sidebar`}
-            className="text-muted-foreground/50 hover:text-foreground/70"
-          >
-            <PanelRightCloseIcon className="size-3.5" />
-          </Button>
-        </div>
-      </div>
-
       {/* Content */}
       <ScrollArea className="min-h-0 flex-1" scrollbarGutter>
         <div className="space-y-3 p-2.5">
@@ -791,20 +725,48 @@ const PlanSidebar = memo(function PlanSidebar({
           {/* Proposed Plan Markdown */}
           {planMarkdown ? (
             <div className="space-y-2">
-              <button
-                type="button"
-                className="group flex w-full items-center gap-1.5 text-left"
-                onClick={() => setProposedPlanExpanded((v) => !v)}
-              >
-                {proposedPlanExpanded ? (
-                  <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground/40 transition-transform" />
-                ) : (
-                  <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground/40 transition-transform" />
-                )}
-                <span className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase group-hover:text-muted-foreground/60">
-                  {planTitle ?? "Full Plan"}
-                </span>
-              </button>
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <button
+                  type="button"
+                  className="group flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                  onClick={() => setProposedPlanExpanded((v) => !v)}
+                >
+                  {proposedPlanExpanded ? (
+                    <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground/40 transition-transform" />
+                  ) : (
+                    <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground/40 transition-transform" />
+                  )}
+                  <span className="truncate text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase group-hover:text-muted-foreground/60">
+                    {planTitle ?? "Full Plan"}
+                  </span>
+                </button>
+                <Menu>
+                  <MenuTrigger
+                    render={
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        className="shrink-0 text-muted-foreground/50 hover:text-foreground/70"
+                        aria-label="Plan actions"
+                      />
+                    }
+                  >
+                    <EllipsisIcon className="size-3.5" />
+                  </MenuTrigger>
+                  <MenuPopup align="end">
+                    <MenuItem onClick={handleCopyPlan}>
+                      {isCopied ? "Copied!" : "Copy to clipboard"}
+                    </MenuItem>
+                    <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
+                    <MenuItem
+                      onClick={handleSaveToWorkspace}
+                      disabled={!workspaceRoot || isSavingToWorkspace}
+                    >
+                      Save to workspace
+                    </MenuItem>
+                  </MenuPopup>
+                </Menu>
+              </div>
               {proposedPlanExpanded ? (
                 <div className="rounded-lg border border-border/50 bg-background/50 p-3">
                   <ChatMarkdown

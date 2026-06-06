@@ -29,12 +29,12 @@ describe("PlanSidebar", () => {
         environmentId={EnvironmentId.make("environment-local")}
         markdownCwd={undefined}
         workspaceRoot={undefined}
-        timestampFormat="locale"
-        onClose={() => {}}
       />,
     );
 
     expect(markup).toContain("PR + local");
+    expect(markup).not.toContain("Overview");
+    expect(markup).not.toContain("Close overview sidebar");
     expect(markup).toContain("Committed");
     expect(markup).toContain("9 files");
     expect(markup).toContain("+30");
@@ -92,8 +92,6 @@ describe("PlanSidebar", () => {
         environmentId={EnvironmentId.make("environment-local")}
         markdownCwd={undefined}
         workspaceRoot={undefined}
-        timestampFormat="locale"
-        onClose={() => {}}
       />,
     );
 

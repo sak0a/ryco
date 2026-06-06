@@ -965,6 +965,34 @@ describe("incremental orchestration updates", () => {
     expect(threadsOf(next)[0]?.latestTurn).toEqual(threadsOf(state)[0]?.latestTurn);
   });
 
+  it("filters placeholder modified zero-change files from completed turn diffs", () => {
+    const state = makeState(makeThread());
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.turn-diff-completed", {
+        threadId: ThreadId.make("thread-1"),
+        turnId: TurnId.make("turn-1"),
+        checkpointTurnCount: 1,
+        checkpointRef: CheckpointRef.make("checkpoint-1"),
+        status: "ready",
+        files: [
+          { path: "src/noop.ts", kind: "modified", additions: 0, deletions: 0 },
+          { path: "script.sh", kind: "mode-changed", additions: 0, deletions: 0 },
+          { path: "src/app.ts", kind: "modified", additions: 1, deletions: 0 },
+        ],
+        assistantMessageId: MessageId.make("assistant-1"),
+        completedAt: "2026-02-27T00:00:04.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    expect(threadsOf(next)[0]?.turnDiffSummaries[0]?.files).toEqual([
+      { path: "script.sh", kind: "mode-changed", additions: 0, deletions: 0 },
+      { path: "src/app.ts", kind: "modified", additions: 1, deletions: 0 },
+    ]);
+  });
+
   it("rebinds live turn diffs to the authoritative assistant message when it arrives later", () => {
     const turnId = TurnId.make("turn-1");
     const state = makeState(

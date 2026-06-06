@@ -29,8 +29,8 @@ describe("parseTurnDiffFilesFromUnifiedDiff", () => {
     ].join("\n");
 
     expect(parseTurnDiffFilesFromUnifiedDiff(diff)).toEqual([
-      { path: "a.txt", additions: 2, deletions: 1 },
-      { path: "src/b.ts", additions: 0, deletions: 2 },
+      { path: "a.txt", kind: "modified", additions: 2, deletions: 1 },
+      { path: "src/b.ts", kind: "modified", additions: 0, deletions: 2 },
     ]);
   });
 
@@ -44,8 +44,27 @@ describe("parseTurnDiffFilesFromUnifiedDiff", () => {
     ].join("\n");
 
     expect(parseTurnDiffFilesFromUnifiedDiff(diff)).toEqual([
-      { path: "src/new.ts", additions: 0, deletions: 0 },
+      { path: "src/new.ts", kind: "renamed", additions: 0, deletions: 0 },
     ]);
+  });
+
+  it("parses mode-only diffs with zero line changes", () => {
+    const diff = [
+      "diff --git a/script.sh b/script.sh",
+      "old mode 100644",
+      "new mode 100755",
+      "",
+    ].join("\n");
+
+    expect(parseTurnDiffFilesFromUnifiedDiff(diff)).toEqual([
+      { path: "script.sh", kind: "mode-changed", additions: 0, deletions: 0 },
+    ]);
+  });
+
+  it("ignores header-only diff entries without actual changes", () => {
+    const diff = ["diff --git a/file.txt b/file.txt", ""].join("\n");
+
+    expect(parseTurnDiffFilesFromUnifiedDiff(diff)).toEqual([]);
   });
 
   it("normalizes CRLF input before parsing", () => {
@@ -62,7 +81,7 @@ describe("parseTurnDiffFilesFromUnifiedDiff", () => {
     ].join("\r\n");
 
     expect(parseTurnDiffFilesFromUnifiedDiff(diff)).toEqual([
-      { path: "a.txt", additions: 2, deletions: 1 },
+      { path: "a.txt", kind: "modified", additions: 2, deletions: 1 },
     ]);
   });
 });

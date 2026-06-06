@@ -4608,16 +4608,13 @@ export default function ChatView(props: ChatViewProps) {
                   subagents={threadSubagents}
                   sourceControlActions={overviewSourceControlActions}
                   branchControl={overviewBranchControl}
-                  label={planSidebarLabel}
                   environmentId={environmentId}
                   markdownCwd={gitCwd ?? undefined}
                   workspaceRoot={activeWorkspaceRoot}
-                  timestampFormat={timestampFormat}
                   mode="floating"
                   onOpenFiles={onOpenFilesPanel}
                   onOpenReview={onOpenReviewPanel}
                   onOpenSubagent={onOpenSubagentPanel}
-                  onClose={closePlanSidebar}
                 />
               </FloatingOverviewMotionFrame>
             ) : null}
@@ -4806,16 +4803,13 @@ export default function ChatView(props: ChatViewProps) {
               subagents={threadSubagents}
               sourceControlActions={overviewSourceControlActions}
               branchControl={overviewBranchControl}
-              label={planSidebarLabel}
               environmentId={environmentId}
               markdownCwd={gitCwd ?? undefined}
               workspaceRoot={activeWorkspaceRoot}
-              timestampFormat={timestampFormat}
               mode="sidebar"
               onOpenFiles={onOpenFilesPanel}
               onOpenReview={onOpenReviewPanel}
               onOpenSubagent={onOpenSubagentPanel}
-              onClose={closePlanSidebar}
             />
           </OverviewSidebarMotionFrame>
         ) : null}
@@ -4849,16 +4843,13 @@ export default function ChatView(props: ChatViewProps) {
             subagents={threadSubagents}
             sourceControlActions={overviewSourceControlActions}
             branchControl={overviewBranchControl}
-            label={planSidebarLabel}
             environmentId={environmentId}
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeWorkspaceRoot}
-            timestampFormat={timestampFormat}
             mode="sheet"
             onOpenFiles={onOpenFilesPanel}
             onOpenReview={onOpenReviewPanel}
             onOpenSubagent={onOpenSubagentPanel}
-            onClose={closePlanSidebar}
           />
         </RightPanelSheet>
       ) : null}

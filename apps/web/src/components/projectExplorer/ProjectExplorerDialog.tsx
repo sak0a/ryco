@@ -253,9 +253,11 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
                   <SelectItem key={member.physicalProjectKey} value={member.physicalProjectKey}>
                     <span className="truncate">
                       {member.name}
-                      <span className="ml-1 text-muted-foreground">
-                        · {member.environmentLabel ?? "Local"}
-                      </span>
+                      {member.environmentLabel ? (
+                        <span className="ml-1 text-muted-foreground">
+                          · {member.environmentLabel}
+                        </span>
+                      ) : null}
                     </span>
                   </SelectItem>
                 ))}

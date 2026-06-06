@@ -55,8 +55,6 @@ describe("PlanSidebar checks tooltip", () => {
         environmentId={EnvironmentId.make("environment-local")}
         markdownCwd={undefined}
         workspaceRoot={undefined}
-        timestampFormat="locale"
-        onClose={() => {}}
       />,
     );
 

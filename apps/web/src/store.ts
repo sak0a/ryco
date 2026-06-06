@@ -225,8 +225,17 @@ function mapTurnDiffSummary(checkpoint: OrchestrationCheckpointSummary): TurnDif
     assistantMessageId: checkpoint.assistantMessageId ?? undefined,
     checkpointTurnCount: checkpoint.checkpointTurnCount,
     checkpointRef: checkpoint.checkpointRef,
-    files: checkpoint.files.map((file) => ({ ...file })),
+    files: checkpoint.files.filter(isMeaningfulTurnDiffFile).map((file) => ({
+      path: file.path,
+      kind: file.kind,
+      additions: file.additions,
+      deletions: file.deletions,
+    })),
   };
+}
+
+function isMeaningfulTurnDiffFile(file: OrchestrationCheckpointSummary["files"][number]): boolean {
+  return file.kind !== "modified" || file.additions > 0 || file.deletions > 0;
 }
 
 function mapProject(
