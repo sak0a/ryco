@@ -102,4 +102,71 @@ describe("PlanSidebar", () => {
     expect(markup).toContain("hover:bg-muted/45");
     expect(markup).toContain("focus-visible:bg-muted/45");
   });
+
+  it("renders running checks in blue without duplicating active runs inline", () => {
+    const markup = renderToStaticMarkup(
+      <PlanSidebar
+        activePlan={null}
+        activeProposedPlan={null}
+        pullRequest={{
+          number: 124,
+          title: "Consolidate chat right panel",
+          checkStatus: {
+            kind: "running",
+            tone: "running",
+            icon: "loader",
+            label: "Checks running",
+            shortLabel: "running",
+            description: "Checks are currently running.",
+            ariaLabel: "Checks running.",
+            className: "",
+            iconClassName: "",
+            dotClassName: "",
+            isTerminal: true,
+            isRefreshable: false,
+            failedChecks: [],
+          },
+          checksLoading: false,
+          hasMergeConflicts: false,
+          activeCheckCount: 2,
+          runs: [
+            {
+              id: "run:active:build",
+              name: "Active build row",
+              activeDetail: "Installing dependencies",
+              statusLabel: "Running",
+              statusKind: "running",
+              tone: "running",
+            },
+            {
+              id: "run:active:deploy",
+              name: "Active deploy row",
+              statusLabel: "Queued",
+              statusKind: "pending",
+              tone: "pending",
+            },
+          ],
+          latestRuns: [
+            {
+              id: "run:latest:build",
+              name: "Latest build tooltip",
+              statusLabel: "Running",
+              statusKind: "running",
+              tone: "running",
+            },
+          ],
+        }}
+        environmentId={EnvironmentId.make("environment-local")}
+        markdownCwd={undefined}
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain("2 running checks");
+    expect(markup).toContain("text-sky-600");
+    expect(markup).toContain("dark:text-sky-300");
+    expect(markup).toContain("Show latest checks");
+    expect(markup).not.toContain("Active build row");
+    expect(markup).not.toContain("Active deploy row");
+  });
 });

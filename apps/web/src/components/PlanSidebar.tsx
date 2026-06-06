@@ -149,12 +149,32 @@ function overviewItemIcon(icon: OverviewPanelItem["icon"]): React.ReactNode {
   return <LaptopIcon className="size-3.5" />;
 }
 
-function ActiveCheckSpinner(): React.ReactNode {
-  return <LoaderCircleIcon className="size-4 shrink-0 animate-spin text-amber-400" />;
+function ActiveCheckSpinner({ kind }: { kind: "pending" | "running" }): React.ReactNode {
+  return (
+    <LoaderCircleIcon
+      className={cn(
+        "size-4 shrink-0 animate-spin",
+        kind === "running" ? "text-sky-600 dark:text-sky-300" : "text-amber-400",
+      )}
+    />
+  );
 }
 
-function pullRequestCheckCountLabel(count: number): string {
-  return `${count} pending ${count === 1 ? "check" : "checks"}`;
+function pullRequestCheckCountLabel(count: number, kind: "pending" | "running"): string {
+  return `${count} ${kind} ${count === 1 ? "check" : "checks"}`;
+}
+
+function resolveActiveCheckKind(
+  runs: ReadonlyArray<OverviewPullRequestCheckRun>,
+  checkStatus: PrCheckStatusView | null | undefined,
+): "pending" | "running" {
+  if (runs.some((run) => run.statusKind === "running")) {
+    return "running";
+  }
+  if (runs.some((run) => run.statusKind === "pending")) {
+    return "pending";
+  }
+  return checkStatus?.kind === "pending" ? "pending" : "running";
 }
 
 function pullRequestStatusIcon(
@@ -164,7 +184,7 @@ function pullRequestStatusIcon(
     return <LoaderCircleIcon className="size-4 shrink-0 animate-spin text-muted-foreground/55" />;
   }
   if (kind === "pending" || kind === "running") {
-    return <ActiveCheckSpinner />;
+    return <ActiveCheckSpinner kind={kind} />;
   }
   if (kind === "passed") {
     return <CircleCheckIcon className="size-4 shrink-0 text-emerald-500" />;
@@ -180,6 +200,8 @@ function pullRequestStatusIcon(
 
 function pullRequestStatusTextClassName(kind: PrCheckStatusView["kind"] | "merge-conflicts") {
   if (kind === "passed") return "text-foreground/90";
+  if (kind === "running") return "text-sky-600 dark:text-sky-300";
+  if (kind === "pending") return "text-amber-500/85";
   if (kind === "merge-conflicts" || kind === "failed" || kind === "api-error") {
     return "text-muted-foreground/70";
   }
@@ -300,7 +322,7 @@ function PullRequestChecksTooltipContent({
                 "shrink-0 text-muted-foreground/60",
                 run.tone === "success" && run.statusLabel !== "Skipped" && "text-emerald-500/90",
                 run.tone === "failure" || run.tone === "error" ? "text-destructive/90" : undefined,
-                run.tone === "running" && "text-amber-500/85",
+                run.tone === "running" && "text-sky-600 dark:text-sky-300",
                 run.tone === "pending" && "text-amber-500/85",
               )}
             >
@@ -382,13 +404,17 @@ const PlanSidebar = memo(function PlanSidebar({
   }, [environmentId, planMarkdown, workspaceRoot]);
 
   const pullRequestActiveCheckCount = pullRequest?.activeCheckCount ?? 0;
+  const activeCheckKind =
+    pullRequest && pullRequestActiveCheckCount > 0
+      ? resolveActiveCheckKind(pullRequest.runs, pullRequest.checkStatus)
+      : null;
   const pullRequestSummaryKind: PrCheckStatusView["kind"] | null =
     pullRequestActiveCheckCount > 0
-      ? "running"
+      ? activeCheckKind
       : (pullRequest?.checkStatus?.kind ?? (pullRequest?.checksLoading ? "loading" : null));
   const pullRequestSummaryLabel = pullRequest
     ? pullRequestActiveCheckCount > 0
-      ? pullRequestCheckCountLabel(pullRequestActiveCheckCount)
+      ? pullRequestCheckCountLabel(pullRequestActiveCheckCount, activeCheckKind ?? "running")
       : (pullRequest.checkStatus?.label ?? "Loading checks")
     : "";
   const primaryActiveRun = pullRequest?.runs[0] ?? null;
@@ -638,31 +664,6 @@ const PlanSidebar = memo(function PlanSidebar({
                       trailing={<span className="text-muted-foreground/45">Fix</span>}
                     />
                   ) : null}
-                  {pullRequest.runs.length > 1
-                    ? pullRequest.runs
-                        .slice(0, 4)
-                        .map((run) => (
-                          <PullRequestStatusRow
-                            key={run.id}
-                            href={run.url}
-                            icon={pullRequestStatusIcon(run.statusKind)}
-                            label={run.name}
-                            detail={run.activeDetail ?? run.detail}
-                            className="text-foreground/80"
-                            trailing={
-                              <span
-                                className={cn(
-                                  "text-muted-foreground/50",
-                                  run.tone === "running" && "text-amber-500/85",
-                                  run.tone === "pending" && "text-amber-500/85",
-                                )}
-                              >
-                                {run.statusLabel}
-                              </span>
-                            }
-                          />
-                        ))
-                    : null}
                   {pullRequest.checksError && pullRequestSummaryKind !== "api-error" ? (
                     <PullRequestStatusRow
                       icon={pullRequestStatusIcon("api-error")}
