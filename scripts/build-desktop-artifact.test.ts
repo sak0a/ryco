@@ -5,6 +5,7 @@ import { ConfigProvider, Effect, Option } from "effect";
 import {
   COPILOT_SDK_PACKAGE_JSON_PATH,
   DESKTOP_BUILD_FILES,
+  DESKTOP_BUILD_RESOURCES_RELATIVE_DIR,
   EXTERNALIZED_DESKTOP_DEPENDENCY_PATHS,
   MAC_UNSIGNED_INSTALL_HELPER_NAME,
   MAC_UNSIGNED_README_NAME,
@@ -101,8 +102,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it.effect("uses electron-builder's current DMG window schema", () =>
     Effect.gen(function* () {
       const config = yield* createBuildConfig("mac", "dmg", "0.1.1", false, false, undefined, {
-        installHelper: "/tmp/Install Ryco.command",
-        readme: "/tmp/README-macOS.txt",
+        installHelperFilePath: "/tmp/Install Ryco.command",
+        readmeFilePath: "/tmp/README-macOS.txt",
+        installHelperDmgPath: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/Install Ryco.command`,
+        readmeDmgPath: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/README-macOS.txt`,
       });
 
       assert.deepStrictEqual(config.dmg, {
@@ -126,14 +129,14 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             x: 140,
             y: 320,
             type: "file",
-            path: "/tmp/Install Ryco.command",
+            path: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/Install Ryco.command`,
             name: MAC_UNSIGNED_INSTALL_HELPER_NAME,
           },
           {
             x: 420,
             y: 320,
             type: "file",
-            path: "/tmp/README-macOS.txt",
+            path: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/README-macOS.txt`,
             name: MAC_UNSIGNED_README_NAME,
           },
         ],
