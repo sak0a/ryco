@@ -75,6 +75,10 @@ describe("PlanSidebar checks tooltip", () => {
         },
         { timeout: 1_000, interval: 16 },
       );
+
+      const viewport = document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+      expect(viewport).not.toBeNull();
+      expect(viewport!.className).toContain("[scrollbar-gutter:stable]");
     } finally {
       await mounted.unmount();
     }

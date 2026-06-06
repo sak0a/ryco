@@ -20,6 +20,7 @@ vi.mock("@legendapp/list/react", async () => {
       renderItem: (args: { item: { id: string } }) => React.ReactNode;
       ListHeaderComponent?: React.ReactNode;
       ListFooterComponent?: React.ReactNode;
+      className?: string;
     },
     ref: React.ForwardedRef<LegendListRef>,
   ) {
@@ -33,7 +34,7 @@ vi.mock("@legendapp/list/react", async () => {
     );
 
     return (
-      <div data-testid="legend-list">
+      <div className={props.className} data-testid="legend-list">
         {props.ListHeaderComponent}
         {props.data.map((item) => (
           <div key={props.keyExtractor(item)}>{props.renderItem({ item })}</div>
@@ -107,6 +108,36 @@ describe("MessagesTimeline", () => {
         .element(page.getByText("Send a message to start the conversation."))
         .not.toBeInTheDocument();
       await expect.element(page.getByText("Thinking - Inspecting repository state")).toBeVisible();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("reserves the scrollbar gutter to avoid width shifts when the terminal drawer opens", async () => {
+    const screen = await render(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "work-1",
+            kind: "work",
+            createdAt: "2026-04-13T12:00:00.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-04-13T12:00:00.000Z",
+              label: "thinking",
+              detail: "Inspecting repository state",
+              tone: "thinking",
+            },
+          },
+        ]}
+      />,
+    );
+
+    try {
+      const list = document.querySelector<HTMLElement>('[data-testid="legend-list"]');
+      expect(list).not.toBeNull();
+      expect(list!.className).toContain("[scrollbar-gutter:stable]");
     } finally {
       await screen.unmount();
     }

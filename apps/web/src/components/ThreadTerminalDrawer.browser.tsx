@@ -317,6 +317,27 @@ describe("TerminalViewport", () => {
       await mounted.cleanup();
     }
   });
+
+  it("hides the native xterm viewport scrollbar strip", () => {
+    const drawer = document.createElement("div");
+    drawer.className = "thread-terminal-drawer";
+
+    const xterm = document.createElement("div");
+    xterm.className = "xterm";
+
+    const viewport = document.createElement("div");
+    viewport.className = "xterm-viewport";
+
+    xterm.append(viewport);
+    drawer.append(xterm);
+    document.body.append(drawer);
+
+    try {
+      expect(getComputedStyle(viewport).getPropertyValue("scrollbar-width")).toBe("none");
+    } finally {
+      drawer.remove();
+    }
+  });
 });
 
 describe("ThreadTerminalDrawer", () => {

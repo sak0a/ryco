@@ -560,6 +560,15 @@ code {
 }
 
 /* Terminal drawer scrollbar parity with chat */
+.thread-terminal-drawer .xterm .xterm-viewport {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.thread-terminal-drawer .xterm .xterm-viewport::-webkit-scrollbar {
+  display: none;
+}
+
 .thread-terminal-drawer .xterm .xterm-scrollable-element > .scrollbar.vertical {
   width: 6px !important;
 }
