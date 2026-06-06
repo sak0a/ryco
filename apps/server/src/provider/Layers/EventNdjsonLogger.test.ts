@@ -6,6 +6,8 @@ import { ThreadId } from "@ryco/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Metric } from "effect";
 
+import { metricNames } from "../../observability/Metrics.ts";
+import { hasMetricSnapshot } from "../../observability/testMetricSnapshots.ts";
 import { makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 function parseLogLine(line: string) {
@@ -26,17 +28,6 @@ function parseLogLine(line: string) {
     payload,
   };
 }
-
-const hasMetricSnapshot = (
-  snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
-  id: string,
-  attributes: Readonly<Record<string, string>>,
-) =>
-  snapshots.some(
-    (snapshot) =>
-      snapshot.id === id &&
-      Object.entries(attributes).every(([key, value]) => snapshot.attributes?.[key] === value),
-  );
 
 describe("EventNdjsonLogger", () => {
   it.effect("writes effect-style lines to thread-scoped files", () =>
@@ -245,7 +236,7 @@ describe("EventNdjsonLogger", () => {
 
         const snapshots = yield* Metric.snapshot;
         assert.equal(
-          hasMetricSnapshot(snapshots, "t3_provider_event_log_records_dropped_total", {
+          hasMetricSnapshot(snapshots, metricNames.providerEventLogRecordsDroppedTotal, {
             stream: "native",
             reason: "queue_full",
             maxQueueSize: "1",

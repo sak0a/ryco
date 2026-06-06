@@ -2,18 +2,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { ProviderDriverKind } from "@ryco/contracts";
 import { Effect, Metric } from "effect";
 
+import { hasMetricSnapshot } from "./testMetricSnapshots.ts";
 import { withMetrics } from "./Metrics.ts";
-
-const hasMetricSnapshot = (
-  snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
-  id: string,
-  attributes: Readonly<Record<string, string>>,
-) =>
-  snapshots.some(
-    (snapshot) =>
-      snapshot.id === id &&
-      Object.entries(attributes).every(([key, value]) => snapshot.attributes?.[key] === value),
-  );
 
 describe("withMetrics", () => {
   it.effect("supports pipe-style usage", () =>

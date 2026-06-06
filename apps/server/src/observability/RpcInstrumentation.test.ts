@@ -1,22 +1,13 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Exit, Metric, Stream } from "effect";
 
+import { metricNames } from "./Metrics.ts";
 import {
   observeRpcEffect,
   observeRpcStream,
   observeRpcStreamEffect,
 } from "./RpcInstrumentation.ts";
-
-const hasMetricSnapshot = (
-  snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
-  id: string,
-  attributes: Readonly<Record<string, string>>,
-) =>
-  snapshots.some(
-    (snapshot) =>
-      snapshot.id === id &&
-      Object.entries(attributes).every(([key, value]) => snapshot.attributes?.[key] === value),
-  );
+import { hasMetricSnapshot } from "./testMetricSnapshots.ts";
 
 describe("RpcInstrumentation", () => {
   it.effect("records success metrics for unary RPC handlers", () =>
@@ -28,14 +19,14 @@ describe("RpcInstrumentation", () => {
       const snapshots = yield* Metric.snapshot;
 
       assert.equal(
-        hasMetricSnapshot(snapshots, "ryco_rpc_requests_total", {
+        hasMetricSnapshot(snapshots, metricNames.rpcRequestsTotal, {
           method: "rpc.instrumentation.success",
           outcome: "success",
         }),
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "ryco_rpc_request_duration", {
+        hasMetricSnapshot(snapshots, metricNames.rpcRequestDuration, {
           method: "rpc.instrumentation.success",
         }),
         true,
@@ -54,14 +45,14 @@ describe("RpcInstrumentation", () => {
       const snapshots = yield* Metric.snapshot;
 
       assert.equal(
-        hasMetricSnapshot(snapshots, "ryco_rpc_requests_total", {
+        hasMetricSnapshot(snapshots, metricNames.rpcRequestsTotal, {
           method: "rpc.instrumentation.failure",
           outcome: "failure",
         }),
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "ryco_rpc_request_duration", {
+        hasMetricSnapshot(snapshots, metricNames.rpcRequestDuration, {
           method: "rpc.instrumentation.failure",
         }),
         true,
@@ -84,14 +75,14 @@ describe("RpcInstrumentation", () => {
       const snapshots = yield* Metric.snapshot;
 
       assert.equal(
-        hasMetricSnapshot(snapshots, "ryco_rpc_requests_total", {
+        hasMetricSnapshot(snapshots, metricNames.rpcRequestsTotal, {
           method: "rpc.instrumentation.stream",
           outcome: "success",
         }),
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "ryco_rpc_request_duration", {
+        hasMetricSnapshot(snapshots, metricNames.rpcRequestDuration, {
           method: "rpc.instrumentation.stream",
         }),
         true,
@@ -114,14 +105,14 @@ describe("RpcInstrumentation", () => {
       const snapshots = yield* Metric.snapshot;
 
       assert.equal(
-        hasMetricSnapshot(snapshots, "ryco_rpc_requests_total", {
+        hasMetricSnapshot(snapshots, metricNames.rpcRequestsTotal, {
           method: "rpc.instrumentation.stream.failure",
           outcome: "failure",
         }),
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "ryco_rpc_request_duration", {
+        hasMetricSnapshot(snapshots, metricNames.rpcRequestDuration, {
           method: "rpc.instrumentation.stream.failure",
         }),
         true,
@@ -144,14 +135,14 @@ describe("RpcInstrumentation", () => {
       const snapshots = yield* Metric.snapshot;
 
       assert.equal(
-        hasMetricSnapshot(snapshots, "ryco_rpc_requests_total", {
+        hasMetricSnapshot(snapshots, metricNames.rpcRequestsTotal, {
           method: "rpc.instrumentation.stream.effect.failure",
           outcome: "failure",
         }),
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "ryco_rpc_request_duration", {
+        hasMetricSnapshot(snapshots, metricNames.rpcRequestDuration, {
           method: "rpc.instrumentation.stream.effect.failure",
         }),
         true,

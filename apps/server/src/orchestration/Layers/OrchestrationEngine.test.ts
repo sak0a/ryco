@@ -40,6 +40,8 @@ import {
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../../config.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { metricNames } from "../../observability/Metrics.ts";
+import { hasMetricSnapshot } from "../../observability/testMetricSnapshots.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
@@ -79,17 +81,6 @@ async function createOrchestrationSystem() {
 function now() {
   return new Date().toISOString();
 }
-
-const hasMetricSnapshot = (
-  snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
-  id: string,
-  attributes: Readonly<Record<string, string>>,
-) =>
-  snapshots.some(
-    (snapshot) =>
-      snapshot.id === id &&
-      Object.entries(attributes).every(([key, value]) => snapshot.attributes?.[key] === value),
-  );
 
 describe("OrchestrationEngine", () => {
   it("bootstraps command handling from persisted projections without reading the full snapshot", async () => {
@@ -593,7 +584,7 @@ describe("OrchestrationEngine", () => {
 
     const snapshots = await system.run(Metric.snapshot);
     expect(
-      hasMetricSnapshot(snapshots, "ryco_orchestration_command_ack_duration", {
+      hasMetricSnapshot(snapshots, metricNames.orchestrationCommandAckDuration, {
         commandType: "thread.create",
         aggregateKind: "thread",
         ackEventType: "thread.created",
@@ -631,7 +622,7 @@ describe("OrchestrationEngine", () => {
 
     const snapshots = await system.run(Metric.snapshot);
     expect(
-      hasMetricSnapshot(snapshots, "ryco_orchestration_commands_total", {
+      hasMetricSnapshot(snapshots, metricNames.orchestrationCommandsTotal, {
         commandType: "thread.create",
         aggregateKind: "thread",
         outcome: "failure",

@@ -11,6 +11,8 @@ import { Deferred, Duration, Effect, Fiber, Metric, Option, PubSub, Ref, Stream 
 import { TestClock } from "effect/testing";
 
 import { ServerConfig } from "./config.ts";
+import { metricNames } from "./observability/Metrics.ts";
+import { hasMetricSnapshot } from "./observability/testMetricSnapshots.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -25,17 +27,6 @@ import {
   resolveWelcomeBase,
   ServerRuntimeStartupError,
 } from "./serverRuntimeStartup.ts";
-
-const hasMetricSnapshot = (
-  snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
-  id: string,
-  attributes: Readonly<Record<string, string>>,
-) =>
-  snapshots.some(
-    (snapshot) =>
-      snapshot.id === id &&
-      Object.entries(attributes).every(([key, value]) => snapshot.attributes?.[key] === value),
-  );
 
 it("uses the canonical Codex default for auto-bootstrapped model selection", () => {
   assert.deepStrictEqual(getAutoBootstrapDefaultModelSelection(), {
@@ -104,14 +95,14 @@ it.effect("enqueueCommand rejects new work when the startup gate is full", () =>
 
       const snapshots = yield* Metric.snapshot;
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_startup_command_gate_enqueues_total", {
+        hasMetricSnapshot(snapshots, metricNames.startupCommandGateEnqueuesTotal, {
           outcome: "busy",
           maxPendingCommands: "1",
         }),
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_startup_command_gate_queue_high_water", {
+        hasMetricSnapshot(snapshots, metricNames.startupCommandGateQueueHighWater, {
           maxPendingCommands: "1",
         }),
         true,
@@ -139,7 +130,7 @@ it.effect("enqueueCommand times out queued work when startup readiness never arr
 
       const snapshots = yield* Metric.snapshot;
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_startup_command_gate_enqueues_total", {
+        hasMetricSnapshot(snapshots, metricNames.startupCommandGateEnqueuesTotal, {
           outcome: "timeout",
           maxPendingCommands: "1",
         }),
