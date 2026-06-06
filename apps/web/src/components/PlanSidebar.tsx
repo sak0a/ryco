@@ -149,14 +149,8 @@ function overviewItemIcon(icon: OverviewPanelItem["icon"]): React.ReactNode {
   return <LaptopIcon className="size-3.5" />;
 }
 
-function PendingCheckRing(): React.ReactNode {
-  return (
-    <span className="relative flex size-4 shrink-0 items-center justify-center">
-      <span className="absolute inset-0 rounded-full border-2 border-muted-foreground/20" />
-      <span className="absolute inset-0 animate-spin rounded-full border-2 border-emerald-500 border-r-amber-400 border-b-transparent" />
-      <span className="size-1 rounded-full bg-muted-foreground/45" />
-    </span>
-  );
+function ActiveCheckSpinner(): React.ReactNode {
+  return <LoaderCircleIcon className="size-4 shrink-0 animate-spin text-amber-400" />;
 }
 
 function pullRequestCheckCountLabel(count: number): string {
@@ -170,7 +164,7 @@ function pullRequestStatusIcon(
     return <LoaderCircleIcon className="size-4 shrink-0 animate-spin text-muted-foreground/55" />;
   }
   if (kind === "pending" || kind === "running") {
-    return PendingCheckRing();
+    return <ActiveCheckSpinner />;
   }
   if (kind === "passed") {
     return <CircleCheckIcon className="size-4 shrink-0 text-emerald-500" />;
