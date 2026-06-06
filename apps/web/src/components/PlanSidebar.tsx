@@ -300,7 +300,7 @@ function PullRequestChecksTooltipContent({
                 "shrink-0 text-muted-foreground/60",
                 run.tone === "success" && run.statusLabel !== "Skipped" && "text-emerald-500/90",
                 run.tone === "failure" || run.tone === "error" ? "text-destructive/90" : undefined,
-                run.tone === "running" && "text-emerald-500/80",
+                run.tone === "running" && "text-amber-500/85",
                 run.tone === "pending" && "text-amber-500/85",
               )}
             >
@@ -653,7 +653,7 @@ const PlanSidebar = memo(function PlanSidebar({
                               <span
                                 className={cn(
                                   "text-muted-foreground/50",
-                                  run.tone === "running" && "text-emerald-500/80",
+                                  run.tone === "running" && "text-amber-500/85",
                                   run.tone === "pending" && "text-amber-500/85",
                                 )}
                               >

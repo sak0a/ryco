@@ -99,4 +99,43 @@ describe("buildOverviewChangesItem", () => {
       },
     );
   });
+
+  it("uses the clean local wording when PR changes exist but local changes are empty", () => {
+    assert.deepEqual(
+      buildOverviewChangesItem({
+        local: {
+          fileCount: 0,
+          insertions: 0,
+          deletions: 0,
+        },
+        pullRequest: {
+          changedFiles: 8,
+          additions: 24,
+          deletions: 6,
+          isLoading: false,
+        },
+      }),
+      {
+        label: "Changes",
+        value: "PR + local",
+        additions: 24,
+        deletions: 6,
+        breakdown: [
+          {
+            label: "Committed",
+            value: "8 files",
+            detail: "PR",
+            additions: 24,
+            deletions: 6,
+            muted: false,
+          },
+          {
+            label: "Uncommitted",
+            value: "No local changes",
+            muted: true,
+          },
+        ],
+      },
+    );
+  });
 });

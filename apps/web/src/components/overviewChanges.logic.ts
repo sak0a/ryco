@@ -85,14 +85,20 @@ export function buildOverviewChangesItem(input: {
     deletions: input.local.deletions + prDeletions,
     breakdown: [
       committedBucket,
-      {
-        label: "Uncommitted",
-        value: formatOverviewFileCount(localFileCount),
-        detail: "local",
-        additions: input.local.insertions,
-        deletions: input.local.deletions,
-        muted: localFileCount === 0,
-      },
+      localFileCount === 0
+        ? {
+            label: "Uncommitted",
+            value: "No local changes",
+            muted: true,
+          }
+        : {
+            label: "Uncommitted",
+            value: formatOverviewFileCount(localFileCount),
+            detail: "local",
+            additions: input.local.insertions,
+            deletions: input.local.deletions,
+            muted: false,
+          },
     ],
   };
 }
