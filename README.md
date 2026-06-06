@@ -4,7 +4,7 @@
 
 # Ryco
 
-**A minimal, fast desktop workspace for coding agents.**
+**A fast desktop workspace for coding agents.**
 
 Codex · Claude · GitHub Copilot · OpenCode · Cursor (Early Access)
 
