@@ -184,7 +184,7 @@ export const CodexSettings = makeProviderSettingsSchema(
         description:
           "Account-specific Codex home. Keeps auth.json separate while sharing state from CODEX_HOME.",
         providerSettingsForm: {
-          placeholder: "~/.codex-s3/personal",
+          placeholder: "~/.codex-ryco/personal",
           clearWhenEmpty: "omit",
         },
       }),

@@ -950,6 +950,7 @@ interface ThreadTerminalDrawerProps {
   cwd: string;
   worktreePath?: string | null;
   runtimeEnv?: Record<string, string>;
+  layout?: "drawer" | "panel";
   visible?: boolean;
   height: number;
   terminalIds: string[];
@@ -1005,6 +1006,7 @@ export default function ThreadTerminalDrawer({
   cwd,
   worktreePath,
   runtimeEnv,
+  layout = "drawer",
   visible = true,
   height,
   terminalIds,
@@ -1133,6 +1135,7 @@ export default function ThreadTerminalDrawer({
   ];
   const isSplitView = visibleTerminalIds.length > 1;
   const hasReachedSplitLimit = visibleTerminalIds.length >= MAX_TERMINALS_PER_GROUP;
+  const isPanelLayout = layout === "panel";
   const terminalLabelById = useMemo(
     () =>
       new Map(
@@ -1283,16 +1286,22 @@ export default function ThreadTerminalDrawer({
 
   return (
     <aside
-      className="thread-terminal-drawer relative flex min-w-0 shrink-0 animate-[terminal-drawer-in_220ms_ease-out] flex-col overflow-hidden border-border/80 border-t bg-background"
-      style={{ height: `${drawerHeight}px` }}
+      className={
+        isPanelLayout
+          ? "thread-terminal-drawer relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background"
+          : "thread-terminal-drawer relative flex min-w-0 shrink-0 animate-[terminal-drawer-in_220ms_ease-out] flex-col overflow-hidden border-border/80 border-t bg-background"
+      }
+      style={isPanelLayout ? undefined : { height: `${drawerHeight}px` }}
     >
-      <div
-        className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize"
-        onPointerDown={handleResizePointerDown}
-        onPointerMove={handleResizePointerMove}
-        onPointerUp={handleResizePointerEnd}
-        onPointerCancel={handleResizePointerEnd}
-      />
+      {isPanelLayout ? null : (
+        <div
+          className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize"
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={handleResizePointerEnd}
+          onPointerCancel={handleResizePointerEnd}
+        />
+      )}
 
       <div
         role="tablist"

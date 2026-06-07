@@ -1,7 +1,7 @@
 import { Encoding } from "effect";
 import { CheckpointRef, ProjectId, type ThreadId } from "@ryco/contracts";
 
-export const CHECKPOINT_REFS_PREFIX = "refs/s3/checkpoints";
+export const CHECKPOINT_REFS_PREFIX = "refs/ryco/checkpoints";
 
 export function checkpointRefForThreadTurn(threadId: ThreadId, turnCount: number): CheckpointRef {
   return CheckpointRef.make(

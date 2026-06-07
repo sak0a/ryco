@@ -1,5 +1,6 @@
 import {
   type ApprovalRequestId,
+  type ChangeRequest,
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
   type EnvironmentId,
@@ -20,6 +21,7 @@ import {
   ProviderDriverKind,
   RuntimeMode,
   AgentTokenMode,
+  type SourceControlWorkflowJob,
   TerminalOpenInput,
 } from "@ryco/contracts";
 import {
@@ -36,7 +38,7 @@ import {
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@ryco/shared/projectScripts";
 import { truncate } from "@ryco/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "effect";
 import {
   lazy,
@@ -48,21 +50,33 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
+  type ReactNode,
 } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
 import {
   issueDetailQueryOptions,
+  changeRequestListQueryOptions,
   changeRequestDetailQueryOptions,
+  workflowRunJobsQueryOptions,
+  workflowRunsQueryOptions,
 } from "~/lib/sourceControlContextRpc";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
-import { buildOpenDiffSearch, stripDiffSearchParams } from "../diffRouteSearch";
-import { buildOpenPreviewSearch, stripPreviewSearchParams } from "../previewRouteSearch";
-import { parseRightPanelRouteSearch } from "../rightPanelRouteSearch";
+import { isRightPanelOpen, parseRightPanelRouteSearch } from "../rightPanelRouteSearch";
+import {
+  buildOpenAgentSearch,
+  buildOpenFilesSearch,
+  buildOpenReviewSearch,
+  buildOpenTerminalSearch,
+  buildOpenWorkspaceSearch,
+  stripWorkspacePanelSearchParams,
+} from "../workspaceRouteSearch";
+import { deriveThreadSubagents, type ThreadSubagentView } from "../threadWorkspaceViewModel";
 import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
@@ -114,18 +128,40 @@ import {
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
+import { PREFERS_REDUCED_MOTION_QUERY } from "../lib/perf/motion";
+import { useDelayedUnmount } from "../hooks/useDelayedUnmount";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
+import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
+import GitActionsControl from "./GitActionsControl";
 import {
   matchesExactModShortcut,
   resolveShortcutCommand,
   shouldIgnoreGlobalNavigationShortcut,
   shortcutLabelForCommand,
 } from "../keybindings";
-import PlanSidebar from "./PlanSidebar";
+import PlanSidebar, { type OverviewPanelItem, type OverviewPullRequestState } from "./PlanSidebar";
+import {
+  getPrCheckStatusForQuery,
+  getPrCheckStatusFromChangeRequest,
+  getPrCheckStatusFromWorkflowRuns,
+  shouldRefreshPrCheckStatus,
+  sourceControlOptionValue,
+} from "./projectExplorer/prCheckStatus";
+import {
+  areOverviewWorkflowRunsSupported,
+  buildOverviewCheckRollupRows,
+  buildOverviewWorkflowCheckRows,
+  isOverviewActiveCheckKind,
+  isOverviewActiveWorkflowRun,
+  OVERVIEW_CHECK_DETAIL_RUN_LIMIT,
+  selectOverviewChecksError,
+  summarizeActiveWorkflowJob,
+} from "./overviewPullRequestChecks.logic";
+import { buildOverviewChangesItem } from "./overviewChanges.logic";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -240,7 +276,100 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 const EMPTY_SESSION_TABS: ReadonlyArray<ChatSessionTabsItem> = Object.freeze([]);
+const OVERVIEW_FLOATING_EXIT_DURATION_MS = 260;
+const OVERVIEW_SIDEBAR_EXIT_DURATION_MS = 320;
+const OVERVIEW_SIDEBAR_FRAME_WIDTH = "calc(340px + 0.75rem)";
 const ThreadTerminalDrawer = lazy(() => import("./ThreadTerminalDrawer"));
+
+function OverviewSidebarMotionFrame(props: {
+  animate: boolean;
+  children: ReactNode;
+  open: boolean;
+}) {
+  const [entered, setEntered] = useState(!props.animate && props.open);
+
+  useEffect(() => {
+    if (!props.animate) {
+      setEntered(props.open);
+      return;
+    }
+
+    if (!props.open) {
+      setEntered(false);
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(frameId);
+  }, [props.animate, props.open]);
+
+  const active = props.animate ? props.open && entered : props.open;
+
+  return (
+    <div
+      aria-hidden={props.open ? undefined : true}
+      inert={props.open ? undefined : true}
+      className={cn(
+        "min-h-0 shrink-0 overflow-hidden transition-[width,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+        active ? "w-(--overview-sidebar-frame-width) opacity-100" : "w-0 opacity-0",
+      )}
+      style={
+        {
+          "--overview-sidebar-frame-width": OVERVIEW_SIDEBAR_FRAME_WIDTH,
+        } as CSSProperties
+      }
+    >
+      <div
+        className={cn(
+          "min-h-0 w-(--overview-sidebar-frame-width) transition-[translate,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transition-none",
+          active ? "translate-x-0 opacity-100" : "translate-x-5 opacity-0",
+        )}
+      >
+        {props.children}
+      </div>
+    </div>
+  );
+}
+
+function FloatingOverviewMotionFrame(props: {
+  animate: boolean;
+  children: ReactNode;
+  open: boolean;
+}) {
+  const [entered, setEntered] = useState(!props.animate && props.open);
+
+  useEffect(() => {
+    if (!props.animate) {
+      setEntered(props.open);
+      return;
+    }
+
+    if (!props.open) {
+      setEntered(false);
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(frameId);
+  }, [props.animate, props.open]);
+
+  const active = props.animate ? props.open && entered : props.open;
+
+  return (
+    <div className="pointer-events-none absolute top-3 right-3 z-40">
+      <div
+        aria-hidden={props.open ? undefined : true}
+        inert={props.open ? undefined : true}
+        className={cn(
+          "origin-top-right transition-[translate,opacity] duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transition-none",
+          active ? "translate-x-0 opacity-100" : "translate-x-3 opacity-0",
+        )}
+      >
+        {props.children}
+      </div>
+    </div>
+  );
+}
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -248,6 +377,43 @@ type EnvironmentUnavailableState = {
 };
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
+
+function compactQueryErrorMessage(error: unknown): string | undefined {
+  if (!error) return undefined;
+  const message = error instanceof Error ? error.message : "Failed to load.";
+  const providerMatch = /^Source control provider [^ ]+ failed in [^:]+:\s*(.*)$/u.exec(message);
+  return providerMatch?.[1] ?? message;
+}
+
+function branchNameCandidates(branchName: string | null | undefined): ReadonlySet<string> {
+  const candidates = new Set<string>();
+  const trimmed = branchName?.trim() ?? "";
+  if (trimmed.length === 0) {
+    return candidates;
+  }
+  candidates.add(trimmed);
+
+  const firstSlashIndex = trimmed.indexOf("/");
+  if (firstSlashIndex > 0 && firstSlashIndex < trimmed.length - 1) {
+    const prefix = trimmed.slice(0, firstSlashIndex);
+    if (prefix === "origin" || prefix === "upstream") {
+      candidates.add(trimmed.slice(firstSlashIndex + 1));
+    }
+  }
+
+  return candidates;
+}
+
+function findChangeRequestForBranch(
+  changeRequests: ReadonlyArray<ChangeRequest> | null | undefined,
+  branchName: string | null | undefined,
+): ChangeRequest | null {
+  const candidates = branchNameCandidates(branchName);
+  if (candidates.size === 0) {
+    return null;
+  }
+  return changeRequests?.find((request) => candidates.has(request.headRefName)) ?? null;
+}
 
 function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalogEntry[] {
   return useStore(
@@ -382,6 +548,10 @@ type ChatViewProps =
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
       onPreviewPanelOpen?: () => void;
+      onTerminalPanelOpen?: () => void;
+      onAgentPanelOpen?: () => void;
+      workspacePanelOpen?: boolean;
+      onToggleWorkspacePanel?: () => void;
       reserveTitleBarControlInset?: boolean;
       routeKind: "server";
       draftId?: never;
@@ -391,6 +561,10 @@ type ChatViewProps =
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
       onPreviewPanelOpen?: () => void;
+      onTerminalPanelOpen?: () => void;
+      onAgentPanelOpen?: () => void;
+      workspacePanelOpen?: boolean;
+      onToggleWorkspacePanel?: () => void;
       reserveTitleBarControlInset?: boolean;
       routeKind: "draft";
       draftId: DraftId;
@@ -667,6 +841,9 @@ export default function ChatView(props: ChatViewProps) {
     routeKind,
     onDiffPanelOpen,
     onPreviewPanelOpen,
+    onTerminalPanelOpen,
+    onAgentPanelOpen,
+    onToggleWorkspacePanel: externalToggleWorkspacePanel,
     reserveTitleBarControlInset = true,
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
@@ -766,8 +943,10 @@ export default function ChatView(props: ChatViewProps) {
   >({});
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
-  const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  const [planSidebarOpen, setPlanSidebarOpen] = useState(true);
+  const [overviewFloatingOpen, setOverviewFloatingOpen] = useState(false);
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const prefersReducedMotion = useMediaQuery(PREFERS_REDUCED_MOTION_QUERY);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
@@ -891,7 +1070,7 @@ export default function ChatView(props: ChatViewProps) {
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const diffOpen = rawSearch.diff === "1";
-  const previewOpen = rawSearch.preview === "1";
+  const workspacePanelOpen = props.workspacePanelOpen ?? isRightPanelOpen(rawSearch);
   const activeThreadId = activeThread?.id ?? null;
   const activeThreadRef = useMemo(
     () => (activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null),
@@ -1521,6 +1700,10 @@ export default function ChatView(props: ChatViewProps) {
     pendingUserInputs,
     activePlan,
   } = threadActivityViewModel;
+  const threadSubagents = useMemo(
+    () => deriveThreadSubagents(threadActivities),
+    [threadActivities],
+  );
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const activePendingDraftAnswers = useMemo(
     () =>
@@ -1573,7 +1756,7 @@ export default function ChatView(props: ChatViewProps) {
       }),
     [activeLatestTurn, activeThread?.id, latestTurnSettled, threadPlanCatalog],
   );
-  const planSidebarLabel = sidebarProposedPlan || interactionMode === "plan" ? "Plan" : "Tasks";
+  const planSidebarLabel = "Overview";
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
@@ -1872,6 +2055,279 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+  const overviewBranchName =
+    activeWorktreeSummary?.branch ?? activeThread?.branch ?? gitStatusQuery.data?.refName ?? null;
+  const overviewBranchPullRequestsQuery = useQuery({
+    ...changeRequestListQueryOptions({
+      environmentId,
+      cwd: gitCwd,
+      state: "open",
+      limit: 50,
+      enabled:
+        overviewBranchName !== null &&
+        activeWorktreeSummary?.prNumber == null &&
+        gitStatusQuery.data?.pr == null,
+    }),
+  });
+  const overviewBranchPullRequest = useMemo(
+    () => findChangeRequestForBranch(overviewBranchPullRequestsQuery.data, overviewBranchName),
+    [overviewBranchName, overviewBranchPullRequestsQuery.data],
+  );
+  const overviewPullRequestNumber =
+    activeWorktreeSummary?.prNumber ??
+    gitStatusQuery.data?.pr?.number ??
+    overviewBranchPullRequest?.number ??
+    null;
+  const overviewPullRequestReference =
+    overviewPullRequestNumber !== null ? String(overviewPullRequestNumber) : null;
+  const overviewGitProvider = gitStatusQuery.data?.sourceControlProvider?.kind ?? null;
+  const overviewPullRequestDetailQuery = useQuery({
+    ...changeRequestDetailQueryOptions({
+      environmentId,
+      cwd: gitCwd,
+      reference: overviewPullRequestReference,
+      enabled: overviewPullRequestNumber !== null,
+    }),
+    refetchInterval: (query) => {
+      const detail = query.state.data;
+      return detail?.state === "open" ? 30_000 : false;
+    },
+  });
+  const overviewPullRequestProvider =
+    overviewPullRequestDetailQuery.data?.provider ??
+    overviewBranchPullRequest?.provider ??
+    overviewGitProvider;
+  const overviewWorkflowRunsSupported = areOverviewWorkflowRunsSupported(
+    overviewPullRequestProvider,
+  );
+  const overviewWorkflowRunsEnabled =
+    overviewWorkflowRunsSupported && overviewPullRequestNumber !== null;
+  const overviewWorkflowRunsQuery = useQuery({
+    ...workflowRunsQueryOptions({
+      environmentId,
+      cwd: gitCwd,
+      pullRequestNumber: overviewPullRequestNumber,
+      limit: 20,
+      enabled: overviewWorkflowRunsEnabled,
+    }),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      const status = getPrCheckStatusFromWorkflowRuns({
+        runs: data.runs,
+        headSha: sourceControlOptionValue(data.headSha),
+      });
+      return shouldRefreshPrCheckStatus(status) ? 30_000 : false;
+    },
+  });
+  const overviewActiveWorkflowRunId = useMemo(() => {
+    const runs = overviewWorkflowRunsQuery.data?.runs ?? [];
+    return runs.find(isOverviewActiveWorkflowRun)?.runId ?? null;
+  }, [overviewWorkflowRunsQuery.data]);
+  const overviewWorkflowDetailRunIds = useMemo(() => {
+    if (!overviewWorkflowRunsSupported || overviewPullRequestNumber === null) return [];
+    const runs = overviewWorkflowRunsQuery.data?.runs ?? [];
+    const runIds = runs.slice(0, OVERVIEW_CHECK_DETAIL_RUN_LIMIT).map((run) => run.runId);
+    if (overviewActiveWorkflowRunId && !runIds.includes(overviewActiveWorkflowRunId)) {
+      return [overviewActiveWorkflowRunId, ...runIds].slice(0, OVERVIEW_CHECK_DETAIL_RUN_LIMIT);
+    }
+    return runIds;
+  }, [
+    overviewActiveWorkflowRunId,
+    overviewPullRequestNumber,
+    overviewWorkflowRunsQuery.data?.runs,
+    overviewWorkflowRunsSupported,
+  ]);
+  const overviewWorkflowRunJobQueries = useQueries({
+    queries: overviewWorkflowDetailRunIds.map((runId) => ({
+      ...workflowRunJobsQueryOptions({
+        environmentId,
+        cwd: gitCwd,
+        runId,
+        enabled: overviewWorkflowRunsSupported && overviewPullRequestNumber !== null,
+      }),
+      refetchInterval: overviewActiveWorkflowRunId === runId ? 30_000 : false,
+    })),
+  });
+  const overviewWorkflowJobsByRunId = useMemo(() => {
+    const jobsByRunId = new Map<string, ReadonlyArray<SourceControlWorkflowJob>>();
+    overviewWorkflowDetailRunIds.forEach((runId, index) => {
+      const jobs = overviewWorkflowRunJobQueries[index]?.data?.jobs;
+      if (jobs) {
+        jobsByRunId.set(runId, jobs);
+      }
+    });
+    return jobsByRunId;
+  }, [overviewWorkflowDetailRunIds, overviewWorkflowRunJobQueries]);
+  const overviewWorkflowRunJobsLoading = overviewWorkflowRunJobQueries.some(
+    (query) => query.isLoading,
+  );
+  const overviewPullRequest = useMemo<OverviewPullRequestState | null>(() => {
+    if (overviewPullRequestNumber === null) {
+      return null;
+    }
+    const gitPr = gitStatusQuery.data?.pr ?? null;
+    const branchPr = overviewBranchPullRequest;
+    const detail = overviewPullRequestDetailQuery.data ?? null;
+    const workflowData = overviewWorkflowRunsSupported
+      ? (overviewWorkflowRunsQuery.data ?? null)
+      : null;
+    const checksQueryError = selectOverviewChecksError({
+      workflowRunsSupported: overviewWorkflowRunsSupported,
+      workflowError: overviewWorkflowRunsQuery.error,
+      detailError: overviewPullRequestDetailQuery.error,
+    });
+    const activeWorkflowJobDetail =
+      overviewActiveWorkflowRunId === null
+        ? undefined
+        : summarizeActiveWorkflowJob(overviewWorkflowJobsByRunId.get(overviewActiveWorkflowRunId));
+    const checkStatus =
+      workflowData && overviewWorkflowRunsSupported
+        ? getPrCheckStatusForQuery({
+            isLoading: overviewWorkflowRunsQuery.isLoading,
+            error: overviewWorkflowRunsQuery.error,
+            status: getPrCheckStatusFromWorkflowRuns({
+              runs: workflowData.runs,
+              headSha: sourceControlOptionValue(workflowData.headSha),
+            }),
+          })
+        : detail
+          ? getPrCheckStatusFromChangeRequest(detail)
+          : branchPr
+            ? getPrCheckStatusFromChangeRequest(branchPr)
+            : getPrCheckStatusForQuery({
+                isLoading:
+                  (overviewWorkflowRunsSupported && overviewWorkflowRunsQuery.isLoading) ||
+                  overviewPullRequestDetailQuery.isLoading,
+                error: checksQueryError,
+                status: null,
+              });
+    const workflowRows = workflowData
+      ? buildOverviewWorkflowCheckRows({
+          runs: workflowData.runs,
+          jobsByRunId: overviewWorkflowJobsByRunId,
+        })
+      : [];
+    const rollupRows = buildOverviewCheckRollupRows({
+      rollup: detail?.checkRollup ?? branchPr?.checkRollup,
+    });
+    const hasWorkflowJobRows = Array.from(overviewWorkflowJobsByRunId.values()).some(
+      (jobs) => jobs.length > 0,
+    );
+    const latestRuns = hasWorkflowJobRows
+      ? workflowRows
+      : rollupRows.length > 0
+        ? rollupRows
+        : workflowRows;
+    if (activeWorkflowJobDetail) {
+      for (const run of latestRuns) {
+        if (
+          isOverviewActiveCheckKind(run.statusKind) &&
+          overviewActiveWorkflowRunId !== null &&
+          run.id.startsWith(`run:${overviewActiveWorkflowRunId}`)
+        ) {
+          run.activeDetail = activeWorkflowJobDetail;
+        }
+      }
+    }
+    const runs = latestRuns.filter((run) => isOverviewActiveCheckKind(run.statusKind));
+    const pullRequestUrl = detail?.url ?? gitPr?.url ?? branchPr?.url ?? null;
+    const pullRequestState =
+      detail?.state ?? activeWorktreeSummary?.prState ?? gitPr?.state ?? branchPr?.state ?? null;
+    const checksError = compactQueryErrorMessage(checksQueryError);
+
+    return {
+      number: overviewPullRequestNumber,
+      title:
+        detail?.title ??
+        gitPr?.title ??
+        branchPr?.title ??
+        activeWorktreeSummary?.title ??
+        `Pull request #${overviewPullRequestNumber}`,
+      ...(pullRequestUrl ? { url: pullRequestUrl } : {}),
+      ...(pullRequestState ? { state: pullRequestState } : {}),
+      ...(typeof detail?.commentsCount === "number"
+        ? { commentsCount: detail.commentsCount }
+        : detail
+          ? { commentsCount: detail.comments.length }
+          : typeof branchPr?.commentsCount === "number"
+            ? { commentsCount: branchPr.commentsCount }
+            : {}),
+      checkStatus,
+      checksLoading:
+        (overviewWorkflowRunsSupported && overviewWorkflowRunsQuery.isLoading) ||
+        overviewPullRequestDetailQuery.isLoading ||
+        overviewWorkflowRunJobsLoading,
+      ...(checksError ? { checksError } : {}),
+      ...(detail?.mergeability ? { mergeability: detail.mergeability } : {}),
+      hasMergeConflicts: detail?.mergeability === "conflicting",
+      activeCheckCount:
+        runs.length > 0
+          ? runs.length
+          : checkStatus && isOverviewActiveCheckKind(checkStatus.kind)
+            ? 1
+            : 0,
+      runs,
+      latestRuns,
+    };
+  }, [
+    activeWorktreeSummary?.prState,
+    activeWorktreeSummary?.title,
+    gitStatusQuery.data?.pr,
+    overviewActiveWorkflowRunId,
+    overviewBranchPullRequest,
+    overviewWorkflowJobsByRunId,
+    overviewWorkflowRunJobsLoading,
+    overviewPullRequestDetailQuery.data,
+    overviewPullRequestDetailQuery.error,
+    overviewPullRequestDetailQuery.isLoading,
+    overviewPullRequestNumber,
+    overviewWorkflowRunsSupported,
+    overviewWorkflowRunsQuery.data,
+    overviewWorkflowRunsQuery.error,
+    overviewWorkflowRunsQuery.isLoading,
+  ]);
+  const overviewItems = useMemo<OverviewPanelItem[]>(() => {
+    const items: OverviewPanelItem[] = [];
+    const gitStatus = gitStatusQuery.data;
+    if (gitStatus) {
+      const prDetail = overviewPullRequestDetailQuery.data ?? null;
+      const changesItem = buildOverviewChangesItem({
+        local: {
+          fileCount: gitStatus.workingTree.files.length,
+          insertions: gitStatus.workingTree.insertions,
+          deletions: gitStatus.workingTree.deletions,
+        },
+        pullRequest:
+          overviewPullRequestNumber !== null
+            ? {
+                changedFiles: prDetail?.changedFiles,
+                additions: prDetail?.additions,
+                deletions: prDetail?.deletions,
+                isLoading: overviewPullRequestDetailQuery.isLoading,
+              }
+            : null,
+      });
+      items.push({ ...changesItem, action: "review", icon: "changes" });
+    }
+
+    items.push({
+      label: "Environment",
+      value: activeEnvironmentUnavailableState?.label ?? "Local",
+      ...(activeEnvironmentUnavailableState
+        ? { detail: activeEnvironmentUnavailableState.connectionState }
+        : {}),
+      icon: "environment",
+    });
+
+    return items;
+  }, [
+    activeEnvironmentUnavailableState,
+    gitStatusQuery.data,
+    overviewPullRequestDetailQuery.data,
+    overviewPullRequestDetailQuery.isLoading,
+    overviewPullRequestNumber,
+  ]);
   const activeTerminalLaunchContext =
     terminalLaunchContext?.threadId === activeThreadId
       ? terminalLaunchContext
@@ -1882,15 +2338,6 @@ export default function ChatView(props: ChatViewProps) {
     () => ({
       context: {
         terminalFocus: true,
-        terminalOpen: Boolean(terminalState.terminalOpen),
-      },
-    }),
-    [terminalState.terminalOpen],
-  );
-  const nonTerminalShortcutLabelOptions = useMemo(
-    () => ({
-      context: {
-        terminalFocus: false,
         terminalOpen: Boolean(terminalState.terminalOpen),
       },
     }),
@@ -1912,16 +2359,28 @@ export default function ChatView(props: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "terminal.close", terminalShortcutLabelOptions),
     [keybindings, terminalShortcutLabelOptions],
   );
-  const diffPanelShortcutLabel = useMemo(
-    () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
-    [keybindings, nonTerminalShortcutLabelOptions],
-  );
+  const onOpenReviewPanel = useEvent(() => {
+    if (!isServerThread) {
+      return;
+    }
+    onDiffPanelOpen?.();
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId,
+        threadId,
+      },
+      replace: true,
+      search: (previous) => buildOpenReviewSearch(previous),
+    });
+  });
   const onToggleDiff = useEvent(() => {
     if (!isServerThread) {
       return;
     }
     if (!diffOpen) {
-      onDiffPanelOpen?.();
+      onOpenReviewPanel();
+      return;
     }
     void navigate({
       to: "/$environmentId/$threadId",
@@ -1933,32 +2392,24 @@ export default function ChatView(props: ChatViewProps) {
       search: (previous) =>
         diffOpen
           ? {
-              ...stripPreviewSearchParams(stripDiffSearchParams(previous)),
+              ...stripWorkspacePanelSearchParams(previous),
               diff: undefined,
               diffTurnId: undefined,
               diffFilePath: undefined,
               preview: undefined,
+              workspaceOpen: undefined,
+              workspaceTab: undefined,
+              workspaceAgentKey: undefined,
             }
-          : buildOpenDiffSearch(previous),
+          : buildOpenReviewSearch(previous),
     });
   });
-  const onTogglePreview = useEvent(() => {
+  const onOpenFilesPanel = useEvent(() => {
     if (!activeProject) {
       return;
     }
-    if (!previewOpen) {
-      onPreviewPanelOpen?.();
-    }
-    const nextSearch = (previous: Record<string, unknown>) =>
-      previewOpen
-        ? {
-            ...stripPreviewSearchParams(stripDiffSearchParams(previous)),
-            diff: undefined,
-            diffTurnId: undefined,
-            diffFilePath: undefined,
-            preview: undefined,
-          }
-        : buildOpenPreviewSearch(previous);
+    onPreviewPanelOpen?.();
+    const nextSearch = (previous: Record<string, unknown>) => buildOpenFilesSearch(previous);
     if (routeKind === "draft" && draftId) {
       void navigate({
         to: "/draft/$draftId",
@@ -1978,7 +2429,73 @@ export default function ChatView(props: ChatViewProps) {
       search: nextSearch,
     });
   });
+  const onOpenTerminalPanel = useEvent(() => {
+    onTerminalPanelOpen?.();
+    const nextSearch = (previous: Record<string, unknown>) => buildOpenTerminalSearch(previous);
+    if (routeKind === "draft" && draftId) {
+      void navigate({
+        to: "/draft/$draftId",
+        params: { draftId },
+        replace: true,
+        search: nextSearch,
+      });
+      return;
+    }
+    if (!isServerThread) {
+      return;
+    }
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId,
+        threadId,
+      },
+      replace: true,
+      search: nextSearch,
+    });
+  });
+  const onToggleWorkspacePanel = useEvent(() => {
+    if (externalToggleWorkspacePanel) {
+      externalToggleWorkspacePanel();
+      return;
+    }
+    const nextSearch = (previous: Record<string, unknown>) =>
+      workspacePanelOpen
+        ? {
+            ...stripWorkspacePanelSearchParams(previous),
+            diff: undefined,
+            diffTurnId: undefined,
+            diffFilePath: undefined,
+            preview: undefined,
+            workspaceOpen: undefined,
+            workspaceTab: undefined,
+            workspaceAgentKey: undefined,
+          }
+        : buildOpenWorkspaceSearch(previous);
 
+    if (routeKind === "draft" && draftId) {
+      void navigate({
+        to: "/draft/$draftId",
+        params: { draftId },
+        replace: true,
+        search: nextSearch,
+      });
+      return;
+    }
+
+    if (!isServerThread) {
+      return;
+    }
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId,
+        threadId,
+      },
+      replace: true,
+      search: nextSearch,
+    });
+  });
   const envLocked = Boolean(
     activeThread &&
     (activeThread.messages.length > 0 ||
@@ -2396,22 +2913,34 @@ export default function ChatView(props: ChatViewProps) {
   const toggleInteractionMode = useCallback(() => {
     handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
   }, [handleInteractionModeChange, interactionMode]);
-  const togglePlanSidebar = useCallback(() => {
-    setPlanSidebarOpen((open) => {
-      if (open) {
-        planSidebarDismissedForTurnRef.current =
-          activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-      } else {
-        planSidebarDismissedForTurnRef.current = null;
-      }
-      return !open;
-    });
-  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+  const setOverviewSidebarOpen = useCallback(
+    (open: boolean) => {
+      setPlanSidebarOpen(open);
+      planSidebarDismissedForTurnRef.current = open
+        ? null
+        : (activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__");
+    },
+    [activePlan?.turnId, sidebarProposedPlan?.turnId],
+  );
   const closePlanSidebar = useCallback(() => {
-    setPlanSidebarOpen(false);
-    planSidebarDismissedForTurnRef.current =
-      activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+    setOverviewFloatingOpen(false);
+    setOverviewSidebarOpen(false);
+  }, [setOverviewSidebarOpen]);
+  const toggleOverviewSidebar = useCallback(
+    (nextOpen?: boolean) => {
+      if (workspacePanelOpen) {
+        const wantsOpen = typeof nextOpen === "boolean" ? nextOpen : !overviewFloatingOpen;
+        setOverviewFloatingOpen(wantsOpen);
+        setOverviewSidebarOpen(wantsOpen);
+        return;
+      }
+
+      const wantsOpen = typeof nextOpen === "boolean" ? nextOpen : !planSidebarOpen;
+      setOverviewFloatingOpen(false);
+      setOverviewSidebarOpen(wantsOpen);
+    },
+    [overviewFloatingOpen, planSidebarOpen, setOverviewSidebarOpen, workspacePanelOpen],
+  );
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -2505,15 +3034,10 @@ export default function ChatView(props: ChatViewProps) {
     isAtEndRef.current = true;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
-    if (planSidebarOpenOnNextThreadRef.current) {
-      planSidebarOpenOnNextThreadRef.current = false;
-      setPlanSidebarOpen(true);
-    } else {
-      planSidebarOpenOnNextThreadRef.current = false;
-      setPlanSidebarOpen(false);
-    }
+    planSidebarOpenOnNextThreadRef.current = false;
+    setPlanSidebarOpen(!shouldUsePlanSidebarSheet);
     planSidebarDismissedForTurnRef.current = null;
-  }, [activeThread?.id]);
+  }, [activeThread?.id, shouldUsePlanSidebarSheet]);
 
   // Auto-open the plan sidebar when plan/todo steps arrive for the current turn.
   // Don't auto-open for plans carried over from a previous turn (the user can open manually).
@@ -2608,6 +3132,35 @@ export default function ChatView(props: ChatViewProps) {
     canOverrideServerThreadBranch && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
+  const overviewSourceControlActions =
+    gitCwd && activeThreadRef ? (
+      <GitActionsControl
+        gitCwd={gitCwd}
+        activeThreadRef={activeThreadRef}
+        {...(routeKind === "draft" && draftId ? { draftId } : {})}
+        showLabels
+      />
+    ) : null;
+  const overviewBranchControl =
+    activeThread && isGitRepo ? (
+      <BranchToolbarBranchSelector
+        className="max-w-[168px] justify-end px-1.5"
+        environmentId={activeThread.environmentId}
+        threadId={activeThread.id}
+        {...(routeKind === "draft" && draftId ? { draftId } : {})}
+        {...(canOverrideServerThreadBranch
+          ? {
+              activeThreadBranchOverride: activeThreadBranch,
+              onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+            }
+          : {})}
+        envLocked={envLocked}
+        onComposerFocusRequest={scheduleComposerFocus}
+        {...(canCheckoutPullRequestIntoThread
+          ? { onCheckoutPullRequestRequest: openPullRequestDialog }
+          : {})}
+      />
+    ) : null;
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
     isGitRepo,
@@ -2812,6 +3365,27 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "workspace.files") {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenFilesPanel();
+        return;
+      }
+
+      if (command === "workspace.review") {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenReviewPanel();
+        return;
+      }
+
+      if (command === "workspace.terminal") {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenTerminalPanel();
+        return;
+      }
+
       if (command === "modelPicker.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -2841,6 +3415,9 @@ export default function ChatView(props: ChatViewProps) {
     splitTerminal,
     keybindings,
     onToggleDiff,
+    onOpenFilesPanel,
+    onOpenReviewPanel,
+    onOpenTerminalPanel,
     readComposer,
     toggleTerminalVisibility,
   ]);
@@ -3818,7 +4395,7 @@ export default function ChatView(props: ChatViewProps) {
           threadId,
         },
         search: (previous) =>
-          buildOpenDiffSearch(previous, {
+          buildOpenReviewSearch(previous, {
             diffTurnId: turnId,
             diffFilePath: filePath ?? undefined,
           }),
@@ -3837,14 +4414,46 @@ export default function ChatView(props: ChatViewProps) {
         threadId,
       },
       search: (previous) => ({
-        ...stripPreviewSearchParams(stripDiffSearchParams(previous)),
+        ...stripWorkspacePanelSearchParams(previous),
         diff: undefined,
         diffTurnId: undefined,
         diffFilePath: undefined,
         preview: undefined,
+        workspaceOpen: undefined,
+        workspaceTab: undefined,
+        workspaceAgentKey: undefined,
       }),
     });
   }, [environmentId, isServerThread, navigate, threadId]);
+  const onOpenSubagentPanel = useCallback(
+    (subagent: ThreadSubagentView) => {
+      onAgentPanelOpen?.();
+      const nextSearch = (previous: Record<string, unknown>) =>
+        buildOpenAgentSearch(previous, subagent.key);
+
+      if (routeKind === "draft" && draftId) {
+        void navigate({
+          to: "/draft/$draftId",
+          params: { draftId },
+          search: nextSearch,
+        });
+        return;
+      }
+
+      if (!isServerThread) {
+        return;
+      }
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId,
+          threadId,
+        },
+        search: nextSearch,
+      });
+    },
+    [draftId, environmentId, isServerThread, navigate, onAgentPanelOpen, routeKind, threadId],
+  );
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
@@ -3859,13 +4468,39 @@ export default function ChatView(props: ChatViewProps) {
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
 
+  useEffect(() => {
+    if (!workspacePanelOpen) {
+      setOverviewFloatingOpen(false);
+    }
+  }, [workspacePanelOpen]);
+
+  useEffect(() => {
+    setOverviewFloatingOpen(false);
+  }, [activeThread?.id]);
+
+  const overviewSidebarVisible = planSidebarOpen && !workspacePanelOpen;
+  const showFloatingOverviewSidebar = overviewFloatingOpen && workspacePanelOpen;
+  const overviewControlOpen = overviewSidebarVisible || showFloatingOverviewSidebar;
+  const showInlineOverviewSidebar = overviewSidebarVisible && !shouldUsePlanSidebarSheet;
+  const showOverviewSidebarSheet = overviewSidebarVisible && shouldUsePlanSidebarSheet;
+  const renderFloatingOverviewSidebar = useDelayedUnmount(
+    showFloatingOverviewSidebar,
+    prefersReducedMotion || !workspacePanelOpen ? 0 : OVERVIEW_FLOATING_EXIT_DURATION_MS,
+  );
+  const renderInlineOverviewSidebar = useDelayedUnmount(
+    showInlineOverviewSidebar,
+    prefersReducedMotion || shouldUsePlanSidebarSheet || workspacePanelOpen
+      ? 0
+      : OVERVIEW_SIDEBAR_EXIT_DURATION_MS,
+  );
+
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       {/* Top bar */}
       <header
         className={cn(
@@ -3881,8 +4516,6 @@ export default function ChatView(props: ChatViewProps) {
       >
         <ChatHeader
           activeThreadEnvironmentId={activeThread.environmentId}
-          activeThreadId={activeThread.id}
-          {...(routeKind === "draft" && draftId ? { draftId } : {})}
           activeThreadTitle={activeThread.title}
           activeProjectName={activeProject?.name}
           isGitRepo={isGitRepo}
@@ -3893,11 +4526,6 @@ export default function ChatView(props: ChatViewProps) {
           }
           keybindings={keybindings}
           availableEditors={availableEditors}
-          diffToggleShortcutLabel={diffPanelShortcutLabel}
-          gitCwd={gitCwd}
-          previewAvailable={activeProject !== undefined}
-          diffOpen={diffOpen}
-          previewOpen={previewOpen}
           worktreeBranch={activeWorktreeSummary?.branch ?? activeThread.branch ?? null}
           worktreeTitle={activeWorktreeSummary?.title ?? null}
           worktreeOrigin={activeWorktreeSummary?.origin ?? null}
@@ -3912,12 +4540,14 @@ export default function ChatView(props: ChatViewProps) {
           onSelectSessionTab={handleSelectSessionTab}
           onPrefetchTabEnter={handleTabPrefetchEnter}
           onPrefetchTabLeave={handleTabPrefetchLeave}
+          workspacePanelOpen={workspacePanelOpen}
+          onToggleWorkspacePanel={onToggleWorkspacePanel}
+          overviewSidebarOpen={overviewControlOpen}
+          onToggleOverviewSidebar={toggleOverviewSidebar}
           onRunProjectScript={runProjectScript}
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
-          onToggleDiff={onToggleDiff}
-          onTogglePreview={onTogglePreview}
         />
       </header>
       <LinkedWorktreeItemDialog
@@ -3976,13 +4606,37 @@ export default function ChatView(props: ChatViewProps) {
               <div aria-hidden className="flex min-h-0 flex-1" />
             )}
 
+            {renderFloatingOverviewSidebar ? (
+              <FloatingOverviewMotionFrame
+                animate={!prefersReducedMotion}
+                open={showFloatingOverviewSidebar}
+              >
+                <PlanSidebar
+                  activePlan={activePlan}
+                  activeProposedPlan={sidebarProposedPlan}
+                  overviewItems={overviewItems}
+                  pullRequest={overviewPullRequest}
+                  subagents={threadSubagents}
+                  sourceControlActions={overviewSourceControlActions}
+                  branchControl={overviewBranchControl}
+                  environmentId={environmentId}
+                  markdownCwd={gitCwd ?? undefined}
+                  workspaceRoot={activeWorkspaceRoot}
+                  mode="floating"
+                  onOpenFiles={onOpenFilesPanel}
+                  onOpenReview={onOpenReviewPanel}
+                  onOpenSubagent={onOpenSubagentPanel}
+                />
+              </FloatingOverviewMotionFrame>
+            ) : null}
+
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
             {showScrollToBottom && (
               <div className="pointer-events-none absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5">
                 <button
                   type="button"
                   onClick={() => scrollToEnd(true)}
-                  className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
+                  className="pointer-events-auto flex items-center gap-1.5 rounded-full border-0 bg-card/80 px-3 py-1 text-muted-foreground text-xs shadow-md/5 ring-1 ring-inset ring-foreground/6 backdrop-blur transition-[background-color,color,box-shadow] hover:bg-card hover:text-foreground hover:shadow-lg/8 hover:cursor-pointer"
                 >
                   <ChevronDownIcon className="size-3.5" />
                   Scroll to bottom
@@ -4040,7 +4694,7 @@ export default function ChatView(props: ChatViewProps) {
                   activePlan={activePlan as { turnId?: TurnId } | null}
                   sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
                   planSidebarLabel={planSidebarLabel}
-                  planSidebarOpen={planSidebarOpen}
+                  planSidebarOpen={overviewControlOpen}
                   runtimeMode={runtimeMode}
                   interactionMode={interactionMode}
                   tokenMode={tokenMode}
@@ -4076,7 +4730,7 @@ export default function ChatView(props: ChatViewProps) {
                   handleRuntimeModeChange={handleRuntimeModeChange}
                   handleInteractionModeChange={handleInteractionModeChange}
                   handleTokenModeChange={handleTokenModeChange}
-                  togglePlanSidebar={togglePlanSidebar}
+                  togglePlanSidebar={toggleOverviewSidebar}
                   focusComposer={focusComposer}
                   scheduleComposerFocus={scheduleComposerFocus}
                   setThreadError={setThreadError}
@@ -4147,20 +4801,28 @@ export default function ChatView(props: ChatViewProps) {
           />
         </div>
         {/* end chat column */}
-
-        {/* Plan sidebar */}
-        {planSidebarOpen && !shouldUsePlanSidebarSheet ? (
-          <PlanSidebar
-            activePlan={activePlan}
-            activeProposedPlan={sidebarProposedPlan}
-            label={planSidebarLabel}
-            environmentId={environmentId}
-            markdownCwd={gitCwd ?? undefined}
-            workspaceRoot={activeWorkspaceRoot}
-            timestampFormat={timestampFormat}
-            mode="sidebar"
-            onClose={closePlanSidebar}
-          />
+        {renderInlineOverviewSidebar ? (
+          <OverviewSidebarMotionFrame
+            animate={!prefersReducedMotion}
+            open={showInlineOverviewSidebar}
+          >
+            <PlanSidebar
+              activePlan={activePlan}
+              activeProposedPlan={sidebarProposedPlan}
+              overviewItems={overviewItems}
+              pullRequest={overviewPullRequest}
+              subagents={threadSubagents}
+              sourceControlActions={overviewSourceControlActions}
+              branchControl={overviewBranchControl}
+              environmentId={environmentId}
+              markdownCwd={gitCwd ?? undefined}
+              workspaceRoot={activeWorkspaceRoot}
+              mode="sidebar"
+              onOpenFiles={onOpenFilesPanel}
+              onOpenReview={onOpenReviewPanel}
+              onOpenSubagent={onOpenSubagentPanel}
+            />
+          </OverviewSidebarMotionFrame>
         ) : null}
       </div>
       {/* end horizontal flex container */}
@@ -4183,17 +4845,22 @@ export default function ChatView(props: ChatViewProps) {
         />
       ))}
       {shouldUsePlanSidebarSheet ? (
-        <RightPanelSheet open={planSidebarOpen} onClose={closePlanSidebar}>
+        <RightPanelSheet open={showOverviewSidebarSheet} onClose={closePlanSidebar}>
           <PlanSidebar
             activePlan={activePlan}
             activeProposedPlan={sidebarProposedPlan}
-            label={planSidebarLabel}
+            overviewItems={overviewItems}
+            pullRequest={overviewPullRequest}
+            subagents={threadSubagents}
+            sourceControlActions={overviewSourceControlActions}
+            branchControl={overviewBranchControl}
             environmentId={environmentId}
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeWorkspaceRoot}
-            timestampFormat={timestampFormat}
             mode="sheet"
-            onClose={closePlanSidebar}
+            onOpenFiles={onOpenFilesPanel}
+            onOpenReview={onOpenReviewPanel}
+            onOpenSubagent={onOpenSubagentPanel}
           />
         </RightPanelSheet>
       ) : null}

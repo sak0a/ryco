@@ -46,8 +46,10 @@ interface DesktopBuildIconAssets {
 }
 
 interface MacUnsignedInstallAssetPaths {
-  readonly installHelper: string;
-  readonly readme: string;
+  readonly installHelperFilePath: string;
+  readonly readmeFilePath: string;
+  readonly installHelperDmgPath: string;
+  readonly readmeDmgPath: string;
 }
 
 interface PlatformConfig {
@@ -614,6 +616,7 @@ export const EXTERNALIZED_DESKTOP_DEPENDENCY_PATHS = [
 ] as const;
 
 export const COPILOT_SDK_PACKAGE_JSON_PATH = "node_modules/@github/copilot-sdk/package.json";
+export const DESKTOP_BUILD_RESOURCES_RELATIVE_DIR = "apps/desktop/resources";
 export const MAC_UNSIGNED_INSTALL_HELPER_NAME = "Install Ryco.command";
 export const MAC_UNSIGNED_README_NAME = "README-macOS.txt";
 
@@ -678,8 +681,10 @@ function resolveMacUnsignedInstallAssetPaths(
   path: Path.Path,
 ): MacUnsignedInstallAssetPaths {
   return {
-    installHelper: path.join(stageResourcesDir, MAC_UNSIGNED_INSTALL_HELPER_NAME),
-    readme: path.join(stageResourcesDir, MAC_UNSIGNED_README_NAME),
+    installHelperFilePath: path.join(stageResourcesDir, MAC_UNSIGNED_INSTALL_HELPER_NAME),
+    readmeFilePath: path.join(stageResourcesDir, MAC_UNSIGNED_README_NAME),
+    installHelperDmgPath: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/${MAC_UNSIGNED_INSTALL_HELPER_NAME}`,
+    readmeDmgPath: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/${MAC_UNSIGNED_README_NAME}`,
   };
 }
 
@@ -689,9 +694,12 @@ const stageMacUnsignedInstallAssets = Effect.fn("stageMacUnsignedInstallAssets")
 ) {
   const fs = yield* FileSystem.FileSystem;
 
-  yield* fs.writeFileString(assetPaths.installHelper, createMacUnsignedInstallScript(productName));
-  yield* fs.chmod(assetPaths.installHelper, 0o755);
-  yield* fs.writeFileString(assetPaths.readme, createMacUnsignedInstallReadme(productName));
+  yield* fs.writeFileString(
+    assetPaths.installHelperFilePath,
+    createMacUnsignedInstallScript(productName),
+  );
+  yield* fs.chmod(assetPaths.installHelperFilePath, 0o755);
+  yield* fs.writeFileString(assetPaths.readmeFilePath, createMacUnsignedInstallReadme(productName));
 });
 
 const pruneExternalizedDesktopDependencies = Effect.fn("pruneExternalizedDesktopDependencies")(
@@ -776,14 +784,14 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
             x: 140,
             y: 320,
             type: "file",
-            path: macUnsignedInstallAssets.installHelper,
+            path: macUnsignedInstallAssets.installHelperDmgPath,
             name: MAC_UNSIGNED_INSTALL_HELPER_NAME,
           },
           {
             x: 420,
             y: 320,
             type: "file",
-            path: macUnsignedInstallAssets.readme,
+            path: macUnsignedInstallAssets.readmeDmgPath,
             name: MAC_UNSIGNED_README_NAME,
           },
         ],

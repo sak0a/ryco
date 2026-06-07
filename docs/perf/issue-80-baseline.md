@@ -25,7 +25,7 @@ process console. Renderer summaries are written to the browser or Electron DevTo
 Renderer render marks are also available from DevTools:
 
 ```js
-performance.getEntriesByType("measure").filter((entry) => entry.name.startsWith("s3:render:"));
+performance.getEntriesByType("measure").filter((entry) => entry.name.startsWith("ryco:render:"));
 ```
 
 ## Instrumentation Labels

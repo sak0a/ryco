@@ -54,5 +54,5 @@ export interface PtyAdapterShape {
  * PtyAdapter - Service tag for PTY process integration.
  */
 export class PtyAdapter extends Context.Service<PtyAdapter, PtyAdapterShape>()(
-  "s3/terminal/Services/PTY/PtyAdapter",
+  "ryco/terminal/Services/PTY/PtyAdapter",
 ) {}

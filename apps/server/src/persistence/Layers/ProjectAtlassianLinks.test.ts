@@ -22,7 +22,7 @@ layer("ProjectAtlassianLinkRepository", (it) => {
         bitbucketConnectionId: AtlassianConnectionId.make("atl-bitbucket"),
         jiraCloudId: "cloud-1",
         jiraSiteUrl: "https://acme.atlassian.net",
-        jiraProjectKeys: ["S3", "OPS"],
+        jiraProjectKeys: ["RYCO", "OPS"],
         bitbucketWorkspace: "acme",
         bitbucketRepoSlug: "ryco",
         defaultIssueTypeName: "Task",
@@ -37,7 +37,7 @@ layer("ProjectAtlassianLinkRepository", (it) => {
 
       const row = yield* repo.getByProjectId({ projectId });
       assert.isTrue(Option.isSome(row));
-      assert.deepStrictEqual(Option.getOrThrow(row).jiraProjectKeys, ["S3", "OPS"]);
+      assert.deepStrictEqual(Option.getOrThrow(row).jiraProjectKeys, ["RYCO", "OPS"]);
       assert.equal(Option.getOrThrow(row).bitbucketRepoSlug, "ryco");
     }),
   );

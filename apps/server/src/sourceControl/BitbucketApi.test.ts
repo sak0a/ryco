@@ -770,7 +770,7 @@ it.effect("getPullRequestDetail returns body and comments via two REST calls", (
       }
       return Response.json({
         id: 12,
-        title: "S3-123 Add feature",
+        title: "RYCO-123 Add feature",
         state: "OPEN",
         summary: { raw: "PR body text for OPS-9" },
         author: { display_name: "Alice" },
@@ -810,7 +810,7 @@ it.effect("getPullRequestDetail returns body and comments via two REST calls", (
     assert.strictEqual(detail.commentsCount, 3);
     assert.strictEqual(detail.tasksCount, 1);
     assert.deepStrictEqual(detail.reviewers, ["Reviewer"]);
-    assert.deepStrictEqual(detail.linkedWorkItemKeys, ["S3-123", "OPS-9"]);
+    assert.deepStrictEqual(detail.linkedWorkItemKeys, ["RYCO-123", "OPS-9"]);
     assert.deepStrictEqual(detail.participants[0], {
       displayName: "Reviewer",
       username: "reviewer",

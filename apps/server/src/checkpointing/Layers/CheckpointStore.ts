@@ -107,7 +107,7 @@ const makeCheckpointStore = Effect.gen(function* () {
     const operation = "CheckpointStore.captureCheckpoint";
 
     yield* Effect.acquireUseRelease(
-      fs.makeTempDirectory({ prefix: "s3-fs-checkpoint-" }),
+      fs.makeTempDirectory({ prefix: "ryco-fs-checkpoint-" }),
       Effect.fn("captureCheckpoint.withTempDirectory")(function* (tempDir) {
         const tempIndexPath = path.join(tempDir, `index-${randomUUID()}`);
         const commitEnv: NodeJS.ProcessEnv = {
@@ -153,7 +153,7 @@ const makeCheckpointStore = Effect.gen(function* () {
           });
         }
 
-        const message = `s3 checkpoint ref=${input.checkpointRef}`;
+        const message = `ryco checkpoint ref=${input.checkpointRef}`;
         const commitTreeResult = yield* vcs.execute({
           operation,
           cwd: input.cwd,

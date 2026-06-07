@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { getWebPerfReporter, isWebPerfProfileEnabled, readWebPerfNow } from "./perfInstrumentation";
 
-export const TAB_SWITCH_MARK_PREFIX = "s3:tab-switch:";
-export const COMPONENT_RENDER_MARK_PREFIX = "s3:render:";
+export const TAB_SWITCH_MARK_PREFIX = "ryco:tab-switch:";
+export const COMPONENT_RENDER_MARK_PREFIX = "ryco:render:";
 
 export type TabSwitchPhase = "click" | "first-paint";
 
@@ -24,7 +24,7 @@ export function markTabSwitchFirstPaint(key: string): void {
   if (performance.getEntriesByName(name).length > 0) return;
   performance.mark(name);
   try {
-    performance.measure(`s3:tab-switch:${key}`, makeTabSwitchMarkName("click", key), name);
+    performance.measure(`ryco:tab-switch:${key}`, makeTabSwitchMarkName("click", key), name);
   } catch {
     // No matching click mark — initial mount, ignore.
   }
@@ -70,7 +70,7 @@ export function useDevPropDiff<T extends Record<string, unknown>>(props: T, labe
  * times during a single interaction. Inspect via:
  *
  *   performance.getEntriesByType("measure")
- *     .filter(m => m.name.startsWith("s3:render:"))
+ *     .filter(m => m.name.startsWith("ryco:render:"))
  */
 export function usePerfMark(label: string): void {
   const seq = useRef(0);

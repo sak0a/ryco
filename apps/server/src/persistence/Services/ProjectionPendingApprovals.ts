@@ -88,4 +88,4 @@ export interface ProjectionPendingApprovalRepositoryShape {
 export class ProjectionPendingApprovalRepository extends Context.Service<
   ProjectionPendingApprovalRepository,
   ProjectionPendingApprovalRepositoryShape
->()("s3/persistence/Services/ProjectionPendingApprovals/ProjectionPendingApprovalRepository") {}
+>()("ryco/persistence/Services/ProjectionPendingApprovals/ProjectionPendingApprovalRepository") {}

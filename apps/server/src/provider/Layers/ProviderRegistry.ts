@@ -46,6 +46,7 @@ import {
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
+import { ignoreProviderBackgroundCause } from "../ignoreProviderBackgroundCause.ts";
 
 const loadProviders = (
   providerSources: ReadonlyArray<ProviderSnapshotSource>,
@@ -561,7 +562,9 @@ export const ProviderRegistryLive = Layer.effect(
             newlyAdded,
             ([, instance]) =>
               refreshOneSource(buildSnapshotSource(instance)).pipe(
-                Effect.ignoreCause({ log: true }),
+                ignoreProviderBackgroundCause(
+                  "provider registry initial instance refresh failed; preserving cached provider",
+                ),
               ),
             { concurrency: "unbounded", discard: true },
           );

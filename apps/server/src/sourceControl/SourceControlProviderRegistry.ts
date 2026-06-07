@@ -57,7 +57,7 @@ export interface SourceControlProviderRegistryShape {
 export class SourceControlProviderRegistry extends Context.Service<
   SourceControlProviderRegistry,
   SourceControlProviderRegistryShape
->()("s3/source-control/SourceControlProviderRegistry") {}
+>()("ryco/source-control/SourceControlProviderRegistry") {}
 
 function unsupportedProviderOperation(kind: SourceControlProviderKind, operation: string) {
   return Effect.fail(

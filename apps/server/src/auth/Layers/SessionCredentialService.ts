@@ -17,6 +17,7 @@ import {
 import {
   base64UrlDecodeUtf8,
   base64UrlEncode,
+  resolveLegacySessionCookieNames,
   resolveSessionCookieName,
   signPayload,
   timingSafeEqualBase64Url,
@@ -89,6 +90,10 @@ export const makeSessionCredentialService = Effect.gen(function* () {
   const connectedSessionsRef = yield* Ref.make(new Map<string, number>());
   const changesPubSub = yield* PubSub.unbounded<SessionCredentialChange>();
   const cookieName = resolveSessionCookieName({
+    mode: serverConfig.mode,
+    port: serverConfig.port,
+  });
+  const legacyCookieNames = resolveLegacySessionCookieNames({
     mode: serverConfig.mode,
     port: serverConfig.port,
   });
@@ -479,6 +484,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
 
   return {
     cookieName,
+    legacyCookieNames,
     issue,
     verify,
     issueWebSocketToken,

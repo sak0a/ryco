@@ -277,7 +277,7 @@ export interface KeybindingsShape {
  * Keybindings - Service tag for keybinding configuration operations.
  */
 export class Keybindings extends Context.Service<Keybindings, KeybindingsShape>()(
-  "s3/keybindings",
+  "ryco/keybindings",
 ) {}
 
 const makeKeybindings = Effect.gen(function* () {

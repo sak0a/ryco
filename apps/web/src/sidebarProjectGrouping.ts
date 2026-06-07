@@ -6,6 +6,7 @@ import {
   deriveProjectGroupLabel,
   type ProjectGroupingSettings,
 } from "./logicalProject";
+import { resolveProjectEnvironmentLabel } from "./environmentDisplay";
 import type { Project } from "./types";
 
 export type EnvironmentPresence = "local-only" | "remote-only" | "mixed";
@@ -51,7 +52,10 @@ export function buildSidebarProjectSnapshots(input: {
     const member: SidebarProjectGroupMember = {
       ...project,
       physicalProjectKey: derivePhysicalProjectKey(project),
-      environmentLabel: input.resolveEnvironmentLabel(project.environmentId),
+      environmentLabel: resolveProjectEnvironmentLabel({
+        environmentId: project.environmentId,
+        label: input.resolveEnvironmentLabel(project.environmentId),
+      }),
     };
     const existing = groupedMembers.get(logicalKey);
     if (existing) {

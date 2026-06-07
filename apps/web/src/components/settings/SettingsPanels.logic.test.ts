@@ -14,7 +14,7 @@ describe("buildProviderInstanceUpdatePatch", () => {
       driver: ProviderDriverKind.make("codex"),
       enabled: true,
       config: {
-        binaryPath: "/opt/s3/codex",
+        binaryPath: "/opt/ryco/codex",
       },
     } satisfies ProviderInstanceConfig;
 

@@ -171,7 +171,7 @@ export interface ForgejoApiShape {
 }
 
 export class ForgejoApi extends Context.Service<ForgejoApi, ForgejoApiShape>()(
-  "s3/source-control/ForgejoApi",
+  "ryco/source-control/ForgejoApi",
 ) {}
 
 function nonEmpty(value: string | undefined): Option.Option<string> {

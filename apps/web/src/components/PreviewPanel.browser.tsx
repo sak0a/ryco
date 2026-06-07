@@ -198,6 +198,63 @@ describe("PreviewPanel", () => {
     previewHarness.reset();
   });
 
+  it("places the workspace tree on the right and filters visible files", async () => {
+    previewHarness.entries = [
+      { path: "src", kind: "directory" },
+      { path: "src/app.ts", kind: "file", sizeBytes: 64 },
+      { path: "README.md", kind: "file", sizeBytes: 64 },
+    ];
+
+    mounted = await render(<PreviewPanel mode="sheet" />);
+
+    const contentPanel = document.querySelector("[data-preview-content-panel]");
+    const fileRail = document.querySelector("[data-preview-file-rail]");
+    expect(contentPanel).not.toBeNull();
+    expect(fileRail).not.toBeNull();
+    expect(
+      contentPanel!.compareDocumentPosition(fileRail!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    await expect.element(page.getByText("Open file")).toBeInTheDocument();
+    await page.getByPlaceholder("Filter files...").fill("readme");
+
+    await expect.element(page.getByRole("button", { name: "README.md" })).toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "src/app.ts" })).not.toBeInTheDocument();
+  });
+
+  it("hides and restores the workspace tree with a smooth rail collapse", async () => {
+    previewHarness.entries = [
+      { path: "src", kind: "directory" },
+      { path: "src/app.ts", kind: "file", sizeBytes: 64 },
+    ];
+
+    mounted = await render(<PreviewPanel mode="sheet" />);
+
+    const fileRail = document.querySelector<HTMLElement>("[data-preview-file-rail]");
+    expect(fileRail).not.toBeNull();
+    expect(fileRail!.getBoundingClientRect().width).toBeGreaterThan(100);
+
+    await page.getByRole("button", { name: "Hide workspace tree" }).click();
+
+    await expect
+      .element(page.getByRole("button", { name: "Show workspace tree" }))
+      .toBeInTheDocument();
+    expect(fileRail!.getAttribute("aria-hidden")).toBe("true");
+    await vi.waitFor(() => {
+      expect(fileRail!.getBoundingClientRect().width).toBeLessThanOrEqual(1);
+    });
+
+    await page.getByRole("button", { name: "Show workspace tree" }).click();
+
+    await expect
+      .element(page.getByRole("button", { name: "Hide workspace tree" }))
+      .toBeInTheDocument();
+    expect(fileRail!.getAttribute("aria-hidden")).toBeNull();
+    await vi.waitFor(() => {
+      expect(fileRail!.getBoundingClientRect().width).toBeGreaterThan(100);
+    });
+  });
+
   it("renders image previews from base64 file content", async () => {
     previewHarness.entries = [
       { path: "assets/logo.png", kind: "file", mimeType: "image/png", sizeBytes: 128 },

@@ -246,7 +246,7 @@ export const makeOrchestrationIntegrationHarness = (
         )
       : null;
     const rootDir = yield* fileSystem.makeTempDirectoryScoped({
-      prefix: "s3-orchestration-integration-",
+      prefix: "ryco-orchestration-integration-",
     });
     const workspaceDir = path.join(rootDir, "workspace");
     const { stateDir, dbPath } = yield* deriveServerPaths(rootDir, undefined).pipe(

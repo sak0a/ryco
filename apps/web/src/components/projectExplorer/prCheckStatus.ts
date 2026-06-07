@@ -141,7 +141,7 @@ function isFailureToken(value: string): boolean {
 }
 
 function isCancelledToken(value: string): boolean {
-  return ["cancelled", "canceled", "skipped", "stale"].includes(value);
+  return ["cancelled", "canceled", "stale"].includes(value);
 }
 
 function isPendingToken(value: string): boolean {
@@ -153,7 +153,14 @@ function isRunningToken(value: string): boolean {
 }
 
 function isPassedToken(value: string): boolean {
-  return ["completed successfully", "neutral", "passed", "success", "successful"].includes(value);
+  return [
+    "completed successfully",
+    "neutral",
+    "passed",
+    "skipped",
+    "success",
+    "successful",
+  ].includes(value);
 }
 
 function statusKindForCheck(input: {

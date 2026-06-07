@@ -44,7 +44,7 @@ it.layer(NodeServices.layer)("providerStatusCache", (it) => {
   it.effect("writes and reads provider status snapshots", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "s3-provider-cache-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-provider-cache-" });
       const codexProvider = makeProvider(CODEX_DRIVER);
       const claudeProvider = makeProvider(CLAUDE_AGENT_DRIVER, {
         status: "warning",

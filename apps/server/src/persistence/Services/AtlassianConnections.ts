@@ -71,4 +71,4 @@ export interface AtlassianConnectionRepositoryShape {
 export class AtlassianConnectionRepository extends Context.Service<
   AtlassianConnectionRepository,
   AtlassianConnectionRepositoryShape
->()("s3/persistence/Services/AtlassianConnections/AtlassianConnectionRepository") {}
+>()("ryco/persistence/Services/AtlassianConnections/AtlassianConnectionRepository") {}

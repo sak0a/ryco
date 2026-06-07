@@ -9,6 +9,12 @@ describe("keybindingCategories", () => {
     expect(getCommandMeta("terminal.close").category).toBe(KEYBINDING_CATEGORIES.terminal);
   });
 
+  it("maps workspace commands to the Workspace category", () => {
+    expect(getCommandMeta("workspace.files").category).toBe(KEYBINDING_CATEGORIES.workspace);
+    expect(getCommandMeta("workspace.review").category).toBe(KEYBINDING_CATEGORIES.workspace);
+    expect(getCommandMeta("workspace.terminal").category).toBe(KEYBINDING_CATEGORIES.workspace);
+  });
+
   it("maps chat commands to the Chat category", () => {
     expect(getCommandMeta("chat.new").category).toBe(KEYBINDING_CATEGORIES.chat);
     expect(getCommandMeta("chat.newLocal").category).toBe(KEYBINDING_CATEGORIES.chat);
@@ -32,6 +38,7 @@ describe("keybindingCategories", () => {
 
   it("returns a friendly title for static commands", () => {
     expect(getCommandMeta("terminal.toggle").title).toBe("Toggle terminal drawer");
+    expect(getCommandMeta("workspace.files").title).toBe("Open workspace files");
     expect(getCommandMeta("commandPalette.toggle").title).toBe("Open command palette");
     expect(getCommandMeta("editor.openFavorite").title).toBe("Open in preferred editor");
   });

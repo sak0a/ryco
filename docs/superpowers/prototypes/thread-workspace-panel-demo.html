@@ -1,0 +1,1407 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ryco Thread Workspace Panel Prototype</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #111211;
+        --panel: #181918;
+        --panel-2: #222321;
+        --panel-3: #2c2d2b;
+        --border: #3a3b38;
+        --border-strong: #4a4b47;
+        --text: #f2f0eb;
+        --muted: #aaa7a0;
+        --dim: #74716b;
+        --green: #33d182;
+        --red: #ff535b;
+        --yellow: #ffd33f;
+        --blue: #4da3ff;
+        --violet: #a678ff;
+        --orange: #ff7a33;
+        --shadow: 0 20px 70px rgb(0 0 0 / 0.45);
+        --radius: 8px;
+        font-family:
+          ui-sans-serif,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        overflow: hidden;
+        background:
+          linear-gradient(90deg, rgb(255 255 255 / 0.025) 1px, transparent 1px) 0 0 / 48px 48px,
+          radial-gradient(circle at 70% 20%, rgb(255 255 255 / 0.035), transparent 28rem),
+          var(--bg);
+        color: var(--text);
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        color: inherit;
+      }
+
+      .app {
+        display: grid;
+        grid-template-columns: minmax(480px, 1fr) minmax(420px, 0.96fr);
+        height: 100vh;
+        min-width: 0;
+      }
+
+      .app.panel-collapsed {
+        grid-template-columns: 1fr 0;
+      }
+
+      .thread,
+      .workspace {
+        min-width: 0;
+        min-height: 0;
+      }
+
+      .thread {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--border);
+        background: rgb(17 18 17 / 0.88);
+      }
+
+      .workspace {
+        display: flex;
+        flex-direction: column;
+        background: #141514;
+      }
+
+      .panel-collapsed .workspace {
+        display: none;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 44px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--border);
+        background: rgb(18 19 18 / 0.92);
+      }
+
+      .title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 15px;
+        font-weight: 650;
+      }
+
+      .spacer {
+        flex: 1;
+      }
+
+      .icon-btn,
+      .tab-btn,
+      .small-btn {
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        transition:
+          background 140ms ease,
+          border-color 140ms ease,
+          color 140ms ease,
+          transform 140ms ease;
+      }
+
+      .icon-btn {
+        display: inline-grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        font-size: 17px;
+      }
+
+      .icon-btn:hover,
+      .small-btn:hover,
+      .tab-btn:hover {
+        border-color: var(--border);
+        background: rgb(255 255 255 / 0.055);
+        color: var(--text);
+      }
+
+      .icon-btn.active,
+      .tab-btn.active {
+        border-color: var(--border-strong);
+        background: var(--panel-2);
+        color: var(--text);
+      }
+
+      .thread-scroll,
+      .workspace-body {
+        min-height: 0;
+        overflow: auto;
+      }
+
+      .thread-scroll {
+        flex: 1;
+        padding: 22px 22px 120px;
+      }
+
+      .message {
+        max-width: 850px;
+        margin: 0 auto 18px;
+        font-size: 15px;
+        line-height: 1.62;
+      }
+
+      .message h2 {
+        margin: 0 0 14px;
+        font-size: 20px;
+      }
+
+      .message p {
+        margin: 0 0 14px;
+      }
+
+      .message ul {
+        margin: 0 0 18px;
+        padding-left: 24px;
+      }
+
+      .message li {
+        margin: 9px 0;
+      }
+
+      .code-chip {
+        display: inline-block;
+        border-radius: 6px;
+        background: #343532;
+        padding: 1px 8px 2px;
+        color: #ece8df;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        line-height: 1.35;
+      }
+
+      .diff-card {
+        overflow: hidden;
+        margin: 20px 0;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      .diff-card-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+        background: var(--panel-2);
+      }
+
+      .diff-icon {
+        display: grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        border-radius: 8px;
+        background: #111;
+        color: var(--muted);
+        font-size: 18px;
+      }
+
+      .diff-title {
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .stats {
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 13px;
+      }
+
+      .add {
+        color: var(--green);
+      }
+
+      .del {
+        color: var(--red);
+      }
+
+      .diff-files {
+        display: grid;
+        gap: 0;
+      }
+
+      .diff-file {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        padding: 10px 16px;
+        border-bottom: 1px solid rgb(255 255 255 / 0.04);
+        color: #e5e1d8;
+      }
+
+      .diff-file:nth-child(3) {
+        background: rgb(255 255 255 / 0.035);
+      }
+
+      .composer {
+        position: absolute;
+        right: 22px;
+        bottom: 18px;
+        left: 22px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 58px;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: #2b2c2a;
+        padding: 10px 12px;
+        box-shadow: 0 14px 42px rgb(0 0 0 / 0.32);
+      }
+
+      .composer input {
+        min-width: 0;
+        flex: 1;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text);
+        font-size: 15px;
+      }
+
+      .send {
+        display: grid;
+        place-items: center;
+        width: 36px;
+        height: 36px;
+        border: 0;
+        border-radius: 999px;
+        background: #d6d4cd;
+        color: #111;
+        cursor: pointer;
+        font-weight: 800;
+      }
+
+      .floating-overview {
+        position: absolute;
+        top: 64px;
+        right: 18px;
+        z-index: 20;
+        width: min(420px, calc(100% - 36px));
+        max-height: calc(100vh - 160px);
+        overflow: auto;
+        border: 1px solid var(--border-strong);
+        border-radius: 22px;
+        background: rgb(43 44 42 / 0.96);
+        box-shadow: var(--shadow);
+      }
+
+      .floating-overview[hidden] {
+        display: none;
+      }
+
+      .overview-inner {
+        padding: 18px;
+      }
+
+      .section-title {
+        margin: 0 0 10px;
+        color: var(--muted);
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .section {
+        padding: 14px 0;
+        border-bottom: 1px solid rgb(255 255 255 / 0.07);
+      }
+
+      .section:last-child {
+        border-bottom: 0;
+      }
+
+      .env-row,
+      .agent-row,
+      .check-row,
+      .progress-row,
+      .source-row {
+        display: grid;
+        grid-template-columns: 24px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+        min-height: 34px;
+        border-radius: 8px;
+        padding: 4px 6px;
+        color: #ebe8df;
+      }
+
+      .env-row.muted {
+        color: var(--dim);
+      }
+
+      .env-row.clickable,
+      .agent-row,
+      .check-row {
+        cursor: pointer;
+      }
+
+      .env-row.clickable:hover,
+      .agent-row:hover,
+      .check-row:hover,
+      .progress-row:hover {
+        background: rgb(255 255 255 / 0.055);
+      }
+
+      .row-icon {
+        color: var(--muted);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        text-align: center;
+      }
+
+      .row-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .row-action {
+        color: var(--muted);
+      }
+
+      .checks-popover {
+        position: absolute;
+        top: 160px;
+        left: -120px;
+        z-index: 30;
+        width: 360px;
+        border: 1px solid var(--border-strong);
+        border-radius: 13px;
+        background: #2b2c2a;
+        box-shadow: var(--shadow);
+        padding: 8px;
+      }
+
+      .checks-popover[hidden],
+      .progress-list[hidden],
+      .add-menu[hidden] {
+        display: none;
+      }
+
+      .status-dot {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 2px solid currentColor;
+        border-radius: 50%;
+      }
+
+      .status-dot.running {
+        border-color: var(--yellow);
+        border-left-color: transparent;
+        animation: spin 1.2s linear infinite;
+      }
+
+      .status-dot.passed {
+        border-color: var(--green);
+        background: var(--green);
+      }
+
+      .status-dot.failed {
+        border-color: var(--red);
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(1turn);
+        }
+      }
+
+      .progress-row {
+        grid-template-columns: 24px minmax(0, 1fr);
+      }
+
+      .done {
+        display: grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #9da09a;
+        color: #222;
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .agent-mark {
+        display: grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        color: var(--agent);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-weight: 900;
+      }
+
+      .agent-mark::before {
+        content: "++";
+        letter-spacing: -4px;
+      }
+
+      .source-row {
+        grid-template-columns: 24px 1fr;
+        color: var(--muted);
+      }
+
+      .workspace-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 44px;
+        padding: 0 10px;
+        border-bottom: 1px solid var(--border);
+        background: rgb(18 19 18 / 0.94);
+      }
+
+      .tabs {
+        display: flex;
+        flex: 1;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        overflow-x: auto;
+      }
+
+      .tab-btn {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 7px;
+        height: 32px;
+        max-width: 190px;
+        border-radius: 10px;
+        padding: 0 12px;
+        white-space: nowrap;
+      }
+
+      .tab-icon {
+        display: inline-grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        color: var(--agent, var(--muted));
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-weight: 900;
+      }
+
+      .workspace-body {
+        flex: 1;
+        padding: 24px 28px 106px;
+      }
+
+      .workspace-page {
+        display: none;
+        max-width: 980px;
+      }
+
+      .workspace-page.active {
+        display: block;
+      }
+
+      .agent-chat {
+        max-width: 900px;
+      }
+
+      .agent-note {
+        margin-bottom: 18px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .chat-bubble {
+        margin: 0 0 18px;
+        border-left: 2px solid var(--border-strong);
+        padding-left: 14px;
+        font-size: 15px;
+        line-height: 1.62;
+      }
+
+      .chat-bubble.agent {
+        border-left-color: var(--agent, var(--red));
+      }
+
+      .chat-bubble.user {
+        border-left-color: var(--blue);
+        color: #dfe9f6;
+      }
+
+      .workspace-composer {
+        position: absolute;
+        right: 18px;
+        bottom: 18px;
+        left: 18px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        border: 1px solid var(--border);
+        border-radius: 17px;
+        background: #2b2c2a;
+        padding: 10px 12px;
+        box-shadow: 0 14px 42px rgb(0 0 0 / 0.32);
+      }
+
+      .workspace {
+        position: relative;
+      }
+
+      .workspace-composer input {
+        min-width: 0;
+        flex: 1;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text);
+      }
+
+      .toolbar-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--panel);
+        padding: 5px 10px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .file-layout {
+        display: grid;
+        grid-template-columns: minmax(220px, 0.75fr) minmax(300px, 1fr);
+        gap: 18px;
+      }
+
+      .card {
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      .card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 42px;
+        border-bottom: 1px solid var(--border);
+        padding: 0 12px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .file-tree {
+        padding: 10px;
+      }
+
+      .file-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 7px;
+        padding: 8px;
+        color: #ddd9d0;
+        cursor: pointer;
+      }
+
+      .file-item.active,
+      .file-item:hover {
+        background: rgb(255 255 255 / 0.06);
+      }
+
+      .preview-code {
+        margin: 0;
+        min-height: 330px;
+        overflow: auto;
+        padding: 16px;
+        background: #101110;
+        color: #d9d5cc;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .terminal {
+        min-height: 430px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #070807;
+        padding: 16px;
+        color: #d4d0c8;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .browser-frame {
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      .address {
+        display: flex;
+        gap: 8px;
+        border-bottom: 1px solid var(--border);
+        padding: 10px;
+      }
+
+      .address input {
+        flex: 1;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: #101110;
+        color: var(--text);
+        padding: 8px 10px;
+      }
+
+      .browser-page {
+        min-height: 350px;
+        padding: 28px;
+        background: linear-gradient(135deg, rgb(51 209 130 / 0.08), transparent 40%), #111;
+      }
+
+      .small-btn {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 7px 10px;
+        font-size: 13px;
+      }
+
+      .add-menu {
+        position: absolute;
+        top: 38px;
+        left: 286px;
+        z-index: 35;
+        width: 230px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #242522;
+        box-shadow: var(--shadow);
+        padding: 8px;
+      }
+
+      .add-menu button {
+        display: block;
+        width: 100%;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        padding: 9px 10px;
+        color: var(--text);
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .add-menu button:hover {
+        background: rgb(255 255 255 / 0.06);
+      }
+
+      .empty-mini {
+        display: grid;
+        place-items: center;
+        min-height: 330px;
+        border: 1px dashed var(--border);
+        border-radius: 8px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      @media (max-width: 980px) {
+        .app {
+          grid-template-columns: 1fr;
+        }
+
+        .workspace {
+          position: fixed;
+          inset: 0;
+          z-index: 40;
+        }
+
+        .panel-collapsed .workspace {
+          display: none;
+        }
+
+        .floating-overview {
+          left: 12px;
+          right: 12px;
+          width: auto;
+        }
+
+        .checks-popover {
+          left: 14px;
+          width: calc(100% - 28px);
+        }
+
+        .file-layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app" id="app">
+      <main class="thread">
+        <div class="topbar">
+          <div class="title">Implement performance roadmap</div>
+          <button class="icon-btn" title="More actions">...</button>
+          <span class="spacer"></span>
+          <button class="icon-btn active" id="overviewToggle" title="Toggle thread overview">
+            ::
+          </button>
+          <button class="icon-btn active" id="panelToggle" title="Toggle workspace panel">
+            []
+          </button>
+        </div>
+
+        <aside class="floating-overview" id="overview">
+          <div class="overview-inner">
+            <div class="section">
+              <div
+                class="topbar"
+                style="height: auto; border: 0; padding: 0 0 8px; background: transparent"
+              >
+                <h3 class="section-title" style="margin: 0">Environment</h3>
+                <span class="spacer"></span>
+                <button class="icon-btn" title="Overview settings">o</button>
+              </div>
+              <div class="env-row">
+                <span class="row-icon">+/-</span>
+                <span class="row-label">Changes</span>
+                <span class="stats"
+                  ><span class="add">+6,534</span> <span class="del">-2,481</span></span
+                >
+              </div>
+              <div class="env-row">
+                <span class="row-icon">pc</span>
+                <span class="row-label">Local</span>
+                <span class="row-action">v</span>
+              </div>
+              <div class="env-row">
+                <span class="row-icon">git</span>
+                <span class="row-label">feature/improve-performance</span>
+                <span class="row-action">v</span>
+              </div>
+              <div class="env-row muted">
+                <span class="row-icon">--</span>
+                <span class="row-label">Commit or push</span>
+                <span></span>
+              </div>
+              <div class="env-row">
+                <span class="row-icon">pr</span>
+                <span class="row-label">Improve startup performance and lazy panels</span>
+                <span></span>
+              </div>
+              <div class="env-row clickable" id="checksToggle">
+                <span class="status-dot passed"></span>
+                <span class="row-label">Checks successful</span>
+                <span class="row-action">v</span>
+              </div>
+              <div class="env-row muted">
+                <span class="row-icon">cm</span>
+                <span class="row-label">2 comments</span>
+                <span class="row-action">Fix</span>
+              </div>
+            </div>
+
+            <div class="checks-popover" id="checksPopover" hidden>
+              <div class="check-row">
+                <span class="status-dot passed"></span>
+                <span class="row-label">bun fmt</span>
+                <span class="row-action">passed</span>
+              </div>
+              <div class="check-row">
+                <span class="status-dot passed"></span>
+                <span class="row-label">bun lint</span>
+                <span class="row-action">passed</span>
+              </div>
+              <div class="check-row">
+                <span class="status-dot passed"></span>
+                <span class="row-label">bun typecheck</span>
+                <span class="row-action">passed</span>
+              </div>
+              <div class="check-row">
+                <span class="status-dot running"></span>
+                <span class="row-label">Pull Request / Release Smoke</span>
+                <span class="row-action">running</span>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="env-row clickable" id="progressToggle">
+                <span></span>
+                <span class="section-title" style="margin: 0">Progress</span>
+                <span class="row-action">v</span>
+              </div>
+              <div class="progress-list" id="progressList" hidden>
+                <div class="progress-row">
+                  <span class="done">✓</span>
+                  <span>Find current PR and review comments</span>
+                </div>
+                <div class="progress-row">
+                  <span class="done">✓</span>
+                  <span>Validate Codex and CodeRabbit feedback</span>
+                </div>
+                <div class="progress-row">
+                  <span class="done">✓</span>
+                  <span>Apply scoped fixes for valid comments</span>
+                </div>
+                <div class="progress-row">
+                  <span class="status-dot running"></span>
+                  <span>Run targeted checks and report</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="section">
+              <h3 class="section-title">Subagents</h3>
+              <div class="agent-row" data-tab="hilbert" style="--agent: var(--red)">
+                <span class="agent-mark"></span>
+                <span class="row-label">Hilbert</span>
+                <span class="row-action">active</span>
+              </div>
+              <div class="agent-row" data-tab="averroes" style="--agent: var(--yellow)">
+                <span class="agent-mark"></span>
+                <span class="row-label">Averroes</span>
+                <span class="row-action">waiting</span>
+              </div>
+              <div class="agent-row" data-tab="bohr" style="--agent: var(--blue)">
+                <span class="agent-mark"></span>
+                <span class="row-label">Bohr</span>
+                <span class="row-action">summarized</span>
+              </div>
+              <div class="agent-row" data-tab="mencius" style="--agent: var(--violet)">
+                <span class="agent-mark"></span>
+                <span class="row-label">Mencius</span>
+                <span class="row-action">idle</span>
+              </div>
+              <div class="agent-row" data-tab="newton" style="--agent: var(--orange)">
+                <span class="agent-mark"></span>
+                <span class="row-label">Newton</span>
+                <span class="row-action">idle</span>
+              </div>
+              <div class="agent-row" data-tab="harvey" style="--agent: #ff6f76">
+                <span class="agent-mark"></span>
+                <span class="row-label">Harvey</span>
+                <span class="row-action">closed</span>
+              </div>
+              <div class="env-row muted">
+                <span></span>
+                <span>Show 6 more</span>
+                <span></span>
+              </div>
+            </div>
+
+            <div class="section">
+              <h3 class="section-title">Sources</h3>
+              <div class="source-row">
+                <span class="row-icon">git</span>
+                <span>PR #428, CodeRabbit, branch diff, terminal context</span>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="thread-scroll">
+          <article class="message">
+            <h2>Final status</h2>
+            <p>
+              Implemented the performance roadmap and validated the lazy panel paths. Checks run:
+            </p>
+            <ul>
+              <li><span class="code-chip">bun fmt</span></li>
+              <li><span class="code-chip">bun lint</span></li>
+              <li><span class="code-chip">bun typecheck</span></li>
+              <li>
+                <span class="code-chip">cd apps/web && bun run build</span>
+                passed
+              </li>
+              <li>
+                <span class="code-chip">bun run test src/perf/webBundleSplitting.test.ts</span>
+                passed
+              </li>
+            </ul>
+            <p>
+              No bare <span class="code-chip">bun test</span> was run. Final git state is based on
+              <span class="code-chip">origin/feature/improve-performance</span>.
+            </p>
+
+            <div class="diff-card">
+              <div class="diff-card-header">
+                <div class="diff-icon">+/-</div>
+                <div>
+                  <div class="diff-title">Edited 7 files</div>
+                  <div class="stats">
+                    <span class="add">+292</span> <span class="del">-84</span>
+                  </div>
+                </div>
+                <span class="spacer"></span>
+                <button class="small-btn" data-open-tab="review">Review</button>
+              </div>
+              <div class="diff-files">
+                <div class="diff-file">
+                  <span>apps/desktop/src/backendRestartBackoff.ts</span>
+                  <span class="stats"
+                    ><span class="add">+45</span> <span class="del">-0</span></span
+                  >
+                </div>
+                <div class="diff-file">
+                  <span>apps/server/src/server.test.ts</span>
+                  <span class="stats"
+                    ><span class="add">+88</span> <span class="del">-4</span></span
+                  >
+                </div>
+                <div class="diff-file">
+                  <span>apps/web/src/components/ChatRightPanel.tsx</span>
+                  <span class="stats"
+                    ><span class="add">+36</span> <span class="del">-1</span></span
+                  >
+                </div>
+                <div class="diff-file">
+                  <span>Show 4 more files</span>
+                  <span>v</span>
+                </div>
+              </div>
+            </div>
+
+            <p>
+              The right workspace can now hold parallel agent chats, file/diff tools, and contextual
+              thread state without replacing the global navigation sidebar.
+            </p>
+          </article>
+        </section>
+
+        <div class="composer">
+          <button class="icon-btn" title="Add context">+</button>
+          <input value="" placeholder="Ask for follow-up changes" />
+          <span class="pill">Full access v</span>
+          <span class="spacer"></span>
+          <span class="pill">5.5 High v</span>
+          <button class="send">^</button>
+        </div>
+      </main>
+
+      <aside class="workspace">
+        <div class="workspace-top">
+          <div class="tabs" id="tabs">
+            <button class="tab-btn active" data-tab="hilbert" style="--agent: var(--red)">
+              <span class="tab-icon">++</span>
+              Hilbert
+            </button>
+            <button class="tab-btn" data-tab="review">+/- Review</button>
+            <button class="tab-btn" data-tab="files">[] Files</button>
+            <button class="tab-btn" data-tab="terminal">&gt;_ Terminal</button>
+            <button class="tab-btn" data-tab="browser">www Browser</button>
+            <button class="tab-btn" data-tab="sidechat">+ Side chat</button>
+          </div>
+          <button class="icon-btn" id="addTabToggle" title="Open another workspace tab">+</button>
+          <span class="spacer"></span>
+          <button class="icon-btn" title="Focus mode">[]</button>
+          <button class="icon-btn" id="panelToggle2" title="Toggle workspace panel">||</button>
+        </div>
+        <div class="add-menu" id="addMenu" hidden>
+          <button data-tab="averroes">Open Averroes chat</button>
+          <button data-tab="bohr">Open Bohr chat</button>
+          <button data-tab="mencius">Open Mencius chat</button>
+          <button data-tab="newton">Open Newton chat</button>
+        </div>
+
+        <div class="workspace-body">
+          <section
+            class="workspace-page active agent-chat"
+            id="page-hilbert"
+            style="--agent: var(--red)"
+          >
+            <p class="agent-note">Subagent thread: performance validation and checks.</p>
+            <div class="chat-bubble agent">
+              <ul>
+                <li><span class="code-chip">bun fmt</span> passed</li>
+                <li><span class="code-chip">bun lint</span> passed</li>
+                <li><span class="code-chip">cd apps/web && bun run typecheck</span> passed</li>
+                <li><span class="code-chip">cd apps/web && bun run build</span> passed</li>
+                <li>Targeted tests passed, <span class="code-chip">3 files / 30 tests</span>.</li>
+              </ul>
+            </div>
+            <div class="chat-bubble agent">
+              <strong>Risks / Follow-Up</strong>
+              <ul>
+                <li>First open of heavy panels can briefly suspend while loading the chunk.</li>
+                <li>Full browser interaction coverage for lazy paths would be a good next step.</li>
+                <li>Root typecheck has one unrelated server-side error outside this scope.</li>
+              </ul>
+            </div>
+            <div class="diff-card">
+              <div class="diff-card-header">
+                <div class="diff-icon">+/-</div>
+                <div>
+                  <div class="diff-title">Edited 14 files</div>
+                  <div class="stats">
+                    <span class="add">+379</span> <span class="del">-186</span>
+                  </div>
+                </div>
+                <span class="spacer"></span>
+                <button class="small-btn" data-open-tab="review">Review</button>
+              </div>
+              <div class="diff-files">
+                <div class="diff-file">
+                  <span>apps/web/src/routes/_chat.$environmentId.$threadId.tsx</span>
+                  <span class="stats"
+                    ><span class="add">+36</span> <span class="del">-1</span></span
+                  >
+                </div>
+                <div class="diff-file">
+                  <span>apps/web/src/routes/_chat.draft.$draftId.tsx</span>
+                  <span class="stats"
+                    ><span class="add">+33</span> <span class="del">-1</span></span
+                  >
+                </div>
+                <div class="diff-file">
+                  <span>apps/web/src/components/ChatRightPanel.tsx</span>
+                  <span class="stats"
+                    ><span class="add">+12</span> <span class="del">-18</span></span
+                  >
+                </div>
+                <div class="diff-file">
+                  <span>Show 11 more files</span>
+                  <span>v</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section
+            class="workspace-page agent-chat"
+            id="page-averroes"
+            style="--agent: var(--yellow)"
+          >
+            <p class="agent-note">Subagent thread: PR comments and review triage.</p>
+            <div class="chat-bubble agent">
+              I checked the two active comments. One is actionable and maps to
+              <span class="code-chip">ChatRightPanel.tsx</span>. The other is stale after the lazy
+              route split.
+            </div>
+            <div class="chat-bubble agent">
+              Recommendation: keep the overview panel separate from review tabs, otherwise comments
+              and progress compete for vertical space.
+            </div>
+          </section>
+
+          <section class="workspace-page agent-chat" id="page-bohr" style="--agent: var(--blue)">
+            <p class="agent-note">Subagent thread: bundle and lazy-loading scan.</p>
+            <div class="chat-bubble agent">
+              The high-impact paths are file explorer, diff worker startup, terminal drawer mount,
+              and browser preview. These should mount lazily behind tab activation.
+            </div>
+          </section>
+
+          <section
+            class="workspace-page agent-chat"
+            id="page-mencius"
+            style="--agent: var(--violet)"
+          >
+            <p class="agent-note">Subagent thread: maintainability review.</p>
+            <div class="chat-bubble agent">
+              The long-term clean boundary is a route-backed workspace panel model with content
+              adapters for each tab. Do not add more booleans to the chat route.
+            </div>
+          </section>
+
+          <section
+            class="workspace-page agent-chat"
+            id="page-newton"
+            style="--agent: var(--orange)"
+          >
+            <p class="agent-note">Subagent thread: implementation sequencing.</p>
+            <div class="chat-bubble agent">
+              Start with overview-only data derivation, then migrate diff and files into the tab
+              shell. Terminal and browser can follow once layout behavior is settled.
+            </div>
+          </section>
+
+          <section class="workspace-page" id="page-review">
+            <div class="toolbar-row">
+              <span class="pill">Branch</span>
+              <span class="stats"
+                ><span class="add">+6,534</span> <span class="del">-2,481</span></span
+              >
+              <span class="pill">feature/improve-performance to origin/main</span>
+            </div>
+            <div class="file-layout">
+              <div class="card">
+                <div class="card-head">Changed files <span>14</span></div>
+                <div class="file-tree">
+                  <div class="file-item active">TS ChatRightPanel.tsx</div>
+                  <div class="file-item">TS rightPanelRouteSearch.ts</div>
+                  <div class="file-item">TS ThreadWorkspacePanel.tsx</div>
+                  <div class="file-item">TS ThreadOverviewPanel.tsx</div>
+                  <div class="file-item">TS CodexAdapter.ts</div>
+                  <div class="file-item">TS ProviderRuntimeIngestion.ts</div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-head">
+                  Diff preview
+                  <span class="stats"
+                    ><span class="add">+36</span> <span class="del">-1</span></span
+                  >
+                </div>
+                <pre class="preview-code">
++ export type WorkspacePanelMode =
++  | "overview"
++  | "files"
++  | "review"
++  | "terminal"
++  | "browser"
++  | "sideChat"
++  | { agentThreadId: string };
+
+- export type RightPanelMode = "diff" | "preview";
++ export type RightPanelMode = WorkspacePanelMode;
+
++ // Overview floats above the thread when requested.
++ // Tools render inside the route-backed panel shell.</pre
+                >
+              </div>
+            </div>
+          </section>
+
+          <section class="workspace-page" id="page-files">
+            <div class="file-layout">
+              <div class="card">
+                <div class="card-head">Files <span>Cmd+P</span></div>
+                <div class="file-tree">
+                  <div class="file-item active">apps/web/src</div>
+                  <div class="file-item">&nbsp;&nbsp;components/ThreadWorkspacePanel.tsx</div>
+                  <div class="file-item">&nbsp;&nbsp;components/ThreadOverviewPanel.tsx</div>
+                  <div class="file-item">&nbsp;&nbsp;components/AgentThreadPanel.tsx</div>
+                  <div class="file-item">&nbsp;&nbsp;rightPanelRouteSearch.ts</div>
+                  <div class="file-item">packages/contracts/src/providerRuntime.ts</div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-head">ThreadWorkspacePanel.tsx <span>read-only</span></div>
+                <pre class="preview-code">
+function ThreadWorkspacePanel(props) {
+  return (
+    &lt;WorkspaceShell tabs={tabs} activeTab={activeTab}&gt;
+      {activeTab.kind === "agent" ? &lt;AgentThreadPanel /&gt; : null}
+      {activeTab.kind === "review" ? &lt;DiffPanel /&gt; : null}
+      {activeTab.kind === "files" ? &lt;FileExplorer /&gt; : null}
+    &lt;/WorkspaceShell&gt;
+  );
+}</pre
+                >
+              </div>
+            </div>
+          </section>
+
+          <section class="workspace-page" id="page-terminal">
+            <div class="toolbar-row">
+              <button class="small-btn">New terminal</button>
+              <button class="small-btn">Split</button>
+              <button class="small-btn">Add context</button>
+            </div>
+            <div class="terminal">
+              $ bun fmt<br />
+              formatted 112 files in 823ms<br /><br />
+              $ bun lint<br />
+              no lint errors<br /><br />
+              $ bun typecheck<br />
+              apps/web passed<br />
+              apps/server has unrelated error at serverRuntimeStartup.ts:228<br /><br />
+              $ git diff --check<br />
+              no whitespace errors
+            </div>
+          </section>
+
+          <section class="workspace-page" id="page-browser">
+            <div class="browser-frame">
+              <div class="address">
+                <input value="http://localhost:5173" aria-label="Browser address" />
+                <button class="small-btn">Open</button>
+              </div>
+              <div class="browser-page">
+                <h2>Ryco local preview</h2>
+                <p>
+                  Browser output would live in the same workspace tabs as agent chats and diffs,
+                  instead of becoming a separate drawer or mode.
+                </p>
+                <button class="small-btn">Run smoke interaction</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="workspace-page" id="page-sidechat">
+            <div class="empty-mini">
+              <div>
+                <h2>Side chat</h2>
+                <p>Start a scoped conversation without changing the main thread.</p>
+                <button class="small-btn">Start side chat</button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="workspace-composer">
+          <button class="icon-btn" title="Attach context">+</button>
+          <input id="agentInput" placeholder="Ask the active panel or subagent" />
+          <button class="send" id="agentSend">^</button>
+        </div>
+      </aside>
+    </div>
+
+    <script>
+      const app = document.getElementById("app");
+      const overview = document.getElementById("overview");
+      const overviewToggle = document.getElementById("overviewToggle");
+      const panelToggle = document.getElementById("panelToggle");
+      const panelToggle2 = document.getElementById("panelToggle2");
+      const checksToggle = document.getElementById("checksToggle");
+      const checksPopover = document.getElementById("checksPopover");
+      const progressToggle = document.getElementById("progressToggle");
+      const progressList = document.getElementById("progressList");
+      const addTabToggle = document.getElementById("addTabToggle");
+      const addMenu = document.getElementById("addMenu");
+      const agentInput = document.getElementById("agentInput");
+      const agentSend = document.getElementById("agentSend");
+      let activeTab = "hilbert";
+
+      function ensureTab(tab) {
+        const existing = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+        if (existing) return existing;
+        const labels = {
+          averroes: ["++", "Averroes", "var(--yellow)"],
+          bohr: ["++", "Bohr", "var(--blue)"],
+          mencius: ["++", "Mencius", "var(--violet)"],
+          newton: ["++", "Newton", "var(--orange)"],
+        };
+        const item = labels[tab];
+        if (!item) return null;
+        const button = document.createElement("button");
+        button.className = "tab-btn";
+        button.dataset.tab = tab;
+        button.style.setProperty("--agent", item[2]);
+        button.innerHTML = `<span class="tab-icon">${item[0]}</span>${item[1]}`;
+        document.getElementById("tabs").appendChild(button);
+        button.addEventListener("click", () => activateTab(tab));
+        return button;
+      }
+
+      function activateTab(tab) {
+        ensureTab(tab);
+        activeTab = tab;
+        document.querySelectorAll(".tab-btn").forEach((button) => {
+          button.classList.toggle("active", button.dataset.tab === tab);
+        });
+        document.querySelectorAll(".workspace-page").forEach((page) => {
+          page.classList.toggle("active", page.id === `page-${tab}`);
+        });
+        if (app.classList.contains("panel-collapsed")) {
+          app.classList.remove("panel-collapsed");
+        }
+        addMenu.hidden = true;
+      }
+
+      function togglePanel() {
+        app.classList.toggle("panel-collapsed");
+      }
+
+      overviewToggle.addEventListener("click", () => {
+        overview.hidden = !overview.hidden;
+        overviewToggle.classList.toggle("active", !overview.hidden);
+      });
+
+      panelToggle.addEventListener("click", togglePanel);
+      panelToggle2.addEventListener("click", togglePanel);
+
+      checksToggle.addEventListener("click", () => {
+        checksPopover.hidden = !checksPopover.hidden;
+      });
+
+      progressToggle.addEventListener("click", () => {
+        progressList.hidden = !progressList.hidden;
+      });
+
+      addTabToggle.addEventListener("click", () => {
+        addMenu.hidden = !addMenu.hidden;
+      });
+
+      document.querySelectorAll("[data-tab]").forEach((node) => {
+        node.addEventListener("click", () => activateTab(node.dataset.tab));
+      });
+
+      document.querySelectorAll("[data-open-tab]").forEach((node) => {
+        node.addEventListener("click", () => activateTab(node.dataset.openTab));
+      });
+
+      agentSend.addEventListener("click", sendAgentQuestion);
+      agentInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") sendAgentQuestion();
+      });
+
+      function sendAgentQuestion() {
+        const text = agentInput.value.trim();
+        if (!text) return;
+        const page = document.getElementById(`page-${activeTab}`);
+        if (!page) return;
+        const user = document.createElement("div");
+        user.className = "chat-bubble user";
+        user.textContent = text;
+        page.appendChild(user);
+        const answer = document.createElement("div");
+        answer.className = "chat-bubble agent";
+        answer.textContent =
+          activeTab === "review"
+            ? "Review panel note: this would become a scoped diff question tied to the selected file."
+            : activeTab === "files"
+              ? "Files panel note: this would ask about the selected file and attach its path automatically."
+              : "Subagent answer: I would keep this scoped to my thread and send a short summary back to the main conversation when requested.";
+        page.appendChild(answer);
+        agentInput.value = "";
+        page.scrollIntoView({ block: "end" });
+      }
+    </script>
+  </body>
+</html>

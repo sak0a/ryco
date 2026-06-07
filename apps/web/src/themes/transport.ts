@@ -10,7 +10,7 @@ import {
 } from "./registry";
 import type { ThemeDefinition } from "./types";
 
-export const THEME_FILE_EXTENSION = ".t3theme.json";
+export const THEME_FILE_EXTENSION = ".rycotheme.json";
 
 const FILENAME_SAFE = /[^a-z0-9-_]+/gi;
 

@@ -47,9 +47,16 @@ delete childEnv.ELECTRON_RUN_AS_NODE;
 let shuttingDown = false;
 let restartTimer = null;
 let currentApp = null;
-let restartQueue = Promise.resolve();
+let restartInFlight = false;
+let restartPending = false;
 const expectedExits = new WeakSet();
 const watchers = [];
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms).unref();
+  });
+}
 
 function killChildTreeByPid(pid, signal) {
   if (process.platform === "win32" || typeof pid !== "number") {
@@ -160,21 +167,48 @@ function scheduleRestart() {
     return;
   }
 
+  restartPending = true;
+
+  if (restartInFlight) {
+    return;
+  }
+
   if (restartTimer) {
     clearTimeout(restartTimer);
   }
 
   restartTimer = setTimeout(() => {
     restartTimer = null;
-    restartQueue = restartQueue
-      .catch(() => undefined)
-      .then(async () => {
-        await stopApp();
-        if (!shuttingDown) {
-          startApp();
-        }
-      });
+    void restartApp();
   }, restartDebounceMs);
+}
+
+async function restartApp() {
+  if (shuttingDown || restartInFlight || !restartPending) {
+    return;
+  }
+
+  restartInFlight = true;
+  try {
+    await stopApp();
+
+    for (;;) {
+      restartPending = false;
+      await delay(restartDebounceMs);
+      if (shuttingDown || !restartPending) {
+        break;
+      }
+    }
+
+    if (!shuttingDown) {
+      startApp();
+    }
+  } finally {
+    restartInFlight = false;
+    if (!shuttingDown && restartPending) {
+      scheduleRestart();
+    }
+  }
 }
 
 function startWatchers() {

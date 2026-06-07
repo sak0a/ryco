@@ -7,24 +7,50 @@ import {
   outcomeFromExit,
 } from "./Attributes.ts";
 
-export const rpcRequestsTotal = Metric.counter("t3_rpc_requests_total", {
+export const metricNames = {
+  rpcRequestsTotal: "ryco_rpc_requests_total",
+  rpcRequestDuration: "ryco_rpc_request_duration",
+  orchestrationCommandsTotal: "ryco_orchestration_commands_total",
+  orchestrationCommandDuration: "ryco_orchestration_command_duration",
+  orchestrationCommandAckDuration: "ryco_orchestration_command_ack_duration",
+  orchestrationEventsProcessedTotal: "ryco_orchestration_events_processed_total",
+  providerSessionsTotal: "ryco_provider_sessions_total",
+  providerTurnsTotal: "ryco_provider_turns_total",
+  providerTurnDuration: "ryco_provider_turn_duration",
+  providerRuntimeEventsTotal: "ryco_provider_runtime_events_total",
+  providerEventLogRecordsDroppedTotal: "ryco_provider_event_log_records_dropped_total",
+  startupCommandGateEnqueuesTotal: "ryco_startup_command_gate_enqueues_total",
+  startupCommandGateQueueDepth: "ryco_startup_command_gate_queue_depth",
+  startupCommandGateQueueHighWater: "ryco_startup_command_gate_queue_high_water",
+  startupCommandGateQueueWaitDuration: "ryco_startup_command_gate_queue_wait_duration",
+  providerStartupAdmissionTotal: "ryco_provider_startup_admission_total",
+  providerStartupQueueDepth: "ryco_provider_startup_queue_depth",
+  providerStartupQueueHighWater: "ryco_provider_startup_queue_high_water",
+  providerStartupQueueWaitDuration: "ryco_provider_startup_queue_wait_duration",
+  gitCommandsTotal: "ryco_git_commands_total",
+  gitCommandDuration: "ryco_git_command_duration",
+  terminalSessionsTotal: "ryco_terminal_sessions_total",
+  terminalRestartsTotal: "ryco_terminal_restarts_total",
+} as const;
+
+export const rpcRequestsTotal = Metric.counter(metricNames.rpcRequestsTotal, {
   description: "Total RPC requests handled by the websocket RPC server.",
 });
 
-export const rpcRequestDuration = Metric.timer("t3_rpc_request_duration", {
+export const rpcRequestDuration = Metric.timer(metricNames.rpcRequestDuration, {
   description: "RPC request handling duration.",
 });
 
-export const orchestrationCommandsTotal = Metric.counter("t3_orchestration_commands_total", {
+export const orchestrationCommandsTotal = Metric.counter(metricNames.orchestrationCommandsTotal, {
   description: "Total orchestration commands dispatched.",
 });
 
-export const orchestrationCommandDuration = Metric.timer("t3_orchestration_command_duration", {
+export const orchestrationCommandDuration = Metric.timer(metricNames.orchestrationCommandDuration, {
   description: "Orchestration command dispatch duration.",
 });
 
 export const orchestrationCommandAckDuration = Metric.timer(
-  "t3_orchestration_command_ack_duration",
+  metricNames.orchestrationCommandAckDuration,
   {
     description:
       "Time from orchestration command dispatch to the first committed domain event emitted for that command.",
@@ -32,92 +58,98 @@ export const orchestrationCommandAckDuration = Metric.timer(
 );
 
 export const orchestrationEventsProcessedTotal = Metric.counter(
-  "t3_orchestration_events_processed_total",
+  metricNames.orchestrationEventsProcessedTotal,
   {
     description: "Total orchestration intent events processed by runtime reactors.",
   },
 );
 
-export const providerSessionsTotal = Metric.counter("t3_provider_sessions_total", {
+export const providerSessionsTotal = Metric.counter(metricNames.providerSessionsTotal, {
   description: "Total provider session lifecycle operations.",
 });
 
-export const providerTurnsTotal = Metric.counter("t3_provider_turns_total", {
+export const providerTurnsTotal = Metric.counter(metricNames.providerTurnsTotal, {
   description: "Total provider turn lifecycle operations.",
 });
 
-export const providerTurnDuration = Metric.timer("t3_provider_turn_duration", {
+export const providerTurnDuration = Metric.timer(metricNames.providerTurnDuration, {
   description: "Provider turn request duration.",
 });
 
-export const providerRuntimeEventsTotal = Metric.counter("t3_provider_runtime_events_total", {
+export const providerRuntimeEventsTotal = Metric.counter(metricNames.providerRuntimeEventsTotal, {
   description: "Total canonical provider runtime events processed.",
 });
 
 export const providerEventLogRecordsDroppedTotal = Metric.counter(
-  "t3_provider_event_log_records_dropped_total",
+  metricNames.providerEventLogRecordsDroppedTotal,
   {
     description: "Total provider observability log records dropped by bounded logging queues.",
   },
 );
 
 export const startupCommandGateEnqueuesTotal = Metric.counter(
-  "t3_startup_command_gate_enqueues_total",
+  metricNames.startupCommandGateEnqueuesTotal,
   {
     description: "Total startup command gate enqueue attempts by outcome.",
   },
 );
 
-export const startupCommandGateQueueDepth = Metric.gauge("t3_startup_command_gate_queue_depth", {
+export const startupCommandGateQueueDepth = Metric.gauge(metricNames.startupCommandGateQueueDepth, {
   description: "Current number of commands waiting for startup command readiness.",
 });
 
 export const startupCommandGateQueueHighWater = Metric.gauge(
-  "t3_startup_command_gate_queue_high_water",
+  metricNames.startupCommandGateQueueHighWater,
   {
     description: "Highest observed startup command gate queue depth.",
   },
 );
 
 export const startupCommandGateQueueWaitDuration = Metric.timer(
-  "t3_startup_command_gate_queue_wait_duration",
+  metricNames.startupCommandGateQueueWaitDuration,
   {
     description: "Time startup commands spent waiting for command readiness.",
   },
 );
 
-export const providerStartupAdmissionTotal = Metric.counter("t3_provider_startup_admission_total", {
-  description: "Total provider startup admission attempts by outcome.",
-});
+export const providerStartupAdmissionTotal = Metric.counter(
+  metricNames.providerStartupAdmissionTotal,
+  {
+    description: "Total provider startup admission attempts by outcome.",
+  },
+);
 
-export const providerStartupQueueDepth = Metric.gauge("t3_provider_startup_queue_depth", {
+export const providerStartupQueueDepth = Metric.gauge(metricNames.providerStartupQueueDepth, {
   description: "Current number of provider session starts in admission per provider instance.",
 });
 
-export const providerStartupQueueHighWater = Metric.gauge("t3_provider_startup_queue_high_water", {
-  description: "Highest observed provider startup admission depth per provider instance.",
-});
+export const providerStartupQueueHighWater = Metric.gauge(
+  metricNames.providerStartupQueueHighWater,
+  {
+    description: "Highest observed provider startup admission depth per provider instance.",
+  },
+);
 
 export const providerStartupQueueWaitDuration = Metric.timer(
-  "t3_provider_startup_queue_wait_duration",
+  metricNames.providerStartupQueueWaitDuration,
   {
     description: "Time provider session starts spent waiting for startup admission.",
   },
 );
 
-export const gitCommandsTotal = Metric.counter("t3_git_commands_total", {
+export const gitCommandsTotal = Metric.counter(metricNames.gitCommandsTotal, {
   description: "Total git commands executed by the server runtime.",
 });
 
-export const gitCommandDuration = Metric.timer("t3_git_command_duration", {
+export const gitCommandDuration = Metric.timer(metricNames.gitCommandDuration, {
   description: "Git command execution duration.",
 });
 
-export const terminalSessionsTotal = Metric.counter("t3_terminal_sessions_total", {
+export const terminalSessionsTotal = Metric.counter(metricNames.terminalSessionsTotal, {
   description: "Total terminal sessions started.",
 });
 
-export const terminalRestartsTotal = Metric.counter("t3_terminal_restarts_total", {
+export const terminalRestartsTotal = Metric.counter(metricNames.terminalRestartsTotal, {
   description: "Total terminal restart requests handled.",
 });
 

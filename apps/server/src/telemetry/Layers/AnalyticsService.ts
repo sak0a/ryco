@@ -100,7 +100,7 @@ const makeAnalyticsService = Effect.gen(function* () {
           platform: process.platform,
           wsl: process.env.WSL_DISTRO_NAME,
           arch: process.arch,
-          t3CodeVersion: packageJson.version,
+          rycoVersion: packageJson.version,
           clientType,
         },
         timestamp: event.capturedAt,

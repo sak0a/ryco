@@ -1,23 +1,29 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import ChatView from "../ChatView";
-import { threadIsPromotedAndPersisted } from "../ChatView.logic";
-import { LazyRightPanel, RightPanelInlineSidebar, closeRightPanelSearch } from "../ChatRightPanel";
-import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
-import { buildOpenDiffSearch } from "../../diffRouteSearch";
-import { buildOpenPreviewSearch } from "../../previewRouteSearch";
+
+import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
-import { RightPanelSheet } from "../RightPanelSheet";
-import { SidebarInset } from "../ui/sidebar";
 import {
   getRightPanelMode,
+  isRightPanelOpen,
   type RightPanelMode,
   type RightPanelRouteSearch,
 } from "../../rightPanelRouteSearch";
-import { createThreadSelectorAcrossEnvironments } from "../../storeSelectors";
 import { useStore } from "../../store";
+import { createThreadSelectorAcrossEnvironments } from "../../storeSelectors";
 import { buildThreadRouteParams } from "../../threadRoutes";
+import {
+  buildOpenFilesSearch,
+  buildOpenReviewSearch,
+  buildOpenTerminalSearch,
+  buildOpenWorkspaceSearch,
+} from "../../workspaceRouteSearch";
+import ChatView from "../ChatView";
+import { threadIsPromotedAndPersisted } from "../ChatView.logic";
+import { LazyRightPanel, RightPanelInlineSidebar, closeRightPanelSearch } from "../ChatRightPanel";
+import { RightPanelSheet } from "../RightPanelSheet";
+import { SidebarInset } from "../ui/sidebar";
 
 export function DraftChatThreadRouteView({
   rawDraftId,
@@ -54,20 +60,38 @@ export function DraftChatThreadRouteView({
   const diffOpen = search.diff === "1";
   const previewOpen = search.preview === "1";
   const rightPanelMode: RightPanelMode | null = getRightPanelMode(search);
-  const rightPanelOpen = rightPanelMode !== null;
+  const rightPanelOpen = isRightPanelOpen(search);
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const [rightPanelMountState, setRightPanelMountState] = useState(() => ({
     draftId,
     hasOpenedDiff: diffOpen,
     hasOpenedPreview: previewOpen,
+    hasOpenedTerminal: rightPanelMode === "terminal",
   }));
   const hasOpenedDiff =
     rightPanelMountState.draftId === draftId ? rightPanelMountState.hasOpenedDiff : diffOpen;
   const hasOpenedPreview =
     rightPanelMountState.draftId === draftId ? rightPanelMountState.hasOpenedPreview : previewOpen;
+  const hasOpenedTerminal =
+    rightPanelMountState.draftId === draftId
+      ? rightPanelMountState.hasOpenedTerminal
+      : rightPanelMode === "terminal";
   const [lastOpenedRightPanelMode, setLastOpenedRightPanelMode] = useState<RightPanelMode>(
-    () => rightPanelMode ?? "preview",
+    () => rightPanelMode ?? "files",
   );
+  const openedPanelModes = useMemo(() => {
+    const modes: RightPanelMode[] = [];
+    if (hasOpenedPreview || rightPanelMode === "files") {
+      modes.push("files");
+    }
+    if (hasOpenedDiff || rightPanelMode === "review") {
+      modes.push("review");
+    }
+    if (hasOpenedTerminal || rightPanelMode === "terminal") {
+      modes.push("terminal");
+    }
+    return modes;
+  }, [hasOpenedDiff, hasOpenedPreview, hasOpenedTerminal, rightPanelMode]);
   const markRightPanelOpened = useCallback(
     (panelMode: RightPanelMode) => {
       setLastOpenedRightPanelMode(panelMode);
@@ -76,22 +100,27 @@ export function DraftChatThreadRouteView({
           draftId,
           hasOpenedDiff:
             (previous.draftId === draftId ? previous.hasOpenedDiff : diffOpen) ||
-            panelMode === "diff",
+            panelMode === "review",
           hasOpenedPreview:
             (previous.draftId === draftId ? previous.hasOpenedPreview : previewOpen) ||
-            panelMode === "preview",
+            panelMode === "files",
+          hasOpenedTerminal:
+            (previous.draftId === draftId
+              ? previous.hasOpenedTerminal
+              : rightPanelMode === "terminal") || panelMode === "terminal",
         };
         if (
           previous.draftId === nextState.draftId &&
           previous.hasOpenedDiff === nextState.hasOpenedDiff &&
-          previous.hasOpenedPreview === nextState.hasOpenedPreview
+          previous.hasOpenedPreview === nextState.hasOpenedPreview &&
+          previous.hasOpenedTerminal === nextState.hasOpenedTerminal
         ) {
           return previous;
         }
         return nextState;
       });
     },
-    [diffOpen, draftId, previewOpen],
+    [diffOpen, draftId, previewOpen, rightPanelMode],
   );
   const closeRightPanel = useCallback(() => {
     void navigate({
@@ -100,35 +129,116 @@ export function DraftChatThreadRouteView({
       search: (previous) => closeRightPanelSearch(previous),
     });
   }, [draftId, navigate]);
-  const openDiff = useCallback(() => {
-    markRightPanelOpened("diff");
-    void navigate({
-      to: "/draft/$draftId",
-      params: { draftId },
-      search: (previous) => buildOpenDiffSearch(previous),
-    });
-  }, [draftId, markRightPanelOpened, navigate]);
-  const openPreview = useCallback(() => {
-    markRightPanelOpened("preview");
-    void navigate({
-      to: "/draft/$draftId",
-      params: { draftId },
-      search: (previous) => buildOpenPreviewSearch(previous),
-    });
-  }, [draftId, markRightPanelOpened, navigate]);
   const openRightPanel = useCallback(() => {
-    if (lastOpenedRightPanelMode === "preview") {
-      openPreview();
+    const nextSearch = (previous: Record<string, unknown>) => {
+      if (lastOpenedRightPanelMode === "files" && hasOpenedPreview) {
+        return buildOpenFilesSearch(previous);
+      }
+      if (lastOpenedRightPanelMode === "review" && hasOpenedDiff) {
+        return buildOpenReviewSearch(previous);
+      }
+      if (lastOpenedRightPanelMode === "terminal" && hasOpenedTerminal) {
+        return buildOpenTerminalSearch(previous);
+      }
+      if (hasOpenedPreview) {
+        return buildOpenFilesSearch(previous);
+      }
+      if (hasOpenedDiff) {
+        return buildOpenReviewSearch(previous);
+      }
+      if (hasOpenedTerminal) {
+        return buildOpenTerminalSearch(previous);
+      }
+      return buildOpenWorkspaceSearch(previous);
+    };
+    void navigate({
+      to: "/draft/$draftId",
+      params: { draftId },
+      search: nextSearch,
+    });
+  }, [
+    draftId,
+    hasOpenedDiff,
+    hasOpenedPreview,
+    hasOpenedTerminal,
+    lastOpenedRightPanelMode,
+    navigate,
+  ]);
+  const toggleRightPanel = useCallback(() => {
+    if (rightPanelOpen) {
+      closeRightPanel();
       return;
     }
-    openDiff();
-  }, [lastOpenedRightPanelMode, openDiff, openPreview]);
+    openRightPanel();
+  }, [closeRightPanel, openRightPanel, rightPanelOpen]);
+  const closePanelTab = useCallback(
+    (input: { mode: RightPanelMode; agentKey?: string }) => {
+      if (input.mode === "agent") {
+        if (rightPanelMode === "agent") {
+          void navigate({
+            to: "/draft/$draftId",
+            params: { draftId },
+            search: (previous) => buildOpenWorkspaceSearch(previous),
+          });
+        }
+        return;
+      }
+
+      const nextHasOpenedDiff =
+        input.mode === "review" ? false : hasOpenedDiff || rightPanelMode === "review";
+      const nextHasOpenedPreview =
+        input.mode === "files" ? false : hasOpenedPreview || rightPanelMode === "files";
+      const nextHasOpenedTerminal =
+        input.mode === "terminal" ? false : hasOpenedTerminal || rightPanelMode === "terminal";
+      setRightPanelMountState((previous) => {
+        const nextState = {
+          draftId,
+          hasOpenedDiff: nextHasOpenedDiff,
+          hasOpenedPreview: nextHasOpenedPreview,
+          hasOpenedTerminal: nextHasOpenedTerminal,
+        };
+        if (
+          previous.draftId === nextState.draftId &&
+          previous.hasOpenedDiff === nextState.hasOpenedDiff &&
+          previous.hasOpenedPreview === nextState.hasOpenedPreview &&
+          previous.hasOpenedTerminal === nextState.hasOpenedTerminal
+        ) {
+          return previous;
+        }
+        return nextState;
+      });
+
+      if (rightPanelMode !== input.mode) {
+        return;
+      }
+
+      const nextSearch = (previous: Record<string, unknown>) => {
+        if (input.mode !== "files" && nextHasOpenedPreview) {
+          return buildOpenFilesSearch(previous);
+        }
+        if (input.mode !== "review" && nextHasOpenedDiff) {
+          return buildOpenReviewSearch(previous);
+        }
+        if (input.mode !== "terminal" && nextHasOpenedTerminal) {
+          return buildOpenTerminalSearch(previous);
+        }
+        return buildOpenWorkspaceSearch(previous);
+      };
+      void navigate({
+        to: "/draft/$draftId",
+        params: { draftId },
+        search: nextSearch,
+      });
+    },
+    [draftId, hasOpenedDiff, hasOpenedPreview, hasOpenedTerminal, navigate, rightPanelMode],
+  );
 
   useEffect(() => {
     if (rightPanelMode !== null) {
       setLastOpenedRightPanelMode(rightPanelMode);
+      markRightPanelOpened(rightPanelMode);
     }
-  }, [rightPanelMode]);
+  }, [markRightPanelOpened, rightPanelMode]);
 
   useEffect(() => {
     if (!canonicalThreadRef) {
@@ -165,8 +275,17 @@ export function DraftChatThreadRouteView({
   }
 
   const shouldRenderRightPanelContent =
-    rightPanelMode === "diff" || hasOpenedDiff || rightPanelMode === "preview" || hasOpenedPreview;
-  const mountedRightPanelMode: RightPanelMode = rightPanelMode ?? lastOpenedRightPanelMode;
+    rightPanelOpen ||
+    rightPanelMode === "review" ||
+    hasOpenedDiff ||
+    rightPanelMode === "files" ||
+    hasOpenedPreview ||
+    rightPanelMode === "terminal" ||
+    hasOpenedTerminal ||
+    rightPanelMode === "agent";
+  const mountedRightPanelMode: RightPanelMode | null = rightPanelOpen
+    ? rightPanelMode
+    : lastOpenedRightPanelMode;
 
   if (!shouldUseDiffSheet) {
     return (
@@ -176,15 +295,20 @@ export function DraftChatThreadRouteView({
             draftId={draftId}
             environmentId={draftSession.environmentId}
             threadId={draftSession.threadId}
-            onDiffPanelOpen={() => markRightPanelOpened("diff")}
-            onPreviewPanelOpen={() => markRightPanelOpened("preview")}
-            reserveTitleBarControlInset={!rightPanelOpen}
+            onDiffPanelOpen={() => markRightPanelOpened("review")}
+            onPreviewPanelOpen={() => markRightPanelOpened("files")}
+            onTerminalPanelOpen={() => markRightPanelOpened("terminal")}
+            onAgentPanelOpen={() => markRightPanelOpened("agent")}
+            workspacePanelOpen={rightPanelOpen}
+            onToggleWorkspacePanel={toggleRightPanel}
             routeKind="draft"
           />
         </SidebarInset>
         <RightPanelInlineSidebar
           open={rightPanelOpen}
           panelMode={mountedRightPanelMode}
+          openedPanelModes={openedPanelModes}
+          onClosePanelTab={closePanelTab}
           onClose={closeRightPanel}
           onOpen={openRightPanel}
           renderContent={shouldRenderRightPanelContent}
@@ -200,14 +324,23 @@ export function DraftChatThreadRouteView({
           draftId={draftId}
           environmentId={draftSession.environmentId}
           threadId={draftSession.threadId}
-          onDiffPanelOpen={() => markRightPanelOpened("diff")}
-          onPreviewPanelOpen={() => markRightPanelOpened("preview")}
+          onDiffPanelOpen={() => markRightPanelOpened("review")}
+          onPreviewPanelOpen={() => markRightPanelOpened("files")}
+          onTerminalPanelOpen={() => markRightPanelOpened("terminal")}
+          onAgentPanelOpen={() => markRightPanelOpened("agent")}
+          workspacePanelOpen={rightPanelOpen}
+          onToggleWorkspacePanel={toggleRightPanel}
           routeKind="draft"
         />
       </SidebarInset>
       <RightPanelSheet open={rightPanelOpen} onClose={closeRightPanel}>
         {shouldRenderRightPanelContent ? (
-          <LazyRightPanel mode="sheet" panelMode={mountedRightPanelMode} />
+          <LazyRightPanel
+            mode="sheet"
+            panelMode={mountedRightPanelMode}
+            openedPanelModes={openedPanelModes}
+            onClosePanelTab={closePanelTab}
+          />
         ) : null}
       </RightPanelSheet>
     </>

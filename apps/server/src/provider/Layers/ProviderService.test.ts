@@ -60,6 +60,8 @@ import {
   makeSqlitePersistenceLive,
   SqlitePersistenceMemory,
 } from "../../persistence/Layers/Sqlite.ts";
+import { metricNames } from "../../observability/Metrics.ts";
+import { hasMetricSnapshot } from "../../observability/testMetricSnapshots.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
 import { makeAdapterRegistryMock } from "../testUtils/providerAdapterRegistryMock.ts";
@@ -273,17 +275,6 @@ function makeFakeCodexAdapter(
 const sleep = (ms: number) =>
   Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
-const hasMetricSnapshot = (
-  snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
-  id: string,
-  attributes: Readonly<Record<string, string>>,
-) =>
-  snapshots.some(
-    (snapshot) =>
-      snapshot.id === id &&
-      Object.entries(attributes).every(([key, value]) => snapshot.attributes?.[key] === value),
-  );
-
 function makeProviderServiceLayer() {
   const codex = makeFakeCodexAdapter();
   const claude = makeFakeCodexAdapter(CLAUDE_AGENT_DRIVER);
@@ -495,7 +486,7 @@ it.effect(
 
         const snapshots = yield* Metric.snapshot;
         assert.equal(
-          hasMetricSnapshot(snapshots, "t3_provider_startup_admission_total", {
+          hasMetricSnapshot(snapshots, metricNames.providerStartupAdmissionTotal, {
             provider: CODEX_DRIVER,
             providerInstanceId: codexInstanceId,
             outcome: "busy",
@@ -503,7 +494,7 @@ it.effect(
           true,
         );
         assert.equal(
-          hasMetricSnapshot(snapshots, "t3_provider_startup_queue_high_water", {
+          hasMetricSnapshot(snapshots, metricNames.providerStartupQueueHighWater, {
             provider: CODEX_DRIVER,
             providerInstanceId: codexInstanceId,
           }),
@@ -707,7 +698,7 @@ it.effect("ProviderServiceLive writes canonical events to the emitting thread se
 
 it.effect("ProviderServiceLive keeps persisted resumable sessions on startup", () =>
   Effect.gen(function* () {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-provider-service-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-provider-service-"));
     const dbPath = path.join(tempDir, "orchestration.sqlite");
 
     const codex = makeFakeCodexAdapter();
@@ -774,7 +765,7 @@ it.effect(
   "ProviderServiceLive restores rollback routing after restart using persisted thread mapping",
   () =>
     Effect.gen(function* () {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-provider-service-restart-"));
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-provider-service-restart-"));
       const dbPath = path.join(tempDir, "orchestration.sqlite");
       const persistenceLayer = makeSqlitePersistenceLive(dbPath);
       const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
@@ -1329,7 +1320,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
   it.effect("reuses persisted resume cursor when startSession is called after a restart", () =>
     Effect.gen(function* () {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-provider-service-start-"));
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-provider-service-start-"));
       const dbPath = path.join(tempDir, "orchestration.sqlite");
       const persistenceLayer = makeSqlitePersistenceLive(dbPath);
       const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
@@ -1419,7 +1410,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
     "reuses persisted cwd when startSession resumes a claude session without cwd input",
     () =>
       Effect.gen(function* () {
-        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-provider-service-cwd-"));
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-provider-service-cwd-"));
         const dbPath = path.join(tempDir, "orchestration.sqlite");
         const persistenceLayer = makeSqlitePersistenceLive(dbPath);
         const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
@@ -1710,7 +1701,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
       const snapshots = yield* Metric.snapshot;
 
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_provider_turns_total", {
+        hasMetricSnapshot(snapshots, metricNames.providerTurnsTotal, {
           provider: ProviderDriverKind.make("claudeAgent"),
           operation: "interrupt",
           outcome: "success",
@@ -1718,7 +1709,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_provider_turns_total", {
+        hasMetricSnapshot(snapshots, metricNames.providerTurnsTotal, {
           provider: ProviderDriverKind.make("claudeAgent"),
           operation: "approval-response",
           outcome: "success",
@@ -1726,7 +1717,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_provider_turns_total", {
+        hasMetricSnapshot(snapshots, metricNames.providerTurnsTotal, {
           provider: ProviderDriverKind.make("claudeAgent"),
           operation: "user-input-response",
           outcome: "success",
@@ -1734,7 +1725,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_provider_turns_total", {
+        hasMetricSnapshot(snapshots, metricNames.providerTurnsTotal, {
           provider: ProviderDriverKind.make("claudeAgent"),
           operation: "rollback",
           outcome: "success",
@@ -1742,7 +1733,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_provider_sessions_total", {
+        hasMetricSnapshot(snapshots, metricNames.providerSessionsTotal, {
           provider: ProviderDriverKind.make("claudeAgent"),
           operation: "stop",
           outcome: "success",
@@ -1775,7 +1766,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         const snapshots = yield* Metric.snapshot;
 
         assert.equal(
-          hasMetricSnapshot(snapshots, "t3_provider_turns_total", {
+          hasMetricSnapshot(snapshots, metricNames.providerTurnsTotal, {
             provider: ProviderDriverKind.make("claudeAgent"),
             operation: "send",
             outcome: "success",
@@ -1783,7 +1774,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
           true,
         );
         assert.equal(
-          hasMetricSnapshot(snapshots, "t3_provider_turn_duration", {
+          hasMetricSnapshot(snapshots, metricNames.providerTurnDuration, {
             provider: ProviderDriverKind.make("claudeAgent"),
             operation: "send",
           }),

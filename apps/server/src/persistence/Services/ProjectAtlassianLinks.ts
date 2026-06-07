@@ -50,4 +50,4 @@ export interface ProjectAtlassianLinkRepositoryShape {
 export class ProjectAtlassianLinkRepository extends Context.Service<
   ProjectAtlassianLinkRepository,
   ProjectAtlassianLinkRepositoryShape
->()("s3/persistence/Services/ProjectAtlassianLinks/ProjectAtlassianLinkRepository") {}
+>()("ryco/persistence/Services/ProjectAtlassianLinks/ProjectAtlassianLinkRepository") {}

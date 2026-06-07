@@ -49,4 +49,4 @@ export interface ProviderInstanceRegistryMutatorShape {
 export class ProviderInstanceRegistryMutator extends Context.Service<
   ProviderInstanceRegistryMutator,
   ProviderInstanceRegistryMutatorShape
->()("s3/provider/Services/ProviderInstanceRegistryMutator") {}
+>()("ryco/provider/Services/ProviderInstanceRegistryMutator") {}

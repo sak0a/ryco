@@ -68,6 +68,11 @@ const TEXT_MIME_TYPES = new Set([
   "image/svg+xml",
 ]);
 
+export interface PreviewProjectEntryFilterInput {
+  readonly path: string;
+  readonly kind: "file" | "directory";
+}
+
 function getPreviewBasename(filePath: string): string {
   const withoutQuery = filePath.split(/[?#]/, 1)[0] ?? filePath;
   return withoutQuery.toLowerCase().split("/").at(-1) ?? withoutQuery.toLowerCase();
@@ -127,4 +132,62 @@ export function resolvePreviewSizeGuard(
     return { state: "too-large", shouldFetch: false, sizeBytes, limitBytes };
   }
   return { state: "within-limit", shouldFetch: true, sizeBytes, limitBytes };
+}
+
+function normalizePreviewEntryPath(pathValue: string): string {
+  return pathValue.replaceAll("\\", "/").toLowerCase();
+}
+
+function getPreviewSearchTokens(query: string): string[] {
+  return normalizePreviewEntryPath(query)
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length > 0);
+}
+
+function previewPathMatchesTokens(pathValue: string, tokens: ReadonlyArray<string>): boolean {
+  return tokens.every((token) => pathValue.includes(token));
+}
+
+function hasMatchingDirectoryAncestor(
+  pathValue: string,
+  matchingDirectoryPaths: ReadonlySet<string>,
+): boolean {
+  let slashIndex = pathValue.lastIndexOf("/");
+  while (slashIndex > 0) {
+    if (matchingDirectoryPaths.has(pathValue.slice(0, slashIndex))) {
+      return true;
+    }
+    slashIndex = pathValue.lastIndexOf("/", slashIndex - 1);
+  }
+  return false;
+}
+
+export function filterPreviewProjectEntries<T extends PreviewProjectEntryFilterInput>(
+  entries: ReadonlyArray<T>,
+  query: string,
+): ReadonlyArray<T> {
+  const tokens = getPreviewSearchTokens(query);
+  if (tokens.length === 0) {
+    return entries;
+  }
+
+  const matchingDirectoryPaths = new Set<string>();
+  for (const entry of entries) {
+    if (entry.kind !== "directory") {
+      continue;
+    }
+    const normalizedPath = normalizePreviewEntryPath(entry.path);
+    if (previewPathMatchesTokens(normalizedPath, tokens)) {
+      matchingDirectoryPaths.add(normalizedPath);
+    }
+  }
+
+  return entries.filter((entry) => {
+    const normalizedPath = normalizePreviewEntryPath(entry.path);
+    return (
+      previewPathMatchesTokens(normalizedPath, tokens) ||
+      hasMatchingDirectoryAncestor(normalizedPath, matchingDirectoryPaths)
+    );
+  });
 }

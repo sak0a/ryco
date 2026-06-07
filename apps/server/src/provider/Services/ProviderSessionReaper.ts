@@ -11,4 +11,4 @@ export interface ProviderSessionReaperShape {
 export class ProviderSessionReaper extends Context.Service<
   ProviderSessionReaper,
   ProviderSessionReaperShape
->()("s3/provider/Services/ProviderSessionReaper") {}
+>()("ryco/provider/Services/ProviderSessionReaper") {}

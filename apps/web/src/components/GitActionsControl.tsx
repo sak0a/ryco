@@ -93,6 +93,7 @@ interface GitActionsControlProps {
   gitCwd: string | null;
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
+  showLabels?: boolean;
 }
 
 interface PendingDefaultBranchAction {
@@ -965,6 +966,7 @@ export default function GitActionsControl({
   gitCwd,
   activeThreadRef,
   draftId,
+  showLabels = false,
 }: GitActionsControlProps) {
   const activeEnvironmentId = activeThreadRef?.environmentId ?? null;
   const threadToastData = useMemo(
@@ -1648,6 +1650,22 @@ export default function GitActionsControl({
   );
 
   const canPublishRepository = isRepo && gitStatusForActions !== null && !hasPrimaryRemote;
+  const quickActionLabelClassName = showLabels
+    ? "truncate text-[11px] font-medium"
+    : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:truncate @3xl/header-actions:text-[11px] @3xl/header-actions:font-medium";
+  const quickActionButtonClassName = cn(
+    "h-7 gap-1.5 border-border/50 bg-background/35 px-2 text-foreground/86 shadow-none before:shadow-none",
+    "dark:bg-background/20 dark:not-disabled:before:shadow-none",
+    "[:hover,[data-pressed]]:bg-muted/55 dark:[:hover,[data-pressed]]:bg-muted/35",
+    showLabels ? "min-w-0 max-w-45" : "max-w-7 @3xl/header-actions:max-w-45",
+  );
+  const quickActionIconFrameClassName =
+    "flex size-4 shrink-0 items-center justify-center rounded-sm bg-muted/55 text-muted-foreground/75";
+  const gitActionMenuButtonClassName =
+    "h-7 w-7 border-border/50 bg-background/35 text-muted-foreground/65 shadow-none before:shadow-none dark:bg-background/20 dark:not-disabled:before:shadow-none [:hover,[data-pressed]]:bg-muted/55 dark:[:hover,[data-pressed]]:bg-muted/35";
+  const groupSeparatorClassName = showLabels
+    ? "block bg-border/50 dark:before:bg-border/45"
+    : "hidden bg-border/50 dark:before:bg-border/45 @3xl/header-actions:block";
 
   if (!gitCwd) return null;
 
@@ -1671,19 +1689,22 @@ export default function GitActionsControl({
                 render={
                   <Button
                     aria-disabled="true"
-                    className="cursor-not-allowed rounded-e-none border-e-0 opacity-64 before:rounded-e-none"
+                    className={cn(
+                      quickActionButtonClassName,
+                      "cursor-not-allowed rounded-e-none border-e-0 opacity-64 before:rounded-e-none",
+                    )}
                     size="xs"
                     variant="outline"
                   />
                 }
               >
-                <GitQuickActionIcon
-                  quickAction={quickAction}
-                  SourceControlIcon={SourceControlIcon}
-                />
-                <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-                  {quickAction.label}
+                <span className={quickActionIconFrameClassName}>
+                  <GitQuickActionIcon
+                    quickAction={quickAction}
+                    SourceControlIcon={SourceControlIcon}
+                  />
                 </span>
+                <span className={quickActionLabelClassName}>{quickAction.label}</span>
               </PopoverTrigger>
               <PopoverPopup tooltipStyle side="bottom" align="start">
                 {quickActionDisabledReason}
@@ -1693,16 +1714,20 @@ export default function GitActionsControl({
             <Button
               variant="outline"
               size="xs"
+              className={quickActionButtonClassName}
               disabled={isGitActionRunning || quickAction.disabled}
               onClick={runQuickAction}
             >
-              <GitQuickActionIcon quickAction={quickAction} SourceControlIcon={SourceControlIcon} />
-              <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-                {quickAction.label}
+              <span className={quickActionIconFrameClassName}>
+                <GitQuickActionIcon
+                  quickAction={quickAction}
+                  SourceControlIcon={SourceControlIcon}
+                />
               </span>
+              <span className={quickActionLabelClassName}>{quickAction.label}</span>
             </Button>
           )}
-          <GroupSeparator className="hidden @3xl/header-actions:block" />
+          <GroupSeparator className={groupSeparatorClassName} />
           <Menu
             onOpenChange={(open) => {
               if (open) {
@@ -1714,7 +1739,14 @@ export default function GitActionsControl({
             }}
           >
             <MenuTrigger
-              render={<Button aria-label="Git action options" size="icon-xs" variant="outline" />}
+              render={
+                <Button
+                  aria-label="Git action options"
+                  className={gitActionMenuButtonClassName}
+                  size="icon-xs"
+                  variant="outline"
+                />
+              }
               disabled={isGitActionRunning}
             >
               <ChevronDownIcon aria-hidden="true" className="size-4" />

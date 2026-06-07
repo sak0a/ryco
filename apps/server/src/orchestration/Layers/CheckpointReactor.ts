@@ -242,7 +242,7 @@ const make = Effect.gen(function* () {
         Effect.map((diff) =>
           parseTurnDiffFilesFromUnifiedDiff(diff).map((file) => ({
             path: file.path,
-            kind: "modified" as const,
+            kind: file.kind,
             additions: file.additions,
             deletions: file.deletions,
           })),

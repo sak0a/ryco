@@ -47,7 +47,10 @@ export function LinkedWorktreeItemDialog(props: LinkedWorktreeItemDialogProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={handleOpenChange}>
-      <DialogPopup className="flex h-[92vh] max-h-[1120px] w-[96vw] max-w-[1440px] flex-col p-0 max-sm:h-[100dvh] max-sm:w-screen">
+      <DialogPopup
+        className="project-glass-surface flex h-[92vh] max-h-[1120px] w-[96vw] max-w-[1440px] flex-col overflow-hidden p-0 max-sm:h-[100dvh] max-sm:w-screen"
+        surface="glass"
+      >
         <DialogTitle className="sr-only">
           {item?.kind === "pr"
             ? `Pull request #${item.number}`

@@ -136,9 +136,10 @@ export function SettingsDialog() {
       }}
     >
       <DialogPopup
-        className="h-[min(88dvh,880px)] max-w-[1180px] overflow-hidden p-0"
+        className="project-glass-surface h-[min(88dvh,880px)] max-w-[1180px] overflow-hidden p-0"
         bottomStickOnMobile={false}
         showCloseButton={true}
+        surface="glass"
       >
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-5">
           <DialogTitle className="text-base font-semibold">Settings</DialogTitle>

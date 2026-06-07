@@ -45,6 +45,35 @@ describe("SidebarWorktreeList", () => {
     await expect.element(page.getByText("Release checklist")).toBeInTheDocument();
   });
 
+  it("expands a worktree when clicking its title without opening it", async () => {
+    const onOpenWorktree = vi.fn();
+    await render(
+      <SidebarWorktreeList
+        attachThreadListAutoAnimateRef={() => undefined}
+        projectExpanded
+        resolveThreadGitStatusTarget={() => null}
+        renderThread={(thread) => <div>{thread.title}</div>}
+        treeProject={makeTreeProject()}
+        visibleThreadKeys={null}
+        onArchiveWorktree={vi.fn()}
+        onCopyWorktreePath={vi.fn()}
+        onDeleteWorktree={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenInEditor={vi.fn()}
+        onOpenWorktree={onOpenWorktree}
+        onRenameWorktree={vi.fn()}
+        onRestoreWorktree={vi.fn()}
+      />,
+    );
+
+    expect(document.body.textContent).not.toContain("Release checklist");
+
+    await page.getByText("main").click();
+
+    await expect.element(page.getByText("Release checklist")).toBeInTheDocument();
+    expect(onOpenWorktree).not.toHaveBeenCalled();
+  });
+
   it("renders state-aware chips for every linked PR/issue lifecycle state", async () => {
     const treeProject = makeVariantsTreeProject();
     await render(
@@ -73,6 +102,35 @@ describe("SidebarWorktreeList", () => {
     await expect.element(page.getByLabelText("Pull request #203 — Merged")).toBeInTheDocument();
     await expect.element(page.getByLabelText("Pull request #204 — Closed")).toBeInTheDocument();
     await expect.element(page.getByLabelText("Pull request #205")).toBeInTheDocument();
+  });
+
+  it("shows only the PR badge for a worktree linked to both a PR and an issue", async () => {
+    await render(
+      <SidebarWorktreeList
+        attachThreadListAutoAnimateRef={() => undefined}
+        projectExpanded
+        resolveThreadGitStatusTarget={() => null}
+        renderThread={(thread) => <div>{thread.title}</div>}
+        treeProject={makeLinkedIssueAndPrTreeProject()}
+        visibleThreadKeys={null}
+        onArchiveWorktree={vi.fn()}
+        onCopyWorktreePath={vi.fn()}
+        onDeleteWorktree={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenInEditor={vi.fn()}
+        onOpenWorktree={vi.fn()}
+        onRenameWorktree={vi.fn()}
+        onRestoreWorktree={vi.fn()}
+      />,
+    );
+
+    await expect.element(page.getByLabelText("Pull request #202 — Open")).toBeInTheDocument();
+    expect(document.querySelector('[aria-label="Issue #101 — Open"]')).toBeNull();
+
+    const badges = [...document.querySelectorAll<HTMLElement>("[data-linked-worktree-item]")];
+    expect(badges.map((badge) => badge.dataset.linkedWorktreeItem)).toEqual(["pr"]);
+    expect(document.body.textContent).toContain("#202");
+    expect(document.body.textContent).not.toContain("#101");
   });
 
   it("colors active worktree names instead of reserving a chat-activity dot slot", async () => {
@@ -250,6 +308,37 @@ function makeVariantsTreeProject(): SidebarTreeProject {
         },
       }),
     ),
+  };
+}
+
+function makeLinkedIssueAndPrTreeProject(): SidebarTreeProject {
+  return {
+    archivedSessions: [],
+    archivedWorktrees: [],
+    flatSessions: [],
+    isGitRepo: true,
+    project: makeProject(),
+    worktrees: [
+      makeWorktreeNode({
+        aggregateStatus: "idle",
+        manualPosition: 1,
+        worktree: {
+          worktreeId: "wt-linked-issue-pr",
+          projectId,
+          branch: "feature/linked-issue-pr",
+          worktreePath: "/tmp/feature/linked-issue-pr",
+          origin: "pr",
+          prNumber: 202,
+          issueNumber: 101,
+          prState: "open",
+          prIsDraft: false,
+          issueState: "open",
+          archivedAt: null,
+          manualPosition: 1,
+          updatedAt: "2026-05-17T00:00:00.000Z",
+        },
+      }),
+    ],
   };
 }
 

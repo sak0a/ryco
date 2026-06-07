@@ -34,4 +34,4 @@ export interface ProjectSetupScriptRunnerShape {
 export class ProjectSetupScriptRunner extends Context.Service<
   ProjectSetupScriptRunner,
   ProjectSetupScriptRunnerShape
->()("s3/project/ProjectSetupScriptRunner") {}
+>()("ryco/project/ProjectSetupScriptRunner") {}

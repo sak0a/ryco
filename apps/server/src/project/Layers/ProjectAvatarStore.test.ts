@@ -18,7 +18,7 @@ it.layer(NodeServices.layer)("ProjectAvatarStoreLive", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const dataDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "s3-project-avatars-test-",
+        prefix: "ryco-project-avatars-test-",
       });
 
       const layer = ProjectAvatarStoreLive({ dataDir });
@@ -46,7 +46,7 @@ it.layer(NodeServices.layer)("ProjectAvatarStoreLive", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const dataDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "s3-project-avatars-test-",
+        prefix: "ryco-project-avatars-test-",
       });
 
       const layer = ProjectAvatarStoreLive({ dataDir });

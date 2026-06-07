@@ -8,8 +8,12 @@ import {
 import { usePreferredEditor } from "../../editorPreferences";
 import { ChevronDownIcon, FolderClosedIcon } from "lucide-react";
 import { Button } from "../ui/button";
-import { Group, GroupSeparator } from "../ui/group";
 import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "../ui/menu";
+import {
+  HEADER_CHROME_BUTTON_CLASS_NAME,
+  HEADER_CHROME_GROUP_CLASS_NAME,
+  HEADER_CHROME_ICON_BUTTON_CLASS_NAME,
+} from "./headerChrome";
 import {
   AntigravityIcon,
   CursorIcon,
@@ -202,10 +206,11 @@ export const OpenInPicker = memo(function OpenInPicker({
   }, [preferredEditor, keybindings, openInCwd]);
 
   return (
-    <Group aria-label="Subscription actions">
+    <div aria-label="Subscription actions" className={HEADER_CHROME_GROUP_CLASS_NAME} role="group">
       <Button
         size="xs"
-        variant="outline"
+        variant="ghost"
+        className={HEADER_CHROME_BUTTON_CLASS_NAME}
         disabled={!preferredEditor || !openInCwd}
         onClick={() => openInEditor(preferredEditor)}
       >
@@ -214,9 +219,17 @@ export const OpenInPicker = memo(function OpenInPicker({
           Open
         </span>
       </Button>
-      <GroupSeparator className="hidden @3xl/header-actions:block" />
       <Menu>
-        <MenuTrigger render={<Button aria-label="Copy options" size="icon-xs" variant="outline" />}>
+        <MenuTrigger
+          render={
+            <Button
+              aria-label="Copy options"
+              className={HEADER_CHROME_ICON_BUTTON_CLASS_NAME}
+              size="icon-xs"
+              variant="ghost"
+            />
+          }
+        >
           <ChevronDownIcon aria-hidden="true" className="size-4" />
         </MenuTrigger>
         <MenuPopup align="end">
@@ -232,6 +245,6 @@ export const OpenInPicker = memo(function OpenInPicker({
           ))}
         </MenuPopup>
       </Menu>
-    </Group>
+    </div>
   );
 });

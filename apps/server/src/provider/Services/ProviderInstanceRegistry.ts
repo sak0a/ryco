@@ -81,4 +81,4 @@ export interface ProviderInstanceRegistryShape {
 export class ProviderInstanceRegistry extends Context.Service<
   ProviderInstanceRegistry,
   ProviderInstanceRegistryShape
->()("s3/provider/Services/ProviderInstanceRegistry") {}
+>()("ryco/provider/Services/ProviderInstanceRegistry") {}

@@ -89,7 +89,7 @@ export interface GitManagerShape {
 }
 
 export class GitManager extends Context.Service<GitManager, GitManagerShape>()(
-  "s3/git/GitManager",
+  "ryco/git/GitManager",
 ) {}
 
 const COMMIT_TIMEOUT_MS = 10 * 60_000;

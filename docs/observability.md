@@ -22,7 +22,7 @@ If you want a log message to show up in the trace file, emit it inside an active
 
 ### Traces
 
-Completed spans are written as NDJSON records to `serverTracePath` (by default, `~/.ryco/userdata/logs/server.trace.ndjson`; legacy installs may still use `~/.s3/userdata/logs/server.trace.ndjson`).
+Completed spans are written as NDJSON records to `serverTracePath` (by default, `~/.ryco/userdata/logs/server.trace.ndjson`; legacy installs may still use `~/.ryco/userdata/logs/server.trace.ndjson`).
 
 Important fields in each record:
 
@@ -101,7 +101,7 @@ Default Grafana login:
 ```bash
 export RYCO_OTLP_TRACES_URL=http://localhost:4318/v1/traces
 export RYCO_OTLP_METRICS_URL=http://localhost:4318/v1/metrics
-export RYCO_OTLP_SERVICE_NAME=s3-local
+export RYCO_OTLP_SERVICE_NAME=ryco-local
 ```
 
 Optional:
@@ -140,7 +140,7 @@ macOS app bundle example:
 ```bash
 RYCO_OTLP_TRACES_URL=http://localhost:4318/v1/traces \
 RYCO_OTLP_METRICS_URL=http://localhost:4318/v1/metrics \
-RYCO_OTLP_SERVICE_NAME=s3-desktop \
+RYCO_OTLP_SERVICE_NAME=ryco-desktop \
 "/Applications/Ryco.app/Contents/MacOS/Ryco"
 ```
 
@@ -149,7 +149,7 @@ Direct binary example:
 ```bash
 RYCO_OTLP_TRACES_URL=http://localhost:4318/v1/traces \
 RYCO_OTLP_METRICS_URL=http://localhost:4318/v1/metrics \
-RYCO_OTLP_SERVICE_NAME=s3-desktop \
+RYCO_OTLP_SERVICE_NAME=ryco-desktop \
 ./path/to/your/desktop-app-binary
 ```
 
@@ -272,7 +272,7 @@ Recommended flow in Grafana:
 
 Good first searches:
 
-- service name such as `s3-local`, `s3-dev`, or `s3-desktop`
+- service name such as `ryco-local`, `ryco-dev`, or `ryco-desktop`
 - span names like `sql.execute`, `git.runCommand`, `provider.sendTurn`
 - orchestration spans with attributes like `orchestration.command_type`
 
@@ -284,20 +284,20 @@ Traces are best for one request. Metrics are best for trends.
 
 Good metric families to watch:
 
-- `t3_rpc_request_duration`
-- `t3_orchestration_command_duration`
-- `t3_orchestration_command_ack_duration`
-- `t3_provider_turn_duration`
-- `t3_git_command_duration`
-- `t3_db_query_duration`
+- `ryco_rpc_request_duration`
+- `ryco_orchestration_command_duration`
+- `ryco_orchestration_command_ack_duration`
+- `ryco_provider_turn_duration`
+- `ryco_git_command_duration`
+- `ryco_db_query_duration`
 
 Counters tell you volume and failure rate:
 
-- `t3_rpc_requests_total`
-- `t3_orchestration_commands_total`
-- `t3_provider_turns_total`
-- `t3_git_commands_total`
-- `t3_db_queries_total`
+- `ryco_rpc_requests_total`
+- `ryco_orchestration_commands_total`
+- `ryco_provider_turns_total`
+- `ryco_git_commands_total`
+- `ryco_db_queries_total`
 
 Use metrics when the question is:
 
@@ -313,7 +313,7 @@ Use traces when the question is:
 
 ### What The New Ack Metric Means
 
-`t3_orchestration_command_ack_duration` measures:
+`ryco_orchestration_command_ack_duration` measures:
 
 - start: command dispatch enters the orchestration engine
 - end: the first committed domain event for that command is published by the server
@@ -344,7 +344,7 @@ If you need those later, add client-side instrumentation or a dedicated server f
 
 ### "Did this command take too long to acknowledge?"
 
-1. Check `t3_orchestration_command_ack_duration` by `commandType`.
+1. Check `ryco_orchestration_command_ack_duration` by `commandType`.
 2. If it is high, inspect the corresponding orchestration trace.
 3. Look at child spans for projection, sqlite, provider, or git work.
 
@@ -494,7 +494,7 @@ OTLP export:
 - `RYCO_OTLP_TRACES_URL`: OTLP trace endpoint
 - `RYCO_OTLP_METRICS_URL`: OTLP metric endpoint
 - `RYCO_OTLP_EXPORT_INTERVAL_MS`: export interval, default `10000`
-- `RYCO_OTLP_SERVICE_NAME`: service name, default `s3-server`
+- `RYCO_OTLP_SERVICE_NAME`: service name, default `ryco-server`
 
 If the OTLP URLs are unset, local tracing still works and metrics stay in-process only.
 

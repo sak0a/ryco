@@ -77,4 +77,4 @@ export interface WorkspaceFileSystemShape {
 export class WorkspaceFileSystem extends Context.Service<
   WorkspaceFileSystem,
   WorkspaceFileSystemShape
->()("s3/workspace/Services/WorkspaceFileSystem") {}
+>()("ryco/workspace/Services/WorkspaceFileSystem") {}

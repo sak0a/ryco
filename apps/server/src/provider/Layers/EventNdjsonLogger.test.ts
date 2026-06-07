@@ -6,6 +6,8 @@ import { ThreadId } from "@ryco/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Metric } from "effect";
 
+import { metricNames } from "../../observability/Metrics.ts";
+import { hasMetricSnapshot } from "../../observability/testMetricSnapshots.ts";
 import { makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 function parseLogLine(line: string) {
@@ -27,21 +29,10 @@ function parseLogLine(line: string) {
   };
 }
 
-const hasMetricSnapshot = (
-  snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
-  id: string,
-  attributes: Readonly<Record<string, string>>,
-) =>
-  snapshots.some(
-    (snapshot) =>
-      snapshot.id === id &&
-      Object.entries(attributes).every(([key, value]) => snapshot.attributes?.[key] === value),
-  );
-
 describe("EventNdjsonLogger", () => {
   it.effect("writes effect-style lines to thread-scoped files", () =>
     Effect.gen(function* () {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-provider-log-"));
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-provider-log-"));
       const basePath = path.join(tempDir, "provider-native.ndjson");
 
       try {
@@ -89,7 +80,7 @@ describe("EventNdjsonLogger", () => {
     "falls back to a global segment when orchestration thread id is missing or invalid",
     () =>
       Effect.gen(function* () {
-        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-provider-log-"));
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-provider-log-"));
         const basePath = path.join(tempDir, "provider-canonical.ndjson");
 
         try {
@@ -125,7 +116,7 @@ describe("EventNdjsonLogger", () => {
 
   it.effect("serializes concurrent first writes for the same segment", () =>
     Effect.gen(function* () {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-provider-log-"));
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-provider-log-"));
       const basePath = path.join(tempDir, "provider-canonical.ndjson");
 
       try {
@@ -168,7 +159,7 @@ describe("EventNdjsonLogger", () => {
 
   it.effect("rotates per-thread files when max size is exceeded", () =>
     Effect.gen(function* () {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-provider-log-"));
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-provider-log-"));
       const basePath = path.join(tempDir, "provider-native.ndjson");
 
       try {
@@ -245,7 +236,7 @@ describe("EventNdjsonLogger", () => {
 
         const snapshots = yield* Metric.snapshot;
         assert.equal(
-          hasMetricSnapshot(snapshots, "t3_provider_event_log_records_dropped_total", {
+          hasMetricSnapshot(snapshots, metricNames.providerEventLogRecordsDroppedTotal, {
             stream: "native",
             reason: "queue_full",
             maxQueueSize: "1",

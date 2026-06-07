@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   detectPreviewFileKind,
+  filterPreviewProjectEntries,
   inferPreviewLanguage,
   PREVIEW_FILE_SIZE_LIMIT_BYTES,
   resolvePreviewSizeGuard,
@@ -70,5 +71,34 @@ describe("resolvePreviewSizeGuard", () => {
       sizeBytes: PREVIEW_FILE_SIZE_LIMIT_BYTES + 1,
       limitBytes: PREVIEW_FILE_SIZE_LIMIT_BYTES,
     });
+  });
+});
+
+describe("filterPreviewProjectEntries", () => {
+  const entries = [
+    { path: "src", kind: "directory" as const },
+    { path: "src/app.ts", kind: "file" as const },
+    { path: "src/components", kind: "directory" as const },
+    { path: "src/components/PreviewPanel.tsx", kind: "file" as const },
+    { path: "docs", kind: "directory" as const },
+    { path: "docs/readme.md", kind: "file" as const },
+    { path: "assets/logo.png", kind: "file" as const },
+  ];
+
+  it("returns every entry for blank searches", () => {
+    expect(filterPreviewProjectEntries(entries, "   ")).toBe(entries);
+  });
+
+  it("filters entries by path tokens", () => {
+    expect(filterPreviewProjectEntries(entries, "preview tsx").map((entry) => entry.path)).toEqual([
+      "src/components/PreviewPanel.tsx",
+    ]);
+  });
+
+  it("keeps descendants when a matching directory is filtered", () => {
+    expect(filterPreviewProjectEntries(entries, "components").map((entry) => entry.path)).toEqual([
+      "src/components",
+      "src/components/PreviewPanel.tsx",
+    ]);
   });
 });

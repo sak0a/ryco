@@ -16,11 +16,13 @@ export interface WorktreeSourceControlBadgesProps {
   className?: string | undefined;
   density?: "compact" | "header" | undefined;
   labelStyle?: "number" | "kind" | undefined;
+  displayMode?: "all" | "prefer-pr" | undefined;
 }
 
 export function WorktreeSourceControlBadges(props: WorktreeSourceControlBadgesProps) {
-  const issueNumber = props.issueNumber ?? null;
   const prNumber = props.prNumber ?? null;
+  const issueNumber =
+    props.displayMode === "prefer-pr" && prNumber !== null ? null : (props.issueNumber ?? null);
 
   if (issueNumber === null && prNumber === null) {
     return null;

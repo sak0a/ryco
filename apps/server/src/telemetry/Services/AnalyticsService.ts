@@ -24,7 +24,7 @@ export interface AnalyticsServiceShape {
 }
 
 export class AnalyticsService extends Context.Service<AnalyticsService, AnalyticsServiceShape>()(
-  "s3/telemetry/Services/AnalyticsService",
+  "ryco/telemetry/Services/AnalyticsService",
 ) {
   static readonly layerTest = Layer.succeed(AnalyticsService, {
     record: () => Effect.void,

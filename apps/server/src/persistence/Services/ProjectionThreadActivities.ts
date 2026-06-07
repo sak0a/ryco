@@ -80,4 +80,4 @@ export interface ProjectionThreadActivityRepositoryShape {
 export class ProjectionThreadActivityRepository extends Context.Service<
   ProjectionThreadActivityRepository,
   ProjectionThreadActivityRepositoryShape
->()("s3/persistence/Services/ProjectionThreadActivities/ProjectionThreadActivityRepository") {}
+>()("ryco/persistence/Services/ProjectionThreadActivities/ProjectionThreadActivityRepository") {}

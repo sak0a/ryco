@@ -105,5 +105,5 @@ export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironment
     return hostname;
   }
 
-  return normalizeLabel(input.cwdBaseName) ?? "S3 environment";
+  return normalizeLabel(input.cwdBaseName) ?? "Ryco environment";
 });

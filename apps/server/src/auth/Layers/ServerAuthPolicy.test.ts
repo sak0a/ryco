@@ -20,7 +20,7 @@ const makeServerAuthPolicyLayer = (overrides?: Partial<ServerConfigShape>) =>
           } satisfies ServerConfigShape;
         }),
       ).pipe(
-        Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "s3-auth-policy-test-" })),
+        Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "ryco-auth-policy-test-" })),
       ),
     ),
   );
@@ -33,7 +33,7 @@ it.layer(NodeServices.layer)("ServerAuthPolicyLive", (it) => {
 
       expect(descriptor.policy).toBe("desktop-managed-local");
       expect(descriptor.bootstrapMethods).toEqual(["desktop-bootstrap"]);
-      expect(descriptor.sessionCookieName).toBe("t3_session_3773");
+      expect(descriptor.sessionCookieName).toBe("ryco_session_3773");
     }).pipe(
       Effect.provide(
         makeServerAuthPolicyLayer({
@@ -68,7 +68,7 @@ it.layer(NodeServices.layer)("ServerAuthPolicyLive", (it) => {
 
       expect(descriptor.policy).toBe("loopback-browser");
       expect(descriptor.bootstrapMethods).toEqual(["one-time-token"]);
-      expect(descriptor.sessionCookieName).toBe("t3_session");
+      expect(descriptor.sessionCookieName).toBe("ryco_session");
     }).pipe(
       Effect.provide(
         makeServerAuthPolicyLayer({

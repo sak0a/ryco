@@ -113,7 +113,7 @@ layer("AtlassianConnectionService", (it) => {
         bitbucketConnectionId: connection.connectionId,
         jiraCloudId: null,
         jiraSiteUrl: null,
-        jiraProjectKeys: ["S3"],
+        jiraProjectKeys: ["RYCO"],
         bitbucketWorkspace: "acme",
         bitbucketRepoSlug: "ryco",
         defaultIssueTypeName: "Task",
@@ -126,7 +126,7 @@ layer("AtlassianConnectionService", (it) => {
       const loaded = yield* service.getProjectLink({ projectId: ProjectId.make("project-1") });
 
       assert.equal(saved.bitbucketConnectionId, connection.connectionId);
-      assert.deepStrictEqual(loaded?.jiraProjectKeys, ["S3"]);
+      assert.deepStrictEqual(loaded?.jiraProjectKeys, ["RYCO"]);
       assert.equal(loaded?.bitbucketRepoSlug, "ryco");
     }),
   );

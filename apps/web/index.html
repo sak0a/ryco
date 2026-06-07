@@ -118,9 +118,9 @@
         },
         { once: true },
       );
-      performance.mark("s3:startup:web-entry.import-start");
+      performance.mark("ryco:startup:web-entry.import-start");
       void import("/src/main.tsx").finally(() => {
-        performance.mark("s3:startup:web-entry.import-end");
+        performance.mark("ryco:startup:web-entry.import-end");
       });
     </script>
   </head>

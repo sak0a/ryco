@@ -123,7 +123,7 @@ interface EnsureActiveAssistantSegmentResult {
 }
 
 export class AcpSessionRuntime extends Context.Service<AcpSessionRuntime, AcpSessionRuntimeShape>()(
-  "s3/provider/acp/AcpSessionRuntime",
+  "ryco/provider/acp/AcpSessionRuntime",
 ) {
   static layer(
     options: AcpSessionRuntimeOptions,

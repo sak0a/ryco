@@ -166,7 +166,7 @@ const DEFAULT_VIEWPORT: ViewportSpec = {
 };
 const WIDE_FOOTER_VIEWPORT: ViewportSpec = {
   name: "wide-footer",
-  width: 1_400,
+  width: 1_680,
   height: 1_100,
   textTolerancePx: 44,
   attachmentTolerancePx: 56,
@@ -204,7 +204,7 @@ function createBaseServerConfig(): ServerConfig {
       policy: "loopback-browser",
       bootstrapMethods: ["one-time-token"],
       sessionMethods: ["browser-session-cookie", "bearer-session-token"],
-      sessionCookieName: "t3_session",
+      sessionCookieName: "ryco_session",
     },
     cwd: "/repo/project",
     keybindingsConfigPath: "/repo/project/.ryco-keybindings.json",
@@ -227,7 +227,7 @@ function createBaseServerConfig(): ServerConfig {
     ],
     availableEditors: [],
     observability: {
-      logsDirectoryPath: "/repo/project/.s3/logs",
+      logsDirectoryPath: "/repo/project/.ryco/logs",
       localTracingEnabled: true,
       otlpTracesEnabled: false,
       otlpMetricsEnabled: false,

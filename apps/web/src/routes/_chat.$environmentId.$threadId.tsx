@@ -26,7 +26,15 @@ function ChatThreadRouteLazyView() {
 export const Route = createFileRoute("/_chat/$environmentId/$threadId")({
   validateSearch: (search) => parseRightPanelRouteSearch(search),
   search: {
-    middlewares: [retainSearchParams<RightPanelRouteSearch>(["diff", "preview"])],
+    middlewares: [
+      retainSearchParams<RightPanelRouteSearch>([
+        "diff",
+        "preview",
+        "workspaceOpen",
+        "workspaceTab",
+        "workspaceAgentKey",
+      ]),
+    ],
   },
   component: ChatThreadRouteLazyView,
 });

@@ -18,7 +18,7 @@ const TestLayer = Layer.empty.pipe(
   Layer.provideMerge(VcsDriverRegistry.layer.pipe(Layer.provide(VcsProcess.layer))),
   Layer.provide(
     ServerConfig.layerTest(process.cwd(), {
-      prefix: "s3-workspace-entries-test-",
+      prefix: "ryco-workspace-entries-test-",
     }),
   ),
   Layer.provideMerge(NodeServices.layer),

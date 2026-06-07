@@ -38,7 +38,7 @@ import type { ContextMenuItem } from "@ryco/contracts";
 import { RotatingFileSink } from "@ryco/shared/logging";
 import { deleteEnv, readEnv } from "@ryco/shared/runtimeEnv";
 import { parsePersistedServerObservabilitySettings } from "@ryco/shared/serverSettings";
-import type { RemoteS3RunnerOptions } from "@ryco/ssh/tunnel";
+import type { RemoteRycoRunnerOptions } from "@ryco/ssh/tunnel";
 import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort.ts";
 import {
   type DesktopSettings,
@@ -65,7 +65,7 @@ import {
   resolveDesktopCoreAdvertisedEndpoints,
   resolveDesktopServerExposure,
 } from "./serverExposure.ts";
-import { DesktopSshEnvironmentBridge, resolveRemoteS3CliPackageSpec } from "./sshEnvironment.ts";
+import { DesktopSshEnvironmentBridge, resolveRemoteRycoCliPackageSpec } from "./sshEnvironment.ts";
 import { syncShellEnvironment } from "./syncShellEnvironment.ts";
 import {
   applyShellEnvironmentCache,
@@ -140,7 +140,7 @@ const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
 const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
 const SAVED_ENVIRONMENT_REGISTRY_PATH = Path.join(STATE_DIR, "saved-environments.json");
 const SHELL_ENVIRONMENT_CACHE_PATH = Path.join(STATE_DIR, "shell-environment-cache.json");
-const DESKTOP_SCHEME = "s3";
+const DESKTOP_SCHEME = "ryco";
 const DESKTOP_BOOT_HOST = "app";
 const DESKTOP_BOOT_PATH = "/desktop-boot.html";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
@@ -691,7 +691,7 @@ async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" |
     waitForHttpReady: () =>
       waitForBackendHttpReady(baseUrl, {
         timeoutMs: 60_000,
-        path: "/.well-known/s3/environment",
+        path: "/.well-known/ryco/environment",
       }),
     cancelHttpWait: cancelBackendReadinessWait,
   });
@@ -952,12 +952,12 @@ let macCodeSignatureKindCache: MacCodeSignatureKind | null = null;
 
 const desktopSshEnvironmentBridge = new DesktopSshEnvironmentBridge({
   getMainWindow: () => mainWindow,
-  resolveCliRunner: (): RemoteS3RunnerOptions => {
+  resolveCliRunner: (): RemoteRycoRunnerOptions => {
     if (isDevelopment && DEV_REMOTE_SERVER_ENTRY_PATH.length > 0) {
       return { nodeScriptPath: DEV_REMOTE_SERVER_ENTRY_PATH };
     }
     return {
-      packageSpec: resolveRemoteS3CliPackageSpec({
+      packageSpec: resolveRemoteRycoCliPackageSpec({
         appVersion: app.getVersion(),
         updateChannel: desktopSettings.updateChannel,
         isDevelopment,
@@ -1499,7 +1499,7 @@ function logDesktopRendererStartupPerformance(
           .slice(0, 12);
         const startup = performance
           .getEntries()
-          .filter((entry) => entry.name.startsWith("s3:startup:"))
+          .filter((entry) => entry.name.startsWith("ryco:startup:"))
           .map((entry) => ({
             name: entry.name,
             entryType: entry.entryType,
@@ -1964,7 +1964,7 @@ function startBackend(): void {
         mode: "desktop",
         noBrowser: true,
         port: backendPort,
-        t3Home: BASE_DIR,
+        rycoHome: BASE_DIR,
         host: backendBindHost,
         ...(isDevelopment ? { devUrl: resolveDesktopDevServerUrl() } : {}),
         desktopBootstrapToken: backendBootstrapToken,

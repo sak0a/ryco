@@ -220,4 +220,4 @@ export interface SourceControlProviderShape {
 export class SourceControlProvider extends Context.Service<
   SourceControlProvider,
   SourceControlProviderShape
->()("s3/source-control/SourceControlProvider") {}
+>()("ryco/source-control/SourceControlProvider") {}

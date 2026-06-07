@@ -73,4 +73,4 @@ export interface AuthPairingLinkRepositoryShape {
 export class AuthPairingLinkRepository extends Context.Service<
   AuthPairingLinkRepository,
   AuthPairingLinkRepositoryShape
->()("s3/persistence/Services/AuthPairingLinks/AuthPairingLinkRepository") {}
+>()("ryco/persistence/Services/AuthPairingLinks/AuthPairingLinkRepository") {}

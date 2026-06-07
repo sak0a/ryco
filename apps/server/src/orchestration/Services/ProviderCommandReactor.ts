@@ -37,4 +37,4 @@ export interface ProviderCommandReactorShape {
 export class ProviderCommandReactor extends Context.Service<
   ProviderCommandReactor,
   ProviderCommandReactorShape
->()("s3/orchestration/Services/ProviderCommandReactor") {}
+>()("ryco/orchestration/Services/ProviderCommandReactor") {}

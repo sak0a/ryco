@@ -1,0 +1,2146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Overview Layout Options</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101113;
+        --surface: #17191c;
+        --surface-2: #1d2024;
+        --surface-3: #24272c;
+        --line: rgb(255 255 255 / 0.1);
+        --line-strong: rgb(255 255 255 / 0.15);
+        --text: #eceef2;
+        --muted: rgb(236 238 242 / 0.58);
+        --faint: rgb(236 238 242 / 0.36);
+        --accent: #8fb8ff;
+        --success: #6dd49d;
+        --danger: #ef8c8c;
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          Geist,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        letter-spacing: 0;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .page {
+        width: min(1480px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 24px 0 32px;
+      }
+
+      .intro {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 20px;
+        align-items: end;
+        margin-bottom: 18px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 22px;
+        line-height: 1.15;
+        font-weight: 650;
+      }
+
+      .read {
+        margin: 0;
+        max-width: 72ch;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .dials {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        justify-content: flex-end;
+        color: var(--faint);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .dial {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgb(255 255 255 / 0.035);
+        padding: 5px 7px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .option {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgb(255 255 255 / 0.025);
+        overflow: hidden;
+      }
+
+      .option-head {
+        display: flex;
+        min-height: 54px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        border-bottom: 1px solid var(--line);
+        padding: 10px 12px;
+      }
+
+      .option-title {
+        min-width: 0;
+      }
+
+      .option-title h2 {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .option-title p {
+        margin: 3px 0 0;
+        color: var(--faint);
+        font-size: 11px;
+        line-height: 1.35;
+      }
+
+      .pick {
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius);
+        background: rgb(255 255 255 / 0.04);
+        color: var(--muted);
+        padding: 5px 8px;
+        font-size: 11px;
+      }
+
+      .mock {
+        display: grid;
+        grid-template-rows: auto minmax(420px, auto);
+        min-height: 530px;
+        background: #0f1012;
+      }
+
+      .app-header {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 10px;
+        border-bottom: 1px solid var(--line);
+        padding: 12px 13px 9px;
+      }
+
+      .breadcrumb {
+        display: flex;
+        min-width: 0;
+        flex: 1;
+        align-items: center;
+        gap: 7px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .crumb-main {
+        overflow: hidden;
+        color: var(--text);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .crumb {
+        overflow: hidden;
+        max-width: 86px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .sep {
+        color: var(--faint);
+      }
+
+      .header-actions {
+        display: flex;
+        flex-shrink: 0;
+        gap: 5px;
+      }
+
+      .icon-btn,
+      .mini-btn {
+        display: inline-flex;
+        height: 27px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid transparent;
+        border-radius: var(--radius);
+        background: transparent;
+        color: var(--muted);
+        padding: 0 8px;
+        font-size: 11px;
+      }
+
+      .icon-btn {
+        width: 27px;
+        padding: 0;
+      }
+
+      .icon-box {
+        width: 12px;
+        height: 12px;
+        border: 1px solid currentColor;
+        border-radius: 3px;
+        opacity: 0.76;
+      }
+
+      .body {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 318px;
+        gap: 9px;
+        padding: 10px;
+      }
+
+      .chat-area {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        justify-content: space-between;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgb(255 255 255 / 0.018);
+      }
+
+      .thread {
+        padding: 14px;
+      }
+
+      .msg {
+        width: 82%;
+        margin-bottom: 10px;
+        border-radius: 9px;
+        background: rgb(255 255 255 / 0.04);
+        padding: 10px;
+      }
+
+      .msg.short {
+        width: 58%;
+      }
+
+      .line {
+        height: 7px;
+        margin: 6px 0;
+        border-radius: 99px;
+        background: rgb(255 255 255 / 0.09);
+      }
+
+      .line:nth-child(2) {
+        width: 76%;
+      }
+
+      .line:nth-child(3) {
+        width: 48%;
+      }
+
+      .bottom-toolbar {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        border-top: 1px solid var(--line);
+        padding: 8px 10px;
+      }
+
+      .panel {
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid var(--line-strong);
+        border-radius: 10px;
+        background: color-mix(in srgb, var(--surface) 88%, transparent);
+      }
+
+      .panel-body {
+        padding: 8px;
+      }
+
+      .label {
+        margin: 0 0 5px;
+        color: var(--faint);
+        font-size: 10px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .source-card {
+        display: grid;
+        gap: 6px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgb(0 0 0 / 0.12);
+        padding: 7px;
+      }
+
+      .source-card.flat {
+        border-color: transparent;
+        background: transparent;
+        padding: 0;
+      }
+
+      .row {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .row-left {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .branch-chip,
+      .env-chip,
+      .action-chip {
+        display: inline-flex;
+        min-width: 0;
+        max-width: 100%;
+        height: 25px;
+        align-items: center;
+        gap: 5px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgb(255 255 255 / 0.035);
+        color: var(--muted);
+        padding: 0 8px;
+        font-size: 11px;
+      }
+
+      .branch-chip strong,
+      .env-chip strong {
+        overflow: hidden;
+        color: var(--text);
+        font-weight: 560;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .action-group {
+        display: flex;
+        min-width: 0;
+        gap: 5px;
+      }
+
+      .action-chip {
+        flex-shrink: 0;
+      }
+
+      .status-list {
+        margin-top: 9px;
+      }
+
+      .status-row {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 8px;
+        border-radius: var(--radius);
+        padding: 7px 7px;
+      }
+
+      .status-icon {
+        display: flex;
+        width: 24px;
+        height: 24px;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        border-radius: 7px;
+        background: rgb(255 255 255 / 0.06);
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      .status-copy {
+        min-width: 0;
+        flex: 1;
+      }
+
+      .status-copy span {
+        display: block;
+        overflow: hidden;
+        color: var(--faint);
+        font-size: 10px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .status-copy strong {
+        display: block;
+        overflow: hidden;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 520;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .nums {
+        display: flex;
+        flex-shrink: 0;
+        gap: 6px;
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-size: 11px;
+      }
+
+      .plus {
+        color: var(--success);
+      }
+
+      .minus {
+        color: var(--danger);
+      }
+
+      .microbar {
+        display: flex;
+        min-height: 35px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 7px;
+        border-bottom: 1px solid var(--line);
+        padding: 5px 7px;
+      }
+
+      .header-branch {
+        max-width: 170px;
+      }
+
+      .panel-starts-high .panel-body {
+        padding-top: 7px;
+      }
+
+      .toolbar-note {
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .notes {
+        border-top: 1px solid var(--line);
+        padding: 10px 12px 12px;
+      }
+
+      .notes p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .notes strong {
+        color: var(--text);
+      }
+
+      .control-band {
+        display: grid;
+        gap: 7px;
+        border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--line));
+        border-radius: var(--radius);
+        background:
+          linear-gradient(135deg, rgb(143 184 255 / 0.12), transparent 42%), rgb(255 255 255 / 0.03);
+        padding: 8px;
+      }
+
+      .control-band.tight {
+        gap: 6px;
+        padding: 7px;
+      }
+
+      .source-kicker {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        color: var(--faint);
+        font-size: 10px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .source-kicker span:last-child {
+        overflow: hidden;
+        color: var(--accent);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .branch-field {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgb(0 0 0 / 0.16);
+        padding: 7px 8px;
+      }
+
+      .branch-field-main {
+        min-width: 0;
+      }
+
+      .branch-field-main span {
+        display: block;
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .branch-field-main strong {
+        display: block;
+        overflow: hidden;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 620;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .branch-field-meta,
+      .small-pill {
+        display: inline-flex;
+        height: 22px;
+        flex-shrink: 0;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgb(255 255 255 / 0.04);
+        color: var(--muted);
+        padding: 0 7px;
+        font-size: 10px;
+      }
+
+      .action-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 5px;
+      }
+
+      .action-grid.two-up {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        margin-top: 5px;
+      }
+
+      .action-button {
+        min-width: 0;
+        height: 28px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgb(255 255 255 / 0.04);
+        color: var(--text);
+        font-size: 11px;
+      }
+
+      .action-button.primary {
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+        background: rgb(143 184 255 / 0.13);
+      }
+
+      .data-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .metric {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgb(255 255 255 / 0.025);
+        padding: 7px;
+      }
+
+      .metric span {
+        display: block;
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .metric strong {
+        display: block;
+        overflow: hidden;
+        margin-top: 2px;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 620;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .metric .nums {
+        margin-top: 4px;
+      }
+
+      .pr-card {
+        margin-top: 8px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgb(0 0 0 / 0.1);
+        padding: 8px;
+      }
+
+      .pr-title {
+        display: flex;
+        min-width: 0;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .pr-title strong {
+        overflow: hidden;
+        font-size: 12px;
+        font-weight: 620;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .pr-title span {
+        flex-shrink: 0;
+        color: var(--accent);
+        font-size: 10px;
+        font-weight: 650;
+      }
+
+      .check-stack {
+        display: grid;
+        gap: 5px;
+        margin-top: 7px;
+      }
+
+      .check-row {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .check-row strong {
+        color: var(--text);
+        font-weight: 540;
+      }
+
+      .check-row .running {
+        color: #e5c77d;
+      }
+
+      .check-row .passed {
+        color: var(--success);
+      }
+
+      .command-strip {
+        display: grid;
+        gap: 6px;
+        border-bottom: 1px solid var(--line);
+        padding: 7px;
+      }
+
+      .command-strip-row {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+      }
+
+      .command-strip .branch-chip {
+        flex: 1;
+      }
+
+      .status-ribbon {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 7px;
+        border: 1px solid rgb(109 212 157 / 0.22);
+        border-radius: var(--radius);
+        background: rgb(109 212 157 / 0.07);
+        padding: 7px;
+      }
+
+      .status-ribbon strong {
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 620;
+      }
+
+      .status-ribbon span {
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .split-lanes {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+
+      .lane {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgb(255 255 255 / 0.025);
+        padding: 7px;
+      }
+
+      .lane h3 {
+        margin: 0 0 6px;
+        color: var(--faint);
+        font-size: 10px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .lane-line {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .lane-line strong {
+        overflow: hidden;
+        color: var(--text);
+        font-weight: 560;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .state-pill {
+        display: inline-flex;
+        height: 22px;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0 8px;
+        font-size: 10px;
+        font-weight: 650;
+      }
+
+      .state-open {
+        border-color: rgb(16 185 129 / 0.2);
+        background: rgb(16 185 129 / 0.1);
+        color: #6ee7b7;
+      }
+
+      .state-merged,
+      .state-issue-closed {
+        border-color: rgb(139 92 246 / 0.22);
+        background: rgb(139 92 246 / 0.11);
+        color: #c4b5fd;
+      }
+
+      .state-closed {
+        border-color: rgb(244 63 94 / 0.22);
+        background: rgb(244 63 94 / 0.1);
+        color: #fda4af;
+      }
+
+      .state-draft {
+        border-color: rgb(161 161 170 / 0.2);
+        background: rgb(161 161 170 / 0.1);
+        color: #d4d4d8;
+      }
+
+      .state-unknown {
+        border-color: rgb(59 130 246 / 0.2);
+        background: rgb(59 130 246 / 0.1);
+        color: #93c5fd;
+      }
+
+      .commit-hero {
+        display: grid;
+        gap: 7px;
+        border: 1px solid rgb(143 184 255 / 0.26);
+        border-radius: var(--radius);
+        background:
+          linear-gradient(135deg, rgb(143 184 255 / 0.13), transparent 56%),
+          rgb(255 255 255 / 0.035);
+        padding: 8px;
+      }
+
+      .commit-topline {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .commit-copy {
+        min-width: 0;
+      }
+
+      .commit-copy span {
+        display: block;
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .commit-copy strong {
+        display: block;
+        overflow: hidden;
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 680;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .commit-button {
+        display: inline-flex;
+        height: 32px;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgb(143 184 255 / 0.38);
+        border-radius: var(--radius);
+        background: rgb(143 184 255 / 0.14);
+        color: var(--text);
+        padding: 0 11px;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .commit-button.clean {
+        border-color: var(--line);
+        background: rgb(255 255 255 / 0.035);
+        color: var(--muted);
+      }
+
+      .commit-meta-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 5px;
+      }
+
+      .control-select {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgb(0 0 0 / 0.14);
+        padding: 7px 8px;
+      }
+
+      .control-select span {
+        display: block;
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .control-select strong {
+        display: block;
+        overflow: hidden;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 620;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .selector-stack {
+        display: grid;
+        gap: 6px;
+        margin-top: 7px;
+      }
+
+      .env-segment {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 5px;
+      }
+
+      .env-option {
+        min-width: 0;
+        height: 28px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgb(255 255 255 / 0.035);
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .env-option.active {
+        border-color: rgb(143 184 255 / 0.32);
+        background: rgb(143 184 255 / 0.12);
+        color: var(--text);
+      }
+
+      .state-board {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .state-card {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgb(255 255 255 / 0.026);
+        padding: 7px;
+      }
+
+      .state-card span:first-child {
+        display: block;
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .state-card strong {
+        display: block;
+        overflow: hidden;
+        margin: 4px 0 6px;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 620;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .branch-ticket {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 7px;
+        align-items: stretch;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgb(255 255 255 / 0.028);
+        padding: 7px;
+      }
+
+      .branch-ticket-main {
+        min-width: 0;
+      }
+
+      .branch-ticket-main span {
+        display: block;
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .branch-ticket-main strong {
+        display: block;
+        overflow: hidden;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 650;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .branch-ticket-side {
+        display: grid;
+        align-content: center;
+        justify-items: end;
+        gap: 4px;
+      }
+
+      .mini-stat-row {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        border-top: 1px solid var(--line);
+        padding-top: 7px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .mini-stat-row strong {
+        color: var(--text);
+        font-weight: 620;
+      }
+
+      @media (max-width: 1120px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+
+        .mock {
+          min-height: 480px;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .page {
+          width: min(100vw - 18px, 520px);
+          padding-top: 14px;
+        }
+
+        .intro {
+          grid-template-columns: 1fr;
+        }
+
+        .dials {
+          justify-content: flex-start;
+          white-space: normal;
+        }
+
+        .body {
+          grid-template-columns: 1fr;
+        }
+
+        .panel {
+          min-height: 300px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="intro" aria-labelledby="title">
+        <div>
+          <h1 id="title">Overview top layout options</h1>
+          <p class="read">
+            Reading this as a compact devtool sidebar for agent-session users. All options remove
+            the right-panel title row and close button, then tighten the source-control controls.
+            New options G-I explore commit, branch, environment, and PR state color treatments.
+          </p>
+        </div>
+        <div class="dials" aria-label="Design dials">
+          <span class="dial">Variance 4</span>
+          <span class="dial">Motion 2</span>
+          <span class="dial">Density 8</span>
+        </div>
+      </section>
+
+      <section class="grid" aria-label="Options">
+        <article class="option" data-option="A">
+          <header class="option-head">
+            <div class="option-title">
+              <h2>A. Panel microbar</h2>
+              <p>Best direct fix. Keeps source control inside overview.</p>
+            </div>
+            <button class="pick" type="button">Choose A</button>
+          </header>
+          <div class="mock">
+            <div class="app-header">
+              <div class="breadcrumb">
+                <span class="crumb">Ryco</span><span class="sep">/</span>
+                <span class="crumb">Header polish</span><span class="sep">/</span>
+                <span class="crumb-main">Implementation</span>
+              </div>
+              <div class="header-actions">
+                <button class="icon-btn" type="button" aria-label="Overview open">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="icon-btn" type="button" aria-label="Workspace">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="mini-btn" type="button">Run</button>
+                <button class="mini-btn" type="button">Open</button>
+              </div>
+            </div>
+            <div class="body">
+              <section class="chat-area">
+                <div class="thread">
+                  <div class="msg">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                  <div class="msg short">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                </div>
+                <div class="bottom-toolbar">
+                  <button class="mini-btn" type="button">Terminal</button>
+                  <span class="toolbar-note">Branch stays in overview when open</span>
+                </div>
+              </section>
+              <aside class="panel panel-starts-high">
+                <div class="microbar">
+                  <span class="branch-chip">
+                    <span>Branch</span>
+                    <strong>feature/header-polish</strong>
+                  </span>
+                  <span class="action-group">
+                    <button class="icon-btn" type="button" aria-label="Review">
+                      <span class="icon-box"></span>
+                    </button>
+                    <button class="icon-btn" type="button" aria-label="Files">
+                      <span class="icon-box"></span>
+                    </button>
+                    <button class="icon-btn" type="button" aria-label="Plan actions">
+                      <span class="icon-box"></span>
+                    </button>
+                  </span>
+                </div>
+                <div class="panel-body">
+                  <p class="label">Status</p>
+                  <div class="status-list">
+                    <div class="status-row">
+                      <span class="status-icon">F</span>
+                      <span class="status-copy"><span>Files</span><strong>PR + local</strong></span>
+                      <span class="nums"
+                        ><span class="plus">+37</span><span class="minus">-6</span></span
+                      >
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">C</span>
+                      <span class="status-copy"><span>Checks</span><strong>2 running</strong></span>
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">P</span>
+                      <span class="status-copy"
+                        ><span>Plan</span><strong>3 steps active</strong></span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+          <div class="notes">
+            <p>
+              <strong>Tradeoff:</strong> saves the most vertical space with the smallest code
+              change. The branch selector can get cramped on very narrow panels.
+            </p>
+          </div>
+        </article>
+
+        <article class="option" data-option="B">
+          <header class="option-head">
+            <div class="option-title">
+              <h2>B. Header integrated</h2>
+              <p>Best global hierarchy. Branch and actions live with breadcrumbs.</p>
+            </div>
+            <button class="pick" type="button">Choose B</button>
+          </header>
+          <div class="mock">
+            <div class="app-header">
+              <div class="breadcrumb">
+                <span class="crumb">Ryco</span><span class="sep">/</span>
+                <span class="crumb-main">Implementation</span>
+              </div>
+              <span class="branch-chip header-branch">
+                <span>Branch</span>
+                <strong>feature/header-polish</strong>
+              </span>
+              <div class="header-actions">
+                <button class="icon-btn" type="button" aria-label="Overview open">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="icon-btn" type="button" aria-label="Workspace">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="mini-btn" type="button">Run</button>
+                <button class="mini-btn" type="button">Open</button>
+              </div>
+            </div>
+            <div class="body">
+              <section class="chat-area">
+                <div class="thread">
+                  <div class="msg">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                  <div class="msg short">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                </div>
+                <div class="bottom-toolbar">
+                  <button class="mini-btn" type="button">Terminal</button>
+                  <span class="toolbar-note"
+                    >Bottom toolbar can disappear or stay terminal-only</span
+                  >
+                </div>
+              </section>
+              <aside class="panel">
+                <div class="panel-body">
+                  <p class="label">Status</p>
+                  <div class="status-list">
+                    <div class="status-row">
+                      <span class="status-icon">F</span>
+                      <span class="status-copy"><span>Files</span><strong>PR + local</strong></span>
+                      <span class="nums"
+                        ><span class="plus">+37</span><span class="minus">-6</span></span
+                      >
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">R</span>
+                      <span class="status-copy"
+                        ><span>Review</span><strong>Ready to inspect</strong></span
+                      >
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">C</span>
+                      <span class="status-copy"><span>Checks</span><strong>2 running</strong></span>
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">P</span>
+                      <span class="status-copy"
+                        ><span>Plan</span><strong>3 steps active</strong></span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+          <div class="notes">
+            <p>
+              <strong>Tradeoff:</strong> strongest information architecture, but it touches more
+              header behavior and long breadcrumbs need careful tests.
+            </p>
+          </div>
+        </article>
+
+        <article class="option" data-option="C">
+          <header class="option-head">
+            <div class="option-title">
+              <h2>C. Compact source card</h2>
+              <p>Best if you want the existing split to stay recognizable.</p>
+            </div>
+            <button class="pick" type="button">Choose C</button>
+          </header>
+          <div class="mock">
+            <div class="app-header">
+              <div class="breadcrumb">
+                <span class="crumb">Ryco</span><span class="sep">/</span>
+                <span class="crumb">Header polish</span><span class="sep">/</span>
+                <span class="crumb-main">Implementation</span>
+              </div>
+              <div class="header-actions">
+                <button class="icon-btn" type="button" aria-label="Overview open">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="icon-btn" type="button" aria-label="Workspace">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="mini-btn" type="button">Run</button>
+                <button class="mini-btn" type="button">Open</button>
+              </div>
+            </div>
+            <div class="body">
+              <section class="chat-area">
+                <div class="thread">
+                  <div class="msg">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                  <div class="msg short">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                </div>
+                <div class="bottom-toolbar">
+                  <span class="env-chip"><strong>Local</strong></span>
+                  <button class="mini-btn" type="button">Terminal</button>
+                </div>
+              </section>
+              <aside class="panel">
+                <div class="panel-body">
+                  <div class="source-card">
+                    <div class="row">
+                      <span class="branch-chip">
+                        <span>Branch</span>
+                        <strong>feature/header-polish</strong>
+                      </span>
+                    </div>
+                    <div class="row">
+                      <span class="row-left">Actions</span>
+                      <span class="action-group">
+                        <button class="action-chip" type="button">Review</button>
+                        <button class="action-chip" type="button">Files</button>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="status-list">
+                    <p class="label">Status</p>
+                    <div class="status-row">
+                      <span class="status-icon">F</span>
+                      <span class="status-copy"><span>Files</span><strong>PR + local</strong></span>
+                      <span class="nums"
+                        ><span class="plus">+37</span><span class="minus">-6</span></span
+                      >
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">C</span>
+                      <span class="status-copy"><span>Checks</span><strong>2 running</strong></span>
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">P</span>
+                      <span class="status-copy"
+                        ><span>Plan</span><strong>3 steps active</strong></span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+          <div class="notes">
+            <p>
+              <strong>Tradeoff:</strong> very safe and readable, but saves less space than A because
+              the source-control grouping remains a small card.
+            </p>
+          </div>
+        </article>
+
+        <article class="option" data-option="D">
+          <header class="option-head">
+            <div class="option-title">
+              <h2>D. Ledger source block</h2>
+              <p>Dense but detailed. Branch, actions, PR, and changes stay in one stack.</p>
+            </div>
+            <button class="pick" type="button">Choose D</button>
+          </header>
+          <div class="mock">
+            <div class="app-header">
+              <div class="breadcrumb">
+                <span class="crumb">Ryco</span><span class="sep">/</span>
+                <span class="crumb">Right panel</span><span class="sep">/</span>
+                <span class="crumb-main">Implementation</span>
+              </div>
+              <div class="header-actions">
+                <button class="icon-btn" type="button" aria-label="Overview open">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="icon-btn" type="button" aria-label="Workspace">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="mini-btn" type="button">Run</button>
+                <button class="mini-btn" type="button">Open</button>
+              </div>
+            </div>
+            <div class="body">
+              <section class="chat-area">
+                <div class="thread">
+                  <div class="msg">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                  <div class="msg short">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                </div>
+                <div class="bottom-toolbar">
+                  <button class="mini-btn" type="button">Terminal</button>
+                  <span class="toolbar-note">1 terminal open</span>
+                </div>
+              </section>
+              <aside class="panel">
+                <div class="panel-body">
+                  <div class="control-band">
+                    <div class="source-kicker">
+                      <span>Source control</span>
+                      <span>GitHub connected</span>
+                    </div>
+                    <div class="branch-field">
+                      <span class="branch-field-main">
+                        <span>Branch</span>
+                        <strong>feature/overview-density</strong>
+                      </span>
+                      <span class="branch-field-meta">Worktree</span>
+                    </div>
+                    <div class="action-grid" aria-label="Overview actions">
+                      <button class="action-button primary" type="button">Review</button>
+                      <button class="action-button" type="button">Files</button>
+                      <button class="action-button" type="button">Plan</button>
+                    </div>
+                  </div>
+
+                  <div class="data-grid">
+                    <div class="metric">
+                      <span>Committed</span>
+                      <strong>9 files</strong>
+                      <span class="nums"
+                        ><span class="plus">+30</span><span class="minus">-5</span></span
+                      >
+                    </div>
+                    <div class="metric">
+                      <span>Uncommitted</span>
+                      <strong>2 files</strong>
+                      <span class="nums"
+                        ><span class="plus">+7</span><span class="minus">-1</span></span
+                      >
+                    </div>
+                  </div>
+
+                  <div class="pr-card">
+                    <div class="pr-title">
+                      <strong>Consolidate right panel</strong>
+                      <span>PR #124</span>
+                    </div>
+                    <div class="check-stack">
+                      <div class="check-row">
+                        <span>Pull Request / Quality</span>
+                        <strong class="running">Running</strong>
+                      </div>
+                      <div class="check-row">
+                        <span>Build desktop artifact</span>
+                        <strong class="passed">Passed</strong>
+                      </div>
+                      <div class="check-row">
+                        <span>Review comments</span>
+                        <strong>3 open</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="status-list">
+                    <p class="label">Session</p>
+                    <div class="status-row">
+                      <span class="status-icon">P</span>
+                      <span class="status-copy"
+                        ><span>Plan</span><strong>3 steps active</strong></span
+                      >
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">S</span>
+                      <span class="status-copy"><span>Subagents</span><strong>2 idle</strong></span>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+          <div class="notes">
+            <p>
+              <strong>Tradeoff:</strong> most detailed while still compact. It turns the top of the
+              panel into a source-control ledger, so the first status rows start lower.
+            </p>
+          </div>
+        </article>
+
+        <article class="option" data-option="E">
+          <header class="option-head">
+            <div class="option-title">
+              <h2>E. Command strip</h2>
+              <p>Controls sit in a tight internal strip, with health details below.</p>
+            </div>
+            <button class="pick" type="button">Choose E</button>
+          </header>
+          <div class="mock">
+            <div class="app-header">
+              <div class="breadcrumb">
+                <span class="crumb">Ryco</span><span class="sep">/</span>
+                <span class="crumb">Right panel</span><span class="sep">/</span>
+                <span class="crumb-main">Implementation</span>
+              </div>
+              <div class="header-actions">
+                <button class="icon-btn" type="button" aria-label="Overview open">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="icon-btn" type="button" aria-label="Workspace">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="mini-btn" type="button">Run</button>
+                <button class="mini-btn" type="button">Open</button>
+              </div>
+            </div>
+            <div class="body">
+              <section class="chat-area">
+                <div class="thread">
+                  <div class="msg">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                  <div class="msg short">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                </div>
+                <div class="bottom-toolbar">
+                  <button class="mini-btn" type="button">Terminal</button>
+                  <span class="toolbar-note">Drawer closed</span>
+                </div>
+              </section>
+              <aside class="panel">
+                <div class="command-strip">
+                  <div class="command-strip-row">
+                    <span class="branch-chip">
+                      <span>Branch</span>
+                      <strong>feature/overview-density</strong>
+                    </span>
+                    <span class="small-pill">Local</span>
+                  </div>
+                  <div class="action-grid" aria-label="Overview actions">
+                    <button class="action-button primary" type="button">Review</button>
+                    <button class="action-button" type="button">Files</button>
+                    <button class="action-button" type="button">Actions</button>
+                  </div>
+                </div>
+                <div class="panel-body">
+                  <div class="status-ribbon">
+                    <div>
+                      <strong>Ready to review</strong>
+                      <span>PR #124 has 1 active workflow</span>
+                    </div>
+                    <span class="small-pill">Clean merge</span>
+                  </div>
+
+                  <div class="data-grid">
+                    <div class="metric">
+                      <span>Files changed</span>
+                      <strong>11 total</strong>
+                      <span class="nums"
+                        ><span class="plus">+37</span><span class="minus">-6</span></span
+                      >
+                    </div>
+                    <div class="metric">
+                      <span>Review state</span>
+                      <strong>3 comments</strong>
+                      <span class="small-pill">Needs reply</span>
+                    </div>
+                  </div>
+
+                  <div class="pr-card">
+                    <div class="pr-title">
+                      <strong>Overview source controls</strong>
+                      <span>Issue #112</span>
+                    </div>
+                    <div class="check-stack">
+                      <div class="check-row">
+                        <span>Quality</span>
+                        <strong class="running">2m 18s</strong>
+                      </div>
+                      <div class="check-row">
+                        <span>Desktop smoke</span>
+                        <strong class="passed">Passed</strong>
+                      </div>
+                      <div class="check-row">
+                        <span>Last push</span>
+                        <strong>4 min ago</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="status-list">
+                    <p class="label">Status</p>
+                    <div class="status-row">
+                      <span class="status-icon">F</span>
+                      <span class="status-copy"
+                        ><span>Files</span><strong>2 local, 9 PR</strong></span
+                      >
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">P</span>
+                      <span class="status-copy"
+                        ><span>Plan</span><strong>Save available</strong></span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+          <div class="notes">
+            <p>
+              <strong>Tradeoff:</strong> fastest to scan because controls are always at the same
+              panel edge. The strip can feel toolbar-heavy if the panel gets more actions later.
+            </p>
+          </div>
+        </article>
+
+        <article class="option" data-option="F">
+          <header class="option-head">
+            <div class="option-title">
+              <h2>F. Split lanes</h2>
+              <p>Branch context and action controls become two small lanes inside overview.</p>
+            </div>
+            <button class="pick" type="button">Choose F</button>
+          </header>
+          <div class="mock">
+            <div class="app-header">
+              <div class="breadcrumb">
+                <span class="crumb">Ryco</span><span class="sep">/</span>
+                <span class="crumb">Right panel</span><span class="sep">/</span>
+                <span class="crumb-main">Implementation</span>
+              </div>
+              <div class="header-actions">
+                <button class="icon-btn" type="button" aria-label="Overview open">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="icon-btn" type="button" aria-label="Workspace">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="mini-btn" type="button">Run</button>
+                <button class="mini-btn" type="button">Open</button>
+              </div>
+            </div>
+            <div class="body">
+              <section class="chat-area">
+                <div class="thread">
+                  <div class="msg">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                  <div class="msg short">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                </div>
+                <div class="bottom-toolbar">
+                  <button class="mini-btn" type="button">Terminal</button>
+                  <span class="toolbar-note">2 terminals open</span>
+                </div>
+              </section>
+              <aside class="panel">
+                <div class="panel-body">
+                  <div class="split-lanes">
+                    <div class="lane">
+                      <h3>Worktree</h3>
+                      <div class="lane-line">
+                        <span>Branch</span>
+                        <strong>feature/overview-density</strong>
+                      </div>
+                      <div class="lane-line">
+                        <span>Base</span>
+                        <strong>main</strong>
+                      </div>
+                      <div class="lane-line">
+                        <span>Run on</span>
+                        <strong>Local</strong>
+                      </div>
+                    </div>
+                    <div class="lane">
+                      <h3>Actions</h3>
+                      <button class="action-button primary" type="button">Review</button>
+                      <div class="action-grid two-up">
+                        <button class="action-button" type="button">Files</button>
+                        <button class="action-button" type="button">Plan</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="control-band tight">
+                    <div class="source-kicker">
+                      <span>Pull Request</span>
+                      <span>#124 open</span>
+                    </div>
+                    <div class="pr-title">
+                      <strong>Keep overview compact</strong>
+                      <span>3 comments</span>
+                    </div>
+                    <div class="check-stack">
+                      <div class="check-row">
+                        <span>Checks</span>
+                        <strong class="running">1 active</strong>
+                      </div>
+                      <div class="check-row">
+                        <span>Merge state</span>
+                        <strong class="passed">Ready</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="status-list">
+                    <p class="label">Changes</p>
+                    <div class="status-row">
+                      <span class="status-icon">L</span>
+                      <span class="status-copy"><span>Local</span><strong>2 files</strong></span>
+                      <span class="nums"
+                        ><span class="plus">+7</span><span class="minus">-1</span></span
+                      >
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">P</span>
+                      <span class="status-copy"><span>PR</span><strong>9 files</strong></span>
+                      <span class="nums"
+                        ><span class="plus">+30</span><span class="minus">-5</span></span
+                      >
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">S</span>
+                      <span class="status-copy"
+                        ><span>Session</span><strong>3 steps active</strong></span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+          <div class="notes">
+            <p>
+              <strong>Tradeoff:</strong> gives branch and actions equal priority without a header
+              row. It is more structured, but the two-lane top can get tight with long labels.
+            </p>
+          </div>
+        </article>
+
+        <article class="option" data-option="G">
+          <header class="option-head">
+            <div class="option-title">
+              <h2>G. Commit command card</h2>
+              <p>A stronger commit button with branch and environment context attached.</p>
+            </div>
+            <button class="pick" type="button">Choose G</button>
+          </header>
+          <div class="mock">
+            <div class="app-header">
+              <div class="breadcrumb">
+                <span class="crumb">Ryco</span><span class="sep">/</span>
+                <span class="crumb">Commit UI</span><span class="sep">/</span>
+                <span class="crumb-main">Implementation</span>
+              </div>
+              <div class="header-actions">
+                <button class="icon-btn" type="button" aria-label="Overview open">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="icon-btn" type="button" aria-label="Workspace">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="mini-btn" type="button">Run</button>
+                <button class="mini-btn" type="button">Open</button>
+              </div>
+            </div>
+            <div class="body">
+              <section class="chat-area">
+                <div class="thread">
+                  <div class="msg">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                  <div class="msg short">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                </div>
+                <div class="bottom-toolbar">
+                  <button class="mini-btn" type="button">Terminal</button>
+                  <span class="toolbar-note">Commit controls stay in overview</span>
+                </div>
+              </section>
+              <aside class="panel">
+                <div class="panel-body">
+                  <div class="commit-hero">
+                    <div class="commit-topline">
+                      <span class="commit-copy">
+                        <span>Local changes</span>
+                        <strong>2 files ready</strong>
+                      </span>
+                      <button class="commit-button" type="button">Commit</button>
+                    </div>
+                    <div class="commit-meta-grid">
+                      <div class="metric">
+                        <span>Added</span>
+                        <strong class="plus">+7</strong>
+                      </div>
+                      <div class="metric">
+                        <span>Deleted</span>
+                        <strong class="minus">-1</strong>
+                      </div>
+                      <div class="metric">
+                        <span>Message</span>
+                        <strong>Auto</strong>
+                      </div>
+                    </div>
+                    <div class="mini-stat-row">
+                      <span>Next action</span>
+                      <strong>Commit, push, open PR</strong>
+                    </div>
+                  </div>
+
+                  <div class="selector-stack">
+                    <div class="control-select">
+                      <span>
+                        <span>Branch</span>
+                        <strong>feature/commit-control</strong>
+                      </span>
+                      <span class="state-pill state-open">PR open</span>
+                    </div>
+                    <div class="env-segment" aria-label="Environment selector">
+                      <button class="env-option active" type="button">Local</button>
+                      <button class="env-option" type="button">Remote</button>
+                    </div>
+                  </div>
+
+                  <div class="pr-card">
+                    <div class="pr-title">
+                      <strong>Refine overview controls</strong>
+                      <span class="state-pill state-open">Open</span>
+                    </div>
+                    <div class="check-stack">
+                      <div class="check-row">
+                        <span>Checks</span>
+                        <strong class="running">1 running</strong>
+                      </div>
+                      <div class="check-row">
+                        <span>Review</span>
+                        <strong>3 comments</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="status-list">
+                    <p class="label">Overview</p>
+                    <div class="status-row">
+                      <span class="status-icon">F</span>
+                      <span class="status-copy"
+                        ><span>Files</span><strong>2 local, 9 PR</strong></span
+                      >
+                      <span class="nums"
+                        ><span class="plus">+37</span><span class="minus">-6</span></span
+                      >
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">P</span>
+                      <span class="status-copy"
+                        ><span>Plan</span><strong>3 steps active</strong></span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+          <div class="notes">
+            <p>
+              <strong>Tradeoff:</strong> makes commit feel like the primary source-control action
+              without moving it out of overview. It needs disabled and running variants in code.
+            </p>
+          </div>
+        </article>
+
+        <article class="option" data-option="H">
+          <header class="option-head">
+            <div class="option-title">
+              <h2>H. Selector console</h2>
+              <p>Branch and environment become polished selectors with PR state nearby.</p>
+            </div>
+            <button class="pick" type="button">Choose H</button>
+          </header>
+          <div class="mock">
+            <div class="app-header">
+              <div class="breadcrumb">
+                <span class="crumb">Ryco</span><span class="sep">/</span>
+                <span class="crumb">Selector UI</span><span class="sep">/</span>
+                <span class="crumb-main">Implementation</span>
+              </div>
+              <div class="header-actions">
+                <button class="icon-btn" type="button" aria-label="Overview open">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="icon-btn" type="button" aria-label="Workspace">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="mini-btn" type="button">Run</button>
+                <button class="mini-btn" type="button">Open</button>
+              </div>
+            </div>
+            <div class="body">
+              <section class="chat-area">
+                <div class="thread">
+                  <div class="msg">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                  <div class="msg short">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                </div>
+                <div class="bottom-toolbar">
+                  <button class="mini-btn" type="button">Terminal</button>
+                  <span class="toolbar-note">Branch picker remains internal</span>
+                </div>
+              </section>
+              <aside class="panel">
+                <div class="panel-body">
+                  <div class="control-band">
+                    <div class="source-kicker">
+                      <span>Repository</span>
+                      <span>GitHub</span>
+                    </div>
+                    <div class="branch-ticket">
+                      <span class="branch-ticket-main">
+                        <span>Selected branch</span>
+                        <strong>feature/state-aware-overview</strong>
+                      </span>
+                      <span class="branch-ticket-side">
+                        <span class="state-pill state-open">Open</span>
+                        <span class="small-pill">base main</span>
+                      </span>
+                    </div>
+                    <div class="env-segment" aria-label="Environment selector">
+                      <button class="env-option active" type="button">Local Mac</button>
+                      <button class="env-option" type="button">Cloud</button>
+                    </div>
+                    <div class="action-grid" aria-label="Git actions">
+                      <button class="action-button primary" type="button">Commit</button>
+                      <button class="action-button" type="button">Push</button>
+                      <button class="action-button" type="button">PR</button>
+                    </div>
+                  </div>
+
+                  <div class="state-board" aria-label="State color examples">
+                    <div class="state-card">
+                      <span>Current PR</span>
+                      <strong>#124 open</strong>
+                      <span class="state-pill state-open">Emerald</span>
+                    </div>
+                    <div class="state-card">
+                      <span>Linked issue</span>
+                      <strong>#112 closed</strong>
+                      <span class="state-pill state-issue-closed">Violet</span>
+                    </div>
+                    <div class="state-card">
+                      <span>Draft example</span>
+                      <strong>#126 draft</strong>
+                      <span class="state-pill state-draft">Zinc</span>
+                    </div>
+                    <div class="state-card">
+                      <span>Unknown host</span>
+                      <strong>#129 unknown</strong>
+                      <span class="state-pill state-unknown">Blue</span>
+                    </div>
+                  </div>
+
+                  <div class="status-list">
+                    <p class="label">Changes</p>
+                    <div class="status-row">
+                      <span class="status-icon">C</span>
+                      <span class="status-copy"
+                        ><span>Committed</span><strong>9 files</strong></span
+                      >
+                      <span class="nums"
+                        ><span class="plus">+30</span><span class="minus">-5</span></span
+                      >
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">L</span>
+                      <span class="status-copy"><span>Local</span><strong>2 files</strong></span>
+                      <span class="nums"
+                        ><span class="plus">+7</span><span class="minus">-1</span></span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+          <div class="notes">
+            <p>
+              <strong>Tradeoff:</strong> best for branch and environment clarity. The state color
+              samples are useful for design selection, but production should show only relevant
+              current states.
+            </p>
+          </div>
+        </article>
+
+        <article class="option" data-option="I">
+          <header class="option-head">
+            <div class="option-title">
+              <h2>I. State-aware actions</h2>
+              <p>Action styling changes with PR state while commit availability stays clear.</p>
+            </div>
+            <button class="pick" type="button">Choose I</button>
+          </header>
+          <div class="mock">
+            <div class="app-header">
+              <div class="breadcrumb">
+                <span class="crumb">Ryco</span><span class="sep">/</span>
+                <span class="crumb">State UI</span><span class="sep">/</span>
+                <span class="crumb-main">Implementation</span>
+              </div>
+              <div class="header-actions">
+                <button class="icon-btn" type="button" aria-label="Overview open">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="icon-btn" type="button" aria-label="Workspace">
+                  <span class="icon-box"></span>
+                </button>
+                <button class="mini-btn" type="button">Run</button>
+                <button class="mini-btn" type="button">Open</button>
+              </div>
+            </div>
+            <div class="body">
+              <section class="chat-area">
+                <div class="thread">
+                  <div class="msg">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                  <div class="msg short">
+                    <div class="line"></div>
+                    <div class="line"></div>
+                  </div>
+                </div>
+                <div class="bottom-toolbar">
+                  <button class="mini-btn" type="button">Terminal</button>
+                  <span class="toolbar-note">PR state controls stay in overview</span>
+                </div>
+              </section>
+              <aside class="panel">
+                <div class="panel-body">
+                  <div class="commit-hero">
+                    <div class="commit-topline">
+                      <span class="commit-copy">
+                        <span>Clean worktree</span>
+                        <strong>No local files to commit</strong>
+                      </span>
+                      <button class="commit-button clean" type="button">Commit</button>
+                    </div>
+                    <div class="selector-stack">
+                      <div class="control-select">
+                        <span>
+                          <span>Branch</span>
+                          <strong>release/panel-polish</strong>
+                        </span>
+                        <span class="state-pill state-closed">PR closed</span>
+                      </div>
+                      <div class="env-segment" aria-label="Environment selector">
+                        <button class="env-option active" type="button">Local</button>
+                        <button class="env-option" type="button">Cloud</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="state-board" aria-label="Pull request states">
+                    <div class="state-card">
+                      <span>Open PR</span>
+                      <strong>#124 review</strong>
+                      <span class="state-pill state-open">Open</span>
+                    </div>
+                    <div class="state-card">
+                      <span>Merged PR</span>
+                      <strong>#119 shipped</strong>
+                      <span class="state-pill state-merged">Merged</span>
+                    </div>
+                    <div class="state-card">
+                      <span>Closed PR</span>
+                      <strong>#118 stale</strong>
+                      <span class="state-pill state-closed">Closed</span>
+                    </div>
+                    <div class="state-card">
+                      <span>Draft PR</span>
+                      <strong>#126 WIP</strong>
+                      <span class="state-pill state-draft">Draft</span>
+                    </div>
+                  </div>
+
+                  <div class="pr-card">
+                    <div class="pr-title">
+                      <strong>Closed branch cleanup</strong>
+                      <span class="state-pill state-closed">Closed</span>
+                    </div>
+                    <div class="check-stack">
+                      <div class="check-row">
+                        <span>Recommended action</span>
+                        <strong>Switch branch</strong>
+                      </div>
+                      <div class="check-row">
+                        <span>Commit</span>
+                        <strong>Disabled until changes exist</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="status-list">
+                    <p class="label">Session</p>
+                    <div class="status-row">
+                      <span class="status-icon">B</span>
+                      <span class="status-copy"
+                        ><span>Branch</span><strong>Closed PR branch</strong></span
+                      >
+                    </div>
+                    <div class="status-row">
+                      <span class="status-icon">R</span>
+                      <span class="status-copy"
+                        ><span>Review</span><strong>No open review</strong></span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+          <div class="notes">
+            <p>
+              <strong>Tradeoff:</strong> strongest PR-state language. It makes closed and merged
+              branches obvious, but it is less focused on the active happy path than G.
+            </p>
+          </div>
+        </article>
+      </section>
+    </main>
+    <script>
+      for (const button of document.querySelectorAll(".pick")) {
+        button.addEventListener("click", () => {
+          const option = button.closest(".option");
+          document.querySelectorAll(".option").forEach((item) => {
+            item.style.borderColor = "var(--line)";
+          });
+          option.style.borderColor = "var(--accent)";
+        });
+      }
+    </script>
+  </body>
+</html>

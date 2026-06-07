@@ -76,9 +76,9 @@ function makeRegistry(input: {
         Layer.mock(GitLabCli.GitLabCli)({}),
         Layer.mock(VcsProcess.VcsProcess)({}),
         NodeServices.layer,
-        ServerConfig.layerTest(process.cwd(), { prefix: "s3-source-control-registry-test-" }).pipe(
-          Layer.provide(NodeServices.layer),
-        ),
+        ServerConfig.layerTest(process.cwd(), {
+          prefix: "ryco-source-control-registry-test-",
+        }).pipe(Layer.provide(NodeServices.layer)),
       ),
     ),
   );

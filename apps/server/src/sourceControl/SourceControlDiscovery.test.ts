@@ -24,9 +24,9 @@ const sourceControlProviderRegistryTestLayer = (input: {
   SourceControlProviderRegistry.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        ServerConfig.layerTest(process.cwd(), { prefix: "s3-source-control-registry-test-" }).pipe(
-          Layer.provide(NodeServices.layer),
-        ),
+        ServerConfig.layerTest(process.cwd(), {
+          prefix: "ryco-source-control-registry-test-",
+        }).pipe(Layer.provide(NodeServices.layer)),
         Layer.mock(AzureDevOpsCli.AzureDevOpsCli)({}),
         Layer.mock(BitbucketApi.BitbucketApi)(input.bitbucket),
         Layer.mock(ForgejoApi.ForgejoApi)({
@@ -112,7 +112,7 @@ Logged in to github.com account juliusmarminge (keyring)
   } satisfies Partial<VcsProcess.VcsProcessShape>;
   const testLayer = SourceControlDiscovery.layer.pipe(
     Layer.provide(
-      ServerConfig.layerTest(process.cwd(), { prefix: "s3-source-control-discovery-" }),
+      ServerConfig.layerTest(process.cwd(), { prefix: "ryco-source-control-discovery-" }),
     ),
     Layer.provide(Layer.mock(VcsProcess.VcsProcess)(processMock)),
     Layer.provide(
@@ -216,7 +216,7 @@ it.effect("caches repeated discovery requests within the short discovery TTL", (
           }),
         ),
       },
-      prefix: "s3-source-control-discovery-cache-test-",
+      prefix: "ryco-source-control-discovery-cache-test-",
     });
 
     const counts = yield* Effect.gen(function* () {
@@ -264,7 +264,7 @@ it.effect("refreshes discovery after the short discovery TTL expires", () =>
           }),
         ),
       },
-      prefix: "s3-source-control-discovery-expiry-test-",
+      prefix: "ryco-source-control-discovery-expiry-test-",
     });
 
     const counts = yield* Effect.gen(function* () {
@@ -331,7 +331,7 @@ Logged in to gitlab.com as gitlab-user
   } satisfies Partial<VcsProcess.VcsProcessShape>;
   const testLayer = SourceControlDiscovery.layer.pipe(
     Layer.provide(
-      ServerConfig.layerTest(process.cwd(), { prefix: "s3-source-control-auth-discovery-" }),
+      ServerConfig.layerTest(process.cwd(), { prefix: "ryco-source-control-auth-discovery-" }),
     ),
     Layer.provide(Layer.mock(VcsProcess.VcsProcess)(processMock)),
     Layer.provide(

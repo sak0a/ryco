@@ -22,11 +22,11 @@ import { SshPasswordPromptError } from "@ryco/ssh/errors";
 import {
   fetchLoopbackSshJson,
   SshEnvironmentManager,
-  type RemoteS3RunnerOptions,
+  type RemoteRycoRunnerOptions,
 } from "@ryco/ssh/tunnel";
 import { Effect, Exit, Layer, ManagedRuntime, Scope } from "effect";
 
-export { resolveRemoteS3CliPackageSpec } from "@ryco/ssh/command";
+export { resolveRemoteRycoCliPackageSpec } from "@ryco/ssh/command";
 
 const DISCOVER_SSH_HOSTS_CHANNEL = "desktop:discover-ssh-hosts";
 const ENSURE_SSH_ENVIRONMENT_CHANNEL = "desktop:ensure-ssh-environment";
@@ -43,7 +43,7 @@ const SSH_PASSWORD_PROMPT_CANCELLED_RESULT = "ssh-password-prompt-cancelled";
 interface DesktopSshEnvironmentManagerOptions {
   readonly passwordProvider?: (request: SshPasswordRequest) => Promise<string | null>;
   readonly resolveCliPackageSpec?: () => string;
-  readonly resolveCliRunner?: () => RemoteS3RunnerOptions;
+  readonly resolveCliRunner?: () => RemoteRycoRunnerOptions;
 }
 
 const sshRuntime = ManagedRuntime.make(
@@ -193,7 +193,7 @@ export interface DesktopSshBridgeIpcMain {
 export interface DesktopSshEnvironmentBridgeOptions {
   readonly getMainWindow: () => DesktopSshBridgeWindow | null;
   readonly resolveCliPackageSpec?: () => string;
-  readonly resolveCliRunner?: () => RemoteS3RunnerOptions;
+  readonly resolveCliRunner?: () => RemoteRycoRunnerOptions;
   readonly passwordPromptTimeoutMs?: number;
 }
 
@@ -283,7 +283,7 @@ export class DesktopSshEnvironmentBridge {
       sshRuntime.runPromise(
         fetchLoopbackSshJson<ExecutionEnvironmentDescriptor>({
           httpBaseUrl: rawHttpBaseUrl,
-          pathname: "/.well-known/s3/environment",
+          pathname: "/.well-known/ryco/environment",
         }),
       ),
     );

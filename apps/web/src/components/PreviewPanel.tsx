@@ -2,10 +2,19 @@ import { File as DiffsFile } from "@pierre/diffs/react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useSearch } from "@tanstack/react-router";
 import { Schema } from "effect";
-import { CircleAlertIcon, RefreshCwIcon, TextWrapIcon, TriangleAlertIcon } from "lucide-react";
 import {
-  type CSSProperties,
+  CircleAlertIcon,
+  FolderOpenIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
+  RefreshCwIcon,
+  SearchIcon,
+  TextWrapIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
+import {
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -33,6 +42,7 @@ import { Toggle } from "./ui/toggle";
 import { cn } from "~/lib/utils";
 import {
   detectPreviewFileKind,
+  filterPreviewProjectEntries,
   inferPreviewLanguage,
   resolvePreviewSizeGuard,
 } from "./PreviewPanel.logic";
@@ -99,7 +109,7 @@ function getResizedTreeWidth(
   containerWidth: number,
   pointerClientX: number,
 ): number {
-  const delta = pointerClientX - resizeState.startX;
+  const delta = resizeState.startX - pointerClientX;
   return clampTreeWidth(resizeState.startWidth + delta, containerWidth);
 }
 
@@ -121,6 +131,73 @@ function buildPreviewFileCacheKey(filePath: string, contents: string): string {
 }
 
 const EMPTY_TURN_DIFF_SUMMARIES: readonly TurnDiffSummary[] = [];
+
+function PreviewTreeMotionFrame(props: {
+  children: ReactNode;
+  open: boolean;
+  resizing: boolean;
+  width: number;
+}) {
+  const [entered, setEntered] = useState(props.open);
+
+  useEffect(() => {
+    if (!props.open) {
+      setEntered(false);
+      return;
+    }
+    const frameId = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(frameId);
+  }, [props.open]);
+
+  const active = props.open && entered;
+
+  return (
+    <div
+      data-preview-file-rail
+      aria-hidden={props.open ? undefined : true}
+      inert={props.open ? undefined : true}
+      className={cn(
+        "min-h-0 shrink-0 overflow-hidden bg-card/20",
+        props.open ? "border-l border-border/70" : "border-l-0",
+        props.resizing
+          ? "transition-none"
+          : "transition-[width,opacity] duration-[360ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+        props.open ? "opacity-100" : "opacity-0",
+      )}
+      style={{
+        width: props.open ? `${props.width}px` : "0px",
+        maxWidth: "55%",
+      }}
+    >
+      <div
+        className={cn(
+          "h-full min-h-0 transition-[translate,opacity] duration-[360ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transition-none",
+          props.resizing ? "transition-none" : null,
+          active ? "translate-x-0 opacity-100" : "translate-x-4 opacity-0",
+        )}
+        style={{ width: `${props.width}px`, maxWidth: "100%" }}
+      >
+        {props.children}
+      </div>
+    </div>
+  );
+}
+
+function PreviewOpenFileEmptyState() {
+  return (
+    <div className="flex flex-1 items-center justify-center px-5 text-center">
+      <div className="flex max-w-xs flex-col items-center gap-3">
+        <FolderOpenIcon className="size-8 text-muted-foreground/65" />
+        <div className="space-y-1.5">
+          <div className="text-sm font-semibold text-foreground">Open file</div>
+          <div className="text-xs leading-5 text-muted-foreground/70">
+            Select a file from the workspace tree.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface PreviewPanelProps {
   mode?: DiffPanelMode;
@@ -182,6 +259,8 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
   );
   const activeCwd = activeThread?.worktreePath ?? activeProject?.cwd ?? null;
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [fileFilterQuery, setFileFilterQuery] = useState("");
+  const [isTreeVisible, setIsTreeVisible] = useState(true);
   const [wrapPreviewLines, setWrapPreviewLines] = useState(settings.diffWordWrap);
   const splitLayoutRef = useRef<HTMLDivElement | null>(null);
   const [treeWidth, setTreeWidth] = useState(() => {
@@ -193,6 +272,7 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
       PREVIEW_TREE_DEFAULT_WIDTH
     );
   });
+  const [isTreeResizing, setIsTreeResizing] = useState(false);
   const resizeStateRef = useRef<{
     pointerId: number;
     startWidth: number;
@@ -209,6 +289,7 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
 
   useEffect(() => {
     setSelectedFilePath(null);
+    setIsTreeVisible(true);
   }, [activeThread?.environmentId, activeThread?.id]);
 
   const latestProjectFilesRefreshKey = useMemo(() => {
@@ -258,6 +339,11 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
   const projectFilesTruncated = projectFilesQuery.data?.truncated === true;
   const projectFilesIsFetching = projectFilesQuery.isFetching;
   const refetchProjectFiles = projectFilesQuery.refetch;
+  const filteredProjectFiles = useMemo(
+    () => filterPreviewProjectEntries(projectFiles?.entries ?? [], fileFilterQuery),
+    [fileFilterQuery, projectFiles?.entries],
+  );
+  const isFilteringProjectFiles = fileFilterQuery.trim().length > 0;
 
   useEffect(() => {
     if (!projectFiles) {
@@ -404,17 +490,22 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
 
   const onResizePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
-      if (event.button !== 0) return;
+      if (event.button !== 0 || !isTreeVisible) return;
+      const renderedTreeWidth =
+        splitLayoutRef.current
+          ?.querySelector<HTMLElement>("[data-preview-file-rail]")
+          ?.getBoundingClientRect().width ?? treeWidth;
       resizeStateRef.current = {
         pointerId: event.pointerId,
-        startWidth: treeWidth,
+        startWidth: renderedTreeWidth,
         startX: event.clientX,
       };
       event.currentTarget.setPointerCapture(event.pointerId);
-      document.body.style.cursor = "e-resize";
+      setIsTreeResizing(true);
+      document.body.style.cursor = "ew-resize";
       document.body.style.userSelect = "none";
     },
-    [treeWidth],
+    [isTreeVisible, treeWidth],
   );
 
   const onResizePointerMove = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -430,12 +521,15 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
 
   const onResizePointerEnd = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     const resizeState = resizeStateRef.current;
-    const container = splitLayoutRef.current;
-    if (!resizeState || !container || resizeState.pointerId !== event.pointerId) {
+    if (!resizeState || resizeState.pointerId !== event.pointerId) {
       return;
     }
-    const nextWidth = getResizedTreeWidth(resizeState, container.clientWidth, event.clientX);
+    const container = splitLayoutRef.current;
+    const nextWidth = container
+      ? getResizedTreeWidth(resizeState, container.clientWidth, event.clientX)
+      : resizeState.startWidth;
     resizeStateRef.current = null;
+    setIsTreeResizing(false);
     setTreeWidth(nextWidth);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -459,6 +553,16 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
     void refetchProjectFiles();
   }, [refetchProjectFiles]);
 
+  const onToggleTreeVisibility = useCallback(() => {
+    if (isTreeVisible) {
+      resizeStateRef.current = null;
+      setIsTreeResizing(false);
+      document.body.style.removeProperty("cursor");
+      document.body.style.removeProperty("user-select");
+    }
+    setIsTreeVisible((current) => !current);
+  }, [isTreeVisible]);
+
   const headerRow = (
     <>
       <div className="min-w-0 flex-1 px-1 [-webkit-app-region:no-drag]">
@@ -473,6 +577,21 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
+        <Button
+          aria-label={isTreeVisible ? "Hide workspace tree" : "Show workspace tree"}
+          aria-pressed={isTreeVisible}
+          title={isTreeVisible ? "Hide workspace tree" : "Show workspace tree"}
+          variant="outline"
+          size="icon-xs"
+          className="shrink-0"
+          onClick={onToggleTreeVisibility}
+        >
+          {isTreeVisible ? (
+            <PanelRightCloseIcon className="size-3" />
+          ) : (
+            <PanelRightOpenIcon className="size-3" />
+          )}
+        </Button>
         <Button
           aria-label="Refresh workspace tree"
           title="Refresh workspace tree"
@@ -519,63 +638,13 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
           No project files available yet.
         </div>
       ) : (
-        <div ref={splitLayoutRef} className="flex min-h-0 min-w-0 flex-1">
+        <div ref={splitLayoutRef} className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <div
-            className="min-h-0 shrink-0 overflow-auto bg-card/20 p-2"
-            style={{ width: `${treeWidth}px`, maxWidth: "55%" } satisfies CSSProperties}
+            data-preview-content-panel
+            className="flex min-h-0 min-w-0 flex-1 flex-col transition-[min-width] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
           >
-            {projectFilesError || projectFilesTruncated ? (
-              <Alert
-                variant={projectFilesError ? "error" : "warning"}
-                className="mb-2 rounded-lg border-border/70 px-3 py-2 text-[11px]"
-              >
-                {projectFilesError ? (
-                  <CircleAlertIcon className="size-3.5" />
-                ) : (
-                  <TriangleAlertIcon className="size-3.5" />
-                )}
-                <AlertTitle className="text-[11px]">
-                  {projectFilesError
-                    ? "Workspace tree refresh failed"
-                    : "Workspace tree is truncated"}
-                </AlertTitle>
-                <AlertDescription className="gap-1 text-[11px] leading-4">
-                  {projectFilesError ? (
-                    <span>{projectFilesError}</span>
-                  ) : (
-                    <span>
-                      Only the first indexed workspace entries are shown here, so some files may be
-                      omitted from preview.
-                    </span>
-                  )}
-                </AlertDescription>
-              </Alert>
-            ) : null}
-            <ChangedFilesTree
-              files={projectFilesQuery.data?.entries ?? []}
-              allDirectoriesExpanded={false}
-              resolvedTheme={resolvedTheme}
-              onSelectFile={setSelectedFilePath}
-              selectedFilePath={selectedFilePath}
-              showStats={false}
-            />
-          </div>
-          <button
-            type="button"
-            aria-label="Resize file preview tree"
-            className="group relative w-2 shrink-0 cursor-e-resize bg-background transition-colors hover:bg-accent/40"
-            onPointerDown={onResizePointerDown}
-            onPointerMove={onResizePointerMove}
-            onPointerUp={onResizePointerEnd}
-            onPointerCancel={onResizePointerEnd}
-          >
-            <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/80 group-hover:bg-border" />
-          </button>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {!selectedFilePath ? (
-              <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-                Select a file to preview.
-              </div>
+              <PreviewOpenFileEmptyState />
             ) : selectedFileSizeGuard?.state === "too-large" ? (
               <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
                 File is too large to preview ({selectedFileSizeGuard.sizeBytes} bytes). Limit is{" "}
@@ -635,6 +704,88 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
               </div>
             )}
           </div>
+          <button
+            type="button"
+            aria-label="Resize workspace tree"
+            aria-hidden={isTreeVisible ? undefined : true}
+            className={cn(
+              "group relative shrink-0 overflow-hidden bg-background transition-[width,opacity,background-color] duration-[360ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent/40 motion-reduce:transition-none",
+              isTreeVisible ? "w-2 cursor-ew-resize opacity-100" : "w-0 opacity-0",
+            )}
+            disabled={!isTreeVisible}
+            onPointerDown={onResizePointerDown}
+            onPointerMove={onResizePointerMove}
+            onPointerUp={onResizePointerEnd}
+            onPointerCancel={onResizePointerEnd}
+          >
+            <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/80 group-hover:bg-border" />
+          </button>
+          <PreviewTreeMotionFrame width={treeWidth} open={isTreeVisible} resizing={isTreeResizing}>
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="shrink-0 border-b border-border/60 p-2">
+                <label className="relative block">
+                  <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/65" />
+                  <input
+                    type="text"
+                    value={fileFilterQuery}
+                    onChange={(event) => setFileFilterQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        setFileFilterQuery("");
+                        event.currentTarget.blur();
+                      }
+                    }}
+                    placeholder="Filter files..."
+                    aria-label="Filter files"
+                    className="h-8 w-full rounded-md border border-border/70 bg-background/65 pl-8 pr-3 text-xs text-foreground outline-none transition-[border-color,background-color,box-shadow] placeholder:text-muted-foreground/55 focus:border-ring/60 focus:bg-background focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--ring)_18%,transparent)]"
+                  />
+                </label>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto p-2">
+                {projectFilesError || projectFilesTruncated ? (
+                  <Alert
+                    variant={projectFilesError ? "error" : "warning"}
+                    className="mb-2 rounded-lg border-border/70 px-3 py-2 text-[11px]"
+                  >
+                    {projectFilesError ? (
+                      <CircleAlertIcon className="size-3.5" />
+                    ) : (
+                      <TriangleAlertIcon className="size-3.5" />
+                    )}
+                    <AlertTitle className="text-[11px]">
+                      {projectFilesError
+                        ? "Workspace tree refresh failed"
+                        : "Workspace tree is truncated"}
+                    </AlertTitle>
+                    <AlertDescription className="gap-1 text-[11px] leading-4">
+                      {projectFilesError ? (
+                        <span>{projectFilesError}</span>
+                      ) : (
+                        <span>
+                          Only the first indexed workspace entries are shown here, so some files may
+                          be omitted from preview.
+                        </span>
+                      )}
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+                {filteredProjectFiles.length === 0 ? (
+                  <div className="px-2 py-6 text-center text-xs leading-5 text-muted-foreground/70">
+                    No files match this filter.
+                  </div>
+                ) : (
+                  <ChangedFilesTree
+                    files={filteredProjectFiles}
+                    allDirectoriesExpanded={isFilteringProjectFiles}
+                    resolvedTheme={resolvedTheme}
+                    onSelectFile={setSelectedFilePath}
+                    selectedFilePath={selectedFilePath}
+                    showStats={false}
+                  />
+                )}
+              </div>
+            </div>
+          </PreviewTreeMotionFrame>
         </div>
       )}
     </DiffPanelShell>

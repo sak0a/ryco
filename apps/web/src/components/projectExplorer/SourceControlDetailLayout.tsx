@@ -11,7 +11,7 @@ export function SourceControlDetailToolbar(props: {
   githubLabel?: string | undefined;
 }) {
   return (
-    <div className="flex min-h-12 items-center gap-2 border-border/60 border-b bg-background/95 py-2 pr-14 pl-4">
+    <div className="flex min-h-12 items-center gap-2 border-border/60 border-b bg-background/55 py-2 pr-14 pl-4">
       <Button type="button" size="sm" variant="ghost" onClick={props.onBack}>
         <ArrowLeftIcon className="size-3.5" />
         Back
@@ -71,7 +71,7 @@ export function SourceControlDetailLoadingState(props: { label: string }) {
             {[0, 1, 2].map((index) => (
               <div key={index} className="grid grid-cols-[2rem_minmax(0,1fr)] gap-3">
                 <Skeleton className="size-8 rounded-lg" />
-                <div className="rounded-lg border border-border/60 bg-background p-3">
+                <div className="rounded-lg border border-border/60 bg-background/50 p-3">
                   <Skeleton className="h-4 w-40 rounded" />
                   <Skeleton className="mt-3 h-3 w-full rounded" />
                   <Skeleton className="mt-2 h-3 w-5/6 rounded" />

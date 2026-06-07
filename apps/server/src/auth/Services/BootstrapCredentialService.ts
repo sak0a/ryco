@@ -54,4 +54,4 @@ export interface BootstrapCredentialServiceShape {
 export class BootstrapCredentialService extends Context.Service<
   BootstrapCredentialService,
   BootstrapCredentialServiceShape
->()("s3/auth/Services/BootstrapCredentialService") {}
+>()("ryco/auth/Services/BootstrapCredentialService") {}

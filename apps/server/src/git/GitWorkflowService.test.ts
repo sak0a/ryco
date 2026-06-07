@@ -131,7 +131,7 @@ describe("GitWorkflowService", () => {
     );
     const missingCwd = path.join(
       os.tmpdir(),
-      `s3-missing-status-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      `ryco-missing-status-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     const status = vi.fn(() =>
       Effect.fail(

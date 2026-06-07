@@ -11,7 +11,7 @@ import {
   buildRemoteLaunchScript,
   buildRemotePairingScript,
   buildRemoteStopScript,
-  buildRemoteS3RunnerScript,
+  buildRemoteRycoRunnerScript,
   describeReadinessCause,
   issueRemotePairingToken,
   REMOTE_PICK_PORT_SCRIPT,
@@ -80,18 +80,18 @@ function commandArgs(command: ChildProcess.Command): ReadonlyArray<string> {
 }
 
 describe("ssh tunnel scripts", () => {
-  it("builds the remote s3 runner with npx and npm fallbacks", () => {
-    const script = buildRemoteS3RunnerScript();
+  it("builds the remote ryco runner with npx and npm fallbacks", () => {
+    const script = buildRemoteRycoRunnerScript();
 
-    assert.include(script, "S3_NODE_SCRIPT_PATH=''");
+    assert.include(script, "RYCO_NODE_SCRIPT_PATH=''");
     assert.include(script, 'exec ryco "$@"');
     assert.include(script, "exec npx --yes 'ryco@latest' \"$@\"");
     assert.include(script, "exec npm exec --yes 'ryco@latest' -- \"$@\"");
     assert.include(script, "could not install 'ryco@latest'");
   });
 
-  it("shell-quotes package specs in the remote s3 runner", () => {
-    const script = buildRemoteS3RunnerScript({
+  it("shell-quotes package specs in the remote ryco runner", () => {
+    const script = buildRemoteRycoRunnerScript({
       packageSpec: "ryco@nightly; touch /tmp/ryco-owned",
     });
 
@@ -100,19 +100,19 @@ describe("ssh tunnel scripts", () => {
     assert.notInclude(script, "exec npx --yes ryco@nightly; touch /tmp/ryco-owned");
   });
 
-  it("builds the remote s3 runner with a node script override", () => {
-    const script = buildRemoteS3RunnerScript({
+  it("builds the remote ryco runner with a node script override", () => {
+    const script = buildRemoteRycoRunnerScript({
       nodeScriptPath: "/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs",
     });
 
     assert.include(
       script,
-      "S3_NODE_SCRIPT_PATH='/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs'",
+      "RYCO_NODE_SCRIPT_PATH='/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs'",
     );
-    assert.include(script, 'exec node "$S3_NODE_SCRIPT_PATH" "$@"');
+    assert.include(script, 'exec node "$RYCO_NODE_SCRIPT_PATH" "$@"');
   });
 
-  it("uses the remote s3 runner for launch and pairing scripts", () => {
+  it("uses the remote ryco runner for launch and pairing scripts", () => {
     const target = {
       alias: "devbox",
       hostname: "devbox.example.com",

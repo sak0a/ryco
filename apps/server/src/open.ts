@@ -209,7 +209,7 @@ export interface OpenShape {
 /**
  * Open - Service tag for browser/editor launch operations.
  */
-export class Open extends Context.Service<Open, OpenShape>()("s3/open") {}
+export class Open extends Context.Service<Open, OpenShape>()("ryco/open") {}
 
 // ==============================
 // Implementations

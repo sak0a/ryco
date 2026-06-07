@@ -86,4 +86,4 @@ export interface OrchestrationEventStoreShape {
 export class OrchestrationEventStore extends Context.Service<
   OrchestrationEventStore,
   OrchestrationEventStoreShape
->()("s3/persistence/Services/OrchestrationEventStore") {}
+>()("ryco/persistence/Services/OrchestrationEventStore") {}

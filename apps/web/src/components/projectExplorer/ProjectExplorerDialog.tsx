@@ -226,8 +226,9 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup
-        className="flex h-[88vh] max-h-[1060px] w-[90vw] max-w-[1340px] flex-col p-0 max-sm:h-[100dvh] max-sm:w-screen"
+        className="project-glass-surface flex h-[88vh] max-h-[1060px] w-[90vw] max-w-[1340px] flex-col p-0 max-sm:h-[100dvh] max-sm:w-screen"
         onKeyDown={handleKeyDown}
+        surface="glass"
       >
         <header className="flex items-center justify-between border-border/60 border-b py-3 pl-5 pr-14">
           <DialogTitle className="truncate text-base">{dialogTitle}</DialogTitle>
@@ -253,9 +254,11 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
                   <SelectItem key={member.physicalProjectKey} value={member.physicalProjectKey}>
                     <span className="truncate">
                       {member.name}
-                      <span className="ml-1 text-muted-foreground">
-                        · {member.environmentLabel ?? "Local"}
-                      </span>
+                      {member.environmentLabel ? (
+                        <span className="ml-1 text-muted-foreground">
+                          · {member.environmentLabel}
+                        </span>
+                      ) : null}
                     </span>
                   </SelectItem>
                 ))}

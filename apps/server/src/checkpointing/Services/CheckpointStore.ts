@@ -97,5 +97,5 @@ export interface CheckpointStoreShape {
  * CheckpointStore - Service tag for checkpoint persistence and restore operations.
  */
 export class CheckpointStore extends Context.Service<CheckpointStore, CheckpointStoreShape>()(
-  "s3/checkpointing/Services/CheckpointStore",
+  "ryco/checkpointing/Services/CheckpointStore",
 ) {}

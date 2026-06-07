@@ -99,4 +99,4 @@ export interface OrchestrationEngineShape {
 export class OrchestrationEngineService extends Context.Service<
   OrchestrationEngineService,
   OrchestrationEngineShape
->()("s3/orchestration/Services/OrchestrationEngine/OrchestrationEngineService") {}
+>()("ryco/orchestration/Services/OrchestrationEngine/OrchestrationEngineService") {}

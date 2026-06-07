@@ -26,7 +26,7 @@ const layer = it.layer(
   OrchestrationProjectionPipelineLive.pipe(
     Layer.provideMerge(OrchestrationEventStoreLive),
     Layer.provideMerge(ProjectionWorktreeRepositoryLive),
-    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "s3-worktree-proj-" })),
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "ryco-worktree-proj-" })),
     Layer.provideMerge(SqlitePersistenceMemory),
     Layer.provideMerge(MockProjectAvatarStoreLive),
     Layer.provideMerge(NodeServices.layer),

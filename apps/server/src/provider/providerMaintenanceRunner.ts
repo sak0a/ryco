@@ -43,7 +43,7 @@ export interface ProviderMaintenanceRunnerShape {
 export class ProviderMaintenanceRunner extends Context.Service<
   ProviderMaintenanceRunner,
   ProviderMaintenanceRunnerShape
->()("t3/provider/ProviderMaintenanceRunner") {}
+>()("ryco/provider/ProviderMaintenanceRunner") {}
 
 interface VerifiedProviderRefresh {
   readonly providers: ReadonlyArray<ServerProvider>;
@@ -338,9 +338,9 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
                 startedAt,
                 finishedAt,
                 message: couldNotVerify
-                  ? "Update command completed, but T3 Code could not verify the provider version."
+                  ? "Update command completed, but Ryco could not verify the provider version."
                   : stillOutdated
-                    ? "Update command completed, but T3 Code still detects an outdated provider version."
+                    ? "Update command completed, but Ryco still detects an outdated provider version."
                     : "Provider updated.",
                 output: commandOutput(result),
               }),

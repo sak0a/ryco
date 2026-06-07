@@ -87,4 +87,4 @@ export interface ProviderSessionRuntimeRepositoryShape {
 export class ProviderSessionRuntimeRepository extends Context.Service<
   ProviderSessionRuntimeRepository,
   ProviderSessionRuntimeRepositoryShape
->()("s3/persistence/Services/ProviderSessionRuntime/ProviderSessionRuntimeRepository") {}
+>()("ryco/persistence/Services/ProviderSessionRuntime/ProviderSessionRuntimeRepository") {}

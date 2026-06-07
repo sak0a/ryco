@@ -208,7 +208,7 @@ Maps Ryco projects to Jira project keys and Bitbucket repository identity.
 | `project_id`                | TEXT      | Ryco project id            |
 | `connection_id`             | TEXT      | Atlassian connection       |
 | `jira_cloud_id`             | TEXT NULL | selected Jira site         |
-| `jira_project_keys_json`    | TEXT      | e.g. `["S3", "WEB"]`       |
+| `jira_project_keys_json`    | TEXT      | e.g. `["RYCO", "WEB"]`     |
 | `bitbucket_workspace`       | TEXT NULL | inferred/selected          |
 | `bitbucket_repo_slug`       | TEXT NULL | inferred/selected          |
 | `branch_template`           | TEXT      | default `{key}-{slug}`     |

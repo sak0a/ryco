@@ -54,7 +54,7 @@ function describeExhaustedToast(): string {
 }
 
 function getConnectionDisplayName(status: WsConnectionStatus): string {
-  return status.connectionLabel?.trim() || "S3 Server";
+  return status.connectionLabel?.trim() || "Ryco Server";
 }
 
 function buildReconnectTitle(status: WsConnectionStatus): string {

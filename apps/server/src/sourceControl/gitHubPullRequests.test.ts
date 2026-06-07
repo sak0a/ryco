@@ -60,6 +60,7 @@ describe("decodeGitHubPullRequestJson", () => {
       url: "https://github.com/owner/repo/pull/42",
       baseRefName: "main",
       headRefName: "feature/my-pr",
+      mergeable: "CONFLICTING",
       state: "OPEN",
       mergedAt: null,
     });
@@ -68,6 +69,7 @@ describe("decodeGitHubPullRequestJson", () => {
     if (!Result.isSuccess(result)) return;
     expect(result.success.number).toBe(42);
     expect(result.success.state).toBe("open");
+    expect(result.success.mergeability).toBe("conflicting");
   });
 });
 

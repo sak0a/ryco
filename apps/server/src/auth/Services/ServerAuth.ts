@@ -80,5 +80,5 @@ export interface ServerAuthShape {
 }
 
 export class ServerAuth extends Context.Service<ServerAuth, ServerAuthShape>()(
-  "s3/auth/Services/ServerAuth",
+  "ryco/auth/Services/ServerAuth",
 ) {}

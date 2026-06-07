@@ -46,4 +46,4 @@ export interface CheckpointDiffQueryShape {
 export class CheckpointDiffQuery extends Context.Service<
   CheckpointDiffQuery,
   CheckpointDiffQueryShape
->()("s3/checkpointing/Services/CheckpointDiffQuery") {}
+>()("ryco/checkpointing/Services/CheckpointDiffQuery") {}

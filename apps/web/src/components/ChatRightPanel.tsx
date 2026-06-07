@@ -1,10 +1,23 @@
-import { Suspense, lazy, useCallback } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 
-import { stripDiffSearchParams } from "../diffRouteSearch";
-import { resolveInactivePanelContentVisibilityStyle } from "../lib/perf/motion";
-import { stripPreviewSearchParams } from "../previewRouteSearch";
+import {
+  PREFERS_REDUCED_MOTION_QUERY,
+  resolveInactivePanelContentVisibilityStyle,
+} from "../lib/perf/motion";
 import type { RightPanelMode, RightPanelRouteSearch } from "../rightPanelRouteSearch";
+import { stripWorkspacePanelSearchParams } from "../workspaceRouteSearch";
 import { Sidebar, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
+import { cn } from "~/lib/utils";
+import { useDelayedUnmount } from "~/hooks/useDelayedUnmount";
+import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import {
   DiffPanelHeaderSkeleton,
@@ -13,25 +26,50 @@ import {
   type DiffPanelMode,
 } from "./DiffPanelShell";
 
-const DiffPanel = lazy(() => import("./DiffPanel"));
-const PreviewPanel = lazy(() => import("./PreviewPanel"));
+const ThreadWorkspacePanel = lazy(() => import("./ThreadWorkspacePanel"));
 
-const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
-const DIFF_INLINE_DEFAULT_WIDTH = "clamp(24rem,34vw,36rem)";
-const DIFF_INLINE_SIDEBAR_MIN_WIDTH = 22 * 16;
-const DIFF_INLINE_SIDEBAR_MAX_WIDTH = 256 * 16;
+const RIGHT_PANEL_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
+const RIGHT_PANEL_INLINE_DEFAULT_WIDTH = "clamp(24rem,34vw,36rem)";
+const RIGHT_PANEL_INLINE_SIDEBAR_MIN_WIDTH = 22 * 16;
+const RIGHT_PANEL_INLINE_SIDEBAR_MAX_WIDTH = 56 * 16;
+const RIGHT_PANEL_INLINE_EXIT_DURATION_MS = 360;
+const RIGHT_PANEL_RESIZE_RAIL_CLASS_NAME =
+  "w-5 cursor-ew-resize after:w-px after:bg-border/50 hover:after:bg-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-0";
 const COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX = 208;
 
 export function closeRightPanelSearch<T extends Record<string, unknown>>(
   params: T,
-): Omit<T, "diff" | "diffTurnId" | "diffFilePath" | "preview"> & RightPanelRouteSearch {
+): Omit<
+  T,
+  | "diff"
+  | "diffTurnId"
+  | "diffFilePath"
+  | "preview"
+  | "workspaceOpen"
+  | "workspaceTab"
+  | "workspaceAgentKey"
+> &
+  RightPanelRouteSearch {
   return {
-    ...stripPreviewSearchParams(stripDiffSearchParams(params)),
+    ...stripWorkspacePanelSearchParams(params),
     diff: undefined,
     diffTurnId: undefined,
     diffFilePath: undefined,
     preview: undefined,
-  } as Omit<T, "diff" | "diffTurnId" | "diffFilePath" | "preview"> & RightPanelRouteSearch;
+    workspaceOpen: undefined,
+    workspaceTab: undefined,
+    workspaceAgentKey: undefined,
+  } as Omit<
+    T,
+    | "diff"
+    | "diffTurnId"
+    | "diffFilePath"
+    | "preview"
+    | "workspaceOpen"
+    | "workspaceTab"
+    | "workspaceAgentKey"
+  > &
+    RightPanelRouteSearch;
 }
 
 const RightPanelLoadingFallback = (props: { mode: DiffPanelMode; label: string }) => {
@@ -42,7 +80,50 @@ const RightPanelLoadingFallback = (props: { mode: DiffPanelMode; label: string }
   );
 };
 
-export const LazyRightPanel = (props: { mode: DiffPanelMode; panelMode: RightPanelMode }) => {
+function RightPanelContentMotionFrame(props: {
+  animate: boolean;
+  children: ReactNode;
+  open: boolean;
+}) {
+  const [entered, setEntered] = useState(!props.animate && props.open);
+
+  useEffect(() => {
+    if (!props.animate) {
+      setEntered(props.open);
+      return;
+    }
+
+    if (!props.open) {
+      setEntered(false);
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(frameId);
+  }, [props.animate, props.open]);
+
+  const active = props.animate ? props.open && entered : props.open;
+
+  return (
+    <div
+      aria-hidden={props.open ? undefined : true}
+      inert={props.open ? undefined : true}
+      className={cn(
+        "flex min-h-0 w-full flex-1 transition-[translate,opacity] duration-[300ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transition-none",
+        active ? "translate-x-0 opacity-100" : "translate-x-4 opacity-0",
+      )}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+export const LazyRightPanel = (props: {
+  mode: DiffPanelMode;
+  panelMode: RightPanelMode | null;
+  openedPanelModes: ReadonlyArray<RightPanelMode>;
+  onClosePanelTab: (input: { mode: RightPanelMode; agentKey?: string }) => void;
+}) => {
   return (
     <DiffWorkerPoolProvider>
       <Suspense
@@ -50,16 +131,25 @@ export const LazyRightPanel = (props: { mode: DiffPanelMode; panelMode: RightPan
           <RightPanelLoadingFallback
             mode={props.mode}
             label={
-              props.panelMode === "diff" ? "Loading diff viewer..." : "Loading file preview..."
+              props.panelMode === "review"
+                ? "Loading diff viewer..."
+                : props.panelMode === "files"
+                  ? "Loading file preview..."
+                  : props.panelMode === "terminal"
+                    ? "Loading terminal..."
+                    : props.panelMode === "agent"
+                      ? "Loading subagent thread..."
+                      : "Loading workspace..."
             }
           />
         }
       >
-        {props.panelMode === "diff" ? (
-          <DiffPanel mode={props.mode} />
-        ) : (
-          <PreviewPanel mode={props.mode} />
-        )}
+        <ThreadWorkspacePanel
+          mode={props.mode}
+          panelMode={props.panelMode}
+          openedPanelModes={props.openedPanelModes}
+          onClosePanelTab={props.onClosePanelTab}
+        />
       </Suspense>
     </DiffWorkerPoolProvider>
   );
@@ -67,14 +157,21 @@ export const LazyRightPanel = (props: { mode: DiffPanelMode; panelMode: RightPan
 
 export const RightPanelInlineSidebar = (props: {
   open: boolean;
-  panelMode: RightPanelMode;
+  panelMode: RightPanelMode | null;
+  openedPanelModes: ReadonlyArray<RightPanelMode>;
+  onClosePanelTab: (input: { mode: RightPanelMode; agentKey?: string }) => void;
   onClose: () => void;
   onOpen: () => void;
   renderContent: boolean;
 }) => {
   const { open, onClose, onOpen, panelMode, renderContent } = props;
+  const prefersReducedMotion = useMediaQuery(PREFERS_REDUCED_MOTION_QUERY);
+  const renderPanelSurface = useDelayedUnmount(
+    open,
+    prefersReducedMotion ? 0 : RIGHT_PANEL_INLINE_EXIT_DURATION_MS,
+  );
   const panelContentVisibilityStyle = resolveInactivePanelContentVisibilityStyle({
-    active: open,
+    active: renderPanelSurface,
     containIntrinsicSize: "28rem 100vh",
   });
   const onOpenChange = useCallback(
@@ -136,26 +233,45 @@ export const RightPanelInlineSidebar = (props: {
   return (
     <SidebarProvider
       defaultOpen={false}
-      open={open}
+      open
       onOpenChange={onOpenChange}
-      className="w-auto min-h-0 flex-none bg-transparent"
-      style={{ "--sidebar-width": DIFF_INLINE_DEFAULT_WIDTH } as React.CSSProperties}
+      className={cn(
+        "min-h-0 flex-none bg-transparent transition-[width] duration-[360ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+        open ? "w-(--sidebar-width)" : "w-0",
+      )}
+      style={{ "--sidebar-width": RIGHT_PANEL_INLINE_DEFAULT_WIDTH } as CSSProperties}
     >
       <Sidebar
         side="right"
         collapsible="offcanvas"
-        className="border-l border-border bg-card text-foreground"
+        className={cn(
+          "border-l border-border bg-card text-foreground transition-[translate,width] duration-[360ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+          open ? "translate-x-0" : "pointer-events-none translate-x-full",
+        )}
         resizable={{
-          maxWidth: DIFF_INLINE_SIDEBAR_MAX_WIDTH,
-          minWidth: DIFF_INLINE_SIDEBAR_MIN_WIDTH,
+          maxWidth: RIGHT_PANEL_INLINE_SIDEBAR_MAX_WIDTH,
+          minWidth: RIGHT_PANEL_INLINE_SIDEBAR_MIN_WIDTH,
           shouldAcceptWidth: shouldAcceptInlineSidebarWidth,
-          storageKey: DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
+          storageKey: RIGHT_PANEL_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >
-        <div className="flex min-h-0 w-full flex-1" style={panelContentVisibilityStyle}>
-          {renderContent ? <LazyRightPanel mode="sidebar" panelMode={panelMode} /> : null}
-        </div>
-        <SidebarRail />
+        <RightPanelContentMotionFrame animate={!prefersReducedMotion} open={open}>
+          <div className="flex min-h-0 w-full flex-1" style={panelContentVisibilityStyle}>
+            {renderContent && renderPanelSurface ? (
+              <LazyRightPanel
+                mode="sidebar"
+                panelMode={panelMode}
+                openedPanelModes={props.openedPanelModes}
+                onClosePanelTab={props.onClosePanelTab}
+              />
+            ) : null}
+          </div>
+        </RightPanelContentMotionFrame>
+        <SidebarRail
+          aria-label="Resize workspace panel"
+          className={RIGHT_PANEL_RESIZE_RAIL_CLASS_NAME}
+          title="Drag to resize workspace panel"
+        />
       </Sidebar>
     </SidebarProvider>
   );

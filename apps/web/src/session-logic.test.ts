@@ -922,6 +922,36 @@ describe("deriveWorkLogEntries", () => {
     ]);
   });
 
+  it("extracts changed file stats for file-change tool activities", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "file-tool",
+        kind: "tool.completed",
+        summary: "File change",
+        turnId: "turn-1",
+        payload: {
+          itemType: "file_change",
+          data: {
+            item: {
+              changes: [
+                { path: "apps/web/src/components/ChatView.tsx", additions: 255, deletions: 12 },
+                { filename: "apps/web/src/session-logic.ts", insertions: 7, deletions: 0 },
+              ],
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, TurnId.make("turn-1"));
+    expect(entry?.turnId).toBe(TurnId.make("turn-1"));
+    expect(entry?.completed).toBe(true);
+    expect(entry?.changedFileStats).toEqual([
+      { path: "apps/web/src/components/ChatView.tsx", additions: 255, deletions: 12 },
+      { path: "apps/web/src/session-logic.ts", additions: 7, deletions: 0 },
+    ]);
+  });
+
   it("drops duplicated tool detail when it only repeats the title", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

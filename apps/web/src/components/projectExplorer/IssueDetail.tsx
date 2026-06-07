@@ -186,7 +186,7 @@ function IssueDetailBody(props: {
       }
     >
       <div className="flex min-h-0 flex-col lg:h-full">
-        <header className="border-border/60 border-b bg-background px-5 py-4 lg:px-6">
+        <header className="border-border/60 border-b bg-background/50 px-5 py-4 lg:px-6">
           <div className="flex flex-wrap items-start gap-3">
             <div className="min-w-0 flex-1">
               <h2 className="text-balance font-heading font-semibold text-xl leading-tight lg:text-2xl">

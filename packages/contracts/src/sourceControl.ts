@@ -22,6 +22,14 @@ export type SourceControlProviderInfo = typeof SourceControlProviderInfo.Type;
 export const ChangeRequestState = Schema.Literals(["open", "closed", "merged"]);
 export type ChangeRequestState = typeof ChangeRequestState.Type;
 
+export const SourceControlChangeRequestMergeability = Schema.Literals([
+  "mergeable",
+  "conflicting",
+  "unknown",
+]);
+export type SourceControlChangeRequestMergeability =
+  typeof SourceControlChangeRequestMergeability.Type;
+
 export const SourceControlCheckRollupItemKind = Schema.Literals([
   "check-run",
   "status-context",
@@ -66,6 +74,7 @@ export const ChangeRequest = Schema.Struct({
   headRepositoryNameWithOwner: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   headRepositoryOwnerLogin: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   headSha: Schema.optional(TrimmedNonEmptyString),
+  mergeability: Schema.optional(SourceControlChangeRequestMergeability),
   checkRollup: Schema.optional(Schema.Array(SourceControlCheckRollupItem)),
 });
 export type ChangeRequest = typeof ChangeRequest.Type;

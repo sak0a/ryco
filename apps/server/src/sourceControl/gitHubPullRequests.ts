@@ -1,5 +1,9 @@
 import { Cause, DateTime, Exit, Option, Result, Schema } from "effect";
-import { PositiveInt, TrimmedNonEmptyString } from "@ryco/contracts";
+import {
+  PositiveInt,
+  TrimmedNonEmptyString,
+  type SourceControlChangeRequestMergeability,
+} from "@ryco/contracts";
 import { decodeJsonResult, formatSchemaError } from "@ryco/shared/schemaJson";
 import {
   normalizeReactionGroups,
@@ -41,6 +45,7 @@ export interface NormalizedGitHubPullRequestRecord {
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
   readonly headSha?: string;
+  readonly mergeability?: SourceControlChangeRequestMergeability;
   readonly checkRollup?: ReadonlyArray<NormalizedGitHubCheckRollupItem>;
 }
 
@@ -72,6 +77,7 @@ const GitHubPullRequestSchema = Schema.Struct({
   baseRefName: TrimmedNonEmptyString,
   headRefName: TrimmedNonEmptyString,
   headRefOid: Schema.optional(Schema.NullOr(Schema.String)),
+  mergeable: Schema.optional(Schema.NullOr(Schema.String)),
   state: Schema.optional(Schema.NullOr(Schema.String)),
   mergedAt: Schema.optional(Schema.NullOr(Schema.String)),
   updatedAt: Schema.optional(Schema.OptionFromNullOr(Schema.DateTimeUtcFromString)),
@@ -224,6 +230,21 @@ function normalizeGitHubPullRequestState(input: {
   return "open";
 }
 
+function normalizeMergeability(
+  value: string | null | undefined,
+): SourceControlChangeRequestMergeability | null {
+  switch (value?.trim().toUpperCase()) {
+    case "MERGEABLE":
+      return "mergeable";
+    case "CONFLICTING":
+      return "conflicting";
+    case "UNKNOWN":
+      return "unknown";
+    default:
+      return null;
+  }
+}
+
 function normalizeCheckRollupKind(
   value: string | null | undefined,
 ): NormalizedGitHubCheckRollupItem["kind"] {
@@ -269,6 +290,7 @@ function normalizeGitHubPullRequestRecord(
         ? raw.comments.length
         : null;
   const headSha = trimOptionalString(raw.headRefOid);
+  const mergeability = normalizeMergeability(raw.mergeable);
 
   return {
     number: raw.number,
@@ -289,6 +311,7 @@ function normalizeGitHubPullRequestRecord(
     ...(headRepositoryNameWithOwner ? { headRepositoryNameWithOwner } : {}),
     ...(headRepositoryOwnerLogin ? { headRepositoryOwnerLogin } : {}),
     ...(headSha ? { headSha } : {}),
+    ...(mergeability ? { mergeability } : {}),
     ...(raw.statusCheckRollup
       ? {
           checkRollup: raw.statusCheckRollup.map((item, index) =>

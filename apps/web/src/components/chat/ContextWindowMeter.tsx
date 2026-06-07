@@ -109,7 +109,13 @@ export function ContextWindowMeter(props: {
           </button>
         }
       />
-      <PopoverPopup tooltipStyle side="top" align="end" className="w-max max-w-none px-3 py-2">
+      <PopoverPopup
+        tooltipStyle
+        surface="glass"
+        side="top"
+        align="end"
+        className="w-max max-w-none px-3 py-2"
+      >
         <div className="space-y-1.5 leading-tight">
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             Context window

@@ -229,7 +229,7 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
 
   it("rehydrates persisted mappings across layer restart", () =>
     Effect.gen(function* () {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "s3-provider-directory-"));
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-provider-directory-"));
       const dbPath = path.join(tempDir, "orchestration.sqlite");
       const directoryLayer = makeDirectoryLayer(makeSqlitePersistenceLive(dbPath));
 
