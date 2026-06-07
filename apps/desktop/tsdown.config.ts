@@ -15,7 +15,9 @@ export default defineConfig([
     ...shared,
     entry: ["src/main.ts"],
     clean: true,
-    noExternal: (id) => id.startsWith("@ryco/") || id.startsWith("effect-acp"),
+    deps: {
+      alwaysBundle: (id) => id.startsWith("@ryco/") || id.startsWith("effect-acp"),
+    },
   },
   {
     ...shared,
