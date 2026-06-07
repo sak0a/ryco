@@ -1,5 +1,5 @@
 import { EnvironmentId } from "@ryco/contracts";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 let mockSavedRecords: Array<Record<string, unknown>> = [];
 

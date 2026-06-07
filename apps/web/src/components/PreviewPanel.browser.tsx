@@ -1,8 +1,8 @@
 import "../index.css";
 
 import { EnvironmentId, ProjectId, ThreadId } from "@ryco/contracts";
-import { page } from "vitest/browser";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { page } from "vite-plus/test/browser";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
 import PreviewPanel from "./PreviewPanel";

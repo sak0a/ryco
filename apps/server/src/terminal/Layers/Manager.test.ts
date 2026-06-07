@@ -22,7 +22,7 @@ import {
   Scope,
 } from "effect";
 import { TestClock } from "effect/testing";
-import { expect } from "vitest";
+import { expect } from "vite-plus/test";
 
 import type { TerminalManagerShape } from "../Services/Manager.ts";
 import {

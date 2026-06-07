@@ -12,5 +12,13 @@ Ryco keeps CI entrypoints small and routes shared checks through
   the local worktree label/path in the run summary when provided.
 
 Shared toolchain setup lives in `.github/actions/setup-ryco`, so new workflows
-should reuse that action instead of duplicating Bun, Node, cache, and install
-steps.
+should reuse that action instead of duplicating Vite+, Bun, Node, cache, and
+install steps. The action uses `setup-vp` for Vite+ and Node, sets up Bun
+explicitly for Ryco's command surface, and installs dependencies with
+`vp install`, which keeps Bun as the underlying package manager via
+`packageManager`.
+
+Reusable validation uses Ryco's canonical Bun entrypoints: `bun run fmt:check`,
+`bun run lint`, `bun run typecheck`, `bun run test`, and `bun run build`.
+Those scripts call Vite+ where applicable, while keeping one CI command surface
+for the monorepo.

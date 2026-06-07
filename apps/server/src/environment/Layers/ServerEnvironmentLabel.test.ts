@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import { Effect, FileSystem } from "effect";
-import { vi } from "vitest";
+import { vi } from "vite-plus/test";
 
 vi.mock("../../processRunner.ts", () => ({
   runProcess: vi.fn(),

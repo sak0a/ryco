@@ -10,8 +10,8 @@ import {
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
 import "../../index.css";
 
-import { page } from "vitest/browser";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { page } from "vite-plus/test/browser";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 import { createModelCapabilities, createModelSelection } from "@ryco/shared/model";
 

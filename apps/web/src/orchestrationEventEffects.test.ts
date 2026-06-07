@@ -8,7 +8,7 @@ import {
   TurnId,
   type OrchestrationEvent,
 } from "@ryco/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { deriveOrchestrationBatchEffects } from "./orchestrationEventEffects";
 

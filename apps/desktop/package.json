@@ -11,7 +11,7 @@
     "build": "tsdown",
     "start": "node scripts/start-electron.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vp test run --passWithNoTests",
     "smoke-test": "node scripts/smoke-test.mjs",
     "startup-timing-smoke": "node scripts/startup-timing-smoke.mjs"
   },
@@ -31,6 +31,7 @@
     "effect-acp": "workspace:*",
     "tsdown": "catalog:",
     "typescript": "catalog:",
+    "vite-plus": "catalog:",
     "vitest": "catalog:"
   },
   "productName": "Ryco"

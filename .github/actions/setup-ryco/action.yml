@@ -1,31 +1,42 @@
 name: Setup Ryco
-description: Install the Bun and Node toolchains, restore build caches, and optionally install dependencies.
+description: Install the Vite+, Bun, and Node toolchains, restore build caches, and optionally install dependencies.
 
 inputs:
   install-dependencies:
-    description: Run bun install after toolchain setup.
+    description: Run vp install after toolchain setup.
     required: false
     default: "true"
+  registry-url:
+    description: Optional npm registry URL for publish jobs.
+    required: false
+    default: ""
+  vite-plus-version:
+    description: Vite+ CLI version. Keep aligned with package.json workspaces.catalog.vite-plus.
+    required: false
+    default: "0.1.24"
 
 runs:
   using: composite
   steps:
+    - name: Setup Vite+
+      uses: voidzero-dev/setup-vp@v1
+      with:
+        version: ${{ inputs['vite-plus-version'] }}
+        node-version-file: package.json
+        cache: true
+        cache-dependency-path: bun.lock
+        registry-url: ${{ inputs['registry-url'] }}
+        run-install: false
+
     - name: Setup Bun
       uses: oven-sh/setup-bun@v2
       with:
         bun-version-file: package.json
 
-    - name: Setup Node
-      uses: actions/setup-node@v6
-      with:
-        node-version-file: package.json
-
-    - name: Cache Bun and Turbo
+    - name: Cache Turbo
       uses: actions/cache@v5
       with:
-        path: |
-          ~/.bun/install/cache
-          .turbo
+        path: .turbo
         key: ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}
         restore-keys: |
           ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-
@@ -34,4 +45,4 @@ runs:
     - name: Install dependencies
       if: ${{ inputs['install-dependencies'] == 'true' }}
       shell: bash
-      run: bun install --frozen-lockfile
+      run: vp install --frozen-lockfile

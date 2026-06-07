@@ -1,7 +1,7 @@
 import "../index.css";
 
 import { render } from "vitest-browser-react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import ThreadWorkspacePanel from "./ThreadWorkspacePanel";
 

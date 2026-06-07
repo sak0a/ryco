@@ -8,7 +8,7 @@ import {
   ThreadId,
   TurnId,
 } from "@ryco/contracts";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { type EnvironmentState, useStore } from "../store";
 import { type ChatMessage, type Thread } from "../types";
 

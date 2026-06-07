@@ -14,12 +14,15 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
+  issues: read
+  pull-requests: read
 
 jobs:
   collect-targets:
     name: Collect PR targets
+    permissions:
+      contents: read
+      pull-requests: read
     runs-on: ubuntu-24.04
     outputs:
       targets: ${{ steps.collect.outputs.targets }}
@@ -64,6 +67,10 @@ jobs:
 
   label:
     name: Label PR ${{ matrix.target.number }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     needs: collect-targets
     if: ${{ needs.collect-targets.outputs.targets != '[]' }}
     runs-on: ubuntu-24.04

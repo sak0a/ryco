@@ -1,5 +1,5 @@
 import type { ScopedThreadRef } from "@ryco/contracts";
-import { assert, describe, it } from "vitest";
+import { assert, describe, it } from "vite-plus/test";
 import {
   buildVisibleToastLayout,
   shouldHideCollapsedToastContent,

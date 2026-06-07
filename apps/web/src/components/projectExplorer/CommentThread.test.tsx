@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { DateTime } from "effect";
 import type { SourceControlCommentAuthorRole, SourceControlIssueComment } from "@ryco/contracts";
 import { CommentItem, CommentThread } from "./CommentThread";
