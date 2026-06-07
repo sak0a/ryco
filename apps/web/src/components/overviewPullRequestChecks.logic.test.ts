@@ -8,8 +8,10 @@ import { DateTime, Option } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
+  areOverviewWorkflowRunsSupported,
   buildOverviewCheckRollupRows,
   buildOverviewWorkflowCheckRows,
+  selectOverviewChecksError,
   summarizeActiveWorkflowJob,
 } from "./overviewPullRequestChecks.logic";
 
@@ -82,6 +84,41 @@ function checkRollup(
 }
 
 describe("overview pull request checks", () => {
+  it("only supports workflow runs after the provider resolves to GitHub", () => {
+    expect(areOverviewWorkflowRunsSupported("github")).toBe(true);
+    expect(areOverviewWorkflowRunsSupported(null)).toBe(false);
+    expect(areOverviewWorkflowRunsSupported("gitlab")).toBe(false);
+    expect(areOverviewWorkflowRunsSupported("bitbucket")).toBe(false);
+    expect(areOverviewWorkflowRunsSupported("azure-devops")).toBe(false);
+  });
+
+  it("ignores workflow errors when workflow runs are unsupported", () => {
+    const workflowError = new Error("Unsupported workflow runs");
+    const detailError = new Error("Change request detail failed");
+
+    expect(
+      selectOverviewChecksError({
+        workflowRunsSupported: false,
+        workflowError,
+        detailError: null,
+      }),
+    ).toBeNull();
+    expect(
+      selectOverviewChecksError({
+        workflowRunsSupported: false,
+        workflowError,
+        detailError,
+      }),
+    ).toBe(detailError);
+    expect(
+      selectOverviewChecksError({
+        workflowRunsSupported: true,
+        workflowError,
+        detailError,
+      }),
+    ).toBe(workflowError);
+  });
+
   it("prefers workflow jobs over workflow run summaries for tooltip rows", () => {
     const run = workflowRun({ runId: "run-1", workflowName: "Release Smoke" });
     const rows = buildOverviewWorkflowCheckRows({

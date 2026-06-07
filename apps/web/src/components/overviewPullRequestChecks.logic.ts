@@ -1,5 +1,6 @@
 import type {
   SourceControlCheckRollupItem,
+  SourceControlProviderKind,
   SourceControlWorkflowJob,
   SourceControlWorkflowRun,
   SourceControlWorkflowStep,
@@ -15,6 +16,22 @@ import {
 
 export const OVERVIEW_CHECK_DETAIL_RUN_LIMIT = 8;
 export const OVERVIEW_CHECK_TOOLTIP_ITEM_LIMIT = 40;
+
+export function areOverviewWorkflowRunsSupported(
+  provider: SourceControlProviderKind | null,
+): boolean {
+  return provider === "github";
+}
+
+export function selectOverviewChecksError(input: {
+  readonly workflowRunsSupported: boolean;
+  readonly workflowError: unknown;
+  readonly detailError: unknown;
+}): unknown {
+  return input.workflowRunsSupported
+    ? (input.workflowError ?? input.detailError)
+    : input.detailError;
+}
 
 export interface OverviewWorkflowCheckRow {
   id: string;

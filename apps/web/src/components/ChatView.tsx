@@ -152,11 +152,13 @@ import {
   sourceControlOptionValue,
 } from "./projectExplorer/prCheckStatus";
 import {
+  areOverviewWorkflowRunsSupported,
   buildOverviewCheckRollupRows,
   buildOverviewWorkflowCheckRows,
   isOverviewActiveCheckKind,
   isOverviewActiveWorkflowRun,
   OVERVIEW_CHECK_DETAIL_RUN_LIMIT,
+  selectOverviewChecksError,
   summarizeActiveWorkflowJob,
 } from "./overviewPullRequestChecks.logic";
 import { buildOverviewChangesItem } from "./overviewChanges.logic";
@@ -2095,15 +2097,18 @@ export default function ChatView(props: ChatViewProps) {
     overviewPullRequestDetailQuery.data?.provider ??
     overviewBranchPullRequest?.provider ??
     overviewGitProvider;
-  const overviewWorkflowRunsSupported =
-    overviewPullRequestProvider === null || overviewPullRequestProvider === "github";
+  const overviewWorkflowRunsSupported = areOverviewWorkflowRunsSupported(
+    overviewPullRequestProvider,
+  );
+  const overviewWorkflowRunsEnabled =
+    overviewWorkflowRunsSupported && overviewPullRequestNumber !== null;
   const overviewWorkflowRunsQuery = useQuery({
     ...workflowRunsQueryOptions({
       environmentId,
       cwd: gitCwd,
       pullRequestNumber: overviewPullRequestNumber,
       limit: 20,
-      enabled: overviewWorkflowRunsSupported && overviewPullRequestNumber !== null,
+      enabled: overviewWorkflowRunsEnabled,
     }),
     refetchInterval: (query) => {
       const data = query.state.data;
@@ -2164,7 +2169,14 @@ export default function ChatView(props: ChatViewProps) {
     const gitPr = gitStatusQuery.data?.pr ?? null;
     const branchPr = overviewBranchPullRequest;
     const detail = overviewPullRequestDetailQuery.data ?? null;
-    const workflowData = overviewWorkflowRunsQuery.data ?? null;
+    const workflowData = overviewWorkflowRunsSupported
+      ? (overviewWorkflowRunsQuery.data ?? null)
+      : null;
+    const checksQueryError = selectOverviewChecksError({
+      workflowRunsSupported: overviewWorkflowRunsSupported,
+      workflowError: overviewWorkflowRunsQuery.error,
+      detailError: overviewPullRequestDetailQuery.error,
+    });
     const activeWorkflowJobDetail =
       overviewActiveWorkflowRunId === null
         ? undefined
@@ -2185,8 +2197,9 @@ export default function ChatView(props: ChatViewProps) {
             ? getPrCheckStatusFromChangeRequest(branchPr)
             : getPrCheckStatusForQuery({
                 isLoading:
-                  overviewWorkflowRunsQuery.isLoading || overviewPullRequestDetailQuery.isLoading,
-                error: overviewWorkflowRunsQuery.error ?? overviewPullRequestDetailQuery.error,
+                  (overviewWorkflowRunsSupported && overviewWorkflowRunsQuery.isLoading) ||
+                  overviewPullRequestDetailQuery.isLoading,
+                error: checksQueryError,
                 status: null,
               });
     const workflowRows = workflowData
@@ -2221,9 +2234,7 @@ export default function ChatView(props: ChatViewProps) {
     const pullRequestUrl = detail?.url ?? gitPr?.url ?? branchPr?.url ?? null;
     const pullRequestState =
       detail?.state ?? activeWorktreeSummary?.prState ?? gitPr?.state ?? branchPr?.state ?? null;
-    const checksError = compactQueryErrorMessage(
-      overviewWorkflowRunsQuery.error ?? overviewPullRequestDetailQuery.error,
-    );
+    const checksError = compactQueryErrorMessage(checksQueryError);
 
     return {
       number: overviewPullRequestNumber,
@@ -2244,7 +2255,7 @@ export default function ChatView(props: ChatViewProps) {
             : {}),
       checkStatus,
       checksLoading:
-        overviewWorkflowRunsQuery.isLoading ||
+        (overviewWorkflowRunsSupported && overviewWorkflowRunsQuery.isLoading) ||
         overviewPullRequestDetailQuery.isLoading ||
         overviewWorkflowRunJobsLoading,
       ...(checksError ? { checksError } : {}),
