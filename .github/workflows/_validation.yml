@@ -31,7 +31,7 @@ jobs:
   quality:
     name: Quality
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -52,6 +52,18 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      - name: Build
+        run: bun run build
+
+      - name: Vite+ check
+        run: vp check
+
+      - name: Vite+ test
+        run: vp test
+
+      - name: Vite+ build
+        run: vp build
 
       - name: Cache Playwright browsers
         if: ${{ inputs['run-browser-tests'] }}
