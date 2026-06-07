@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import { Effect, Layer, Schema } from "effect";
-import { beforeEach } from "vite-plus/test";
+import { beforeEach } from "vitest";
 import type { OpencodeClient } from "@opencode-ai/sdk/v2";
 
 import { OpenCodeSettings } from "@ryco/contracts";

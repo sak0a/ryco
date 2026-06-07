@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
 import { AtlassianSaveProjectLinkInput } from "./atlassian.ts";
 import { WS_METHODS } from "./rpc.ts";

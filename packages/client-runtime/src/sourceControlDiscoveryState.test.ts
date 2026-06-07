@@ -1,4 +1,4 @@
-import { assert, beforeEach, it } from "vite-plus/test";
+import { assert, beforeEach, it } from "vitest";
 import type { SourceControlDiscoveryResult } from "@ryco/contracts";
 import { AtomRegistry } from "effect/unstable/reactivity";
 

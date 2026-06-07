@@ -6,8 +6,8 @@ import {
 } from "@ryco/contracts";
 import { EnvironmentId } from "@ryco/contracts";
 import { createModelCapabilities } from "@ryco/shared/model";
-import { page, userEvent } from "vite-plus/test/browser";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { page, userEvent } from "vitest/browser";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import { ProviderModelPicker } from "./ProviderModelPicker";

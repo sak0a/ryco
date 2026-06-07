@@ -1,6 +1,6 @@
-import type { ExpectPollOptions } from "vite-plus/test";
+import type { ExpectPollOptions } from "vitest";
 
-declare module "vite-plus/test" {
+declare module "vitest" {
   interface ExpectStatic {
     element: (element: unknown, options?: ExpectPollOptions) => any;
   }

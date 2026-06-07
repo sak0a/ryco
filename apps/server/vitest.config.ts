@@ -1,4 +1,4 @@
-import { defineConfig, mergeConfig } from "vite-plus";
+import { defineConfig, mergeConfig } from "vitest/config";
 
 import baseConfig from "../../vitest.config.ts";
 

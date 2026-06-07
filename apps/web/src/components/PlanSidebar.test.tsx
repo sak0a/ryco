@@ -1,6 +1,6 @@
 import { EnvironmentId } from "@ryco/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
 import PlanSidebar from "./PlanSidebar";
 import { buildOverviewChangesItem } from "./overviewChanges.logic";

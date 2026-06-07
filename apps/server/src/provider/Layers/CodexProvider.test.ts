@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import * as CodexSchema from "effect-codex-app-server/schema";
 
 import { parseCodexRateLimits } from "./CodexProvider.ts";

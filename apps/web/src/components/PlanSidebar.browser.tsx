@@ -1,8 +1,8 @@
 import "../index.css";
 
 import { EnvironmentId } from "@ryco/contracts";
-import { page } from "vite-plus/test/browser";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { page } from "vitest/browser";
+import { describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import PlanSidebar from "./PlanSidebar";

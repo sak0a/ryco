@@ -1,4 +1,4 @@
-import { assert, describe, it } from "vite-plus/test";
+import { assert, describe, it } from "vitest";
 
 import { getVscodeIconUrlForEntry } from "./vscode-icons";
 

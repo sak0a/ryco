@@ -13,7 +13,7 @@ import {
   type TerminalEvent,
   ThreadId,
 } from "@ryco/contracts";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContextMenuItem } from "@ryco/contracts";
 

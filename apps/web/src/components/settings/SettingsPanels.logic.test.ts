@@ -4,7 +4,7 @@ import {
   ProviderInstanceId,
   type ProviderInstanceConfig,
 } from "@ryco/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { buildProviderInstanceUpdatePatch } from "./SettingsPanels.logic";
 
 describe("buildProviderInstanceUpdatePatch", () => {

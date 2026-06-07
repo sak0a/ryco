@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import * as EffectAcpErrors from "effect-acp/errors";
 import { ProviderDriverKind } from "@ryco/contracts";
 

@@ -1,5 +1,5 @@
 import { EnvironmentId, type VcsRef } from "@ryco/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,

@@ -1,6 +1,6 @@
 import { ProjectId, type OrchestrationProject } from "@ryco/contracts";
 import { Effect, Layer, Option } from "effect";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vitest";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { TerminalManager } from "../../terminal/Services/Manager.ts";

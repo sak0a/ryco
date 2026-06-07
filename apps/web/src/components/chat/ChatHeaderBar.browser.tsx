@@ -1,8 +1,8 @@
 import "../../index.css";
 
-import { page } from "vite-plus/test/browser";
+import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatHeaderBar } from "./ChatHeaderBar";
 

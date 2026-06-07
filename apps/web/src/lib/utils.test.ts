@@ -1,4 +1,4 @@
-import { describe, assert, it } from "vite-plus/test";
+import { describe, assert, it } from "vitest";
 import { isWindowsPlatform } from "./utils";
 
 describe("isWindowsPlatform", () => {

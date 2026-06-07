@@ -2,8 +2,8 @@ import "../index.css";
 
 import { EnvironmentId, ProjectId, ThreadId } from "@ryco/contracts";
 import type { ReactNode } from "react";
-import { page } from "vite-plus/test/browser";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { page } from "vitest/browser";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import DiffPanel from "./DiffPanel";

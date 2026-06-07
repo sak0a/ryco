@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
-import { vi } from "vite-plus/test";
+import { vi } from "vitest";
 
 import type { TraceRecord } from "./TraceRecord.ts";
 import { makeTraceSink } from "./TraceSink.ts";

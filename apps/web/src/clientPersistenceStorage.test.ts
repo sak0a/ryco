@@ -1,5 +1,5 @@
 import { EnvironmentId, type PersistedSavedEnvironmentRecord } from "@ryco/contracts";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const testEnvironmentId = EnvironmentId.make("environment-1");
 

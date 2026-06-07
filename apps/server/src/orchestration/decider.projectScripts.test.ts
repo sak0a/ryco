@@ -8,7 +8,7 @@ import {
   ProviderInstanceId,
 } from "@ryco/contracts";
 import { createModelSelection } from "@ryco/shared/model";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 
 import { decideOrchestrationCommand } from "./decider.ts";

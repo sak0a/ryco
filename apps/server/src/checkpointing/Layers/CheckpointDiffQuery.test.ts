@@ -1,6 +1,6 @@
 import { CheckpointRef, ProjectId, ThreadId, TurnId } from "@ryco/contracts";
 import { Effect, Layer, Option } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
 import {
   ProjectionSnapshotQuery,

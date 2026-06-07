@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@ryco/contracts";
 import { DEFAULT_INTERACTION_MODE, type Project } from "../../../types";
 import { composeSidebarTree, type SidebarTreeThread, type SidebarWorktree } from "./useSidebarTree";

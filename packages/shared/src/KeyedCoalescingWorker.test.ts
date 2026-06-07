@@ -1,5 +1,5 @@
 import { it } from "@effect/vitest";
-import { describe, expect } from "vite-plus/test";
+import { describe, expect } from "vitest";
 import { Deferred, Effect } from "effect";
 
 import { makeKeyedCoalescingWorker } from "./KeyedCoalescingWorker.ts";

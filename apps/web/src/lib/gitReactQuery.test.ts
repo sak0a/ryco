@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../environmentApi", () => ({
   ensureEnvironmentApi: vi.fn(),

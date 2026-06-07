@@ -1,5 +1,5 @@
 import { DEFAULT_SERVER_SETTINGS, ProviderDriverKind, ProviderInstanceId } from "@ryco/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { createModelSelection } from "./model.ts";
 import {
   applyServerSettingsPatch,

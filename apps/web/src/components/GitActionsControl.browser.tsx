@@ -1,7 +1,7 @@
 import { scopeThreadRef } from "@ryco/client-runtime";
 import { ThreadId } from "@ryco/contracts";
 import { useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 const SHARED_THREAD_ID = ThreadId.make("thread-shared");

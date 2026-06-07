@@ -1,5 +1,5 @@
 import { EnvironmentId } from "@ryco/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
 import { APP_VERSION } from "./branding";
 import {

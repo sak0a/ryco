@@ -1,6 +1,6 @@
 import { ThreadId } from "@ryco/contracts";
 import { Cause, Effect, Exit } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
 import { logCleanupCauseUnlessInterrupted } from "./ThreadDeletionReactor.ts";
 

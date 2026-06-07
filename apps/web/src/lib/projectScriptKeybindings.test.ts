@@ -1,5 +1,5 @@
 import { MAX_KEYBINDING_VALUE_LENGTH, type KeybindingCommand } from "@ryco/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
 import { commandForProjectScript } from "../projectScripts";
 import {

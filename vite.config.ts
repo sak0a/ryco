@@ -62,14 +62,7 @@ const rootConfig = {
       "react/no-object-type-as-default-prop": "off",
       "react/no-unstable-nested-components": "off",
       "unicorn/consistent-function-scoping": "off",
-      "vite-plus/prefer-vite-plus-imports": "error",
     },
-    jsPlugins: [
-      {
-        name: "vite-plus",
-        specifier: "vite-plus/oxlint-plugin",
-      },
-    ],
   },
 };
 

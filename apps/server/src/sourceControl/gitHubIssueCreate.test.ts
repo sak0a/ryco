@@ -1,5 +1,5 @@
 import { buildGitHubIssueCreateArgv, parseGitHubIssueCreateOutput } from "./gitHubIssueCreate.ts";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
 describe("buildGitHubIssueCreateArgv", () => {
   it("emits --title and --body-file", () => {

@@ -17,8 +17,8 @@ import {
   type SourceControlDiscoveryResult,
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
-import { page } from "vite-plus/test/browser";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { page } from "vitest/browser";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 

@@ -11,7 +11,7 @@ import {
   type ServerProvider,
 } from "@ryco/contracts";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@ryco/shared/keybindings";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   getServerConfig,

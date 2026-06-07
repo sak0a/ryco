@@ -1,6 +1,6 @@
 import { scopeThreadRef, scopedThreadKey } from "@ryco/client-runtime";
 import { ThreadId, type TerminalEvent } from "@ryco/contracts";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   migratePersistedTerminalStateStoreState,

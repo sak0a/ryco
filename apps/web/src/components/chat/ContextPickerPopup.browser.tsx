@@ -1,8 +1,8 @@
 import "../../index.css";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
-import { page, userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vitest/browser";
 import type { ChangeRequest, EnvironmentId, SourceControlIssueSummary } from "@ryco/contracts";
 
 // ---------------------------------------------------------------------------

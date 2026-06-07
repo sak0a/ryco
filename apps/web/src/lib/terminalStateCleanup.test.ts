@@ -1,6 +1,6 @@
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
 import { ThreadId } from "@ryco/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
 import { collectActiveTerminalThreadIds } from "./terminalStateCleanup";
 

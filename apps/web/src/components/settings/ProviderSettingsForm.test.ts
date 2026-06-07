@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { ProviderDriverKind } from "@ryco/contracts";
 
 import { DRIVER_OPTION_BY_VALUE } from "./providerDriverMeta";

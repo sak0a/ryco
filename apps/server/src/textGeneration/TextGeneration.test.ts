@@ -1,6 +1,6 @@
 import { it } from "@effect/vitest";
 import { Effect, PubSub, Result, Stream } from "effect";
-import { describe, expect } from "vite-plus/test";
+import { describe, expect } from "vitest";
 
 import { ProviderInstanceId } from "@ryco/contracts";
 import { createModelSelection } from "@ryco/shared/model";

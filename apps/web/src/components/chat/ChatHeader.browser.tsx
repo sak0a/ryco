@@ -1,9 +1,9 @@
 import "../../index.css";
 
 import { EnvironmentId, type ResolvedKeybindingsConfig } from "@ryco/contracts";
-import { page } from "vite-plus/test/browser";
+import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SidebarProvider } from "../ui/sidebar";
 import ProjectScriptsControl from "../ProjectScriptsControl";

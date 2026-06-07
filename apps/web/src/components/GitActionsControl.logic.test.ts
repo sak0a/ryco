@@ -1,5 +1,5 @@
 import type { VcsStatusResult } from "@ryco/contracts";
-import { assert, describe, it } from "vite-plus/test";
+import { assert, describe, it } from "vitest";
 import {
   buildGitActionProgressStages,
   buildMenuItems,

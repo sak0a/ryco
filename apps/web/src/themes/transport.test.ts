@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { DEFAULT_THEME, DEFAULT_THEME_ID } from "./builtin";
 import { addCustomTheme, getCustomThemes, setCustomThemes } from "./registry";

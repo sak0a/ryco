@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { ProviderDriverKind, type ModelCapabilities } from "@ryco/contracts";
 import { createModelCapabilities } from "@ryco/shared/model";
 

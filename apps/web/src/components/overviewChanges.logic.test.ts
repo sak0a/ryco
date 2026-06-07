@@ -1,4 +1,4 @@
-import { assert, describe, it } from "vite-plus/test";
+import { assert, describe, it } from "vitest";
 import { buildOverviewChangesItem } from "./overviewChanges.logic";
 
 describe("buildOverviewChangesItem", () => {

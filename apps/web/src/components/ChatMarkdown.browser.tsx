@@ -1,7 +1,7 @@
 import "../index.css";
 
-import { page } from "vite-plus/test/browser";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { page } from "vitest/browser";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 const { codeToHtmlMock, getSharedHighlighterMock, openInPreferredEditorMock, readLocalApiMock } =

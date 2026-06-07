@@ -6,7 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, PlatformError, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { expect } from "vite-plus/test";
+import { expect } from "vitest";
 import type {
   GitActionProgressEvent,
   GitPreparePullRequestThreadInput,
