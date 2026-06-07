@@ -1,3 +1,4 @@
+import * as NodePath from "node:path";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -11,6 +12,8 @@ import { assert, it } from "@effect/vitest";
 
 import * as CodexClient from "./client.ts";
 
+const packageRoot = NodePath.join(import.meta.dirname, "..");
+
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/codex-app-server-mock-peer.ts"),
 );
@@ -19,9 +22,8 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
   const makeHandle = () =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const path = yield* Path.Path;
       const command = ChildProcess.make("bun", ["run", yield* mockPeerPath], {
-        cwd: path.join(import.meta.dirname, ".."),
+        cwd: packageRoot,
         shell: process.platform === "win32",
       });
       return yield* spawner.spawn(command);
@@ -79,10 +81,10 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
         });
 
         const skills = yield* client.request("skills/list", {
-          cwds: [process.cwd()],
+          cwds: [packageRoot],
         });
         assert.equal(skills.data.length, 1);
-        assert.equal(skills.data[0]?.cwd, process.cwd());
+        assert.equal(skills.data[0]?.cwd, packageRoot);
 
         return {
           account,

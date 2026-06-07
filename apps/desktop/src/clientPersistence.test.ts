@@ -7,7 +7,7 @@ import {
   type ClientSettings,
   type PersistedSavedEnvironmentRecord,
 } from "@ryco/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
   readClientSettings,

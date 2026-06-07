@@ -1,5 +1,5 @@
 import { DateTime, Option, Schema } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { WorkItemDetail, WorkItemSummary } from "./workItems.ts";
 

@@ -1,7 +1,7 @@
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@ryco/contracts";
-import { page } from "vitest/browser";
+import { page } from "vite-plus/test/browser";
 import { render } from "vitest-browser-react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { DEFAULT_INTERACTION_MODE } from "../../types";
 import type {

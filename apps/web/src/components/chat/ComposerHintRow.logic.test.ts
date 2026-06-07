@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { resolveHintRowPills, type HintRowFlags } from "./ComposerHintRow.logic";
 
 const all: HintRowFlags = { hasSourceControlRemote: true, hasJiraProvider: true };

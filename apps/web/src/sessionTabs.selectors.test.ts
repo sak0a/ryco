@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import type { DraftThreadState } from "./composerDraftStore";
 import { createSessionTabsSelector, draftThreadToSidebarSummary } from "./sessionTabs.selectors";
 import type { SidebarThreadSummary } from "./types";
