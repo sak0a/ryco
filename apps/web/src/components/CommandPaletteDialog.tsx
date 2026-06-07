@@ -1504,8 +1504,9 @@ function OpenCommandPaletteDialog() {
   return (
     <CommandDialogPopup
       aria-label="Command palette"
-      className="overflow-hidden p-0"
+      className="project-glass-surface overflow-hidden p-0"
       data-testid="command-palette"
+      surface="glass"
       finalFocus={() => {
         composerHandleRef?.current?.focusAtEnd();
         return false;
@@ -1618,7 +1619,7 @@ function OpenCommandPaletteDialog() {
             </Button>
           ) : null}
         </div>
-        <CommandPanel className="max-h-[min(28rem,70vh)]">
+        <CommandPanel className="max-h-[min(28rem,70vh)] bg-transparent">
           {remoteProjectContext ? (
             <div className="p-2 pb-0">
               <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">

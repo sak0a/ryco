@@ -577,8 +577,9 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup
-        className="flex h-[90vh] max-h-[980px] w-full max-w-7xl flex-col p-0 sm:max-w-7xl"
+        className="project-glass-surface flex h-[90vh] max-h-[980px] w-full max-w-7xl flex-col p-0 sm:max-w-7xl"
         onKeyDown={handleKeyDown}
+        surface="glass"
       >
         <DialogHeader className="border-border/60 border-b px-5 py-3">
           <DialogTitle className="text-base">New worktree</DialogTitle>
@@ -1216,7 +1217,7 @@ function BranchRefPicker(props: {
       </ComboboxTrigger>
       <ComboboxPopup
         anchor={triggerRef}
-        className="w-[min(42rem,var(--available-width))] overflow-hidden bg-popover shadow-xl/10 [&_[data-slot=combobox-list]]:bg-popover [&_[data-slot=combobox-popup]]:bg-popover"
+        className="w-[min(42rem,var(--available-width))] overflow-hidden"
       >
         <div className="border-b p-1">
           <ComboboxInput

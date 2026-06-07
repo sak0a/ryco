@@ -45,12 +45,13 @@ export function resolveSidebarStatusTextStyle(
     spreadPerCharacterPx?: number;
   },
 ): CSSProperties {
-  const durationSeconds = options?.durationSeconds ?? 2;
   const spreadPerCharacterPx = options?.spreadPerCharacterPx ?? 2;
   const spreadPx = Math.max(12, Math.round(text.length * spreadPerCharacterPx));
 
   return {
-    "--sidebar-status-text-duration": `${durationSeconds}s`,
+    ...(options?.durationSeconds === undefined
+      ? {}
+      : { "--sidebar-status-text-duration": `${options.durationSeconds}s` }),
     "--sidebar-status-text-spread": `${spreadPx}px`,
   } as CSSProperties;
 }

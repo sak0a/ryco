@@ -254,7 +254,7 @@ function PullRequestDetailBody(props: {
       }
     >
       <div className="flex min-h-0 flex-col lg:h-full">
-        <header className="border-border/60 border-b bg-background px-5 py-4 lg:px-6">
+        <header className="border-border/60 border-b bg-background/50 px-5 py-4 lg:px-6">
           <div className="flex flex-wrap items-start gap-3">
             <div className="min-w-0 flex-1">
               <h2 className="text-balance font-heading font-semibold text-xl leading-tight lg:text-2xl">
@@ -491,7 +491,7 @@ function PullRequestTimelineCommits(props: {
   const commitLabel = props.commits.length === 1 ? "1 commit" : `${props.commits.length} commits`;
 
   return (
-    <section className="overflow-hidden rounded-lg border border-border/60 bg-background/80 text-sm">
+    <section className="overflow-hidden rounded-lg border border-border/60 bg-background/55 text-sm">
       <header className="flex flex-wrap items-center gap-2 border-border/60 border-b px-3 py-2.5">
         <div className="min-w-0 flex-1">
           <h3 className="font-medium text-foreground/90 text-sm">Commits</h3>

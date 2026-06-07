@@ -519,7 +519,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     <TooltipProvider delay={0}>
       <div
         className={cn(
-          "relative flex h-screen max-h-96 w-screen max-w-100 overflow-hidden rounded-lg border bg-popover not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+          "selection-glass-surface relative flex h-screen max-h-96 w-screen max-w-100 overflow-hidden rounded-lg border text-popover-foreground",
           isLocked && !showLockedInstanceSidebar ? "flex-col" : "flex-row",
         )}
       >
