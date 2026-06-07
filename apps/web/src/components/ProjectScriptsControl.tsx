@@ -380,7 +380,7 @@ export default function ProjectScriptsControl({
         }}
         open={dialogOpen}
       >
-        <DialogPopup>
+        <DialogPopup className="project-glass-surface" surface="glass">
           <DialogHeader>
             <DialogTitle>{isEditing ? "Edit Action" : "Add Action"}</DialogTitle>
             <DialogDescription>
