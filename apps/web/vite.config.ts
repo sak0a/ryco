@@ -3,9 +3,11 @@ import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { parseOptInSourcemapEnv, readEnv } from "@ryco/shared/runtimeEnv";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite-plus";
 import pkg from "./package.json" with { type: "json" };
 
+const webRoot = fileURLToPath(new URL(".", import.meta.url));
 const port = Number(process.env.PORT ?? 5733);
 const host = process.env.HOST?.trim() || "localhost";
 const configuredHttpUrl = process.env.VITE_HTTP_URL?.trim();
@@ -51,6 +53,9 @@ export default defineConfig({
     tanstackRouter(),
     react(),
     babel({
+      // Root-level `vp build` executes from the repository root; keep Babel plugin
+      // resolution anchored to the package that declares the React Compiler plugin.
+      cwd: webRoot,
       // We need to be explicit about the parser options after moving to @vitejs/plugin-react v6.0.0
       // This is because the babel plugin only automatically parses typescript and jsx based on relative paths (e.g. "**/*.ts")
       // whereas the previous version of the plugin parsed all files with a .ts extension.
