@@ -13,8 +13,10 @@ Ryco keeps CI entrypoints small and routes shared checks through
 
 Shared toolchain setup lives in `.github/actions/setup-ryco`, so new workflows
 should reuse that action instead of duplicating Vite+, Bun, Node, cache, and
-install steps. The action installs dependencies with `vp install`, which keeps
-Bun as the underlying package manager via `packageManager`.
+install steps. The action uses `setup-vp` for Vite+ and Node, sets up Bun
+explicitly for Ryco's command surface, and installs dependencies with
+`vp install`, which keeps Bun as the underlying package manager via
+`packageManager`.
 
 Reusable validation intentionally covers both command surfaces:
 
