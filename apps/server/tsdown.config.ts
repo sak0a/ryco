@@ -12,8 +12,10 @@ export default defineConfig({
   outDir: "dist",
   sourcemap: buildSourcemap,
   clean: true,
-  noExternal: (id) => id.startsWith("@ryco/") || id.startsWith("effect-acp"),
-  inlineOnly: false,
+  deps: {
+    alwaysBundle: (id) => id.startsWith("@ryco/") || id.startsWith("effect-acp"),
+    onlyBundle: false,
+  },
   banner: {
     js: "#!/usr/bin/env node\n",
   },
