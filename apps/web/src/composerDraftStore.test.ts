@@ -54,7 +54,7 @@ function selectionsByProvider(
   }
   return result;
 }
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { Option } from "effect";
 import type { ComposerSourceControlContext } from "@ryco/contracts";
 

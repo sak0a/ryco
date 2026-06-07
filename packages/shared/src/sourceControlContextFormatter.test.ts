@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import type { ComposerSourceControlContext } from "@ryco/contracts";
 import { formatSourceControlContextsForAgent } from "./sourceControlContextFormatter.ts";
 

@@ -7,7 +7,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import { Effect, Layer, Result, Schema } from "effect";
 import { createModelSelection } from "@ryco/shared/model";
-import { expect } from "vitest";
+import { expect } from "vite-plus/test";
 
 import { CursorSettings, ProviderInstanceId, TextGenerationError } from "@ryco/contracts";
 

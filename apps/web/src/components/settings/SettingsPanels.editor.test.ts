@@ -1,5 +1,5 @@
 import { EDITORS, type EditorId } from "@ryco/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { EDITOR_ICONS, getEditorLabel } from "./SettingsPanels.editor";
 

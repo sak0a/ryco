@@ -1,6 +1,6 @@
 import { it } from "@effect/vitest";
 import { Cause, Effect, Exit } from "effect";
-import { describe, expect } from "vitest";
+import { describe, expect } from "vite-plus/test";
 
 import { scopedSafeTeardown } from "./scopedSafeTeardown.ts";
 

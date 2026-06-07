@@ -1,6 +1,6 @@
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@ryco/contracts";
 import { scopeProjectRef } from "@ryco/client-runtime";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   selectProjectsAcrossEnvironments,

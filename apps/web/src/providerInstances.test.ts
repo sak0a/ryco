@@ -1,5 +1,5 @@
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@ryco/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import {
   deriveProviderInstanceEntries,
   resolveSelectableProviderInstance,

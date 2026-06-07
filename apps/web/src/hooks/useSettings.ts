@@ -22,70 +22,40 @@ import { ensureLocalApi } from "~/localApi";
 import { Struct } from "effect";
 import { applyServerSettingsPatch } from "@ryco/shared/serverSettings";
 import { applySettingsUpdated, getServerConfig, useServerSettings } from "~/rpc/serverState";
+import {
+  __resetClientSettingsPersistenceForTests,
+  addClientSettingsHydrationListener,
+  addClientSettingsListener,
+  clearClientSettingsHydrationPromise,
+  getClientSettingsHydratedSnapshot,
+  getClientSettingsSnapshot,
+  readClientSettingsHydrationPromise,
+  replaceClientSettingsSnapshot,
+  setClientSettingsHydrated,
+  writeClientSettingsHydrationPromise,
+} from "./clientSettingsStore";
 
 const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
 
-const clientSettingsListeners = new Set<() => void>();
-const clientSettingsHydrationListeners = new Set<() => void>();
-let clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
-let clientSettingsHydrated = false;
-let clientSettingsHydrationPromise: Promise<void> | null = null;
-
-function emitClientSettingsChange() {
-  for (const listener of clientSettingsListeners) {
-    listener();
-  }
-}
-
-function emitClientSettingsHydrationChange() {
-  for (const listener of clientSettingsHydrationListeners) {
-    listener();
-  }
-}
-
-function getClientSettingsSnapshot(): ClientSettings {
-  return clientSettingsSnapshot;
-}
-
-function replaceClientSettingsSnapshot(settings: ClientSettings): void {
-  clientSettingsSnapshot = settings;
-  emitClientSettingsChange();
-}
-
-function setClientSettingsHydrated(nextHydrated: boolean): void {
-  if (clientSettingsHydrated === nextHydrated) {
-    return;
-  }
-  clientSettingsHydrated = nextHydrated;
-  emitClientSettingsHydrationChange();
-}
-
 function subscribeClientSettings(listener: () => void): () => void {
-  clientSettingsListeners.add(listener);
+  const unsubscribe = addClientSettingsListener(listener);
   void hydrateClientSettings();
-  return () => {
-    clientSettingsListeners.delete(listener);
-  };
-}
-
-function getClientSettingsHydratedSnapshot(): boolean {
-  return clientSettingsHydrated;
+  return unsubscribe;
 }
 
 function subscribeClientSettingsHydration(listener: () => void): () => void {
-  clientSettingsHydrationListeners.add(listener);
+  const unsubscribe = addClientSettingsHydrationListener(listener);
   void hydrateClientSettings();
-  return () => {
-    clientSettingsHydrationListeners.delete(listener);
-  };
+  return unsubscribe;
 }
 
 async function hydrateClientSettings(): Promise<void> {
-  if (clientSettingsHydrated) {
+  if (getClientSettingsHydratedSnapshot()) {
     return;
   }
-  if (clientSettingsHydrationPromise) {
-    return clientSettingsHydrationPromise;
+  const currentHydrationPromise = readClientSettingsHydrationPromise();
+  if (currentHydrationPromise) {
+    return currentHydrationPromise;
   }
 
   const nextHydration = (async () => {
@@ -102,13 +72,11 @@ async function hydrateClientSettings(): Promise<void> {
   })();
 
   const hydrationPromise = nextHydration.finally(() => {
-    if (clientSettingsHydrationPromise === hydrationPromise) {
-      clientSettingsHydrationPromise = null;
-    }
+    clearClientSettingsHydrationPromise(hydrationPromise);
   });
-  clientSettingsHydrationPromise = hydrationPromise;
+  writeClientSettingsHydrationPromise(hydrationPromise);
 
-  return clientSettingsHydrationPromise;
+  return hydrationPromise;
 }
 
 function persistClientSettings(settings: ClientSettings): void {
@@ -222,11 +190,4 @@ export function useUpdateSettings() {
     resetSettings,
   };
 }
-
-export function __resetClientSettingsPersistenceForTests(): void {
-  clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
-  clientSettingsHydrated = false;
-  clientSettingsHydrationPromise = null;
-  clientSettingsListeners.clear();
-  clientSettingsHydrationListeners.clear();
-}
+export { __resetClientSettingsPersistenceForTests };

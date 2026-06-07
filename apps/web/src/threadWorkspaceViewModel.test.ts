@@ -1,5 +1,5 @@
 import { EventId, TurnId, type OrchestrationThreadActivity } from "@ryco/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { deriveThreadSubagents, findThreadSubagent } from "./threadWorkspaceViewModel";
 

@@ -18,8 +18,7 @@ explicitly for Ryco's command surface, and installs dependencies with
 `vp install`, which keeps Bun as the underlying package manager via
 `packageManager`.
 
-Reusable validation intentionally covers both command surfaces:
-
-- Ryco commands: `bun run fmt:check`, `bun run lint`, `bun run typecheck`,
-  `bun run test`, and `bun run build`.
-- Vite+ compatibility: `vp check`, `vp test`, and `vp build`.
+Reusable validation uses Ryco's canonical Bun entrypoints: `bun run fmt:check`,
+`bun run lint`, `bun run typecheck`, `bun run test`, and `bun run build`.
+Those scripts call Vite+ where applicable, while keeping one CI command surface
+for the monorepo.

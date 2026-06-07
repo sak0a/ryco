@@ -2,7 +2,7 @@ import * as NodeOS from "node:os";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, FileSystem, Path } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import type * as EffectAcpSchema from "effect-acp/schema";
 import type { CursorSettings, ServerProviderModel } from "@ryco/contracts";
 import { createModelCapabilities } from "@ryco/shared/model";

@@ -37,6 +37,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          persist-credentials: false
 
       - name: Setup project
         uses: ./.github/actions/setup-ryco
@@ -55,15 +56,6 @@ jobs:
 
       - name: Build
         run: bun run build
-
-      - name: Vite+ check
-        run: vp check
-
-      - name: Vite+ test
-        run: vp test
-
-      - name: Vite+ build
-        run: vp build
 
       - name: Cache Playwright browsers
         if: ${{ inputs['run-browser-tests'] }}
@@ -102,6 +94,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          persist-credentials: false
 
       - name: Setup project
         uses: ./.github/actions/setup-ryco

@@ -1,6 +1,6 @@
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@ryco/contracts";
 import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@ryco/contracts/settings";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { deriveProviderInstanceEntries } from "./providerInstances";
 import {
   getAppModelOptionsForInstance,

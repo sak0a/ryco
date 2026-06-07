@@ -1,6 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { EnvironmentId } from "@ryco/contracts";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mockCreateEnvironmentConnection = vi.fn();
 const mockCreateWsRpcClient = vi.fn();

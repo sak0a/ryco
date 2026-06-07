@@ -4,7 +4,7 @@ import { it } from "@effect/vitest";
 import { Duration, Effect, Layer, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { NetService } from "@ryco/shared/Net";
-import { beforeEach, expect } from "vitest";
+import { beforeEach, expect } from "vite-plus/test";
 import type { OpencodeClient } from "@opencode-ai/sdk/v2";
 
 import { ServerConfig } from "../config.ts";

@@ -5,7 +5,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import { Effect } from "effect";
-import { describe, expect } from "vitest";
+import { describe, expect } from "vite-plus/test";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { AcpSessionRuntime } from "./AcpSessionRuntime.ts";
