@@ -1,3 +1,6 @@
+import { spawnSync } from "node:child_process";
+import * as path from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { ConfigProvider, Effect, Option } from "effect";
@@ -22,7 +25,64 @@ import {
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 
+interface TurboDryRunTask {
+  readonly taskId: string;
+  readonly dependencies: ReadonlyArray<string>;
+  readonly resolvedTaskDefinition: {
+    readonly cache?: boolean;
+    readonly dependsOn?: ReadonlyArray<string>;
+  };
+}
+
+interface TurboDryRun {
+  readonly tasks: ReadonlyArray<TurboDryRunTask>;
+}
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+
+const parseTurboDryRun = (output: string): TurboDryRun => {
+  const start = output.indexOf("{");
+  const end = output.lastIndexOf("}");
+
+  assert.ok(start >= 0 && end > start, `Expected Turbo dry-run JSON output, received:\n${output}`);
+  return JSON.parse(output.slice(start, end + 1)) as TurboDryRun;
+};
+
+const getTask = (dryRun: TurboDryRun, taskId: string): TurboDryRunTask => {
+  const task = dryRun.tasks.find((candidate) => candidate.taskId === taskId);
+  assert.ok(
+    task,
+    `Expected Turbo dry-run task ${taskId}; tasks were: ${dryRun.tasks
+      .map((candidate) => candidate.taskId)
+      .join(", ")}`,
+  );
+  return task;
+};
+
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+  it("builds the web app before bundling it into the desktop server", () => {
+    const result = spawnSync("bun", ["run", "build:desktop", "--dry=json"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      shell: process.platform === "win32",
+    });
+
+    assert.equal(
+      result.status,
+      0,
+      `Expected build:desktop dry-run to pass.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+
+    const dryRun = parseTurboDryRun(`${result.stdout}\n${result.stderr}`);
+    getTask(dryRun, "@ryco/web#build");
+    getTask(dryRun, "@ryco/desktop#build");
+
+    const serverTask = getTask(dryRun, "ryco-cli#build");
+    assert.ok(serverTask.dependencies.includes("@ryco/web#build"));
+    assert.ok(serverTask.resolvedTaskDefinition.dependsOn?.includes("@ryco/web#build"));
+    assert.equal(serverTask.resolvedTaskDefinition.cache, false);
+  });
+
   it("resolves the dedicated nightly updater channel from nightly versions", () => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42"), "nightly");
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
