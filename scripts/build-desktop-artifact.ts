@@ -437,6 +437,39 @@ const runCommand = Effect.fn("runCommand")(function* (
   }
 });
 
+interface ElectronBuilderInvocation {
+  readonly cwd: string;
+  readonly command: "bun";
+  readonly args: ReadonlyArray<string>;
+  readonly label: string;
+}
+
+export function createElectronBuilderInvocation(input: {
+  readonly desktopWorkspaceDir: string;
+  readonly stageAppDir: string;
+  readonly platformFlag: PlatformConfig["cliFlag"];
+  readonly arch: typeof BuildArch.Type;
+}): ElectronBuilderInvocation {
+  const args = [
+    "x",
+    "--no-install",
+    "electron-builder",
+    "--projectDir",
+    input.stageAppDir,
+    input.platformFlag,
+    `--${input.arch}`,
+    "--publish",
+    "never",
+  ];
+
+  return {
+    cwd: input.desktopWorkspaceDir,
+    command: "bun",
+    args,
+    label: `bun ${args.join(" ")}`,
+  };
+}
+
 function generateMacIconSetFromSourcePng(
   sourcePng: string,
   targetIcns: string,
@@ -1199,15 +1232,21 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* Effect.log(
     `[desktop-artifact] Building ${options.platform}/${options.target} (arch=${options.arch}, version=${appVersion})...`,
   );
+  const electronBuilderInvocation = createElectronBuilderInvocation({
+    desktopWorkspaceDir: path.join(repoRoot, "apps/desktop"),
+    stageAppDir,
+    platformFlag: platformConfig.cliFlag,
+    arch: options.arch,
+  });
   yield* runCommand(
-    ChildProcess.make({
-      cwd: stageAppDir,
+    ChildProcess.make(electronBuilderInvocation.command, electronBuilderInvocation.args, {
+      cwd: electronBuilderInvocation.cwd,
       env: buildEnv,
       // Windows needs shell mode to resolve .cmd shims.
       shell: process.platform === "win32",
-    })`bun x --install=fallback electron-builder ${platformConfig.cliFlag} --${options.arch} --publish never`,
+    }),
     {
-      label: `bun x --install=fallback electron-builder ${platformConfig.cliFlag} --${options.arch} --publish never`,
+      label: electronBuilderInvocation.label,
       verbose: options.verbose,
     },
   );

@@ -29,6 +29,7 @@ import {
   createMacUnsignedInstallReadme,
   createMacUnsignedInstallScript,
   createBuildConfig,
+  createElectronBuilderInvocation,
   formatCommandFailureMessage,
   formatOutputSection,
   resolveElectronBuilderDebugEnv,
@@ -113,13 +114,16 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(
       formatCommandFailureMessage(
         1,
-        { label: "bun x --install=fallback electron-builder --win --x64 --publish never" },
+        {
+          label:
+            "bun x --no-install electron-builder --projectDir /tmp/ryco-stage/app --win --x64 --publish never",
+        },
         { stdout: "stdout detail\n", stderr: "stderr detail\n" },
       ),
       [
         "Command exited with non-zero exit code (1)",
         "",
-        "Command: bun x --install=fallback electron-builder --win --x64 --publish never",
+        "Command: bun x --no-install electron-builder --projectDir /tmp/ryco-stage/app --win --x64 --publish never",
         "",
         "stdout tail:",
         "stdout detail",
@@ -174,6 +178,50 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       resolveElectronBuilderDebugEnv("existing", true),
       "existing,electron-builder,electron-builder:*",
     );
+  });
+
+  it("runs electron-builder from the desktop workspace against the staged app", () => {
+    const desktopWorkspaceDir = path.join(repoRoot, "apps/desktop");
+    const stageAppDir = path.join(repoRoot, ".tmp", "ryco-stage", "app");
+    const invocation = createElectronBuilderInvocation({
+      desktopWorkspaceDir,
+      stageAppDir,
+      platformFlag: "--win",
+      arch: "x64",
+    });
+
+    assert.equal(invocation.cwd, desktopWorkspaceDir);
+    assert.equal(invocation.command, "bun");
+    assert.deepStrictEqual(invocation.args, [
+      "x",
+      "--no-install",
+      "electron-builder",
+      "--projectDir",
+      stageAppDir,
+      "--win",
+      "--x64",
+      "--publish",
+      "never",
+    ]);
+    assert.equal(
+      invocation.label,
+      `bun x --no-install electron-builder --projectDir ${stageAppDir} --win --x64 --publish never`,
+    );
+  });
+
+  it("resolves electron-builder from the desktop workspace without installing it", () => {
+    const result = spawnSync("bun", ["x", "--no-install", "electron-builder", "--version"], {
+      cwd: path.join(repoRoot, "apps/desktop"),
+      encoding: "utf8",
+      shell: process.platform === "win32",
+    });
+
+    assert.equal(
+      result.status,
+      0,
+      `Expected desktop electron-builder binary to resolve without install.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+    assert.equal(result.stdout.trim(), "26.8.1");
   });
 
   it("builds the web app before bundling it into the desktop server", () => {
