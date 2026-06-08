@@ -250,6 +250,38 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
     ),
   );
 
+  it.effect("forwards Claude Opus 4.8 ultracode as xhigh effort with settings", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: {
+            title: "Improve orchestration flow",
+            body: "Body",
+          },
+        }),
+        argsMustContain: '--effort xhigh --settings {"ultracode":true}',
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generatePrContent({
+            cwd: process.cwd(),
+            baseBranch: "main",
+            headBranch: "feature/claude-ultracode",
+            commitSummary: "Improve orchestration",
+            diffSummary: "1 file changed",
+            diffPatch: "diff --git a/README.md b/README.md",
+            modelSelection: {
+              ...createModelSelection(ProviderInstanceId.make("claudeAgent"), "claude-opus-4-8", [
+                { id: "effort", value: "ultracode" },
+              ]),
+            },
+          });
+
+          expect(generated.title).toBe("Improve orchestration flow");
+        }),
+    ),
+  );
+
   it.effect("generates thread titles through the Claude provider", () =>
     withFakeClaudeEnv(
       {

@@ -76,6 +76,7 @@ import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { formatProjectCustomSystemPrompt } from "../ProjectCustomSystemPrompt.ts";
 import {
   getClaudeModelCapabilities,
+  isClaudeUltracodeEffort,
   normalizeClaudeCliEffort,
   resolveClaudeApiModelId,
   resolveClaudeEffort,
@@ -243,8 +244,11 @@ function normalizeClaudeStreamMessages(cause: Cause.Cause<Error>): ReadonlyArray
   return squashed.length > 0 ? [squashed] : [];
 }
 
-function getEffectiveClaudeAgentEffort(effort: string | null | undefined): ClaudeSdkEffort | null {
-  const normalized = normalizeClaudeCliEffort(effort);
+function getEffectiveClaudeAgentEffort(
+  effort: string | null | undefined,
+  model: string | null | undefined,
+): ClaudeSdkEffort | null {
+  const normalized = normalizeClaudeCliEffort(effort, model);
   return normalized ? (normalized as ClaudeSdkEffort) : null;
 }
 
@@ -2880,7 +2884,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const thinking = thinkingSupported
         ? getModelSelectionBooleanOptionValue(modelSelection, "thinking")
         : undefined;
-      const effectiveEffort = getEffectiveClaudeAgentEffort(effort);
+      const ultracode = isClaudeUltracodeEffort(effort);
+      const effectiveEffort = getEffectiveClaudeAgentEffort(effort, modelSelection?.model);
       const runtimeModeToPermission: Record<string, PermissionMode> = {
         "auto-accept-edits": "acceptEdits",
         "full-access": "bypassPermissions",
@@ -2889,6 +2894,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const settings = {
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
         ...(fastMode ? { fastMode: true } : {}),
+        ...(ultracode ? { ultracode: true } : {}),
       };
       const tokenMode = input.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE;
       const tokenReductionInstructions = yield* readTokenReductionInstructions(tokenMode);
