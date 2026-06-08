@@ -1,20 +1,37 @@
 import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { ConfigProvider, Effect, Option } from "effect";
+import { ConfigProvider, Effect, Option, Stream } from "effect";
 
 import {
+  COMMAND_OUTPUT_TAIL_LENGTH,
   COPILOT_SDK_PACKAGE_JSON_PATH,
   DESKTOP_BUILD_FILES,
   DESKTOP_BUILD_RESOURCES_RELATIVE_DIR,
   EXTERNALIZED_DESKTOP_DEPENDENCY_PATHS,
+  LINUX_ICON_SIZES,
   MAC_UNSIGNED_INSTALL_HELPER_NAME,
   MAC_UNSIGNED_README_NAME,
+  appendOutputTail,
+  collectCommandStream,
   createMacUnsignedInstallReadme,
   createMacUnsignedInstallScript,
   createBuildConfig,
+  formatCommandFailureMessage,
+  formatOutputSection,
+  resolveElectronBuilderDebugEnv,
   resolveBuildOptions,
   resolveDesktopBuildIconAssets,
   resolveDesktopProductName,
@@ -22,6 +39,7 @@ import {
   resolveDesktopWebAssetBrand,
   resolveMockUpdateServerPort,
   resolveMockUpdateServerUrl,
+  stageLinuxIcons,
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 
@@ -39,6 +57,25 @@ interface TurboDryRun {
 }
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
+const encoder = new TextEncoder();
+
+function shellSingleQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function writeFakeImageMagickCommand(binDir: string, commandName: string, logPath: string): void {
+  const commandPath = path.join(binDir, commandName);
+  writeFileSync(
+    commandPath,
+    [
+      "#!/bin/sh",
+      `printf '${commandName}|%s|%s|%s|%s\\n' "$1" "$2" "$3" "$4" >> ${shellSingleQuote(logPath)}`,
+      'printf "generated %s\\n" "$3" > "$4"',
+      "",
+    ].join("\n"),
+  );
+  chmodSync(commandPath, 0o755);
+}
 
 const parseTurboDryRun = (output: string): TurboDryRun => {
   const start = output.indexOf("{");
@@ -60,6 +97,85 @@ const getTask = (dryRun: TurboDryRun, taskId: string): TurboDryRunTask => {
 };
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+  it("keeps a bounded tail of command output", () => {
+    const oversized = "a".repeat(COMMAND_OUTPUT_TAIL_LENGTH + 5);
+    const tail = appendOutputTail("", oversized);
+
+    assert.equal(tail.length, COMMAND_OUTPUT_TAIL_LENGTH);
+    assert.equal(tail, oversized.slice(-COMMAND_OUTPUT_TAIL_LENGTH));
+    assert.equal(appendOutputTail("old", "new"), "oldnew");
+  });
+
+  it("formats labeled command output tails for failures", () => {
+    assert.equal(formatOutputSection("stdout", " \n ok \n "), "stdout tail:\nok");
+    assert.equal(formatOutputSection("stderr", " \n "), undefined);
+
+    assert.equal(
+      formatCommandFailureMessage(
+        1,
+        { label: "bun x --install=fallback electron-builder --win --x64 --publish never" },
+        { stdout: "stdout detail\n", stderr: "stderr detail\n" },
+      ),
+      [
+        "Command exited with non-zero exit code (1)",
+        "",
+        "Command: bun x --install=fallback electron-builder --win --x64 --publish never",
+        "",
+        "stdout tail:",
+        "stdout detail",
+        "",
+        "stderr tail:",
+        "stderr detail",
+      ].join("\n"),
+    );
+    assert.equal(
+      formatCommandFailureMessage(2, {}, { stdout: "", stderr: "" }),
+      "Command exited with non-zero exit code (2)",
+    );
+  });
+
+  it.effect("captures command streams and writes through only in verbose mode", () =>
+    Effect.gen(function* () {
+      let written = "";
+      const output = {
+        write(chunk: string) {
+          written += chunk;
+          return true;
+        },
+      } as NodeJS.WriteStream;
+
+      const nonVerbose = yield* collectCommandStream(
+        Stream.make(encoder.encode("first"), encoder.encode("second")),
+        output,
+        false,
+      );
+      assert.equal(nonVerbose, "firstsecond");
+      assert.equal(written, "");
+
+      const verbose = yield* collectCommandStream(
+        Stream.make(encoder.encode("third"), encoder.encode("fourth")),
+        output,
+        true,
+      );
+      assert.equal(verbose, "thirdfourth");
+      assert.equal(written, "thirdfourth");
+    }),
+  );
+
+  it("adds electron-builder debug namespaces only for verbose artifact builds", () => {
+    assert.equal(resolveElectronBuilderDebugEnv(undefined, false), undefined);
+    assert.equal(resolveElectronBuilderDebugEnv("existing", false), "existing");
+    assert.equal(
+      resolveElectronBuilderDebugEnv(undefined, true),
+      "electron-builder,electron-builder:*",
+    );
+    assert.equal(resolveElectronBuilderDebugEnv("", true), "electron-builder,electron-builder:*");
+    assert.equal(
+      resolveElectronBuilderDebugEnv("existing", true),
+      "existing,electron-builder,electron-builder:*",
+    );
+  });
+
   it("builds the web app before bundling it into the desktop server", () => {
     const result = spawnSync("bun", ["run", "build:desktop", "--dry=json"], {
       cwd: repoRoot,
@@ -113,6 +229,119 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resolveDesktopWebAssetBrand("0.0.17"), "production");
     assert.equal(resolveDesktopWebAssetBrand("0.0.17-nightly.20260413.42"), "nightly");
   });
+
+  it.effect("stages standard Linux AppImage icon sizes with ImageMagick", () =>
+    Effect.gen(function* () {
+      const tempRoot = mkdtempSync(path.join(tmpdir(), "ryco-linux-icons-"));
+      const previousPath = process.env.PATH;
+      try {
+        const stageResourcesDir = path.join(tempRoot, "resources");
+        const binDir = path.join(tempRoot, "bin");
+        const sourcePng = path.join(tempRoot, "source.png");
+        const logPath = path.join(tempRoot, "magick.log");
+        mkdirSync(stageResourcesDir, { recursive: true });
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(sourcePng, "source icon\n");
+        writeFakeImageMagickCommand(binDir, "magick", logPath);
+
+        process.env.PATH = binDir;
+
+        yield* stageLinuxIcons(stageResourcesDir, sourcePng, false);
+
+        assert.equal(
+          readFileSync(path.join(stageResourcesDir, "icon.png"), "utf8"),
+          "source icon\n",
+        );
+        assert.deepStrictEqual(LINUX_ICON_SIZES, [16, 22, 24, 32, 48, 64, 128, 256, 512]);
+        for (const iconSize of LINUX_ICON_SIZES) {
+          assert.equal(
+            readFileSync(
+              path.join(stageResourcesDir, "icons", `${iconSize}x${iconSize}.png`),
+              "utf8",
+            ),
+            `generated ${iconSize}x${iconSize}\n`,
+          );
+        }
+        assert.deepStrictEqual(
+          readFileSync(logPath, "utf8").trim().split("\n"),
+          LINUX_ICON_SIZES.map(
+            (iconSize) =>
+              `magick|${sourcePng}|-resize|${iconSize}x${iconSize}|${path.join(
+                stageResourcesDir,
+                "icons",
+                `${iconSize}x${iconSize}.png`,
+              )}`,
+          ),
+        );
+      } finally {
+        process.env.PATH = previousPath;
+        rmSync(tempRoot, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("falls back to convert when magick is unavailable for Linux icons", () =>
+    Effect.gen(function* () {
+      const tempRoot = mkdtempSync(path.join(tmpdir(), "ryco-linux-icons-convert-"));
+      const previousPath = process.env.PATH;
+      try {
+        const stageResourcesDir = path.join(tempRoot, "resources");
+        const binDir = path.join(tempRoot, "bin");
+        const sourcePng = path.join(tempRoot, "source.png");
+        const logPath = path.join(tempRoot, "convert.log");
+        mkdirSync(stageResourcesDir, { recursive: true });
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(sourcePng, "source icon\n");
+        writeFakeImageMagickCommand(binDir, "convert", logPath);
+
+        process.env.PATH = binDir;
+
+        yield* stageLinuxIcons(stageResourcesDir, sourcePng, false);
+
+        assert.ok(existsSync(path.join(stageResourcesDir, "icons", "512x512.png")));
+        assert.deepStrictEqual(
+          readFileSync(logPath, "utf8").trim().split("\n"),
+          LINUX_ICON_SIZES.map(
+            (iconSize) =>
+              `convert|${sourcePng}|-resize|${iconSize}x${iconSize}|${path.join(
+                stageResourcesDir,
+                "icons",
+                `${iconSize}x${iconSize}.png`,
+              )}`,
+          ),
+        );
+      } finally {
+        process.env.PATH = previousPath;
+        rmSync(tempRoot, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("points Linux electron-builder config at the generated icon directory", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "linux",
+        "AppImage",
+        "0.1.1",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+
+      assert.deepStrictEqual(config.linux, {
+        target: ["AppImage"],
+        executableName: "ryco",
+        icon: "icons",
+        category: "Development",
+        desktop: {
+          entry: {
+            StartupWMClass: "ryco",
+          },
+        },
+      });
+    }),
+  );
 
   it("excludes the bundled GitHub Copilot CLI from desktop artifacts", () => {
     assert.deepStrictEqual(DESKTOP_BUILD_FILES, [
