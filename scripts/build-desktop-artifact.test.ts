@@ -39,6 +39,7 @@ import {
   resolveDesktopProductName,
   resolveDesktopUpdateChannel,
   resolveDesktopWebAssetBrand,
+  resolveMacUnsignedInstallAssetPaths,
   resolveMockUpdateServerPort,
   resolveMockUpdateServerUrl,
   stageLinuxIcons,
@@ -468,13 +469,34 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.ok(readme.includes("https://github.com/sak0a/ryco/releases"));
   });
 
+  it("resolves unsigned macOS DMG assets to absolute staged files", () => {
+    const stageResourcesDir = path.join(
+      repoRoot,
+      ".tmp",
+      "ryco-stage",
+      "app",
+      DESKTOP_BUILD_RESOURCES_RELATIVE_DIR,
+    );
+    const resolved = resolveMacUnsignedInstallAssetPaths(stageResourcesDir, path);
+
+    assert.equal(
+      resolved.installHelperFilePath,
+      path.join(stageResourcesDir, MAC_UNSIGNED_INSTALL_HELPER_NAME),
+    );
+    assert.equal(resolved.installHelperDmgPath, resolved.installHelperFilePath);
+    assert.equal(resolved.readmeFilePath, path.join(stageResourcesDir, MAC_UNSIGNED_README_NAME));
+    assert.equal(resolved.readmeDmgPath, resolved.readmeFilePath);
+  });
+
   it.effect("uses electron-builder's current DMG window schema", () =>
     Effect.gen(function* () {
+      const installHelperPath = "/tmp/ryco-stage/app/apps/desktop/resources/Install Ryco.command";
+      const readmePath = "/tmp/ryco-stage/app/apps/desktop/resources/README-macOS.txt";
       const config = yield* createBuildConfig("mac", "dmg", "0.1.1", false, false, undefined, {
-        installHelperFilePath: "/tmp/Install Ryco.command",
-        readmeFilePath: "/tmp/README-macOS.txt",
-        installHelperDmgPath: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/Install Ryco.command`,
-        readmeDmgPath: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/README-macOS.txt`,
+        installHelperFilePath: installHelperPath,
+        readmeFilePath: readmePath,
+        installHelperDmgPath: installHelperPath,
+        readmeDmgPath: readmePath,
       });
 
       assert.deepStrictEqual(config.dmg, {
@@ -498,14 +520,14 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             x: 140,
             y: 320,
             type: "file",
-            path: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/Install Ryco.command`,
+            path: installHelperPath,
             name: MAC_UNSIGNED_INSTALL_HELPER_NAME,
           },
           {
             x: 420,
             y: 320,
             type: "file",
-            path: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/README-macOS.txt`,
+            path: readmePath,
             name: MAC_UNSIGNED_README_NAME,
           },
         ],

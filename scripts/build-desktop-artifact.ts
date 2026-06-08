@@ -834,15 +834,20 @@ https://github.com/sak0a/ryco/releases
 `;
 }
 
-function resolveMacUnsignedInstallAssetPaths(
+export function resolveMacUnsignedInstallAssetPaths(
   stageResourcesDir: string,
-  path: Path.Path,
+  path: Pick<Path.Path, "join">,
 ): MacUnsignedInstallAssetPaths {
+  const installHelperFilePath = path.join(stageResourcesDir, MAC_UNSIGNED_INSTALL_HELPER_NAME);
+  const readmeFilePath = path.join(stageResourcesDir, MAC_UNSIGNED_README_NAME);
+
   return {
-    installHelperFilePath: path.join(stageResourcesDir, MAC_UNSIGNED_INSTALL_HELPER_NAME),
-    readmeFilePath: path.join(stageResourcesDir, MAC_UNSIGNED_README_NAME),
-    installHelperDmgPath: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/${MAC_UNSIGNED_INSTALL_HELPER_NAME}`,
-    readmeDmgPath: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/${MAC_UNSIGNED_README_NAME}`,
+    installHelperFilePath,
+    readmeFilePath,
+    // dmgbuild resolves custom DMG content paths from electron-builder's cwd, not
+    // from the staged projectDir, so generated stage-only assets must be absolute.
+    installHelperDmgPath: installHelperFilePath,
+    readmeDmgPath: readmeFilePath,
   };
 }
 
