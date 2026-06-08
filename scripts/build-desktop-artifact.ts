@@ -297,6 +297,25 @@ interface StagePackageJson {
     readonly electron: string;
   };
   readonly overrides: Record<string, unknown>;
+  readonly patchedDependencies?: Record<string, string>;
+}
+
+export function createStagePatchedDependencies(
+  patchedDependencies: Record<string, string>,
+  dependencies: Record<string, unknown>,
+): StagePackageJson["patchedDependencies"] {
+  const stagePatchedDependencies = Object.fromEntries(
+    Object.entries(patchedDependencies).filter(([patchKey]) =>
+      Object.hasOwn(dependencies, getPatchedDependencyPackageName(patchKey)),
+    ),
+  );
+
+  return Object.keys(stagePatchedDependencies).length > 0 ? stagePatchedDependencies : undefined;
+}
+
+function getPatchedDependencyPackageName(patchKey: string): string {
+  const versionSeparator = patchKey.lastIndexOf("@");
+  return versionSeparator > 0 ? patchKey.slice(0, versionSeparator) : patchKey;
 }
 
 const AzureTrustedSigningOptionsConfig = Config.all({
@@ -1073,6 +1092,14 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         cause,
       }),
   });
+  const stageDependencies = {
+    ...resolvedServerDependencies,
+    ...resolvedDesktopRuntimeDependencies,
+  };
+  const stagePatchedDependencies = createStagePatchedDependencies(
+    rootPackageJson.patchedDependencies ?? {},
+    stageDependencies,
+  );
 
   const appVersion = options.version ?? serverPackageJson.version;
   const iconAssets = resolveDesktopBuildIconAssets(appVersion);
@@ -1177,18 +1204,20 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       options.mockUpdateServerPort,
       macUnsignedInstallAssets,
     ),
-    dependencies: {
-      ...resolvedServerDependencies,
-      ...resolvedDesktopRuntimeDependencies,
-    },
+    dependencies: stageDependencies,
     devDependencies: {
       electron: electronVersion,
     },
     overrides: resolvedOverrides,
+    ...(stagePatchedDependencies ? { patchedDependencies: stagePatchedDependencies } : {}),
   };
 
   const stagePackageJsonString = yield* encodeJsonString(stagePackageJson);
   yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${stagePackageJsonString}\n`);
+
+  if (stagePatchedDependencies) {
+    yield* fs.copy(path.join(repoRoot, "patches"), path.join(stageAppDir, "patches"));
+  }
 
   yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
   yield* runCommand(

@@ -30,6 +30,7 @@ import {
   createMacUnsignedInstallScript,
   createBuildConfig,
   createElectronBuilderInvocation,
+  createStagePatchedDependencies,
   formatCommandFailureMessage,
   formatOutputSection,
   resolveElectronBuilderDebugEnv,
@@ -276,6 +277,37 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("switches packaged web assets to nightly artwork for nightly versions", () => {
     assert.equal(resolveDesktopWebAssetBrand("0.0.17"), "production");
     assert.equal(resolveDesktopWebAssetBrand("0.0.17-nightly.20260413.42"), "nightly");
+  });
+
+  it("carries only staged dependency patch metadata into staged Bun installs", () => {
+    assert.deepStrictEqual(
+      createStagePatchedDependencies(
+        {
+          "@expo/metro-config@56.0.13": "patches/@expo%2Fmetro-config@56.0.13.patch",
+          "@pierre/diffs@1.1.20": "patches/@pierre%2Fdiffs@1.1.20.patch",
+          "alchemy@2.0.0-beta.49": "patches/alchemy@2.0.0-beta.49.patch",
+          "effect@4.0.0-beta.59": "patches/effect@4.0.0-beta.59.patch",
+        },
+        {
+          "@pierre/diffs": "1.1.20",
+          effect: "4.0.0-beta.59",
+        },
+      ),
+      {
+        "@pierre/diffs@1.1.20": "patches/@pierre%2Fdiffs@1.1.20.patch",
+        "effect@4.0.0-beta.59": "patches/effect@4.0.0-beta.59.patch",
+      },
+    );
+
+    assert.equal(
+      createStagePatchedDependencies(
+        {
+          "@expo/metro-config@56.0.13": "patches/@expo%2Fmetro-config@56.0.13.patch",
+        },
+        { effect: "4.0.0-beta.59" },
+      ),
+      undefined,
+    );
   });
 
   it.effect("stages standard Linux AppImage icon sizes with ImageMagick", () =>
