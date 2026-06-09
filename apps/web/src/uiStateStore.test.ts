@@ -3,14 +3,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import {
   clearThreadUi,
+  createProjectFolder,
+  deleteProjectFolder,
   hydratePersistedProjectState,
   markThreadVisited,
   markThreadUnread,
+  moveProjectsBetweenFolders,
+  moveProjectsToFolder,
+  moveProjectsToRoot,
   PERSISTED_STATE_KEY,
   type PersistedUiState,
   persistState,
+  projectFolderTreeItemId,
+  projectTreeItemId,
+  renameProjectFolder,
   reorderProjects,
+  reorderProjectTreeItem,
   setDefaultAdvertisedEndpointKey,
+  setProjectFolderExpanded,
   setProjectExpanded,
   setReasoningIndicatorStyle,
   setThreadChangedFilesExpanded,
@@ -25,6 +35,9 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
     projectExpandedById: {},
     projectOrder: [],
+    projectFoldersById: {},
+    projectFolderOrder: [],
+    projectTreeOrder: [],
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     threadWorkEntryExpandedById: {},
@@ -423,6 +436,247 @@ describe("uiStateStore pure functions", () => {
     expect(next.projectOrder).toEqual([project1]);
   });
 
+  it("createProjectFolder creates a named local folder and moves initial projects into it", () => {
+    const initialState = makeUiState({
+      projectOrder: ["project-a", "project-b"],
+      projectTreeOrder: [projectTreeItemId("project-a"), projectTreeItemId("project-b")],
+    });
+
+    const next = createProjectFolder(initialState, " WordPress ", ["project-a"], {
+      folderId: "folder-wordpress",
+      now: "2026-06-09T00:00:00.000Z",
+    });
+
+    expect(next.projectFolderOrder).toEqual(["folder-wordpress"]);
+    expect(next.projectFoldersById["folder-wordpress"]).toMatchObject({
+      id: "folder-wordpress",
+      name: "WordPress",
+      projectKeys: ["project-a"],
+      expanded: true,
+    });
+    expect(next.projectTreeOrder).toEqual([
+      projectTreeItemId("project-b"),
+      projectFolderTreeItemId("folder-wordpress"),
+    ]);
+  });
+
+  it("renameProjectFolder and setProjectFolderExpanded update only the target folder", () => {
+    const initialState = createProjectFolder(makeUiState(), "WordPress", [], {
+      folderId: "folder-wordpress",
+      now: "2026-06-09T00:00:00.000Z",
+    });
+
+    const renamed = renameProjectFolder(
+      initialState,
+      "folder-wordpress",
+      "WP",
+      "2026-06-09T00:01:00.000Z",
+    );
+    const collapsed = setProjectFolderExpanded(renamed, "folder-wordpress", false);
+
+    expect(collapsed.projectFoldersById["folder-wordpress"]).toMatchObject({
+      name: "WP",
+      expanded: false,
+    });
+    expect(renameProjectFolder(collapsed, "missing", "Other")).toBe(collapsed);
+  });
+
+  it("deleteProjectFolder removes only the folder and keeps projects in root order", () => {
+    const initialState = createProjectFolder(
+      makeUiState({
+        projectOrder: ["project-a", "project-b"],
+        projectTreeOrder: [projectTreeItemId("project-a"), projectTreeItemId("project-b")],
+      }),
+      "WordPress",
+      ["project-a"],
+      { folderId: "folder-wordpress", now: "2026-06-09T00:00:00.000Z" },
+    );
+
+    const next = deleteProjectFolder(initialState, "folder-wordpress");
+
+    expect(next.projectFoldersById).toEqual({});
+    expect(next.projectFolderOrder).toEqual([]);
+    expect(next.projectTreeOrder).toEqual([
+      projectTreeItemId("project-b"),
+      projectTreeItemId("project-a"),
+    ]);
+  });
+
+  it("moveProjectsToFolder removes moved projects from other folders before inserting", () => {
+    const withFolders = createProjectFolder(
+      createProjectFolder(
+        makeUiState({
+          projectOrder: ["project-a", "project-b", "project-c"],
+          projectTreeOrder: [
+            projectTreeItemId("project-a"),
+            projectTreeItemId("project-b"),
+            projectTreeItemId("project-c"),
+          ],
+        }),
+        "WordPress",
+        ["project-a", "project-b"],
+        { folderId: "folder-wordpress", now: "2026-06-09T00:00:00.000Z" },
+      ),
+      "Clients",
+      [],
+      { folderId: "folder-clients", now: "2026-06-09T00:00:01.000Z" },
+    );
+
+    const next = moveProjectsToFolder(withFolders, ["project-b", "project-c"], "folder-clients");
+
+    expect(next.projectFoldersById["folder-wordpress"]?.projectKeys).toEqual(["project-a"]);
+    expect(next.projectFoldersById["folder-clients"]?.projectKeys).toEqual([
+      "project-b",
+      "project-c",
+    ]);
+    expect(next.projectTreeOrder).toEqual([
+      projectFolderTreeItemId("folder-wordpress"),
+      projectFolderTreeItemId("folder-clients"),
+    ]);
+  });
+
+  it("moveProjectsToRoot removes folder membership and inserts root tree items", () => {
+    const initialState = createProjectFolder(
+      makeUiState({
+        projectOrder: ["project-a", "project-b"],
+        projectTreeOrder: [projectTreeItemId("project-a"), projectTreeItemId("project-b")],
+      }),
+      "WordPress",
+      ["project-a"],
+      { folderId: "folder-wordpress", now: "2026-06-09T00:00:00.000Z" },
+    );
+
+    const next = moveProjectsToRoot(initialState, ["project-a"], 0);
+
+    expect(next.projectFoldersById["folder-wordpress"]?.projectKeys).toEqual([]);
+    expect(next.projectTreeOrder).toEqual([
+      projectTreeItemId("project-a"),
+      projectTreeItemId("project-b"),
+      projectFolderTreeItemId("folder-wordpress"),
+    ]);
+  });
+
+  it("moveProjectsToRoot re-roots grouped projects by logical tree item", () => {
+    const localProjectKey = "env-local:/repo/project";
+    const remoteProjectKey = "env-remote:/repo/project";
+    const logicalProjectKey = "repo-canonical-key";
+    const otherProjectKey = "env-local:/repo/other";
+    const synced = syncProjects(makeUiState(), [
+      { key: localProjectKey, logicalKey: logicalProjectKey, cwd: "/repo/project" },
+      { key: remoteProjectKey, logicalKey: logicalProjectKey, cwd: "/repo/project" },
+      { key: otherProjectKey, logicalKey: otherProjectKey, cwd: "/repo/other" },
+    ]);
+    expect(synced.projectTreeOrder).toEqual([
+      projectTreeItemId(logicalProjectKey),
+      projectTreeItemId(otherProjectKey),
+    ]);
+    const initialState = createProjectFolder(
+      synced,
+      "Grouped",
+      [localProjectKey, remoteProjectKey],
+      { folderId: "folder-grouped", now: "2026-06-09T00:00:00.000Z" },
+    );
+    expect(initialState.projectTreeOrder).toEqual([
+      projectTreeItemId(otherProjectKey),
+      projectFolderTreeItemId("folder-grouped"),
+    ]);
+
+    const next = moveProjectsToRoot(initialState, [localProjectKey, remoteProjectKey], 0);
+
+    expect(next.projectFoldersById["folder-grouped"]?.projectKeys).toEqual([]);
+    expect(next.projectTreeOrder).toEqual([
+      projectTreeItemId(logicalProjectKey),
+      projectTreeItemId(otherProjectKey),
+      projectFolderTreeItemId("folder-grouped"),
+    ]);
+    expect(next.projectTreeOrder).not.toContain(projectTreeItemId(localProjectKey));
+    expect(next.projectTreeOrder).not.toContain(projectTreeItemId(remoteProjectKey));
+  });
+
+  it("moveProjectsBetweenFolders delegates to target folder insertion", () => {
+    const initialState = createProjectFolder(
+      createProjectFolder(
+        makeUiState({
+          projectOrder: ["project-a"],
+          projectTreeOrder: [projectTreeItemId("project-a")],
+        }),
+        "WordPress",
+        ["project-a"],
+        { folderId: "folder-wordpress", now: "2026-06-09T00:00:00.000Z" },
+      ),
+      "Clients",
+      [],
+      { folderId: "folder-clients", now: "2026-06-09T00:00:01.000Z" },
+    );
+
+    const next = moveProjectsBetweenFolders(
+      initialState,
+      ["project-a"],
+      "folder-wordpress",
+      "folder-clients",
+    );
+
+    expect(next.projectFoldersById["folder-wordpress"]?.projectKeys).toEqual([]);
+    expect(next.projectFoldersById["folder-clients"]?.projectKeys).toEqual(["project-a"]);
+  });
+
+  it("reorderProjectTreeItem reorders root items and keeps flat project order aligned", () => {
+    const initialState = makeUiState({
+      projectOrder: ["project-a", "project-b"],
+      projectTreeOrder: [projectTreeItemId("project-a"), projectTreeItemId("project-b")],
+    });
+
+    const next = reorderProjectTreeItem(
+      initialState,
+      projectTreeItemId("project-a"),
+      projectTreeItemId("project-b"),
+    );
+
+    expect(next.projectTreeOrder).toEqual([
+      projectTreeItemId("project-b"),
+      projectTreeItemId("project-a"),
+    ]);
+    expect(next.projectOrder).toEqual(["project-b", "project-a"]);
+  });
+
+  it("syncProjects prunes stale folder project keys and preserves empty folders", () => {
+    const initialState = createProjectFolder(
+      makeUiState({
+        projectOrder: ["project-a", "project-b"],
+        projectTreeOrder: [projectTreeItemId("project-a"), projectTreeItemId("project-b")],
+      }),
+      "WordPress",
+      ["project-a", "project-b"],
+      { folderId: "folder-wordpress", now: "2026-06-09T00:00:00.000Z" },
+    );
+
+    const next = syncProjects(initialState, [
+      { key: "project-a", logicalKey: "project-a", cwd: "/project-a" },
+    ]);
+
+    expect(next.projectFoldersById["folder-wordpress"]?.projectKeys).toEqual(["project-a"]);
+    expect(next.projectFolderOrder).toEqual(["folder-wordpress"]);
+  });
+
+  it("syncProjects preserves folder membership across project id churn at the same physical key", () => {
+    const physicalKey = "env-local:/tmp/project";
+    const initialState = createProjectFolder(
+      makeUiState({
+        projectOrder: [physicalKey],
+        projectTreeOrder: [projectTreeItemId(physicalKey)],
+      }),
+      "WordPress",
+      [physicalKey],
+      { folderId: "folder-wordpress", now: "2026-06-09T00:00:00.000Z" },
+    );
+
+    const next = syncProjects(initialState, [
+      { key: physicalKey, logicalKey: "project-id-after-churn", cwd: "/tmp/project" },
+    ]);
+
+    expect(next.projectFoldersById["folder-wordpress"]?.projectKeys).toEqual([physicalKey]);
+  });
+
   it("clearThreadUi removes visit state for deleted threads", () => {
     const thread1 = ThreadId.make("thread-1");
     const initialState = makeUiState({
@@ -635,6 +889,36 @@ describe("uiStateStore persistence round-trip", () => {
     const rehydrated = syncProjects(makeUiState(), [projectA, projectB, projectC]);
 
     expect(rehydrated.projectOrder).toEqual([projectC.key, projectA.key, projectB.key]);
+  });
+
+  it("persists project folders under the existing ui state key", () => {
+    const state = createProjectFolder(
+      makeUiState({
+        projectOrder: ["project-a"],
+        projectTreeOrder: [projectTreeItemId("project-a")],
+      }),
+      "WordPress",
+      ["project-a"],
+      { folderId: "folder-wordpress", now: "2026-06-09T00:00:00.000Z" },
+    );
+
+    persistState(state);
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+    expect(persisted.projectFolders).toEqual([
+      {
+        id: "folder-wordpress",
+        name: "WordPress",
+        projectKeys: ["project-a"],
+        expanded: true,
+        createdAt: "2026-06-09T00:00:00.000Z",
+        updatedAt: "2026-06-09T00:00:00.000Z",
+      },
+    ]);
+    expect(persisted.projectFolderOrder).toEqual(["folder-wordpress"]);
+    expect(persisted.projectTreeOrder).toEqual([projectFolderTreeItemId("folder-wordpress")]);
   });
 
   it("persists the default advertised endpoint preference", () => {
