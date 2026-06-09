@@ -7,6 +7,7 @@ import { DateTime, Option } from "effect";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
 import { CircleDotIcon, FileTextIcon, MessageSquareIcon, SendIcon } from "lucide-react";
+import { errorMessage } from "~/lib/errorMessage";
 import {
   issueDetailQueryOptions,
   useAddIssueCommentMutation,
@@ -79,9 +80,7 @@ export function IssueDetail(props: IssueDetailProps) {
           <SourceControlDetailLoadingState label="issue" />
         ) : detailQuery.isError ? (
           <SourceControlDetailErrorState
-            message={
-              detailQuery.error instanceof Error ? detailQuery.error.message : "Failed to load."
-            }
+            message={errorMessage(detailQuery.error, "Failed to load issue.")}
           />
         ) : detail ? (
           <IssueDetailBody

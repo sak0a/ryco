@@ -34,13 +34,14 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { requireEnvironmentConnection } from "~/environments/runtime";
 import { readEnvironmentApi } from "~/environmentApi";
+import { cn } from "~/lib/utils";
 import {
   findLinkedWorkItemBranches,
   findLinkedWorkItemWorktrees,
   type LinkedWorkItemWorktree,
 } from "~/lib/workItemLocalLinks";
 import { searchChangeRequestsQueryOptions } from "~/lib/sourceControlContextRpc";
-import { workItemStateLabel } from "~/lib/workItemState";
+import { errorMessage } from "~/lib/errorMessage";
 import { workItemDetailQueryOptions, workItemsQueryKeys } from "~/lib/workItemsRpc";
 import { selectSidebarWorktreesForProjectRef, useStore } from "~/store";
 import { AtlassianJiraIcon } from "../Icons";
@@ -69,7 +70,6 @@ import {
   SourceControlDetailLayout,
   SourceControlDetailLoadingState,
   SourceControlDetailToolbar,
-  SourceControlMetricStrip,
 } from "./SourceControlDetailLayout";
 import {
   SourceControlTimeline,
@@ -77,6 +77,13 @@ import {
   SourceControlTimelineNotice,
 } from "./SourceControlTimeline";
 import { StateBadge, type StateBadgeKind } from "./StateBadge";
+import {
+  filterWorkItemActivityEntries,
+  isWorkItemTransitionActivity,
+  workItemActivityCounts,
+  type WorkItemActivityFilter,
+  type WorkItemActivityCounts,
+} from "./WorkItemDetail.logic";
 
 const dateFmt = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
@@ -186,7 +193,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
         stackedThreadToast({
           type: "error",
           title: "Could not update Jira work item",
-          description: error instanceof Error ? error.message : "The Jira update was not saved.",
+          description: errorMessage(error, "The Jira update was not saved."),
         }),
       );
     },
@@ -213,7 +220,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
         stackedThreadToast({
           type: "error",
           title: "Could not add Jira comment",
-          description: error instanceof Error ? error.message : "The comment was not posted.",
+          description: errorMessage(error, "The comment was not posted."),
         }),
       );
     },
@@ -242,7 +249,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
         stackedThreadToast({
           type: "error",
           title: "Could not edit Jira comment",
-          description: error instanceof Error ? error.message : "The comment edit was not saved.",
+          description: errorMessage(error, "The comment edit was not saved."),
         }),
       );
     },
@@ -269,8 +276,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
         stackedThreadToast({
           type: "error",
           title: "Could not transition Jira work item",
-          description:
-            error instanceof Error ? error.message : "The work item transition was not applied.",
+          description: errorMessage(error, "The work item transition was not applied."),
         }),
       );
     },
@@ -346,9 +352,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
           <SourceControlDetailLoadingState label="Jira work item" />
         ) : detailQuery.isError ? (
           <SourceControlDetailErrorState
-            message={
-              detailQuery.error instanceof Error ? detailQuery.error.message : "Failed to load."
-            }
+            message={errorMessage(detailQuery.error, "Failed to load Jira work item.")}
           />
         ) : detail ? (
           <SourceControlDetailLayout
@@ -480,6 +484,17 @@ function WorkItemConversation(props: {
   readonly onTransition: (transitionId: string) => void;
 }) {
   const { detail } = props;
+  const [activityFilter, setActivityFilter] = useState<WorkItemActivityFilter>("comments");
+  const activityCounts = useMemo(
+    () => workItemActivityCounts({ comments: detail.comments, activity: detail.activity }),
+    [detail.activity, detail.comments],
+  );
+  const visibleActivityEntries = useMemo(
+    () => filterWorkItemActivityEntries({ activity: detail.activity, filter: activityFilter }),
+    [activityFilter, detail.activity],
+  );
+  const showComments = activityFilter === "comments" || activityFilter === "all";
+  const showStatusNotice = activityFilter === "transitions" || activityFilter === "all";
   const opCreatedAt =
     detail.createdAt && Option.isSome(detail.createdAt)
       ? detail.createdAt.value
@@ -489,19 +504,21 @@ function WorkItemConversation(props: {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="border-border/60 border-b px-5 py-4 lg:px-6">
-        <div className="flex flex-wrap items-start gap-3">
+      <header className="border-border/60 border-b bg-background/70 px-5 py-4 lg:px-6">
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
           <div className="min-w-0 flex-1">
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <span className="font-mono text-muted-foreground text-xs">{detail.key}</span>
-              <StateBadge kind={workItemStateBadgeKind(detail.state)} />
               {detail.issueType ? (
                 <span className="rounded-full border border-border/60 bg-muted/35 px-2 py-0.5 text-muted-foreground text-xs">
                   {detail.issueType}
                 </span>
               ) : null}
+              <StateBadge kind={workItemStateBadgeKind(detail.state)} />
             </div>
-            <h2 className="font-heading font-semibold text-xl leading-tight">{detail.title}</h2>
+            <h2 className="max-w-4xl font-heading font-semibold text-xl leading-tight">
+              {detail.title}
+            </h2>
             {detail.labels && detail.labels.length > 0 ? (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {detail.labels.map((label) => (
@@ -523,21 +540,9 @@ function WorkItemConversation(props: {
             </Button>
           ) : null}
         </div>
-        <SourceControlMetricStrip
-          className="mt-4"
-          items={[
-            { label: "Status", value: workItemStateLabel(detail) },
-            {
-              label: "Priority",
-              value: <PriorityDisplay priority={detail.priorityDetail ?? detail.priority} />,
-            },
-            { label: "Assignee", value: detail.assignee ?? "Unassigned" },
-            { label: "Updated", value: formatOptionDate(detail.updatedAt) ?? "Unknown" },
-          ]}
-        />
         {detail.transitions.length > 0 ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground text-xs">Transition</span>
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-border/50 border-t pt-3">
+            <span className="mr-1 text-muted-foreground text-xs">Move status</span>
             {detail.transitions.map((transition) => (
               <Button
                 key={transition.id}
@@ -576,124 +581,242 @@ function WorkItemConversation(props: {
                 }
               />
             </SourceControlTimelineEntry>
-            <SourceControlTimelineEntry tone="system" icon={<CircleDotIcon className="size-4" />}>
-              <SourceControlTimelineNotice
-                tone="system"
-                title="Current Jira status"
-                description={
-                  formatOptionDate(detail.updatedAt)
-                    ? `Updated ${formatOptionDate(detail.updatedAt)}`
-                    : undefined
-                }
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <StateBadge kind={workItemStateBadgeKind(detail.state)} />
-                  {detail.assignee ? (
-                    <span className="text-muted-foreground text-xs">
-                      Assigned to {detail.assignee}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground text-xs">Unassigned</span>
-                  )}
-                </div>
-              </SourceControlTimelineNotice>
-            </SourceControlTimelineEntry>
-            {detail.activity.length > 0 ? (
-              detail.activity.map((entry) => (
-                <SourceControlTimelineEntry
-                  key={entry.id}
+          </SourceControlTimeline>
+
+          <div className="mt-5 mb-4 flex flex-wrap items-center justify-between gap-3 border-border/60 border-y py-3">
+            <div className="min-w-0">
+              <h3 className="font-medium text-foreground text-sm">Activity</h3>
+              <p className="text-muted-foreground text-xs">
+                {activityFilterDescription(activityFilter)}
+              </p>
+            </div>
+            <ActivityFilterTabs
+              value={activityFilter}
+              counts={activityCounts}
+              onChange={setActivityFilter}
+            />
+          </div>
+
+          <SourceControlTimeline>
+            {showStatusNotice ? (
+              <SourceControlTimelineEntry tone="system" icon={<CircleDotIcon className="size-4" />}>
+                <SourceControlTimelineNotice
                   tone="system"
-                  icon={<HistoryIcon className="size-4" />}
+                  title="Current Jira status"
+                  description={
+                    formatOptionDate(detail.updatedAt)
+                      ? `Updated ${formatOptionDate(detail.updatedAt)}`
+                      : undefined
+                  }
                 >
-                  <SourceControlTimelineNotice
-                    tone="system"
-                    title={entry.author ? `${entry.author} updated Jira` : "Jira activity"}
-                    description={formatDateTime(entry.createdAt)}
-                  >
-                    <ul className="grid gap-1 text-xs">
-                      {entry.items.map((item) => (
-                        <li
-                          key={`${entry.id}-${item.field}-${item.from ?? ""}-${item.to ?? ""}`}
-                          className="text-muted-foreground"
-                        >
-                          <span className="font-medium text-foreground/80">{item.field}</span>
-                          {": "}
-                          {item.from ?? "None"} {"->"} {item.to ?? "None"}
-                        </li>
-                      ))}
-                    </ul>
-                  </SourceControlTimelineNotice>
-                </SourceControlTimelineEntry>
-              ))
-            ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StateBadge kind={workItemStateBadgeKind(detail.state)} />
+                    {detail.assignee ? (
+                      <span className="text-muted-foreground text-xs">
+                        Assigned to {detail.assignee}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">Unassigned</span>
+                    )}
+                  </div>
+                </SourceControlTimelineNotice>
+              </SourceControlTimelineEntry>
+            ) : null}
+
+            {visibleActivityEntries.map((entry) => (
+              <SourceControlTimelineEntry
+                key={entry.id}
+                tone="system"
+                icon={<HistoryIcon className="size-4" />}
+              >
+                <SourceControlTimelineNotice
+                  tone="system"
+                  title={activityEntryTitle(entry)}
+                  description={formatDateTime(entry.createdAt)}
+                >
+                  <ul className="grid gap-1 text-xs">
+                    {entry.items.map((item) => (
+                      <li
+                        key={`${entry.id}-${item.field}-${item.from ?? ""}-${item.to ?? ""}`}
+                        className="text-muted-foreground"
+                      >
+                        <span className="font-medium text-foreground/80">{item.field}</span>
+                        {": "}
+                        {item.from ?? "None"} {"->"} {item.to ?? "None"}
+                      </li>
+                    ))}
+                  </ul>
+                </SourceControlTimelineNotice>
+              </SourceControlTimelineEntry>
+            ))}
+
+            {activityFilter !== "comments" && visibleActivityEntries.length === 0 ? (
               <SourceControlTimelineEntry tone="system" icon={<HistoryIcon className="size-4" />}>
                 <SourceControlTimelineNotice
                   tone="system"
-                  title="Jira activity"
-                  description="No recent changelog entries returned."
+                  title={emptyActivityTitle(activityFilter)}
+                  description="Jira did not return matching changelog entries for this issue."
                 />
               </SourceControlTimelineEntry>
-            )}
-            {detail.comments.map((comment) => (
+            ) : null}
+
+            {showComments && detail.comments.length === 0 ? (
               <SourceControlTimelineEntry
-                key={
-                  comment.id ??
-                  `${comment.author}-${DateTime.toDate(comment.createdAt).toISOString()}`
-                }
                 tone="comment"
                 icon={<MessageSquareIcon className="size-4" />}
               >
-                <CommentItem
-                  author={comment.author}
-                  body={comment.body}
-                  createdAt={comment.createdAt}
-                  reactions={comment.reactions}
-                  itemKind="comment"
-                  eyebrow={
-                    comment.updatedAt ? `Edited ${formatDateTime(comment.updatedAt)}` : "Comment"
-                  }
-                  onQuote={() =>
-                    props.onQuote({
-                      author: comment.author,
-                      body: comment.body,
-                      createdAt: comment.createdAt,
-                      contextLabel: "Jira comment",
-                    })
-                  }
-                  actions={
-                    comment.editable && comment.id ? (
-                      <button
-                        type="button"
-                        onClick={() => props.onEditComment(comment)}
-                        className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        aria-label="Edit Jira comment"
-                        title="Edit comment"
-                      >
-                        <PencilIcon className="size-3.5" />
-                      </button>
-                    ) : null
-                  }
+                <SourceControlTimelineNotice
+                  tone="system"
+                  title="No comments yet"
+                  description="Add the first Jira comment below."
                 />
               </SourceControlTimelineEntry>
-            ))}
-            <SourceControlTimelineEntry
-              tone="composer"
-              icon={<MessageSquareIcon className="size-4" />}
-            >
-              <CommentComposer
-                placeholder="Add a Jira comment"
-                submitLabel="Comment"
-                disabled={props.addCommentPending}
-                quoteInsertion={props.quoteInsertion}
-                onQuoteInsertionHandled={props.onQuoteInsertionHandled}
-                onSubmit={({ body }) => props.onAddComment(body).then(() => undefined)}
-              />
-            </SourceControlTimelineEntry>
+            ) : null}
+
+            {showComments
+              ? detail.comments.map((comment) => (
+                  <SourceControlTimelineEntry
+                    key={
+                      comment.id ??
+                      `${comment.author}-${DateTime.toDate(comment.createdAt).toISOString()}`
+                    }
+                    tone="comment"
+                    icon={<MessageSquareIcon className="size-4" />}
+                  >
+                    <CommentItem
+                      author={comment.author}
+                      body={comment.body}
+                      createdAt={comment.createdAt}
+                      reactions={comment.reactions}
+                      itemKind="comment"
+                      eyebrow={
+                        comment.updatedAt
+                          ? `Edited ${formatDateTime(comment.updatedAt)}`
+                          : "Comment"
+                      }
+                      onQuote={() =>
+                        props.onQuote({
+                          author: comment.author,
+                          body: comment.body,
+                          createdAt: comment.createdAt,
+                          contextLabel: "Jira comment",
+                        })
+                      }
+                      actions={
+                        comment.editable && comment.id ? (
+                          <button
+                            type="button"
+                            onClick={() => props.onEditComment(comment)}
+                            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            aria-label="Edit Jira comment"
+                            title="Edit comment"
+                          >
+                            <PencilIcon className="size-3.5" />
+                          </button>
+                        ) : null
+                      }
+                    />
+                  </SourceControlTimelineEntry>
+                ))
+              : null}
+
+            {showComments ? (
+              <SourceControlTimelineEntry
+                tone="composer"
+                icon={<MessageSquareIcon className="size-4" />}
+              >
+                <CommentComposer
+                  placeholder="Add a Jira comment"
+                  submitLabel="Comment"
+                  disabled={props.addCommentPending}
+                  quoteInsertion={props.quoteInsertion}
+                  onQuoteInsertionHandled={props.onQuoteInsertionHandled}
+                  onSubmit={({ body }) => props.onAddComment(body).then(() => undefined)}
+                />
+              </SourceControlTimelineEntry>
+            ) : null}
           </SourceControlTimeline>
         </div>
       </div>
     </div>
   );
+}
+
+function ActivityFilterTabs(props: {
+  readonly value: WorkItemActivityFilter;
+  readonly counts: WorkItemActivityCounts;
+  readonly onChange: (value: WorkItemActivityFilter) => void;
+}) {
+  const options: ReadonlyArray<{
+    readonly id: WorkItemActivityFilter;
+    readonly label: string;
+    readonly count: number;
+  }> = [
+    { id: "comments", label: "Comments", count: props.counts.comments },
+    { id: "history", label: "History", count: props.counts.history },
+    { id: "transitions", label: "Transitions", count: props.counts.transitions },
+    { id: "all", label: "All", count: props.counts.all },
+  ];
+  return (
+    <div
+      role="tablist"
+      aria-label="Jira activity filter"
+      className="flex max-w-full items-center gap-0.5 overflow-x-auto rounded-md border border-border/60 bg-muted/35 p-0.5"
+    >
+      {options.map((option) => {
+        const active = props.value === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => props.onChange(option.id)}
+            className={cn(
+              "inline-flex h-7 shrink-0 items-center gap-1 rounded px-2 text-xs transition-colors",
+              active
+                ? "bg-background text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <span>{option.label}</span>
+            <span className="font-mono text-[10px] text-muted-foreground">{option.count}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function activityFilterDescription(filter: WorkItemActivityFilter): string {
+  switch (filter) {
+    case "comments":
+      return "Comments only";
+    case "history":
+      return "Field changes without status moves";
+    case "transitions":
+      return "Status and resolution changes";
+    case "all":
+      return "Comments and Jira changelog";
+  }
+}
+
+function activityEntryTitle(entry: WorkItemDetailModel["activity"][number]): string {
+  const actor = entry.author ?? "Jira";
+  return isWorkItemTransitionActivity(entry) ? `${actor} moved the issue` : `${actor} updated Jira`;
+}
+
+function emptyActivityTitle(filter: WorkItemActivityFilter): string {
+  switch (filter) {
+    case "history":
+      return "No field history";
+    case "transitions":
+      return "No transition history";
+    case "all":
+      return "No Jira activity";
+    case "comments":
+      return "No comments yet";
+  }
 }
 
 function WorkItemSidebar(props: {
@@ -714,113 +837,59 @@ function WorkItemSidebar(props: {
   const dueDateField = editableField(detail, "dueDate");
   const startDateField = editableField(detail, "startDate");
   const reporterField = editableField(detail, "reporter");
-  const hasEditableDetails =
-    assigneeField ||
-    priorityField ||
-    parentField ||
-    dueDateField ||
-    startDateField ||
-    reporterField;
+  const parentValue = detail.parentKey ?? detail.epicKey ?? null;
 
   return (
     <aside className="border-border/60 border-t bg-muted/12 px-4 py-4 lg:min-h-0 lg:overflow-y-auto lg:border-t-0 lg:border-l">
       <div className="space-y-5 text-xs">
-        <section className="space-y-2">
-          <h3 className="font-medium text-foreground text-sm">Jira details</h3>
-          <SidebarField label="Status" value={workItemStateLabel(detail)} />
-          <SidebarField label="Issue type" value={detail.issueType ?? "Work item"} />
-          <SidebarField label="Assignee" value={detail.assignee ?? "Unassigned"} />
-          <SidebarField label="Reporter" value={detail.reporter ?? "Unknown"} />
-          <SidebarField
-            label="Priority"
-            value={<PriorityDisplay priority={detail.priorityDetail ?? detail.priority} />}
-          />
-          <SidebarField label="Parent" value={detail.parentKey ?? detail.epicKey ?? "None"} />
-          <SidebarField label="Due date" value={detail.dueDate ?? "None"} />
-          <SidebarField label="Start date" value={detail.startDate ?? "None"} />
-          {detail.createdAt && Option.isSome(detail.createdAt) ? (
-            <SidebarField
-              label="Created"
-              value={dateFmt.format(DateTime.toDate(detail.createdAt.value))}
-            />
-          ) : null}
-          {detail.updatedAt && Option.isSome(detail.updatedAt) ? (
-            <SidebarField
-              label="Updated"
-              value={dateFmt.format(DateTime.toDate(detail.updatedAt.value))}
-            />
-          ) : null}
-        </section>
-
-        {hasEditableDetails ? (
-          <section className="space-y-2">
-            <h3 className="font-medium text-foreground text-sm">Editable fields</h3>
-            {assigneeField ? (
-              <EditableOptionSelect
-                label="Assignee"
-                field={assigneeField}
-                currentLabel={detail.assignee ?? "Unassigned"}
-                disabled={props.mutationPending}
-                valueForOption={(option) => option.accountId ?? option.id ?? option.name}
-                onChange={(value) => props.onUpdate({ assigneeAccountId: value })}
-                onClear={() => props.onUpdate({ assigneeAccountId: null })}
-              />
+        <section>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="font-medium text-foreground text-sm">Details</h3>
+            {props.mutationPending ? (
+              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                <Spinner className="size-3" />
+                Saving
+              </span>
             ) : null}
+          </div>
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-background/45">
             {priorityField ? (
-              <EditableOptionSelect
+              <EditableOptionDetailRow
                 label="Priority"
                 field={priorityField}
                 currentLabel={detail.priority ?? "None"}
                 selectedValue={detail.priorityDetail?.id}
                 disabled={props.mutationPending}
                 valueForOption={(option) => option.id ?? option.name}
+                renderCurrentValue={() => (
+                  <PriorityDisplay priority={detail.priorityDetail ?? detail.priority} />
+                )}
                 renderOptionPrefix={(option) => <PriorityDisplay priority={option} compact />}
                 onChange={(value) => props.onUpdate({ priorityId: value })}
                 onClear={() => props.onUpdate({ priorityId: null })}
               />
-            ) : null}
-            {parentField ? (
-              parentField.options && parentField.options.length > 0 ? (
-                <EditableOptionSelect
-                  label="Parent"
-                  field={parentField}
-                  currentLabel={detail.parentKey ?? "None"}
-                  selectedValue={detail.parentKey}
-                  disabled={props.mutationPending}
-                  valueForOption={(option) => option.key ?? option.id ?? option.name}
-                  onChange={(value) => props.onUpdate({ parentKey: value })}
-                  onClear={() => props.onUpdate({ parentKey: null })}
-                />
-              ) : (
-                <EditableTextField
-                  label="Parent"
-                  value={detail.parentKey ?? ""}
-                  placeholder="PROJ-123"
-                  disabled={props.mutationPending}
-                  onSave={(value) => props.onUpdate({ parentKey: value.trim() || null })}
-                />
-              )
-            ) : null}
-            {dueDateField ? (
-              <EditableTextField
-                label="Due date"
-                type="date"
-                value={detail.dueDate ?? ""}
-                disabled={props.mutationPending}
-                onSave={(value) => props.onUpdate({ dueDate: value.trim() || null })}
+            ) : (
+              <DetailRow
+                label="Priority"
+                value={<PriorityDisplay priority={detail.priorityDetail ?? detail.priority} />}
               />
-            ) : null}
-            {startDateField ? (
-              <EditableTextField
-                label="Start date"
-                type="date"
-                value={detail.startDate ?? ""}
+            )}
+            {assigneeField ? (
+              <EditableOptionDetailRow
+                label="Assignee"
+                field={assigneeField}
+                currentLabel={detail.assignee ?? "Unassigned"}
                 disabled={props.mutationPending}
-                onSave={(value) => props.onUpdate({ startDate: value.trim() || null })}
+                valueForOption={(option) => option.accountId ?? option.id ?? option.name}
+                renderCurrentValue={() => detail.assignee ?? "Unassigned"}
+                onChange={(value) => props.onUpdate({ assigneeAccountId: value })}
+                onClear={() => props.onUpdate({ assigneeAccountId: null })}
               />
-            ) : null}
+            ) : (
+              <DetailRow label="Assignee" value={detail.assignee ?? "Unassigned"} />
+            )}
             {reporterField ? (
-              <EditableOptionSelect
+              <EditableOptionDetailRow
                 label="Reporter"
                 field={reporterField}
                 currentLabel={detail.reporter ?? "Unknown"}
@@ -829,24 +898,72 @@ function WorkItemSidebar(props: {
                 onChange={(value) => props.onUpdate({ reporterAccountId: value })}
                 onClear={() => props.onUpdate({ reporterAccountId: null })}
               />
+            ) : (
+              <DetailRow label="Reporter" value={detail.reporter ?? "Unknown"} />
+            )}
+            {parentField ? (
+              parentField.options && parentField.options.length > 0 ? (
+                <EditableOptionDetailRow
+                  label="Parent"
+                  field={parentField}
+                  currentLabel={parentValue ?? "None"}
+                  selectedValue={parentValue ?? undefined}
+                  disabled={props.mutationPending}
+                  valueForOption={(option) => option.key ?? option.id ?? option.name}
+                  onChange={(value) => props.onUpdate({ parentKey: value })}
+                  onClear={() => props.onUpdate({ parentKey: null })}
+                />
+              ) : (
+                <EditableTextDetailRow
+                  label="Parent"
+                  value={parentValue ?? ""}
+                  placeholder="PROJ-123"
+                  emptyLabel="None"
+                  disabled={props.mutationPending}
+                  onSave={(value) => props.onUpdate({ parentKey: value.trim() || null })}
+                />
+              )
+            ) : (
+              <DetailRow label="Parent" value={parentValue ?? "None"} />
+            )}
+            {dueDateField ? (
+              <EditableTextDetailRow
+                label="Due date"
+                type="date"
+                value={detail.dueDate ?? ""}
+                emptyLabel="None"
+                disabled={props.mutationPending}
+                onSave={(value) => props.onUpdate({ dueDate: value.trim() || null })}
+              />
+            ) : (
+              <DetailRow label="Due date" value={detail.dueDate ?? "None"} />
+            )}
+            {startDateField ? (
+              <EditableTextDetailRow
+                label="Start date"
+                type="date"
+                value={detail.startDate ?? ""}
+                emptyLabel="None"
+                disabled={props.mutationPending}
+                onSave={(value) => props.onUpdate({ startDate: value.trim() || null })}
+              />
+            ) : (
+              <DetailRow label="Start date" value={detail.startDate ?? "None"} />
+            )}
+            {detail.createdAt && Option.isSome(detail.createdAt) ? (
+              <DetailRow
+                label="Created"
+                value={dateFmt.format(DateTime.toDate(detail.createdAt.value))}
+              />
             ) : null}
-          </section>
-        ) : (
-          <section className="rounded-md border border-border/60 bg-background/50 px-3 py-2 text-muted-foreground">
-            Jira did not expose editable fields for this issue.
-          </section>
-        )}
-
-        {detail.labels && detail.labels.length > 0 ? (
-          <section>
-            <div className="mb-2 text-muted-foreground">Labels</div>
-            <div className="flex flex-wrap gap-1">
-              {detail.labels.map((label) => (
-                <LabelChip key={label} label={label} />
-              ))}
-            </div>
-          </section>
-        ) : null}
+            {detail.updatedAt && Option.isSome(detail.updatedAt) ? (
+              <DetailRow
+                label="Updated"
+                value={dateFmt.format(DateTime.toDate(detail.updatedAt.value))}
+              />
+            ) : null}
+          </div>
+        </section>
 
         <LinkedLocalWorkItemSection
           branches={props.linkedBranches}
@@ -863,45 +980,64 @@ function WorkItemSidebar(props: {
   );
 }
 
-function SidebarField(props: { readonly label: string; readonly value: ReactNode }) {
+function DetailRow(props: { readonly label: string; readonly value: ReactNode }) {
   return (
-    <div className="min-w-0">
-      <div className="mb-1 text-muted-foreground">{props.label}</div>
-      <div className="min-w-0 truncate font-medium text-foreground">{props.value}</div>
+    <div className="grid min-h-9 grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-2 border-border/55 border-b px-3 py-2 last:border-b-0">
+      <div className="text-muted-foreground">{props.label}</div>
+      <div className="min-w-0 truncate text-right font-medium text-foreground">{props.value}</div>
     </div>
   );
 }
 
-function EditableOptionSelect(props: {
+function EditableOptionDetailRow(props: {
   readonly label: string;
   readonly field: WorkItemEditableFieldMetadata;
   readonly currentLabel: string;
   readonly selectedValue?: string | undefined;
   readonly disabled: boolean;
   readonly valueForOption: (option: WorkItemEditableFieldOption) => string;
+  readonly renderCurrentValue?: (() => ReactNode) | undefined;
   readonly renderOptionPrefix?: ((option: WorkItemEditableFieldOption) => ReactNode) | undefined;
   readonly onChange: (value: string) => void;
   readonly onClear: () => void;
 }) {
   const options = props.field.options ?? [];
   if (options.length === 0) {
-    return <SidebarField label={props.label} value={props.currentLabel} />;
+    return <DetailRow label={props.label} value={props.currentLabel} />;
   }
+  const selectedValue =
+    props.selectedValue ??
+    selectedEditableOptionValue({
+      options,
+      currentLabel: props.currentLabel,
+      valueForOption: props.valueForOption,
+    });
   return (
-    <div className="space-y-1">
+    <div className="grid min-h-9 grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-2 border-border/55 border-b px-3 py-1.5 last:border-b-0">
       <div className="text-muted-foreground">{props.label}</div>
       <Select
-        value={props.selectedValue ?? ""}
+        value={selectedValue ?? ""}
         onValueChange={(value) => {
           if (typeof value !== "string") return;
           if (value === NONE_VALUE) props.onClear();
           else props.onChange(value);
         }}
       >
-        <SelectTrigger size="sm" disabled={props.disabled} className="w-full">
-          <SelectValue placeholder={props.currentLabel} />
+        <SelectTrigger
+          size="xs"
+          variant="ghost"
+          disabled={props.disabled}
+          className="h-7 w-full justify-end text-right"
+        >
+          {props.renderCurrentValue ? (
+            <span className="flex min-w-0 flex-1 justify-end truncate text-foreground">
+              {props.renderCurrentValue()}
+            </span>
+          ) : (
+            <SelectValue placeholder={props.currentLabel} />
+          )}
         </SelectTrigger>
-        <SelectPopup>
+        <SelectPopup align="end">
           <SelectItem value={NONE_VALUE}>None</SelectItem>
           {options.map((option) => {
             const value = props.valueForOption(option);
@@ -920,11 +1056,12 @@ function EditableOptionSelect(props: {
   );
 }
 
-function EditableTextField(props: {
+function EditableTextDetailRow(props: {
   readonly label: string;
   readonly value: string;
   readonly type?: "text" | "date" | undefined;
   readonly placeholder?: string | undefined;
+  readonly emptyLabel: string;
   readonly disabled: boolean;
   readonly onSave: (value: string) => void;
 }) {
@@ -934,15 +1071,16 @@ function EditableTextField(props: {
   }, [props.value]);
   const dirty = draft !== props.value;
   return (
-    <div className="space-y-1">
+    <div className="grid min-h-9 grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-2 border-border/55 border-b px-3 py-1.5 last:border-b-0">
       <div className="text-muted-foreground">{props.label}</div>
-      <div className="flex items-center gap-1.5">
+      <div className="flex min-w-0 items-center justify-end gap-1.5">
         <Input
           type={props.type ?? "text"}
           size="sm"
           value={draft}
           disabled={props.disabled}
-          placeholder={props.placeholder}
+          placeholder={props.value.length > 0 ? props.placeholder : props.emptyLabel}
+          className="max-w-36"
           onChange={(event) => setDraft(event.currentTarget.value)}
         />
         {dirty ? (
@@ -959,6 +1097,29 @@ function EditableTextField(props: {
       </div>
     </div>
   );
+}
+
+function selectedEditableOptionValue(input: {
+  readonly options: ReadonlyArray<WorkItemEditableFieldOption>;
+  readonly currentLabel: string;
+  readonly valueForOption: (option: WorkItemEditableFieldOption) => string;
+}): string | undefined {
+  const currentLabel = normalizeOptionLabel(input.currentLabel);
+  const option = input.options.find((candidate) => {
+    const labels = [
+      candidate.displayName,
+      candidate.name,
+      candidate.key,
+      candidate.id,
+      candidate.accountId,
+    ];
+    return labels.some((label) => normalizeOptionLabel(label) === currentLabel);
+  });
+  return option ? input.valueForOption(option) : undefined;
+}
+
+function normalizeOptionLabel(value: string | undefined): string {
+  return value?.trim().toLowerCase() ?? "";
 }
 
 export function LinkedLocalWorkItemSection(props: {

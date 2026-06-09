@@ -350,6 +350,127 @@ it.effect("maps Jira detail labels, priority icons, comments, edit metadata, and
   }).pipe(Effect.provide(layer));
 });
 
+it.effect("ignores non-string Jira custom fields when mapping detail", () => {
+  const connectionId = AtlassianConnectionId.make("atl-jira-1");
+  const projectId = ProjectId.make("project-jira-1");
+  const connection = connectedJiraConnection(connectionId);
+  const { layer } = makeLayer({
+    connection,
+    projectLink: projectLink({ connectionId, projectId }),
+    token: "jira-secret",
+    response: (request) => {
+      const url = new URL(request.url);
+      if (url.pathname.endsWith("/comment")) return Response.json({ comments: [] });
+      if (url.pathname.endsWith("/transitions")) return Response.json({ transitions: [] });
+      if (url.pathname.endsWith("/editmeta")) return Response.json({ fields: {} });
+      if (url.pathname.endsWith("/changelog")) return Response.json({ values: [] });
+      return Response.json({
+        id: "10001",
+        key: "KAN-4",
+        fields: {
+          summary: "Detail with site-specific custom fields",
+          status: { name: "To Do", statusCategory: { key: "new" } },
+          assignee: null,
+          updated: "2026-06-08T12:00:00.000Z",
+          description: "Description",
+          customfield_10014: { value: "Not an epic key on this site" },
+          customfield_10015: ["2026-06-10"],
+        },
+      });
+    },
+  });
+
+  return Effect.gen(function* () {
+    const service = yield* JiraWorkItemService;
+    const detail = yield* service.get({ projectId, key: "KAN-4", fullContent: true });
+
+    assert.strictEqual(detail.title, "Detail with site-specific custom fields");
+    assert.strictEqual(detail.epicKey, undefined);
+    assert.strictEqual(detail.startDate, undefined);
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("enriches editable assignee metadata from Jira assignable users", () => {
+  const connectionId = AtlassianConnectionId.make("atl-jira-1");
+  const projectId = ProjectId.make("project-jira-1");
+  const connection = connectedJiraConnection(connectionId);
+  const { execute, layer } = makeLayer({
+    connection,
+    projectLink: projectLink({ connectionId, projectId }),
+    token: "jira-secret",
+    response: (request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/rest/api/3/user/assignable/search") {
+        return Response.json([
+          {
+            accountId: "acct-alice",
+            displayName: "Alice",
+            avatarUrls: { "24x24": "https://avatar.test/alice.png" },
+          },
+          {
+            accountId: "acct-bob",
+            displayName: "Bob",
+          },
+        ]);
+      }
+      if (url.pathname.endsWith("/comment")) return Response.json({ comments: [] });
+      if (url.pathname.endsWith("/transitions")) return Response.json({ transitions: [] });
+      if (url.pathname.endsWith("/editmeta")) {
+        return Response.json({
+          fields: {
+            assignee: {
+              name: "Assignee",
+              required: false,
+              operations: ["set"],
+            },
+          },
+        });
+      }
+      if (url.pathname.endsWith("/changelog")) return Response.json({ values: [] });
+      return Response.json({
+        id: "10001",
+        key: "KAN-4",
+        fields: {
+          summary: "Assignable Jira detail",
+          status: { name: "To Do", statusCategory: { key: "new" } },
+          assignee: { accountId: "acct-alice", displayName: "Alice" },
+          updated: "2026-06-08T12:00:00.000Z",
+          description: "Description",
+        },
+      });
+    },
+  });
+
+  return Effect.gen(function* () {
+    const service = yield* JiraWorkItemService;
+    const detail = yield* service.get({ projectId, key: "KAN-4", fullContent: true });
+
+    const assigneeField = detail.editableFields.find((field) => field.id === "assignee");
+    assert.ok(assigneeField);
+    assert.deepStrictEqual(assigneeField.options, [
+      {
+        accountId: "acct-alice",
+        name: "Alice",
+        displayName: "Alice",
+        avatarUrl: "https://avatar.test/alice.png",
+      },
+      {
+        accountId: "acct-bob",
+        name: "Bob",
+        displayName: "Bob",
+      },
+    ]);
+    const assignableRequest = execute.mock.calls
+      .map((call) => call[0])
+      .find((request) => new URL(request.url).pathname === "/rest/api/3/user/assignable/search");
+    assert.ok(assignableRequest);
+    assert.deepStrictEqual(assignableRequest.urlParams.params, [
+      ["issueKey", "KAN-4"],
+      ["maxResults", "50"],
+    ]);
+  }).pipe(Effect.provide(layer));
+});
+
 it.effect("builds Jira issue update payloads from edit metadata and refetches detail", () => {
   const connectionId = AtlassianConnectionId.make("atl-jira-1");
   const projectId = ProjectId.make("project-jira-1");

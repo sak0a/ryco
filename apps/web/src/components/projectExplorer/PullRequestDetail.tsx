@@ -27,6 +27,7 @@ import {
   useAddChangeRequestCommentReactionMutation,
   workflowRunsQueryOptions,
 } from "~/lib/sourceControlContextRpc";
+import { errorMessage } from "~/lib/errorMessage";
 import { cn } from "~/lib/utils";
 import { ContextPickerTabs } from "../chat/ContextPickerTabs";
 import { Button } from "../ui/button";
@@ -119,9 +120,7 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
           <SourceControlDetailLoadingState label="pull request" />
         ) : detailQuery.isError ? (
           <SourceControlDetailErrorState
-            message={
-              detailQuery.error instanceof Error ? detailQuery.error.message : "Failed to load."
-            }
+            message={errorMessage(detailQuery.error, "Failed to load pull request.")}
           />
         ) : detail ? (
           <PullRequestDetailBody
