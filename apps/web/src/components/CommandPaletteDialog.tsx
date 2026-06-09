@@ -1320,6 +1320,7 @@ function OpenCommandPaletteDialog() {
           ? {
               provider: cloneProvider,
               repository: addProjectCloneFlow.repository.nameWithOwner,
+              remoteUrl: addProjectCloneFlow.remoteUrl,
               ...(addProjectCloneFlow.source === "bitbucket" ? { protocol: "https" as const } : {}),
             }
           : {
