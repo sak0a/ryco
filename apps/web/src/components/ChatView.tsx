@@ -4534,6 +4534,9 @@ export default function ChatView(props: ChatViewProps) {
           worktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
           worktreePrState={activeWorktreeSummary?.prState ?? null}
           worktreePrIsDraft={activeWorktreeSummary?.prIsDraft ?? null}
+          worktreeWorkItemProvider={activeWorktreeSummary?.workItemProvider ?? null}
+          worktreeWorkItemKey={activeWorktreeSummary?.workItemKey ?? null}
+          worktreeWorkItemState={activeWorktreeSummary?.workItemState ?? null}
           sessionTabs={activeWorktreeSessionTabs}
           activeSessionTabKey={activeSessionTabKey}
           onOpenLinkedWorktreeItem={handleOpenHeaderLinkedItem}
@@ -4554,6 +4557,7 @@ export default function ChatView(props: ChatViewProps) {
         open={headerLinkedItem !== null}
         item={headerLinkedItem}
         environmentId={activeProject?.environmentId ?? activeThread.environmentId}
+        projectId={activeProject?.id ?? activeThread.projectId}
         cwd={activeProject?.cwd ?? gitCwd}
         onOpenChange={handleHeaderLinkedItemDialogOpenChange}
       />

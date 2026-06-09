@@ -1,12 +1,37 @@
 import { DateTime, Option, Schema } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 
-import { WorkItemDetail, WorkItemSummary } from "./workItems.ts";
+import { AtlassianConnectionId } from "./baseSchemas.ts";
+import {
+  WorkItemDetail,
+  WorkItemListProjectsInput,
+  WorkItemProject,
+  WorkItemSummary,
+} from "./workItems.ts";
 
 const updatedAt = DateTime.fromDateUnsafe(new Date("2026-05-12T12:00:00.000Z"));
+const createdAt = DateTime.fromDateUnsafe(new Date("2026-05-01T12:00:00.000Z"));
 const commentCreatedAt = DateTime.fromDateUnsafe(new Date("2026-05-12T11:00:00.000Z"));
 
 describe("work item contracts", () => {
+  it("decodes a Jira project summary and list input", () => {
+    const project = Schema.decodeUnknownSync(WorkItemProject)({
+      provider: "jira",
+      key: "KAN",
+      name: "Mein Software-Team",
+      url: "https://ryco-app.atlassian.net/jira/software/projects/KAN",
+      projectTypeKey: "software",
+      simplified: true,
+    });
+    const input = Schema.decodeUnknownSync(WorkItemListProjectsInput)({
+      connectionId: AtlassianConnectionId.make("atl-conn-1"),
+      siteUrl: "https://ryco-app.atlassian.net",
+    });
+
+    expect(project.key).toBe("KAN");
+    expect(input.connectionId).toBe("atl-conn-1");
+  });
+
   it("decodes a Jira issue summary", () => {
     const decoded = Schema.decodeUnknownSync(WorkItemSummary)({
       provider: "jira",
@@ -20,10 +45,12 @@ describe("work item contracts", () => {
       assignee: "Alice",
       reporter: "Bob",
       labels: ["atlassian"],
+      createdAt: Option.some(createdAt),
       updatedAt: Option.some(updatedAt),
     });
 
     expect(decoded.key).toBe("PROJ-123");
+    expect(decoded.createdAt && Option.isSome(decoded.createdAt)).toBe(true);
     expect(Option.isSome(decoded.updatedAt)).toBe(true);
   });
 
@@ -35,6 +62,7 @@ describe("work item contracts", () => {
       url: "https://acme.atlassian.net/browse/PROJ-123",
       state: "open",
       assignee: null,
+      createdAt: Option.some(createdAt),
       updatedAt: Option.none(),
       description: "Add Jira-aware settings.",
       comments: [

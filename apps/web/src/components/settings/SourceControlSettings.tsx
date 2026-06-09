@@ -1,4 +1,4 @@
-import { KeyRoundIcon, RefreshCwIcon, TicketCheckIcon, Trash2Icon } from "lucide-react";
+import { KeyRoundIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { Option } from "effect";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -31,6 +31,7 @@ import { Skeleton } from "../ui/skeleton";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
+  AtlassianJiraIcon,
   AzureDevOpsIcon,
   BitbucketIcon,
   ForgejoIcon,
@@ -334,7 +335,7 @@ function AtlassianProductIcon(props: {
   if (props.products.includes("bitbucket")) {
     return <BitbucketIcon className={props.className} aria-hidden />;
   }
-  return <TicketCheckIcon className={props.className} aria-hidden />;
+  return <AtlassianJiraIcon className={props.className} aria-hidden />;
 }
 
 function AtlassianConfiguration() {
@@ -373,6 +374,7 @@ function AtlassianConfiguration() {
       setBitbucketEmail("");
       setBitbucketToken("");
       void queryClient.invalidateQueries({ queryKey: atlassianConnectionQueryKey });
+      void refreshSourceControlDiscovery();
       toastManager.add(
         stackedThreadToast({
           type: "success",
@@ -435,6 +437,7 @@ function AtlassianConfiguration() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: atlassianConnectionQueryKey });
+      void refreshSourceControlDiscovery();
     },
     onError: (error) => {
       toastManager.add(

@@ -83,6 +83,9 @@ import { resolveProjectWorktreesDir } from "./project/projectMetadataPaths.ts";
 import { resolveWorktreeCheckoutPath } from "./project/worktreeCheckoutPaths.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { ServerAuth, type AuthenticatedSession } from "./auth/Services/ServerAuth.ts";
+import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
+import { AtlassianConnectionRepositoryLive } from "./persistence/Layers/AtlassianConnections.ts";
+import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import { ProjectionWorktreeRepository } from "./persistence/Services/ProjectionWorktrees.ts";
 import { refreshWorktreeSourceControlState } from "./sourceControl/refreshWorktreeSourceControlState.ts";
 import * as SourceControlDiscoveryLayer from "./sourceControl/SourceControlDiscovery.ts";
@@ -147,6 +150,32 @@ const deterministicShortId = (input: string, length = 6): string =>
 const buildIssueBranchNameFallback = (number: number): string =>
   `issue/${number}-${deterministicShortId(String(number), 6)}`;
 
+const branchSlug = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 48);
+
+const buildWorkItemBranchNameFallback = (input: { key: string; title?: string }): string => {
+  const key = input.key.trim().toUpperCase();
+  const titleSlug = branchSlug(input.title ?? "");
+  return titleSlug.length > 0 ? `${key}-${titleSlug}` : `${key}-${deterministicShortId(key, 6)}`;
+};
+
+const ensureWorkItemBranchNameIncludesKey = (input: {
+  readonly branch: string;
+  readonly fallback: string;
+  readonly key: string;
+}): string => {
+  const branch = input.branch.trim();
+  if (!branch) return input.fallback;
+  const normalizedBranch = branch.toLowerCase();
+  const normalizedKey = input.key.toLowerCase();
+  return normalizedBranch.includes(normalizedKey) ? branch : `${input.key}-${branch}`;
+};
+
 const buildIssueBranchNameMessage = (input: {
   readonly number: number;
   readonly title?: string | undefined;
@@ -161,6 +190,24 @@ const buildIssueBranchNameMessage = (input: {
   if (body) {
     lines.push("", `Body: ${body}`);
   }
+  return lines.join("\n");
+};
+
+const buildWorkItemBranchNameMessage = (input: {
+  readonly key: string;
+  readonly title?: string | undefined;
+  readonly body?: string | undefined;
+}): string => {
+  const lines = [`Create a branch name for Jira work item ${input.key}.`];
+  const title = input.title?.trim();
+  const body = input.body?.trim();
+  if (title) {
+    lines.push("", `Title: ${title}`);
+  }
+  if (body) {
+    lines.push("", `Body: ${body}`);
+  }
+  lines.push("", `The branch name should include the Jira key ${input.key}.`);
   return lines.join("\n");
 };
 
@@ -1199,18 +1246,35 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
       const createWorktreeForProject = (input: GitCreateWorktreeForProjectInput) =>
         Effect.gen(function* () {
           const operation = "git.createWorktreeForProject";
-          if (input.intent.kind === "pr" || input.intent.kind === "issue") {
-            const existing = yield* projectionWorktrees
-              .findByOrigin({
-                projectId: input.projectId,
-                kind: input.intent.kind,
-                number: input.intent.number ?? 0,
-              })
-              .pipe(
-                Effect.mapError((cause) =>
-                  toGitManagerError(operation, "Failed to find existing worktree.", cause),
-                ),
-              );
+          if (
+            input.intent.kind === "pr" ||
+            input.intent.kind === "issue" ||
+            input.intent.kind === "workItem"
+          ) {
+            const existing =
+              input.intent.kind === "workItem"
+                ? yield* projectionWorktrees
+                    .findByWorkItem({
+                      projectId: input.projectId,
+                      provider: input.intent.provider,
+                      key: input.intent.key,
+                    })
+                    .pipe(
+                      Effect.mapError((cause) =>
+                        toGitManagerError(operation, "Failed to find existing worktree.", cause),
+                      ),
+                    )
+                : yield* projectionWorktrees
+                    .findByOrigin({
+                      projectId: input.projectId,
+                      kind: input.intent.kind,
+                      number: input.intent.number ?? 0,
+                    })
+                    .pipe(
+                      Effect.mapError((cause) =>
+                        toGitManagerError(operation, "Failed to find existing worktree.", cause),
+                      ),
+                    );
             if (existing !== null) {
               const existingWorktree = yield* loadWorktreeForGitWorkflow(operation, existing);
               const project = yield* loadProjectForGitWorkflow(operation, input.projectId);
@@ -1230,6 +1294,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                   threadId,
                   projectId: input.projectId,
                   title:
+                    existingWorktree.workItemTitle ??
                     existingWorktree.prTitle ??
                     existingWorktree.issueTitle ??
                     existingWorktree.branch,
@@ -1277,6 +1342,11 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
           let issueNumber: number | null = null;
           let prTitle: string | null = null;
           let issueTitle: string | null = null;
+          let workItemProvider: "jira" | null = null;
+          let workItemKey: string | null = null;
+          let workItemTitle: string | null = null;
+          let workItemState: "open" | "in_progress" | "done" | "closed" | "unknown" | null = null;
+          let workItemUrl: string | null = null;
           let preparedWorktreePath: string | null = null;
           let ownedWorktreePath: string | null = null;
           let ownedBranchName: string | null = null;
@@ -1365,6 +1435,56 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
               issueTitle = title;
               break;
             }
+            case "workItem": {
+              const key = input.intent.key.trim().toUpperCase();
+              const generatedBranchFallback = buildWorkItemBranchNameFallback({
+                key,
+                title: input.intent.title,
+              });
+              if (input.intent.branchSource === "existing") {
+                const existingBranch = input.intent.branchName?.trim();
+                if (!existingBranch) {
+                  return yield* failGitWorkflow(
+                    operation,
+                    `Select an existing branch for Jira work item ${key}.`,
+                  );
+                }
+                branch = existingBranch;
+                refName = existingBranch;
+              } else {
+                const requestedBranch =
+                  input.intent.branchName ??
+                  (yield* textGeneration
+                    .generateBranchName({
+                      cwd: project.workspaceRoot,
+                      message: buildWorkItemBranchNameMessage({
+                        key,
+                        title: input.intent.title,
+                        body: input.intent.body,
+                      }),
+                      modelSelection,
+                    })
+                    .pipe(
+                      Effect.map(({ branch: generatedBranch }) => generatedBranch),
+                      Effect.catch(() => Effect.succeed(generatedBranchFallback)),
+                    ));
+                branch = ensureWorkItemBranchNameIncludesKey({
+                  branch: requestedBranch,
+                  fallback: generatedBranchFallback,
+                  key,
+                });
+                refName = input.intent.baseBranch ?? "HEAD";
+                newRefName = branch;
+              }
+              title = input.intent.title.trim();
+              origin = "issue";
+              workItemProvider = input.intent.provider;
+              workItemKey = key;
+              workItemTitle = title;
+              workItemState = input.intent.state ?? null;
+              workItemUrl = input.intent.url ?? null;
+              break;
+            }
           }
 
           const worktreePath =
@@ -1444,12 +1564,17 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                 issueNumber,
                 prTitle,
                 issueTitle,
+                workItemProvider,
+                workItemKey,
+                workItemTitle,
+                workItemState,
+                workItemUrl,
                 createdAt: now,
               },
               operation,
             );
 
-            if (origin === "pr" || origin === "issue") {
+            if (origin === "pr" || issueNumber !== null) {
               yield* refreshWorktreeSourceControlState({ worktreeId }).pipe(
                 Effect.ignoreCause({ log: true }),
                 Effect.forkDetach,
@@ -2051,7 +2176,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>
           observeRpcEffect(
             WS_METHODS.serverDiscoverSourceControl,
-            ownerEffect(WS_METHODS.serverDiscoverSourceControl, sourceControlDiscovery.discover),
+            ownerEffect(WS_METHODS.serverDiscoverSourceControl, sourceControlDiscovery.refresh),
             {
               "rpc.aggregate": "server",
             },
@@ -2145,6 +2270,17 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             ownerEffect(
               WS_METHODS.sourceControlLookupRepository,
               sourceControlRepositories.lookupRepository(input),
+            ),
+            {
+              "rpc.aggregate": "source-control",
+            },
+          ),
+        [WS_METHODS.sourceControlSearchRepositories]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlSearchRepositories,
+            ownerEffect(
+              WS_METHODS.sourceControlSearchRepositories,
+              sourceControlRepositories.searchRepositories(input),
             ),
             {
               "rpc.aggregate": "source-control",
@@ -2730,6 +2866,10 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
               "rpc.aggregate": "atlassian",
             },
           ),
+        [WS_METHODS.workItemsListProjects]: (input) =>
+          observeRpcEffect(WS_METHODS.workItemsListProjects, workItems.listProjects(input), {
+            "rpc.aggregate": "work-items",
+          }),
         [WS_METHODS.workItemsList]: (input) =>
           observeRpcEffect(WS_METHODS.workItemsList, workItems.list(input), {
             "rpc.aggregate": "work-items",
@@ -3027,17 +3167,18 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             WS_METHODS.gitFindWorktreeForOrigin,
             ownerEffect(
               WS_METHODS.gitFindWorktreeForOrigin,
-              projectionWorktrees
-                .findByOrigin(input)
-                .pipe(
-                  Effect.mapError((cause) =>
-                    toGitManagerError(
-                      "git.findWorktreeForOrigin",
-                      "Failed to find worktree for origin.",
-                      cause,
-                    ),
+              (input.kind === "workItem"
+                ? projectionWorktrees.findByWorkItem(input)
+                : projectionWorktrees.findByOrigin(input)
+              ).pipe(
+                Effect.mapError((cause) =>
+                  toGitManagerError(
+                    "git.findWorktreeForOrigin",
+                    "Failed to find worktree for origin.",
+                    cause,
                   ),
                 ),
+              ),
             ),
             { "rpc.aggregate": "git" },
           ),
@@ -3386,6 +3527,9 @@ export const websocketRpcRouteLayer = Layer.unwrap(
                           GitLabCli.layer,
                         ),
                       ),
+                      Layer.provideMerge(AtlassianConnectionRepositoryLive),
+                      Layer.provideMerge(SqlitePersistenceLayerLive),
+                      Layer.provide(ServerSecretStoreLive),
                       Layer.provideMerge(GitVcsDriver.layer),
                       Layer.provide(
                         VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer)),

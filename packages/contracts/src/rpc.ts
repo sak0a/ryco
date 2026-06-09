@@ -19,7 +19,7 @@ import {
   AtlassianStartOAuthInput,
   AtlassianStartOAuthResult,
 } from "./atlassian.ts";
-import { ProjectId, ThreadId } from "./baseSchemas.ts";
+import { ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
@@ -137,6 +137,8 @@ import {
   SourceControlRepositoryError,
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
+  SourceControlRepositorySearchInput,
+  SourceControlRepositorySearchResult,
   ChangeRequest,
   SourceControlChangeRequestDetail,
   SourceControlIssueDetail,
@@ -167,7 +169,10 @@ import {
   WorkItemDetail,
   WorkItemGetInput,
   WorkItemListInput,
+  WorkItemListProjectsInput,
   WorkItemListTransitionsInput,
+  WorkItemProject,
+  WorkItemProviderKind,
   WorkItemProviderError,
   WorkItemSearchInput,
   WorkItemSummary,
@@ -256,6 +261,7 @@ export const WS_METHODS = {
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
+  sourceControlSearchRepositories: "sourceControl.searchRepositories",
   sourceControlCloneRepository: "sourceControl.cloneRepository",
   sourceControlPublishRepository: "sourceControl.publishRepository",
   sourceControlListIssues: "sourceControl.listIssues",
@@ -293,6 +299,7 @@ export const WS_METHODS = {
   atlassianSaveManualJiraToken: "atlassian.saveManualJiraToken",
 
   // Work item methods
+  workItemsListProjects: "workItems.listProjects",
   workItemsList: "workItems.list",
   workItemsSearch: "workItems.search",
   workItemsGet: "workItems.get",
@@ -361,11 +368,19 @@ export const TextGenerationBranchNameResult = Schema.Struct({
 });
 export type TextGenerationBranchNameResult = typeof TextGenerationBranchNameResult.Type;
 
-export const GitFindWorktreeForOriginInput = Schema.Struct({
-  projectId: ProjectId,
-  kind: Schema.Literals(["pr", "issue"]),
-  number: Schema.Number,
-});
+export const GitFindWorktreeForOriginInput = Schema.Union([
+  Schema.Struct({
+    projectId: ProjectId,
+    kind: Schema.Literals(["pr", "issue"]),
+    number: Schema.Number,
+  }),
+  Schema.Struct({
+    projectId: ProjectId,
+    kind: Schema.Literal("workItem"),
+    provider: WorkItemProviderKind,
+    key: TrimmedNonEmptyString,
+  }),
+]);
 export type GitFindWorktreeForOriginInput = typeof GitFindWorktreeForOriginInput.Type;
 
 export const GitFindWorktreeForOriginOutput = Schema.NullOr(WorktreeId);
@@ -542,6 +557,15 @@ export const WsSourceControlLookupRepositoryRpc = Rpc.make(
   {
     payload: SourceControlRepositoryLookupInput,
     success: SourceControlRepositoryInfo,
+    error: Schema.Union([SourceControlRepositoryError, AuthRpcError]),
+  },
+);
+
+export const WsSourceControlSearchRepositoriesRpc = Rpc.make(
+  WS_METHODS.sourceControlSearchRepositories,
+  {
+    payload: SourceControlRepositorySearchInput,
+    success: SourceControlRepositorySearchResult,
     error: Schema.Union([SourceControlRepositoryError, AuthRpcError]),
   },
 );
@@ -808,6 +832,12 @@ export const WsAtlassianSaveManualJiraTokenRpc = Rpc.make(WS_METHODS.atlassianSa
 export const WsWorkItemsListRpc = Rpc.make(WS_METHODS.workItemsList, {
   payload: WorkItemListInput,
   success: Schema.Array(WorkItemSummary),
+  error: WorkItemProviderError,
+});
+
+export const WsWorkItemsListProjectsRpc = Rpc.make(WS_METHODS.workItemsListProjects, {
+  payload: WorkItemListProjectsInput,
+  success: Schema.Array(WorkItemProject),
   error: WorkItemProviderError,
 });
 
@@ -1143,6 +1173,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsMcpReloadServersRpc,
   WsMcpStartOauthLoginRpc,
   WsSourceControlLookupRepositoryRpc,
+  WsSourceControlSearchRepositoriesRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
   WsSourceControlListIssuesRpc,
@@ -1174,6 +1205,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsAtlassianSaveProjectLinkRpc,
   WsAtlassianSaveManualBitbucketTokenRpc,
   WsAtlassianSaveManualJiraTokenRpc,
+  WsWorkItemsListProjectsRpc,
   WsWorkItemsListRpc,
   WsWorkItemsSearchRpc,
   WsWorkItemsGetRpc,

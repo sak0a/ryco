@@ -15,6 +15,9 @@ export interface ChatHeaderBarProps {
   worktreeIssueState?: "open" | "closed" | null | undefined;
   worktreePrState?: "open" | "closed" | "merged" | null | undefined;
   worktreePrIsDraft?: boolean | null | undefined;
+  worktreeWorkItemProvider?: "jira" | null | undefined;
+  worktreeWorkItemKey?: string | null | undefined;
+  worktreeWorkItemState?: "open" | "in_progress" | "done" | "closed" | "unknown" | null | undefined;
   sessionTitle: string;
   onSelectProject?: (() => void) | undefined;
   onSelectWorktree?: (() => void) | undefined;
@@ -41,6 +44,9 @@ export const ChatHeaderBar = memo(function ChatHeaderBar(props: ChatHeaderBarPro
           prNumber={props.worktreePrNumber}
           prState={props.worktreePrState}
           prIsDraft={props.worktreePrIsDraft}
+          workItemProvider={props.worktreeWorkItemProvider}
+          workItemKey={props.worktreeWorkItemKey}
+          workItemState={props.worktreeWorkItemState}
           density="header"
           labelStyle="kind"
           onOpenLinkedItem={props.onOpenLinkedWorktreeItem}

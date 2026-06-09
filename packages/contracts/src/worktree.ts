@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
 
 import { IsoDateTime, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { WorkItemProviderKind, WorkItemState } from "./workItems.ts";
 
 export const WorktreeId = Schema.String.pipe(Schema.brand("WorktreeId"));
 export type WorktreeId = typeof WorktreeId.Type;
@@ -40,6 +41,21 @@ export const Worktree = Schema.Struct({
   issueState: Schema.optional(Schema.NullOr(IssueState)).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  workItemProvider: Schema.optional(Schema.NullOr(WorkItemProviderKind)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  workItemKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  workItemTitle: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  workItemState: Schema.optional(Schema.NullOr(WorkItemState)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  workItemUrl: Schema.optional(Schema.NullOr(Schema.String)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),
@@ -57,6 +73,18 @@ export const CreateWorktreeIntent = Schema.Union([
     baseBranch: Schema.optional(TrimmedNonEmptyString),
     title: Schema.optional(TrimmedNonEmptyString),
     body: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("workItem"),
+    provider: WorkItemProviderKind,
+    key: TrimmedNonEmptyString,
+    title: TrimmedNonEmptyString,
+    state: Schema.optional(WorkItemState),
+    url: Schema.optional(Schema.String),
+    body: Schema.optional(Schema.String),
+    branchSource: Schema.optional(Schema.Literals(["new", "existing"])),
+    branchName: Schema.optional(TrimmedNonEmptyString),
+    baseBranch: Schema.optional(TrimmedNonEmptyString),
   }),
   Schema.Struct({
     kind: Schema.Literal("newBranch"),

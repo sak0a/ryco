@@ -40,6 +40,9 @@ interface ChatHeaderProps {
   worktreeIssueState?: "open" | "closed" | null;
   worktreePrState?: "open" | "closed" | "merged" | null;
   worktreePrIsDraft?: boolean | null;
+  worktreeWorkItemProvider?: "jira" | null;
+  worktreeWorkItemKey?: string | null;
+  worktreeWorkItemState?: "open" | "in_progress" | "done" | "closed" | "unknown" | null;
   sessionTabs?: ReadonlyArray<ChatSessionTabsItem>;
   activeSessionTabKey?: string | null;
   onSelectSessionTab?: (key: string) => void;
@@ -154,6 +157,9 @@ export const ChatHeader = memo(function ChatHeader(props: ChatHeaderProps) {
           worktreePrNumber={props.worktreePrNumber}
           worktreePrState={props.worktreePrState}
           worktreePrIsDraft={props.worktreePrIsDraft}
+          worktreeWorkItemProvider={props.worktreeWorkItemProvider}
+          worktreeWorkItemKey={props.worktreeWorkItemKey}
+          worktreeWorkItemState={props.worktreeWorkItemState}
           sessionTitle={props.activeThreadTitle}
           {...(props.onSelectProject ? { onSelectProject: props.onSelectProject } : {})}
           {...(props.onSelectWorktree ? { onSelectWorktree: props.onSelectWorktree } : {})}

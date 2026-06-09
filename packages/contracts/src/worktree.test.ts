@@ -65,6 +65,50 @@ describe("CreateWorktreeIntent (issue variant)", () => {
   it("rejects empty branchName", () => {
     expect(() => decode({ kind: "issue", number: 42, branchName: "" })).toThrow();
   });
+
+  it("accepts Jira work item intent metadata", () => {
+    expect(
+      decode({
+        kind: "workItem",
+        provider: "jira",
+        key: "KAN-4",
+        title: "SUPER TOLL",
+        state: "open",
+        url: "https://ryco-app.atlassian.net/browse/KAN-4",
+        baseBranch: "main",
+      }),
+    ).toMatchObject({
+      kind: "workItem",
+      provider: "jira",
+      key: "KAN-4",
+      title: "SUPER TOLL",
+      state: "open",
+      baseBranch: "main",
+    });
+  });
+
+  it("accepts Jira work item intent with an existing branch source", () => {
+    expect(
+      decode({
+        kind: "workItem",
+        provider: "jira",
+        key: "KAN-4",
+        title: "SUPER TOLL",
+        branchSource: "existing",
+        branchName: "feature/KAN-4-existing",
+      }),
+    ).toMatchObject({
+      kind: "workItem",
+      provider: "jira",
+      key: "KAN-4",
+      branchSource: "existing",
+      branchName: "feature/KAN-4-existing",
+    });
+  });
+
+  it("rejects empty Jira work item key", () => {
+    expect(() => decode({ kind: "workItem", provider: "jira", key: "", title: "Story" })).toThrow();
+  });
 });
 
 describe("Worktree", () => {
@@ -87,5 +131,32 @@ describe("Worktree", () => {
 
     expect(decoded.origin).toBe("main");
     expect(decoded.worktreePath).toBeNull();
+    expect(decoded.workItemKey).toBeNull();
+  });
+
+  it("decodes work item metadata", () => {
+    const decoded = Schema.decodeUnknownSync(Worktree)({
+      worktreeId: "worktree-jira-1",
+      projectId: "project-1",
+      branch: "KAN-4-super-toll",
+      worktreePath: "/tmp/KAN-4-super-toll",
+      origin: "issue",
+      prNumber: null,
+      issueNumber: null,
+      prTitle: null,
+      issueTitle: null,
+      workItemProvider: "jira",
+      workItemKey: "KAN-4",
+      workItemTitle: "SUPER TOLL",
+      workItemState: "open",
+      workItemUrl: "https://ryco-app.atlassian.net/browse/KAN-4",
+      createdAt: "2026-05-08T00:00:00.000Z",
+      updatedAt: "2026-05-08T00:00:00.000Z",
+      archivedAt: null,
+      manualPosition: 0,
+    });
+
+    expect(decoded.workItemProvider).toBe("jira");
+    expect(decoded.workItemKey).toBe("KAN-4");
   });
 });

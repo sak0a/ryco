@@ -3,6 +3,68 @@ import { cn } from "~/lib/utils";
 
 export type Icon = React.FC<SVGProps<SVGSVGElement>>;
 
+export const JiraIcon: Icon = (props) => {
+  const id = useId().replaceAll(":", "");
+  const gradientA = `${id}-jira-a`;
+  const gradientB = `${id}-jira-b`;
+
+  return (
+    <svg {...props} viewBox="0 0 128 128" fill="none">
+      <title>Jira</title>
+      <defs>
+        <linearGradient
+          id={gradientA}
+          x1="88.136"
+          x2="68.472"
+          y1="39.092"
+          y2="59.368"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop offset=".176" stopColor="#0052cc" />
+          <stop offset="1" stopColor="#2684ff" />
+        </linearGradient>
+        <linearGradient
+          id={gradientB}
+          x1="66.564"
+          x2="43.828"
+          y1="62.256"
+          y2="84.376"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop offset=".176" stopColor="#0052cc" />
+          <stop offset="1" stopColor="#2684ff" />
+        </linearGradient>
+      </defs>
+      <path
+        fill="#2684ff"
+        d="M108.023 16H61.805c0 11.52 9.324 20.848 20.847 20.848h8.5v8.226c0 11.52 9.328 20.848 20.848 20.848V19.977A3.98 3.98 0 0 0 108.023 16Z"
+      />
+      <path
+        fill={`url(#${gradientA})`}
+        d="M85.121 39.04H38.902c0 11.519 9.325 20.847 20.844 20.847h8.504v8.226c0 11.52 9.328 20.848 20.848 20.848V43.016a3.983 3.983 0 0 0-3.977-3.977Z"
+      />
+      <path
+        fill={`url(#${gradientB})`}
+        d="M62.219 62.078H16c0 11.524 9.324 20.848 20.848 20.848h8.5v8.23c0 11.52 9.328 20.844 20.847 20.844V66.059a3.984 3.984 0 0 0-3.976-3.98Z"
+      />
+    </svg>
+  );
+};
+
+export const AtlassianJiraIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 512 512" fill="none">
+    <title>Jira</title>
+    <path
+      d="M0 128C0 57.312 57.312 0 128 0h256.001c70.688 0 128 57.312 128 128v256.001c0 70.688-57.312 128-128 128h-256C57.311 512.002 0 454.69 0 384.002v-256z"
+      fill="#1868db"
+    />
+    <path
+      d="M189.544 324.041H160.69c-43.51 0-74.72-24.483-74.72-60.321h155.115c8.043 0 13.248 5.241 13.248 12.677V419.77c-38.784 0-64.79-28.853-64.79-69.07V324.04zm76.608-71.245h-28.843c-43.51 0-74.73-24.043-74.73-59.89h155.125c8.043 0 13.718 4.81 13.718 12.236v143.373c-38.785 0-65.27-28.843-65.27-69.061v-26.658zm77.088-70.815h-28.842c-43.51 0-74.731-24.483-74.731-60.321h155.125c8.043 0 13.248 5.241 13.248 12.237v143.372c-38.784 0-64.8-28.853-64.8-69.06V181.98z"
+      fill="#fff"
+    />
+  </svg>
+);
+
 export const GitHubIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 1024 1024" fill="none">
     <path

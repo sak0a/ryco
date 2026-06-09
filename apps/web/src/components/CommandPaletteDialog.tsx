@@ -252,6 +252,25 @@ function remoteProjectInputPlaceholder(flow: AddProjectCloneFlow | null): string
   return `Enter ${remoteProjectSourceLabel(flow.source)} repository (${remoteProjectSourcePathHint(flow.source)})`;
 }
 
+function repositorySlugFromNameWithOwner(nameWithOwner: string): string {
+  return nameWithOwner.split("/").at(-1)?.trim() ?? nameWithOwner;
+}
+
+function remoteRepositoryItemValue(repository: SourceControlRepositoryInfo): string {
+  return `remote-repository:${repository.provider}:${encodeURIComponent(repository.nameWithOwner)}`;
+}
+
+function cloneUrlForRemoteProjectSource(
+  source: AddProjectRemoteSource,
+  repository: SourceControlRepositoryInfo,
+): string {
+  return source === "bitbucket" ? repository.url : repository.sshUrl;
+}
+
+function isBareRepositoryInput(input: string): boolean {
+  return !input.includes("/") && !input.includes(":");
+}
+
 function sourceProviderKind(source: AddProjectRemoteSource): AddProjectRemoteProviderKind | null {
   return source === "url" ? null : source;
 }
@@ -443,6 +462,43 @@ function OpenCommandPaletteDialog() {
   }, [browseEnvironmentId, primaryEnvironmentId, savedEnvironmentRuntimeById]);
   const isRemoteProjectCloneFlow = addProjectCloneFlow !== null;
   const isRemoteProjectRepositoryStep = addProjectCloneFlow?.step === "repository";
+  const remoteRepositoryProvider =
+    isRemoteProjectRepositoryStep && addProjectCloneFlow
+      ? remoteProjectSourceProvider(addProjectCloneFlow.source)
+      : null;
+  const remoteRepositoryQuery = isRemoteProjectRepositoryStep ? deferredQuery.trim() : "";
+  const remoteRepositorySearchQuery = useQuery({
+    queryKey: [
+      "source-control",
+      "repository-search",
+      addProjectCloneFlow?.step === "repository" ? addProjectCloneFlow.environmentId : null,
+      remoteRepositoryProvider,
+      remoteRepositoryQuery,
+    ],
+    queryFn: async () => {
+      if (
+        addProjectCloneFlow?.step !== "repository" ||
+        remoteRepositoryProvider !== "bitbucket" ||
+        addProjectCloneFlow.source === "url"
+      ) {
+        throw new Error("Repository search is not available for this source.");
+      }
+      const api = readEnvironmentApi(addProjectCloneFlow.environmentId);
+      if (!api) {
+        throw new Error("Environment API is not available.");
+      }
+      return api.sourceControl.searchRepositories({
+        provider: remoteRepositoryProvider,
+        ...(remoteRepositoryQuery.length > 0 ? { query: remoteRepositoryQuery } : {}),
+        limit: 25,
+      });
+    },
+    enabled:
+      addProjectCloneFlow?.step === "repository" &&
+      addProjectCloneFlow.source !== "url" &&
+      remoteRepositoryProvider === "bitbucket",
+    staleTime: 30_000,
+  });
   const isBrowsing =
     !isRemoteProjectRepositoryStep && isFilesystemBrowseQuery(query, browseEnvironmentPlatform);
   const paletteMode = getCommandPaletteMode({ currentView, isBrowsing });
@@ -832,10 +888,6 @@ function OpenCommandPaletteDialog() {
         ),
       });
 
-      if (initialDiscovery) {
-        return;
-      }
-
       void refreshSourceControlDiscovery(target).then((discovery) => {
         setViewStack((previousViews) => {
           const currentTopView = previousViews.at(-1);
@@ -1120,9 +1172,34 @@ function OpenCommandPaletteDialog() {
     ],
   );
 
-  function getDefaultCloneParentPath(environmentId: EnvironmentId): string {
-    return getAddProjectInitialQueryForEnvironment(environmentId);
-  }
+  const getDefaultCloneParentPath = useCallback(
+    (environmentId: EnvironmentId): string =>
+      getAddProjectInitialQueryForEnvironment(environmentId),
+    [getAddProjectInitialQueryForEnvironment],
+  );
+
+  const continueWithRemoteRepository = useCallback(
+    (input: {
+      readonly flow: Extract<AddProjectCloneFlow, { readonly step: "repository" }>;
+      readonly repositoryInput: string;
+      readonly repository: SourceControlRepositoryInfo | null;
+      readonly remoteUrl: string;
+    }): void => {
+      const destinationPath = getDefaultCloneParentPath(input.flow.environmentId);
+      setAddProjectCloneFlow({
+        step: "confirm",
+        environmentId: input.flow.environmentId,
+        source: input.flow.source,
+        repositoryInput: input.repositoryInput,
+        repository: input.repository,
+        remoteUrl: input.remoteUrl,
+      });
+      setHighlightedItemValue(null);
+      setQuery(destinationPath);
+      setBrowseGeneration((generation) => generation + 1);
+    },
+    [getDefaultCloneParentPath],
+  );
 
   async function submitAddProjectCloneFlow(destinationPathInput?: string): Promise<void> {
     if (!addProjectCloneFlow) {
@@ -1149,18 +1226,28 @@ function OpenCommandPaletteDialog() {
 
       const provider = remoteProjectSourceProvider(addProjectCloneFlow.source);
       if (!provider) {
-        const destinationPath = getDefaultCloneParentPath(addProjectCloneFlow.environmentId);
-        setAddProjectCloneFlow({
-          step: "confirm",
-          environmentId: addProjectCloneFlow.environmentId,
-          source: addProjectCloneFlow.source,
+        continueWithRemoteRepository({
+          flow: addProjectCloneFlow,
           repositoryInput: rawRepository,
           repository: null,
           remoteUrl: rawRepository,
         });
-        setHighlightedItemValue(null);
-        setQuery(destinationPath);
-        setBrowseGeneration((generation) => generation + 1);
+        return;
+      }
+
+      const searchedRepositories = remoteRepositorySearchQuery.data?.repositories ?? [];
+      if (
+        isBareRepositoryInput(rawRepository) &&
+        remoteRepositoryQuery === rawRepository &&
+        searchedRepositories.length === 1
+      ) {
+        const repository = searchedRepositories[0]!;
+        continueWithRemoteRepository({
+          flow: addProjectCloneFlow,
+          repositoryInput: repository.nameWithOwner,
+          repository,
+          remoteUrl: cloneUrlForRemoteProjectSource(addProjectCloneFlow.source, repository),
+        });
         return;
       }
 
@@ -1170,18 +1257,12 @@ function OpenCommandPaletteDialog() {
           provider,
           repository: rawRepository,
         });
-        const destinationPath = getDefaultCloneParentPath(addProjectCloneFlow.environmentId);
-        setAddProjectCloneFlow({
-          step: "confirm",
-          environmentId: addProjectCloneFlow.environmentId,
-          source: addProjectCloneFlow.source,
+        continueWithRemoteRepository({
+          flow: addProjectCloneFlow,
           repositoryInput: rawRepository,
           repository,
-          remoteUrl: repository.sshUrl,
+          remoteUrl: cloneUrlForRemoteProjectSource(addProjectCloneFlow.source, repository),
         });
-        setHighlightedItemValue(null);
-        setQuery(destinationPath);
-        setBrowseGeneration((generation) => generation + 1);
       } catch (error) {
         toastManager.add(
           stackedThreadToast({
@@ -1233,8 +1314,17 @@ function OpenCommandPaletteDialog() {
 
     setIsRemoteProjectCloning(true);
     try {
+      const cloneProvider = remoteProjectSourceProvider(addProjectCloneFlow.source);
       const result = await api.sourceControl.cloneRepository({
-        remoteUrl: addProjectCloneFlow.remoteUrl,
+        ...(cloneProvider && addProjectCloneFlow.repository
+          ? {
+              provider: cloneProvider,
+              repository: addProjectCloneFlow.repository.nameWithOwner,
+              ...(addProjectCloneFlow.source === "bitbucket" ? { protocol: "https" as const } : {}),
+            }
+          : {
+              remoteUrl: addProjectCloneFlow.remoteUrl,
+            }),
         destinationPath,
       });
       await handleAddProject(result.cwd);
@@ -1318,9 +1408,112 @@ function OpenCommandPaletteDialog() {
     };
   }, [addProjectCloneFlow]);
 
+  const remoteRepositoryGroups = useMemo<CommandPaletteView["groups"]>(() => {
+    if (
+      addProjectCloneFlow?.step !== "repository" ||
+      addProjectCloneFlow.source === "url" ||
+      remoteRepositoryProvider !== "bitbucket"
+    ) {
+      return [];
+    }
+
+    const repositories = remoteRepositorySearchQuery.data?.repositories ?? [];
+    if (repositories.length > 0) {
+      return [
+        {
+          value: `remote-repositories:${addProjectCloneFlow.environmentId}:${remoteRepositoryProvider}`,
+          label:
+            remoteRepositoryQuery.length > 0 ? "Matching repositories" : "Available repositories",
+          items: repositories.map((repository) => ({
+            kind: "action" as const,
+            value: remoteRepositoryItemValue(repository),
+            searchTerms: [
+              repository.nameWithOwner,
+              repositorySlugFromNameWithOwner(repository.nameWithOwner),
+              repository.url,
+              repository.sshUrl,
+            ],
+            title: repository.nameWithOwner,
+            description: repository.url,
+            icon: remoteProjectSourceIcon(addProjectCloneFlow.source, ITEM_ICON_CLASS),
+            keepOpen: true,
+            run: async () => {
+              continueWithRemoteRepository({
+                flow: addProjectCloneFlow,
+                repositoryInput: repository.nameWithOwner,
+                repository,
+                remoteUrl: cloneUrlForRemoteProjectSource(addProjectCloneFlow.source, repository),
+              });
+            },
+          })),
+        },
+      ];
+    }
+
+    if (remoteRepositorySearchQuery.isFetching) {
+      return [
+        {
+          value: `remote-repositories:${addProjectCloneFlow.environmentId}:${remoteRepositoryProvider}:loading`,
+          label: "Repositories",
+          items: [
+            {
+              kind: "action",
+              value: "remote-repositories:loading",
+              searchTerms: ["loading", "repository", "repo"],
+              title: "Loading repositories",
+              description: "Reading available Bitbucket workspaces",
+              icon: remoteProjectSourceIcon(addProjectCloneFlow.source, ITEM_ICON_CLASS),
+              disabled: true,
+              run: async () => {},
+            },
+          ],
+        },
+      ];
+    }
+
+    if (remoteRepositorySearchQuery.isError) {
+      return [
+        {
+          value: `remote-repositories:${addProjectCloneFlow.environmentId}:${remoteRepositoryProvider}:error`,
+          label: "Repositories",
+          items: [
+            {
+              kind: "action",
+              value: "remote-repositories:error",
+              searchTerms: ["error", "repository", "repo"],
+              title: "Unable to load repositories",
+              description: errorMessage(remoteRepositorySearchQuery.error),
+              icon: remoteProjectSourceIcon(addProjectCloneFlow.source, ITEM_ICON_CLASS),
+              disabled: true,
+              run: async () => {},
+            },
+          ],
+        },
+      ];
+    }
+
+    return [];
+  }, [
+    addProjectCloneFlow,
+    continueWithRemoteRepository,
+    remoteRepositoryProvider,
+    remoteRepositoryQuery,
+    remoteRepositorySearchQuery.data?.repositories,
+    remoteRepositorySearchQuery.error,
+    remoteRepositorySearchQuery.isError,
+    remoteRepositorySearchQuery.isFetching,
+  ]);
+
+  const remoteRepositoryEmptyStateMessage =
+    addProjectCloneFlow?.step === "repository" && addProjectCloneFlow.source === "bitbucket"
+      ? remoteRepositoryQuery.length === 0
+        ? "No repositories found. Enter workspace/repository manually."
+        : "No matching repositories. Enter workspace/repository manually."
+      : null;
+
   let displayedGroups: CommandPaletteView["groups"] = filteredGroups;
   if (addProjectCloneFlow?.step === "repository") {
-    displayedGroups = [];
+    displayedGroups = remoteRepositoryGroups;
   } else if (addProjectCloneFlow?.step === "confirm") {
     displayedGroups = relativePathNeedsActiveProject ? [] : cloneDestinationBrowseGroups;
   } else if (isBrowsing) {
@@ -1399,6 +1592,21 @@ function OpenCommandPaletteDialog() {
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
     if (addProjectCloneFlow?.step === "repository" && event.key === "Enter") {
       event.preventDefault();
+      const highlightedRepository = remoteRepositorySearchQuery.data?.repositories.find(
+        (repository) => remoteRepositoryItemValue(repository) === highlightedItemValue,
+      );
+      if (highlightedRepository) {
+        continueWithRemoteRepository({
+          flow: addProjectCloneFlow,
+          repositoryInput: highlightedRepository.nameWithOwner,
+          repository: highlightedRepository,
+          remoteUrl: cloneUrlForRemoteProjectSource(
+            addProjectCloneFlow.source,
+            highlightedRepository,
+          ),
+        });
+        return;
+      }
       void submitAddProjectCloneFlow();
       return;
     }
@@ -1629,7 +1837,8 @@ function OpenCommandPaletteDialog() {
                   emptyStateMessage:
                     addProjectCloneFlow.source === "url"
                       ? "Enter a Git clone URL and press Enter to continue."
-                      : "Enter a repository path and press Enter to look it up.",
+                      : (remoteRepositoryEmptyStateMessage ??
+                        "Enter a repository path and press Enter to look it up."),
                 }
               : addProjectCloneFlow?.step === "confirm"
                 ? { emptyStateMessage: "Choose a destination path and press Enter to clone." }

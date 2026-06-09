@@ -39,6 +39,11 @@ function toProjectionWorktree(
     prState: row.prState,
     prIsDraft: row.prIsDraft === null ? null : row.prIsDraft === 1,
     issueState: row.issueState,
+    workItemProvider: row.workItemProvider,
+    workItemKey: row.workItemKey,
+    workItemTitle: row.workItemTitle,
+    workItemState: row.workItemState,
+    workItemUrl: row.workItemUrl,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     archivedAt: row.archivedAt,
@@ -67,6 +72,11 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
           pr_state,
           pr_is_draft,
           issue_state,
+          work_item_provider,
+          work_item_key,
+          work_item_title,
+          work_item_state,
+          work_item_url,
           created_at,
           updated_at,
           archived_at,
@@ -86,6 +96,11 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
           ${row.prState},
           ${row.prIsDraft === null ? null : row.prIsDraft ? 1 : 0},
           ${row.issueState},
+          ${row.workItemProvider ?? null},
+          ${row.workItemKey ?? null},
+          ${row.workItemTitle ?? null},
+          ${row.workItemState ?? null},
+          ${row.workItemUrl ?? null},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.archivedAt},
@@ -105,6 +120,11 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
           pr_state = excluded.pr_state,
           pr_is_draft = excluded.pr_is_draft,
           issue_state = excluded.issue_state,
+          work_item_provider = excluded.work_item_provider,
+          work_item_key = excluded.work_item_key,
+          work_item_title = excluded.work_item_title,
+          work_item_state = excluded.work_item_state,
+          work_item_url = excluded.work_item_url,
           updated_at = excluded.updated_at,
           archived_at = excluded.archived_at,
           manual_position = excluded.manual_position
@@ -130,6 +150,11 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
           pr_state AS "prState",
           pr_is_draft AS "prIsDraft",
           issue_state AS "issueState",
+          work_item_provider AS "workItemProvider",
+          work_item_key AS "workItemKey",
+          work_item_title AS "workItemTitle",
+          work_item_state AS "workItemState",
+          work_item_url AS "workItemUrl",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
@@ -158,6 +183,11 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
           pr_state AS "prState",
           pr_is_draft AS "prIsDraft",
           issue_state AS "issueState",
+          work_item_provider AS "workItemProvider",
+          work_item_key AS "workItemKey",
+          work_item_title AS "workItemTitle",
+          work_item_state AS "workItemState",
+          work_item_url AS "workItemUrl",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
@@ -277,6 +307,23 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
       ),
     );
 
+  const findByWorkItem: ProjectionWorktreeRepositoryShape["findByWorkItem"] = (input) =>
+    Effect.gen(function* () {
+      const rows = yield* sql<{ readonly worktreeId: string }>`
+        SELECT worktree_id AS "worktreeId"
+        FROM projection_worktrees
+        WHERE project_id = ${input.projectId}
+          AND work_item_provider = ${input.provider}
+          AND work_item_key = ${input.key}
+          AND archived_at IS NULL
+        ORDER BY manual_position ASC, created_at ASC
+        LIMIT 1
+      `;
+      return rows[0]?.worktreeId !== undefined ? WorktreeId.make(rows[0].worktreeId) : null;
+    }).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionWorktreeRepository.findByWorkItem:query")),
+    );
+
   const upsert: ProjectionWorktreeRepositoryShape["upsert"] = (row) =>
     upsertProjectionWorktreeRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionWorktreeRepository.upsert:query")),
@@ -327,6 +374,7 @@ const makeProjectionWorktreeRepository = Effect.gen(function* () {
     listByProjectId,
     findByOrigin,
     findActiveByLinkedNumber,
+    findByWorkItem,
     markArchived,
     markRestored,
     updateMeta,

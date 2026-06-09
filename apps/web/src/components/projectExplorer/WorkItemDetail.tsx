@@ -2,15 +2,26 @@ import type {
   ChangeRequest,
   EnvironmentId,
   ProjectId,
+  VcsRef,
   WorkItemDetail as WorkItemDetailModel,
 } from "@ryco/contracts";
+import { scopeProjectRef } from "@ryco/client-runtime";
 import { DateTime, Option } from "effect";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeftIcon, ExternalLinkIcon, GitPullRequestIcon, TicketCheckIcon } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
+import { ArrowLeftIcon, ExternalLinkIcon, GitBranchIcon, GitPullRequestIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { requireEnvironmentConnection } from "~/environments/runtime";
+import { readEnvironmentApi } from "~/environmentApi";
+import {
+  findLinkedWorkItemBranches,
+  findLinkedWorkItemWorktrees,
+  type LinkedWorkItemWorktree,
+} from "~/lib/workItemLocalLinks";
 import { searchChangeRequestsQueryOptions } from "~/lib/sourceControlContextRpc";
 import { workItemDetailQueryOptions, workItemsQueryKeys } from "~/lib/workItemsRpc";
+import { selectSidebarWorktreesForProjectRef, useStore } from "~/store";
+import { AtlassianJiraIcon } from "../Icons";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
@@ -54,6 +65,37 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
       limit: 8,
       enabled: props.cwd !== null,
     }),
+  );
+  const localBranchQuery = useQuery({
+    queryKey: [
+      "workItems",
+      "localBranches",
+      props.environmentId,
+      props.cwd ?? null,
+      props.workItemKey,
+    ] as const,
+    queryFn: async () => {
+      const api = props.environmentId ? readEnvironmentApi(props.environmentId) : null;
+      if (!api || !props.cwd) return [];
+      const result = await api.vcs.listRefs({
+        cwd: props.cwd,
+        query: props.workItemKey,
+        limit: 100,
+      });
+      return result.refs;
+    },
+    enabled: props.environmentId !== null && props.cwd !== null,
+    staleTime: 30_000,
+  });
+  const projectWorktrees = useStore(
+    useShallow((state) =>
+      props.environmentId && props.projectId
+        ? selectSidebarWorktreesForProjectRef(
+            state,
+            scopeProjectRef(props.environmentId, props.projectId),
+          )
+        : [],
+    ),
   );
 
   const invalidateDetail = () =>
@@ -132,6 +174,22 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
       ),
     [detail?.linkedChangeRequests, linkedPrQuery.data, props.workItemKey],
   );
+  const linkedBranches = useMemo(
+    () =>
+      findLinkedWorkItemBranches({
+        key: props.workItemKey,
+        refs: localBranchQuery.data ?? [],
+      }),
+    [localBranchQuery.data, props.workItemKey],
+  );
+  const linkedWorktrees = useMemo(
+    () =>
+      findLinkedWorkItemWorktrees({
+        key: props.workItemKey,
+        worktrees: projectWorktrees,
+      }),
+    [projectWorktrees, props.workItemKey],
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -168,6 +226,9 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
             detail={detail}
             linkedChangeRequests={linkedChangeRequests}
             linkedChangeRequestsLoading={linkedPrQuery.isLoading}
+            linkedBranches={linkedBranches}
+            linkedBranchesLoading={localBranchQuery.isLoading}
+            linkedWorktrees={linkedWorktrees}
             onSelectLinkedChangeRequest={props.onSelectLinkedChangeRequest}
           />
         ) : null}
@@ -266,6 +327,9 @@ function WorkItemDetailBody(props: {
   readonly detail: WorkItemDetailModel;
   readonly linkedChangeRequests: ReadonlyArray<WorkItemLinkedChangeRequest>;
   readonly linkedChangeRequestsLoading: boolean;
+  readonly linkedBranches: ReadonlyArray<VcsRef>;
+  readonly linkedBranchesLoading: boolean;
+  readonly linkedWorktrees: ReadonlyArray<LinkedWorkItemWorktree>;
   readonly onSelectLinkedChangeRequest?: ((number: number) => void) | undefined;
 }) {
   const { detail } = props;
@@ -282,21 +346,8 @@ function WorkItemDetailBody(props: {
             <h2 className="flex-1 font-heading font-semibold text-xl leading-tight">
               {detail.title} <span className="font-normal text-muted-foreground">{detail.key}</span>
             </h2>
-            <Badge
-              variant={
-                detail.state === "done" || detail.state === "closed" ? "secondary" : "outline"
-              }
-            >
-              {detail.state.replace("_", " ")}
-            </Badge>
           </div>
-          <p className="text-muted-foreground text-xs">
-            {detail.issueType ? detail.issueType : "Work item"}
-            {detail.assignee ? <> · assigned to {detail.assignee}</> : null}
-            {detail.updatedAt && Option.isSome(detail.updatedAt) ? (
-              <> · updated {dateFmt.format(DateTime.toDate(detail.updatedAt.value))}</>
-            ) : null}
-          </p>
+          <p className="text-muted-foreground text-xs">{workItemSubtitle(detail)}</p>
         </header>
 
         <ol className="space-y-4">
@@ -322,10 +373,24 @@ function WorkItemDetailBody(props: {
 
       <aside className="hidden w-56 shrink-0 border-border/60 border-l bg-muted/20 px-4 py-4 lg:block">
         <div className="space-y-4 text-xs">
-          <SidebarField label="State" value={detail.state.replace("_", " ")} />
-          <SidebarField label="Assignee" value={detail.assignee ?? "Unassigned"} />
           <SidebarField label="Priority" value={detail.priority ?? "None"} />
+          <SidebarField
+            label="Project"
+            value={projectKeyFromWorkItemKey(detail.key) ?? "Unknown"}
+          />
           <SidebarField label="Parent" value={detail.parentKey ?? detail.epicKey ?? "None"} />
+          {detail.createdAt && Option.isSome(detail.createdAt) ? (
+            <SidebarField
+              label="Created"
+              value={dateFmt.format(DateTime.toDate(detail.createdAt.value))}
+            />
+          ) : null}
+          {detail.updatedAt && Option.isSome(detail.updatedAt) ? (
+            <SidebarField
+              label="Updated"
+              value={dateFmt.format(DateTime.toDate(detail.updatedAt.value))}
+            />
+          ) : null}
           {detail.labels && detail.labels.length > 0 ? (
             <div>
               <div className="mb-2 text-muted-foreground">Labels</div>
@@ -338,6 +403,11 @@ function WorkItemDetailBody(props: {
               </div>
             </div>
           ) : null}
+          <LinkedLocalWorkItemSection
+            branches={props.linkedBranches}
+            branchesLoading={props.linkedBranchesLoading}
+            worktrees={props.linkedWorktrees}
+          />
           <div>
             <div className="mb-2 text-muted-foreground">Linked PRs</div>
             {props.linkedChangeRequestsLoading ? (
@@ -372,13 +442,6 @@ function WorkItemDetailBody(props: {
               <span className="text-muted-foreground/70 text-xs italic">None found</span>
             )}
           </div>
-          <div className="rounded-md border border-border/60 bg-background/60 p-3">
-            <TicketCheckIcon className="mb-2 size-4 text-blue-600 dark:text-blue-300" />
-            <p className="text-muted-foreground leading-relaxed">
-              Use transitions and comments here to keep Jira aligned while reviewing repository
-              changes.
-            </p>
-          </div>
         </div>
       </aside>
     </div>
@@ -392,4 +455,68 @@ function SidebarField(props: { readonly label: string; readonly value: string })
       <div className="font-medium text-foreground capitalize">{props.value}</div>
     </div>
   );
+}
+
+export function LinkedLocalWorkItemSection(props: {
+  readonly branches: ReadonlyArray<VcsRef>;
+  readonly branchesLoading: boolean;
+  readonly worktrees: ReadonlyArray<LinkedWorkItemWorktree>;
+}) {
+  const hasLinks = props.branches.length > 0 || props.worktrees.length > 0;
+  return (
+    <div>
+      <div className="mb-2 text-muted-foreground">Local links</div>
+      {props.branchesLoading && !hasLinks ? (
+        <span className="text-muted-foreground/70 text-xs italic">Checking…</span>
+      ) : hasLinks ? (
+        <div className="grid gap-2">
+          {props.branches.length > 0 ? (
+            <div className="grid gap-1">
+              {props.branches.map((branch) => (
+                <span
+                  key={branch.name}
+                  className="flex min-w-0 items-center gap-1 rounded-md border border-border/60 bg-background/60 px-2 py-1.5"
+                  title={branch.worktreePath ?? branch.name}
+                >
+                  <GitBranchIcon className="size-3 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 truncate font-mono text-[11px]">{branch.name}</span>
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {props.worktrees.length > 0 ? (
+            <div className="grid gap-1">
+              {props.worktrees.map((worktree) => (
+                <span
+                  key={worktree.id}
+                  className="flex min-w-0 items-center gap-1 rounded-md border border-border/60 bg-background/60 px-2 py-1.5"
+                  title={worktree.worktreePath ?? worktree.branch}
+                >
+                  <AtlassianJiraIcon className="size-3 shrink-0" />
+                  <span className="min-w-0 truncate font-mono text-[11px]">{worktree.branch}</span>
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <span className="text-muted-foreground/70 text-xs italic">None found</span>
+      )}
+    </div>
+  );
+}
+
+function workItemSubtitle(detail: WorkItemDetailModel): string {
+  const parts = [detail.state.replace("_", " "), detail.issueType ?? "Work item"];
+  if (detail.assignee) parts.push(`assigned to ${detail.assignee}`);
+  if (detail.reporter) parts.push(`reported by ${detail.reporter}`);
+  if (detail.updatedAt && Option.isSome(detail.updatedAt)) {
+    parts.push(`updated ${dateFmt.format(DateTime.toDate(detail.updatedAt.value))}`);
+  }
+  return parts.join(" · ");
+}
+
+function projectKeyFromWorkItemKey(key: string): string | null {
+  const [projectKey] = key.trim().toUpperCase().split("-", 1);
+  return projectKey && projectKey.length > 0 ? projectKey : null;
 }

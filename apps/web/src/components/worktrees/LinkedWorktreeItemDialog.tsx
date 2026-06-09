@@ -1,15 +1,20 @@
-import type { EnvironmentId } from "@ryco/contracts";
+import type { EnvironmentId, ProjectId } from "@ryco/contracts";
 import { useCallback, useState } from "react";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { IssueDetail } from "../projectExplorer/IssueDetail";
 import { PullRequestDetail } from "../projectExplorer/PullRequestDetail";
+import { WorkItemDetail } from "../projectExplorer/WorkItemDetail";
 
-export type LinkedWorktreeItem = { kind: "pr"; number: number } | { kind: "issue"; number: number };
+export type LinkedWorktreeItem =
+  | { kind: "pr"; number: number }
+  | { kind: "issue"; number: number }
+  | { kind: "workItem"; provider: "jira"; key: string };
 
 export interface LinkedWorktreeItemDialogProps {
   open: boolean;
   item: LinkedWorktreeItem | null;
   environmentId: EnvironmentId | null;
+  projectId: ProjectId | null;
   cwd: string | null;
   onOpenChange: (open: boolean) => void;
 }
@@ -56,7 +61,9 @@ export function LinkedWorktreeItemDialog(props: LinkedWorktreeItemDialogProps) {
             ? `Pull request #${item.number}`
             : item?.kind === "issue"
               ? `Issue #${item.number}`
-              : "Linked item"}
+              : item?.kind === "workItem"
+                ? item.key
+                : "Linked item"}
         </DialogTitle>
 
         {item === null ? null : pivot !== null ? (
@@ -77,6 +84,15 @@ export function LinkedWorktreeItemDialog(props: LinkedWorktreeItemDialogProps) {
               onSelectLinkedIssue={handleSelectLinkedIssue}
             />
           )
+        ) : item.kind === "workItem" ? (
+          <WorkItemDetail
+            environmentId={props.environmentId}
+            projectId={props.projectId}
+            cwd={props.cwd}
+            workItemKey={item.key}
+            onBack={close}
+            onSelectLinkedChangeRequest={handleSelectLinkedChangeRequest}
+          />
         ) : item.kind === "pr" ? (
           <PullRequestDetail
             environmentId={props.environmentId}

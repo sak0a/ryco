@@ -115,6 +115,8 @@ import type {
   SourceControlPublishRepositoryResult,
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
+  SourceControlRepositorySearchInput,
+  SourceControlRepositorySearchResult,
 } from "./sourceControl.ts";
 
 export interface ContextMenuItem<T extends string = string> {
@@ -408,6 +410,9 @@ export interface EnvironmentApi {
     lookupRepository: (
       input: SourceControlRepositoryLookupInput,
     ) => Promise<SourceControlRepositoryInfo>;
+    searchRepositories: (
+      input: SourceControlRepositorySearchInput,
+    ) => Promise<SourceControlRepositorySearchResult>;
     cloneRepository: (
       input: SourceControlCloneRepositoryInput,
     ) => Promise<SourceControlCloneRepositoryResult>;

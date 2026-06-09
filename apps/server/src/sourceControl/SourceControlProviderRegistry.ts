@@ -28,6 +28,11 @@ import * as VcsProcess from "../vcs/VcsProcess.ts";
 const PROVIDER_DETECTION_CACHE_CAPACITY = 2_048;
 const PROVIDER_DETECTION_CACHE_TTL = Duration.seconds(5);
 
+interface LazyProviderOptions {
+  readonly searchRepositories?: boolean;
+  readonly cloneAuthentication?: boolean;
+}
+
 export interface SourceControlProviderRegistration {
   readonly kind: SourceControlProviderKind;
   readonly provider: SourceControlProvider.SourceControlProviderShape;
@@ -136,6 +141,7 @@ function providerLoadError(kind: SourceControlProviderKind, cause: unknown) {
 const makeLazyProvider = Effect.fn("makeLazySourceControlProvider")(function* (
   kind: SourceControlProviderKind,
   load: Effect.Effect<SourceControlProvider.SourceControlProviderShape, SourceControlProviderError>,
+  options: LazyProviderOptions = {},
 ) {
   const provider = yield* Effect.cached(load);
 
@@ -149,6 +155,32 @@ const makeLazyProvider = Effect.fn("makeLazySourceControlProvider")(function* (
       provider.pipe(Effect.flatMap((loaded) => loaded.createChangeRequest(input))),
     getRepositoryCloneUrls: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.getRepositoryCloneUrls(input))),
+    ...(options.searchRepositories
+      ? {
+          searchRepositories: (input) =>
+            provider.pipe(
+              Effect.flatMap((loaded) => {
+                const method = loaded.searchRepositories;
+                return method
+                  ? method(input)
+                  : unsupportedProviderOperation(kind, "searchRepositories");
+              }),
+            ),
+        }
+      : {}),
+    ...(options.cloneAuthentication
+      ? {
+          cloneAuthentication: (input) =>
+            provider.pipe(
+              Effect.flatMap((loaded) => {
+                const method = loaded.cloneAuthentication;
+                return method
+                  ? method(input)
+                  : unsupportedProviderOperation(kind, "cloneAuthentication");
+              }),
+            ),
+        }
+      : {}),
     createRepository: (input) =>
       provider.pipe(Effect.flatMap((loaded) => loaded.createRepository(input))),
     getDefaultBranch: (input) =>
@@ -269,6 +301,27 @@ function bindProviderContext(
         ...input,
         context: input.context ?? context,
       }),
+    ...(provider.searchRepositories
+      ? {
+          searchRepositories: (input) => {
+            const method = provider.searchRepositories;
+            if (!method) return unsupportedProviderOperation(provider.kind, "searchRepositories");
+            return method({
+              ...input,
+              context: input.context ?? context,
+            });
+          },
+        }
+      : {}),
+    ...(provider.cloneAuthentication
+      ? {
+          cloneAuthentication: (input) => {
+            const method = provider.cloneAuthentication;
+            if (!method) return unsupportedProviderOperation(provider.kind, "cloneAuthentication");
+            return method(input);
+          },
+        }
+      : {}),
     createRepository: (input) => provider.createRepository(input),
     getDefaultBranch: (input) =>
       provider.getDefaultBranch({
@@ -542,6 +595,7 @@ export const make = Effect.fn("makeSourceControlProviderRegistry")(function* () 
       Effect.flatMap((module) => module.make()),
       Effect.provideService(BitbucketApi.BitbucketApi, bitbucketApi),
     ),
+    { searchRepositories: true, cloneAuthentication: true },
   );
 
   const forgejo = yield* makeLazyProvider(

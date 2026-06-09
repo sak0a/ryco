@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-import { ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { AtlassianConnectionId, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ChangeRequestState,
   SourceControlIssueComment,
@@ -29,6 +29,17 @@ export const WorkItemTransition = Schema.Struct({
 });
 export type WorkItemTransition = typeof WorkItemTransition.Type;
 
+export const WorkItemProject = Schema.Struct({
+  provider: WorkItemProviderKind,
+  key: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  url: Schema.String,
+  projectTypeKey: Schema.optional(TrimmedNonEmptyString),
+  simplified: Schema.optional(Schema.Boolean),
+  avatarUrl: Schema.optional(Schema.String),
+});
+export type WorkItemProject = typeof WorkItemProject.Type;
+
 export const LinkedChangeRequest = Schema.Struct({
   provider: SourceControlProviderKind,
   number: Schema.Number,
@@ -50,6 +61,7 @@ export const WorkItemSummary = Schema.Struct({
   assignee: Schema.NullOr(TrimmedNonEmptyString),
   reporter: Schema.optional(TrimmedNonEmptyString),
   labels: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  createdAt: Schema.optional(Schema.Option(Schema.DateTimeUtc)),
   updatedAt: Schema.Option(Schema.DateTimeUtc),
 });
 export type WorkItemSummary = typeof WorkItemSummary.Type;
@@ -89,6 +101,12 @@ export const WorkItemListInput = Schema.Struct({
   projectKeys: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type WorkItemListInput = typeof WorkItemListInput.Type;
+
+export const WorkItemListProjectsInput = Schema.Struct({
+  connectionId: AtlassianConnectionId,
+  siteUrl: Schema.optional(Schema.String),
+});
+export type WorkItemListProjectsInput = typeof WorkItemListProjectsInput.Type;
 
 export const WorkItemSearchInput = Schema.Struct({
   projectId: Schema.optional(ProjectId),

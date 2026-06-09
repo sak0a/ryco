@@ -290,6 +290,11 @@ function readExplicitWorktrees(
         prState: readPullRequestState(record.prState),
         prIsDraft: readNullableBoolean(record.prIsDraft),
         issueState: readIssueState(record.issueState),
+        workItemProvider: readWorkItemProvider(record.workItemProvider),
+        workItemKey: readNullableString(record.workItemKey),
+        workItemTitle: readNullableString(record.workItemTitle),
+        workItemState: readWorkItemState(record.workItemState),
+        workItemUrl: readNullableString(record.workItemUrl),
         projectId: logicalProjectId,
         title: readNullableString(record.title),
         updatedAt: readString(record.updatedAt),
@@ -306,6 +311,22 @@ function readPullRequestState(value: unknown): "open" | "closed" | "merged" | nu
 
 function readIssueState(value: unknown): "open" | "closed" | null {
   return value === "open" || value === "closed" ? value : null;
+}
+
+function readWorkItemProvider(value: unknown): "jira" | null {
+  return value === "jira" ? value : null;
+}
+
+function readWorkItemState(
+  value: unknown,
+): "open" | "in_progress" | "done" | "closed" | "unknown" | null {
+  return value === "open" ||
+    value === "in_progress" ||
+    value === "done" ||
+    value === "closed" ||
+    value === "unknown"
+    ? value
+    : null;
 }
 
 function readNullableBoolean(value: unknown): boolean | null {

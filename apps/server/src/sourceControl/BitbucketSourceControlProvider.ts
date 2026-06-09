@@ -154,6 +154,19 @@ export const make = Effect.fn("makeBitbucketSourceControlProvider")(function* ()
       bitbucket
         .getRepositoryCloneUrls(input)
         .pipe(Effect.mapError((error) => providerError("getRepositoryCloneUrls", error))),
+    searchRepositories: (input) =>
+      bitbucket
+        .searchRepositories({
+          cwd: input.cwd,
+          ...(input.context ? { context: input.context } : {}),
+          ...(input.query !== undefined ? { query: input.query } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        })
+        .pipe(Effect.mapError((error) => providerError("searchRepositories", error))),
+    cloneAuthentication: (input) =>
+      bitbucket
+        .cloneAuthentication(input)
+        .pipe(Effect.mapError((error) => providerError("cloneAuthentication", error))),
     createRepository: (input) =>
       bitbucket
         .createRepository(input)

@@ -5,17 +5,31 @@ import type {
   ProjectId,
   SourceControlIssueSummary,
   VcsRef,
+  WorkItemStateFilter,
+  WorkItemSummary,
 } from "@ryco/contracts";
+import { scopeProjectRef } from "@ryco/client-runtime";
 import { ChevronDownIcon, GitBranchIcon, RotateCwIcon, SparklesIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { requireEnvironmentConnection } from "../../environments/runtime";
 import { readEnvironmentApi } from "../../environmentApi";
 import { isEditableShortcutTarget, matchesExactModShortcut } from "../../keybindings";
+import { selectSidebarWorktreesForProjectRef, useStore } from "../../store";
+import { AtlassianJiraIcon } from "../Icons";
+import {
+  buildWorkItemBranchChoices,
+  findLinkedWorkItemBranches,
+  findLinkedWorkItemWorktrees,
+  type LinkedWorkItemWorktree,
+  type WorkItemBranchChoice,
+} from "~/lib/workItemLocalLinks";
 import { cn } from "~/lib/utils";
 import { ContextPickerTabs } from "../chat/ContextPickerTabs";
 import { IssuesTab } from "../projectExplorer/IssuesTab";
 import { PullRequestsTab } from "../projectExplorer/PullRequestsTab";
 import { changeRequestStateKind, StateBadge } from "../projectExplorer/StateBadge";
+import { WorkItemsTab } from "../projectExplorer/WorkItemsTab";
 import type {
   ChangeRequestStateFilter,
   IssueStateFilter,
@@ -42,7 +56,7 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 
-export type NewWorktreeDialogTab = "branches" | "prs" | "issues" | "newBranch";
+export type NewWorktreeDialogTab = "branches" | "prs" | "issues" | "jira" | "newBranch";
 
 interface NewWorktreeDialogProps {
   cwd: string | null;
@@ -57,17 +71,24 @@ interface NewWorktreeDialogProps {
 type Selection =
   | { kind: "issue"; item: SourceControlIssueSummary & { readonly body?: string | undefined } }
   | { kind: "pr"; item: ChangeRequest }
+  | { kind: "workItem"; item: WorkItemSummary }
   | null;
 type SelectionKind = NonNullable<Selection>["kind"] | null;
 
 type IssueBranchMode = "ai" | "custom";
 type NewBranchNameMode = "manual" | "ai";
-type BranchNameGenerationTarget = "issue" | "newBranch";
+type BranchNameGenerationTarget = "issue" | "workItem" | "newBranch";
 
 const WORKTREE_BRANCH_REF_LIMIT = 100;
 
 function sourceControlItemKey(item: { readonly provider: string; readonly number: number }) {
   return `${item.provider}:${item.number}`;
+}
+
+function selectionKey(selection: Selection): string | null {
+  if (!selection) return null;
+  if (selection.kind === "workItem") return `${selection.item.provider}:${selection.item.key}`;
+  return sourceControlItemKey(selection.item);
 }
 
 function branchLabel(value: string | null | undefined) {
@@ -90,6 +111,19 @@ function buildIssueBranchNameMessage(input: {
     lines.push("", `Body: ${body}`);
   }
   return lines.join("\n");
+}
+
+function buildWorkItemBranchNameMessage(input: {
+  readonly key: string;
+  readonly title?: string | undefined;
+}) {
+  return [
+    `Create a branch name for Jira work item ${input.key}.`,
+    "",
+    `Title: ${input.title?.trim() || input.key}`,
+    "",
+    `The branch name should include the Jira key ${input.key}.`,
+  ].join("\n");
 }
 
 function buildNewBranchNameMessage(input: { readonly baseBranch: string }) {
@@ -165,12 +199,17 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
   const [baseBranch, setBaseBranch] = useState("main");
   const [issueBranchMode, setIssueBranchMode] = useState<IssueBranchMode>("ai");
   const [issueBranchName, setIssueBranchName] = useState("");
+  const [workItemBranchMode, setWorkItemBranchMode] = useState<IssueBranchMode>("ai");
+  const [workItemBranchName, setWorkItemBranchName] = useState("");
   const [issueQuery, setIssueQuery] = useState("");
+  const [workItemQuery, setWorkItemQuery] = useState("");
   const [prQuery, setPrQuery] = useState("");
   const [issueStateFilter, setIssueStateFilter] = useState<IssueStateFilter>("open");
+  const [workItemStateFilter, setWorkItemStateFilter] = useState<WorkItemStateFilter>("open");
   const [prStateFilter, setPrStateFilter] = useState<ChangeRequestStateFilter>("open");
   const [selection, setSelection] = useState<Selection>(null);
   const [selectedBranchName, setSelectedBranchName] = useState<string | null>(null);
+  const [selectedWorkItemBranchName, setSelectedWorkItemBranchName] = useState<string | null>(null);
   const [existingWorktreeId, setExistingWorktreeId] = useState<string | null>(null);
   const [branchNameGenerationTarget, setBranchNameGenerationTarget] =
     useState<BranchNameGenerationTarget | null>(null);
@@ -179,6 +218,7 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
   const [createError, setCreateError] = useState<string | null>(null);
   const branchInputRef = useRef<HTMLInputElement>(null);
   const issueInputRef = useRef<HTMLInputElement>(null);
+  const workItemInputRef = useRef<HTMLInputElement>(null);
   const prInputRef = useRef<HTMLInputElement>(null);
   const newBranchInputRef = useRef<HTMLInputElement>(null);
   const dialogTargetKey = `${props.projectId ?? ""}\0${props.environmentId ?? ""}\0${props.cwd ?? ""}`;
@@ -190,6 +230,7 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
     cwd: props.cwd,
     environmentId: props.environmentId,
     selectionBody: undefined as string | undefined,
+    selectionIssueKey: undefined as string | undefined,
     selectionKey: null as string | null,
     selectionKind: null as SelectionKind,
     selectionTitle: undefined as string | undefined,
@@ -202,7 +243,8 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
     cwd: props.cwd,
     environmentId: props.environmentId,
     selectionBody: selection?.kind === "issue" ? selection.item.body : undefined,
-    selectionKey: selection ? sourceControlItemKey(selection.item) : null,
+    selectionIssueKey: selection?.kind === "workItem" ? selection.item.key : undefined,
+    selectionKey: selectionKey(selection),
     selectionKind: selection?.kind ?? null,
     selectionTitle: selection?.item.title,
     targetKey: dialogTargetKey,
@@ -233,8 +275,11 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
         setNewBranchNameMode("manual");
         setIssueBranchName("");
         setIssueBranchMode("ai");
+        setWorkItemBranchName("");
+        setWorkItemBranchMode("ai");
         setBranchQuery("");
         setIssueQuery("");
+        setWorkItemQuery("");
         setPrQuery("");
       }
     }
@@ -260,7 +305,7 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
       setExistingWorktreeId(null);
       return;
     }
-    if (selection?.kind !== "pr" && selection?.kind !== "issue") {
+    if (selection?.kind !== "pr" && selection?.kind !== "issue" && selection?.kind !== "workItem") {
       setExistingWorktreeId(null);
       return;
     }
@@ -271,11 +316,20 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
       return;
     }
     let cancelled = false;
-    void findWorktree({
-      projectId: props.projectId,
-      kind: selection.kind,
-      number: selection.item.number,
-    })
+    void findWorktree(
+      selection.kind === "workItem"
+        ? {
+            projectId: props.projectId,
+            kind: "workItem",
+            provider: selection.item.provider,
+            key: selection.item.key,
+          }
+        : {
+            projectId: props.projectId,
+            kind: selection.kind,
+            number: selection.item.number,
+          },
+    )
       .then((worktreeId) => {
         if (!cancelled) {
           setExistingWorktreeId(worktreeId);
@@ -299,6 +353,7 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
     const frame = window.requestAnimationFrame(() => {
       if (activeTab === "branches") branchInputRef.current?.focus();
       if (activeTab === "issues") issueInputRef.current?.focus();
+      if (activeTab === "jira") workItemInputRef.current?.focus();
       if (activeTab === "prs") prInputRef.current?.focus();
       if (activeTab === "newBranch") newBranchInputRef.current?.focus();
     });
@@ -311,6 +366,7 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
       { id: "newBranch", label: "New branch" },
       { id: "prs", label: "Pull requests" },
       { id: "issues", label: "Issues" },
+      { id: "jira", label: "Jira" },
     ],
     [],
   );
@@ -329,6 +385,7 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
       "2": "newBranch",
       "3": "prs",
       "4": "issues",
+      "5": "jira",
     };
     const nextTab = Object.entries(tabByKey).find(([key]) =>
       matchesExactModShortcut(event, key),
@@ -349,18 +406,25 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
       }
 
       const message =
-        target === "issue"
-          ? selection?.kind === "issue"
-            ? buildIssueBranchNameMessage({
-                number: selection.item.number,
+        target === "workItem"
+          ? selection?.kind === "workItem"
+            ? buildWorkItemBranchNameMessage({
+                key: selection.item.key,
                 title: selection.item.title,
-                body: selection.item.body,
               })
             : null
-          : buildNewBranchNameMessage({ baseBranch });
+          : target === "issue"
+            ? selection?.kind === "issue"
+              ? buildIssueBranchNameMessage({
+                  number: selection.item.number,
+                  title: selection.item.title,
+                  body: selection.item.body,
+                })
+              : null
+            : buildNewBranchNameMessage({ baseBranch });
 
       if (!message) {
-        setBranchNameGenerationError("Select an issue before generating a branch name.");
+        setBranchNameGenerationError("Select an item before generating a branch name.");
         return;
       }
 
@@ -380,7 +444,12 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
               current.selectionKey === snapshot.selectionKey &&
               current.selectionTitle === snapshot.selectionTitle &&
               current.selectionBody === snapshot.selectionBody
-            : current.activeTab === "newBranch" && current.baseBranch === snapshot.baseBranch)
+            : target === "workItem"
+              ? current.activeTab === "jira" &&
+                current.selectionKind === "workItem" &&
+                current.selectionIssueKey === snapshot.selectionIssueKey &&
+                current.selectionTitle === snapshot.selectionTitle
+              : current.activeTab === "newBranch" && current.baseBranch === snapshot.baseBranch)
         );
       };
 
@@ -403,6 +472,9 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
         if (target === "issue") {
           setIssueBranchMode("custom");
           setIssueBranchName(branch);
+        } else if (target === "workItem") {
+          setWorkItemBranchMode("custom");
+          setWorkItemBranchName(branch);
         } else {
           setNewBranchNameMode("ai");
           setNewBranchName(branch);
@@ -426,6 +498,64 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
   const selectedPrKey = selection?.kind === "pr" ? sourceControlItemKey(selection.item) : null;
   const selectedIssueKey =
     selection?.kind === "issue" ? sourceControlItemKey(selection.item) : null;
+  const selectedWorkItem = selection?.kind === "workItem" ? selection.item : null;
+  const projectWorktrees = useStore(
+    useShallow((state) =>
+      props.environmentId && props.projectId
+        ? selectSidebarWorktreesForProjectRef(
+            state,
+            scopeProjectRef(props.environmentId, props.projectId),
+          )
+        : [],
+    ),
+  );
+  const workItemBranchSearch = useWorktreeBranchRefs({
+    open: props.open,
+    enabled: activeTab === "jira" && selectedWorkItem !== null,
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    query: selectedWorkItem?.key ?? "",
+  });
+  const linkedWorkItemBranches = useMemo(
+    () =>
+      selectedWorkItem
+        ? findLinkedWorkItemBranches({
+            key: selectedWorkItem.key,
+            refs: workItemBranchSearch.refs,
+          })
+        : [],
+    [selectedWorkItem, workItemBranchSearch.refs],
+  );
+  const linkedWorkItemWorktrees = useMemo(
+    () =>
+      selectedWorkItem
+        ? findLinkedWorkItemWorktrees({
+            key: selectedWorkItem.key,
+            worktrees: projectWorktrees,
+          })
+        : [],
+    [projectWorktrees, selectedWorkItem],
+  );
+  const workItemBranchChoices = useMemo(
+    () =>
+      buildWorkItemBranchChoices({
+        branches: linkedWorkItemBranches,
+        worktrees: linkedWorkItemWorktrees,
+      }),
+    [linkedWorkItemBranches, linkedWorkItemWorktrees],
+  );
+
+  useEffect(() => {
+    if (!props.open || activeTab !== "jira" || !selectedWorkItem) {
+      setSelectedWorkItemBranchName(null);
+      return;
+    }
+    setSelectedWorkItemBranchName((current) =>
+      current && workItemBranchChoices.some((choice) => choice.branchName === current)
+        ? current
+        : (workItemBranchChoices[0]?.branchName ?? null),
+    );
+  }, [activeTab, props.open, selectedWorkItem, workItemBranchChoices]);
 
   const canCreate = useMemo(() => {
     if (!props.projectId || !props.environmentId || creating) {
@@ -450,6 +580,21 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
         (issueBranchMode === "ai" || issueBranchName.trim().length > 0)
       );
     }
+    if (activeTab === "jira") {
+      if (selection?.kind !== "workItem") {
+        return false;
+      }
+      if (existingWorktreeId) {
+        return true;
+      }
+      if (workItemBranchChoices.length > 0) {
+        return selectedWorkItemBranchName !== null && selectedWorkItemBranchName.length > 0;
+      }
+      return (
+        trimmedBaseBranch.length > 0 &&
+        (workItemBranchMode === "ai" || workItemBranchName.trim().length > 0)
+      );
+    }
     return trimmedBaseBranch.length > 0 && newBranchName.trim().length > 0;
   }, [
     activeTab,
@@ -462,7 +607,11 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
     props.environmentId,
     props.projectId,
     selectedBranchName,
+    selectedWorkItemBranchName,
     selection,
+    workItemBranchMode,
+    workItemBranchChoices.length,
+    workItemBranchName,
   ]);
 
   const createButtonLabel = useMemo(() => {
@@ -487,6 +636,15 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
       }
       return `Create worktree from ${branchLabel(baseBranch)}`;
     }
+    if (activeTab === "jira") {
+      if (selectedWorkItemBranchName) {
+        return `Create worktree from ${selectedWorkItemBranchName}`;
+      }
+      if (workItemBranchMode === "custom" && workItemBranchName.trim()) {
+        return `Create worktree from ${branchLabel(baseBranch)} as ${workItemBranchName.trim()}`;
+      }
+      return `Create worktree from ${branchLabel(baseBranch)}`;
+    }
     if (activeTab === "prs" && selection?.kind === "pr") {
       return `Create worktree for PR #${selection.item.number}`;
     }
@@ -500,7 +658,10 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
     issueBranchName,
     newBranchName,
     selectedBranchName,
+    selectedWorkItemBranchName,
     selection,
+    workItemBranchMode,
+    workItemBranchName,
   ]);
 
   const handleCreate = useCallback(async () => {
@@ -518,6 +679,7 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
     const branchName = selectedBranchName ?? "";
     const trimmedNewBranchName = newBranchName.trim();
     const trimmedIssueBranchName = issueBranchName.trim();
+    const trimmedWorkItemBranchName = workItemBranchName.trim();
     const trimmedBaseBranch = baseBranch.trim();
     const intent =
       activeTab === "branches"
@@ -543,7 +705,33 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
                   branchName: trimmedNewBranchName,
                   ...(trimmedBaseBranch.length > 0 ? { baseBranch: trimmedBaseBranch } : {}),
                 } as const)
-              : null;
+              : activeTab === "jira" && selection?.kind === "workItem"
+                ? ({
+                    kind: "workItem",
+                    provider: selection.item.provider,
+                    key: selection.item.key,
+                    title: selection.item.title,
+                    state: selection.item.state,
+                    url: selection.item.url,
+                    ...(selectedWorkItemBranchName
+                      ? {
+                          branchSource: "existing" as const,
+                          branchName: selectedWorkItemBranchName,
+                        }
+                      : {
+                          ...(trimmedBaseBranch.length > 0
+                            ? { baseBranch: trimmedBaseBranch }
+                            : {}),
+                          ...(workItemBranchMode === "custom" &&
+                          trimmedWorkItemBranchName.length > 0
+                            ? {
+                                branchSource: "new" as const,
+                                branchName: trimmedWorkItemBranchName,
+                              }
+                            : {}),
+                        }),
+                  } as const)
+                : null;
     if (!intent) {
       setCreateError("Select a worktree target first.");
       return;
@@ -571,7 +759,10 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
     newBranchName,
     props,
     selectedBranchName,
+    selectedWorkItemBranchName,
     selection,
+    workItemBranchMode,
+    workItemBranchName,
   ]);
 
   return (
@@ -638,6 +829,18 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
                   onStateFilterChange={setIssueStateFilter}
                   onSelect={(item) => setSelection({ kind: "issue", item })}
                 />
+              ) : activeTab === "jira" ? (
+                <WorkItemsTab
+                  environmentId={props.environmentId}
+                  cwd={props.cwd}
+                  projectId={props.projectId ?? null}
+                  searchInputRef={workItemInputRef}
+                  query={workItemQuery}
+                  onQueryChange={setWorkItemQuery}
+                  stateFilter={workItemStateFilter}
+                  onStateFilterChange={setWorkItemStateFilter}
+                  onSelect={(item) => setSelection({ kind: "workItem", item })}
+                />
               ) : (
                 <NewBranchTab
                   baseBranch={baseBranch}
@@ -671,14 +874,26 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
               generationTarget={branchNameGenerationTarget}
               issueBranchMode={issueBranchMode}
               issueBranchName={issueBranchName}
+              linkedWorkItemBranches={linkedWorkItemBranches}
+              linkedWorkItemBranchesError={workItemBranchSearch.error}
+              linkedWorkItemBranchesLoading={workItemBranchSearch.isLoading}
+              linkedWorkItemWorktrees={linkedWorkItemWorktrees}
               newBranchName={newBranchName}
               selection={selection}
               selectedBranchName={selectedBranchName}
+              selectedWorkItemBranchName={selectedWorkItemBranchName}
+              workItemBranchChoices={workItemBranchChoices}
+              workItemBranchMode={workItemBranchMode}
+              workItemBranchName={workItemBranchName}
               onBaseBranchChange={setBaseBranch}
               onDefaultBranchDiscovered={handleDefaultBranchDiscovered}
               onGenerateIssueBranchName={() => void handleGenerateBranchName("issue")}
+              onGenerateWorkItemBranchName={() => void handleGenerateBranchName("workItem")}
               onIssueBranchModeChange={setIssueBranchMode}
               onIssueBranchNameChange={setIssueBranchName}
+              onSelectWorkItemBranchName={setSelectedWorkItemBranchName}
+              onWorkItemBranchModeChange={setWorkItemBranchMode}
+              onWorkItemBranchNameChange={setWorkItemBranchName}
             />
           </div>
         </DialogPanel>
@@ -889,14 +1104,26 @@ function WorktreeCreateSummary(props: {
   generationTarget: BranchNameGenerationTarget | null;
   issueBranchMode: IssueBranchMode;
   issueBranchName: string;
+  linkedWorkItemBranches: ReadonlyArray<VcsRef>;
+  linkedWorkItemBranchesError: string | null;
+  linkedWorkItemBranchesLoading: boolean;
+  linkedWorkItemWorktrees: ReadonlyArray<LinkedWorkItemWorktree>;
   newBranchName: string;
   selection: Selection;
   selectedBranchName: string | null;
+  selectedWorkItemBranchName: string | null;
+  workItemBranchChoices: ReadonlyArray<WorkItemBranchChoice>;
+  workItemBranchMode: IssueBranchMode;
+  workItemBranchName: string;
   onBaseBranchChange: (value: string) => void;
   onDefaultBranchDiscovered: (branchName: string) => void;
   onGenerateIssueBranchName: () => void;
+  onGenerateWorkItemBranchName: () => void;
   onIssueBranchModeChange: (value: IssueBranchMode) => void;
   onIssueBranchNameChange: (value: string) => void;
+  onSelectWorkItemBranchName: (value: string | null) => void;
+  onWorkItemBranchModeChange: (value: IssueBranchMode) => void;
+  onWorkItemBranchNameChange: (value: string) => void;
 }) {
   return (
     <aside className="flex min-h-0 flex-col gap-4 border-border/60 border-t bg-muted/20 p-4 md:border-t-0 md:border-l">
@@ -909,7 +1136,9 @@ function WorktreeCreateSummary(props: {
               ? "New branch"
               : props.activeTab === "prs"
                 ? "Pull request"
-                : "Issue"}
+                : props.activeTab === "issues"
+                  ? "Issue"
+                  : "Jira work item"}
         </span>
       </div>
 
@@ -922,7 +1151,7 @@ function WorktreeCreateSummary(props: {
           existingWorktreeId={props.existingWorktreeId}
           selection={props.selection?.kind === "pr" ? props.selection.item : null}
         />
-      ) : (
+      ) : props.activeTab === "issues" ? (
         <IssueSummary
           baseBranch={props.baseBranch}
           branchName={props.issueBranchName}
@@ -939,6 +1168,31 @@ function WorktreeCreateSummary(props: {
           onBranchNameChange={props.onIssueBranchNameChange}
           onDefaultBranchDiscovered={props.onDefaultBranchDiscovered}
           onGenerateBranchName={props.onGenerateIssueBranchName}
+        />
+      ) : (
+        <WorkItemSummaryPanel
+          baseBranch={props.baseBranch}
+          branchName={props.workItemBranchName}
+          branchMode={props.workItemBranchMode}
+          cwd={props.cwd}
+          dialogOpen={props.dialogOpen}
+          environmentId={props.environmentId}
+          existingWorktreeId={props.existingWorktreeId}
+          generationError={props.branchNameGenerationError}
+          isGenerating={props.generationTarget === "workItem"}
+          linkedBranches={props.linkedWorkItemBranches}
+          linkedBranchesError={props.linkedWorkItemBranchesError}
+          linkedBranchesLoading={props.linkedWorkItemBranchesLoading}
+          linkedWorktrees={props.linkedWorkItemWorktrees}
+          selection={props.selection?.kind === "workItem" ? props.selection.item : null}
+          selectedExistingBranchName={props.selectedWorkItemBranchName}
+          workItemBranchChoices={props.workItemBranchChoices}
+          onBaseBranchChange={props.onBaseBranchChange}
+          onBranchModeChange={props.onWorkItemBranchModeChange}
+          onBranchNameChange={props.onWorkItemBranchNameChange}
+          onDefaultBranchDiscovered={props.onDefaultBranchDiscovered}
+          onGenerateBranchName={props.onGenerateWorkItemBranchName}
+          onSelectExistingBranchName={props.onSelectWorkItemBranchName}
         />
       )}
     </aside>
@@ -1118,6 +1372,205 @@ function IssueSummary(props: {
       </div>
     </div>
   );
+}
+
+export function WorkItemSummaryPanel(props: {
+  baseBranch: string;
+  branchMode: IssueBranchMode;
+  branchName: string;
+  cwd: string | null;
+  dialogOpen: boolean;
+  environmentId: EnvironmentId | null;
+  existingWorktreeId: string | null;
+  generationError: string | null;
+  isGenerating: boolean;
+  linkedBranches: ReadonlyArray<VcsRef>;
+  linkedBranchesError: string | null;
+  linkedBranchesLoading: boolean;
+  linkedWorktrees: ReadonlyArray<LinkedWorkItemWorktree>;
+  selection: WorkItemSummary | null;
+  selectedExistingBranchName: string | null;
+  workItemBranchChoices: ReadonlyArray<WorkItemBranchChoice>;
+  onBaseBranchChange: (value: string) => void;
+  onBranchModeChange: (value: IssueBranchMode) => void;
+  onBranchNameChange: (value: string) => void;
+  onDefaultBranchDiscovered: (branchName: string) => void;
+  onGenerateBranchName: () => void;
+  onSelectExistingBranchName: (value: string | null) => void;
+}) {
+  if (!props.selection) {
+    return (
+      <p className="rounded-md border border-dashed border-border/70 p-3 text-muted-foreground text-sm">
+        Select a Jira work item from the list.
+      </p>
+    );
+  }
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 rounded-md border border-border/60 bg-background/70 p-3">
+        <div className="flex items-start gap-2">
+          <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 font-medium text-violet-600 text-xs dark:text-violet-300">
+            <AtlassianJiraIcon className="size-3" />
+            Jira
+          </span>
+          <div className="min-w-0">
+            <div className="text-muted-foreground text-xs">{props.selection.key}</div>
+            <div className="line-clamp-2 font-medium text-sm">{props.selection.title}</div>
+          </div>
+        </div>
+        <SummaryRow label="State" value={jiraStateLabel(props.selection.state)} />
+        {props.selection.issueType ? (
+          <SummaryRow label="Type" value={props.selection.issueType} />
+        ) : null}
+        {props.existingWorktreeId ? (
+          <span className="rounded border border-primary/30 bg-primary/10 px-2 py-1 text-primary text-xs">
+            Existing worktree found
+          </span>
+        ) : null}
+        {props.linkedWorktrees.length > 0 ? (
+          <div className="grid gap-1.5">
+            <span className="text-muted-foreground text-[11px] uppercase">Linked worktrees</span>
+            <div className="flex flex-wrap gap-1">
+              {props.linkedWorktrees.map((worktree) => (
+                <span
+                  key={worktree.id}
+                  className="max-w-full truncate rounded border border-border/70 bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                  title={worktree.worktreePath ?? worktree.branch}
+                >
+                  {worktree.branch}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {props.workItemBranchChoices.length > 0 ? (
+        <div className="grid gap-3 rounded-md border border-primary/25 bg-primary/8 p-3">
+          <div className="grid gap-1">
+            <span className="font-medium text-primary text-xs">
+              Branch already exists for this Jira ticket
+            </span>
+            <span className="text-muted-foreground text-xs">
+              Select which matching branch should get a new worktree.
+            </span>
+          </div>
+          <div className="grid gap-1.5">
+            {props.workItemBranchChoices.map((choice) => {
+              const selected = props.selectedExistingBranchName === choice.branchName;
+              return (
+                <button
+                  key={choice.branchName}
+                  type="button"
+                  className={cn(
+                    "flex min-w-0 items-start gap-2 rounded-md border px-2 py-2 text-left transition-colors",
+                    selected
+                      ? "border-primary/40 bg-background text-foreground"
+                      : "border-border/70 bg-background/60 hover:bg-background",
+                  )}
+                  onClick={() => props.onSelectExistingBranchName(choice.branchName)}
+                >
+                  <GitBranchIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-mono text-xs">{choice.label}</span>
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {choice.description}
+                    </span>
+                  </span>
+                  {choice.hasWorktree ? (
+                    <span className="shrink-0 rounded border border-border/70 px-1 py-0.5 text-[9px] text-muted-foreground uppercase">
+                      worktree
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {props.linkedBranchesLoading ? (
+            <p className="rounded-md border border-border/60 bg-background/60 px-3 py-2 text-muted-foreground text-xs">
+              Checking for existing Jira branches…
+            </p>
+          ) : props.linkedBranchesError ? (
+            <p className="rounded-md border border-border/60 bg-background/60 px-3 py-2 text-muted-foreground text-xs">
+              Could not check existing Jira branches: {props.linkedBranchesError}
+            </p>
+          ) : null}
+          <div className="grid gap-2">
+            <span className="text-xs font-medium text-foreground">From branch</span>
+            <BranchRefPicker
+              cwd={props.cwd}
+              dialogOpen={props.dialogOpen}
+              environmentId={props.environmentId}
+              value={props.baseBranch}
+              onChange={props.onBaseBranchChange}
+              onDefaultBranchDiscovered={props.onDefaultBranchDiscovered}
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-medium text-foreground">Branch name</span>
+              <BranchNameModeControl
+                value={props.branchMode}
+                left={{ value: "ai", label: "AI" }}
+                right={{ value: "custom", label: "Custom" }}
+                onChange={props.onBranchModeChange}
+              />
+            </div>
+            {props.branchMode === "ai" ? (
+              <p className="rounded-md border border-border/60 bg-background/60 px-3 py-2 text-muted-foreground text-xs">
+                The branch name will be generated from the selected Jira item when the worktree is
+                created.
+              </p>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Input
+                  value={props.branchName}
+                  onChange={(event) => props.onBranchNameChange(event.target.value)}
+                  placeholder="KAN-4-short-name"
+                  className="font-mono text-xs"
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  disabled={props.isGenerating}
+                  onClick={props.onGenerateBranchName}
+                  aria-label="Generate Jira branch name"
+                >
+                  <SparklesIcon
+                    className={props.isGenerating ? "size-3.5 animate-pulse" : "size-3.5"}
+                  />
+                </Button>
+              </div>
+            )}
+            {props.generationError ? (
+              <span className="text-destructive text-xs">{props.generationError}</span>
+            ) : null}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function jiraStateLabel(state: WorkItemSummary["state"]): string {
+  switch (state) {
+    case "open":
+      return "Open";
+    case "in_progress":
+      return "In progress";
+    case "done":
+      return "Done";
+    case "closed":
+      return "Closed";
+    case "unknown":
+      return "Unknown";
+  }
 }
 
 function SummaryRow(props: { label: string; value: string; mono?: boolean }) {

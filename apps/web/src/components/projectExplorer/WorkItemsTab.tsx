@@ -3,22 +3,35 @@ import type {
   AtlassianProjectLink,
   EnvironmentId,
   ProjectId,
+  VcsRef,
   WorkItemStateFilter,
   WorkItemSummary,
 } from "@ryco/contracts";
+import { scopeProjectRef } from "@ryco/client-runtime";
 import { DateTime, Option } from "effect";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
-import { RotateCwIcon, SearchIcon, TicketCheckIcon } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
+import { GitBranchIcon, RotateCwIcon, SearchIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type RefObject } from "react";
 import { readEnvironmentConnection } from "~/environments/runtime";
+import { readEnvironmentApi } from "~/environmentApi";
+import {
+  findLinkedWorkItemBranches,
+  findLinkedWorkItemWorktrees,
+  type LinkedWorkItemWorktree,
+} from "~/lib/workItemLocalLinks";
 import {
   workItemListQueryOptions,
   workItemsQueryKeys,
   workItemSearchQueryOptions,
 } from "~/lib/workItemsRpc";
+import { selectSidebarWorktreesForProjectRef, useStore } from "~/store";
 import { cn } from "~/lib/utils";
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
+import type { SidebarWorktreeSummary } from "~/types";
+import { AtlassianJiraIcon } from "../Icons";
+import { JiraProjectPicker } from "../atlassian/JiraProjectPicker";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -42,6 +55,7 @@ const dateFmt = new Intl.DateTimeFormat(undefined, {
 
 interface WorkItemsTabProps {
   environmentId: EnvironmentId | null;
+  cwd?: string | null | undefined;
   projectId: ProjectId | null;
   searchInputRef: RefObject<HTMLInputElement | null>;
   query: string;
@@ -124,8 +138,6 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
   const configured =
     projectLink?.jiraConnectionId !== null &&
     projectLink?.jiraConnectionId !== undefined &&
-    projectLink?.jiraSiteUrl !== null &&
-    projectLink?.jiraSiteUrl !== undefined &&
     projectLink.jiraProjectKeys.length > 0;
 
   const listQuery = useQuery(
@@ -161,9 +173,43 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
     }),
   );
 
-  const items = needsServerSearch ? (searchQuery.data ?? []) : filteredItems;
+  const items = useMemo(
+    () => (needsServerSearch ? (searchQuery.data ?? []) : filteredItems),
+    [filteredItems, needsServerSearch, searchQuery.data],
+  );
   const isLoading = projectLinkQuery.isLoading || listQuery.isLoading || searchQuery.isLoading;
   const error = projectLinkQuery.error ?? listQuery.error ?? searchQuery.error;
+  const projectWorktrees = useStore(
+    useShallow((state) =>
+      props.environmentId && props.projectId
+        ? selectSidebarWorktreesForProjectRef(
+            state,
+            scopeProjectRef(props.environmentId, props.projectId),
+          )
+        : [],
+    ),
+  );
+  const branchRefsQuery = useQuery({
+    queryKey: ["workItems", "localBranches", props.environmentId, props.cwd ?? null] as const,
+    queryFn: async () => {
+      const api = props.environmentId ? readEnvironmentApi(props.environmentId) : null;
+      if (!api || !props.cwd) return [];
+      const result = await api.vcs.listRefs({ cwd: props.cwd, limit: 100 });
+      return result.refs;
+    },
+    enabled:
+      configured && props.environmentId !== null && props.cwd !== null && props.cwd !== undefined,
+    staleTime: 30_000,
+  });
+  const localLinksByWorkItemKey = useMemo(
+    () =>
+      buildLocalLinksByWorkItemKey({
+        items,
+        refs: branchRefsQuery.data ?? [],
+        worktrees: projectWorktrees,
+      }),
+    [branchRefsQuery.data, items, projectWorktrees],
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -212,6 +258,7 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
                     ? "No Jira work items match this search."
                     : "No Jira work items to show."
                 }
+                localLinksByWorkItemKey={localLinksByWorkItemKey}
                 onSelect={props.onSelect}
               />
             )}
@@ -266,6 +313,7 @@ function WorkItemList(props: {
   readonly items: ReadonlyArray<WorkItemSummary>;
   readonly isLoading: boolean;
   readonly emptyText: string;
+  readonly localLinksByWorkItemKey: ReadonlyMap<string, WorkItemLocalLinks>;
   readonly onSelect: (item: WorkItemSummary) => void;
 }) {
   if (props.isLoading && props.items.length === 0) {
@@ -288,7 +336,7 @@ function WorkItemList(props: {
               "hover:bg-accent/40 focus-visible:bg-accent/60 focus-visible:outline-none",
             )}
           >
-            <TicketCheckIcon className="mt-0.5 size-4 shrink-0 text-blue-600 dark:text-blue-300" />
+            <AtlassianJiraIcon className="mt-0.5 size-4 shrink-0" />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
                 <span className="text-muted-foreground text-xs">{item.key}</span>
@@ -306,6 +354,7 @@ function WorkItemList(props: {
                 {item.issueType ? <span>{item.issueType}</span> : null}
                 {item.assignee ? <span>assigned to {item.assignee}</span> : null}
                 {item.priority ? <span>{item.priority}</span> : null}
+                <WorkItemLocalLinkChips links={props.localLinksByWorkItemKey.get(item.key)} />
                 {item.updatedAt && Option.isSome(item.updatedAt) ? (
                   <span className="ml-auto">
                     {dateFmt.format(DateTime.toDate(item.updatedAt.value))}
@@ -317,6 +366,57 @@ function WorkItemList(props: {
         </li>
       ))}
     </ul>
+  );
+}
+
+interface WorkItemLocalLinks {
+  readonly branches: ReadonlyArray<VcsRef>;
+  readonly worktrees: ReadonlyArray<LinkedWorkItemWorktree>;
+}
+
+function buildLocalLinksByWorkItemKey(input: {
+  readonly items: ReadonlyArray<WorkItemSummary>;
+  readonly refs: ReadonlyArray<VcsRef>;
+  readonly worktrees: ReadonlyArray<SidebarWorktreeSummary>;
+}): ReadonlyMap<string, WorkItemLocalLinks> {
+  const links = new Map<string, WorkItemLocalLinks>();
+  for (const item of input.items) {
+    const branches = findLinkedWorkItemBranches({ key: item.key, refs: input.refs });
+    const worktrees = findLinkedWorkItemWorktrees({ key: item.key, worktrees: input.worktrees });
+    if (branches.length > 0 || worktrees.length > 0) {
+      links.set(item.key, { branches, worktrees });
+    }
+  }
+  return links;
+}
+
+function WorkItemLocalLinkChips(props: { readonly links: WorkItemLocalLinks | undefined }) {
+  if (!props.links || (props.links.branches.length === 0 && props.links.worktrees.length === 0)) {
+    return null;
+  }
+  const branchCount = props.links.branches.length;
+  const worktreeCount = props.links.worktrees.length;
+  return (
+    <>
+      {branchCount > 0 ? (
+        <span
+          className="inline-flex items-center gap-1 rounded border border-border/60 px-1.5 py-0.5 text-[10px]"
+          title={props.links.branches.map((branch) => branch.name).join(", ")}
+        >
+          <GitBranchIcon className="size-3" />
+          {branchCount} branch{branchCount === 1 ? "" : "es"}
+        </span>
+      ) : null}
+      {worktreeCount > 0 ? (
+        <span
+          className="inline-flex items-center gap-1 rounded border border-border/60 px-1.5 py-0.5 text-[10px]"
+          title={props.links.worktrees.map((worktree) => worktree.branch).join(", ")}
+        >
+          <AtlassianJiraIcon className="size-3" />
+          {worktreeCount} worktree{worktreeCount === 1 ? "" : "s"}
+        </span>
+      ) : null}
+    </>
   );
 }
 
@@ -334,7 +434,6 @@ function JiraProjectSetup(props: {
   readonly onSaved: () => void;
 }) {
   const [connectionId, setConnectionId] = useState("");
-  const [siteUrl, setSiteUrl] = useState("");
   const [projectKeys, setProjectKeys] = useState("");
   const dirtyRef = useRef(false);
   const initializedProjectRef = useRef<ProjectId | null>(null);
@@ -347,7 +446,6 @@ function JiraProjectSetup(props: {
     if (dirtyRef.current) return;
     const first = props.connections[0];
     setConnectionId(connectionIdValue(props.projectLink?.jiraConnectionId ?? first?.connectionId));
-    setSiteUrl(props.projectLink?.jiraSiteUrl ?? first?.baseUrl ?? "");
     setProjectKeys(props.projectLink?.jiraProjectKeys.join(", ") ?? "");
   }, [props.connections, props.projectId, props.projectLink]);
 
@@ -360,15 +458,15 @@ function JiraProjectSetup(props: {
       if (!props.client || !props.projectId) throw new Error("No project connection is available.");
       const selectedConnectionId = connectionId.trim() as AtlassianConnectionId;
       const keys = splitProjectKeys(projectKeys);
-      if (!selectedConnectionId || siteUrl.trim().length === 0 || keys.length === 0) {
-        throw new Error("Select a Jira connection, site URL, and at least one project key.");
+      if (!selectedConnectionId || keys.length === 0) {
+        throw new Error("Select a Jira connection and at least one project key.");
       }
       return props.client.atlassian.saveProjectLink(
         defaultProjectLink({
           projectId: props.projectId,
           existing: props.projectLink,
           jiraConnectionId: selectedConnectionId,
-          jiraSiteUrl: siteUrl.trim(),
+          jiraSiteUrl: null,
           jiraProjectKeys: keys,
         }),
       );
@@ -399,22 +497,28 @@ function JiraProjectSetup(props: {
     props.client !== null &&
     props.projectId !== null &&
     connectionId.trim().length > 0 &&
-    siteUrl.trim().length > 0 &&
     splitProjectKeys(projectKeys).length > 0 &&
     !saveMutation.isPending;
+  const selectedJiraConnectionId =
+    connectionId.trim().length > 0 ? (connectionId.trim() as AtlassianConnectionId) : null;
+  const selectedJiraConnection = props.connections.find(
+    (connection) => connection.connectionId === selectedJiraConnectionId,
+  );
+  const selectedJiraSiteUrl =
+    selectedJiraConnection?.baseUrl ?? props.projectLink?.jiraSiteUrl ?? "";
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
       <div className="mx-auto max-w-xl space-y-4">
         <div className="flex items-start gap-3">
           <div className="flex size-9 items-center justify-center rounded-md border border-border/70 bg-muted/50">
-            <TicketCheckIcon className="size-4 text-blue-600 dark:text-blue-300" />
+            <AtlassianJiraIcon className="size-4" />
           </div>
           <div className="min-w-0">
             <h3 className="font-semibold text-sm">Link this project to Jira</h3>
             <p className="mt-1 text-muted-foreground text-xs leading-relaxed">
-              Save a Jira token in Source Control settings, then choose the Jira site and project
-              keys that belong to this repository.
+              Save a Jira token in Source Control settings, then choose the project keys that belong
+              to this repository.
             </p>
           </div>
         </div>
@@ -460,25 +564,20 @@ function JiraProjectSetup(props: {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="work-item-jira-site" className="text-xs">
-                Jira site URL
-              </Label>
-              <Input
-                id="work-item-jira-site"
-                size="sm"
-                value={siteUrl}
-                inputMode="url"
-                onChange={(event) => {
-                  markDirty();
-                  setSiteUrl(event.currentTarget.value);
-                }}
-                placeholder="https://your-team.atlassian.net"
-              />
-            </div>
-            <div className="space-y-1.5">
               <Label htmlFor="work-item-jira-project-keys" className="text-xs">
                 Project keys
               </Label>
+              <JiraProjectPicker
+                environmentId={props.environmentId}
+                connectionId={selectedJiraConnectionId}
+                siteUrl={selectedJiraSiteUrl}
+                projectKeys={projectKeys}
+                disabled={saveMutation.isPending}
+                onProjectKeysChange={(value) => {
+                  markDirty();
+                  setProjectKeys(value);
+                }}
+              />
               <Input
                 id="work-item-jira-project-keys"
                 size="sm"

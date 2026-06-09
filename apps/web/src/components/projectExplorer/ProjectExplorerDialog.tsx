@@ -18,13 +18,14 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { ActionsTab } from "./ActionsTab";
 import { IssueDetail } from "./IssueDetail";
 import { IssuesTab } from "./IssuesTab";
+import { ProjectOverviewTab } from "./ProjectOverviewTab";
 import { PullRequestDetail } from "./PullRequestDetail";
 import { PullRequestsTab } from "./PullRequestsTab";
 import { WorkItemDetail } from "./WorkItemDetail";
 import { WorkItemsTab } from "./WorkItemsTab";
 import type { ChangeRequestStateFilter, IssueStateFilter } from "./StateFilterButtons";
 
-type TabId = "issues" | "prs" | "actions" | "workItems";
+export type ProjectExplorerTabId = "overview" | "issues" | "prs" | "actions" | "workItems";
 
 type Selection =
   | { kind: "issue"; number: number }
@@ -36,12 +37,12 @@ interface ProjectExplorerDialogProps {
   open: boolean;
   projectName: string;
   memberProjects: ReadonlyArray<SidebarProjectGroupMember>;
-  initialTab: TabId;
+  initialTab: ProjectExplorerTabId;
   onOpenChange: (open: boolean) => void;
 }
 
 export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
-  const [activeTab, setActiveTab] = useState<TabId>(props.initialTab);
+  const [activeTab, setActiveTab] = useState<ProjectExplorerTabId>(props.initialTab);
   const [issueQuery, setIssueQuery] = useState("");
   const [prQuery, setPrQuery] = useState("");
   const [workItemQuery, setWorkItemQuery] = useState("");
@@ -202,6 +203,7 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
 
   const tabs = useMemo(
     () => [
+      { id: "overview" as const, label: "Overview" },
       { id: "issues" as const, label: "Issues" },
       { id: "prs" as const, label: "Pull requests" },
       { id: "actions" as const, label: "Actions" },
@@ -211,13 +213,15 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
   );
 
   const tabLabel =
-    activeTab === "issues"
-      ? "Issues"
-      : activeTab === "prs"
-        ? "Pull requests"
-        : activeTab === "actions"
-          ? "Actions"
-          : "Jira";
+    activeTab === "overview"
+      ? "Overview"
+      : activeTab === "issues"
+        ? "Issues"
+        : activeTab === "prs"
+          ? "Pull requests"
+          : activeTab === "actions"
+            ? "Actions"
+            : "Jira";
   const dialogTitle = `${props.projectName} · ${tabLabel}`;
   const showRepoPicker = props.memberProjects.length > 1 && selectedMember !== null;
   const environmentId = selectedMember?.environmentId ?? null;
@@ -272,10 +276,20 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
             <ContextPickerTabs
               tabs={tabs}
               activeId={activeTab}
-              onSelect={(id) => setActiveTab(id as TabId)}
+              onSelect={(id) => setActiveTab(id as ProjectExplorerTabId)}
             />
             <div className="min-h-0 flex-1">
-              {activeTab === "issues" ? (
+              {activeTab === "overview" ? (
+                <ProjectOverviewTab
+                  environmentId={environmentId}
+                  cwd={cwd}
+                  projectId={selectedMember?.id ?? null}
+                  onOpenTab={setActiveTab}
+                  onSelectIssue={handleSelectIssue}
+                  onSelectChangeRequest={handleSelectChangeRequest}
+                  onSelectWorkItem={handleSelectWorkItem}
+                />
+              ) : activeTab === "issues" ? (
                 <IssuesTab
                   environmentId={environmentId}
                   cwd={cwd}
@@ -302,6 +316,7 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
               ) : (
                 <WorkItemsTab
                   environmentId={environmentId}
+                  cwd={cwd}
                   projectId={selectedMember?.id ?? null}
                   searchInputRef={workItemInputRef}
                   query={workItemQuery}

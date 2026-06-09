@@ -28,6 +28,13 @@ export const makeServerSecretStore = Effect.gen(function* () {
 
   const resolveSecretPath = (name: string) => path.join(serverConfig.secretsDir, `${name}.bin`);
 
+  const ensureSecretDirectory = (secretPath: string) => {
+    const directory = path.dirname(secretPath);
+    return fileSystem
+      .makeDirectory(directory, { recursive: true })
+      .pipe(Effect.flatMap(() => fileSystem.chmod(directory, 0o700)));
+  };
+
   const isPlatformError = (u: unknown): u is PlatformError.PlatformError =>
     Predicate.isTagged(u, "PlatformError");
 
@@ -50,6 +57,7 @@ export const makeServerSecretStore = Effect.gen(function* () {
     const secretPath = resolveSecretPath(name);
     const tempPath = `${secretPath}.${Crypto.randomUUID()}.tmp`;
     return Effect.gen(function* () {
+      yield* ensureSecretDirectory(secretPath);
       yield* fileSystem.writeFile(tempPath, value);
       yield* fileSystem.chmod(tempPath, 0o600);
       yield* fileSystem.rename(tempPath, secretPath);
@@ -75,6 +83,7 @@ export const makeServerSecretStore = Effect.gen(function* () {
     const secretPath = resolveSecretPath(name);
     return Effect.scoped(
       Effect.gen(function* () {
+        yield* ensureSecretDirectory(secretPath);
         const file = yield* fileSystem.open(secretPath, {
           flag: "wx",
           mode: 0o600,

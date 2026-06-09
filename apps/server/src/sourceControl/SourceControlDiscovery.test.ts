@@ -298,6 +298,47 @@ it.effect("refreshes discovery after the short discovery TTL expires", () =>
   }),
 );
 
+it.effect("refresh bypasses the short discovery cache", () =>
+  Effect.gen(function* () {
+    const bitbucketProbes = yield* Ref.make(0);
+    const processMock = {
+      run: (input: VcsProcess.VcsProcessInput) =>
+        Effect.succeed(processOutput(`${input.command} version test\n`)),
+    } satisfies Partial<VcsProcess.VcsProcessShape>;
+    const testLayer = sourceControlDiscoveryTestLayer({
+      process: processMock,
+      bitbucket: {
+        probeAuth: Ref.updateAndGet(bitbucketProbes, (count) => count + 1).pipe(
+          Effect.map((count) => ({
+            status: count === 1 ? ("unauthenticated" as const) : ("authenticated" as const),
+            account: count === 1 ? Option.none<string>() : Option.some("bitbucket-user"),
+            host: Option.some("bitbucket.org"),
+            detail: Option.none<string>(),
+          })),
+        ),
+      },
+      prefix: "ryco-source-control-discovery-refresh-test-",
+    });
+
+    const result = yield* Effect.gen(function* () {
+      const discovery = yield* SourceControlDiscovery.SourceControlDiscovery;
+      const first = yield* discovery.discover;
+      const refreshed = yield* discovery.refresh;
+
+      return {
+        first: first.sourceControlProviders.find((item) => item.kind === "bitbucket")?.auth.status,
+        refreshed: refreshed.sourceControlProviders.find((item) => item.kind === "bitbucket")?.auth
+          .status,
+        probes: yield* Ref.get(bitbucketProbes),
+      };
+    }).pipe(Effect.provide(testLayer));
+
+    assert.strictEqual(result.first, "unauthenticated");
+    assert.strictEqual(result.refreshed, "authenticated");
+    assert.strictEqual(result.probes, 2);
+  }),
+);
+
 it.effect("probes provider authentication without exposing token details", () => {
   const processMock = {
     run: (input: VcsProcess.VcsProcessInput) => {

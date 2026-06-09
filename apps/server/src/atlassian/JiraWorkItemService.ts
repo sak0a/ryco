@@ -4,7 +4,9 @@ import {
   type WorkItemDetail,
   type WorkItemGetInput,
   type WorkItemListInput,
+  type WorkItemListProjectsInput,
   type WorkItemSearchInput,
+  type WorkItemProject,
   type WorkItemSummary,
   type WorkItemTransition,
   type WorkItemTransitionInput,
@@ -25,6 +27,9 @@ export interface JiraWorkItemServiceShape {
   readonly list: (
     input: WorkItemListInput,
   ) => Effect.Effect<ReadonlyArray<WorkItemSummary>, WorkItemProviderError>;
+  readonly listProjects: (
+    input: WorkItemListProjectsInput,
+  ) => Effect.Effect<ReadonlyArray<WorkItemProject>, WorkItemProviderError>;
   readonly search: (
     input: WorkItemSearchInput,
   ) => Effect.Effect<ReadonlyArray<WorkItemSummary>, WorkItemProviderError>;
@@ -76,6 +81,7 @@ const JiraIssueSchema = Schema.Struct({
     assignee: Schema.optional(Schema.NullOr(JiraUserSchema)),
     reporter: Schema.optional(Schema.NullOr(JiraUserSchema)),
     labels: Schema.optional(Schema.Array(Schema.String)),
+    created: Schema.optional(Schema.NullOr(Schema.String)),
     updated: Schema.optional(Schema.NullOr(Schema.String)),
     description: Schema.optional(Schema.NullOr(Schema.Unknown)),
     parent: Schema.optional(Schema.NullOr(Schema.Struct({ key: Schema.String }))),
@@ -85,6 +91,18 @@ const JiraIssueSchema = Schema.Struct({
 
 const JiraSearchSchema = Schema.Struct({
   issues: Schema.Array(JiraIssueSchema),
+});
+
+const JiraProjectSchema = Schema.Struct({
+  key: Schema.String,
+  name: Schema.String,
+  projectTypeKey: Schema.optional(Schema.String),
+  simplified: Schema.optional(Schema.Boolean),
+  avatarUrls: Schema.optional(Schema.Unknown),
+});
+
+const JiraProjectSearchSchema = Schema.Struct({
+  values: Schema.Array(JiraProjectSchema),
 });
 
 const JiraCommentSchema = Schema.Struct({
@@ -122,6 +140,7 @@ const ISSUE_FIELDS = [
   "assignee",
   "reporter",
   "labels",
+  "created",
   "updated",
   "description",
   "parent",
@@ -133,6 +152,12 @@ interface JiraProjectContext {
   readonly email: string;
   readonly token: string;
   readonly projectKeys: ReadonlyArray<string>;
+}
+
+interface JiraConnectionContext {
+  readonly siteUrl: string;
+  readonly email: string;
+  readonly token: string;
 }
 
 function responseError(
@@ -202,6 +227,14 @@ function requireAllowedIssueKey(
 
 function trimSlash(value: string): string {
   return value.trim().replace(/\/+$/u, "");
+}
+
+function originOf(value: string): string | null {
+  try {
+    return new URL(trimSlash(value)).origin;
+  } catch {
+    return null;
+  }
 }
 
 function displayName(
@@ -353,7 +386,36 @@ function mapIssueSummary(
     ...(issue.fields.labels && issue.fields.labels.length > 0
       ? { labels: issue.fields.labels }
       : {}),
+    createdAt: optionDate(issue.fields.created),
     updatedAt: optionDate(issue.fields.updated),
+  };
+}
+
+function avatarUrlFromProject(
+  avatarUrls: Schema.Schema.Type<typeof JiraProjectSchema>["avatarUrls"],
+): string | undefined {
+  if (!avatarUrls || typeof avatarUrls !== "object") return undefined;
+  const values = avatarUrls as Record<string, unknown>;
+  for (const key of ["48x48", "32x32", "24x24", "16x16"]) {
+    const value = values[key];
+    if (typeof value === "string" && value.trim().length > 0) return value;
+  }
+  return undefined;
+}
+
+function mapProject(
+  siteUrl: string,
+  project: Schema.Schema.Type<typeof JiraProjectSchema>,
+): WorkItemProject {
+  const avatarUrl = avatarUrlFromProject(project.avatarUrls);
+  return {
+    provider: "jira",
+    key: project.key,
+    name: project.name,
+    url: `${siteUrl}/jira/software/projects/${encodeURIComponent(project.key)}`,
+    ...(project.projectTypeKey ? { projectTypeKey: project.projectTypeKey } : {}),
+    ...(project.simplified !== undefined ? { simplified: project.simplified } : {}),
+    ...(avatarUrl ? { avatarUrl } : {}),
   };
 }
 
@@ -372,6 +434,85 @@ export const make = Effect.fn("makeJiraWorkItemService")(function* () {
   const projectLinks = yield* ProjectAtlassianLinkRepository;
   const secretStore = yield* ServerSecretStore;
   const httpClient = yield* HttpClient.HttpClient;
+
+  const resolveConnection = Effect.fn("JiraWorkItemService.resolveConnection")(function* (
+    input: WorkItemListProjectsInput,
+  ) {
+    const connection = yield* connections.getById({ connectionId: input.connectionId }).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            Effect.fail(
+              workItemError(
+                "workItems.resolveConnection",
+                "The selected Jira connection was not found.",
+              ),
+            ),
+          onSome: Effect.succeed,
+        }),
+      ),
+      Effect.mapError(
+        mapError("workItems.resolveConnection", "Failed to load the Jira connection."),
+      ),
+    );
+    if (connection.status !== "connected") {
+      return yield* workItemError(
+        "workItems.resolveConnection",
+        `The Jira connection is ${connection.status.replace("_", " ")}.`,
+      );
+    }
+    if (!connection.products.includes("jira")) {
+      return yield* workItemError(
+        "workItems.resolveConnection",
+        "The selected connection is not a Jira connection.",
+      );
+    }
+    if (!connection.accountEmail) {
+      return yield* workItemError(
+        "workItems.resolveConnection",
+        "The Jira connection is missing its account email.",
+      );
+    }
+
+    const connectionSiteUrl = trimSlash(connection.baseUrl ?? "");
+    const requestedSiteUrl = trimSlash(input.siteUrl ?? connectionSiteUrl);
+    if (!requestedSiteUrl) {
+      return yield* workItemError(
+        "workItems.resolveConnection",
+        "The Jira connection is missing its site URL.",
+      );
+    }
+    if (
+      input.siteUrl !== undefined &&
+      connectionSiteUrl &&
+      originOf(input.siteUrl) !== originOf(connectionSiteUrl)
+    ) {
+      return yield* workItemError(
+        "workItems.resolveConnection",
+        "The Jira site URL must match the selected Jira connection.",
+      );
+    }
+
+    const tokenBytes = yield* secretStore
+      .get(manualJiraTokenSecretName(input.connectionId))
+      .pipe(
+        Effect.mapError(
+          mapError("workItems.resolveConnection", "Failed to read the saved Jira API token."),
+        ),
+      );
+    if (!tokenBytes) {
+      return yield* workItemError(
+        "workItems.resolveConnection",
+        "The saved Jira API token is missing.",
+      );
+    }
+
+    return {
+      siteUrl: requestedSiteUrl,
+      email: connection.accountEmail,
+      token: textDecoder.decode(tokenBytes).trim(),
+    } satisfies JiraConnectionContext;
+  });
 
   const resolveProject = Effect.fn("JiraWorkItemService.resolveProject")(function* (input: {
     readonly projectId?: WorkItemListInput["projectId"];
@@ -527,6 +668,20 @@ export const make = Effect.fn("makeJiraWorkItemService")(function* () {
     return result.issues.map((issue) => mapIssueSummary(context.siteUrl, issue));
   });
 
+  const listProjects = Effect.fn("JiraWorkItemService.listProjects")(function* (
+    input: WorkItemListProjectsInput,
+  ) {
+    const context = yield* resolveConnection(input);
+    const result = yield* request("workItems.listProjects", JiraProjectSearchSchema, {
+      ...context,
+      path: "/rest/api/3/project/search",
+      urlParams: {
+        maxResults: "100",
+      },
+    });
+    return result.values.map((project) => mapProject(context.siteUrl, project));
+  });
+
   const getTransitions = Effect.fn("JiraWorkItemService.getTransitions")(function* (
     context: JiraProjectContext,
     key: string,
@@ -619,6 +774,7 @@ export const make = Effect.fn("makeJiraWorkItemService")(function* () {
   };
 
   return JiraWorkItemService.of({
+    listProjects,
     list: (input) => searchIssues(input),
     search: (input) => searchIssues(input),
     get: (input) => getDetail(input),

@@ -130,4 +130,37 @@ layer("AtlassianConnectionService", (it) => {
       assert.equal(loaded?.bitbucketRepoSlug, "ryco");
     }),
   );
+
+  it.effect("derives a project Jira site URL from the selected Jira connection", () =>
+    Effect.gen(function* () {
+      secrets.clear();
+      const service = yield* AtlassianConnectionService;
+      const connection = yield* service.saveManualJiraToken({
+        label: "Derived Jira",
+        email: "jira@example.com",
+        siteUrl: "https://derived.atlassian.net/",
+        token: "jira-secret",
+      });
+
+      const saved = yield* service.saveProjectLink({
+        projectId: ProjectId.make("project-derived-jira"),
+        jiraConnectionId: connection.connectionId,
+        bitbucketConnectionId: null,
+        jiraCloudId: null,
+        jiraSiteUrl: null,
+        jiraProjectKeys: ["KAN"],
+        bitbucketWorkspace: null,
+        bitbucketRepoSlug: null,
+        defaultIssueTypeName: null,
+        branchNameTemplate: "{issueKey}-{titleSlug}",
+        commitMessageTemplate: "{issueKey}: {summary}",
+        pullRequestTitleTemplate: "{issueKey}: {summary}",
+        smartLinkingEnabled: true,
+        autoAttachWorkItems: true,
+      });
+
+      assert.equal(saved.jiraSiteUrl, "https://derived.atlassian.net");
+      assert.deepStrictEqual(saved.jiraProjectKeys, ["KAN"]);
+    }),
+  );
 });
