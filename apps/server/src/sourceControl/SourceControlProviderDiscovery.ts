@@ -1,16 +1,24 @@
 import type {
   SourceControlProviderAuth,
   SourceControlProviderDiscoveryItem,
+  SourceControlProviderInfo,
   SourceControlProviderKind,
 } from "@ryco/contracts";
 import { Effect, Option } from "effect";
 
+import type * as SourceControlProvider from "./SourceControlProvider.ts";
 import type * as VcsProcess from "../vcs/VcsProcess.ts";
 
 export interface SourceControlAuthProbeInput {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: VcsProcess.VcsProcessOutput["exitCode"];
+}
+
+export interface SourceControlUnknownRemoteRefinementInput {
+  readonly cwd: string;
+  readonly context: SourceControlProvider.SourceControlProviderContext;
+  readonly auth: SourceControlAuthProbeInput;
 }
 
 interface SourceControlDiscoverySpecBase {
@@ -25,6 +33,9 @@ export type SourceControlCliDiscoverySpec = SourceControlDiscoverySpecBase & {
   readonly versionArgs: ReadonlyArray<string>;
   readonly authArgs: ReadonlyArray<string>;
   readonly parseAuth: (input: SourceControlAuthProbeInput) => SourceControlProviderAuth;
+  readonly refineUnknownRemote?: (
+    input: SourceControlUnknownRemoteRefinementInput,
+  ) => SourceControlProviderInfo | null;
 };
 
 export type SourceControlApiDiscoverySpec = SourceControlDiscoverySpecBase & {
@@ -35,6 +46,10 @@ export type SourceControlApiDiscoverySpec = SourceControlDiscoverySpecBase & {
 export type SourceControlProviderDiscoverySpec =
   | SourceControlCliDiscoverySpec
   | SourceControlApiDiscoverySpec;
+
+type SourceControlCliRemoteRefinementSpec = SourceControlCliDiscoverySpec & {
+  readonly refineUnknownRemote: NonNullable<SourceControlCliDiscoverySpec["refineUnknownRemote"]>;
+};
 
 interface DiscoveryProbeResult {
   readonly kind: SourceControlProviderKind;
@@ -123,6 +138,12 @@ export function matchFirst(text: string, patterns: ReadonlyArray<RegExp>): strin
     if (value && value.length > 0) return value;
   }
   return undefined;
+}
+
+function isCliRemoteRefinementSpec(
+  spec: SourceControlProviderDiscoverySpec,
+): spec is SourceControlCliRemoteRefinementSpec {
+  return spec.type === "cli" && spec.refineUnknownRemote !== undefined;
 }
 
 function probeCli(input: {
@@ -235,3 +256,44 @@ export function probeSourceControlProvider(input: {
     }),
   );
 }
+
+export const refineUnknownRemoteProvider = Effect.fn("refineUnknownRemoteProvider")(
+  function* (input: {
+    readonly specs: ReadonlyArray<SourceControlProviderDiscoverySpec>;
+    readonly process: VcsProcess.VcsProcessShape;
+    readonly cwd: string;
+    readonly context: SourceControlProvider.SourceControlProviderContext | null;
+  }) {
+    if (input.context === null || input.context.provider.kind !== "unknown") {
+      return input.context;
+    }
+    const context = input.context;
+
+    const providers = yield* Effect.forEach(input.specs.filter(isCliRemoteRefinementSpec), (spec) =>
+      input.process
+        .run({
+          operation: "source-control.discovery.refine-unknown-remote",
+          command: spec.executable,
+          args: spec.authArgs,
+          cwd: input.cwd,
+          allowNonZeroExit: true,
+          timeoutMs: 5_000,
+          maxOutputBytes: 8_000,
+          truncateOutputAtMaxBytes: true,
+        })
+        .pipe(
+          Effect.map((auth) =>
+            spec.refineUnknownRemote({
+              cwd: input.cwd,
+              context,
+              auth,
+            }),
+          ),
+          Effect.catch(() => Effect.succeed(null)),
+        ),
+    );
+    const provider = providers.find((candidate) => candidate !== null);
+
+    return provider ? { ...context, provider } : context;
+  },
+);

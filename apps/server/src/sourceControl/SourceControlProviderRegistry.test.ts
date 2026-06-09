@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { DateTime, Effect, Layer, Option, Ref } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerConfig } from "../config.ts";
 import type * as VcsDriver from "../vcs/VcsDriver.ts";
@@ -15,12 +16,27 @@ import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
+const processOutput = (
+  stdout: string,
+  options?: {
+    readonly stderr?: string;
+    readonly exitCode?: ChildProcessSpawner.ExitCode;
+  },
+): VcsProcess.VcsProcessOutput => ({
+  exitCode: options?.exitCode ?? ChildProcessSpawner.ExitCode(0),
+  stdout,
+  stderr: options?.stderr ?? "",
+  stdoutTruncated: false,
+  stderrTruncated: false,
+});
+
 function makeRegistry(input: {
   readonly remotes: ReadonlyArray<{
     readonly name: string;
     readonly url: string;
   }>;
   readonly githubCli?: Partial<GitHubCli.GitHubCliShape>;
+  readonly process?: Partial<VcsProcess.VcsProcessShape>;
 }) {
   const driver = {
     listRemotes: () =>
@@ -74,7 +90,9 @@ function makeRegistry(input: {
         }),
         Layer.mock(GitHubCli.GitHubCli)(input.githubCli ?? {}),
         Layer.mock(GitLabCli.GitLabCli)({}),
-        Layer.mock(VcsProcess.VcsProcess)({}),
+        Layer.mock(VcsProcess.VcsProcess)(
+          input.process ?? { run: () => Effect.succeed(processOutput("")) },
+        ),
         NodeServices.layer,
         ServerConfig.layerTest(process.cwd(), {
           prefix: "ryco-source-control-registry-test-",
@@ -117,6 +135,54 @@ it.effect("routes GitLab remotes to the GitLab provider", () =>
     const provider = yield* registry.resolve({ cwd: "/repo" });
 
     assert.strictEqual(provider.kind, "gitlab");
+  }),
+);
+
+it.effect("refines unknown remotes to GitLab when glab is authenticated for that host", () =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry({
+      remotes: [{ name: "origin", url: "git@code.example.test:group/project.git" }],
+      process: {
+        run: (input) => {
+          if (input.command === "glab" && input.args.join(" ") === "auth status") {
+            return Effect.succeed(
+              processOutput(`code.example.test
+  ✓ Logged in to code.example.test as self-hosted-user
+`),
+            );
+          }
+          return Effect.succeed(processOutput(`${input.command} version test\n`));
+        },
+      },
+    });
+
+    const provider = yield* registry.resolve({ cwd: "/repo" });
+
+    assert.strictEqual(provider.kind, "gitlab");
+  }),
+);
+
+it.effect("leaves unknown remotes unchanged when glab is authenticated for another host", () =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry({
+      remotes: [{ name: "origin", url: "git@code.example.test:group/project.git" }],
+      process: {
+        run: (input) => {
+          if (input.command === "glab" && input.args.join(" ") === "auth status") {
+            return Effect.succeed(
+              processOutput(`gitlab.example.test
+  ✓ Logged in to gitlab.example.test as gitlab-user
+`),
+            );
+          }
+          return Effect.succeed(processOutput(`${input.command} version test\n`));
+        },
+      },
+    });
+
+    const provider = yield* registry.resolve({ cwd: "/repo" });
+
+    assert.strictEqual(provider.kind, "unknown");
   }),
 );
 

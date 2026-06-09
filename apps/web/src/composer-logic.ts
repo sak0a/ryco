@@ -1,4 +1,5 @@
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
+import { serializeComposerMentionPath } from "./composerMentionSyntax";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "skill" | "source-control";
@@ -115,7 +116,7 @@ export function expandCollapsedComposerCursor(text: string, cursorInput: number)
 
   for (const segment of segments) {
     if (segment.type === "mention") {
-      const expandedLength = segment.path.length + 1;
+      const expandedLength = serializeComposerMentionPath(segment.path).length + 1;
       if (remaining <= 1) {
         return expandedCursor + (remaining === 0 ? 0 : expandedLength);
       }
@@ -203,7 +204,7 @@ export function collapseExpandedComposerCursor(text: string, cursorInput: number
 
   for (const segment of segments) {
     if (segment.type === "mention") {
-      const expandedLength = segment.path.length + 1;
+      const expandedLength = serializeComposerMentionPath(segment.path).length + 1;
       if (remaining === 0) {
         return collapsedCursor;
       }

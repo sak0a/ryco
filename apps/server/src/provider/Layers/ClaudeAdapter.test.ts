@@ -1628,6 +1628,138 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("ignores Claude thinking token system messages", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+
+      const deniedEventFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "tool.denied",
+      ).pipe(Stream.runHead, Effect.forkChild);
+
+      harness.query.emit({
+        type: "system",
+        subtype: "thinking_tokens",
+        session_id: "sdk-session-thinking",
+        uuid: "thinking-tokens-1",
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "system",
+        subtype: "permission_denied",
+        tool_name: "Bash",
+        tool_use_id: "tool-denied-1",
+        decision_reason: "User denied command execution.",
+        agent_id: "agent-1",
+        session_id: "sdk-session-thinking",
+        uuid: "permission-denied-1",
+      } as unknown as SDKMessage);
+
+      const nextEvent = yield* Fiber.join(deniedEventFiber);
+      assert.equal(nextEvent._tag, "Some");
+      assert.equal(nextEvent._tag === "Some" ? nextEvent.value.type : undefined, "tool.denied");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("maps Claude permission_denied system messages to tool.denied", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+
+      const deniedEventFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "tool.denied",
+      ).pipe(Stream.runHead, Effect.forkChild);
+
+      harness.query.emit({
+        type: "system",
+        subtype: "permission_denied",
+        tool_name: "Edit",
+        tool_use_id: "tool-denied-2",
+        decision_reason: "File write was denied.",
+        agent_id: "agent-2",
+        session_id: "sdk-session-denied",
+        uuid: "permission-denied-2",
+      } as unknown as SDKMessage);
+
+      const event = yield* Fiber.join(deniedEventFiber);
+      assert.equal(event._tag, "Some");
+      if (event._tag === "Some") {
+        assert.equal(event.value.type, "tool.denied");
+        if (event.value.type === "tool.denied") {
+          assert.deepEqual(event.value.payload, {
+            toolName: "Edit",
+            toolUseId: "tool-denied-2",
+            reason: "File write was denied.",
+            agentId: "agent-2",
+          });
+        }
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("maps Claude mirror_error system messages to runtime.error", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+
+      const runtimeErrorFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "runtime.error",
+      ).pipe(Stream.runHead, Effect.forkChild);
+
+      harness.query.emit({
+        type: "system",
+        subtype: "mirror_error",
+        error: "workspace mirror failed",
+        session_id: "sdk-session-mirror",
+        uuid: "mirror-error-1",
+      } as unknown as SDKMessage);
+
+      const event = yield* Fiber.join(runtimeErrorFiber);
+      assert.equal(event._tag, "Some");
+      if (event._tag === "Some") {
+        assert.equal(event.value.type, "runtime.error");
+        if (event.value.type === "runtime.error") {
+          assert.equal(
+            event.value.payload.message,
+            "Claude workspace mirror error: workspace mirror failed",
+          );
+        }
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("emits Claude context window on result completion usage snapshots", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

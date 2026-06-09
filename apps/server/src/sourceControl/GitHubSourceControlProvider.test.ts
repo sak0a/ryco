@@ -8,12 +8,19 @@ import { SOURCE_CONTROL_DETAIL_BODY_MAX_BYTES } from "@ryco/contracts";
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubCli from "./GitHubCli.ts";
+import { parseGitHubAuthStatus } from "./gitHubAuthStatus.ts";
 import * as GitHubSourceControlProvider from "./GitHubSourceControlProvider.ts";
 
-const processResult = (stdout: string): VcsProcess.VcsProcessOutput => ({
-  exitCode: ChildProcessSpawner.ExitCode(0),
+const processResult = (
+  stdout: string,
+  options?: {
+    readonly stderr?: string;
+    readonly exitCode?: ChildProcessSpawner.ExitCode;
+  },
+): VcsProcess.VcsProcessOutput => ({
+  exitCode: options?.exitCode ?? ChildProcessSpawner.ExitCode(0),
   stdout,
-  stderr: "",
+  stderr: options?.stderr ?? "",
   stdoutTruncated: false,
   stderrTruncated: false,
 });
@@ -34,6 +41,132 @@ function makeProvider(github: Partial<GitHubCli.GitHubCliShape>) {
     Effect.provide(Layer.mergeAll(Layer.mock(GitHubCli.GitHubCli)(github), NodeServices.layer)),
   );
 }
+
+it("parses structured gh auth status hosts output", () => {
+  const status = parseGitHubAuthStatus(
+    JSON.stringify({
+      hosts: {
+        "github.com": [
+          {
+            state: "success",
+            active: false,
+            host: "github.com",
+            login: "octocat",
+          },
+          {
+            state: "success",
+            active: true,
+            host: "github.com",
+            login: "hubot",
+          },
+        ],
+      },
+    }),
+  );
+
+  assert.strictEqual(status.parsed, true);
+  assert.deepStrictEqual(
+    status.accounts.map((account) => ({
+      host: account.host,
+      account: account.account,
+      authenticated: account.authenticated,
+      active: account.active,
+    })),
+    [
+      {
+        host: "github.com",
+        account: "octocat",
+        authenticated: true,
+        active: false,
+      },
+      {
+        host: "github.com",
+        account: "hubot",
+        authenticated: true,
+        active: true,
+      },
+    ],
+  );
+});
+
+it("prefers the active authenticated GitHub account", () => {
+  const auth = GitHubSourceControlProvider.discovery.parseAuth(
+    processResult(
+      JSON.stringify({
+        hosts: {
+          "github.com": [
+            {
+              state: "success",
+              active: false,
+              host: "github.com",
+              login: "octocat",
+            },
+            {
+              state: "success",
+              active: true,
+              host: "github.com",
+              login: "hubot",
+            },
+          ],
+        },
+      }),
+    ),
+  );
+
+  assert.strictEqual(auth.status, "authenticated");
+  assert.deepStrictEqual(auth.account, Option.some("hubot"));
+  assert.deepStrictEqual(auth.host, Option.some("github.com"));
+});
+
+it("falls back to any successful GitHub account when none is active", () => {
+  const auth = GitHubSourceControlProvider.discovery.parseAuth(
+    processResult(
+      JSON.stringify({
+        hosts: {
+          "github.example.test": [
+            {
+              state: "success",
+              active: false,
+              host: "github.example.test",
+              login: "octocat",
+            },
+          ],
+        },
+      }),
+    ),
+  );
+
+  assert.strictEqual(auth.status, "authenticated");
+  assert.deepStrictEqual(auth.account, Option.some("octocat"));
+  assert.deepStrictEqual(auth.host, Option.some("github.example.test"));
+});
+
+it("returns unauthenticated when structured GitHub auth has no successful account", () => {
+  const auth = GitHubSourceControlProvider.discovery.parseAuth(
+    processResult(
+      JSON.stringify({
+        hosts: {
+          "github.com": [
+            {
+              state: "failed",
+              error: "token expired",
+              active: true,
+              host: "github.com",
+              login: "octocat",
+            },
+          ],
+        },
+      }),
+      {
+        exitCode: ChildProcessSpawner.ExitCode(1),
+      },
+    ),
+  );
+
+  assert.strictEqual(auth.status, "unauthenticated");
+  assert.deepStrictEqual(auth.host, Option.some("github.com"));
+  assert.deepStrictEqual(auth.detail, Option.some("token expired"));
+});
 
 it.effect("maps GitHub PR summaries into provider-neutral change requests", () =>
   Effect.gen(function* () {

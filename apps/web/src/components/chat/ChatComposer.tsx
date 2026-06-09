@@ -48,6 +48,7 @@ import {
   replaceTextRange,
   shouldUseNativeComposerFileReference,
 } from "../../composer-logic";
+import { serializeComposerMentionPath } from "../../composerMentionSyntax";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
   type ComposerImageAttachment,
@@ -1770,7 +1771,7 @@ export const ChatComposer = memo(
         const { snapshot, trigger } = resolveActiveComposerTrigger();
         if (!trigger) return;
         if (item.type === "path") {
-          const replacement = `@${item.path} `;
+          const replacement = `@${serializeComposerMentionPath(item.path)} `;
           const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
             snapshot.value,
             trigger.rangeEnd,

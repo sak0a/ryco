@@ -12,6 +12,7 @@ import {
   replaceTextRange,
   shouldUseNativeComposerFileReference,
 } from "./composer-logic";
+import { serializeComposerMentionPath } from "./composerMentionSyntax";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 describe("detectComposerTrigger", () => {
@@ -160,6 +161,16 @@ describe("expandCollapsedComposerCursor", () => {
     );
   });
 
+  it("maps collapsed quoted mention cursor to expanded text cursor", () => {
+    const text = 'what is in @"My File.md" please';
+    const collapsedCursorAfterMention = "what is in ".length + 2;
+    const expandedCursorAfterMention = 'what is in @"My File.md" '.length;
+
+    expect(expandCollapsedComposerCursor(text, collapsedCursorAfterMention)).toBe(
+      expandedCursorAfterMention,
+    );
+  });
+
   it("allows path trigger detection to close after selecting a mention", () => {
     const text = "what's in my @AGENTS.md ";
     const collapsedCursorAfterMention = "what's in my ".length + 2;
@@ -188,6 +199,16 @@ describe("collapseExpandedComposerCursor", () => {
     const text = "what's in my @AGENTS.md fsfdas";
     const collapsedCursorAfterMention = "what's in my ".length + 2;
     const expandedCursorAfterMention = "what's in my @AGENTS.md ".length;
+
+    expect(collapseExpandedComposerCursor(text, expandedCursorAfterMention)).toBe(
+      collapsedCursorAfterMention,
+    );
+  });
+
+  it("maps expanded quoted mention cursor back to collapsed cursor", () => {
+    const text = 'what is in @"My File.md" please';
+    const collapsedCursorAfterMention = "what is in ".length + 2;
+    const expandedCursorAfterMention = 'what is in @"My File.md" '.length;
 
     expect(collapseExpandedComposerCursor(text, expandedCursorAfterMention)).toBe(
       collapsedCursorAfterMention,
@@ -266,6 +287,20 @@ describe("formatComposerFileReference", () => {
     expect(formatComposerFileReference("/tmp/\"quoted\" and 'single'.json")).toBe(
       '"/tmp/\\"quoted\\" and \'single\'.json"',
     );
+  });
+});
+
+describe("serializeComposerMentionPath", () => {
+  it("keeps simple mention paths unquoted", () => {
+    expect(serializeComposerMentionPath("src/index.ts")).toBe("src/index.ts");
+  });
+
+  it("quotes mention paths containing whitespace", () => {
+    expect(serializeComposerMentionPath("My File.md")).toBe('"My File.md"');
+  });
+
+  it("escapes quoted mention path content", () => {
+    expect(serializeComposerMentionPath('docs/My "File".md')).toBe('"docs/My \\"File\\".md"');
   });
 });
 

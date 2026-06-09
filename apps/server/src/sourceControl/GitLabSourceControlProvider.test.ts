@@ -1,15 +1,72 @@
 import { assert, describe, it } from "@effect/vitest";
 import { DateTime, Effect, Layer, Option } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { SOURCE_CONTROL_DETAIL_BODY_MAX_BYTES } from "@ryco/contracts";
 
+import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitLabCli from "./GitLabCli.ts";
+import { parseGitLabAuthStatusHosts } from "./gitLabAuthStatus.ts";
 import * as GitLabSourceControlProvider from "./GitLabSourceControlProvider.ts";
+
+const processResult = (
+  stdout: string,
+  options?: {
+    readonly stderr?: string;
+    readonly exitCode?: ChildProcessSpawner.ExitCode;
+  },
+): VcsProcess.VcsProcessOutput => ({
+  exitCode: options?.exitCode ?? ChildProcessSpawner.ExitCode(0),
+  stdout,
+  stderr: options?.stderr ?? "",
+  stdoutTruncated: false,
+  stderrTruncated: false,
+});
 
 function makeProvider(gitlab: Partial<GitLabCli.GitLabCliShape>) {
   return GitLabSourceControlProvider.make().pipe(
     Effect.provide(Layer.mock(GitLabCli.GitLabCli)(gitlab)),
   );
 }
+
+it("parses GitLab auth status by host", () => {
+  const hosts = parseGitLabAuthStatusHosts(`gitlab.com
+  ✓ Logged in to gitlab.com as gitlab-user
+self-hosted.example.test
+  ✓ Logged in to self-hosted.example.test as self-hosted-user
+`);
+
+  assert.deepStrictEqual(hosts, [
+    {
+      host: "gitlab.com",
+      account: "gitlab-user",
+      authenticated: true,
+    },
+    {
+      host: "self-hosted.example.test",
+      account: "self-hosted-user",
+      authenticated: true,
+    },
+  ]);
+});
+
+it("uses a successful GitLab host even when another host fails", () => {
+  const auth = GitLabSourceControlProvider.discovery.parseAuth(
+    processResult(
+      `gitlab.example.test
+  ✓ Logged in to gitlab.example.test as gitlab-user
+bad.example.test
+  x failed to authenticate
+`,
+      {
+        exitCode: ChildProcessSpawner.ExitCode(1),
+      },
+    ),
+  );
+
+  assert.strictEqual(auth.status, "authenticated");
+  assert.deepStrictEqual(auth.account, Option.some("gitlab-user"));
+  assert.deepStrictEqual(auth.host, Option.some("gitlab.example.test"));
+});
 
 it.effect("maps GitLab MR summaries into provider-neutral change requests", () =>
   Effect.gen(function* () {

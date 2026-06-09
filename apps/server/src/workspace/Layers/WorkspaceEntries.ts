@@ -173,6 +173,14 @@ async function mapWithConcurrency<A, B>(
   return results;
 }
 
+function isPermissionDeniedError(cause: unknown): boolean {
+  const code =
+    typeof cause === "object" && cause !== null && "code" in cause
+      ? (cause as { readonly code?: unknown }).code
+      : undefined;
+  return code === "EACCES" || code === "EPERM";
+}
+
 // macOS Finder aliases are binary files (not symlinks). Modern ones (10.5+)
 // are bookmark-format NSURL data and start with magic bytes "book". Pre-10.5
 // "alis"-format aliases stored their type/creator metadata in the HFS
@@ -603,7 +611,12 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
             detail: `Unable to browse '${parentPath}': ${cause instanceof Error ? cause.message : String(cause)}`,
             cause,
           }),
-      });
+      }).pipe(
+        Effect.catchIf(
+          (error) => isPermissionDeniedError(error.cause),
+          () => Effect.succeed([] as Dirent[]),
+        ),
+      );
 
       const showHidden = endsWithSeparator || prefix.startsWith(".");
       const lowerPrefix = prefix.toLowerCase();

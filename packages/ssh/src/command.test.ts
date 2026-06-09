@@ -10,6 +10,7 @@ import {
   parseSshResolveOutput,
   resolveRemoteRycoCliPackageSpec,
   runSshCommand,
+  SSH_COMMAND,
 } from "./command.ts";
 import { SshCommandError } from "./errors.ts";
 
@@ -32,6 +33,21 @@ const makeFailedProcess = (input: { readonly stdout: string; readonly stderr?: s
     unref: Effect.succeed(Effect.void),
   });
 };
+
+const makeSuccessfulProcess = (input: { readonly stdout?: string; readonly stderr?: string }) =>
+  ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(123),
+    stdout: input.stdout ? Stream.make(encoder.encode(input.stdout)) : Stream.empty,
+    stderr: input.stderr ? Stream.make(encoder.encode(input.stderr)) : Stream.empty,
+    all: Stream.empty,
+    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+    isRunning: Effect.succeed(false),
+    kill: () => Effect.void,
+    stdin: Sink.drain,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+    unref: Effect.succeed(Effect.void),
+  });
 
 const makeNeverFinishingProcess = () => {
   let finish: ((exitCode: ChildProcessSpawner.ExitCode) => void) | null = null;
@@ -138,6 +154,34 @@ describe("ssh command", () => {
       );
     }),
   );
+
+  it.effect("spawns the platform SSH executable directly", () => {
+    let capturedCommand: string | null = null;
+    const spawner = ChildProcessSpawner.make((command) => {
+      const childProcess = command as unknown as {
+        readonly command: string;
+        readonly args: ReadonlyArray<string>;
+      };
+      capturedCommand = childProcess.command;
+      return Effect.succeed(makeSuccessfulProcess({}));
+    });
+    const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
+    const processLayer = Layer.mergeAll(NodeServices.layer, spawnerLayer);
+
+    return Effect.gen(function* () {
+      yield* runSshCommand(
+        {
+          alias: "devbox",
+          hostname: "devbox.example.com",
+          username: "julius",
+          port: 2222,
+        },
+        { remoteCommandArgs: ["true"] },
+      );
+
+      assert.equal(capturedCommand, SSH_COMMAND);
+    }).pipe(Effect.provide(processLayer));
+  });
 
   it.effect("includes stdout in non-zero command failures when stderr is empty", () => {
     const spawner = ChildProcessSpawner.make(() =>

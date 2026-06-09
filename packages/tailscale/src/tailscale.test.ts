@@ -10,6 +10,7 @@ import {
   parseTailscaleMagicDnsName,
   parseTailscaleStatus,
   readTailscaleStatus,
+  TAILSCALE_COMMAND,
 } from "./tailscale.ts";
 
 const encoder = new TextEncoder();
@@ -93,7 +94,7 @@ describe("tailscale", () => {
 
   it.effect("reads tailscale status through the process spawner service", () => {
     const layer = mockSpawnerLayer((command, args) => {
-      assert.equal(command, "tailscale");
+      assert.equal(command, TAILSCALE_COMMAND);
       assert.deepEqual(args, ["status", "--json"]);
       return {
         stdout: tailscaleStatusWithSingleIpJson,
@@ -111,7 +112,7 @@ describe("tailscale", () => {
 
   it.effect("configures tailscale serve through the process spawner service", () => {
     const layer = mockSpawnerLayer((command, args) => {
-      assert.equal(command, "tailscale");
+      assert.equal(command, TAILSCALE_COMMAND);
       assert.deepEqual(args, ["serve", "--bg", "--https=8443", "http://127.0.0.1:13773"]);
       return {};
     });
@@ -126,7 +127,7 @@ describe("tailscale", () => {
     }[] = [];
     const layer = mockSpawnerLayer((command, args) => {
       commands.push({ command, args });
-      assert.equal(command, "tailscale");
+      assert.equal(command, TAILSCALE_COMMAND);
       assert.deepEqual(args, ["serve", "--https=8443", "off"]);
       return {};
     });
@@ -134,7 +135,7 @@ describe("tailscale", () => {
     return Effect.gen(function* () {
       yield* disableTailscaleServe({ servePort: 8443 }).pipe(Effect.provide(layer));
       assert.deepEqual(commands, [
-        { command: "tailscale", args: ["serve", "--https=8443", "off"] },
+        { command: TAILSCALE_COMMAND, args: ["serve", "--https=8443", "off"] },
       ]);
     });
   });
