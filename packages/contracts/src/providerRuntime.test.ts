@@ -69,6 +69,30 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.payload.planMarkdown).toBe("# Ship it");
   });
 
+  it("decodes tool.denied events", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "tool.denied",
+      eventId: "event-tool-denied-1",
+      provider: "claudeAgent",
+      createdAt: "2026-02-28T00:00:00.000Z",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      payload: {
+        toolName: "Bash",
+        toolUseId: "tool-use-1",
+        reason: "User denied command execution.",
+        agentId: "agent-1",
+      },
+    });
+
+    expect(parsed.type).toBe("tool.denied");
+    if (parsed.type !== "tool.denied") {
+      throw new Error("expected tool.denied");
+    }
+    expect(parsed.payload.toolName).toBe("Bash");
+    expect(parsed.payload.reason).toBe("User denied command execution.");
+  });
+
   it("decodes user-input.requested with structured questions", () => {
     const parsed = decodeRuntimeEvent({
       type: "user-input.requested",

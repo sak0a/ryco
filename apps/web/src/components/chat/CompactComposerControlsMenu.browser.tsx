@@ -145,6 +145,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
       traitsMenuContent={
         <TraitsMenuContent
           provider={provider}
+          instanceId={instanceId}
           models={models}
           threadRef={threadRef}
           model={model}

@@ -10,7 +10,44 @@ import {
   parseSshResolveOutput,
   resolveRemoteRycoCliPackageSpec,
   runSshCommand,
+  SSH_COMMAND,
 } from "./command.ts";
+import { SshCommandError } from "./errors.ts";
+
+const encoder = new TextEncoder();
+
+const makeFailedProcess = (input: { readonly stdout: string; readonly stderr?: string }) => {
+  const stdoutStream = Stream.make(encoder.encode(input.stdout));
+  const stderrStream = input.stderr ? Stream.make(encoder.encode(input.stderr)) : Stream.empty;
+  return ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(123),
+    stdout: stdoutStream,
+    stderr: stderrStream,
+    all: Stream.empty,
+    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
+    isRunning: Effect.succeed(false),
+    kill: () => Effect.void,
+    stdin: Sink.drain,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+    unref: Effect.succeed(Effect.void),
+  });
+};
+
+const makeSuccessfulProcess = (input: { readonly stdout?: string; readonly stderr?: string }) =>
+  ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(123),
+    stdout: input.stdout ? Stream.make(encoder.encode(input.stdout)) : Stream.empty,
+    stderr: input.stderr ? Stream.make(encoder.encode(input.stderr)) : Stream.empty,
+    all: Stream.empty,
+    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+    isRunning: Effect.succeed(false),
+    kill: () => Effect.void,
+    stdin: Sink.drain,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+    unref: Effect.succeed(Effect.void),
+  });
 
 const makeNeverFinishingProcess = () => {
   let finish: ((exitCode: ChildProcessSpawner.ExitCode) => void) | null = null;
@@ -117,6 +154,158 @@ describe("ssh command", () => {
       );
     }),
   );
+
+  it.effect("spawns the platform SSH executable directly", () => {
+    let capturedCommand: string | null = null;
+    const spawner = ChildProcessSpawner.make((command) => {
+      const childProcess = command as unknown as {
+        readonly command: string;
+        readonly args: ReadonlyArray<string>;
+      };
+      capturedCommand = childProcess.command;
+      return Effect.succeed(makeSuccessfulProcess({}));
+    });
+    const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
+    const processLayer = Layer.mergeAll(NodeServices.layer, spawnerLayer);
+
+    return Effect.gen(function* () {
+      yield* runSshCommand(
+        {
+          alias: "devbox",
+          hostname: "devbox.example.com",
+          username: "julius",
+          port: 2222,
+        },
+        { remoteCommandArgs: ["true"] },
+      );
+
+      assert.equal(capturedCommand, SSH_COMMAND);
+    }).pipe(Effect.provide(processLayer));
+  });
+
+  it.effect("includes stdout in non-zero command failures when stderr is empty", () => {
+    const spawner = ChildProcessSpawner.make(() =>
+      Effect.succeed(makeFailedProcess({ stdout: "Pairing token creation failed\n" })),
+    );
+    const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
+    const processLayer = Layer.mergeAll(NodeServices.layer, spawnerLayer);
+
+    return Effect.gen(function* () {
+      const result = yield* Effect.result(
+        runSshCommand(
+          {
+            alias: "devbox",
+            hostname: "devbox.example.com",
+            username: "julius",
+            port: 2222,
+          },
+          { remoteCommandArgs: ["sh", "-s"] },
+        ),
+      );
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, SshCommandError);
+        assert.equal(result.failure.message, "Pairing token creation failed");
+        assert.equal(result.failure.stdout, "Pairing token creation failed\n");
+        assert.equal(result.failure.stderr, "");
+      }
+    }).pipe(Effect.provide(processLayer));
+  });
+
+  it.effect("redacts credentials from stdout in non-zero command failures", () => {
+    const spawner = ChildProcessSpawner.make(() =>
+      Effect.succeed(makeFailedProcess({ stdout: '{"credential":"pairing-secret"}\n' })),
+    );
+    const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
+    const processLayer = Layer.mergeAll(NodeServices.layer, spawnerLayer);
+
+    return Effect.gen(function* () {
+      const result = yield* Effect.result(
+        runSshCommand(
+          {
+            alias: "devbox",
+            hostname: "devbox.example.com",
+            username: "julius",
+            port: 2222,
+          },
+          { remoteCommandArgs: ["sh", "-s"] },
+        ),
+      );
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, SshCommandError);
+        assert.equal(result.failure.message, '{"credential":"[redacted]"}');
+        assert.equal(result.failure.stdout, '{"credential":"[redacted]"}\n');
+      }
+    }).pipe(Effect.provide(processLayer));
+  });
+
+  it.effect("keeps stderr as the failure message when stderr is present", () => {
+    const spawner = ChildProcessSpawner.make(() =>
+      Effect.succeed(
+        makeFailedProcess({
+          stdout: "stdout diagnostic\n",
+          stderr: "stderr diagnostic\n",
+        }),
+      ),
+    );
+    const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
+    const processLayer = Layer.mergeAll(NodeServices.layer, spawnerLayer);
+
+    return Effect.gen(function* () {
+      const result = yield* Effect.result(
+        runSshCommand(
+          {
+            alias: "devbox",
+            hostname: "devbox.example.com",
+            username: "julius",
+            port: 2222,
+          },
+          { remoteCommandArgs: ["sh", "-s"] },
+        ),
+      );
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, SshCommandError);
+        assert.equal(result.failure.message, "stderr diagnostic");
+        assert.equal(result.failure.stdout, "stdout diagnostic\n");
+        assert.equal(result.failure.stderr, "stderr diagnostic\n");
+      }
+    }).pipe(Effect.provide(processLayer));
+  });
+
+  it.effect("truncates stdout in non-zero command failures", () => {
+    const expectedStdout = `${"a".repeat(4_000)}\n[truncated]`;
+    const spawner = ChildProcessSpawner.make(() =>
+      Effect.succeed(makeFailedProcess({ stdout: "a".repeat(4_001) })),
+    );
+    const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
+    const processLayer = Layer.mergeAll(NodeServices.layer, spawnerLayer);
+
+    return Effect.gen(function* () {
+      const result = yield* Effect.result(
+        runSshCommand(
+          {
+            alias: "devbox",
+            hostname: "devbox.example.com",
+            username: "julius",
+            port: 2222,
+          },
+          { remoteCommandArgs: ["sh", "-s"] },
+        ),
+      );
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, SshCommandError);
+        assert.equal(result.failure.message, expectedStdout);
+        assert.equal(result.failure.stdout, expectedStdout);
+      }
+    }).pipe(Effect.provide(processLayer));
+  });
 
   it.effect("fails commands that never finish", () => {
     const spawner = ChildProcessSpawner.make(() => Effect.succeed(makeNeverFinishingProcess()));

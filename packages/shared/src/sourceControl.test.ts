@@ -69,6 +69,18 @@ describe("detectSourceControlProviderFromRemoteUrl", () => {
         ?.kind,
     ).toBe("forgejo");
   });
+
+  it("preserves URL ports while classifying by hostname", () => {
+    expect(
+      detectSourceControlProviderFromRemoteUrl(
+        "https://gitlab.example.test:8443/group/project.git",
+      ),
+    ).toEqual({
+      kind: "gitlab",
+      name: "GitLab Self-Hosted",
+      baseUrl: "https://gitlab.example.test:8443",
+    });
+  });
 });
 
 describe("classifySourceControlCommentAuthorRole", () => {

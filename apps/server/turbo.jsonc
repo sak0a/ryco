@@ -2,6 +2,11 @@
   "$schema": "https://turbo.build/schema.json",
   "extends": ["//"],
   "tasks": {
+    "build": {
+      "dependsOn": ["^build", "@ryco/web#build"],
+      "outputs": ["dist/**"],
+      "cache": false,
+    },
     "start": {
       "dependsOn": ["build"],
       "cache": false,

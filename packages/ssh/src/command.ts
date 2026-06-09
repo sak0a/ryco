@@ -9,6 +9,9 @@ import { SshCommandError, SshInvalidTargetError } from "./errors.ts";
 
 const PUBLISHABLE_RYCO_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 const DEFAULT_SSH_COMMAND_TIMEOUT_MS = 60_000;
+const MAX_SSH_ERROR_OUTPUT_LENGTH = 4_000;
+
+export const SSH_COMMAND = process.platform === "win32" ? "ssh.exe" : "ssh";
 
 const encoder = new TextEncoder();
 
@@ -112,9 +115,28 @@ export const collectProcessOutput = <E>(
     ),
   );
 
-function normalizeSshErrorMessage(stderr: string, fallbackMessage: string): string {
-  const cleaned = stderr.trim();
-  return cleaned.length > 0 ? cleaned : fallbackMessage;
+function redactSshErrorOutput(output: string): string {
+  const redacted = output.replace(
+    /("(?:access_token|bearerToken|credential|pairingToken|token)"\s*:\s*")[^"]+(")/giu,
+    "$1[redacted]$2",
+  );
+  return redacted.length > MAX_SSH_ERROR_OUTPUT_LENGTH
+    ? `${redacted.slice(0, MAX_SSH_ERROR_OUTPUT_LENGTH)}\n[truncated]`
+    : redacted;
+}
+
+function normalizeSshErrorMessage(input: {
+  readonly stdout?: string;
+  readonly stderr: string;
+  readonly fallbackMessage: string;
+}): string {
+  const cleanedStderr = input.stderr.trim();
+  if (cleanedStderr.length > 0) {
+    return cleanedStderr;
+  }
+
+  const cleanedStdout = input.stdout?.trim() ?? "";
+  return cleanedStdout.length > 0 ? cleanedStdout : input.fallbackMessage;
 }
 
 function sshTargetLogFields(target: DesktopSshEnvironmentTarget) {
@@ -147,7 +169,7 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
     Effect.mapError(
       (cause) =>
         new SshCommandError({
-          command: ["ssh"],
+          command: [SSH_COMMAND],
           exitCode: null,
           stderr: "",
           message: "Failed to prepare SSH authentication helpers.",
@@ -166,15 +188,14 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   yield* Effect.logDebug("ssh.command.start", {
     ...sshTargetLogFields(target),
-    command: ["ssh", ...args],
+    command: [SSH_COMMAND, ...args],
     hasStdin: input.stdin !== undefined,
     timeoutMs: input.timeoutMs ?? DEFAULT_SSH_COMMAND_TIMEOUT_MS,
   });
   const child = yield* spawner
     .spawn(
-      ChildProcess.make("ssh", args, {
+      ChildProcess.make(SSH_COMMAND, args, {
         env: environment,
-        shell: process.platform === "win32",
         stdin: {
           stream: stdinStream(input.stdin),
           endOnDone: true,
@@ -186,7 +207,7 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
       Effect.mapError(
         (cause) =>
           new SshCommandError({
-            command: ["ssh", ...args],
+            command: [SSH_COMMAND, ...args],
             exitCode: null,
             stderr: "",
             message:
@@ -209,7 +230,7 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
     Effect.mapError(
       (cause) =>
         new SshCommandError({
-          command: ["ssh", ...args],
+          command: [SSH_COMMAND, ...args],
           exitCode: null,
           stderr: "",
           message:
@@ -220,26 +241,30 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
   );
 
   if (exitCode !== 0) {
+    const diagnosticStdout = redactSshErrorOutput(stdout);
     yield* Effect.logWarning("ssh.command.failed", {
       ...sshTargetLogFields(target),
-      command: ["ssh", ...args],
+      command: [SSH_COMMAND, ...args],
       exitCode,
+      stdout: diagnosticStdout,
       stderr,
     });
     return yield* new SshCommandError({
-      command: ["ssh", ...args],
+      command: [SSH_COMMAND, ...args],
       exitCode,
+      stdout: diagnosticStdout,
       stderr,
-      message: normalizeSshErrorMessage(
+      message: normalizeSshErrorMessage({
+        stdout: diagnosticStdout,
         stderr,
-        `SSH command failed for ${hostSpec} (exit ${exitCode}).`,
-      ),
+        fallbackMessage: `SSH command failed for ${hostSpec} (exit ${exitCode}).`,
+      }),
     });
   }
 
   yield* Effect.logDebug("ssh.command.succeeded", {
     ...sshTargetLogFields(target),
-    command: ["ssh", ...args],
+    command: [SSH_COMMAND, ...args],
   });
   return { stdout, stderr };
 });
@@ -269,7 +294,7 @@ export const runSshCommand = Effect.fn("ssh/command.runSshCommand")(function* (
               hasStdin: input.stdin !== undefined,
             });
             return yield* new SshCommandError({
-              command: ["ssh"],
+              command: [SSH_COMMAND],
               exitCode: null,
               stderr: "",
               message: `SSH command timed out after ${input.timeoutMs ?? DEFAULT_SSH_COMMAND_TIMEOUT_MS}ms.`,

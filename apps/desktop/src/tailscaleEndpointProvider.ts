@@ -16,6 +16,7 @@ import { Effect, Layer } from "effect";
 export { isTailscaleIpv4Address, parseTailscaleMagicDnsName } from "@ryco/tailscale";
 
 const TailscaleDesktopLayer = Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici);
+const TAILSCALE_MAGIC_DNS_CACHE_TTL_MS = 60_000;
 
 const TAILSCALE_ENDPOINT_PROVIDER: AdvertisedEndpointProvider = {
   id: "tailscale",
@@ -32,6 +33,35 @@ function createTailscaleEndpoint(
     provider: TAILSCALE_ENDPOINT_PROVIDER,
     source: "desktop-addon",
   });
+}
+
+let cachedTailscaleMagicDnsName: {
+  readonly expiresAtMs: number;
+  readonly promise: Promise<string | null>;
+} | null = null;
+
+async function readDefaultTailscaleMagicDnsName(): Promise<string | null> {
+  return Effect.runPromise(
+    readTailscaleStatus.pipe(
+      Effect.map((status) => status.magicDnsName),
+      Effect.catch(() => Effect.succeed(null)),
+      Effect.provide(TailscaleDesktopLayer),
+    ),
+  );
+}
+
+function readCachedDefaultTailscaleMagicDnsName(): Promise<string | null> {
+  const now = Date.now();
+  if (cachedTailscaleMagicDnsName && cachedTailscaleMagicDnsName.expiresAtMs > now) {
+    return cachedTailscaleMagicDnsName.promise;
+  }
+
+  const promise = readDefaultTailscaleMagicDnsName();
+  cachedTailscaleMagicDnsName = {
+    expiresAtMs: now + TAILSCALE_MAGIC_DNS_CACHE_TTL_MS,
+    promise,
+  };
+  return promise;
 }
 
 export function resolveTailscaleIpAdvertisedEndpoints(input: {
@@ -109,18 +139,13 @@ export async function resolveTailscaleAdvertisedEndpoints(input: {
   readonly servePort?: number;
   readonly networkInterfaces: NodeJS.Dict<NetworkInterfaceInfo[]>;
   readonly statusJson?: string | null;
+  readonly readMagicDnsName?: () => Promise<string | null>;
   readonly probe?: (baseUrl: string) => Promise<boolean>;
 }): Promise<readonly AdvertisedEndpoint[]> {
   const ipEndpoints = resolveTailscaleIpAdvertisedEndpoints(input);
   const dnsName =
     input.statusJson === undefined
-      ? await Effect.runPromise(
-          readTailscaleStatus.pipe(
-            Effect.map((status) => status.magicDnsName),
-            Effect.catch(() => Effect.succeed(null)),
-            Effect.provide(TailscaleDesktopLayer),
-          ),
-        )
+      ? await (input.readMagicDnsName ?? readCachedDefaultTailscaleMagicDnsName)()
       : input.statusJson
         ? await Effect.runPromise(
             parseTailscaleMagicDnsName(input.statusJson).pipe(

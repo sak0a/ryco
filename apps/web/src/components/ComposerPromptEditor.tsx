@@ -57,6 +57,7 @@ import {
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToInlineToken,
 } from "~/composer-logic";
+import { serializeComposerMentionPath } from "~/composerMentionSyntax";
 import {
   selectionTouchesMentionBoundary,
   splitPromptIntoComposerSegments,
@@ -201,7 +202,7 @@ class ComposerMentionNode extends DecoratorNode<ReactElement> {
   }
 
   override getTextContent(): string {
-    return `@${this.__path}`;
+    return `@${serializeComposerMentionPath(this.__path)}`;
   }
 
   override isInline(): true {

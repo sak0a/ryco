@@ -473,10 +473,11 @@ function getDesktopServerExposureState(): DesktopServerExposureState {
 }
 
 async function getDesktopAdvertisedEndpoints() {
+  const networkInterfaces = OS.networkInterfaces();
   const exposure = resolveDesktopServerExposure({
     mode: desktopServerExposureMode,
     port: backendPort,
-    networkInterfaces: OS.networkInterfaces(),
+    networkInterfaces,
     ...(backendAdvertisedHost ? { advertisedHostOverride: backendAdvertisedHost } : {}),
   });
   const coreEndpoints = resolveDesktopCoreAdvertisedEndpoints({
@@ -484,11 +485,18 @@ async function getDesktopAdvertisedEndpoints() {
     exposure,
     customHttpsEndpointUrls: resolveCustomHttpsEndpointUrls(),
   });
+  if (
+    desktopServerExposureMode !== "network-accessible" &&
+    !desktopSettings.tailscaleServeEnabled
+  ) {
+    return coreEndpoints;
+  }
+
   const tailscaleEndpoints = await resolveTailscaleAdvertisedEndpoints({
     port: backendPort,
     serveEnabled: desktopSettings.tailscaleServeEnabled,
     servePort: desktopSettings.tailscaleServePort,
-    networkInterfaces: OS.networkInterfaces(),
+    networkInterfaces,
   });
   return [...coreEndpoints, ...tailscaleEndpoints];
 }

@@ -2626,6 +2626,43 @@ describe("ProviderRuntimeIngestion", () => {
     expect(activityPayload?.message).toBe("runtime activity exploded");
   });
 
+  it("maps tool.denied into an error-toned thread activity", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "tool.denied",
+      eventId: asEventId("evt-tool-denied-activity"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-tool-denied-activity"),
+      payload: {
+        toolName: "Bash",
+        toolUseId: "tool-denied-activity-1",
+        reason: "User denied command execution.",
+        agentId: "agent-1",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some((activity) => activity.id === "evt-tool-denied-activity"),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-tool-denied-activity",
+    );
+    const activityPayload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("tool.denied");
+    expect(activity?.tone).toBe("error");
+    expect(activity?.summary).toBe("Tool denied: Bash");
+    expect(activityPayload?.toolName).toBe("Bash");
+    expect(activityPayload?.detail).toBe("User denied command execution.");
+  });
+
   it("keeps the session running when a runtime.warning arrives during an active turn", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

@@ -119,4 +119,20 @@ describe("tailscale endpoint provider", () => {
       },
     ]);
   });
+
+  it("uses an injected MagicDNS reader when tailscale status JSON is omitted", async () => {
+    let readCount = 0;
+    const endpoints = await resolveTailscaleAdvertisedEndpoints({
+      port: 3773,
+      networkInterfaces: {},
+      readMagicDnsName: async () => {
+        readCount += 1;
+        return "desktop.tail.ts.net";
+      },
+    });
+
+    expect(readCount).toBe(1);
+    expect(endpoints).toHaveLength(1);
+    expect(endpoints[0]?.id).toBe("tailscale-magicdns:https://desktop.tail.ts.net/");
+  });
 });

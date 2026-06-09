@@ -518,11 +518,7 @@ function OpenCommandPaletteDialog() {
       !relativePathNeedsActiveProject,
   });
   const browseEntries = browseResult?.entries ?? EMPTY_BROWSE_ENTRIES;
-  const {
-    filteredEntries: filteredBrowseEntries,
-    highlightedEntry: highlightedBrowseEntry,
-    exactEntry: exactBrowseEntry,
-  } = useMemo(
+  const { filteredEntries: filteredBrowseEntries, exactEntry: exactBrowseEntry } = useMemo(
     () => filterBrowseEntries({ browseEntries, browseFilterQuery, highlightedItemValue }),
     [browseEntries, browseFilterQuery, highlightedItemValue],
   );
@@ -543,31 +539,15 @@ function OpenCommandPaletteDialog() {
     [browseEnvironmentId, currentProjectCwdForBrowse, fetchBrowseResult, queryClient],
   );
 
-  // Prefetch the parent and the most likely next child so browse navigation
-  // stays warm without scanning every child directory in large trees.
+  // Keep parent navigation warm without probing highlighted child folders,
+  // which can trigger repeated OS permission prompts on protected locations.
   useEffect(() => {
-    if (!isBrowsing || filteredBrowseEntries.length === 0) return;
+    if (!isBrowsing) return;
 
     if (canNavigateUp(query)) {
       prefetchBrowsePath(getBrowseParentPath(query)!);
     }
-
-    const nextChild = highlightedBrowseEntry ?? exactBrowseEntry;
-    if (nextChild) {
-      prefetchBrowsePath(
-        nextChild.isAlias
-          ? ensureBrowseDirectoryPath(nextChild.fullPath)
-          : appendBrowsePathSegment(query, nextChild.name),
-      );
-    }
-  }, [
-    exactBrowseEntry,
-    filteredBrowseEntries.length,
-    highlightedBrowseEntry,
-    isBrowsing,
-    prefetchBrowsePath,
-    query,
-  ]);
+  }, [isBrowsing, prefetchBrowsePath, query]);
 
   const openProjectFromSearch = useMemo(
     () => async (project: (typeof projects)[number]) => {

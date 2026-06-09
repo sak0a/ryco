@@ -48,7 +48,7 @@ const CLAUDE_PRESENTATION = {
 const MINIMUM_CLAUDE_OPUS_4_8_VERSION = "2.1.154";
 const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
 
-type ClaudeEffortLevel = "low" | "medium" | "high" | "xhigh" | "max" | "ultrathink";
+type ClaudeEffortLevel = "low" | "medium" | "high" | "xhigh" | "max" | "ultracode" | "ultrathink";
 
 function buildClaudeEffortOption(value: ClaudeEffortLevel, defaultEffort: ClaudeEffortLevel) {
   const label =
@@ -114,6 +114,16 @@ const CLAUDE_OPUS_ADAPTIVE_EFFORT_LEVELS = [
   "ultrathink",
 ] as const satisfies ReadonlyArray<ClaudeEffortLevel>;
 
+const CLAUDE_OPUS_4_8_EFFORT_LEVELS = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultracode",
+  "ultrathink",
+] as const satisfies ReadonlyArray<ClaudeEffortLevel>;
+
 const CLAUDE_OPUS_LEGACY_EFFORT_LEVELS = [
   "low",
   "medium",
@@ -128,7 +138,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     shortName: "Opus 4.8",
     isCustom: false,
     capabilities: buildClaudeOpusCapabilities({
-      effortLevels: CLAUDE_OPUS_ADAPTIVE_EFFORT_LEVELS,
+      effortLevels: CLAUDE_OPUS_4_8_EFFORT_LEVELS,
       defaultEffort: "high",
       supportsFastMode: true,
       supportsContextWindow: true,
@@ -286,15 +296,26 @@ export function resolveClaudeEffort(
  * CLI's `--effort` flag.
  *
  * Mirrors the mapping used when invoking the Claude Agent SDK
- * ({@link getEffectiveClaudeAgentEffort} in ClaudeAdapter): `"ultrathink"`
- * is filtered out because it is a prompt-prefix mode rather than a CLI-effort
- * value. Returns `undefined` when no flag should be passed.
+ * ({@link getEffectiveClaudeAgentEffort} in ClaudeAdapter): `"ultracode"`
+ * is paired with the Claude Code settings flag and normalized to `"xhigh"`,
+ * while `"ultrathink"` is filtered out because it is a prompt-prefix mode.
+ * Returns `undefined` when no flag should be passed.
  */
-export function normalizeClaudeCliEffort(effort: string | null | undefined): string | undefined {
+export function normalizeClaudeCliEffort(
+  effort: string | null | undefined,
+  model?: string | null | undefined,
+): string | undefined {
   if (!effort || effort === "ultrathink") {
     return undefined;
   }
+  if (effort === "ultracode") {
+    return model === "claude-opus-4-8" ? "xhigh" : undefined;
+  }
   return effort;
+}
+
+export function isClaudeUltracodeEffort(effort: string | null | undefined): boolean {
+  return effort === "ultracode";
 }
 
 export function resolveClaudeApiModelId(modelSelection: ModelSelection): string {

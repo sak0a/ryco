@@ -1,5 +1,6 @@
 import {
   type ProviderDriverKind,
+  type ProviderInstanceId,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
   type ScopedThreadRef,
@@ -43,6 +44,7 @@ type Persistence =
 
 export type TraitsChipsProps = {
   provider: ProviderDriverKind;
+  instanceId?: ProviderInstanceId;
   models: ReadonlyArray<ServerProviderModel>;
   model: string | null | undefined;
   prompt: string;
@@ -61,6 +63,7 @@ export const TraitsChips = memo(function TraitsChips(props: TraitsChipsProps) {
       const threadTarget = props.threadRef ?? props.draftId;
       if (!threadTarget) return;
       setProviderModelOptions(threadTarget, props.provider, nextOptions, {
+        ...(props.instanceId ? { instanceId: props.instanceId } : {}),
         model: props.model,
         persistSticky: true,
       });

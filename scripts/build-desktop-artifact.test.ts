@@ -1,28 +1,254 @@
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { ConfigProvider, Effect, Option } from "effect";
+import { ConfigProvider, Effect, Option, Stream } from "effect";
 
 import {
+  COMMAND_OUTPUT_TAIL_LENGTH,
   COPILOT_SDK_PACKAGE_JSON_PATH,
   DESKTOP_BUILD_FILES,
   DESKTOP_BUILD_RESOURCES_RELATIVE_DIR,
   EXTERNALIZED_DESKTOP_DEPENDENCY_PATHS,
+  LINUX_ICON_SIZES,
   MAC_UNSIGNED_INSTALL_HELPER_NAME,
   MAC_UNSIGNED_README_NAME,
+  appendOutputTail,
+  collectCommandStream,
   createMacUnsignedInstallReadme,
   createMacUnsignedInstallScript,
   createBuildConfig,
+  createElectronBuilderInvocation,
+  createStagePatchedDependencies,
+  formatCommandFailureMessage,
+  formatOutputSection,
+  resolveElectronBuilderDebugEnv,
   resolveBuildOptions,
   resolveDesktopBuildIconAssets,
   resolveDesktopProductName,
   resolveDesktopUpdateChannel,
   resolveDesktopWebAssetBrand,
+  resolveMacUnsignedInstallAssetPaths,
   resolveMockUpdateServerPort,
   resolveMockUpdateServerUrl,
+  stageLinuxIcons,
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 
+interface TurboDryRunTask {
+  readonly taskId: string;
+  readonly dependencies: ReadonlyArray<string>;
+  readonly resolvedTaskDefinition: {
+    readonly cache?: boolean;
+    readonly dependsOn?: ReadonlyArray<string>;
+  };
+}
+
+interface TurboDryRun {
+  readonly tasks: ReadonlyArray<TurboDryRunTask>;
+}
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const encoder = new TextEncoder();
+
+function shellSingleQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function writeFakeImageMagickCommand(binDir: string, commandName: string, logPath: string): void {
+  const commandPath = path.join(binDir, commandName);
+  writeFileSync(
+    commandPath,
+    [
+      "#!/bin/sh",
+      `printf '${commandName}|%s|%s|%s|%s\\n' "$1" "$2" "$3" "$4" >> ${shellSingleQuote(logPath)}`,
+      'printf "generated %s\\n" "$3" > "$4"',
+      "",
+    ].join("\n"),
+  );
+  chmodSync(commandPath, 0o755);
+}
+
+const parseTurboDryRun = (output: string): TurboDryRun => {
+  const start = output.indexOf("{");
+  const end = output.lastIndexOf("}");
+
+  assert.ok(start >= 0 && end > start, `Expected Turbo dry-run JSON output, received:\n${output}`);
+  return JSON.parse(output.slice(start, end + 1)) as TurboDryRun;
+};
+
+const getTask = (dryRun: TurboDryRun, taskId: string): TurboDryRunTask => {
+  const task = dryRun.tasks.find((candidate) => candidate.taskId === taskId);
+  assert.ok(
+    task,
+    `Expected Turbo dry-run task ${taskId}; tasks were: ${dryRun.tasks
+      .map((candidate) => candidate.taskId)
+      .join(", ")}`,
+  );
+  return task;
+};
+
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+  it("keeps a bounded tail of command output", () => {
+    const oversized = "a".repeat(COMMAND_OUTPUT_TAIL_LENGTH + 5);
+    const tail = appendOutputTail("", oversized);
+
+    assert.equal(tail.length, COMMAND_OUTPUT_TAIL_LENGTH);
+    assert.equal(tail, oversized.slice(-COMMAND_OUTPUT_TAIL_LENGTH));
+    assert.equal(appendOutputTail("old", "new"), "oldnew");
+  });
+
+  it("formats labeled command output tails for failures", () => {
+    assert.equal(formatOutputSection("stdout", " \n ok \n "), "stdout tail:\nok");
+    assert.equal(formatOutputSection("stderr", " \n "), undefined);
+
+    assert.equal(
+      formatCommandFailureMessage(
+        1,
+        {
+          label:
+            "bun x --no-install electron-builder --projectDir /tmp/ryco-stage/app --win --x64 --publish never",
+        },
+        { stdout: "stdout detail\n", stderr: "stderr detail\n" },
+      ),
+      [
+        "Command exited with non-zero exit code (1)",
+        "",
+        "Command: bun x --no-install electron-builder --projectDir /tmp/ryco-stage/app --win --x64 --publish never",
+        "",
+        "stdout tail:",
+        "stdout detail",
+        "",
+        "stderr tail:",
+        "stderr detail",
+      ].join("\n"),
+    );
+    assert.equal(
+      formatCommandFailureMessage(2, {}, { stdout: "", stderr: "" }),
+      "Command exited with non-zero exit code (2)",
+    );
+  });
+
+  it.effect("captures command streams and writes through only in verbose mode", () =>
+    Effect.gen(function* () {
+      let written = "";
+      const output = {
+        write(chunk: string) {
+          written += chunk;
+          return true;
+        },
+      } as NodeJS.WriteStream;
+
+      const nonVerbose = yield* collectCommandStream(
+        Stream.make(encoder.encode("first"), encoder.encode("second")),
+        output,
+        false,
+      );
+      assert.equal(nonVerbose, "firstsecond");
+      assert.equal(written, "");
+
+      const verbose = yield* collectCommandStream(
+        Stream.make(encoder.encode("third"), encoder.encode("fourth")),
+        output,
+        true,
+      );
+      assert.equal(verbose, "thirdfourth");
+      assert.equal(written, "thirdfourth");
+    }),
+  );
+
+  it("adds electron-builder debug namespaces only for verbose artifact builds", () => {
+    assert.equal(resolveElectronBuilderDebugEnv(undefined, false), undefined);
+    assert.equal(resolveElectronBuilderDebugEnv("existing", false), "existing");
+    assert.equal(
+      resolveElectronBuilderDebugEnv(undefined, true),
+      "electron-builder,electron-builder:*",
+    );
+    assert.equal(resolveElectronBuilderDebugEnv("", true), "electron-builder,electron-builder:*");
+    assert.equal(
+      resolveElectronBuilderDebugEnv("existing", true),
+      "existing,electron-builder,electron-builder:*",
+    );
+  });
+
+  it("runs electron-builder from the desktop workspace against the staged app", () => {
+    const desktopWorkspaceDir = path.join(repoRoot, "apps/desktop");
+    const stageAppDir = path.join(repoRoot, ".tmp", "ryco-stage", "app");
+    const invocation = createElectronBuilderInvocation({
+      desktopWorkspaceDir,
+      stageAppDir,
+      platformFlag: "--win",
+      arch: "x64",
+    });
+
+    assert.equal(invocation.cwd, desktopWorkspaceDir);
+    assert.equal(invocation.command, "bun");
+    assert.deepStrictEqual(invocation.args, [
+      "x",
+      "--no-install",
+      "electron-builder",
+      "--projectDir",
+      stageAppDir,
+      "--win",
+      "--x64",
+      "--publish",
+      "never",
+    ]);
+    assert.equal(
+      invocation.label,
+      `bun x --no-install electron-builder --projectDir ${stageAppDir} --win --x64 --publish never`,
+    );
+  });
+
+  it("resolves electron-builder from the desktop workspace without installing it", () => {
+    const result = spawnSync("bun", ["x", "--no-install", "electron-builder", "--version"], {
+      cwd: path.join(repoRoot, "apps/desktop"),
+      encoding: "utf8",
+      shell: process.platform === "win32",
+    });
+
+    assert.equal(
+      result.status,
+      0,
+      `Expected desktop electron-builder binary to resolve without install.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+    assert.equal(result.stdout.trim(), "26.8.1");
+  });
+
+  it("builds the web app before bundling it into the desktop server", () => {
+    const result = spawnSync("bun", ["run", "build:desktop", "--dry=json"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      shell: process.platform === "win32",
+    });
+
+    assert.equal(
+      result.status,
+      0,
+      `Expected build:desktop dry-run to pass.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+
+    const dryRun = parseTurboDryRun(`${result.stdout}\n${result.stderr}`);
+    getTask(dryRun, "@ryco/web#build");
+    getTask(dryRun, "@ryco/desktop#build");
+
+    const serverTask = getTask(dryRun, "ryco-cli#build");
+    assert.ok(serverTask.dependencies.includes("@ryco/web#build"));
+    assert.ok(serverTask.resolvedTaskDefinition.dependsOn?.includes("@ryco/web#build"));
+    assert.equal(serverTask.resolvedTaskDefinition.cache, false);
+  });
+
   it("resolves the dedicated nightly updater channel from nightly versions", () => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42"), "nightly");
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
@@ -53,6 +279,150 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resolveDesktopWebAssetBrand("0.0.17"), "production");
     assert.equal(resolveDesktopWebAssetBrand("0.0.17-nightly.20260413.42"), "nightly");
   });
+
+  it("carries only staged dependency patch metadata into staged Bun installs", () => {
+    assert.deepStrictEqual(
+      createStagePatchedDependencies(
+        {
+          "@expo/metro-config@56.0.13": "patches/@expo%2Fmetro-config@56.0.13.patch",
+          "@pierre/diffs@1.1.20": "patches/@pierre%2Fdiffs@1.1.20.patch",
+          "alchemy@2.0.0-beta.49": "patches/alchemy@2.0.0-beta.49.patch",
+          "effect@4.0.0-beta.59": "patches/effect@4.0.0-beta.59.patch",
+        },
+        {
+          "@pierre/diffs": "1.1.20",
+          effect: "4.0.0-beta.59",
+        },
+      ),
+      {
+        "@pierre/diffs@1.1.20": "patches/@pierre%2Fdiffs@1.1.20.patch",
+        "effect@4.0.0-beta.59": "patches/effect@4.0.0-beta.59.patch",
+      },
+    );
+
+    assert.equal(
+      createStagePatchedDependencies(
+        {
+          "@expo/metro-config@56.0.13": "patches/@expo%2Fmetro-config@56.0.13.patch",
+        },
+        { effect: "4.0.0-beta.59" },
+      ),
+      undefined,
+    );
+  });
+
+  it.effect("stages standard Linux AppImage icon sizes with ImageMagick", () =>
+    Effect.gen(function* () {
+      const tempRoot = mkdtempSync(path.join(tmpdir(), "ryco-linux-icons-"));
+      const previousPath = process.env.PATH;
+      try {
+        const stageResourcesDir = path.join(tempRoot, "resources");
+        const binDir = path.join(tempRoot, "bin");
+        const sourcePng = path.join(tempRoot, "source.png");
+        const logPath = path.join(tempRoot, "magick.log");
+        mkdirSync(stageResourcesDir, { recursive: true });
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(sourcePng, "source icon\n");
+        writeFakeImageMagickCommand(binDir, "magick", logPath);
+
+        process.env.PATH = binDir;
+
+        yield* stageLinuxIcons(stageResourcesDir, sourcePng, false);
+
+        assert.equal(
+          readFileSync(path.join(stageResourcesDir, "icon.png"), "utf8"),
+          "source icon\n",
+        );
+        assert.deepStrictEqual(LINUX_ICON_SIZES, [16, 22, 24, 32, 48, 64, 128, 256, 512]);
+        for (const iconSize of LINUX_ICON_SIZES) {
+          assert.equal(
+            readFileSync(
+              path.join(stageResourcesDir, "icons", `${iconSize}x${iconSize}.png`),
+              "utf8",
+            ),
+            `generated ${iconSize}x${iconSize}\n`,
+          );
+        }
+        assert.deepStrictEqual(
+          readFileSync(logPath, "utf8").trim().split("\n"),
+          LINUX_ICON_SIZES.map(
+            (iconSize) =>
+              `magick|${sourcePng}|-resize|${iconSize}x${iconSize}|${path.join(
+                stageResourcesDir,
+                "icons",
+                `${iconSize}x${iconSize}.png`,
+              )}`,
+          ),
+        );
+      } finally {
+        process.env.PATH = previousPath;
+        rmSync(tempRoot, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("falls back to convert when magick is unavailable for Linux icons", () =>
+    Effect.gen(function* () {
+      const tempRoot = mkdtempSync(path.join(tmpdir(), "ryco-linux-icons-convert-"));
+      const previousPath = process.env.PATH;
+      try {
+        const stageResourcesDir = path.join(tempRoot, "resources");
+        const binDir = path.join(tempRoot, "bin");
+        const sourcePng = path.join(tempRoot, "source.png");
+        const logPath = path.join(tempRoot, "convert.log");
+        mkdirSync(stageResourcesDir, { recursive: true });
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(sourcePng, "source icon\n");
+        writeFakeImageMagickCommand(binDir, "convert", logPath);
+
+        process.env.PATH = binDir;
+
+        yield* stageLinuxIcons(stageResourcesDir, sourcePng, false);
+
+        assert.ok(existsSync(path.join(stageResourcesDir, "icons", "512x512.png")));
+        assert.deepStrictEqual(
+          readFileSync(logPath, "utf8").trim().split("\n"),
+          LINUX_ICON_SIZES.map(
+            (iconSize) =>
+              `convert|${sourcePng}|-resize|${iconSize}x${iconSize}|${path.join(
+                stageResourcesDir,
+                "icons",
+                `${iconSize}x${iconSize}.png`,
+              )}`,
+          ),
+        );
+      } finally {
+        process.env.PATH = previousPath;
+        rmSync(tempRoot, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("points Linux electron-builder config at the generated icon directory", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "linux",
+        "AppImage",
+        "0.1.1",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+
+      assert.deepStrictEqual(config.linux, {
+        target: ["AppImage"],
+        executableName: "ryco",
+        icon: "icons",
+        category: "Development",
+        desktop: {
+          entry: {
+            StartupWMClass: "ryco",
+          },
+        },
+      });
+    }),
+  );
 
   it("excludes the bundled GitHub Copilot CLI from desktop artifacts", () => {
     assert.deepStrictEqual(DESKTOP_BUILD_FILES, [
@@ -99,13 +469,34 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.ok(readme.includes("https://github.com/sak0a/ryco/releases"));
   });
 
+  it("resolves unsigned macOS DMG assets to absolute staged files", () => {
+    const stageResourcesDir = path.join(
+      repoRoot,
+      ".tmp",
+      "ryco-stage",
+      "app",
+      DESKTOP_BUILD_RESOURCES_RELATIVE_DIR,
+    );
+    const resolved = resolveMacUnsignedInstallAssetPaths(stageResourcesDir, path);
+
+    assert.equal(
+      resolved.installHelperFilePath,
+      path.join(stageResourcesDir, MAC_UNSIGNED_INSTALL_HELPER_NAME),
+    );
+    assert.equal(resolved.installHelperDmgPath, resolved.installHelperFilePath);
+    assert.equal(resolved.readmeFilePath, path.join(stageResourcesDir, MAC_UNSIGNED_README_NAME));
+    assert.equal(resolved.readmeDmgPath, resolved.readmeFilePath);
+  });
+
   it.effect("uses electron-builder's current DMG window schema", () =>
     Effect.gen(function* () {
+      const installHelperPath = "/tmp/ryco-stage/app/apps/desktop/resources/Install Ryco.command";
+      const readmePath = "/tmp/ryco-stage/app/apps/desktop/resources/README-macOS.txt";
       const config = yield* createBuildConfig("mac", "dmg", "0.1.1", false, false, undefined, {
-        installHelperFilePath: "/tmp/Install Ryco.command",
-        readmeFilePath: "/tmp/README-macOS.txt",
-        installHelperDmgPath: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/Install Ryco.command`,
-        readmeDmgPath: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/README-macOS.txt`,
+        installHelperFilePath: installHelperPath,
+        readmeFilePath: readmePath,
+        installHelperDmgPath: installHelperPath,
+        readmeDmgPath: readmePath,
       });
 
       assert.deepStrictEqual(config.dmg, {
@@ -129,14 +520,14 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             x: 140,
             y: 320,
             type: "file",
-            path: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/Install Ryco.command`,
+            path: installHelperPath,
             name: MAC_UNSIGNED_INSTALL_HELPER_NAME,
           },
           {
             x: 420,
             y: 320,
             type: "file",
-            path: `${DESKTOP_BUILD_RESOURCES_RELATIVE_DIR}/README-macOS.txt`,
+            path: readmePath,
             name: MAC_UNSIGNED_README_NAME,
           },
         ],

@@ -329,6 +329,33 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
       }),
     );
 
+    it.effect("returns an empty listing when browse is denied by filesystem permissions", () =>
+      Effect.gen(function* () {
+        const workspaceEntries = yield* WorkspaceEntries;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir({ prefix: "ryco-workspace-browse-permission-" });
+        const deniedPath = path.join(cwd, "denied");
+        const originalReaddir = fsPromises.readdir.bind(fsPromises);
+        vi.spyOn(fsPromises, "readdir").mockImplementation((async (
+          ...args: Parameters<typeof fsPromises.readdir>
+        ) => {
+          if (args[0] === deniedPath) {
+            throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+          }
+          return originalReaddir(...args);
+        }) as typeof fsPromises.readdir);
+
+        const result = yield* workspaceEntries.browse({
+          partialPath: appendSeparator(deniedPath),
+        });
+
+        expect(result).toEqual({
+          parentPath: deniedPath,
+          entries: [],
+        });
+      }),
+    );
+
     it.effect("supports relative paths when cwd is provided", () =>
       Effect.gen(function* () {
         const workspaceEntries = yield* WorkspaceEntries;

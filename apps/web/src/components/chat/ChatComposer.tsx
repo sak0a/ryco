@@ -48,6 +48,7 @@ import {
   replaceTextRange,
   shouldUseNativeComposerFileReference,
 } from "../../composer-logic";
+import { serializeComposerMentionPath } from "../../composerMentionSyntax";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
   type ComposerImageAttachment,
@@ -883,9 +884,16 @@ export const ChatComposer = memo(
           model: selectedModel,
           models: selectedProviderModels,
           prompt,
-          modelOptions: composerModelOptions?.[selectedProvider],
+          modelOptions: composerModelOptions?.[selectedInstanceId],
         }),
-      [composerModelOptions, prompt, selectedModel, selectedProvider, selectedProviderModels],
+      [
+        composerModelOptions,
+        prompt,
+        selectedInstanceId,
+        selectedModel,
+        selectedProvider,
+        selectedProviderModels,
+      ],
     );
 
     const selectedPromptEffort = composerProviderState.promptEffort;
@@ -1218,21 +1226,23 @@ export const ChatComposer = memo(
 
     const providerTraitsMenuContent = renderProviderTraitsMenuContent({
       provider: selectedProvider,
+      instanceId: selectedInstanceId,
       ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
       ...(routeKind === "draft" && draftId ? { draftId } : {}),
       model: selectedModel,
       models: selectedProviderModels,
-      modelOptions: composerModelOptions?.[selectedProvider],
+      modelOptions: composerModelOptions?.[selectedInstanceId],
       prompt,
       onPromptChange: setPromptFromTraits,
     });
     const providerTraitsChips = renderProviderTraitsChips({
       provider: selectedProvider,
+      instanceId: selectedInstanceId,
       ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
       ...(routeKind === "draft" && draftId ? { draftId } : {}),
       model: selectedModel,
       models: selectedProviderModels,
-      modelOptions: composerModelOptions?.[selectedProvider],
+      modelOptions: composerModelOptions?.[selectedInstanceId],
       prompt,
       onPromptChange: setPromptFromTraits,
     });
@@ -1761,7 +1771,7 @@ export const ChatComposer = memo(
         const { snapshot, trigger } = resolveActiveComposerTrigger();
         if (!trigger) return;
         if (item.type === "path") {
-          const replacement = `@${item.path} `;
+          const replacement = `@${serializeComposerMentionPath(item.path)} `;
           const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
             snapshot.value,
             trigger.rangeEnd,

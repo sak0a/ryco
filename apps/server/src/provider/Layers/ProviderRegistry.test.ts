@@ -1575,6 +1575,12 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               { id: "xhigh", label: "Extra High" },
             );
             assert.deepStrictEqual(
+              effortDescriptor?.type === "select"
+                ? effortDescriptor.options.find((option) => option.id === "ultracode")
+                : undefined,
+              { id: "ultracode", label: "Ultracode" },
+            );
+            assert.deepStrictEqual(
               opus48.capabilities.optionDescriptors?.find(
                 (descriptor) => descriptor.type === "boolean" && descriptor.id === "fastMode",
               ),

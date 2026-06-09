@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
+import { isValidElement, type ReactElement } from "react";
 import {
   ProviderDriverKind,
+  ProviderInstanceId,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
   type ServerProviderModel,
 } from "@ryco/contracts";
+import { DraftId } from "../../composerDraftStore";
 import {
   getComposerProviderState,
   renderProviderTraitsChips,
@@ -16,6 +19,7 @@ import {
 // vary only the descriptor shape per scenario.
 
 const PROVIDER: ProviderDriverKind = ProviderDriverKind.make("codex");
+const INSTANCE_ID = ProviderInstanceId.make("codex_secondary");
 const MODEL = "test-model";
 
 function selectDescriptor(
@@ -238,5 +242,32 @@ describe("provider traits render guards", () => {
 
     expect(renderProviderTraitsChips(args)).toBeNull();
     expect(renderProviderTraitsMenuContent(args)).toBeNull();
+  });
+
+  it("passes instance id through traits render helpers", () => {
+    const models = modelWith([
+      selectDescriptor("effort", [{ id: "high", label: "High", isDefault: true }]),
+    ]);
+    const args = {
+      provider: PROVIDER,
+      instanceId: INSTANCE_ID,
+      draftId: DraftId.make("draft-traits-instance"),
+      model: MODEL,
+      models,
+      modelOptions: undefined,
+      prompt: "",
+      onPromptChange: () => {},
+    };
+    const chips = renderProviderTraitsChips(args);
+    const menu = renderProviderTraitsMenuContent(args);
+
+    expect(isValidElement(chips)).toBe(true);
+    expect(isValidElement(menu)).toBe(true);
+    expect((chips as ReactElement<{ instanceId?: ProviderInstanceId }>).props.instanceId).toBe(
+      INSTANCE_ID,
+    );
+    expect((menu as ReactElement<{ instanceId?: ProviderInstanceId }>).props.instanceId).toBe(
+      INSTANCE_ID,
+    );
   });
 });
