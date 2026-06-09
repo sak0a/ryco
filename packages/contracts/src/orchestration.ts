@@ -755,6 +755,7 @@ const WorktreeCreateCommand = Schema.Struct({
   workItemKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   workItemTitle: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   workItemState: Schema.optional(Schema.NullOr(WorkItemState)),
+  workItemStateName: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   workItemUrl: Schema.optional(Schema.NullOr(Schema.String)),
   createdAt: IsoDateTime,
 });
@@ -1228,6 +1229,7 @@ export const WorktreeCreatedPayload = Schema.Struct({
   workItemKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   workItemTitle: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   workItemState: Schema.optional(Schema.NullOr(WorkItemState)),
+  workItemStateName: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   workItemUrl: Schema.optional(Schema.NullOr(Schema.String)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

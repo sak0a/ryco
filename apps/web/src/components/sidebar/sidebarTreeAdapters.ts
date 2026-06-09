@@ -294,6 +294,7 @@ function readExplicitWorktrees(
         workItemKey: readNullableString(record.workItemKey),
         workItemTitle: readNullableString(record.workItemTitle),
         workItemState: readWorkItemState(record.workItemState),
+        workItemStateName: readNullableString(record.workItemStateName),
         workItemUrl: readNullableString(record.workItemUrl),
         projectId: logicalProjectId,
         title: readNullableString(record.title),

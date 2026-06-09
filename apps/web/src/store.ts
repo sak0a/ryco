@@ -286,6 +286,7 @@ function mapWorktree(
     workItemKey: worktree.workItemKey ?? null,
     workItemTitle: worktree.workItemTitle ?? null,
     workItemState: worktree.workItemState ?? null,
+    workItemStateName: worktree.workItemStateName ?? null,
     workItemUrl: worktree.workItemUrl ?? null,
     createdAt: worktree.createdAt,
     updatedAt: worktree.updatedAt,
@@ -539,6 +540,7 @@ function sidebarWorktreesEqual(
     left.workItemKey === right.workItemKey &&
     left.workItemTitle === right.workItemTitle &&
     left.workItemState === right.workItemState &&
+    left.workItemStateName === right.workItemStateName &&
     left.workItemUrl === right.workItemUrl &&
     left.createdAt === right.createdAt &&
     left.updatedAt === right.updatedAt &&
@@ -2151,6 +2153,7 @@ function applyEnvironmentOrchestrationEvent(
             workItemKey: event.payload.workItemKey ?? null,
             workItemTitle: event.payload.workItemTitle ?? null,
             workItemState: event.payload.workItemState ?? null,
+            workItemStateName: event.payload.workItemStateName ?? null,
             workItemUrl: event.payload.workItemUrl ?? null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,

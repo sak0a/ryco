@@ -6,13 +6,15 @@ import type {
   WorkItemSummary,
 } from "@ryco/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangleIcon, CircleDotIcon, GitPullRequestIcon } from "lucide-react";
+import { AlertTriangleIcon, CircleDotIcon, GitPullRequestIcon, ListChecksIcon } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 import {
   changeRequestListQueryOptions,
   issueListQueryOptions,
+  workflowRunsQueryOptions,
 } from "~/lib/sourceControlContextRpc";
 import { workItemListQueryOptions, workItemsQueryKeys } from "~/lib/workItemsRpc";
+import { workItemStateLabel } from "~/lib/workItemState";
 import { cn } from "~/lib/utils";
 import { readEnvironmentConnection } from "~/environments/runtime";
 import { AtlassianJiraIcon } from "../Icons";
@@ -21,7 +23,7 @@ import { Button } from "../ui/button";
 const OVERVIEW_LIST_LIMIT = 20;
 const OVERVIEW_VISIBLE_LIMIT = 5;
 
-type OverviewTabId = "issues" | "prs" | "workItems";
+type OverviewTabId = "issues" | "prs" | "actions" | "workItems";
 
 interface ProjectOverviewTabProps {
   readonly environmentId: EnvironmentId | null;
@@ -76,6 +78,13 @@ export function ProjectOverviewTab(props: ProjectOverviewTabProps) {
       limit: OVERVIEW_LIST_LIMIT,
     }),
   );
+  const workflowRunsQuery = useQuery(
+    workflowRunsQueryOptions({
+      environmentId: props.environmentId,
+      cwd: props.cwd,
+      limit: OVERVIEW_LIST_LIMIT,
+    }),
+  );
   const projectLinkQuery = useQuery({
     queryKey: workItemsQueryKeys.projectLink(props.environmentId, props.projectId),
     queryFn: async () => {
@@ -104,11 +113,12 @@ export function ProjectOverviewTab(props: ProjectOverviewTabProps) {
 
   const issues = useMemo(() => issueListQuery.data ?? [], [issueListQuery.data]);
   const pullRequests = useMemo(() => pullRequestListQuery.data ?? [], [pullRequestListQuery.data]);
+  const workflowRuns = useMemo(() => workflowRunsQuery.data?.runs ?? [], [workflowRunsQuery.data]);
   const workItems = useMemo(() => workItemListQuery.data ?? [], [workItemListQuery.data]);
 
   return (
     <div className="h-full min-h-0 overflow-y-auto">
-      <div className="grid gap-3 p-4 md:grid-cols-3">
+      <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
         <OverviewMetric
           label="Open issues"
           value={formatProjectOverviewCount(issues.length)}
@@ -122,6 +132,13 @@ export function ProjectOverviewTab(props: ProjectOverviewTabProps) {
           icon={<GitPullRequestIcon className="size-3.5" />}
           accentClassName="border-blue-500/18 bg-blue-500/8 text-blue-600 dark:text-blue-300"
           onClick={() => props.onOpenTab("prs")}
+        />
+        <OverviewMetric
+          label="Actions"
+          value={formatProjectOverviewCount(workflowRuns.length)}
+          icon={<ListChecksIcon className="size-3.5" />}
+          accentClassName="border-amber-500/18 bg-amber-500/8 text-amber-600 dark:text-amber-300"
+          onClick={() => props.onOpenTab("actions")}
         />
         <OverviewMetric
           label="Open Jira"
@@ -209,7 +226,7 @@ export function ProjectOverviewTab(props: ProjectOverviewTabProps) {
                 <span className="shrink-0 text-muted-foreground text-xs">{workItem.key}</span>
                 <span className="min-w-0 flex-1 truncate text-sm">{workItem.title}</span>
                 <span className="shrink-0 text-[11px] text-muted-foreground">
-                  {workItem.state.replace("_", " ")}
+                  {workItemStateLabel(workItem)}
                 </span>
               </button>
             )}

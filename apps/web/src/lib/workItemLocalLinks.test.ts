@@ -44,6 +44,7 @@ function worktree(overrides: Partial<SidebarWorktreeSummary>): SidebarWorktreeSu
     workItemKey: null,
     workItemTitle: null,
     workItemState: null,
+    workItemStateName: null,
     workItemUrl: null,
     createdAt: "2026-06-09T00:00:00.000Z",
     updatedAt: "2026-06-09T00:00:00.000Z",

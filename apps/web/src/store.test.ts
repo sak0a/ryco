@@ -329,6 +329,7 @@ describe("worktree sidebar state", () => {
           workItemKey: null,
           workItemTitle: null,
           workItemState: null,
+          workItemStateName: null,
           workItemUrl: null,
           createdAt: "2026-02-13T00:00:00.000Z",
           updatedAt: "2026-02-13T00:00:00.000Z",

@@ -149,6 +149,7 @@ describe("Worktree", () => {
       workItemKey: "KAN-4",
       workItemTitle: "SUPER TOLL",
       workItemState: "open",
+      workItemStateName: "Next to come",
       workItemUrl: "https://ryco-app.atlassian.net/browse/KAN-4",
       createdAt: "2026-05-08T00:00:00.000Z",
       updatedAt: "2026-05-08T00:00:00.000Z",
@@ -158,5 +159,6 @@ describe("Worktree", () => {
 
     expect(decoded.workItemProvider).toBe("jira");
     expect(decoded.workItemKey).toBe("KAN-4");
+    expect(decoded.workItemStateName).toBe("Next to come");
   });
 });

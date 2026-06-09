@@ -26,6 +26,7 @@ export const WorkItemTransition = Schema.Struct({
   id: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
   toState: WorkItemState,
+  toStateName: Schema.optional(TrimmedNonEmptyString),
 });
 export type WorkItemTransition = typeof WorkItemTransition.Type;
 
@@ -56,6 +57,7 @@ export const WorkItemSummary = Schema.Struct({
   title: TrimmedNonEmptyString,
   url: Schema.String,
   state: WorkItemState,
+  stateName: Schema.optional(TrimmedNonEmptyString),
   issueType: Schema.optional(TrimmedNonEmptyString),
   priority: Schema.optional(TrimmedNonEmptyString),
   assignee: Schema.NullOr(TrimmedNonEmptyString),

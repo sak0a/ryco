@@ -53,6 +53,9 @@ export const Worktree = Schema.Struct({
   workItemState: Schema.optional(Schema.NullOr(WorkItemState)).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  workItemStateName: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   workItemUrl: Schema.optional(Schema.NullOr(Schema.String)).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -80,6 +83,7 @@ export const CreateWorktreeIntent = Schema.Union([
     key: TrimmedNonEmptyString,
     title: TrimmedNonEmptyString,
     state: Schema.optional(WorkItemState),
+    stateName: Schema.optional(TrimmedNonEmptyString),
     url: Schema.optional(Schema.String),
     body: Schema.optional(Schema.String),
     branchSource: Schema.optional(Schema.Literals(["new", "existing"])),

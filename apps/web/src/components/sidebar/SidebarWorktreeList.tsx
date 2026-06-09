@@ -201,6 +201,7 @@ function ArchivedWorktreeRow(props: {
           workItemProvider={props.worktree.worktree.workItemProvider}
           workItemKey={props.worktree.worktree.workItemKey}
           workItemState={props.worktree.worktree.workItemState}
+          workItemStateName={props.worktree.worktree.workItemStateName}
           displayMode="prefer-pr"
           onOpenLinkedItem={props.onOpenLinkedItem}
         />
@@ -424,6 +425,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                   workItemProvider={props.worktree.worktree.workItemProvider}
                   workItemKey={props.worktree.worktree.workItemKey}
                   workItemState={props.worktree.worktree.workItemState}
+                  workItemStateName={props.worktree.worktree.workItemStateName}
                   displayMode="prefer-pr"
                   onOpenLinkedItem={props.onOpenLinkedItem}
                 />

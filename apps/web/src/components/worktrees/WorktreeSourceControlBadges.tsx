@@ -1,6 +1,7 @@
 import type { MouseEvent } from "react";
 import { AtlassianJiraIcon } from "../Icons";
 import { cn } from "~/lib/utils";
+import { workItemStateLabel } from "~/lib/workItemState";
 import {
   resolveStateBadgeVariant,
   type StateBadgeVariant,
@@ -16,6 +17,7 @@ export interface WorktreeSourceControlBadgesProps {
   workItemProvider?: "jira" | null | undefined;
   workItemKey?: string | null | undefined;
   workItemState?: "open" | "in_progress" | "done" | "closed" | "unknown" | null | undefined;
+  workItemStateName?: string | null | undefined;
   onOpenLinkedItem?: ((item: LinkedWorktreeItem) => void) | undefined;
   className?: string | undefined;
   density?: "compact" | "header" | undefined;
@@ -39,6 +41,7 @@ export function WorktreeSourceControlBadges(props: WorktreeSourceControlBadgesPr
         <WorktreeWorkItemBadge
           itemKey={workItemKey}
           state={props.workItemState ?? null}
+          stateName={props.workItemStateName ?? null}
           density={props.density ?? "compact"}
           onClick={
             props.onOpenLinkedItem
@@ -96,6 +99,7 @@ export function WorktreeSourceControlBadges(props: WorktreeSourceControlBadgesPr
 function WorktreeWorkItemBadge(props: {
   itemKey: string;
   state: WorktreeSourceControlBadgesProps["workItemState"];
+  stateName: string | null;
   density: "compact" | "header";
   onClick?: (() => void) | undefined;
 }) {
@@ -104,7 +108,10 @@ function WorktreeWorkItemBadge(props: {
       ? "inline-flex h-5 shrink-0 items-center justify-center gap-1 rounded-md border px-1.5 text-[10px] font-semibold tabular-nums leading-none"
       : "inline-flex h-4 shrink-0 items-center justify-center gap-0.5 rounded-sm border px-1 text-[9px] font-semibold tabular-nums leading-none";
   const iconClass = props.density === "header" ? "size-3" : "size-2.5";
-  const title = `Jira ${props.itemKey}${props.state ? ` — ${jiraStateLabel(props.state)}` : ""}`;
+  const stateLabel = props.state
+    ? workItemStateLabel({ state: props.state, stateName: props.stateName })
+    : null;
+  const title = `Jira ${props.itemKey}${stateLabel ? ` — ${stateLabel}` : ""}`;
   const className = "border-violet-500/20 bg-violet-500/10 text-violet-600 dark:text-violet-300";
 
   if (props.onClick) {
@@ -143,23 +150,6 @@ function WorktreeWorkItemBadge(props: {
       <span>{props.itemKey}</span>
     </span>
   );
-}
-
-function jiraStateLabel(
-  state: NonNullable<WorktreeSourceControlBadgesProps["workItemState"]>,
-): string {
-  switch (state) {
-    case "open":
-      return "Open";
-    case "in_progress":
-      return "In progress";
-    case "done":
-      return "Done";
-    case "closed":
-      return "Closed";
-    case "unknown":
-      return "Unknown";
-  }
 }
 
 function WorktreeSourceControlBadge(props: {

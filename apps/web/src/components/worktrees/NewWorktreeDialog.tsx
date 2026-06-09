@@ -24,6 +24,7 @@ import {
   type LinkedWorkItemWorktree,
   type WorkItemBranchChoice,
 } from "~/lib/workItemLocalLinks";
+import { workItemStateLabel } from "~/lib/workItemState";
 import { cn } from "~/lib/utils";
 import { ContextPickerTabs } from "../chat/ContextPickerTabs";
 import { IssuesTab } from "../projectExplorer/IssuesTab";
@@ -712,6 +713,7 @@ export function NewWorktreeDialog(props: NewWorktreeDialogProps) {
                     key: selection.item.key,
                     title: selection.item.title,
                     state: selection.item.state,
+                    ...(selection.item.stateName ? { stateName: selection.item.stateName } : {}),
                     url: selection.item.url,
                     ...(selectedWorkItemBranchName
                       ? {
@@ -1419,7 +1421,7 @@ export function WorkItemSummaryPanel(props: {
             <div className="line-clamp-2 font-medium text-sm">{props.selection.title}</div>
           </div>
         </div>
-        <SummaryRow label="State" value={jiraStateLabel(props.selection.state)} />
+        <SummaryRow label="State" value={workItemStateLabel(props.selection)} />
         {props.selection.issueType ? (
           <SummaryRow label="Type" value={props.selection.issueType} />
         ) : null}
@@ -1556,21 +1558,6 @@ export function WorkItemSummaryPanel(props: {
       )}
     </div>
   );
-}
-
-function jiraStateLabel(state: WorkItemSummary["state"]): string {
-  switch (state) {
-    case "open":
-      return "Open";
-    case "in_progress":
-      return "In progress";
-    case "done":
-      return "Done";
-    case "closed":
-      return "Closed";
-    case "unknown":
-      return "Unknown";
-  }
 }
 
 function SummaryRow(props: { label: string; value: string; mono?: boolean }) {

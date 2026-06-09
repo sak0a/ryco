@@ -1346,6 +1346,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
           let workItemKey: string | null = null;
           let workItemTitle: string | null = null;
           let workItemState: "open" | "in_progress" | "done" | "closed" | "unknown" | null = null;
+          let workItemStateName: string | null = null;
           let workItemUrl: string | null = null;
           let preparedWorktreePath: string | null = null;
           let ownedWorktreePath: string | null = null;
@@ -1482,6 +1483,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
               workItemKey = key;
               workItemTitle = title;
               workItemState = input.intent.state ?? null;
+              workItemStateName = input.intent.stateName ?? null;
               workItemUrl = input.intent.url ?? null;
               break;
             }
@@ -1568,6 +1570,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                 workItemKey,
                 workItemTitle,
                 workItemState,
+                workItemStateName,
                 workItemUrl,
                 createdAt: now,
               },

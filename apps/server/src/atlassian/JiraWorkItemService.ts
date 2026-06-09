@@ -267,6 +267,12 @@ function stateFromStatusCategory(
   return "unknown";
 }
 
+function stateNameFromStatus(
+  status: { readonly name?: string | undefined } | null | undefined,
+): string | null {
+  return status?.name?.trim() || null;
+}
+
 function optionDate(value: string | null | undefined): WorkItemSummary["updatedAt"] {
   if (!value) return Option.none();
   return Option.some(DateTime.fromDateUnsafe(new Date(value)));
@@ -377,6 +383,9 @@ function mapIssueSummary(
     title: issue.fields.summary,
     url: `${siteUrl}/browse/${encodeURIComponent(issue.key)}`,
     state: stateFromStatusCategory(issue.fields.status?.statusCategory),
+    ...(stateNameFromStatus(issue.fields.status)
+      ? { stateName: stateNameFromStatus(issue.fields.status)! }
+      : {}),
     ...(issue.fields.issuetype?.name ? { issueType: issue.fields.issuetype.name } : {}),
     ...(issue.fields.priority?.name ? { priority: issue.fields.priority.name } : {}),
     assignee: displayName(issue.fields.assignee),
@@ -426,6 +435,9 @@ function mapTransitions(
     id: transition.id,
     name: transition.name,
     toState: stateFromStatusCategory(transition.to?.statusCategory),
+    ...(stateNameFromStatus(transition.to)
+      ? { toStateName: stateNameFromStatus(transition.to)! }
+      : {}),
   }));
 }
 

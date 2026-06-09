@@ -40,6 +40,7 @@ describe("work item contracts", () => {
       title: "Wire Atlassian connection settings",
       url: "https://acme.atlassian.net/browse/PROJ-123",
       state: "in_progress",
+      stateName: "Next to come",
       issueType: "Task",
       priority: "High",
       assignee: "Alice",
@@ -50,6 +51,7 @@ describe("work item contracts", () => {
     });
 
     expect(decoded.key).toBe("PROJ-123");
+    expect(decoded.stateName).toBe("Next to come");
     expect(decoded.createdAt && Option.isSome(decoded.createdAt)).toBe(true);
     expect(Option.isSome(decoded.updatedAt)).toBe(true);
   });
@@ -61,6 +63,7 @@ describe("work item contracts", () => {
       title: "Wire Atlassian connection settings",
       url: "https://acme.atlassian.net/browse/PROJ-123",
       state: "open",
+      stateName: "Backlog",
       assignee: null,
       createdAt: Option.some(createdAt),
       updatedAt: Option.none(),
@@ -77,6 +80,7 @@ describe("work item contracts", () => {
           id: "31",
           name: "In Progress",
           toState: "in_progress",
+          toStateName: "In Umsetzung",
         },
       ],
       linkedChangeRequests: [
@@ -92,7 +96,9 @@ describe("work item contracts", () => {
     });
 
     expect(decoded.comments).toHaveLength(1);
+    expect(decoded.stateName).toBe("Backlog");
     expect(decoded.transitions[0]?.toState).toBe("in_progress");
+    expect(decoded.transitions[0]?.toStateName).toBe("In Umsetzung");
     expect(decoded.linkedChangeRequests[0]?.provider).toBe("bitbucket");
   });
 

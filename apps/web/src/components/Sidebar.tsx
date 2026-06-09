@@ -129,6 +129,7 @@ import {
 import { useModelPickerOpen } from "../modelPickerOpenState";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { useGitStatus, type GitStatusState } from "../lib/gitStatusState";
+import { buildJiraProjectUnlinkInput } from "../lib/atlassianProjectLinks";
 import { resolveJiraProjectOpenUrl } from "../lib/workItemLocalLinks";
 import { readLocalApi } from "../localApi";
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
@@ -2002,6 +2003,11 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
     dirtyRef.current = true;
   };
 
+  const invalidateAtlassianProjectSettings = () => {
+    void queryClient.invalidateQueries({ queryKey: ["atlassian"] });
+    void queryClient.invalidateQueries({ queryKey: ["workItems"] });
+  };
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!client || !target) throw new Error("Project connection is unavailable.");
@@ -2030,8 +2036,7 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
     },
     onSuccess: () => {
       dirtyRef.current = false;
-      void queryClient.invalidateQueries({ queryKey: ["atlassian"] });
-      void queryClient.invalidateQueries({ queryKey: ["workItems"] });
+      invalidateAtlassianProjectSettings();
       toastManager.add(
         stackedThreadToast({
           type: "success",
@@ -2051,8 +2056,47 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
     },
   });
 
+  const unlinkJiraMutation = useMutation({
+    mutationFn: async () => {
+      if (!client || !target) throw new Error("Project connection is unavailable.");
+      return client.atlassian.saveProjectLink(
+        buildJiraProjectUnlinkInput({
+          projectId: target.id,
+          existing: projectLinkQuery.data ?? null,
+        }),
+      );
+    },
+    onSuccess: () => {
+      dirtyRef.current = false;
+      setJiraConnectionValue(ATLASSIAN_NONE_VALUE);
+      setJiraProjectKeys("");
+      invalidateAtlassianProjectSettings();
+      toastManager.add(
+        stackedThreadToast({
+          type: "success",
+          title: "Jira project unlinked",
+          description: "Bitbucket mapping and project templates were left unchanged.",
+        }),
+      );
+    },
+    onError: (error) => {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not unlink Jira project",
+          description: error instanceof Error ? error.message : "The project link was not saved.",
+        }),
+      );
+    },
+  });
+
   const isLoading = projectLinkQuery.isLoading || connectionsQuery.isLoading;
-  const disabled = client === null || target === null || saveMutation.isPending;
+  const disabled =
+    client === null || target === null || saveMutation.isPending || unlinkJiraMutation.isPending;
+  const jiraLinked =
+    projectLinkQuery.data?.jiraConnectionId !== null &&
+    projectLinkQuery.data?.jiraConnectionId !== undefined &&
+    projectLinkQuery.data.jiraProjectKeys.length > 0;
   const selectedJiraConnectionId = nullableAtlassianConnectionId(jiraConnectionValue);
   const selectedJiraConnection = jiraConnections.find(
     (connection) => connection.connectionId === selectedJiraConnectionId,
@@ -2271,15 +2315,27 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
         <p className="text-[11px] text-muted-foreground">
           Tokens live in Source Control settings. These defaults belong only to this project.
         </p>
-        <Button
-          type="button"
-          size="sm"
-          className="h-8 shrink-0"
-          disabled={disabled}
-          onClick={() => saveMutation.mutate()}
-        >
-          {saveMutation.isPending ? "Saving..." : "Save Atlassian"}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive-outline"
+            className="h-8"
+            disabled={disabled || !jiraLinked}
+            onClick={() => unlinkJiraMutation.mutate()}
+          >
+            {unlinkJiraMutation.isPending ? "Unlinking..." : "Unlink Jira"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="h-8"
+            disabled={disabled}
+            onClick={() => saveMutation.mutate()}
+          >
+            {saveMutation.isPending ? "Saving..." : "Save Atlassian"}
+          </Button>
+        </div>
       </div>
     </div>
   );

@@ -19,6 +19,7 @@ import {
   type LinkedWorkItemWorktree,
 } from "~/lib/workItemLocalLinks";
 import { searchChangeRequestsQueryOptions } from "~/lib/sourceControlContextRpc";
+import { workItemStateLabel } from "~/lib/workItemState";
 import { workItemDetailQueryOptions, workItemsQueryKeys } from "~/lib/workItemsRpc";
 import { selectSidebarWorktreesForProjectRef, useStore } from "~/store";
 import { AtlassianJiraIcon } from "../Icons";
@@ -507,7 +508,7 @@ export function LinkedLocalWorkItemSection(props: {
 }
 
 function workItemSubtitle(detail: WorkItemDetailModel): string {
-  const parts = [detail.state.replace("_", " "), detail.issueType ?? "Work item"];
+  const parts = [workItemStateLabel(detail), detail.issueType ?? "Work item"];
   if (detail.assignee) parts.push(`assigned to ${detail.assignee}`);
   if (detail.reporter) parts.push(`reported by ${detail.reporter}`);
   if (detail.updatedAt && Option.isSome(detail.updatedAt)) {

@@ -3319,6 +3319,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               key: "KAN-4",
               title: "SUPER TOLL",
               state: "open",
+              stateName: "Next to come",
               url: "https://ryco-app.atlassian.net/browse/KAN-4",
             },
           }),
@@ -3342,6 +3343,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(worktreeCreate?.workItemKey, "KAN-4");
       assert.equal(worktreeCreate?.workItemTitle, "SUPER TOLL");
       assert.equal(worktreeCreate?.workItemState, "open");
+      assert.equal(worktreeCreate?.workItemStateName, "Next to come");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -3425,6 +3427,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               key: "KAN-4",
               title: "SUPER TOLL",
               state: "open",
+              stateName: "Next to come",
               url: "https://ryco-app.atlassian.net/browse/KAN-4",
               branchSource: "existing",
               branchName: "feature/KAN-4-existing",
@@ -3446,6 +3449,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(worktreeCreate?.workItemProvider, "jira");
       assert.equal(worktreeCreate?.workItemKey, "KAN-4");
       assert.equal(worktreeCreate?.workItemTitle, "SUPER TOLL");
+      assert.equal(worktreeCreate?.workItemState, "open");
+      assert.equal(worktreeCreate?.workItemStateName, "Next to come");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

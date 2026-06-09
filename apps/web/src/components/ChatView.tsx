@@ -4537,6 +4537,7 @@ export default function ChatView(props: ChatViewProps) {
           worktreeWorkItemProvider={activeWorktreeSummary?.workItemProvider ?? null}
           worktreeWorkItemKey={activeWorktreeSummary?.workItemKey ?? null}
           worktreeWorkItemState={activeWorktreeSummary?.workItemState ?? null}
+          worktreeWorkItemStateName={activeWorktreeSummary?.workItemStateName ?? null}
           sessionTabs={activeWorktreeSessionTabs}
           activeSessionTabKey={activeSessionTabKey}
           onOpenLinkedWorktreeItem={handleOpenHeaderLinkedItem}

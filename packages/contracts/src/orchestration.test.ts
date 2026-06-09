@@ -383,6 +383,73 @@ it.effect("decodes thread archived and unarchived events", () =>
   }),
 );
 
+it.effect("decodes Jira work item metadata on worktree create commands and events", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeOrchestrationCommand({
+      type: "worktree.create",
+      commandId: "cmd-jira-worktree-create",
+      worktreeId: "worktree-jira-kan-4",
+      projectId: "project-jira",
+      branch: "KAN-4-super-toll",
+      worktreePath: "/tmp/KAN-4-super-toll",
+      origin: "issue",
+      prNumber: null,
+      issueNumber: null,
+      prTitle: null,
+      issueTitle: null,
+      workItemProvider: "jira",
+      workItemKey: "KAN-4",
+      workItemTitle: "SUPER TOLL",
+      workItemState: "open",
+      workItemStateName: "Next to come",
+      workItemUrl: "https://ryco-app.atlassian.net/browse/KAN-4",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    const event = yield* decodeOrchestrationEvent({
+      sequence: 1,
+      eventId: "event-jira-worktree-created",
+      aggregateKind: "worktree",
+      aggregateId: "worktree-jira-kan-4",
+      type: "worktree.created",
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      commandId: "cmd-jira-worktree-create",
+      causationEventId: null,
+      correlationId: "cmd-jira-worktree-create",
+      metadata: {},
+      payload: {
+        worktreeId: "worktree-jira-kan-4",
+        projectId: "project-jira",
+        branch: "KAN-4-super-toll",
+        worktreePath: "/tmp/KAN-4-super-toll",
+        origin: "issue",
+        prNumber: null,
+        issueNumber: null,
+        prTitle: null,
+        issueTitle: null,
+        workItemProvider: "jira",
+        workItemKey: "KAN-4",
+        workItemTitle: "SUPER TOLL",
+        workItemState: "open",
+        workItemStateName: "Next to come",
+        workItemUrl: "https://ryco-app.atlassian.net/browse/KAN-4",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+
+    if (command.type !== "worktree.create") {
+      throw new Error(`Unexpected command type: ${command.type}`);
+    }
+    assert.strictEqual(command.workItemState, "open");
+    assert.strictEqual(command.workItemStateName, "Next to come");
+    if (event.type !== "worktree.created") {
+      throw new Error(`Unexpected event type: ${event.type}`);
+    }
+    assert.strictEqual(event.payload.workItemState, "open");
+    assert.strictEqual(event.payload.workItemStateName, "Next to come");
+  }),
+);
+
 it.effect("accepts provider-scoped model options in thread.turn.start", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({

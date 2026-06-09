@@ -857,6 +857,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             workItemKey: event.payload.workItemKey ?? null,
             workItemTitle: event.payload.workItemTitle ?? null,
             workItemState: event.payload.workItemState ?? null,
+            workItemStateName: event.payload.workItemStateName ?? null,
             workItemUrl: event.payload.workItemUrl ?? null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,

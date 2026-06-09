@@ -17,6 +17,10 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type RefObject } 
 import { readEnvironmentConnection } from "~/environments/runtime";
 import { readEnvironmentApi } from "~/environmentApi";
 import {
+  buildJiraProjectLinkInput,
+  buildJiraProjectUnlinkInput,
+} from "~/lib/atlassianProjectLinks";
+import {
   findLinkedWorkItemBranches,
   findLinkedWorkItemWorktrees,
   type LinkedWorkItemWorktree,
@@ -30,6 +34,7 @@ import { selectSidebarWorktreesForProjectRef, useStore } from "~/store";
 import { cn } from "~/lib/utils";
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
 import type { SidebarWorktreeSummary } from "~/types";
+import { workItemStateLabel } from "~/lib/workItemState";
 import { AtlassianJiraIcon } from "../Icons";
 import { JiraProjectPicker } from "../atlassian/JiraProjectPicker";
 import { Badge } from "../ui/badge";
@@ -74,31 +79,6 @@ function splitProjectKeys(value: string): string[] {
 
 function connectionIdValue(value: AtlassianConnectionId | null | undefined): string {
   return value ?? "";
-}
-
-function defaultProjectLink(input: {
-  readonly projectId: ProjectId;
-  readonly existing: AtlassianProjectLink | null | undefined;
-  readonly jiraConnectionId: AtlassianConnectionId | null;
-  readonly jiraSiteUrl: string | null;
-  readonly jiraProjectKeys: ReadonlyArray<string>;
-}) {
-  return {
-    projectId: input.projectId,
-    jiraConnectionId: input.jiraConnectionId,
-    bitbucketConnectionId: input.existing?.bitbucketConnectionId ?? null,
-    jiraCloudId: input.existing?.jiraCloudId ?? null,
-    jiraSiteUrl: input.jiraSiteUrl,
-    jiraProjectKeys: input.jiraProjectKeys,
-    bitbucketWorkspace: input.existing?.bitbucketWorkspace ?? null,
-    bitbucketRepoSlug: input.existing?.bitbucketRepoSlug ?? null,
-    defaultIssueTypeName: input.existing?.defaultIssueTypeName ?? null,
-    branchNameTemplate: input.existing?.branchNameTemplate ?? "{issueKey}-{titleSlug}",
-    commitMessageTemplate: input.existing?.commitMessageTemplate ?? "{issueKey}: {summary}",
-    pullRequestTitleTemplate: input.existing?.pullRequestTitleTemplate ?? "{issueKey}: {summary}",
-    smartLinkingEnabled: input.existing?.smartLinkingEnabled ?? true,
-    autoAttachWorkItems: input.existing?.autoAttachWorkItems ?? true,
-  };
 }
 
 export function WorkItemsTab(props: WorkItemsTabProps) {
@@ -210,6 +190,43 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
       }),
     [branchRefsQuery.data, items, projectWorktrees],
   );
+  const invalidateWorkItems = () => {
+    void queryClient.invalidateQueries({
+      queryKey: workItemsQueryKeys.projectLink(props.environmentId, props.projectId),
+    });
+    void queryClient.invalidateQueries({ queryKey: workItemsQueryKeys.all });
+  };
+  const unlinkMutation = useMutation({
+    mutationFn: async () => {
+      if (!client || !props.projectId) throw new Error("No project connection is available.");
+      return client.atlassian.saveProjectLink(
+        buildJiraProjectUnlinkInput({
+          projectId: props.projectId,
+          existing: projectLink,
+        }),
+      );
+    },
+    onSuccess: () => {
+      props.onQueryChange("");
+      invalidateWorkItems();
+      toastManager.add(
+        stackedThreadToast({
+          type: "success",
+          title: "Jira project unlinked",
+          description: "Jira work items are no longer loaded for this project.",
+        }),
+      );
+    },
+    onError: (error) => {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not unlink Jira project",
+          description: error instanceof Error ? error.message : "The project link was not saved.",
+        }),
+      );
+    },
+  });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -235,12 +252,23 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
               size="icon"
               variant="ghost"
               onClick={() => listQuery.refetch()}
-              disabled={listQuery.isFetching}
+              disabled={listQuery.isFetching || unlinkMutation.isPending}
               aria-label="Refresh"
             >
               <RotateCwIcon
                 className={listQuery.isFetching ? "size-3.5 animate-spin" : "size-3.5"}
               />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive-outline"
+              className="h-8"
+              disabled={unlinkMutation.isPending}
+              onClick={() => unlinkMutation.mutate()}
+            >
+              {unlinkMutation.isPending ? <Spinner className="size-3.5" /> : null}
+              Unlink Jira
             </Button>
           </div>
 
@@ -272,12 +300,7 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
           connections={jiraConnections}
           connectionsPending={connectionsQuery.isLoading}
           projectLink={projectLink}
-          onSaved={() => {
-            void queryClient.invalidateQueries({
-              queryKey: workItemsQueryKeys.projectLink(props.environmentId, props.projectId),
-            });
-            void queryClient.invalidateQueries({ queryKey: workItemsQueryKeys.all });
-          }}
+          onSaved={invalidateWorkItems}
         />
       )}
     </div>
@@ -347,7 +370,7 @@ function WorkItemList(props: {
                   }
                   size="sm"
                 >
-                  {item.state.replace("_", " ")}
+                  {workItemStateLabel(item)}
                 </Badge>
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-1.5 text-muted-foreground text-xs">
@@ -462,7 +485,7 @@ function JiraProjectSetup(props: {
         throw new Error("Select a Jira connection and at least one project key.");
       }
       return props.client.atlassian.saveProjectLink(
-        defaultProjectLink({
+        buildJiraProjectLinkInput({
           projectId: props.projectId,
           existing: props.projectLink,
           jiraConnectionId: selectedConnectionId,

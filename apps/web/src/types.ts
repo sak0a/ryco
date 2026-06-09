@@ -198,6 +198,7 @@ export interface SidebarWorktreeSummary {
   workItemKey: string | null;
   workItemTitle: string | null;
   workItemState: "open" | "in_progress" | "done" | "closed" | "unknown" | null;
+  workItemStateName: string | null;
   workItemUrl: string | null;
   createdAt: string;
   updatedAt: string;

@@ -219,6 +219,7 @@ layer("OrchestrationProjectionPipeline worktrees", (it) => {
           workItemKey: "KAN-4",
           workItemTitle: "SUPER TOLL",
           workItemState: "open",
+          workItemStateName: "Next to come",
           workItemUrl: "https://ryco-app.atlassian.net/browse/KAN-4",
           createdAt: now,
           updatedAt: now,
@@ -231,6 +232,7 @@ layer("OrchestrationProjectionPipeline worktrees", (it) => {
       assert.equal(createdRow.workItemKey, "KAN-4");
       assert.equal(createdRow.workItemTitle, "SUPER TOLL");
       assert.equal(createdRow.workItemState, "open");
+      assert.equal(createdRow.workItemStateName, "Next to come");
       assert.equal(createdRow.workItemUrl, "https://ryco-app.atlassian.net/browse/KAN-4");
     }),
   );

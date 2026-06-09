@@ -1,4 +1,4 @@
-import { AtlassianConnectionId } from "@ryco/contracts";
+import { AtlassianConnectionId, ProjectId } from "@ryco/contracts";
 import { assert, it, vi } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
@@ -7,10 +7,12 @@ import { ServerSecretStore } from "../auth/Services/ServerSecretStore.ts";
 import { AtlassianConnectionRepository } from "../persistence/Services/AtlassianConnections.ts";
 import type { AtlassianConnectionRecord } from "../persistence/Services/AtlassianConnections.ts";
 import { ProjectAtlassianLinkRepository } from "../persistence/Services/ProjectAtlassianLinks.ts";
+import type { ProjectAtlassianLinkRecord } from "../persistence/Services/ProjectAtlassianLinks.ts";
 import { JiraWorkItemService, layer as JiraWorkItemServiceLive } from "./JiraWorkItemService.ts";
 import { manualJiraTokenSecretName } from "./AtlassianConnectionService.ts";
 
 const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
 
 function connectedJiraConnection(connectionId: AtlassianConnectionId): AtlassianConnectionRecord {
   const timestamp = "2026-06-08T00:00:00.000Z";
@@ -40,6 +42,7 @@ function basicAuthorization(email: string, token: string): string {
 
 function makeLayer(input: {
   readonly connection: AtlassianConnectionRecord;
+  readonly projectLink?: ProjectAtlassianLinkRecord;
   readonly token: string;
   readonly response: (request: HttpClientRequest.HttpClientRequest) => Response;
 }) {
@@ -64,7 +67,12 @@ function makeLayer(input: {
     ),
     Layer.provide(
       Layer.mock(ProjectAtlassianLinkRepository)({
-        getByProjectId: () => Effect.die("unexpected project link lookup"),
+        getByProjectId: ({ projectId }) =>
+          Effect.succeed(
+            input.projectLink && projectId === input.projectLink.projectId
+              ? Option.some(input.projectLink)
+              : Option.none(),
+          ),
         upsert: () => Effect.die("unexpected project link upsert"),
         deleteByProjectId: () => Effect.die("unexpected project link delete"),
       }),
@@ -91,6 +99,31 @@ function makeLayer(input: {
   );
 
   return { execute, layer };
+}
+
+function projectLink(input: {
+  readonly connectionId: AtlassianConnectionId;
+  readonly projectId: ProjectId;
+}): ProjectAtlassianLinkRecord {
+  const timestamp = "2026-06-08T00:00:00.000Z";
+  return {
+    projectId: input.projectId,
+    jiraConnectionId: input.connectionId,
+    bitbucketConnectionId: null,
+    jiraCloudId: null,
+    jiraSiteUrl: "https://ryco-app.atlassian.net",
+    jiraProjectKeys: ["KAN"],
+    bitbucketWorkspace: null,
+    bitbucketRepoSlug: null,
+    defaultIssueTypeName: null,
+    branchNameTemplate: "{issueKey}-{titleSlug}",
+    commitMessageTemplate: "{issueKey}: {summary}",
+    pullRequestTitleTemplate: "{issueKey}: {summary}",
+    smartLinkingEnabled: true,
+    autoAttachWorkItems: true,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
 }
 
 it.effect("lists Jira projects from a saved manual Jira token", () => {
@@ -144,5 +177,55 @@ it.effect("lists Jira projects from a saved manual Jira token", () => {
       request.headers.authorization,
       basicAuthorization("jira@example.com", "jira-secret"),
     );
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("returns Jira status names separately from normalized state categories", () => {
+  const connectionId = AtlassianConnectionId.make("atl-jira-1");
+  const projectId = ProjectId.make("project-jira-1");
+  const connection = connectedJiraConnection(connectionId);
+  const { execute, layer } = makeLayer({
+    connection,
+    projectLink: projectLink({ connectionId, projectId }),
+    token: "jira-secret",
+    response: () =>
+      Response.json({
+        issues: [
+          {
+            id: "10001",
+            key: "KAN-4",
+            fields: {
+              summary: "Custom workflow status",
+              status: {
+                name: "Next to come",
+                statusCategory: {
+                  key: "new",
+                  name: "To Do",
+                },
+              },
+              issuetype: { name: "Story" },
+              assignee: null,
+              updated: "2026-06-08T12:00:00.000Z",
+            },
+          },
+        ],
+      }),
+  });
+
+  return Effect.gen(function* () {
+    const service = yield* JiraWorkItemService;
+    const items = yield* service.list({
+      projectId,
+      state: "open",
+      limit: 10,
+    });
+
+    assert.strictEqual(items[0]?.state, "open");
+    assert.strictEqual(items[0]?.stateName, "Next to come");
+    const request = execute.mock.calls[0]?.[0];
+    assert.ok(request);
+    const rawBody = (request.body as { readonly body?: Uint8Array }).body;
+    assert.ok(rawBody);
+    assert.include(textDecoder.decode(rawBody), "statusCategory != Done");
   }).pipe(Effect.provide(layer));
 });
