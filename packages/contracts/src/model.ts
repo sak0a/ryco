@@ -129,6 +129,7 @@ const CODEX_DRIVER_KIND = ProviderDriverKind.make("codex");
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const COPILOT_DRIVER_KIND = ProviderDriverKind.make("copilot");
 const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
+const GEMINI_DRIVER_KIND = ProviderDriverKind.make("gemini");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 
 export const DEFAULT_MODEL = "gpt-5.4";
@@ -139,6 +140,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [CLAUDE_DRIVER_KIND]: "claude-sonnet-4-6",
   [COPILOT_DRIVER_KIND]: "gpt-5",
   [CURSOR_DRIVER_KIND]: "auto",
+  [GEMINI_DRIVER_KIND]: "auto-gemini-3",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
 };
 
@@ -201,6 +203,20 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
     "opus-4.5-thinking": "claude-opus-4-5",
     "opus-4.5": "claude-opus-4-5",
   },
+  [GEMINI_DRIVER_KIND]: {
+    auto: "auto-gemini-3",
+    "auto-3": "auto-gemini-3",
+    "auto-gemini-3": "auto-gemini-3",
+    "auto-2.5": "auto-gemini-2.5",
+    "auto-gemini-2.5": "auto-gemini-2.5",
+    pro: "gemini-2.5-pro",
+    "2.5-pro": "gemini-2.5-pro",
+    "gemini-pro": "gemini-2.5-pro",
+    flash: "gemini-2.5-flash",
+    "2.5-flash": "gemini-2.5-flash",
+    "flash-lite": "gemini-2.5-flash-lite",
+    "2.5-flash-lite": "gemini-2.5-flash-lite",
+  },
   [OPENCODE_DRIVER_KIND]: {},
 };
 
@@ -211,5 +227,6 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [CLAUDE_DRIVER_KIND]: "Claude",
   [COPILOT_DRIVER_KIND]: "GitHub Copilot",
   [CURSOR_DRIVER_KIND]: "Cursor",
+  [GEMINI_DRIVER_KIND]: "Gemini",
   [OPENCODE_DRIVER_KIND]: "OpenCode",
 };
