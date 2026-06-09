@@ -35,15 +35,42 @@ export interface PersistedUiState {
   collapsedProjectCwds?: string[];
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
+  projectFolders?: PersistedUiProjectFolder[];
+  projectFolderOrder?: string[];
+  projectTreeOrder?: string[];
   defaultAdvertisedEndpointKey?: string | null;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
   reasoningIndicatorStyle?: ReasoningIndicatorStyle;
   tokenModeControlStyle?: TokenModeControlStyle;
 }
 
+export type UiProjectFolderId = string;
+export type UiProjectTreeItemId = `folder:${UiProjectFolderId}` | `project:${string}`;
+
+export interface PersistedUiProjectFolder {
+  id?: string;
+  name?: string;
+  projectKeys?: string[];
+  expanded?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UiProjectFolder {
+  id: UiProjectFolderId;
+  name: string;
+  projectKeys: string[];
+  expanded: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface UiProjectState {
   projectExpandedById: Record<string, boolean>;
   projectOrder: string[];
+  projectFoldersById: Record<string, UiProjectFolder>;
+  projectFolderOrder: string[];
+  projectTreeOrder: UiProjectTreeItemId[];
 }
 
 export interface UiThreadState {
@@ -84,6 +111,9 @@ export interface SyncThreadInput {
 const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
+  projectFoldersById: {},
+  projectFolderOrder: [],
+  projectTreeOrder: [],
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   threadWorkEntryExpandedById: {},
@@ -105,6 +135,232 @@ const currentProjectCwdsByLogicalKey = new Map<string, string[]>();
 const currentLogicalKeyByPhysicalKey = new Map<string, string>();
 let legacyKeysCleanedUp = false;
 
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function makeProjectFolderId(): UiProjectFolderId {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return `folder-${globalThis.crypto.randomUUID()}`;
+  }
+  return `folder-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+}
+
+export function projectFolderTreeItemId(folderId: UiProjectFolderId): UiProjectTreeItemId {
+  return `folder:${folderId}`;
+}
+
+export function projectTreeItemId(projectKey: string): UiProjectTreeItemId {
+  return `project:${projectKey}`;
+}
+
+export function parseProjectTreeItemId(
+  itemId: string,
+): { kind: "folder"; folderId: string } | { kind: "project"; projectKey: string } | null {
+  if (itemId.startsWith("folder:")) {
+    const folderId = itemId.slice("folder:".length);
+    return folderId.length > 0 ? { kind: "folder", folderId } : null;
+  }
+  if (itemId.startsWith("project:")) {
+    const projectKey = itemId.slice("project:".length);
+    return projectKey.length > 0 ? { kind: "project", projectKey } : null;
+  }
+  return null;
+}
+
+function uniqueNonEmptyStrings(values: readonly unknown[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string") {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function sanitizeIsoDate(value: unknown, fallback: string): string {
+  if (typeof value !== "string" || value.length === 0 || Number.isNaN(Date.parse(value))) {
+    return fallback;
+  }
+  return value;
+}
+
+function sanitizeProjectFolders(
+  folders: PersistedUiState["projectFolders"],
+): Record<string, UiProjectFolder> {
+  if (!Array.isArray(folders)) {
+    return {};
+  }
+  const sanitized: Record<string, UiProjectFolder> = {};
+  const fallbackTimestamp = nowIso();
+  for (const folder of folders) {
+    if (!folder || typeof folder !== "object") {
+      continue;
+    }
+    const id = typeof folder.id === "string" ? folder.id.trim() : "";
+    const name = typeof folder.name === "string" ? folder.name.trim() : "";
+    if (!id || !name || sanitized[id] !== undefined) {
+      continue;
+    }
+    const createdAt = sanitizeIsoDate(folder.createdAt, fallbackTimestamp);
+    sanitized[id] = {
+      id,
+      name,
+      projectKeys: uniqueNonEmptyStrings(folder.projectKeys ?? []),
+      expanded: folder.expanded !== false,
+      createdAt,
+      updatedAt: sanitizeIsoDate(folder.updatedAt, createdAt),
+    };
+  }
+  return sanitized;
+}
+
+function sanitizeProjectFolderOrder(
+  order: PersistedUiState["projectFolderOrder"],
+  foldersById: Record<string, UiProjectFolder>,
+): string[] {
+  const knownFolderIds = new Set(Object.keys(foldersById));
+  const result: string[] = [];
+  for (const folderId of uniqueNonEmptyStrings(order ?? [])) {
+    if (knownFolderIds.has(folderId)) {
+      result.push(folderId);
+    }
+  }
+  for (const folderId of Object.keys(foldersById)) {
+    if (!result.includes(folderId)) {
+      result.push(folderId);
+    }
+  }
+  return result;
+}
+
+function sanitizeProjectTreeOrder(
+  order: PersistedUiState["projectTreeOrder"],
+  foldersById: Record<string, UiProjectFolder>,
+): UiProjectTreeItemId[] {
+  if (!Array.isArray(order)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const result: UiProjectTreeItemId[] = [];
+  for (const itemId of order) {
+    if (typeof itemId !== "string" || seen.has(itemId)) {
+      continue;
+    }
+    const parsed = parseProjectTreeItemId(itemId);
+    if (!parsed) {
+      continue;
+    }
+    if (parsed.kind === "folder" && foldersById[parsed.folderId] === undefined) {
+      continue;
+    }
+    seen.add(itemId);
+    result.push(itemId as UiProjectTreeItemId);
+  }
+  return result;
+}
+
+function projectKeysInFolders(foldersById: Record<string, UiProjectFolder>): Set<string> {
+  const keys = new Set<string>();
+  for (const folder of Object.values(foldersById)) {
+    for (const key of folder.projectKeys) {
+      keys.add(key);
+    }
+  }
+  return keys;
+}
+
+function normalizeProjectTreeOrder(input: {
+  projectKeys: readonly string[];
+  foldersById: Record<string, UiProjectFolder>;
+  folderOrder: readonly string[];
+  treeOrder: readonly UiProjectTreeItemId[];
+}): UiProjectTreeItemId[] {
+  const currentProjectKeys = new Set(input.projectKeys);
+  const folderedProjectKeys = projectKeysInFolders(input.foldersById);
+  const seen = new Set<string>();
+  const result: UiProjectTreeItemId[] = [];
+
+  for (const itemId of input.treeOrder) {
+    if (seen.has(itemId)) {
+      continue;
+    }
+    const parsed = parseProjectTreeItemId(itemId);
+    if (!parsed) {
+      continue;
+    }
+    if (parsed.kind === "folder") {
+      if (input.foldersById[parsed.folderId] === undefined) {
+        continue;
+      }
+    } else if (
+      !currentProjectKeys.has(parsed.projectKey) ||
+      folderedProjectKeys.has(parsed.projectKey)
+    ) {
+      continue;
+    }
+    seen.add(itemId);
+    result.push(itemId);
+  }
+
+  for (const folderId of input.folderOrder) {
+    const itemId = projectFolderTreeItemId(folderId);
+    if (input.foldersById[folderId] !== undefined && !seen.has(itemId)) {
+      seen.add(itemId);
+      result.push(itemId);
+    }
+  }
+
+  for (const projectKey of input.projectKeys) {
+    const itemId = projectTreeItemId(projectKey);
+    if (!folderedProjectKeys.has(projectKey) && !seen.has(itemId)) {
+      seen.add(itemId);
+      result.push(itemId);
+    }
+  }
+
+  return result;
+}
+
+function insertAt<T>(values: readonly T[], inserted: readonly T[], index?: number): T[] {
+  const boundedIndex =
+    typeof index === "number" && Number.isFinite(index)
+      ? Math.max(0, Math.min(values.length, Math.trunc(index)))
+      : values.length;
+  return [...values.slice(0, boundedIndex), ...inserted, ...values.slice(boundedIndex)];
+}
+
+function removeProjectKeysFromAllFolders(
+  foldersById: Record<string, UiProjectFolder>,
+  projectKeys: ReadonlySet<string>,
+  updatedAt: string,
+): Record<string, UiProjectFolder> {
+  let changed = false;
+  const nextEntries = Object.entries(foldersById).map(([folderId, folder]) => {
+    const projectKeysForFolder = folder.projectKeys.filter((key) => !projectKeys.has(key));
+    if (projectKeysForFolder.length === folder.projectKeys.length) {
+      return [folderId, folder] as const;
+    }
+    changed = true;
+    return [
+      folderId,
+      {
+        ...folder,
+        projectKeys: projectKeysForFolder,
+        updatedAt,
+      },
+    ] as const;
+  });
+  return changed ? Object.fromEntries(nextEntries) : foldersById;
+}
+
 function readPersistedState(): UiState {
   if (typeof window === "undefined") {
     return initialState;
@@ -124,8 +380,16 @@ function readPersistedState(): UiState {
     }
     const parsed = JSON.parse(raw) as PersistedUiState;
     hydratePersistedProjectState(parsed);
+    const projectFoldersById = sanitizeProjectFolders(parsed.projectFolders);
+    const projectFolderOrder = sanitizeProjectFolderOrder(
+      parsed.projectFolderOrder,
+      projectFoldersById,
+    );
     return {
       ...initialState,
+      projectFoldersById,
+      projectFolderOrder,
+      projectTreeOrder: sanitizeProjectTreeOrder(parsed.projectTreeOrder, projectFoldersById),
       defaultAdvertisedEndpointKey:
         typeof parsed.defaultAdvertisedEndpointKey === "string" &&
         parsed.defaultAdvertisedEndpointKey.length > 0
@@ -210,6 +474,21 @@ export function persistState(state: UiState): void {
       const cwd = currentProjectCwdById.get(projectId);
       return cwd ? [cwd] : [];
     });
+    const projectFolders = state.projectFolderOrder.flatMap((folderId) => {
+      const folder = state.projectFoldersById[folderId];
+      return folder
+        ? [
+            {
+              id: folder.id,
+              name: folder.name,
+              projectKeys: folder.projectKeys,
+              expanded: folder.expanded,
+              createdAt: folder.createdAt,
+              updatedAt: folder.updatedAt,
+            } satisfies PersistedUiProjectFolder,
+          ]
+        : [];
+    });
     const threadChangedFilesExpandedById = Object.fromEntries(
       Object.entries(state.threadChangedFilesExpandedById).flatMap(([threadId, turns]) => {
         const nextTurns = Object.fromEntries(
@@ -224,6 +503,9 @@ export function persistState(state: UiState): void {
         collapsedProjectCwds,
         expandedProjectCwds,
         projectOrderCwds,
+        projectFolders,
+        projectFolderOrder: state.projectFolderOrder,
+        projectTreeOrder: state.projectTreeOrder,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         threadChangedFilesExpandedById,
         reasoningIndicatorStyle: state.reasoningIndicatorStyle,
@@ -261,6 +543,34 @@ function projectOrdersEqual(left: readonly string[], right: readonly string[]): 
   return (
     left.length === right.length && left.every((projectId, index) => projectId === right[index])
   );
+}
+
+function projectFoldersEqual(
+  left: Record<string, UiProjectFolder>,
+  right: Record<string, UiProjectFolder>,
+): boolean {
+  const leftEntries = Object.entries(left);
+  const rightEntries = Object.entries(right);
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+  for (const [folderId, leftFolder] of leftEntries) {
+    const rightFolder = right[folderId];
+    if (!rightFolder) {
+      return false;
+    }
+    if (
+      leftFolder.id !== rightFolder.id ||
+      leftFolder.name !== rightFolder.name ||
+      leftFolder.expanded !== rightFolder.expanded ||
+      leftFolder.createdAt !== rightFolder.createdAt ||
+      leftFolder.updatedAt !== rightFolder.updatedAt ||
+      !projectOrdersEqual(leftFolder.projectKeys, rightFolder.projectKeys)
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function nestedBooleanRecordsEqual(
@@ -416,9 +726,45 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
           })
           .map((project) => project.id);
 
+  const currentProjectKeySet = new Set(mappedProjects.map((project) => project.id));
+  let projectFoldersById = state.projectFoldersById;
+  const nextFolderEntries = Object.entries(state.projectFoldersById).map(
+    ([folderId, folder]) =>
+      [
+        folderId,
+        {
+          ...folder,
+          projectKeys: folder.projectKeys.filter((projectKey) =>
+            currentProjectKeySet.has(projectKey),
+          ),
+        },
+      ] as const,
+  );
+  const nextProjectFoldersById = Object.fromEntries(nextFolderEntries);
+  if (!projectFoldersEqual(state.projectFoldersById, nextProjectFoldersById)) {
+    projectFoldersById = nextProjectFoldersById;
+  }
+  const projectFolderOrder = state.projectFolderOrder.filter(
+    (folderId) => projectFoldersById[folderId] !== undefined,
+  );
+  for (const folderId of Object.keys(projectFoldersById)) {
+    if (!projectFolderOrder.includes(folderId)) {
+      projectFolderOrder.push(folderId);
+    }
+  }
+  const projectTreeOrder = normalizeProjectTreeOrder({
+    projectKeys: nextProjectOrder,
+    foldersById: projectFoldersById,
+    folderOrder: projectFolderOrder,
+    treeOrder: state.projectTreeOrder,
+  });
+
   if (
     recordsEqual(state.projectExpandedById, nextExpandedById) &&
     projectOrdersEqual(state.projectOrder, nextProjectOrder) &&
+    projectFoldersEqual(state.projectFoldersById, projectFoldersById) &&
+    projectOrdersEqual(state.projectFolderOrder, projectFolderOrder) &&
+    projectOrdersEqual(state.projectTreeOrder, projectTreeOrder) &&
     !cwdMappingChanged
   ) {
     return state;
@@ -428,6 +774,9 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
     ...state,
     projectExpandedById: nextExpandedById,
     projectOrder: nextProjectOrder,
+    projectFoldersById,
+    projectFolderOrder,
+    projectTreeOrder,
   };
 }
 
@@ -671,6 +1020,232 @@ export function setProjectExpanded(state: UiState, projectId: string, expanded: 
   };
 }
 
+export function createProjectFolder(
+  state: UiState,
+  name: string,
+  initialProjectKeys: readonly string[] = [],
+  options?: { folderId?: string; now?: string },
+): UiState {
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    return state;
+  }
+  const folderId = options?.folderId?.trim() || makeProjectFolderId();
+  if (!folderId || state.projectFoldersById[folderId] !== undefined) {
+    return state;
+  }
+  const timestamp = options?.now ?? nowIso();
+  const projectKeys = uniqueNonEmptyStrings(initialProjectKeys);
+  const projectKeySet = new Set(projectKeys);
+  const projectFoldersByIdWithoutMoved = removeProjectKeysFromAllFolders(
+    state.projectFoldersById,
+    projectKeySet,
+    timestamp,
+  );
+  const projectFoldersById = {
+    ...projectFoldersByIdWithoutMoved,
+    [folderId]: {
+      id: folderId,
+      name: trimmedName,
+      projectKeys,
+      expanded: true,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+  };
+  const projectFolderOrder = [...state.projectFolderOrder, folderId];
+  const projectTreeOrder = normalizeProjectTreeOrder({
+    projectKeys: state.projectOrder,
+    foldersById: projectFoldersById,
+    folderOrder: projectFolderOrder,
+    treeOrder: [
+      ...state.projectTreeOrder.filter((itemId) => {
+        const parsed = parseProjectTreeItemId(itemId);
+        return parsed?.kind !== "project" || !projectKeySet.has(parsed.projectKey);
+      }),
+      projectFolderTreeItemId(folderId),
+    ],
+  });
+  return {
+    ...state,
+    projectFoldersById,
+    projectFolderOrder,
+    projectTreeOrder,
+  };
+}
+
+export function renameProjectFolder(
+  state: UiState,
+  folderId: string,
+  name: string,
+  updatedAt = nowIso(),
+): UiState {
+  const folder = state.projectFoldersById[folderId];
+  const trimmedName = name.trim();
+  if (!folder || !trimmedName || folder.name === trimmedName) {
+    return state;
+  }
+  return {
+    ...state,
+    projectFoldersById: {
+      ...state.projectFoldersById,
+      [folderId]: {
+        ...folder,
+        name: trimmedName,
+        updatedAt,
+      },
+    },
+  };
+}
+
+export function deleteProjectFolder(state: UiState, folderId: string): UiState {
+  if (state.projectFoldersById[folderId] === undefined) {
+    return state;
+  }
+  const { [folderId]: _removed, ...projectFoldersById } = state.projectFoldersById;
+  const projectFolderOrder = state.projectFolderOrder.filter((id) => id !== folderId);
+  const projectTreeOrder = normalizeProjectTreeOrder({
+    projectKeys: state.projectOrder,
+    foldersById: projectFoldersById,
+    folderOrder: projectFolderOrder,
+    treeOrder: state.projectTreeOrder.filter(
+      (itemId) => itemId !== projectFolderTreeItemId(folderId),
+    ),
+  });
+  return {
+    ...state,
+    projectFoldersById,
+    projectFolderOrder,
+    projectTreeOrder,
+  };
+}
+
+export function setProjectFolderExpanded(
+  state: UiState,
+  folderId: string,
+  expanded: boolean,
+): UiState {
+  const folder = state.projectFoldersById[folderId];
+  if (!folder || folder.expanded === expanded) {
+    return state;
+  }
+  return {
+    ...state,
+    projectFoldersById: {
+      ...state.projectFoldersById,
+      [folderId]: {
+        ...folder,
+        expanded,
+        updatedAt: nowIso(),
+      },
+    },
+  };
+}
+
+export function moveProjectsToFolder(
+  state: UiState,
+  projectKeysInput: readonly string[],
+  folderId: string,
+  targetIndex?: number,
+): UiState {
+  const folder = state.projectFoldersById[folderId];
+  const projectKeys = uniqueNonEmptyStrings(projectKeysInput).filter((projectKey) =>
+    state.projectOrder.includes(projectKey),
+  );
+  if (!folder || projectKeys.length === 0) {
+    return state;
+  }
+  const timestamp = nowIso();
+  const projectKeySet = new Set(projectKeys);
+  const withoutMoved = removeProjectKeysFromAllFolders(
+    state.projectFoldersById,
+    projectKeySet,
+    timestamp,
+  );
+  const targetFolder = withoutMoved[folderId] ?? folder;
+  const targetKeys = targetFolder.projectKeys.filter(
+    (projectKey) => !projectKeySet.has(projectKey),
+  );
+  const nextTargetKeys = insertAt(targetKeys, projectKeys, targetIndex);
+  const projectFoldersById = {
+    ...withoutMoved,
+    [folderId]: {
+      ...targetFolder,
+      projectKeys: nextTargetKeys,
+      updatedAt: timestamp,
+    },
+  };
+  const projectTreeOrder = normalizeProjectTreeOrder({
+    projectKeys: state.projectOrder,
+    foldersById: projectFoldersById,
+    folderOrder: state.projectFolderOrder,
+    treeOrder: state.projectTreeOrder.filter((itemId) => {
+      const parsed = parseProjectTreeItemId(itemId);
+      return parsed?.kind !== "project" || !projectKeySet.has(parsed.projectKey);
+    }),
+  });
+  return {
+    ...state,
+    projectFoldersById,
+    projectTreeOrder,
+  };
+}
+
+export function moveProjectsToRoot(
+  state: UiState,
+  projectKeysInput: readonly string[],
+  targetIndex?: number,
+): UiState {
+  const projectKeys = uniqueNonEmptyStrings(projectKeysInput).filter((projectKey) =>
+    state.projectOrder.includes(projectKey),
+  );
+  if (projectKeys.length === 0) {
+    return state;
+  }
+  const projectKeySet = new Set(projectKeys);
+  const projectFoldersById = removeProjectKeysFromAllFolders(
+    state.projectFoldersById,
+    projectKeySet,
+    nowIso(),
+  );
+  const rootOrderWithoutMoved = state.projectTreeOrder.filter((itemId) => {
+    const parsed = parseProjectTreeItemId(itemId);
+    return parsed?.kind !== "project" || !projectKeySet.has(parsed.projectKey);
+  });
+  const projectTreeOrder = normalizeProjectTreeOrder({
+    projectKeys: state.projectOrder,
+    foldersById: projectFoldersById,
+    folderOrder: state.projectFolderOrder,
+    treeOrder: insertAt(
+      rootOrderWithoutMoved,
+      projectKeys.map((projectKey) => projectTreeItemId(projectKey)),
+      targetIndex,
+    ),
+  });
+  return {
+    ...state,
+    projectFoldersById,
+    projectTreeOrder,
+  };
+}
+
+export function moveProjectsBetweenFolders(
+  state: UiState,
+  projectKeys: readonly string[],
+  sourceFolderId: string,
+  targetFolderId: string,
+  targetIndex?: number,
+): UiState {
+  if (
+    sourceFolderId === targetFolderId ||
+    state.projectFoldersById[sourceFolderId] === undefined ||
+    state.projectFoldersById[targetFolderId] === undefined
+  ) {
+    return moveProjectsToFolder(state, projectKeys, targetFolderId, targetIndex);
+  }
+  return moveProjectsToFolder(state, projectKeys, targetFolderId, targetIndex);
+}
+
 export function reorderProjects(
   state: UiState,
   draggedProjectIds: readonly string[],
@@ -714,6 +1289,41 @@ export function reorderProjects(
   };
 }
 
+export function reorderProjectTreeItem(
+  state: UiState,
+  activeItemId: UiProjectTreeItemId,
+  overItemId: UiProjectTreeItemId,
+): UiState {
+  if (activeItemId === overItemId) {
+    return state;
+  }
+  const activeParsed = parseProjectTreeItemId(activeItemId);
+  const overParsed = parseProjectTreeItemId(overItemId);
+  if (!activeParsed || !overParsed) {
+    return state;
+  }
+  const activeIndex = state.projectTreeOrder.indexOf(activeItemId);
+  const overIndex = state.projectTreeOrder.indexOf(overItemId);
+  if (activeIndex < 0 || overIndex < 0) {
+    return state;
+  }
+  const projectTreeOrder = [...state.projectTreeOrder];
+  const [removed] = projectTreeOrder.splice(activeIndex, 1);
+  if (!removed) {
+    return state;
+  }
+  const insertIndex = activeIndex < overIndex ? overIndex : overIndex;
+  projectTreeOrder.splice(insertIndex, 0, removed);
+  const nextState = {
+    ...state,
+    projectTreeOrder,
+  };
+  if (activeParsed.kind === "project" && overParsed.kind === "project") {
+    return reorderProjects(nextState, [activeParsed.projectKey], [overParsed.projectKey]);
+  }
+  return nextState;
+}
+
 interface UiStateStore extends UiState {
   syncProjects: (projects: readonly SyncProjectInput[]) => void;
   syncThreads: (threads: readonly SyncThreadInput[]) => void;
@@ -727,9 +1337,29 @@ interface UiStateStore extends UiState {
   setTokenModeControlStyle: (style: TokenModeControlStyle) => void;
   toggleProject: (projectId: string) => void;
   setProjectExpanded: (projectId: string, expanded: boolean) => void;
+  createProjectFolder: (name: string, initialProjectKeys?: readonly string[]) => void;
+  renameProjectFolder: (folderId: string, name: string) => void;
+  deleteProjectFolder: (folderId: string) => void;
+  setProjectFolderExpanded: (folderId: string, expanded: boolean) => void;
+  moveProjectsToFolder: (
+    projectKeys: readonly string[],
+    folderId: string,
+    targetIndex?: number,
+  ) => void;
+  moveProjectsToRoot: (projectKeys: readonly string[], targetIndex?: number) => void;
+  moveProjectsBetweenFolders: (
+    projectKeys: readonly string[],
+    sourceFolderId: string,
+    targetFolderId: string,
+    targetIndex?: number,
+  ) => void;
   reorderProjects: (
     draggedProjectIds: readonly string[],
     targetProjectIds: readonly string[],
+  ) => void;
+  reorderProjectTreeItem: (
+    activeItemId: UiProjectTreeItemId,
+    overItemId: UiProjectTreeItemId,
   ) => void;
 }
 
@@ -753,8 +1383,25 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),
   setProjectExpanded: (projectId, expanded) =>
     set((state) => setProjectExpanded(state, projectId, expanded)),
+  createProjectFolder: (name, initialProjectKeys = []) =>
+    set((state) => createProjectFolder(state, name, initialProjectKeys)),
+  renameProjectFolder: (folderId, name) =>
+    set((state) => renameProjectFolder(state, folderId, name)),
+  deleteProjectFolder: (folderId) => set((state) => deleteProjectFolder(state, folderId)),
+  setProjectFolderExpanded: (folderId, expanded) =>
+    set((state) => setProjectFolderExpanded(state, folderId, expanded)),
+  moveProjectsToFolder: (projectKeys, folderId, targetIndex) =>
+    set((state) => moveProjectsToFolder(state, projectKeys, folderId, targetIndex)),
+  moveProjectsToRoot: (projectKeys, targetIndex) =>
+    set((state) => moveProjectsToRoot(state, projectKeys, targetIndex)),
+  moveProjectsBetweenFolders: (projectKeys, sourceFolderId, targetFolderId, targetIndex) =>
+    set((state) =>
+      moveProjectsBetweenFolders(state, projectKeys, sourceFolderId, targetFolderId, targetIndex),
+    ),
   reorderProjects: (draggedProjectIds, targetProjectIds) =>
     set((state) => reorderProjects(state, draggedProjectIds, targetProjectIds)),
+  reorderProjectTreeItem: (activeItemId, overItemId) =>
+    set((state) => reorderProjectTreeItem(state, activeItemId, overItemId)),
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));
