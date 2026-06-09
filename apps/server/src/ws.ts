@@ -2889,6 +2889,14 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
           observeRpcEffect(WS_METHODS.workItemsAddComment, workItems.addComment(input), {
             "rpc.aggregate": "work-items",
           }),
+        [WS_METHODS.workItemsEditComment]: (input) =>
+          observeRpcEffect(WS_METHODS.workItemsEditComment, workItems.editComment(input), {
+            "rpc.aggregate": "work-items",
+          }),
+        [WS_METHODS.workItemsUpdate]: (input) =>
+          observeRpcEffect(WS_METHODS.workItemsUpdate, workItems.update(input), {
+            "rpc.aggregate": "work-items",
+          }),
         [WS_METHODS.workItemsListTransitions]: (input) =>
           observeRpcEffect(WS_METHODS.workItemsListTransitions, workItems.listTransitions(input), {
             "rpc.aggregate": "work-items",

@@ -3,10 +3,17 @@ import type {
   EnvironmentId,
   ProjectId,
   SourceControlIssueSummary,
+  WorkItemPriority,
   WorkItemSummary,
 } from "@ryco/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangleIcon, CircleDotIcon, GitPullRequestIcon, ListChecksIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  CircleDotIcon,
+  FlagIcon,
+  GitPullRequestIcon,
+  ListChecksIcon,
+} from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 import {
   changeRequestListQueryOptions,
@@ -98,8 +105,6 @@ export function ProjectOverviewTab(props: ProjectOverviewTabProps) {
   const jiraConfigured =
     projectLinkQuery.data?.jiraConnectionId !== null &&
     projectLinkQuery.data?.jiraConnectionId !== undefined &&
-    projectLinkQuery.data?.jiraSiteUrl !== null &&
-    projectLinkQuery.data?.jiraSiteUrl !== undefined &&
     projectLinkQuery.data.jiraProjectKeys.length > 0;
   const workItemListQuery = useQuery(
     workItemListQueryOptions({
@@ -220,12 +225,26 @@ export function ProjectOverviewTab(props: ProjectOverviewTabProps) {
             renderItem={(workItem) => (
               <button
                 type="button"
-                className="flex w-full min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-accent/50 focus-visible:bg-accent/60 focus-visible:outline-none"
+                className="flex w-full min-w-0 items-start gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-accent/50 focus-visible:bg-accent/60 focus-visible:outline-none"
                 onClick={() => props.onSelectWorkItem(workItem)}
               >
-                <span className="shrink-0 text-muted-foreground text-xs">{workItem.key}</span>
-                <span className="min-w-0 flex-1 truncate text-sm">{workItem.title}</span>
-                <span className="shrink-0 text-[11px] text-muted-foreground">
+                <span className="mt-0.5 shrink-0 text-muted-foreground text-xs">
+                  {workItem.key}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm">{workItem.title}</span>
+                  <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                    {workItem.issueType ? <span>{workItem.issueType}</span> : null}
+                    {workItem.assignee ? <span>{workItem.assignee}</span> : null}
+                    {(workItem.priorityDetail ?? workItem.priority) ? (
+                      <span className="inline-flex items-center gap-1">
+                        <PriorityMini priority={workItem.priorityDetail ?? workItem.priority} />
+                        {workItem.priority}
+                      </span>
+                    ) : null}
+                  </span>
+                </span>
+                <span className="mt-0.5 shrink-0 text-[11px] text-muted-foreground">
                   {workItemStateLabel(workItem)}
                 </span>
               </button>
@@ -256,6 +275,14 @@ export function ProjectOverviewTab(props: ProjectOverviewTabProps) {
       </div>
     </div>
   );
+}
+
+function PriorityMini(props: { readonly priority: WorkItemPriority | string | undefined }) {
+  const iconUrl = typeof props.priority === "string" ? undefined : props.priority?.iconUrl;
+  if (iconUrl) {
+    return <img src={iconUrl} alt="" className="size-3" loading="lazy" decoding="async" />;
+  }
+  return <FlagIcon className="size-3" />;
 }
 
 function OverviewMetric(props: {

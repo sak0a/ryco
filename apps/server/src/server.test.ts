@@ -605,6 +605,8 @@ const buildAppUnderTest = (options?: {
           search: () => Effect.succeed([]),
           get: () => Effect.die("not implemented in test"),
           addComment: () => Effect.die("not implemented in test"),
+          editComment: () => Effect.die("not implemented in test"),
+          update: () => Effect.die("not implemented in test"),
           listTransitions: () => Effect.succeed([]),
           transition: () => Effect.die("not implemented in test"),
           ...options?.layers?.jiraWorkItemService,

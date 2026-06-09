@@ -4,6 +4,7 @@ import type {
   EnvironmentId,
   ProjectId,
   VcsRef,
+  WorkItemPriority,
   WorkItemStateFilter,
   WorkItemSummary,
 } from "@ryco/contracts";
@@ -12,7 +13,7 @@ import { DateTime, Option } from "effect";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useShallow } from "zustand/react/shallow";
-import { GitBranchIcon, RotateCwIcon, SearchIcon } from "lucide-react";
+import { ExternalLinkIcon, FlagIcon, GitBranchIcon, RotateCwIcon, SearchIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type RefObject } from "react";
 import { readEnvironmentConnection } from "~/environments/runtime";
 import { readEnvironmentApi } from "~/environmentApi";
@@ -41,6 +42,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
+import { LabelChip } from "./LabelChip";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -350,12 +352,12 @@ function WorkItemList(props: {
   return (
     <ul role="listbox" className="divide-y divide-border/40">
       {props.items.map((item) => (
-        <li key={`${item.provider}:${item.key}`}>
+        <li key={`${item.provider}:${item.key}`} className="flex items-stretch">
           <button
             type="button"
             onClick={() => props.onSelect(item)}
             className={cn(
-              "flex w-full items-start gap-3 px-4 py-3 text-left",
+              "flex min-w-0 flex-1 items-start gap-3 px-4 py-3 text-left",
               "hover:bg-accent/40 focus-visible:bg-accent/60 focus-visible:outline-none",
             )}
           >
@@ -375,9 +377,22 @@ function WorkItemList(props: {
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-1.5 text-muted-foreground text-xs">
                 {item.issueType ? <span>{item.issueType}</span> : null}
+                {item.reporter ? <span>reported by {item.reporter}</span> : null}
                 {item.assignee ? <span>assigned to {item.assignee}</span> : null}
-                {item.priority ? <span>{item.priority}</span> : null}
+                {(item.priorityDetail ?? item.priority) ? (
+                  <span className="inline-flex items-center gap-1">
+                    <PriorityMini priority={item.priorityDetail ?? item.priority} />
+                    {item.priority}
+                  </span>
+                ) : null}
+                {item.dueDate ? <span>due {item.dueDate}</span> : null}
                 <WorkItemLocalLinkChips links={props.localLinksByWorkItemKey.get(item.key)} />
+                {item.labels?.slice(0, 3).map((label) => (
+                  <LabelChip key={label} label={label} />
+                ))}
+                {item.labels && item.labels.length > 3 ? (
+                  <span className="text-[10px]">+{item.labels.length - 3} labels</span>
+                ) : null}
                 {item.updatedAt && Option.isSome(item.updatedAt) ? (
                   <span className="ml-auto">
                     {dateFmt.format(DateTime.toDate(item.updatedAt.value))}
@@ -386,10 +401,29 @@ function WorkItemList(props: {
               </div>
             </div>
           </button>
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex w-10 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            title={`Open ${item.key} in Jira`}
+            aria-label={`Open ${item.key} in Jira`}
+          >
+            <ExternalLinkIcon className="size-3.5" />
+          </a>
         </li>
       ))}
     </ul>
   );
+}
+
+function PriorityMini(props: { readonly priority: WorkItemPriority | string | undefined }) {
+  const name = typeof props.priority === "string" ? props.priority : props.priority?.name;
+  const iconUrl = typeof props.priority === "string" ? undefined : props.priority?.iconUrl;
+  if (iconUrl) {
+    return <img src={iconUrl} alt="" className="size-3" loading="lazy" decoding="async" />;
+  }
+  return <FlagIcon className="size-3" aria-label={name ?? "Priority"} />;
 }
 
 interface WorkItemLocalLinks {

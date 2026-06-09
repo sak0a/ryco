@@ -139,6 +139,8 @@ export interface WsRpcClient {
     readonly search: RpcUnaryMethod<typeof WS_METHODS.workItemsSearch>;
     readonly get: RpcUnaryMethod<typeof WS_METHODS.workItemsGet>;
     readonly addComment: RpcUnaryMethod<typeof WS_METHODS.workItemsAddComment>;
+    readonly editComment: RpcUnaryMethod<typeof WS_METHODS.workItemsEditComment>;
+    readonly update: RpcUnaryMethod<typeof WS_METHODS.workItemsUpdate>;
     readonly listTransitions: RpcUnaryMethod<typeof WS_METHODS.workItemsListTransitions>;
     readonly transition: RpcUnaryMethod<typeof WS_METHODS.workItemsTransition>;
   };
@@ -367,6 +369,9 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       get: (input) => transport.request((client) => client[WS_METHODS.workItemsGet](input)),
       addComment: (input) =>
         transport.request((client) => client[WS_METHODS.workItemsAddComment](input)),
+      editComment: (input) =>
+        transport.request((client) => client[WS_METHODS.workItemsEditComment](input)),
+      update: (input) => transport.request((client) => client[WS_METHODS.workItemsUpdate](input)),
       listTransitions: (input) =>
         transport.request((client) => client[WS_METHODS.workItemsListTransitions](input)),
       transition: (input) =>

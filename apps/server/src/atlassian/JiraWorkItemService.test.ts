@@ -40,6 +40,12 @@ function basicAuthorization(email: string, token: string): string {
   return `Basic ${Buffer.from(`${email}:${token}`, "utf8").toString("base64")}`;
 }
 
+function requestJsonBody(request: HttpClientRequest.HttpClientRequest): unknown {
+  const rawBody = (request.body as { readonly body?: Uint8Array }).body;
+  assert.ok(rawBody);
+  return JSON.parse(textDecoder.decode(rawBody));
+}
+
 function makeLayer(input: {
   readonly connection: AtlassianConnectionRecord;
   readonly projectLink?: ProjectAtlassianLinkRecord;
@@ -227,5 +233,214 @@ it.effect("returns Jira status names separately from normalized state categories
     const rawBody = (request.body as { readonly body?: Uint8Array }).body;
     assert.ok(rawBody);
     assert.include(textDecoder.decode(rawBody), "statusCategory != Done");
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("maps Jira detail labels, priority icons, comments, edit metadata, and activity", () => {
+  const connectionId = AtlassianConnectionId.make("atl-jira-1");
+  const projectId = ProjectId.make("project-jira-1");
+  const connection = connectedJiraConnection(connectionId);
+  const { layer } = makeLayer({
+    connection,
+    projectLink: projectLink({ connectionId, projectId }),
+    token: "jira-secret",
+    response: (request) => {
+      const url = new URL(request.url);
+      if (url.pathname.endsWith("/comment")) {
+        return Response.json({
+          comments: [
+            {
+              id: "10000",
+              author: { displayName: "Alice" },
+              body: {
+                type: "doc",
+                version: 1,
+                content: [{ type: "paragraph", content: [{ type: "text", text: "Looks good" }] }],
+              },
+              created: "2026-06-08T12:30:00.000Z",
+              updated: "2026-06-08T12:45:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.pathname.endsWith("/transitions")) {
+        return Response.json({ transitions: [] });
+      }
+      if (url.pathname.endsWith("/editmeta")) {
+        return Response.json({
+          fields: {
+            priority: {
+              name: "Priority",
+              required: false,
+              operations: ["set"],
+              allowedValues: [
+                {
+                  id: "1",
+                  name: "High",
+                  iconUrl: "https://ryco-app.atlassian.net/images/icons/priorities/high.svg",
+                  statusColor: "#f15c75",
+                },
+              ],
+            },
+            customfield_10015: {
+              name: "Start date",
+              required: false,
+              operations: ["set"],
+            },
+          },
+        });
+      }
+      if (url.pathname.endsWith("/changelog")) {
+        return Response.json({
+          values: [
+            {
+              id: "20000",
+              author: { displayName: "Bob" },
+              created: "2026-06-08T13:00:00.000Z",
+              items: [{ field: "priority", fromString: "Medium", toString: "High" }],
+            },
+          ],
+        });
+      }
+      return Response.json({
+        id: "10001",
+        key: "KAN-4",
+        fields: {
+          summary: "Mapped Jira detail",
+          status: { name: "In Progress", statusCategory: { key: "indeterminate" } },
+          issuetype: { name: "Story" },
+          priority: {
+            id: "1",
+            name: "High",
+            iconUrl: "https://ryco-app.atlassian.net/images/icons/priorities/high.svg",
+            statusColor: "#f15c75",
+          },
+          assignee: { displayName: "Alice" },
+          reporter: { displayName: "Bob" },
+          labels: ["frontend", "jira"],
+          duedate: "2026-06-30",
+          customfield_10015: "2026-06-10",
+          updated: "2026-06-08T12:00:00.000Z",
+          description: {
+            type: "doc",
+            version: 1,
+            content: [{ type: "paragraph", content: [{ type: "text", text: "Description" }] }],
+          },
+          parent: { key: "KAN-1" },
+        },
+      });
+    },
+  });
+
+  return Effect.gen(function* () {
+    const service = yield* JiraWorkItemService;
+    const detail = yield* service.get({ projectId, key: "KAN-4", fullContent: true });
+
+    assert.deepStrictEqual(detail.labels, ["frontend", "jira"]);
+    assert.strictEqual(detail.priorityDetail?.iconUrl?.endsWith("high.svg"), true);
+    assert.strictEqual(detail.dueDate, "2026-06-30");
+    assert.strictEqual(detail.startDate, "2026-06-10");
+    assert.strictEqual(detail.comments[0]?.id, "10000");
+    assert.strictEqual(detail.comments[0]?.editable, true);
+    assert.deepStrictEqual(
+      detail.editableFields.map((field) => field.id),
+      ["priority", "startDate"],
+    );
+    assert.strictEqual(detail.activity[0]?.items[0]?.to, "High");
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("builds Jira issue update payloads from edit metadata and refetches detail", () => {
+  const connectionId = AtlassianConnectionId.make("atl-jira-1");
+  const projectId = ProjectId.make("project-jira-1");
+  const connection = connectedJiraConnection(connectionId);
+  const { execute, layer } = makeLayer({
+    connection,
+    projectLink: projectLink({ connectionId, projectId }),
+    token: "jira-secret",
+    response: (request) => {
+      const url = new URL(request.url);
+      if (request.method === "PUT" && url.pathname === "/rest/api/3/issue/KAN-4") {
+        return new Response(null, { status: 204 });
+      }
+      if (url.pathname.endsWith("/editmeta")) {
+        return Response.json({
+          fields: {
+            assignee: {
+              name: "Assignee",
+              required: false,
+              operations: ["set"],
+              allowedValues: [{ accountId: "acct-alice", displayName: "Alice" }],
+            },
+            priority: {
+              name: "Priority",
+              required: false,
+              operations: ["set"],
+              allowedValues: [{ id: "2", name: "Medium" }],
+            },
+            duedate: { name: "Due date", required: false, operations: ["set"] },
+            customfield_10015: { name: "Start date", required: false, operations: ["set"] },
+            description: { name: "Description", required: false, operations: ["set"] },
+          },
+        });
+      }
+      if (url.pathname.endsWith("/comment")) return Response.json({ comments: [] });
+      if (url.pathname.endsWith("/transitions")) return Response.json({ transitions: [] });
+      if (url.pathname.endsWith("/changelog")) return Response.json({ values: [] });
+      return Response.json({
+        id: "10001",
+        key: "KAN-4",
+        fields: {
+          summary: "Updated Jira detail",
+          status: { name: "To Do", statusCategory: { key: "new" } },
+          assignee: { displayName: "Alice" },
+          priority: { id: "2", name: "Medium" },
+          updated: "2026-06-08T12:00:00.000Z",
+          description: "Updated description",
+        },
+      });
+    },
+  });
+
+  return Effect.gen(function* () {
+    const service = yield* JiraWorkItemService;
+    const detail = yield* service.update({
+      projectId,
+      key: "KAN-4",
+      fields: {
+        assigneeAccountId: "acct-alice",
+        priorityId: "2",
+        dueDate: "2026-06-30",
+        startDate: "2026-06-10",
+        description: "Updated description",
+      },
+    });
+
+    assert.strictEqual(detail.title, "Updated Jira detail");
+    const updateRequest = execute.mock.calls
+      .map((call) => call[0])
+      .find(
+        (request) =>
+          request.method === "PUT" && new URL(request.url).pathname === "/rest/api/3/issue/KAN-4",
+      );
+    assert.ok(updateRequest);
+    assert.deepStrictEqual(requestJsonBody(updateRequest), {
+      fields: {
+        assignee: { accountId: "acct-alice" },
+        priority: { id: "2" },
+        duedate: "2026-06-30",
+        customfield_10015: "2026-06-10",
+        description: {
+          type: "doc",
+          version: 1,
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "Updated description" }],
+            },
+          ],
+        },
+      },
+    });
   }).pipe(Effect.provide(layer));
 });

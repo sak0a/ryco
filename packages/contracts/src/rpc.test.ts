@@ -26,6 +26,8 @@ describe("WS_METHODS Atlassian and work item names", () => {
     );
     expect(WS_METHODS.workItemsListProjects).toBe("workItems.listProjects");
     expect(WS_METHODS.workItemsList).toBe("workItems.list");
+    expect(WS_METHODS.workItemsUpdate).toBe("workItems.update");
+    expect(WS_METHODS.workItemsEditComment).toBe("workItems.editComment");
     expect(WS_METHODS.workItemsTransition).toBe("workItems.transition");
   });
 

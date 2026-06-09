@@ -43,15 +43,24 @@ describe("work item contracts", () => {
       stateName: "Next to come",
       issueType: "Task",
       priority: "High",
+      priorityDetail: {
+        id: "1",
+        name: "High",
+        iconUrl: "https://acme.atlassian.net/images/icons/priorities/high.svg",
+        statusColor: "#f15c75",
+      },
       assignee: "Alice",
       reporter: "Bob",
       labels: ["atlassian"],
+      dueDate: "2026-05-30",
+      startDate: "2026-05-12",
       createdAt: Option.some(createdAt),
       updatedAt: Option.some(updatedAt),
     });
 
     expect(decoded.key).toBe("PROJ-123");
     expect(decoded.stateName).toBe("Next to come");
+    expect(decoded.priorityDetail?.iconUrl).toContain("high.svg");
     expect(decoded.createdAt && Option.isSome(decoded.createdAt)).toBe(true);
     expect(Option.isSome(decoded.updatedAt)).toBe(true);
   });
@@ -70,9 +79,12 @@ describe("work item contracts", () => {
       description: "Add Jira-aware settings.",
       comments: [
         {
+          id: "10000",
           author: "Alice",
           body: "Please keep tokens out of the browser.",
           createdAt: commentCreatedAt,
+          updatedAt: commentCreatedAt,
+          editable: true,
         },
       ],
       transitions: [
@@ -90,6 +102,30 @@ describe("work item contracts", () => {
           title: "PROJ-123 add connection settings",
           url: "https://bitbucket.org/acme/ryco/pull-requests/42",
           state: "open",
+        },
+      ],
+      editableFields: [
+        {
+          id: "priority",
+          jiraFieldId: "priority",
+          name: "Priority",
+          required: false,
+          operations: ["set"],
+          options: [
+            {
+              id: "1",
+              name: "High",
+              iconUrl: "https://acme.atlassian.net/images/icons/priorities/high.svg",
+            },
+          ],
+        },
+      ],
+      activity: [
+        {
+          id: "20000",
+          author: "Alice",
+          createdAt: commentCreatedAt,
+          items: [{ field: "priority", from: "Medium", to: "High" }],
         },
       ],
       truncated: false,

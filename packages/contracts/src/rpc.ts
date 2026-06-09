@@ -166,6 +166,7 @@ import {
 import { VcsError } from "./vcs.ts";
 import {
   WorkItemAddCommentInput,
+  WorkItemEditCommentInput,
   WorkItemDetail,
   WorkItemGetInput,
   WorkItemListInput,
@@ -178,6 +179,7 @@ import {
   WorkItemSummary,
   WorkItemTransition,
   WorkItemTransitionInput,
+  WorkItemUpdateInput,
 } from "./workItems.ts";
 import {
   CreateWorktreeIntent,
@@ -304,6 +306,8 @@ export const WS_METHODS = {
   workItemsSearch: "workItems.search",
   workItemsGet: "workItems.get",
   workItemsAddComment: "workItems.addComment",
+  workItemsEditComment: "workItems.editComment",
+  workItemsUpdate: "workItems.update",
   workItemsListTransitions: "workItems.listTransitions",
   workItemsTransition: "workItems.transition",
 
@@ -859,6 +863,18 @@ export const WsWorkItemsAddCommentRpc = Rpc.make(WS_METHODS.workItemsAddComment,
   error: WorkItemProviderError,
 });
 
+export const WsWorkItemsEditCommentRpc = Rpc.make(WS_METHODS.workItemsEditComment, {
+  payload: WorkItemEditCommentInput,
+  success: WorkItemDetail,
+  error: WorkItemProviderError,
+});
+
+export const WsWorkItemsUpdateRpc = Rpc.make(WS_METHODS.workItemsUpdate, {
+  payload: WorkItemUpdateInput,
+  success: WorkItemDetail,
+  error: WorkItemProviderError,
+});
+
 export const WsWorkItemsListTransitionsRpc = Rpc.make(WS_METHODS.workItemsListTransitions, {
   payload: WorkItemListTransitionsInput,
   success: Schema.Array(WorkItemTransition),
@@ -1210,6 +1226,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsWorkItemsSearchRpc,
   WsWorkItemsGetRpc,
   WsWorkItemsAddCommentRpc,
+  WsWorkItemsEditCommentRpc,
+  WsWorkItemsUpdateRpc,
   WsWorkItemsListTransitionsRpc,
   WsWorkItemsTransitionRpc,
   WsProjectsListEntriesRpc,
