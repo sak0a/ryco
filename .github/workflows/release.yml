@@ -178,6 +178,11 @@ jobs:
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $installPath = & $vswhere -products * -latest -property installationPath
           $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          if ([string]::IsNullOrWhiteSpace($installPath)) {
+            Write-Error "Unable to resolve Visual Studio installation path via $vswhere; installPath='$installPath'"
+            exit 1
+          }
+
           $proc = Start-Process -FilePath $setupExe `
             -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `
             "Microsoft.VisualStudio.Component.VC.Tools.x86.x64.Spectre", "--quiet", "--norestart" `
