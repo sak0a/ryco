@@ -267,24 +267,58 @@ function sanitizeProjectTreeOrder(
   return result;
 }
 
-function projectKeysInFolders(foldersById: Record<string, UiProjectFolder>): Set<string> {
+function rootProjectKeyForPhysicalProjectKey(projectKey: string): string {
+  return currentLogicalKeyByPhysicalKey.get(projectKey) ?? projectKey;
+}
+
+function rootProjectKeysForProjectKeys(projectKeys: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const projectKey of projectKeys) {
+    const rootProjectKey = rootProjectKeyForPhysicalProjectKey(projectKey);
+    if (!seen.has(rootProjectKey)) {
+      seen.add(rootProjectKey);
+      result.push(rootProjectKey);
+    }
+  }
+  return result;
+}
+
+function rootProjectKeysInFolders(foldersById: Record<string, UiProjectFolder>): Set<string> {
   const keys = new Set<string>();
   for (const folder of Object.values(foldersById)) {
-    for (const key of folder.projectKeys) {
-      keys.add(key);
+    for (const projectKey of folder.projectKeys) {
+      keys.add(rootProjectKeyForPhysicalProjectKey(projectKey));
     }
   }
   return keys;
 }
 
+function removeProjectTreeItemsForProjectKeys(
+  treeOrder: readonly UiProjectTreeItemId[],
+  projectKeys: readonly string[],
+): UiProjectTreeItemId[] {
+  const physicalProjectKeys = new Set(projectKeys);
+  const rootProjectKeys = new Set(rootProjectKeysForProjectKeys(projectKeys));
+  return treeOrder.filter((itemId) => {
+    const parsed = parseProjectTreeItemId(itemId);
+    return (
+      parsed?.kind !== "project" ||
+      (!physicalProjectKeys.has(parsed.projectKey) && !rootProjectKeys.has(parsed.projectKey))
+    );
+  });
+}
+
 function normalizeProjectTreeOrder(input: {
   projectKeys: readonly string[];
+  rootProjectKeys?: readonly string[];
   foldersById: Record<string, UiProjectFolder>;
   folderOrder: readonly string[];
   treeOrder: readonly UiProjectTreeItemId[];
 }): UiProjectTreeItemId[] {
-  const currentProjectKeys = new Set(input.projectKeys);
-  const folderedProjectKeys = projectKeysInFolders(input.foldersById);
+  const rootProjectKeys = input.rootProjectKeys ?? rootProjectKeysForProjectKeys(input.projectKeys);
+  const currentRootProjectKeys = new Set(rootProjectKeys);
+  const folderedRootProjectKeys = rootProjectKeysInFolders(input.foldersById);
   const seen = new Set<string>();
   const result: UiProjectTreeItemId[] = [];
 
@@ -301,8 +335,8 @@ function normalizeProjectTreeOrder(input: {
         continue;
       }
     } else if (
-      !currentProjectKeys.has(parsed.projectKey) ||
-      folderedProjectKeys.has(parsed.projectKey)
+      !currentRootProjectKeys.has(parsed.projectKey) ||
+      folderedRootProjectKeys.has(parsed.projectKey)
     ) {
       continue;
     }
@@ -318,9 +352,9 @@ function normalizeProjectTreeOrder(input: {
     }
   }
 
-  for (const projectKey of input.projectKeys) {
+  for (const projectKey of rootProjectKeys) {
     const itemId = projectTreeItemId(projectKey);
-    if (!folderedProjectKeys.has(projectKey) && !seen.has(itemId)) {
+    if (!folderedRootProjectKeys.has(projectKey) && !seen.has(itemId)) {
       seen.add(itemId);
       result.push(itemId);
     }
@@ -754,6 +788,7 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
   }
   const projectTreeOrder = normalizeProjectTreeOrder({
     projectKeys: nextProjectOrder,
+    rootProjectKeys: rootProjectKeysForProjectKeys(nextProjectOrder),
     foldersById: projectFoldersById,
     folderOrder: projectFolderOrder,
     treeOrder: state.projectTreeOrder,
@@ -1056,13 +1091,11 @@ export function createProjectFolder(
   const projectFolderOrder = [...state.projectFolderOrder, folderId];
   const projectTreeOrder = normalizeProjectTreeOrder({
     projectKeys: state.projectOrder,
+    rootProjectKeys: rootProjectKeysForProjectKeys(state.projectOrder),
     foldersById: projectFoldersById,
     folderOrder: projectFolderOrder,
     treeOrder: [
-      ...state.projectTreeOrder.filter((itemId) => {
-        const parsed = parseProjectTreeItemId(itemId);
-        return parsed?.kind !== "project" || !projectKeySet.has(parsed.projectKey);
-      }),
+      ...removeProjectTreeItemsForProjectKeys(state.projectTreeOrder, projectKeys),
       projectFolderTreeItemId(folderId),
     ],
   });
@@ -1106,6 +1139,7 @@ export function deleteProjectFolder(state: UiState, folderId: string): UiState {
   const projectFolderOrder = state.projectFolderOrder.filter((id) => id !== folderId);
   const projectTreeOrder = normalizeProjectTreeOrder({
     projectKeys: state.projectOrder,
+    rootProjectKeys: rootProjectKeysForProjectKeys(state.projectOrder),
     foldersById: projectFoldersById,
     folderOrder: projectFolderOrder,
     treeOrder: state.projectTreeOrder.filter(
@@ -1177,12 +1211,10 @@ export function moveProjectsToFolder(
   };
   const projectTreeOrder = normalizeProjectTreeOrder({
     projectKeys: state.projectOrder,
+    rootProjectKeys: rootProjectKeysForProjectKeys(state.projectOrder),
     foldersById: projectFoldersById,
     folderOrder: state.projectFolderOrder,
-    treeOrder: state.projectTreeOrder.filter((itemId) => {
-      const parsed = parseProjectTreeItemId(itemId);
-      return parsed?.kind !== "project" || !projectKeySet.has(parsed.projectKey);
-    }),
+    treeOrder: removeProjectTreeItemsForProjectKeys(state.projectTreeOrder, projectKeys),
   });
   return {
     ...state,
@@ -1203,22 +1235,24 @@ export function moveProjectsToRoot(
     return state;
   }
   const projectKeySet = new Set(projectKeys);
+  const movedRootProjectKeys = rootProjectKeysForProjectKeys(projectKeys);
   const projectFoldersById = removeProjectKeysFromAllFolders(
     state.projectFoldersById,
     projectKeySet,
     nowIso(),
   );
-  const rootOrderWithoutMoved = state.projectTreeOrder.filter((itemId) => {
-    const parsed = parseProjectTreeItemId(itemId);
-    return parsed?.kind !== "project" || !projectKeySet.has(parsed.projectKey);
-  });
+  const rootOrderWithoutMoved = removeProjectTreeItemsForProjectKeys(
+    state.projectTreeOrder,
+    projectKeys,
+  );
   const projectTreeOrder = normalizeProjectTreeOrder({
     projectKeys: state.projectOrder,
+    rootProjectKeys: rootProjectKeysForProjectKeys(state.projectOrder),
     foldersById: projectFoldersById,
     folderOrder: state.projectFolderOrder,
     treeOrder: insertAt(
       rootOrderWithoutMoved,
-      projectKeys.map((projectKey) => projectTreeItemId(projectKey)),
+      movedRootProjectKeys.map((projectKey) => projectTreeItemId(projectKey)),
       targetIndex,
     ),
   });
@@ -1232,17 +1266,10 @@ export function moveProjectsToRoot(
 export function moveProjectsBetweenFolders(
   state: UiState,
   projectKeys: readonly string[],
-  sourceFolderId: string,
+  _sourceFolderId: string,
   targetFolderId: string,
   targetIndex?: number,
 ): UiState {
-  if (
-    sourceFolderId === targetFolderId ||
-    state.projectFoldersById[sourceFolderId] === undefined ||
-    state.projectFoldersById[targetFolderId] === undefined
-  ) {
-    return moveProjectsToFolder(state, projectKeys, targetFolderId, targetIndex);
-  }
   return moveProjectsToFolder(state, projectKeys, targetFolderId, targetIndex);
 }
 
@@ -1312,7 +1339,7 @@ export function reorderProjectTreeItem(
   if (!removed) {
     return state;
   }
-  const insertIndex = activeIndex < overIndex ? overIndex : overIndex;
+  const insertIndex = overIndex;
   projectTreeOrder.splice(insertIndex, 0, removed);
   const nextState = {
     ...state,

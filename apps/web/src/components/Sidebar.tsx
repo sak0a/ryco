@@ -6,6 +6,7 @@ import {
   CopyIcon,
   Edit3Icon,
   ExternalLinkIcon,
+  FolderIcon,
   FolderPlusIcon,
   FolderOpenIcon,
   GitPullRequestIcon,
@@ -4655,9 +4656,14 @@ const SidebarProjectFolderRow = memo(function SidebarProjectFolderRow(
         {...(props.isManualProjectSorting && props.dragHandleProps
           ? props.dragHandleProps.listeners
           : {})}
+        aria-expanded={props.expanded}
         onClick={props.onToggle}
       >
-        <FolderOpenIcon className="size-[18px] shrink-0 text-muted-foreground/80" />
+        {props.expanded ? (
+          <FolderOpenIcon className="size-[18px] shrink-0 text-muted-foreground/80" />
+        ) : (
+          <FolderIcon className="size-[18px] shrink-0 text-muted-foreground/80" />
+        )}
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground/90">
           {props.folderName}
         </span>

@@ -556,6 +556,43 @@ describe("uiStateStore pure functions", () => {
     ]);
   });
 
+  it("moveProjectsToRoot re-roots grouped projects by logical tree item", () => {
+    const localProjectKey = "env-local:/repo/project";
+    const remoteProjectKey = "env-remote:/repo/project";
+    const logicalProjectKey = "repo-canonical-key";
+    const otherProjectKey = "env-local:/repo/other";
+    const synced = syncProjects(makeUiState(), [
+      { key: localProjectKey, logicalKey: logicalProjectKey, cwd: "/repo/project" },
+      { key: remoteProjectKey, logicalKey: logicalProjectKey, cwd: "/repo/project" },
+      { key: otherProjectKey, logicalKey: otherProjectKey, cwd: "/repo/other" },
+    ]);
+    expect(synced.projectTreeOrder).toEqual([
+      projectTreeItemId(logicalProjectKey),
+      projectTreeItemId(otherProjectKey),
+    ]);
+    const initialState = createProjectFolder(
+      synced,
+      "Grouped",
+      [localProjectKey, remoteProjectKey],
+      { folderId: "folder-grouped", now: "2026-06-09T00:00:00.000Z" },
+    );
+    expect(initialState.projectTreeOrder).toEqual([
+      projectTreeItemId(otherProjectKey),
+      projectFolderTreeItemId("folder-grouped"),
+    ]);
+
+    const next = moveProjectsToRoot(initialState, [localProjectKey, remoteProjectKey], 0);
+
+    expect(next.projectFoldersById["folder-grouped"]?.projectKeys).toEqual([]);
+    expect(next.projectTreeOrder).toEqual([
+      projectTreeItemId(logicalProjectKey),
+      projectTreeItemId(otherProjectKey),
+      projectFolderTreeItemId("folder-grouped"),
+    ]);
+    expect(next.projectTreeOrder).not.toContain(projectTreeItemId(localProjectKey));
+    expect(next.projectTreeOrder).not.toContain(projectTreeItemId(remoteProjectKey));
+  });
+
   it("moveProjectsBetweenFolders delegates to target folder insertion", () => {
     const initialState = createProjectFolder(
       createProjectFolder(
