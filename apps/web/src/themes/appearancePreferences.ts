@@ -7,6 +7,7 @@ export const APPEARANCE_PREFERENCE_KEYS = [
   "fontFamilyMono",
   "fontSizeBase",
   "radius",
+  "surfaceTransparency",
 ] as const;
 
 export type AppearancePreferenceKey = (typeof APPEARANCE_PREFERENCE_KEYS)[number];
@@ -102,11 +103,20 @@ export const RADIUS_OPTIONS = [
   { value: "1.125rem", label: "Round", description: "18 px" },
 ] as const satisfies ReadonlyArray<AppearancePreferenceOption>;
 
+export const SURFACE_TRANSPARENCY_OPTIONS = [
+  { value: "default", label: "Default", description: "Current" },
+  { value: "light", label: "Light", description: "8%" },
+  { value: "medium", label: "Medium", description: "16%" },
+  { value: "high", label: "High", description: "24%" },
+  { value: "glass", label: "Glass", description: "32%" },
+] as const satisfies ReadonlyArray<AppearancePreferenceOption>;
+
 export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
   fontFamilySans: FONT_FAMILY_SANS_OPTIONS[0].value,
   fontFamilyMono: FONT_FAMILY_MONO_OPTIONS[0].value,
   fontSizeBase: "16px",
   radius: "0.625rem",
+  surfaceTransparency: "default",
 };
 
 const RADIUS_TOKEN_OFFSETS_PX = {
@@ -124,6 +134,15 @@ const OPTION_VALUES: Record<AppearancePreferenceKey, ReadonlySet<string>> = {
   fontFamilyMono: new Set(FONT_FAMILY_MONO_OPTIONS.map((option) => option.value)),
   fontSizeBase: new Set(FONT_SIZE_OPTIONS.map((option) => option.value)),
   radius: new Set(RADIUS_OPTIONS.map((option) => option.value)),
+  surfaceTransparency: new Set(SURFACE_TRANSPARENCY_OPTIONS.map((option) => option.value)),
+};
+
+const SURFACE_TRANSPARENCY_STEPS: Record<string, number> = {
+  default: 0,
+  light: 0.08,
+  medium: 0.16,
+  high: 0.24,
+  glass: 0.32,
 };
 
 function hasStorage(): boolean {
@@ -195,7 +214,7 @@ export function applyAppearancePreferencesToDocument(): void {
   if (typeof document === "undefined" || typeof document.getElementById !== "function") return;
   const preferences = getAppearancePreferences();
   const style = ensureAppearancePreferencesStyleElement();
-  style.textContent = `:root { --font-family-sans: ${preferences.fontFamilySans}; --font-family-mono: ${preferences.fontFamilyMono}; --font-size-base: ${preferences.fontSizeBase}; ${buildRadiusCssVariables(preferences.radius)} }`;
+  style.textContent = `:root { --font-family-sans: ${preferences.fontFamilySans}; --font-family-mono: ${preferences.fontFamilyMono}; --font-size-base: ${preferences.fontSizeBase}; ${buildRadiusCssVariables(preferences.radius)} ${buildSurfaceTransparencyCssVariables(preferences.surfaceTransparency)} }`;
   dispatchAppearancePreferencesChangeEvent();
 }
 
@@ -219,6 +238,37 @@ function resolveRadiusToken(radius: string, offsetPx: number): string {
 function formatRemLength(rem: number): string {
   if (rem === 0) return "0px";
   return `${Number(rem.toFixed(4))}rem`;
+}
+
+function buildSurfaceTransparencyCssVariables(surfaceTransparency: string): string {
+  const step = SURFACE_TRANSPARENCY_STEPS[surfaceTransparency] ?? 0;
+  return [
+    ["--app-surface-opacity", resolveTransparencyPercent(100, step, 1, 68)],
+    ["--app-muted-surface-opacity", resolveTransparencyPercent(72, step, 0.65, 46)],
+    ["--app-dialog-viewport-light-alpha", resolveTransparencyPercent(48, step, 0.65, 24)],
+    ["--app-dialog-viewport-dark-alpha", resolveTransparencyPercent(28, step, 0.45, 12)],
+    ["--app-sheet-backdrop-alpha", resolveTransparencyPercent(32, step, 0.5, 14)],
+    ["--app-command-backdrop-opacity", resolveTransparencyPercent(60, step, 0.75, 30)],
+    ["--app-glass-light-start-alpha", resolveTransparencyPercent(26, step, 0.45, 10)],
+    ["--app-glass-light-end-alpha", resolveTransparencyPercent(10, step, 0.2, 4)],
+    ["--app-glass-foreground-alpha", resolveTransparencyPercent(6, step, 0.12, 2)],
+    ["--app-glass-light-popover-alpha", resolveTransparencyPercent(28, step, 0.5, 10)],
+    ["--app-glass-dark-start-alpha", resolveTransparencyPercent(5.5, step, 0.12, 1.5)],
+    ["--app-glass-dark-end-alpha", resolveTransparencyPercent(1.5, step, 0.03, 0.5)],
+    ["--app-glass-dark-popover-alpha", resolveTransparencyPercent(32, step, 0.55, 10)],
+  ]
+    .map(([name, value]) => `${name}: ${value};`)
+    .join(" ");
+}
+
+function resolveTransparencyPercent(
+  basePercent: number,
+  step: number,
+  scale: number,
+  minPercent: number,
+): string {
+  const next = Math.max(minPercent, basePercent - step * 100 * scale);
+  return `${Number(next.toFixed(2))}%`;
 }
 
 function ensureAppearancePreferencesStyleElement(): HTMLStyleElement {

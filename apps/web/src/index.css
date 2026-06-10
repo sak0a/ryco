@@ -229,6 +229,19 @@
     "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-family-mono: "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   --font-size-base: 16px;
+  --app-surface-opacity: 100%;
+  --app-muted-surface-opacity: 72%;
+  --app-dialog-viewport-light-alpha: 48%;
+  --app-dialog-viewport-dark-alpha: 28%;
+  --app-sheet-backdrop-alpha: 32%;
+  --app-command-backdrop-opacity: 60%;
+  --app-glass-light-start-alpha: 26%;
+  --app-glass-light-end-alpha: 10%;
+  --app-glass-foreground-alpha: 6%;
+  --app-glass-light-popover-alpha: 28%;
+  --app-glass-dark-start-alpha: 5.5%;
+  --app-glass-dark-end-alpha: 1.5%;
+  --app-glass-dark-popover-alpha: 32%;
   --background: var(--color-white);
   --app-chrome-background: var(--background);
   --foreground: var(--color-neutral-800);
@@ -382,11 +395,55 @@ code {
 }
 
 @layer components {
+  .app-surface {
+    background-color: color-mix(in srgb, var(--popover) var(--app-surface-opacity), transparent);
+  }
+
+  .app-muted-surface {
+    background-color: color-mix(
+      in srgb,
+      var(--muted) var(--app-muted-surface-opacity),
+      transparent
+    );
+  }
+
+  .app-muted-before::before {
+    background-color: color-mix(
+      in srgb,
+      var(--muted) var(--app-muted-surface-opacity),
+      transparent
+    );
+  }
+
+  .app-dialog-viewport-scrim {
+    background-color: rgb(255 255 255 / var(--app-dialog-viewport-light-alpha));
+  }
+
+  .dark .app-dialog-viewport-scrim {
+    background-color: rgb(0 0 0 / var(--app-dialog-viewport-dark-alpha));
+  }
+
+  .app-sheet-backdrop {
+    background-color: rgb(0 0 0 / var(--app-sheet-backdrop-alpha));
+  }
+
+  .app-command-backdrop {
+    background-color: color-mix(
+      in srgb,
+      var(--background) var(--app-command-backdrop-opacity),
+      transparent
+    );
+  }
+
   .selection-glass-surface {
     background:
-      linear-gradient(135deg, rgb(255 255 255 / 0.26), rgb(255 255 255 / 0.1)),
-      color-mix(in srgb, var(--foreground) 6%, transparent),
-      color-mix(in srgb, var(--popover) 28%, transparent);
+      linear-gradient(
+        135deg,
+        rgb(255 255 255 / var(--app-glass-light-start-alpha)),
+        rgb(255 255 255 / var(--app-glass-light-end-alpha))
+      ),
+      color-mix(in srgb, var(--foreground) var(--app-glass-foreground-alpha), transparent),
+      color-mix(in srgb, var(--popover) var(--app-glass-light-popover-alpha), transparent);
     border-color: color-mix(in srgb, var(--border) 52%, rgb(255 255 255 / 0.28));
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.36),
@@ -399,8 +456,12 @@ code {
 
   .dark .selection-glass-surface {
     background:
-      linear-gradient(135deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.015)),
-      color-mix(in srgb, var(--popover) 32%, transparent);
+      linear-gradient(
+        135deg,
+        rgb(255 255 255 / var(--app-glass-dark-start-alpha)),
+        rgb(255 255 255 / var(--app-glass-dark-end-alpha))
+      ),
+      color-mix(in srgb, var(--popover) var(--app-glass-dark-popover-alpha), transparent);
     border-color: color-mix(in srgb, var(--border) 58%, rgb(255 255 255 / 0.1));
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.1),
@@ -416,6 +477,15 @@ code {
   }
 
   @media (prefers-reduced-transparency: reduce) {
+    .app-surface {
+      background-color: var(--popover);
+    }
+
+    .app-muted-surface,
+    .app-muted-before::before {
+      background-color: var(--muted);
+    }
+
     .selection-glass-surface {
       background: var(--popover);
       -webkit-backdrop-filter: none;
@@ -424,6 +494,12 @@ code {
   }
 
   @media (forced-colors: active) {
+    .app-surface,
+    .app-muted-surface,
+    .app-muted-before::before {
+      background: Canvas;
+    }
+
     .selection-glass-surface {
       background: Canvas;
       border-color: CanvasText;
