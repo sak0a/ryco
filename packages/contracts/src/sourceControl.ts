@@ -585,11 +585,33 @@ export interface SourceControlDetailContentOutput<
   readonly truncated: boolean;
 }
 
+function utf8ByteLength(codePoint: number): number {
+  if (codePoint <= 0x7f) return 1;
+  if (codePoint <= 0x7ff) return 2;
+  if (codePoint <= 0xffff) return 3;
+  return 4;
+}
+
 function truncateUtf8(value: string, maxBytes: number): { value: string; truncated: boolean } {
-  if (Buffer.byteLength(value, "utf8") <= maxBytes) return { value, truncated: false };
-  const buf = Buffer.from(value, "utf8").subarray(0, maxBytes);
-  // Avoid splitting a multi-byte char at the tail.
-  return { value: buf.toString("utf8"), truncated: true };
+  let byteLength = 0;
+  let end = 0;
+
+  for (let index = 0; index < value.length; ) {
+    const codePoint = value.codePointAt(index);
+    if (codePoint === undefined) break;
+
+    const codeUnitLength = codePoint > 0xffff ? 2 : 1;
+    const nextByteLength = byteLength + utf8ByteLength(codePoint);
+    if (nextByteLength > maxBytes) {
+      return { value: value.slice(0, end), truncated: true };
+    }
+
+    byteLength = nextByteLength;
+    end = index + codeUnitLength;
+    index = end;
+  }
+
+  return { value, truncated: false };
 }
 
 export function truncateSourceControlDetailContent<C extends SourceControlDetailContentCommentLike>(

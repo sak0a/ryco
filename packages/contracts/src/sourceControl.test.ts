@@ -30,9 +30,14 @@ describe("truncateSourceControlDetailContent", () => {
     const big = "x".repeat(SOURCE_CONTROL_DETAIL_BODY_MAX_BYTES + 100);
     const result = truncateSourceControlDetailContent({ body: big, comments: [] });
     expect(result.truncated).toBe(true);
-    expect(Buffer.byteLength(result.body, "utf8")).toBeLessThanOrEqual(
-      SOURCE_CONTROL_DETAIL_BODY_MAX_BYTES,
-    );
+    expect(result.body.length).toBeLessThanOrEqual(SOURCE_CONTROL_DETAIL_BODY_MAX_BYTES);
+  });
+
+  it("does not split multi-byte characters at the byte cap", () => {
+    const prefix = "x".repeat(SOURCE_CONTROL_DETAIL_BODY_MAX_BYTES - 1);
+    const result = truncateSourceControlDetailContent({ body: `${prefix}\u{1f4be}`, comments: [] });
+    expect(result.truncated).toBe(true);
+    expect(result.body).toBe(prefix);
   });
 
   it("keeps only last N comments", () => {
