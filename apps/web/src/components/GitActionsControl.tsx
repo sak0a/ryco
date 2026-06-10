@@ -1,4 +1,5 @@
 import { type ScopedThreadRef, WorktreeId } from "@ryco/contracts";
+import { scopedThreadKey } from "@ryco/client-runtime";
 import type {
   GitActionProgressEvent,
   GitRunStackedActionResult,
@@ -94,6 +95,16 @@ interface GitActionsControlProps {
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
   showLabels?: boolean;
+  onPostPush?: (event: GitActionPostPushEvent) => void;
+}
+
+export interface GitActionPostPushEvent {
+  readonly environmentId: ScopedThreadRef["environmentId"];
+  readonly threadKey: string | null;
+  readonly cwd: string;
+  readonly action: GitStackedAction;
+  readonly commitSha: string | null;
+  readonly pullRequestNumber: number | null;
 }
 
 interface PendingDefaultBranchAction {
@@ -967,6 +978,7 @@ export default function GitActionsControl({
   activeThreadRef,
   draftId,
   showLabels = false,
+  onPostPush,
 }: GitActionsControlProps) {
   const activeEnvironmentId = activeThreadRef?.environmentId ?? null;
   const threadToastData = useMemo(
@@ -1320,6 +1332,7 @@ export default function GitActionsControl({
           (!actionStatus?.hasUpstream || (actionStatus?.aheadCount ?? 0) > 0),
       });
       const scopedToastData = threadToastData ? { ...threadToastData } : undefined;
+      const actionThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
       const actionId = randomUUID();
       const resolvedProgressToastId =
         progressToastId ??
@@ -1425,6 +1438,16 @@ export default function GitActionsControl({
         const result = await promise;
         clearActiveGitActionProgress();
         syncThreadBranchAfterGitAction(result);
+        if (result.push.status === "pushed" && activeEnvironmentId && gitCwd) {
+          onPostPush?.({
+            environmentId: activeEnvironmentId,
+            threadKey: actionThreadKey,
+            cwd: gitCwd,
+            action: result.action,
+            commitSha: result.commit.commitSha ?? null,
+            pullRequestNumber: result.pr.number ?? null,
+          });
+        }
         const closeResultToast = () => {
           toastManager.close(resolvedProgressToastId);
         };
