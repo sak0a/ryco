@@ -104,11 +104,11 @@ export const RADIUS_OPTIONS = [
 ] as const satisfies ReadonlyArray<AppearancePreferenceOption>;
 
 export const SURFACE_TRANSPARENCY_OPTIONS = [
-  { value: "default", label: "Default", description: "Current" },
+  { value: "default", label: "Solid", description: "0%" },
   { value: "light", label: "Light", description: "8%" },
   { value: "medium", label: "Medium", description: "16%" },
-  { value: "high", label: "High", description: "24%" },
-  { value: "glass", label: "Glass", description: "32%" },
+  { value: "high", label: "High", description: "22%" },
+  { value: "glass", label: "Glass", description: "28%" },
 ] as const satisfies ReadonlyArray<AppearancePreferenceOption>;
 
 export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
@@ -141,8 +141,8 @@ const SURFACE_TRANSPARENCY_STEPS: Record<string, number> = {
   default: 0,
   light: 0.08,
   medium: 0.16,
-  high: 0.24,
-  glass: 0.32,
+  high: 0.22,
+  glass: 0.28,
 };
 
 function hasStorage(): boolean {
@@ -241,34 +241,29 @@ function formatRemLength(rem: number): string {
 }
 
 function buildSurfaceTransparencyCssVariables(surfaceTransparency: string): string {
-  const step = SURFACE_TRANSPARENCY_STEPS[surfaceTransparency] ?? 0;
+  const transparency = SURFACE_TRANSPARENCY_STEPS[surfaceTransparency] ?? 0;
+  const surfaceOpacity = 100 - transparency * 100;
   return [
-    ["--app-surface-opacity", resolveTransparencyPercent(100, step, 1, 68)],
-    ["--app-muted-surface-opacity", resolveTransparencyPercent(72, step, 0.65, 46)],
-    ["--app-dialog-viewport-light-alpha", resolveTransparencyPercent(48, step, 0.65, 24)],
-    ["--app-dialog-viewport-dark-alpha", resolveTransparencyPercent(28, step, 0.45, 12)],
-    ["--app-sheet-backdrop-alpha", resolveTransparencyPercent(32, step, 0.5, 14)],
-    ["--app-command-backdrop-opacity", resolveTransparencyPercent(60, step, 0.75, 30)],
-    ["--app-glass-light-start-alpha", resolveTransparencyPercent(26, step, 0.45, 10)],
-    ["--app-glass-light-end-alpha", resolveTransparencyPercent(10, step, 0.2, 4)],
-    ["--app-glass-foreground-alpha", resolveTransparencyPercent(6, step, 0.12, 2)],
-    ["--app-glass-light-popover-alpha", resolveTransparencyPercent(28, step, 0.5, 10)],
-    ["--app-glass-dark-start-alpha", resolveTransparencyPercent(5.5, step, 0.12, 1.5)],
-    ["--app-glass-dark-end-alpha", resolveTransparencyPercent(1.5, step, 0.03, 0.5)],
-    ["--app-glass-dark-popover-alpha", resolveTransparencyPercent(32, step, 0.55, 10)],
+    ["--app-surface-opacity", formatPercent(surfaceOpacity)],
+    ["--app-muted-surface-opacity", formatPercent(100 - transparency * 75)],
+    ["--app-dialog-viewport-light-alpha", formatPercent(Math.max(34, 48 - transparency * 50))],
+    ["--app-dialog-viewport-dark-alpha", formatPercent(Math.max(16, 28 - transparency * 36))],
+    ["--app-sheet-backdrop-alpha", formatPercent(Math.max(18, 32 - transparency * 42))],
+    ["--app-command-backdrop-opacity", formatPercent(Math.max(38, 60 - transparency * 60))],
+    ["--app-glass-light-start-alpha", formatPercent(transparency * 75)],
+    ["--app-glass-light-end-alpha", formatPercent(transparency * 32)],
+    ["--app-glass-foreground-alpha", formatPercent(transparency * 18)],
+    ["--app-glass-light-popover-alpha", formatPercent(surfaceOpacity)],
+    ["--app-glass-dark-start-alpha", formatPercent(transparency * 18)],
+    ["--app-glass-dark-end-alpha", formatPercent(transparency * 5)],
+    ["--app-glass-dark-popover-alpha", formatPercent(surfaceOpacity)],
   ]
     .map(([name, value]) => `${name}: ${value};`)
     .join(" ");
 }
 
-function resolveTransparencyPercent(
-  basePercent: number,
-  step: number,
-  scale: number,
-  minPercent: number,
-): string {
-  const next = Math.max(minPercent, basePercent - step * 100 * scale);
-  return `${Number(next.toFixed(2))}%`;
+function formatPercent(percent: number): string {
+  return `${Number(percent.toFixed(2))}%`;
 }
 
 function ensureAppearancePreferencesStyleElement(): HTMLStyleElement {

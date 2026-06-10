@@ -141,8 +141,8 @@ const TRANSPARENCY_PREVIEW_OPACITY: Record<string, number> = {
   default: 1,
   light: 0.92,
   medium: 0.84,
-  high: 0.76,
-  glass: 0.68,
+  high: 0.78,
+  glass: 0.72,
 };
 
 export function AppearanceSettingsPanel() {

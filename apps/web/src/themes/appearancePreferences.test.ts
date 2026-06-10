@@ -163,7 +163,43 @@ describe("appearance preferences", () => {
     expect(style?.textContent).toContain("--radius-sm: 0px !important;");
     expect(style?.textContent).toContain("--radius-4xl: 0px !important;");
     expect(style?.textContent).toContain("--font-size-base: 18px;");
-    expect(style?.textContent).toContain("--app-surface-opacity: 76%;");
-    expect(style?.textContent).toContain("--app-dialog-viewport-light-alpha: 32.4%;");
+    expect(style?.textContent).toContain("--app-surface-opacity: 78%;");
+    expect(style?.textContent).toContain("--app-glass-light-popover-alpha: 78%;");
+    expect(style?.textContent).toContain("--app-dialog-viewport-light-alpha: 37%;");
+  });
+
+  it("keeps floating surfaces solid at the default transparency setting", () => {
+    class FakeStyle {
+      id = "";
+      textContent = "";
+    }
+    const appended: FakeStyle[] = [];
+    Object.defineProperty(globalThis, "HTMLStyleElement", {
+      configurable: true,
+      value: FakeStyle,
+    });
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: {
+        getElementById: (id: string) => appended.find((node) => node.id === id) ?? null,
+        createElement: () => new FakeStyle(),
+        head: {
+          append: (node: FakeStyle) => {
+            const existingIndex = appended.indexOf(node);
+            if (existingIndex >= 0) appended.splice(existingIndex, 1);
+            appended.push(node);
+          },
+        },
+      },
+    });
+
+    applyAppearancePreferencesToDocument();
+
+    const style = appended.find((node) => node.id === APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID);
+    expect(style?.textContent).toContain("--app-surface-opacity: 100%;");
+    expect(style?.textContent).toContain("--app-muted-surface-opacity: 100%;");
+    expect(style?.textContent).toContain("--app-glass-light-start-alpha: 0%;");
+    expect(style?.textContent).toContain("--app-glass-light-popover-alpha: 100%;");
+    expect(style?.textContent).toContain("--app-glass-dark-popover-alpha: 100%;");
   });
 });

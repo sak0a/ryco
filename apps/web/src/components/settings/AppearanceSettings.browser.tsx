@@ -149,7 +149,7 @@ describe("AppearanceSettingsPanel", () => {
     expect(style?.textContent).toContain('--font-family-mono: "Geist Mono"');
     expect(style?.textContent).toContain("--font-size-base: 18px");
     expect(style?.textContent).toContain("--radius: 0rem");
-    expect(style?.textContent).toContain("--app-surface-opacity: 76%");
+    expect(style?.textContent).toContain("--app-surface-opacity: 78%");
 
     await expect
       .element(page.getByRole("button", { name: "Reset interface font to default" }))
