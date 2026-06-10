@@ -14,6 +14,7 @@ import {
   APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID,
   FONT_FAMILY_MONO_OPTIONS,
   FONT_FAMILY_SANS_OPTIONS,
+  SURFACE_TRANSPARENCY_OPTIONS,
 } from "../../themes/appearancePreferences";
 import { AppearanceSettingsPanel } from "./AppearanceSettings";
 
@@ -117,22 +118,28 @@ describe("AppearanceSettingsPanel", () => {
     const codeFontValue = FONT_FAMILY_MONO_OPTIONS.find(
       (option) => option.label === codeFontLabel,
     )?.value;
+    const transparencyValue = SURFACE_TRANSPARENCY_OPTIONS.find(
+      (option) => option.label === "High",
+    )?.value;
 
     await expect.element(page.getByText("Interface controls")).toBeInTheDocument();
     await page.getByRole("radio", { name: `Use ${interfaceFontLabel} for interface font` }).click();
     await page.getByRole("radio", { name: `Use ${codeFontLabel} for code font` }).click();
     await page.getByRole("button", { name: "Set text size to Large" }).click();
     await page.getByRole("button", { name: "Set corner radius to Square" }).click();
+    await page.getByRole("button", { name: "Set transparency to High" }).click();
 
     await vi.waitFor(() => {
       expect(interfaceFontValue).toBeDefined();
       expect(codeFontValue).toBeDefined();
+      expect(transparencyValue).toBeDefined();
       expect(JSON.parse(localStorage.getItem(APPEARANCE_PREFERENCES_STORAGE_KEY) ?? "{}")).toEqual(
         expect.objectContaining({
           fontFamilySans: interfaceFontValue,
           fontFamilyMono: codeFontValue,
           fontSizeBase: "18px",
           radius: "0rem",
+          surfaceTransparency: transparencyValue,
         }),
       );
     });
@@ -142,6 +149,7 @@ describe("AppearanceSettingsPanel", () => {
     expect(style?.textContent).toContain('--font-family-mono: "Geist Mono"');
     expect(style?.textContent).toContain("--font-size-base: 18px");
     expect(style?.textContent).toContain("--radius: 0rem");
+    expect(style?.textContent).toContain("--app-surface-opacity: 78%");
 
     await expect
       .element(page.getByRole("button", { name: "Reset interface font to default" }))
@@ -154,6 +162,9 @@ describe("AppearanceSettingsPanel", () => {
       .toBeInTheDocument();
     await expect
       .element(page.getByRole("button", { name: "Reset corner radius to default" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Reset transparency to default" }))
       .toBeInTheDocument();
   });
 });

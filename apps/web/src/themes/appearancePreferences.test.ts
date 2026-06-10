@@ -61,6 +61,7 @@ describe("appearance preferences", () => {
     expect(hasAppearancePreferenceOverride("fontFamilyMono")).toBe(false);
     expect(hasAppearancePreferenceOverride("fontSizeBase")).toBe(false);
     expect(hasAppearancePreferenceOverride("radius")).toBe(false);
+    expect(hasAppearancePreferenceOverride("surfaceTransparency")).toBe(false);
   });
 
   it("persists only non-default values and removes defaults", () => {
@@ -84,16 +85,21 @@ describe("appearance preferences", () => {
         fontFamilyMono: "Papyrus",
         fontSizeBase: "500px",
         radius: "url(javascript:alert(1))",
+        surfaceTransparency: "invisible",
       }),
     );
     expect(getAppearancePreferences()).toEqual(DEFAULT_APPEARANCE_PREFERENCES);
 
     setAppearancePreference("fontFamilySans", "serif");
     setAppearancePreference("radius", "999rem");
+    setAppearancePreference("surfaceTransparency", "opaque");
     expect(getAppearancePreferences().fontFamilySans).toBe(
       DEFAULT_APPEARANCE_PREFERENCES.fontFamilySans,
     );
     expect(getAppearancePreferences().radius).toBe(DEFAULT_APPEARANCE_PREFERENCES.radius);
+    expect(getAppearancePreferences().surfaceTransparency).toBe(
+      DEFAULT_APPEARANCE_PREFERENCES.surfaceTransparency,
+    );
   });
 
   it("resets a single preference without touching the other", () => {
@@ -103,6 +109,7 @@ describe("appearance preferences", () => {
     );
     setAppearancePreference("fontSizeBase", "18px");
     setAppearancePreference("radius", "0rem");
+    setAppearancePreference("surfaceTransparency", "high");
 
     resetAppearancePreference("radius");
 
@@ -111,6 +118,7 @@ describe("appearance preferences", () => {
       fontFamilySans:
         '"Geist", "Geist Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       fontSizeBase: "18px",
+      surfaceTransparency: "high",
     });
   });
 
@@ -141,6 +149,7 @@ describe("appearance preferences", () => {
 
     setAppearancePreference("fontSizeBase", "18px");
     setAppearancePreference("radius", "0rem");
+    setAppearancePreference("surfaceTransparency", "high");
     applyAppearancePreferencesToDocument();
 
     const style = appended.find((node) => node.id === APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID);
@@ -154,5 +163,43 @@ describe("appearance preferences", () => {
     expect(style?.textContent).toContain("--radius-sm: 0px !important;");
     expect(style?.textContent).toContain("--radius-4xl: 0px !important;");
     expect(style?.textContent).toContain("--font-size-base: 18px;");
+    expect(style?.textContent).toContain("--app-surface-opacity: 78%;");
+    expect(style?.textContent).toContain("--app-glass-light-popover-alpha: 78%;");
+    expect(style?.textContent).toContain("--app-dialog-viewport-light-alpha: 37%;");
+  });
+
+  it("keeps floating surfaces solid at the default transparency setting", () => {
+    class FakeStyle {
+      id = "";
+      textContent = "";
+    }
+    const appended: FakeStyle[] = [];
+    Object.defineProperty(globalThis, "HTMLStyleElement", {
+      configurable: true,
+      value: FakeStyle,
+    });
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: {
+        getElementById: (id: string) => appended.find((node) => node.id === id) ?? null,
+        createElement: () => new FakeStyle(),
+        head: {
+          append: (node: FakeStyle) => {
+            const existingIndex = appended.indexOf(node);
+            if (existingIndex >= 0) appended.splice(existingIndex, 1);
+            appended.push(node);
+          },
+        },
+      },
+    });
+
+    applyAppearancePreferencesToDocument();
+
+    const style = appended.find((node) => node.id === APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID);
+    expect(style?.textContent).toContain("--app-surface-opacity: 100%;");
+    expect(style?.textContent).toContain("--app-muted-surface-opacity: 100%;");
+    expect(style?.textContent).toContain("--app-glass-light-start-alpha: 0%;");
+    expect(style?.textContent).toContain("--app-glass-light-popover-alpha: 100%;");
+    expect(style?.textContent).toContain("--app-glass-dark-popover-alpha: 100%;");
   });
 });
