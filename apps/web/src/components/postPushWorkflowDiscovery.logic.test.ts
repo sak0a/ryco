@@ -138,6 +138,17 @@ describe("post-push workflow discovery", () => {
     ).toBe(false);
   });
 
+  it("does not treat cached runs as discovered when the pushed commit is unknown", () => {
+    const watch = createPostPushWorkflowDiscoveryWatch({
+      environmentId,
+      cwd: "/repo",
+      commitSha: null,
+      nowMs: 1_000,
+    });
+
+    expect(hasDiscoveredPostPushWorkflowRun({ watch, runs: [workflowRun()] })).toBe(false);
+  });
+
   it("uses 10s discovery polling before falling back to normal refresh rules", () => {
     const watch = createPostPushWorkflowDiscoveryWatch({
       environmentId,

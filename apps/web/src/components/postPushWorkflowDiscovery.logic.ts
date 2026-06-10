@@ -60,7 +60,7 @@ export function hasDiscoveredPostPushWorkflowRun(input: {
 }): boolean {
   if (!input.watch || !input.runs || input.runs.length === 0) return false;
   const commitSha = input.watch.commitSha;
-  if (!commitSha) return true;
+  if (!commitSha) return false;
   return input.runs.some((run) => {
     const oid = run.commit.oid;
     return oid === commitSha || oid.startsWith(commitSha) || commitSha.startsWith(oid);
