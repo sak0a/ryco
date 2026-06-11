@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { releasePackageFiles } from "./update-release-package-versions.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -49,6 +50,22 @@ function copyWorkspaceManifestFixture(targetRoot: string): void {
     mkdirSync(dirname(destinationPath), { recursive: true });
     cpSync(sourcePath, destinationPath);
   }
+}
+
+function formatReleasePackageFixtures(targetRoot: string): void {
+  execFileSync(
+    "bunx",
+    [
+      "oxfmt@0.53.0",
+      "--config",
+      resolve(repoRoot, ".github/oxfmtrc.release.json"),
+      ...releasePackageFiles,
+    ],
+    {
+      cwd: targetRoot,
+      stdio: "inherit",
+    },
+  );
 }
 
 function writeMacManifestFixtures(targetRoot: string): { arm64Path: string; x64Path: string } {
@@ -197,9 +214,11 @@ try {
     },
   );
 
+  formatReleasePackageFixtures(tempRoot);
+
   rmSync(resolve(tempRoot, "bun.lock"), { force: true });
 
-  execFileSync("bun", ["install", "--ignore-scripts"], {
+  execFileSync("bun", ["install", "--lockfile-only", "--ignore-scripts"], {
     cwd: tempRoot,
     stdio: "inherit",
   });
