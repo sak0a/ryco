@@ -42,7 +42,7 @@ const noopReporter: PerfRateReporter = {
   flush: () => undefined,
   dispose: () => undefined,
 };
-let textEncoder: TextEncoder | null | undefined;
+let textEncoder: { encode(input?: string): Uint8Array } | null | undefined;
 
 export function parsePerfProfileFlag(value: string | number | boolean | null | undefined): boolean {
   if (typeof value === "boolean") return value;

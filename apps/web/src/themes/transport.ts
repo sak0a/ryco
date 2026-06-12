@@ -91,9 +91,6 @@ export function encodeThemeToBase64(theme: ThemeDefinition): string {
     for (const byte of bytes) binary += String.fromCharCode(byte);
     return btoa(binary);
   }
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(json, "utf-8").toString("base64");
-  }
   throw new Error("No base64 encoder available in this environment.");
 }
 
@@ -105,8 +102,6 @@ export function decodeThemeFromBase64(input: string): ThemeDefinition {
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
     json = TEXT_DECODER.decode(bytes);
-  } else if (typeof Buffer !== "undefined") {
-    json = Buffer.from(trimmed, "base64").toString("utf-8");
   } else {
     throw new Error("No base64 decoder available in this environment.");
   }

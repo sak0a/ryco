@@ -60,6 +60,7 @@ import {
   issueDetailQueryOptions,
   changeRequestListQueryOptions,
   changeRequestDetailQueryOptions,
+  sourceControlContextQueryKeys,
   workflowRunJobsQueryOptions,
   workflowRunsQueryOptions,
 } from "~/lib/sourceControlContextRpc";
@@ -136,7 +137,7 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
-import GitActionsControl from "./GitActionsControl";
+import GitActionsControl, { type GitActionPostPushEvent } from "./GitActionsControl";
 import {
   matchesExactModShortcut,
   resolveShortcutCommand,
@@ -161,6 +162,13 @@ import {
   selectOverviewChecksError,
   summarizeActiveWorkflowJob,
 } from "./overviewPullRequestChecks.logic";
+import {
+  createPostPushWorkflowDiscoveryWatch,
+  hasDiscoveredPostPushWorkflowRun,
+  resolveWorkflowRunsRefetchInterval,
+  selectActivePostPushWorkflowDiscoveryWatch,
+  type PostPushWorkflowDiscoveryWatch,
+} from "./postPushWorkflowDiscovery.logic";
 import { buildOverviewChangesItem } from "./overviewChanges.logic";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
@@ -2032,6 +2040,38 @@ export default function ChatView(props: ChatViewProps) {
     : null;
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
   const queryClient = useQueryClient();
+  const [postPushWorkflowWatch, setPostPushWorkflowWatch] =
+    useState<PostPushWorkflowDiscoveryWatch | null>(null);
+  const handlePostPushGitAction = useCallback(
+    (event: GitActionPostPushEvent) => {
+      setPostPushWorkflowWatch(
+        createPostPushWorkflowDiscoveryWatch({
+          environmentId: event.environmentId,
+          threadKey: event.threadKey,
+          cwd: event.cwd,
+          pullRequestNumber: event.pullRequestNumber,
+          commitSha: event.commitSha,
+          nowMs: Date.now(),
+        }),
+      );
+      void queryClient.invalidateQueries({
+        queryKey: sourceControlContextQueryKeys.changeRequests(event.environmentId, event.cwd),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: sourceControlContextQueryKeys.workflows(event.environmentId, event.cwd),
+      });
+    },
+    [queryClient],
+  );
+  useEffect(() => {
+    if (!postPushWorkflowWatch) return;
+    const timeoutId = window.setTimeout(
+      () =>
+        setPostPushWorkflowWatch((current) => (current === postPushWorkflowWatch ? null : current)),
+      Math.max(0, postPushWorkflowWatch.expiresAtMs - Date.now()),
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [postPushWorkflowWatch]);
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
   // Prefer an instance-id match so a custom Codex instance (e.g.
@@ -2073,11 +2113,28 @@ export default function ChatView(props: ChatViewProps) {
     () => findChangeRequestForBranch(overviewBranchPullRequestsQuery.data, overviewBranchName),
     [overviewBranchName, overviewBranchPullRequestsQuery.data],
   );
+  const postPushWorkflowWatchForContext = selectActivePostPushWorkflowDiscoveryWatch({
+    watch: postPushWorkflowWatch,
+    environmentId,
+    threadKey: activeThreadKey,
+    cwd: gitCwd,
+    pullRequestNumber: null,
+    nowMs: Date.now(),
+  });
   const overviewPullRequestNumber =
     activeWorktreeSummary?.prNumber ??
     gitStatusQuery.data?.pr?.number ??
     overviewBranchPullRequest?.number ??
+    postPushWorkflowWatchForContext?.pullRequestNumber ??
     null;
+  const activePostPushWorkflowWatch = selectActivePostPushWorkflowDiscoveryWatch({
+    watch: postPushWorkflowWatchForContext,
+    environmentId,
+    threadKey: activeThreadKey,
+    cwd: gitCwd,
+    pullRequestNumber: overviewPullRequestNumber,
+    nowMs: Date.now(),
+  });
   const overviewPullRequestReference =
     overviewPullRequestNumber !== null ? String(overviewPullRequestNumber) : null;
   const overviewGitProvider = gitStatusQuery.data?.sourceControlProvider?.kind ?? null;
@@ -2107,19 +2164,43 @@ export default function ChatView(props: ChatViewProps) {
       environmentId,
       cwd: gitCwd,
       pullRequestNumber: overviewPullRequestNumber,
+      commitSha: activePostPushWorkflowWatch?.commitSha ?? null,
       limit: 20,
       enabled: overviewWorkflowRunsEnabled,
     }),
     refetchInterval: (query) => {
       const data = query.state.data;
-      if (!data) return false;
-      const status = getPrCheckStatusFromWorkflowRuns({
-        runs: data.runs,
-        headSha: sourceControlOptionValue(data.headSha),
+      const status = data
+        ? getPrCheckStatusFromWorkflowRuns({
+            runs: data.runs,
+            headSha: sourceControlOptionValue(data.headSha),
+          })
+        : null;
+      return resolveWorkflowRunsRefetchInterval({
+        activeWatch: activePostPushWorkflowWatch,
+        nowMs: Date.now(),
+        discoveredPostPushRun: hasDiscoveredPostPushWorkflowRun({
+          watch: activePostPushWorkflowWatch,
+          runs: data?.runs,
+        }),
+        statusRefreshable: status ? shouldRefreshPrCheckStatus(status) : false,
       });
-      return shouldRefreshPrCheckStatus(status) ? 30_000 : false;
     },
   });
+  useEffect(() => {
+    if (!activePostPushWorkflowWatch) return;
+    if (
+      !hasDiscoveredPostPushWorkflowRun({
+        watch: activePostPushWorkflowWatch,
+        runs: overviewWorkflowRunsQuery.data?.runs,
+      })
+    ) {
+      return;
+    }
+    setPostPushWorkflowWatch((current) =>
+      current === activePostPushWorkflowWatch ? null : current,
+    );
+  }, [activePostPushWorkflowWatch, overviewWorkflowRunsQuery.data?.runs]);
   const overviewActiveWorkflowRunId = useMemo(() => {
     const runs = overviewWorkflowRunsQuery.data?.runs ?? [];
     return runs.find(isOverviewActiveWorkflowRun)?.runId ?? null;
@@ -3138,6 +3219,7 @@ export default function ChatView(props: ChatViewProps) {
         gitCwd={gitCwd}
         activeThreadRef={activeThreadRef}
         {...(routeKind === "draft" && draftId ? { draftId } : {})}
+        onPostPush={handlePostPushGitAction}
         showLabels
       />
     ) : null;

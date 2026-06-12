@@ -35,6 +35,7 @@ import {
   FONT_FAMILY_SANS_OPTIONS,
   FONT_SIZE_OPTIONS,
   RADIUS_OPTIONS,
+  SURFACE_TRANSPARENCY_OPTIONS,
   applyAppearancePreferencesToDocument,
   getAppearancePreferences,
   hasAppearancePreferenceOverride,
@@ -135,6 +136,14 @@ const TOKEN_MODE_CONTROL_OPTIONS = [
   preview: string;
   icon: LucideIcon;
 }>;
+
+const TRANSPARENCY_PREVIEW_OPACITY: Record<string, number> = {
+  default: 1,
+  light: 0.92,
+  medium: 0.84,
+  high: 0.78,
+  glass: 0.72,
+};
 
 export function AppearanceSettingsPanel() {
   const { theme, setTheme, resolvedTheme, activeThemeId, setActiveTheme } = useTheme();
@@ -420,6 +429,39 @@ export function AppearanceSettingsPanel() {
                   <span
                     className="border border-muted-foreground/30 bg-muted"
                     style={{ borderRadius: appearancePreferences.radius }}
+                  />
+                </span>
+              }
+            />
+          }
+        />
+        <SettingsRow
+          title="Transparency"
+          description="Adjust glass and floating surfaces like dialogs, menus, popups, and toasts."
+          resetAction={
+            hasAppearancePreferenceOverride("surfaceTransparency") ? (
+              <SettingResetButton
+                label="transparency"
+                onClick={() => handleAppearancePreferenceReset("surfaceTransparency")}
+              />
+            ) : null
+          }
+          control={
+            <AppearancePreferenceSlider
+              ariaLabel="Transparency"
+              icon={<GaugeIcon className="size-3.5" />}
+              options={SURFACE_TRANSPARENCY_OPTIONS}
+              value={appearancePreferences.surfaceTransparency}
+              onChange={(value) => handleAppearancePreferenceChange("surfaceTransparency", value)}
+              preview={
+                <span className="relative h-9 min-w-14 overflow-hidden rounded-md border border-border/70 bg-[linear-gradient(135deg,var(--color-sky-500)_0_20%,var(--color-emerald-500)_20%_40%,var(--color-amber-500)_40%_60%,var(--color-fuchsia-500)_60%_80%,var(--color-slate-500)_80%_100%)] p-1.5 shadow-xs/5">
+                  <span
+                    className="block h-full rounded border border-border/70 bg-popover"
+                    style={{
+                      opacity:
+                        TRANSPARENCY_PREVIEW_OPACITY[appearancePreferences.surfaceTransparency] ??
+                        TRANSPARENCY_PREVIEW_OPACITY.default,
+                    }}
                   />
                 </span>
               }

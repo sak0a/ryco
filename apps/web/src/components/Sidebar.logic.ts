@@ -195,7 +195,7 @@ export function createThreadJumpHintVisibilityController(input: {
   const setTimeoutFn = input.setTimeoutFn ?? globalThis.setTimeout;
   const clearTimeoutFn = input.clearTimeoutFn ?? globalThis.clearTimeout;
   let isVisible = false;
-  let timeoutId: NodeJS.Timeout | null = null;
+  let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
 
   const clearPendingShow = () => {
     if (timeoutId === null) {
