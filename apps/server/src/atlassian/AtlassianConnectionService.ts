@@ -18,7 +18,10 @@ import {
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
 
 import { ServerSecretStore } from "../auth/Services/ServerSecretStore.ts";
-import { AtlassianConnectionRepository } from "../persistence/Services/AtlassianConnections.ts";
+import {
+  AtlassianConnectionRepository,
+  type AtlassianConnectionRecord,
+} from "../persistence/Services/AtlassianConnections.ts";
 import { AtlassianResourceRepository } from "../persistence/Services/AtlassianResources.ts";
 import { ProjectAtlassianLinkRepository } from "../persistence/Services/ProjectAtlassianLinks.ts";
 
@@ -88,6 +91,10 @@ function nullableDateTime(value: string | null) {
   return value === null ? null : dateTime(value);
 }
 
+function isManualTokenConnection(record: AtlassianConnectionRecord | null): boolean {
+  return record === null || record.kind === "bitbucket_token" || record.kind === "jira_token";
+}
+
 export const manualBitbucketTokenSecretName = (connectionId: AtlassianConnectionId): string =>
   `atlassian/bitbucket-token/${connectionId}`;
 
@@ -112,9 +119,7 @@ export const make = Effect.fn("makeAtlassianConnectionService")(function* () {
   const projectLinks = yield* ProjectAtlassianLinkRepository;
   const secretStore = yield* ServerSecretStore;
 
-  const toSummary = (
-    record: import("../persistence/Services/AtlassianConnections.ts").AtlassianConnectionRecord,
-  ): AtlassianConnectionSummary => ({
+  const toSummary = (record: AtlassianConnectionRecord): AtlassianConnectionSummary => ({
     connectionId: record.connectionId,
     kind: record.kind,
     label: record.label,
@@ -171,6 +176,15 @@ export const make = Effect.fn("makeAtlassianConnectionService")(function* () {
 
   const cleanupSecretOnFailure = (secretName: string) =>
     Effect.tapError(() => secretStore.remove(secretName).pipe(Effect.ignore));
+
+  const removeConnectionSecrets = (connectionId: AtlassianConnectionId) =>
+    Effect.all(
+      [
+        secretStore.remove(manualBitbucketTokenSecretName(connectionId)),
+        secretStore.remove(manualJiraTokenSecretName(connectionId)),
+      ],
+      { concurrency: 2 },
+    ).pipe(Effect.asVoid);
 
   const vettedJiraSiteUrl = Effect.fn("AtlassianConnectionService.vettedJiraSiteUrl")(function* (
     input: AtlassianSaveProjectLinkInput,
@@ -306,26 +320,38 @@ export const make = Effect.fn("makeAtlassianConnectionService")(function* () {
         );
     },
     disconnect: (input) =>
-      connections
-        .disconnect({
-          connectionId: input.connectionId,
-          updatedAt: nowIso(),
-        })
-        .pipe(
-          Effect.flatMap(() =>
-            Effect.all(
-              [
-                secretStore.remove(manualBitbucketTokenSecretName(input.connectionId)),
-                secretStore.remove(manualJiraTokenSecretName(input.connectionId)),
-              ],
-              { concurrency: 2 },
-            ),
-          ),
-          Effect.flatMap(() => resources.deleteForConnection(input)),
-          Effect.mapError(
-            mapError("atlassian.disconnect", "Failed to disconnect the Atlassian connection."),
-          ),
+      connections.getById({ connectionId: input.connectionId }).pipe(
+        Effect.flatMap((recordOption) => {
+          const record = Option.getOrNull(recordOption);
+          const updatedAt = nowIso();
+          const cleanupLocalState = Effect.all(
+            [removeConnectionSecrets(input.connectionId), resources.deleteForConnection(input)],
+            { concurrency: 2 },
+          ).pipe(Effect.asVoid);
+
+          if (isManualTokenConnection(record)) {
+            return cleanupLocalState.pipe(
+              Effect.flatMap(() =>
+                projectLinks.clearConnectionReferences({
+                  connectionId: input.connectionId,
+                  updatedAt,
+                }),
+              ),
+              Effect.flatMap(() => connections.deleteById({ connectionId: input.connectionId })),
+            );
+          }
+
+          return connections
+            .disconnect({
+              connectionId: input.connectionId,
+              updatedAt,
+            })
+            .pipe(Effect.flatMap(() => cleanupLocalState));
+        }),
+        Effect.mapError(
+          mapError("atlassian.disconnect", "Failed to disconnect the Atlassian connection."),
         ),
+      ),
     refresh: (input) =>
       connections.getById({ connectionId: input.connectionId }).pipe(
         Effect.flatMap(

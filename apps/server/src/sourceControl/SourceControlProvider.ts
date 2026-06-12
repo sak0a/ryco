@@ -34,6 +34,12 @@ export interface SourceControlRefSelector {
   readonly repository?: string;
 }
 
+export interface SourceControlCloneAuthentication {
+  readonly kind: "http-basic";
+  readonly username: string;
+  readonly password: string;
+}
+
 export function parseSourceControlOwnerRef(
   headSelector: string,
 ): SourceControlRefSelector | undefined {
@@ -91,6 +97,15 @@ export interface SourceControlProviderShape {
     readonly context?: SourceControlProviderContext;
     readonly repository: string;
   }) => Effect.Effect<SourceControlRepositoryCloneUrls, SourceControlProviderError>;
+  readonly searchRepositories?: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
+    readonly query?: string;
+    readonly limit?: number;
+  }) => Effect.Effect<ReadonlyArray<SourceControlRepositoryCloneUrls>, SourceControlProviderError>;
+  readonly cloneAuthentication?: (input: {
+    readonly remoteUrl: string;
+  }) => Effect.Effect<SourceControlCloneAuthentication | null, SourceControlProviderError>;
   readonly createRepository: (input: {
     readonly cwd: string;
     readonly repository: string;

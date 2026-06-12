@@ -283,6 +283,63 @@ describe("OrchestrationEngine", () => {
     }
   });
 
+  it("dispatches worktree create with Jira work item metadata", async () => {
+    const createdAt = now();
+    const system = await createOrchestrationSystem();
+    const { engine } = system;
+    const projectId = asProjectId("project-jira-worktree");
+    const worktreeId = WorktreeId.make("worktree-jira-kan-4");
+
+    try {
+      await system.run(
+        engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("cmd-jira-worktree-project-create"),
+          projectId,
+          title: "Jira Worktree Project",
+          workspaceRoot: "/tmp/project-jira-worktree",
+          defaultModelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          createdAt,
+        }),
+      );
+
+      await system.run(
+        engine.dispatch({
+          type: "worktree.create",
+          commandId: CommandId.make("cmd-jira-worktree-create"),
+          worktreeId,
+          projectId,
+          branch: "KAN-4-super-toll",
+          worktreePath: "/tmp/project-jira-worktree/KAN-4-super-toll",
+          origin: "issue",
+          prNumber: null,
+          issueNumber: null,
+          prTitle: null,
+          issueTitle: null,
+          workItemProvider: "jira",
+          workItemKey: "KAN-4",
+          workItemTitle: "SUPER TOLL",
+          workItemState: "open",
+          workItemStateName: "Next to come",
+          workItemUrl: "https://ryco-app.atlassian.net/browse/KAN-4",
+          createdAt,
+        }),
+      );
+
+      const readModel = await system.readModel();
+      const worktree = readModel.worktrees?.find((entry) => entry.worktreeId === worktreeId);
+      expect(worktree?.workItemProvider).toBe("jira");
+      expect(worktree?.workItemKey).toBe("KAN-4");
+      expect(worktree?.workItemState).toBe("open");
+      expect(worktree?.workItemStateName).toBe("Next to come");
+    } finally {
+      await system.dispose();
+    }
+  });
+
   it("persists deterministic read models for repeated snapshot reads", async () => {
     const createdAt = now();
     const system = await createOrchestrationSystem();

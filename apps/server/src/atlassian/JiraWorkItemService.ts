@@ -1,16 +1,26 @@
 import {
   WorkItemProviderError,
   type WorkItemAddCommentInput,
+  type WorkItemActivityEntry,
   type WorkItemDetail,
+  type WorkItemEditCommentInput,
+  type WorkItemEditableFieldId,
+  type WorkItemEditableFieldMetadata,
+  type WorkItemEditableFieldOption,
   type WorkItemGetInput,
   type WorkItemListInput,
+  type WorkItemListProjectsInput,
   type WorkItemSearchInput,
+  type WorkItemProject,
   type WorkItemSummary,
   type WorkItemTransition,
   type WorkItemTransitionInput,
   type WorkItemListTransitionsInput,
+  type WorkItemUpdateFields,
+  type WorkItemUpdateInput,
   WORK_ITEM_DETAIL_BODY_MAX_BYTES,
   WORK_ITEM_DETAIL_COMMENT_BODY_MAX_BYTES,
+  WORK_ITEM_DETAIL_MAX_ACTIVITY,
   WORK_ITEM_DETAIL_MAX_COMMENTS,
 } from "@ryco/contracts";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
@@ -25,12 +35,21 @@ export interface JiraWorkItemServiceShape {
   readonly list: (
     input: WorkItemListInput,
   ) => Effect.Effect<ReadonlyArray<WorkItemSummary>, WorkItemProviderError>;
+  readonly listProjects: (
+    input: WorkItemListProjectsInput,
+  ) => Effect.Effect<ReadonlyArray<WorkItemProject>, WorkItemProviderError>;
   readonly search: (
     input: WorkItemSearchInput,
   ) => Effect.Effect<ReadonlyArray<WorkItemSummary>, WorkItemProviderError>;
   readonly get: (input: WorkItemGetInput) => Effect.Effect<WorkItemDetail, WorkItemProviderError>;
   readonly addComment: (
     input: WorkItemAddCommentInput,
+  ) => Effect.Effect<WorkItemDetail, WorkItemProviderError>;
+  readonly editComment: (
+    input: WorkItemEditCommentInput,
+  ) => Effect.Effect<WorkItemDetail, WorkItemProviderError>;
+  readonly update: (
+    input: WorkItemUpdateInput,
   ) => Effect.Effect<WorkItemDetail, WorkItemProviderError>;
   readonly listTransitions: (
     input: WorkItemListTransitionsInput,
@@ -48,9 +67,11 @@ export class JiraWorkItemService extends Context.Service<
 const textDecoder = new TextDecoder();
 
 const JiraUserSchema = Schema.Struct({
+  accountId: Schema.optional(Schema.String),
   displayName: Schema.optional(Schema.String),
   emailAddress: Schema.optional(Schema.String),
   name: Schema.optional(Schema.String),
+  avatarUrls: Schema.optional(Schema.Unknown),
 });
 
 const JiraStatusCategorySchema = Schema.Struct({
@@ -72,14 +93,26 @@ const JiraIssueSchema = Schema.Struct({
       ),
     ),
     issuetype: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
-    priority: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
+    priority: Schema.optional(
+      Schema.NullOr(
+        Schema.Struct({
+          id: Schema.optional(Schema.String),
+          name: Schema.String,
+          iconUrl: Schema.optional(Schema.String),
+          statusColor: Schema.optional(Schema.String),
+        }),
+      ),
+    ),
     assignee: Schema.optional(Schema.NullOr(JiraUserSchema)),
     reporter: Schema.optional(Schema.NullOr(JiraUserSchema)),
     labels: Schema.optional(Schema.Array(Schema.String)),
+    created: Schema.optional(Schema.NullOr(Schema.String)),
     updated: Schema.optional(Schema.NullOr(Schema.String)),
+    duedate: Schema.optional(Schema.NullOr(Schema.String)),
     description: Schema.optional(Schema.NullOr(Schema.Unknown)),
     parent: Schema.optional(Schema.NullOr(Schema.Struct({ key: Schema.String }))),
-    customfield_10014: Schema.optional(Schema.NullOr(Schema.String)),
+    customfield_10014: Schema.optional(Schema.NullOr(Schema.Unknown)),
+    customfield_10015: Schema.optional(Schema.NullOr(Schema.Unknown)),
   }),
 });
 
@@ -87,10 +120,24 @@ const JiraSearchSchema = Schema.Struct({
   issues: Schema.Array(JiraIssueSchema),
 });
 
+const JiraProjectSchema = Schema.Struct({
+  key: Schema.String,
+  name: Schema.String,
+  projectTypeKey: Schema.optional(Schema.String),
+  simplified: Schema.optional(Schema.Boolean),
+  avatarUrls: Schema.optional(Schema.Unknown),
+});
+
+const JiraProjectSearchSchema = Schema.Struct({
+  values: Schema.Array(JiraProjectSchema),
+});
+
 const JiraCommentSchema = Schema.Struct({
+  id: Schema.optional(Schema.String),
   author: Schema.optional(Schema.NullOr(JiraUserSchema)),
   body: Schema.optional(Schema.NullOr(Schema.Unknown)),
   created: Schema.optional(Schema.String),
+  updated: Schema.optional(Schema.String),
 });
 
 const JiraCommentListSchema = Schema.Struct({
@@ -114,6 +161,29 @@ const JiraTransitionsSchema = Schema.Struct({
   transitions: Schema.Array(JiraTransitionSchema),
 });
 
+const JiraEditMetaSchema = Schema.Struct({
+  fields: Schema.Unknown,
+});
+
+const JiraAssignableUsersSchema = Schema.Array(JiraUserSchema);
+
+const JiraChangelogItemSchema = Schema.Struct({
+  field: Schema.optional(Schema.String),
+  fromString: Schema.optional(Schema.NullOr(Schema.String)),
+  toString: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+const JiraChangelogEntrySchema = Schema.Struct({
+  id: Schema.String,
+  author: Schema.optional(Schema.NullOr(JiraUserSchema)),
+  created: Schema.optional(Schema.String),
+  items: Schema.optional(Schema.Array(JiraChangelogItemSchema)),
+});
+
+const JiraChangelogSchema = Schema.Struct({
+  values: Schema.Array(JiraChangelogEntrySchema),
+});
+
 const ISSUE_FIELDS = [
   "summary",
   "status",
@@ -122,10 +192,13 @@ const ISSUE_FIELDS = [
   "assignee",
   "reporter",
   "labels",
+  "created",
   "updated",
+  "duedate",
   "description",
   "parent",
   "customfield_10014",
+  "customfield_10015",
 ] as const;
 
 interface JiraProjectContext {
@@ -133,6 +206,12 @@ interface JiraProjectContext {
   readonly email: string;
   readonly token: string;
   readonly projectKeys: ReadonlyArray<string>;
+}
+
+interface JiraConnectionContext {
+  readonly siteUrl: string;
+  readonly email: string;
+  readonly token: string;
 }
 
 function responseError(
@@ -204,9 +283,18 @@ function trimSlash(value: string): string {
   return value.trim().replace(/\/+$/u, "");
 }
 
+function originOf(value: string): string | null {
+  try {
+    return new URL(trimSlash(value)).origin;
+  } catch {
+    return null;
+  }
+}
+
 function displayName(
   user:
     | {
+        readonly accountId?: string | undefined;
         readonly displayName?: string | undefined;
         readonly emailAddress?: string | undefined;
         readonly name?: string | undefined;
@@ -215,6 +303,32 @@ function displayName(
     | undefined,
 ): string | null {
   return user?.displayName?.trim() || user?.emailAddress?.trim() || user?.name?.trim() || null;
+}
+
+function trimOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function avatarUrlFromUnknown(avatarUrls: unknown): string | undefined {
+  if (!avatarUrls || typeof avatarUrls !== "object") return undefined;
+  const values = avatarUrls as Record<string, unknown>;
+  for (const key of ["48x48", "32x32", "24x24", "16x16"]) {
+    const value = trimOptionalString(values[key]);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function priorityDetail(
+  priority: Schema.Schema.Type<typeof JiraIssueSchema>["fields"]["priority"],
+): WorkItemSummary["priorityDetail"] | undefined {
+  if (!priority?.name) return undefined;
+  return {
+    ...(priority.id ? { id: priority.id } : {}),
+    name: priority.name,
+    ...(priority.iconUrl ? { iconUrl: priority.iconUrl } : {}),
+    ...(priority.statusColor ? { statusColor: priority.statusColor } : {}),
+  };
 }
 
 function stateFromStatusCategory(
@@ -232,6 +346,12 @@ function stateFromStatusCategory(
   if (key === "indeterminate" || name === "in progress") return "in_progress";
   if (key === "new" || name === "to do") return "open";
   return "unknown";
+}
+
+function stateNameFromStatus(
+  status: { readonly name?: string | undefined } | null | undefined,
+): string | null {
+  return status?.name?.trim() || null;
 }
 
 function optionDate(value: string | null | undefined): WorkItemSummary["updatedAt"] {
@@ -337,6 +457,9 @@ function mapIssueSummary(
   siteUrl: string,
   issue: Schema.Schema.Type<typeof JiraIssueSchema>,
 ): WorkItemSummary {
+  const mappedPriority = priorityDetail(issue.fields.priority);
+  const labels = (issue.fields.labels ?? []).map((label) => label.trim()).filter(Boolean);
+  const startDate = trimOptionalString(issue.fields.customfield_10015);
   return {
     provider: "jira",
     key: issue.key,
@@ -344,16 +467,43 @@ function mapIssueSummary(
     title: issue.fields.summary,
     url: `${siteUrl}/browse/${encodeURIComponent(issue.key)}`,
     state: stateFromStatusCategory(issue.fields.status?.statusCategory),
+    ...(stateNameFromStatus(issue.fields.status)
+      ? { stateName: stateNameFromStatus(issue.fields.status)! }
+      : {}),
     ...(issue.fields.issuetype?.name ? { issueType: issue.fields.issuetype.name } : {}),
     ...(issue.fields.priority?.name ? { priority: issue.fields.priority.name } : {}),
+    ...(mappedPriority ? { priorityDetail: mappedPriority } : {}),
     assignee: displayName(issue.fields.assignee),
     ...(displayName(issue.fields.reporter)
       ? { reporter: displayName(issue.fields.reporter)! }
       : {}),
-    ...(issue.fields.labels && issue.fields.labels.length > 0
-      ? { labels: issue.fields.labels }
-      : {}),
+    ...(labels.length > 0 ? { labels } : {}),
+    ...(issue.fields.duedate !== undefined ? { dueDate: issue.fields.duedate } : {}),
+    ...(startDate ? { startDate } : {}),
+    createdAt: optionDate(issue.fields.created),
     updatedAt: optionDate(issue.fields.updated),
+  };
+}
+
+function avatarUrlFromProject(
+  avatarUrls: Schema.Schema.Type<typeof JiraProjectSchema>["avatarUrls"],
+): string | undefined {
+  return avatarUrlFromUnknown(avatarUrls);
+}
+
+function mapProject(
+  siteUrl: string,
+  project: Schema.Schema.Type<typeof JiraProjectSchema>,
+): WorkItemProject {
+  const avatarUrl = avatarUrlFromProject(project.avatarUrls);
+  return {
+    provider: "jira",
+    key: project.key,
+    name: project.name,
+    url: `${siteUrl}/jira/software/projects/${encodeURIComponent(project.key)}`,
+    ...(project.projectTypeKey ? { projectTypeKey: project.projectTypeKey } : {}),
+    ...(project.simplified !== undefined ? { simplified: project.simplified } : {}),
+    ...(avatarUrl ? { avatarUrl } : {}),
   };
 }
 
@@ -364,7 +514,304 @@ function mapTransitions(
     id: transition.id,
     name: transition.name,
     toState: stateFromStatusCategory(transition.to?.statusCategory),
+    ...(stateNameFromStatus(transition.to)
+      ? { toStateName: stateNameFromStatus(transition.to)! }
+      : {}),
   }));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringArray(value: unknown): ReadonlyArray<string> {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+}
+
+function semanticEditableFieldId(
+  jiraFieldId: string,
+  fieldName: string | undefined,
+): WorkItemEditableFieldId | null {
+  const normalizedFieldId = jiraFieldId.trim().toLowerCase();
+  const normalizedName = fieldName?.trim().toLowerCase();
+  if (normalizedFieldId === "assignee") return "assignee";
+  if (normalizedFieldId === "priority") return "priority";
+  if (normalizedFieldId === "parent") return "parent";
+  if (normalizedFieldId === "duedate") return "dueDate";
+  if (normalizedFieldId === "reporter") return "reporter";
+  if (normalizedFieldId === "description") return "description";
+  if (normalizedFieldId === "summary") return "title";
+  if (normalizedName === "start date" || normalizedFieldId === "customfield_10015") {
+    return "startDate";
+  }
+  return null;
+}
+
+function optionFromAllowedValue(value: unknown): WorkItemEditableFieldOption | null {
+  if (typeof value === "string") {
+    const name = value.trim();
+    return name.length > 0 ? { name } : null;
+  }
+  if (!isRecord(value)) return null;
+  const nestedFields = isRecord(value.fields) ? value.fields : null;
+  const name =
+    trimOptionalString(value.displayName) ??
+    trimOptionalString(value.name) ??
+    trimOptionalString(value.value) ??
+    trimOptionalString(nestedFields?.summary) ??
+    trimOptionalString(value.key) ??
+    trimOptionalString(value.id) ??
+    trimOptionalString(value.accountId);
+  if (!name) return null;
+  return {
+    ...(trimOptionalString(value.id) ? { id: trimOptionalString(value.id)! } : {}),
+    ...(trimOptionalString(value.key) ? { key: trimOptionalString(value.key)! } : {}),
+    ...(trimOptionalString(value.accountId)
+      ? { accountId: trimOptionalString(value.accountId)! }
+      : {}),
+    name,
+    ...(trimOptionalString(value.displayName)
+      ? { displayName: trimOptionalString(value.displayName)! }
+      : {}),
+    ...(trimOptionalString(value.iconUrl) ? { iconUrl: trimOptionalString(value.iconUrl)! } : {}),
+    ...(avatarUrlFromUnknown(value.avatarUrls)
+      ? { avatarUrl: avatarUrlFromUnknown(value.avatarUrls)! }
+      : {}),
+    ...(trimOptionalString(value.statusColor)
+      ? { statusColor: trimOptionalString(value.statusColor)! }
+      : {}),
+  };
+}
+
+function mapEditMetadata(
+  editMeta: Schema.Schema.Type<typeof JiraEditMetaSchema> | null,
+): ReadonlyArray<WorkItemEditableFieldMetadata> {
+  if (!editMeta || !isRecord(editMeta.fields)) return [];
+  const mapped = new Map<WorkItemEditableFieldId, WorkItemEditableFieldMetadata>();
+  for (const [jiraFieldId, rawField] of Object.entries(editMeta.fields)) {
+    if (!isRecord(rawField)) continue;
+    const operations = stringArray(rawField.operations);
+    if (!operations.includes("set")) continue;
+    const name = trimOptionalString(rawField.name);
+    const semanticId = semanticEditableFieldId(jiraFieldId, name ?? undefined);
+    if (!semanticId || mapped.has(semanticId)) continue;
+    const options = Array.isArray(rawField.allowedValues)
+      ? rawField.allowedValues
+          .map(optionFromAllowedValue)
+          .filter((item): item is WorkItemEditableFieldOption => item !== null)
+      : [];
+    mapped.set(semanticId, {
+      id: semanticId,
+      jiraFieldId,
+      name: name ?? jiraFieldId,
+      required: rawField.required === true,
+      operations,
+      ...(options.length > 0 ? { options } : {}),
+    });
+  }
+  return Array.from(mapped.values());
+}
+
+function optionIdentity(option: WorkItemEditableFieldOption): string {
+  return (
+    option.accountId?.trim() ||
+    option.id?.trim() ||
+    option.key?.trim() ||
+    option.displayName?.trim() ||
+    option.name.trim()
+  ).toLowerCase();
+}
+
+function mergeEditableFieldOptions(
+  field: WorkItemEditableFieldMetadata,
+  options: ReadonlyArray<WorkItemEditableFieldOption>,
+): WorkItemEditableFieldMetadata {
+  const merged = new Map<string, WorkItemEditableFieldOption>();
+  for (const option of field.options ?? []) {
+    merged.set(optionIdentity(option), option);
+  }
+  for (const option of options) {
+    merged.set(optionIdentity(option), option);
+  }
+  const values = Array.from(merged.values());
+  return {
+    ...field,
+    ...(values.length > 0 ? { options: values } : {}),
+  };
+}
+
+function mergeAssigneeOptions(
+  editableFields: ReadonlyArray<WorkItemEditableFieldMetadata>,
+  options: ReadonlyArray<WorkItemEditableFieldOption>,
+): ReadonlyArray<WorkItemEditableFieldMetadata> {
+  if (options.length === 0) return editableFields;
+  return editableFields.map((field) =>
+    field.id === "assignee" ? mergeEditableFieldOptions(field, options) : field,
+  );
+}
+
+function editableFieldById(
+  editableFields: ReadonlyArray<WorkItemEditableFieldMetadata>,
+  id: WorkItemEditableFieldId,
+): WorkItemEditableFieldMetadata | null {
+  return editableFields.find((field) => field.id === id) ?? null;
+}
+
+function hasOwnField(fields: WorkItemUpdateFields, key: keyof WorkItemUpdateFields): boolean {
+  return Object.prototype.hasOwnProperty.call(fields, key);
+}
+
+function requireEditableField(input: {
+  readonly editableFields: ReadonlyArray<WorkItemEditableFieldMetadata>;
+  readonly id: WorkItemEditableFieldId;
+  readonly label: string;
+  readonly unsupported: string[];
+}): WorkItemEditableFieldMetadata | null {
+  const field = editableFieldById(input.editableFields, input.id);
+  if (field) return field;
+  input.unsupported.push(input.label);
+  return null;
+}
+
+export function buildJiraIssueUpdatePayload(input: {
+  readonly fields: WorkItemUpdateFields;
+  readonly editableFields: ReadonlyArray<WorkItemEditableFieldMetadata>;
+}): { readonly fields: Record<string, unknown> } {
+  const fields: Record<string, unknown> = {};
+  const unsupported: string[] = [];
+
+  if (hasOwnField(input.fields, "assigneeAccountId")) {
+    const field = requireEditableField({
+      editableFields: input.editableFields,
+      id: "assignee",
+      label: "assignee",
+      unsupported,
+    });
+    if (field) {
+      fields[field.jiraFieldId] =
+        input.fields.assigneeAccountId === null
+          ? null
+          : { accountId: input.fields.assigneeAccountId };
+    }
+  }
+  if (hasOwnField(input.fields, "priorityId")) {
+    const field = requireEditableField({
+      editableFields: input.editableFields,
+      id: "priority",
+      label: "priority",
+      unsupported,
+    });
+    if (field) {
+      fields[field.jiraFieldId] =
+        input.fields.priorityId === null ? null : { id: input.fields.priorityId };
+    }
+  }
+  if (hasOwnField(input.fields, "parentKey")) {
+    const field = requireEditableField({
+      editableFields: input.editableFields,
+      id: "parent",
+      label: "parent",
+      unsupported,
+    });
+    if (field) {
+      fields[field.jiraFieldId] =
+        input.fields.parentKey === null ? null : { key: input.fields.parentKey };
+    }
+  }
+  if (hasOwnField(input.fields, "dueDate")) {
+    const field = requireEditableField({
+      editableFields: input.editableFields,
+      id: "dueDate",
+      label: "due date",
+      unsupported,
+    });
+    if (field) fields[field.jiraFieldId] = input.fields.dueDate;
+  }
+  if (hasOwnField(input.fields, "startDate")) {
+    const field = requireEditableField({
+      editableFields: input.editableFields,
+      id: "startDate",
+      label: "start date",
+      unsupported,
+    });
+    if (field) fields[field.jiraFieldId] = input.fields.startDate;
+  }
+  if (hasOwnField(input.fields, "reporterAccountId")) {
+    const field = requireEditableField({
+      editableFields: input.editableFields,
+      id: "reporter",
+      label: "reporter",
+      unsupported,
+    });
+    if (field) {
+      fields[field.jiraFieldId] =
+        input.fields.reporterAccountId === null
+          ? null
+          : { accountId: input.fields.reporterAccountId };
+    }
+  }
+  if (hasOwnField(input.fields, "description")) {
+    const field = requireEditableField({
+      editableFields: input.editableFields,
+      id: "description",
+      label: "description",
+      unsupported,
+    });
+    if (field) fields[field.jiraFieldId] = adfFromText(input.fields.description ?? "");
+  }
+  if (hasOwnField(input.fields, "title")) {
+    const field = requireEditableField({
+      editableFields: input.editableFields,
+      id: "title",
+      label: "title",
+      unsupported,
+    });
+    if (field) fields[field.jiraFieldId] = input.fields.title;
+  }
+
+  if (unsupported.length > 0) {
+    throw new Error(`Jira does not expose editable metadata for ${unsupported.join(", ")}.`);
+  }
+  if (Object.keys(fields).length === 0) {
+    throw new Error("No Jira fields were provided for update.");
+  }
+  return { fields };
+}
+
+function mapActivity(
+  changelog: Schema.Schema.Type<typeof JiraChangelogSchema> | null,
+): ReadonlyArray<WorkItemActivityEntry> {
+  if (!changelog) return [];
+  return changelog.values
+    .slice(0, WORK_ITEM_DETAIL_MAX_ACTIVITY)
+    .map((entry) => {
+      const items = (entry.items ?? [])
+        .map((item) => {
+          const mapped: { field: string; from?: string | null; to?: string | null } = {
+            field: item.field?.trim() || "field",
+          };
+          if (item.fromString !== undefined) mapped.from = item.fromString;
+          if (item.toString !== undefined) mapped.to = item.toString;
+          return mapped;
+        })
+        .filter((item) => item.field.length > 0);
+      const mapped: {
+        id: string;
+        author?: string;
+        createdAt: DateTime.Utc;
+        items: ReadonlyArray<WorkItemActivityEntry["items"][number]>;
+      } = {
+        id: entry.id,
+        createdAt: DateTime.fromDateUnsafe(new Date(entry.created ?? new Date().toISOString())),
+        items,
+      };
+      const author = displayName(entry.author);
+      if (author) mapped.author = author;
+      return mapped;
+    })
+    .filter((entry) => entry.items.length > 0);
 }
 
 export const make = Effect.fn("makeJiraWorkItemService")(function* () {
@@ -372,6 +819,85 @@ export const make = Effect.fn("makeJiraWorkItemService")(function* () {
   const projectLinks = yield* ProjectAtlassianLinkRepository;
   const secretStore = yield* ServerSecretStore;
   const httpClient = yield* HttpClient.HttpClient;
+
+  const resolveConnection = Effect.fn("JiraWorkItemService.resolveConnection")(function* (
+    input: WorkItemListProjectsInput,
+  ) {
+    const connection = yield* connections.getById({ connectionId: input.connectionId }).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            Effect.fail(
+              workItemError(
+                "workItems.resolveConnection",
+                "The selected Jira connection was not found.",
+              ),
+            ),
+          onSome: Effect.succeed,
+        }),
+      ),
+      Effect.mapError(
+        mapError("workItems.resolveConnection", "Failed to load the Jira connection."),
+      ),
+    );
+    if (connection.status !== "connected") {
+      return yield* workItemError(
+        "workItems.resolveConnection",
+        `The Jira connection is ${connection.status.replace("_", " ")}.`,
+      );
+    }
+    if (!connection.products.includes("jira")) {
+      return yield* workItemError(
+        "workItems.resolveConnection",
+        "The selected connection is not a Jira connection.",
+      );
+    }
+    if (!connection.accountEmail) {
+      return yield* workItemError(
+        "workItems.resolveConnection",
+        "The Jira connection is missing its account email.",
+      );
+    }
+
+    const connectionSiteUrl = trimSlash(connection.baseUrl ?? "");
+    const requestedSiteUrl = trimSlash(input.siteUrl ?? connectionSiteUrl);
+    if (!requestedSiteUrl) {
+      return yield* workItemError(
+        "workItems.resolveConnection",
+        "The Jira connection is missing its site URL.",
+      );
+    }
+    if (
+      input.siteUrl !== undefined &&
+      connectionSiteUrl &&
+      originOf(input.siteUrl) !== originOf(connectionSiteUrl)
+    ) {
+      return yield* workItemError(
+        "workItems.resolveConnection",
+        "The Jira site URL must match the selected Jira connection.",
+      );
+    }
+
+    const tokenBytes = yield* secretStore
+      .get(manualJiraTokenSecretName(input.connectionId))
+      .pipe(
+        Effect.mapError(
+          mapError("workItems.resolveConnection", "Failed to read the saved Jira API token."),
+        ),
+      );
+    if (!tokenBytes) {
+      return yield* workItemError(
+        "workItems.resolveConnection",
+        "The saved Jira API token is missing.",
+      );
+    }
+
+    return {
+      siteUrl: requestedSiteUrl,
+      email: connection.accountEmail,
+      token: textDecoder.decode(tokenBytes).trim(),
+    } satisfies JiraConnectionContext;
+  });
 
   const resolveProject = Effect.fn("JiraWorkItemService.resolveProject")(function* (input: {
     readonly projectId?: WorkItemListInput["projectId"];
@@ -469,7 +995,7 @@ export const make = Effect.fn("makeJiraWorkItemService")(function* () {
       readonly email: string;
       readonly token: string;
       readonly path: string;
-      readonly method?: "GET" | "POST";
+      readonly method?: "GET" | "POST" | "PUT";
       readonly body?: unknown;
       readonly urlParams?: Record<string, string>;
     },
@@ -478,7 +1004,9 @@ export const make = Effect.fn("makeJiraWorkItemService")(function* () {
     const base =
       context.method === "POST"
         ? HttpClientRequest.post(url, { urlParams: context.urlParams })
-        : HttpClientRequest.get(url, { urlParams: context.urlParams });
+        : context.method === "PUT"
+          ? HttpClientRequest.put(url, { urlParams: context.urlParams })
+          : HttpClientRequest.get(url, { urlParams: context.urlParams });
     const withBody =
       context.body === undefined ? base : base.pipe(HttpClientRequest.bodyJsonUnsafe(context.body));
     return httpClient
@@ -527,6 +1055,20 @@ export const make = Effect.fn("makeJiraWorkItemService")(function* () {
     return result.issues.map((issue) => mapIssueSummary(context.siteUrl, issue));
   });
 
+  const listProjects = Effect.fn("JiraWorkItemService.listProjects")(function* (
+    input: WorkItemListProjectsInput,
+  ) {
+    const context = yield* resolveConnection(input);
+    const result = yield* request("workItems.listProjects", JiraProjectSearchSchema, {
+      ...context,
+      path: "/rest/api/3/project/search",
+      urlParams: {
+        maxResults: "100",
+      },
+    });
+    return result.values.map((project) => mapProject(context.siteUrl, project));
+  });
+
   const getTransitions = Effect.fn("JiraWorkItemService.getTransitions")(function* (
     context: JiraProjectContext,
     key: string,
@@ -538,11 +1080,50 @@ export const make = Effect.fn("makeJiraWorkItemService")(function* () {
     return mapTransitions(result.transitions);
   });
 
+  const getAssignableUserOptions = Effect.fn("JiraWorkItemService.getAssignableUserOptions")(
+    function* (context: JiraProjectContext, key: string) {
+      const users = yield* request("workItems.assignableUsers", JiraAssignableUsersSchema, {
+        ...context,
+        path: "/rest/api/3/user/assignable/search",
+        urlParams: {
+          issueKey: key,
+          maxResults: "50",
+        },
+      });
+      return users
+        .map(optionFromAllowedValue)
+        .filter(
+          (option): option is WorkItemEditableFieldOption =>
+            option !== null && option.accountId !== undefined,
+        );
+    },
+  );
+
+  const enrichEditMetadata = Effect.fn("JiraWorkItemService.enrichEditMetadata")(function* (
+    context: JiraProjectContext,
+    key: string,
+    editMeta: Schema.Schema.Type<typeof JiraEditMetaSchema> | null,
+  ) {
+    const editableFields = mapEditMetadata(editMeta);
+    const assigneeField = editableFieldById(editableFields, "assignee");
+    if (!assigneeField || (assigneeField.options?.length ?? 0) > 0) {
+      return editableFields;
+    }
+    const assignableUsers = yield* getAssignableUserOptions(context, key).pipe(
+      Effect.catch(() => Effect.succeed([])),
+    );
+    return mergeAssigneeOptions(editableFields, assignableUsers);
+  });
+
   const getDetail = Effect.fn("JiraWorkItemService.getDetail")(function* (input: WorkItemGetInput) {
     const context = yield* resolveProject(input);
     yield* requireProjectKeys(context, "workItems.get");
     yield* requireAllowedIssueKey(context, input.key, "workItems.get");
-    const [issue, comments, transitions] = yield* Effect.all(
+    const emptyComments: Schema.Schema.Type<typeof JiraCommentListSchema> = { comments: [] };
+    const emptyTransitions: ReadonlyArray<WorkItemTransition> = [];
+    const noEditMeta: Schema.Schema.Type<typeof JiraEditMetaSchema> | null = null;
+    const noChangelog: Schema.Schema.Type<typeof JiraChangelogSchema> | null = null;
+    const [issue, comments, transitions, editMeta, changelog] = yield* Effect.all(
       [
         request("workItems.get", JiraIssueSchema, {
           ...context,
@@ -558,21 +1139,47 @@ export const make = Effect.fn("makeJiraWorkItemService")(function* () {
             maxResults: String(WORK_ITEM_DETAIL_MAX_COMMENTS),
             orderBy: "-created",
           },
-        }),
-        getTransitions(context, input.key),
+        }).pipe(Effect.catch(() => Effect.succeed(emptyComments))),
+        getTransitions(context, input.key).pipe(
+          Effect.catch(() => Effect.succeed(emptyTransitions)),
+        ),
+        request("workItems.editMetadata", JiraEditMetaSchema, {
+          ...context,
+          path: `/rest/api/3/issue/${encodeURIComponent(input.key)}/editmeta`,
+        }).pipe(Effect.catch(() => Effect.succeed(noEditMeta))),
+        request("workItems.changelog", JiraChangelogSchema, {
+          ...context,
+          path: `/rest/api/3/issue/${encodeURIComponent(input.key)}/changelog`,
+          urlParams: {
+            maxResults: String(WORK_ITEM_DETAIL_MAX_ACTIVITY),
+          },
+        }).pipe(Effect.catch(() => Effect.succeed(noChangelog))),
       ],
-      { concurrency: 3 },
+      { concurrency: 5 },
     );
+    const editableFields = yield* enrichEditMetadata(context, input.key, editMeta);
     const body = truncateText(adfToText(issue.fields.description), WORK_ITEM_DETAIL_BODY_MAX_BYTES);
+    const epicKey = trimOptionalString(issue.fields.customfield_10014);
     const mappedComments = comments.comments
       .slice(0, WORK_ITEM_DETAIL_MAX_COMMENTS)
       .map((comment) => {
         const text = truncateText(adfToText(comment.body), WORK_ITEM_DETAIL_COMMENT_BODY_MAX_BYTES);
-        return {
+        const mapped: {
+          id?: string;
+          author: string;
+          body: string;
+          createdAt: DateTime.Utc;
+          updatedAt?: DateTime.Utc;
+          editable: boolean;
+        } = {
           author: displayName(comment.author) ?? "unknown",
           body: text.text,
           createdAt: DateTime.fromDateUnsafe(new Date(comment.created ?? new Date().toISOString())),
+          editable: comment.id !== undefined,
         };
+        if (comment.id) mapped.id = comment.id;
+        if (comment.updated) mapped.updatedAt = DateTime.fromDateUnsafe(new Date(comment.updated));
+        return mapped;
       });
     return {
       ...mapIssueSummary(context.siteUrl, issue),
@@ -580,8 +1187,10 @@ export const make = Effect.fn("makeJiraWorkItemService")(function* () {
       comments: mappedComments,
       transitions,
       linkedChangeRequests: [],
+      editableFields,
+      activity: mapActivity(changelog),
       ...(issue.fields.parent?.key ? { parentKey: issue.fields.parent.key } : {}),
-      ...(issue.fields.customfield_10014 ? { epicKey: issue.fields.customfield_10014 } : {}),
+      ...(epicKey ? { epicKey } : {}),
       truncated: body.truncated || comments.comments.length > mappedComments.length,
     } satisfies WorkItemDetail;
   });
@@ -593,11 +1202,13 @@ export const make = Effect.fn("makeJiraWorkItemService")(function* () {
       readonly email: string;
       readonly token: string;
       readonly path: string;
-      readonly method: "POST";
+      readonly method: "POST" | "PUT";
       readonly body?: unknown;
     },
   ) => {
-    const base = HttpClientRequest.post(`${context.siteUrl}${context.path}`);
+    const url = `${context.siteUrl}${context.path}`;
+    const base =
+      context.method === "PUT" ? HttpClientRequest.put(url) : HttpClientRequest.post(url);
     const withBody =
       context.body === undefined ? base : base.pipe(HttpClientRequest.bodyJsonUnsafe(context.body));
     return httpClient
@@ -619,6 +1230,7 @@ export const make = Effect.fn("makeJiraWorkItemService")(function* () {
   };
 
   return JiraWorkItemService.of({
+    listProjects,
     list: (input) => searchIssues(input),
     search: (input) => searchIssues(input),
     get: (input) => getDetail(input),
@@ -634,6 +1246,53 @@ export const make = Effect.fn("makeJiraWorkItemService")(function* () {
           body: {
             body: adfFromText(input.body),
           },
+        });
+        return yield* getDetail(input);
+      }),
+    editComment: (input) =>
+      Effect.gen(function* () {
+        const context = yield* resolveProject(input);
+        yield* requireProjectKeys(context, "workItems.editComment");
+        yield* requireAllowedIssueKey(context, input.key, "workItems.editComment");
+        yield* requestVoid("workItems.editComment", {
+          ...context,
+          path: `/rest/api/3/issue/${encodeURIComponent(input.key)}/comment/${encodeURIComponent(
+            input.commentId,
+          )}`,
+          method: "PUT",
+          body: {
+            body: adfFromText(input.body),
+          },
+        });
+        return yield* getDetail(input);
+      }),
+    update: (input) =>
+      Effect.gen(function* () {
+        const context = yield* resolveProject(input);
+        yield* requireProjectKeys(context, "workItems.update");
+        yield* requireAllowedIssueKey(context, input.key, "workItems.update");
+        const editMeta = yield* request("workItems.editMetadata", JiraEditMetaSchema, {
+          ...context,
+          path: `/rest/api/3/issue/${encodeURIComponent(input.key)}/editmeta`,
+        });
+        const payload = yield* Effect.try({
+          try: () =>
+            buildJiraIssueUpdatePayload({
+              fields: input.fields,
+              editableFields: mapEditMetadata(editMeta),
+            }),
+          catch: (cause) =>
+            workItemError(
+              "workItems.update",
+              cause instanceof Error ? cause.message : "Could not build the Jira update payload.",
+              cause,
+            ),
+        });
+        yield* requestVoid("workItems.update", {
+          ...context,
+          path: `/rest/api/3/issue/${encodeURIComponent(input.key)}`,
+          method: "PUT",
+          body: payload,
         });
         return yield* getDetail(input);
       }),

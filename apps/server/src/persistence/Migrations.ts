@@ -51,6 +51,8 @@ import Migration0034 from "./Migrations/034_ProjectAvatarAndPreferredRemote.ts";
 import Migration0035 from "./Migrations/035_ProjectionThreadsTokenMode.ts";
 import Migration0036 from "./Migrations/036_AtlassianConnections.ts";
 import Migration0037 from "./Migrations/037_WorktreeSourceControlState.ts";
+import Migration0038 from "./Migrations/038_WorktreeWorkItems.ts";
+import Migration0039 from "./Migrations/039_WorktreeWorkItemStateNames.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -100,6 +102,8 @@ export const migrationEntries = [
   [35, "ProjectionThreadsTokenMode", Migration0035],
   [36, "AtlassianConnections", Migration0036],
   [37, "WorktreeSourceControlState", Migration0037],
+  [38, "WorktreeWorkItems", Migration0038],
+  [39, "WorktreeWorkItemStateNames", Migration0039],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

@@ -59,6 +59,7 @@ export const SOURCE_CONTROL_DISCOVERY_CACHE_TTL = Duration.seconds(5);
 
 export interface SourceControlDiscoveryShape {
   readonly discover: Effect.Effect<SourceControlDiscoveryResult>;
+  readonly refresh: Effect.Effect<SourceControlDiscoveryResult>;
 }
 
 export class SourceControlDiscovery extends Context.Service<
@@ -153,6 +154,9 @@ export const layer = Layer.effect(
 
     return SourceControlDiscovery.of({
       discover: Cache.get(discoveryCache, DISCOVERY_CACHE_KEY),
+      refresh: Cache.invalidate(discoveryCache, DISCOVERY_CACHE_KEY).pipe(
+        Effect.flatMap(() => Cache.get(discoveryCache, DISCOVERY_CACHE_KEY)),
+      ),
     });
   }),
 );

@@ -1,5 +1,7 @@
 import type { MouseEvent } from "react";
+import { AtlassianJiraIcon } from "../Icons";
 import { cn } from "~/lib/utils";
+import { workItemStateLabel } from "~/lib/workItemState";
 import {
   resolveStateBadgeVariant,
   type StateBadgeVariant,
@@ -12,6 +14,10 @@ export interface WorktreeSourceControlBadgesProps {
   issueState?: "open" | "closed" | null | undefined;
   prState?: "open" | "closed" | "merged" | null | undefined;
   prIsDraft?: boolean | null | undefined;
+  workItemProvider?: "jira" | null | undefined;
+  workItemKey?: string | null | undefined;
+  workItemState?: "open" | "in_progress" | "done" | "closed" | "unknown" | null | undefined;
+  workItemStateName?: string | null | undefined;
   onOpenLinkedItem?: ((item: LinkedWorktreeItem) => void) | undefined;
   className?: string | undefined;
   density?: "compact" | "header" | undefined;
@@ -23,13 +29,32 @@ export function WorktreeSourceControlBadges(props: WorktreeSourceControlBadgesPr
   const prNumber = props.prNumber ?? null;
   const issueNumber =
     props.displayMode === "prefer-pr" && prNumber !== null ? null : (props.issueNumber ?? null);
+  const workItemKey = props.workItemProvider === "jira" ? (props.workItemKey ?? null) : null;
 
-  if (issueNumber === null && prNumber === null) {
+  if (issueNumber === null && prNumber === null && workItemKey === null) {
     return null;
   }
 
   return (
     <span className={cn("inline-flex shrink-0 items-center gap-1", props.className)}>
+      {workItemKey !== null ? (
+        <WorktreeWorkItemBadge
+          itemKey={workItemKey}
+          state={props.workItemState ?? null}
+          stateName={props.workItemStateName ?? null}
+          density={props.density ?? "compact"}
+          onClick={
+            props.onOpenLinkedItem
+              ? () =>
+                  props.onOpenLinkedItem?.({
+                    kind: "workItem",
+                    provider: "jira",
+                    key: workItemKey,
+                  })
+              : undefined
+          }
+        />
+      ) : null}
       {issueNumber !== null ? (
         <WorktreeSourceControlBadge
           variant={resolveStateBadgeVariant({
@@ -67,6 +92,62 @@ export function WorktreeSourceControlBadges(props: WorktreeSourceControlBadgesPr
           }
         />
       ) : null}
+    </span>
+  );
+}
+
+function WorktreeWorkItemBadge(props: {
+  itemKey: string;
+  state: WorktreeSourceControlBadgesProps["workItemState"];
+  stateName: string | null;
+  density: "compact" | "header";
+  onClick?: (() => void) | undefined;
+}) {
+  const baseClass =
+    props.density === "header"
+      ? "inline-flex h-5 shrink-0 items-center justify-center gap-1 rounded-md border px-1.5 text-[10px] font-semibold tabular-nums leading-none"
+      : "inline-flex h-4 shrink-0 items-center justify-center gap-0.5 rounded-sm border px-1 text-[9px] font-semibold tabular-nums leading-none";
+  const iconClass = props.density === "header" ? "size-3" : "size-2.5";
+  const stateLabel = props.state
+    ? workItemStateLabel({ state: props.state, stateName: props.stateName })
+    : null;
+  const title = `Jira ${props.itemKey}${stateLabel ? ` — ${stateLabel}` : ""}`;
+  const className = "border-violet-500/20 bg-violet-500/10 text-violet-600 dark:text-violet-300";
+
+  if (props.onClick) {
+    const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      props.onClick?.();
+    };
+    return (
+      <button
+        type="button"
+        className={cn(
+          baseClass,
+          className,
+          "cursor-pointer hover:brightness-125 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-current",
+        )}
+        title={title}
+        aria-label={title}
+        data-linked-worktree-item="workItem"
+        onClick={handleClick}
+      >
+        <AtlassianJiraIcon className={iconClass} />
+        <span>{props.itemKey}</span>
+      </button>
+    );
+  }
+
+  return (
+    <span
+      className={cn(baseClass, className)}
+      title={title}
+      aria-label={title}
+      data-linked-worktree-item="workItem"
+    >
+      <AtlassianJiraIcon className={iconClass} />
+      <span>{props.itemKey}</span>
     </span>
   );
 }

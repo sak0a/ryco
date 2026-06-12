@@ -172,10 +172,34 @@ const makeProjectAtlassianLinkRepository = Effect.gen(function* () {
       ),
     );
 
+  const clearConnectionReferences: ProjectAtlassianLinkRepositoryShape["clearConnectionReferences"] =
+    ({ connectionId, updatedAt }) =>
+      sql`
+        UPDATE project_atlassian_links
+        SET
+          jira_cloud_id = CASE WHEN jira_connection_id = ${connectionId} THEN NULL ELSE jira_cloud_id END,
+          jira_site_url = CASE WHEN jira_connection_id = ${connectionId} THEN NULL ELSE jira_site_url END,
+          jira_project_keys_json = CASE WHEN jira_connection_id = ${connectionId} THEN ${JSON.stringify([])} ELSE jira_project_keys_json END,
+          default_issue_type_name = CASE WHEN jira_connection_id = ${connectionId} THEN NULL ELSE default_issue_type_name END,
+          jira_connection_id = CASE WHEN jira_connection_id = ${connectionId} THEN NULL ELSE jira_connection_id END,
+          bitbucket_workspace = CASE WHEN bitbucket_connection_id = ${connectionId} THEN NULL ELSE bitbucket_workspace END,
+          bitbucket_repo_slug = CASE WHEN bitbucket_connection_id = ${connectionId} THEN NULL ELSE bitbucket_repo_slug END,
+          bitbucket_connection_id = CASE WHEN bitbucket_connection_id = ${connectionId} THEN NULL ELSE bitbucket_connection_id END,
+          updated_at = ${updatedAt}
+        WHERE jira_connection_id = ${connectionId}
+           OR bitbucket_connection_id = ${connectionId}
+      `.pipe(
+        Effect.asVoid,
+        Effect.mapError(
+          toPersistenceSqlError("ProjectAtlassianLinkRepository.clearConnectionReferences:query"),
+        ),
+      );
+
   return {
     getByProjectId,
     upsert,
     deleteByProjectId,
+    clearConnectionReferences,
   } satisfies ProjectAtlassianLinkRepositoryShape;
 });
 

@@ -98,6 +98,82 @@ layer("AtlassianConnectionService", (it) => {
     }),
   );
 
+  it.effect("deletes manual token connections and clears saved project references", () =>
+    Effect.gen(function* () {
+      secrets.clear();
+      const service = yield* AtlassianConnectionService;
+      const projectId = ProjectId.make("project-delete-atlassian-connection");
+
+      const jira = yield* service.saveManualJiraToken({
+        label: "Delete Jira",
+        email: "jira-delete@example.com",
+        siteUrl: "https://delete.atlassian.net",
+        token: "jira-delete-secret",
+      });
+      const bitbucket = yield* service.saveManualBitbucketToken({
+        label: "Delete Bitbucket",
+        email: "bitbucket-delete@example.com",
+        token: "bitbucket-delete-secret",
+      });
+
+      yield* service.saveProjectLink({
+        projectId,
+        jiraConnectionId: jira.connectionId,
+        bitbucketConnectionId: bitbucket.connectionId,
+        jiraCloudId: "cloud-delete",
+        jiraSiteUrl: "https://delete.atlassian.net",
+        jiraProjectKeys: ["DEL"],
+        bitbucketWorkspace: "delete-workspace",
+        bitbucketRepoSlug: "delete-repo",
+        defaultIssueTypeName: "Task",
+        branchNameTemplate: "{issueKey}-{titleSlug}",
+        commitMessageTemplate: "{issueKey}: {summary}",
+        pullRequestTitleTemplate: "{issueKey}: {summary}",
+        smartLinkingEnabled: true,
+        autoAttachWorkItems: true,
+      });
+
+      yield* service.disconnect({ connectionId: jira.connectionId });
+
+      let connections = yield* service.listConnections;
+      assert.isFalse(
+        connections.some((connection) => connection.connectionId === jira.connectionId),
+      );
+      assert.isTrue(
+        connections.some((connection) => connection.connectionId === bitbucket.connectionId),
+      );
+      assert.isFalse(secrets.has(manualJiraTokenSecretName(jira.connectionId)));
+
+      const jiraResources = yield* service.listResources({ connectionId: jira.connectionId });
+      assert.equal(jiraResources.length, 0);
+
+      const linkAfterJiraDelete = yield* service.getProjectLink({ projectId });
+      assert.ok(linkAfterJiraDelete);
+      assert.equal(linkAfterJiraDelete.jiraConnectionId, null);
+      assert.equal(linkAfterJiraDelete.jiraSiteUrl, null);
+      assert.deepStrictEqual(linkAfterJiraDelete.jiraProjectKeys, []);
+      assert.equal(linkAfterJiraDelete.defaultIssueTypeName, null);
+      assert.equal(linkAfterJiraDelete.bitbucketConnectionId, bitbucket.connectionId);
+
+      yield* service.disconnect({ connectionId: bitbucket.connectionId });
+
+      connections = yield* service.listConnections;
+      assert.isFalse(
+        connections.some((connection) => connection.connectionId === jira.connectionId),
+      );
+      assert.isFalse(
+        connections.some((connection) => connection.connectionId === bitbucket.connectionId),
+      );
+      assert.isFalse(secrets.has(manualBitbucketTokenSecretName(bitbucket.connectionId)));
+
+      const linkAfterBitbucketDelete = yield* service.getProjectLink({ projectId });
+      assert.ok(linkAfterBitbucketDelete);
+      assert.equal(linkAfterBitbucketDelete.bitbucketConnectionId, null);
+      assert.equal(linkAfterBitbucketDelete.bitbucketWorkspace, null);
+      assert.equal(linkAfterBitbucketDelete.bitbucketRepoSlug, null);
+    }),
+  );
+
   it.effect("saves and reads a project Atlassian link", () =>
     Effect.gen(function* () {
       const service = yield* AtlassianConnectionService;
@@ -128,6 +204,39 @@ layer("AtlassianConnectionService", (it) => {
       assert.equal(saved.bitbucketConnectionId, connection.connectionId);
       assert.deepStrictEqual(loaded?.jiraProjectKeys, ["RYCO"]);
       assert.equal(loaded?.bitbucketRepoSlug, "ryco");
+    }),
+  );
+
+  it.effect("derives a project Jira site URL from the selected Jira connection", () =>
+    Effect.gen(function* () {
+      secrets.clear();
+      const service = yield* AtlassianConnectionService;
+      const connection = yield* service.saveManualJiraToken({
+        label: "Derived Jira",
+        email: "jira@example.com",
+        siteUrl: "https://derived.atlassian.net/",
+        token: "jira-secret",
+      });
+
+      const saved = yield* service.saveProjectLink({
+        projectId: ProjectId.make("project-derived-jira"),
+        jiraConnectionId: connection.connectionId,
+        bitbucketConnectionId: null,
+        jiraCloudId: null,
+        jiraSiteUrl: null,
+        jiraProjectKeys: ["KAN"],
+        bitbucketWorkspace: null,
+        bitbucketRepoSlug: null,
+        defaultIssueTypeName: null,
+        branchNameTemplate: "{issueKey}-{titleSlug}",
+        commitMessageTemplate: "{issueKey}: {summary}",
+        pullRequestTitleTemplate: "{issueKey}: {summary}",
+        smartLinkingEnabled: true,
+        autoAttachWorkItems: true,
+      });
+
+      assert.equal(saved.jiraSiteUrl, "https://derived.atlassian.net");
+      assert.deepStrictEqual(saved.jiraProjectKeys, ["KAN"]);
     }),
   );
 });

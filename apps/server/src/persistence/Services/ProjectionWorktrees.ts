@@ -6,7 +6,13 @@
  *
  * @module ProjectionWorktreeRepository
  */
-import { IsoDateTime, ProjectId, Worktree, WorktreeId } from "@ryco/contracts";
+import {
+  IsoDateTime,
+  ProjectId,
+  WorkItemProviderKind,
+  Worktree,
+  WorktreeId,
+} from "@ryco/contracts";
 import { Context, Option, Schema } from "effect";
 import type { Effect } from "effect";
 
@@ -40,6 +46,14 @@ export const FindActiveProjectionWorktreesByLinkedNumberInput = Schema.Struct({
 });
 export type FindActiveProjectionWorktreesByLinkedNumberInput =
   typeof FindActiveProjectionWorktreesByLinkedNumberInput.Type;
+
+export const FindProjectionWorktreeByWorkItemInput = Schema.Struct({
+  projectId: ProjectId,
+  provider: WorkItemProviderKind,
+  key: Schema.String,
+});
+export type FindProjectionWorktreeByWorkItemInput =
+  typeof FindProjectionWorktreeByWorkItemInput.Type;
 
 export const MarkProjectionWorktreeArchivedInput = Schema.Struct({
   worktreeId: WorktreeId,
@@ -85,6 +99,10 @@ export interface ProjectionWorktreeRepositoryShape {
   readonly findActiveByLinkedNumber: (
     input: FindActiveProjectionWorktreesByLinkedNumberInput,
   ) => Effect.Effect<ReadonlyArray<WorktreeId>, ProjectionRepositoryError>;
+
+  readonly findByWorkItem: (
+    input: FindProjectionWorktreeByWorkItemInput,
+  ) => Effect.Effect<WorktreeId | null, ProjectionRepositoryError>;
 
   readonly markArchived: (
     input: MarkProjectionWorktreeArchivedInput,

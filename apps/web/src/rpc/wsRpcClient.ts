@@ -80,6 +80,7 @@ export interface WsRpcClient {
   };
   readonly sourceControl: {
     readonly lookupRepository: RpcUnaryMethod<typeof WS_METHODS.sourceControlLookupRepository>;
+    readonly searchRepositories: RpcUnaryMethod<typeof WS_METHODS.sourceControlSearchRepositories>;
     readonly cloneRepository: RpcUnaryMethod<typeof WS_METHODS.sourceControlCloneRepository>;
     readonly publishRepository: RpcUnaryMethod<typeof WS_METHODS.sourceControlPublishRepository>;
     readonly listIssues: RpcUnaryMethod<typeof WS_METHODS.sourceControlListIssues>;
@@ -133,10 +134,13 @@ export interface WsRpcClient {
     readonly saveManualJiraToken: RpcUnaryMethod<typeof WS_METHODS.atlassianSaveManualJiraToken>;
   };
   readonly workItems: {
+    readonly listProjects: RpcUnaryMethod<typeof WS_METHODS.workItemsListProjects>;
     readonly list: RpcUnaryMethod<typeof WS_METHODS.workItemsList>;
     readonly search: RpcUnaryMethod<typeof WS_METHODS.workItemsSearch>;
     readonly get: RpcUnaryMethod<typeof WS_METHODS.workItemsGet>;
     readonly addComment: RpcUnaryMethod<typeof WS_METHODS.workItemsAddComment>;
+    readonly editComment: RpcUnaryMethod<typeof WS_METHODS.workItemsEditComment>;
+    readonly update: RpcUnaryMethod<typeof WS_METHODS.workItemsUpdate>;
     readonly listTransitions: RpcUnaryMethod<typeof WS_METHODS.workItemsListTransitions>;
     readonly transition: RpcUnaryMethod<typeof WS_METHODS.workItemsTransition>;
   };
@@ -281,6 +285,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
     sourceControl: {
       lookupRepository: (input) =>
         transport.request((client) => client[WS_METHODS.sourceControlLookupRepository](input)),
+      searchRepositories: (input) =>
+        transport.request((client) => client[WS_METHODS.sourceControlSearchRepositories](input)),
       cloneRepository: (input) =>
         transport.request((client) => client[WS_METHODS.sourceControlCloneRepository](input)),
       publishRepository: (input) =>
@@ -356,11 +362,16 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.atlassianSaveManualJiraToken](input)),
     },
     workItems: {
+      listProjects: (input) =>
+        transport.request((client) => client[WS_METHODS.workItemsListProjects](input)),
       list: (input) => transport.request((client) => client[WS_METHODS.workItemsList](input)),
       search: (input) => transport.request((client) => client[WS_METHODS.workItemsSearch](input)),
       get: (input) => transport.request((client) => client[WS_METHODS.workItemsGet](input)),
       addComment: (input) =>
         transport.request((client) => client[WS_METHODS.workItemsAddComment](input)),
+      editComment: (input) =>
+        transport.request((client) => client[WS_METHODS.workItemsEditComment](input)),
+      update: (input) => transport.request((client) => client[WS_METHODS.workItemsUpdate](input)),
       listTransitions: (input) =>
         transport.request((client) => client[WS_METHODS.workItemsListTransitions](input)),
       transition: (input) =>

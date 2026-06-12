@@ -169,6 +169,7 @@ export const SidebarWorktreeList = memo(function SidebarWorktreeList(
         open={linkedItem !== null}
         item={linkedItem}
         environmentId={props.treeProject.project.environmentId}
+        projectId={props.treeProject.project.id}
         cwd={props.treeProject.project.cwd}
         onOpenChange={handleLinkedItemDialogOpenChange}
       />
@@ -197,6 +198,10 @@ function ArchivedWorktreeRow(props: {
           prNumber={props.worktree.worktree.prNumber}
           prState={props.worktree.worktree.prState}
           prIsDraft={props.worktree.worktree.prIsDraft}
+          workItemProvider={props.worktree.worktree.workItemProvider}
+          workItemKey={props.worktree.worktree.workItemKey}
+          workItemState={props.worktree.worktree.workItemState}
+          workItemStateName={props.worktree.worktree.workItemStateName}
           displayMode="prefer-pr"
           onOpenLinkedItem={props.onOpenLinkedItem}
         />
@@ -417,6 +422,10 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                   prNumber={props.worktree.worktree.prNumber}
                   prState={props.worktree.worktree.prState}
                   prIsDraft={props.worktree.worktree.prIsDraft}
+                  workItemProvider={props.worktree.worktree.workItemProvider}
+                  workItemKey={props.worktree.worktree.workItemKey}
+                  workItemState={props.worktree.worktree.workItemState}
+                  workItemStateName={props.worktree.worktree.workItemStateName}
                   displayMode="prefer-pr"
                   onOpenLinkedItem={props.onOpenLinkedItem}
                 />
@@ -626,6 +635,9 @@ function WorktreeOriginLabel({ worktree }: { worktree: SidebarTreeWorktree }) {
     return null;
   }
   if (origin === "issue" && worktree.worktree.issueNumber != null) {
+    return null;
+  }
+  if (origin === "issue" && worktree.worktree.workItemKey) {
     return null;
   }
   const label = origin === "pr" ? "PR" : origin === "issue" ? "Issue" : "Manual";

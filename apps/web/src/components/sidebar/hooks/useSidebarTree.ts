@@ -11,6 +11,7 @@ import {
 } from "../../Sidebar.logic";
 
 export type SidebarWorktreeOrigin = "main" | "branch" | "pr" | "issue" | "manual";
+export type SidebarWorkItemState = "open" | "in_progress" | "done" | "closed" | "unknown";
 
 export interface SidebarWorktree {
   worktreeId: string;
@@ -24,6 +25,12 @@ export interface SidebarWorktree {
   prState?: "open" | "closed" | "merged" | null | undefined;
   prIsDraft?: boolean | null | undefined;
   issueState?: "open" | "closed" | null | undefined;
+  workItemProvider?: "jira" | null | undefined;
+  workItemKey?: string | null | undefined;
+  workItemTitle?: string | null | undefined;
+  workItemState?: SidebarWorkItemState | null | undefined;
+  workItemStateName?: string | null | undefined;
+  workItemUrl?: string | null | undefined;
   archivedAt?: string | null | undefined;
   manualPosition?: number | null | undefined;
   updatedAt?: string | undefined;
@@ -294,6 +301,12 @@ function mergeWorktree(left: SidebarWorktree, right: SidebarWorktree): SidebarWo
     prState: fresher.prState ?? null,
     prIsDraft: fresher.prIsDraft ?? null,
     issueState: fresher.issueState ?? null,
+    workItemProvider: left.workItemProvider ?? right.workItemProvider ?? null,
+    workItemKey: left.workItemKey ?? right.workItemKey ?? null,
+    workItemTitle: left.workItemTitle ?? right.workItemTitle ?? null,
+    workItemState: fresher.workItemState ?? null,
+    workItemStateName: fresher.workItemStateName ?? null,
+    workItemUrl: left.workItemUrl ?? right.workItemUrl ?? null,
     title: preferWorktreeTitle(left, right),
     updatedAt: maxIso(left.updatedAt, right.updatedAt),
     worktreeId: preferWorktreeId(left, right),

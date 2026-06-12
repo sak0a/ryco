@@ -187,6 +187,56 @@ layer("OrchestrationProjectionPipeline worktrees", (it) => {
     }),
   );
 
+  it.effect("worktree.created projects Jira work item metadata", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const worktrees = yield* ProjectionWorktreeRepository;
+      const now = "2026-05-18T00:00:00.000Z";
+      const worktreeId = WorktreeId.make("worktree-jira-kan-4");
+
+      const created = yield* eventStore.append({
+        type: "worktree.created",
+        eventId: EventId.make("evt-jira-worktree-created"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.make("project-jira"),
+        occurredAt: now,
+        commandId: CommandId.make("cmd-jira-worktree-created"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-jira-worktree-created"),
+        metadata: {},
+        payload: {
+          worktreeId,
+          projectId: ProjectId.make("project-jira"),
+          branch: "KAN-4-super-toll",
+          worktreePath: "/tmp/KAN-4-super-toll",
+          origin: "issue",
+          prNumber: null,
+          issueNumber: null,
+          prTitle: null,
+          issueTitle: null,
+          workItemProvider: "jira",
+          workItemKey: "KAN-4",
+          workItemTitle: "SUPER TOLL",
+          workItemState: "open",
+          workItemStateName: "Next to come",
+          workItemUrl: "https://ryco-app.atlassian.net/browse/KAN-4",
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      yield* projectionPipeline.projectEvent(created);
+      const createdRow = Option.getOrThrow(yield* worktrees.getById({ worktreeId }));
+      assert.equal(createdRow.workItemProvider, "jira");
+      assert.equal(createdRow.workItemKey, "KAN-4");
+      assert.equal(createdRow.workItemTitle, "SUPER TOLL");
+      assert.equal(createdRow.workItemState, "open");
+      assert.equal(createdRow.workItemStateName, "Next to come");
+      assert.equal(createdRow.workItemUrl, "https://ryco-app.atlassian.net/browse/KAN-4");
+    }),
+  );
+
   it.effect("registers the worktree projector name", () =>
     Effect.sync(() => {
       assert.equal(ORCHESTRATION_PROJECTOR_NAMES.worktrees, "projection.worktrees");

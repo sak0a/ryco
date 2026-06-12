@@ -193,6 +193,9 @@ const SourceControlProviderRegistryLayerLive = SourceControlProviderRegistry.lay
       GitLabCli.layer,
     ),
   ),
+  Layer.provideMerge(AtlassianConnectionRepositoryLive),
+  Layer.provideMerge(PersistenceLayerLive),
+  Layer.provide(ServerSecretStoreLive),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
 );

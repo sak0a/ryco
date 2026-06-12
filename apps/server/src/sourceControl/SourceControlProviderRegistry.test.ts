@@ -37,6 +37,7 @@ function makeRegistry(input: {
   }>;
   readonly githubCli?: Partial<GitHubCli.GitHubCliShape>;
   readonly process?: Partial<VcsProcess.VcsProcessShape>;
+  readonly bitbucketApi?: Partial<BitbucketApi.BitbucketApiShape>;
 }) {
   const driver = {
     listRemotes: () =>
@@ -78,7 +79,7 @@ function makeRegistry(input: {
       Layer.mergeAll(
         registryLayer,
         Layer.mock(AzureDevOpsCli.AzureDevOpsCli)({}),
-        Layer.mock(BitbucketApi.BitbucketApi)({}),
+        Layer.mock(BitbucketApi.BitbucketApi)(input.bitbucketApi ?? {}),
         Layer.mock(ForgejoApi.ForgejoApi)({
           detectProviderFromRemoteUrl: () => null,
           probeAuth: Effect.succeed({
@@ -111,6 +112,69 @@ it.effect("routes GitHub remotes to the GitHub provider", () =>
     const provider = yield* registry.resolve({ cwd: "/repo" });
 
     assert.strictEqual(provider.kind, "github");
+  }),
+);
+
+it.effect("forwards Bitbucket repository search and clone auth through the lazy provider", () =>
+  Effect.gen(function* () {
+    const searchRepositoriesCalled = yield* Ref.make(false);
+    const cloneAuthenticationCalled = yield* Ref.make(false);
+    const cloneUrls = {
+      nameWithOwner: "ryco-app/ryco-post-index",
+      url: "https://bitbucket.org/ryco-app/ryco-post-index.git",
+      sshUrl: "git@bitbucket.org:ryco-app/ryco-post-index.git",
+    };
+    const registry = yield* makeRegistry({
+      remotes: [],
+      bitbucketApi: {
+        searchRepositories: (input) =>
+          Effect.tap(Effect.succeed([cloneUrls]), () => {
+            assert.strictEqual(input.cwd, "/repo");
+            assert.strictEqual(input.query, "post");
+            assert.strictEqual(input.limit, 5);
+            return Ref.set(searchRepositoriesCalled, true);
+          }),
+        cloneAuthentication: (input) =>
+          Effect.tap(
+            Effect.succeed({
+              kind: "http-basic" as const,
+              username: "x-bitbucket-api-token-auth",
+              password: "secret-token",
+            }),
+            () => {
+              assert.strictEqual(
+                input.remoteUrl,
+                "https://ryco-app-admin@bitbucket.org/ryco-app/ryco-post-index.git",
+              );
+              return Ref.set(cloneAuthenticationCalled, true);
+            },
+          ),
+      },
+    });
+
+    const provider = yield* registry.get("bitbucket");
+    const searchRepositories = provider.searchRepositories;
+    const cloneAuthentication = provider.cloneAuthentication;
+    assert.ok(searchRepositories);
+    assert.ok(cloneAuthentication);
+
+    const repositories = yield* searchRepositories({
+      cwd: "/repo",
+      query: "post",
+      limit: 5,
+    });
+    const authentication = yield* cloneAuthentication({
+      remoteUrl: "https://ryco-app-admin@bitbucket.org/ryco-app/ryco-post-index.git",
+    });
+
+    assert.deepStrictEqual(repositories, [cloneUrls]);
+    assert.deepStrictEqual(authentication, {
+      kind: "http-basic",
+      username: "x-bitbucket-api-token-auth",
+      password: "secret-token",
+    });
+    assert.strictEqual(yield* Ref.get(searchRepositoriesCalled), true);
+    assert.strictEqual(yield* Ref.get(cloneAuthenticationCalled), true);
   }),
 );
 

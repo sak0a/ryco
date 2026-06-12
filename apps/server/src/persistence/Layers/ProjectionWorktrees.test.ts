@@ -14,7 +14,7 @@ const layer = it.layer(
 layer("ProjectionWorktreeRepository", (it) => {
   it.effect("upsert + getById round-trips a row", () =>
     Effect.gen(function* () {
-      yield* runMigrations({ toMigrationInclusive: 37 });
+      yield* runMigrations({ toMigrationInclusive: 39 });
       const repo = yield* ProjectionWorktreeRepository;
 
       const id = WorktreeId.make("worktree-test");
@@ -49,7 +49,7 @@ layer("ProjectionWorktreeRepository", (it) => {
 
   it.effect("updateMeta changes the persisted title", () =>
     Effect.gen(function* () {
-      yield* runMigrations({ toMigrationInclusive: 37 });
+      yield* runMigrations({ toMigrationInclusive: 39 });
       const repo = yield* ProjectionWorktreeRepository;
 
       const id = WorktreeId.make("worktree-title-test");
@@ -90,7 +90,7 @@ layer("ProjectionWorktreeRepository", (it) => {
 
   it.effect("findByOrigin returns the matching open worktree", () =>
     Effect.gen(function* () {
-      yield* runMigrations({ toMigrationInclusive: 37 });
+      yield* runMigrations({ toMigrationInclusive: 39 });
       const repo = yield* ProjectionWorktreeRepository;
 
       yield* repo.upsert({
@@ -124,7 +124,7 @@ layer("ProjectionWorktreeRepository", (it) => {
 
   it.effect("findByOrigin ignores archived worktrees", () =>
     Effect.gen(function* () {
-      yield* runMigrations({ toMigrationInclusive: 37 });
+      yield* runMigrations({ toMigrationInclusive: 39 });
       const repo = yield* ProjectionWorktreeRepository;
 
       yield* repo.upsert({
@@ -158,7 +158,7 @@ layer("ProjectionWorktreeRepository", (it) => {
 
   it.effect("round-trips pr_state, pr_is_draft, issue_state", () =>
     Effect.gen(function* () {
-      yield* runMigrations({ toMigrationInclusive: 37 });
+      yield* runMigrations({ toMigrationInclusive: 39 });
       const repo = yield* ProjectionWorktreeRepository;
 
       yield* repo.upsert({
@@ -193,7 +193,7 @@ layer("ProjectionWorktreeRepository", (it) => {
 
   it.effect("round-trips prIsDraft true", () =>
     Effect.gen(function* () {
-      yield* runMigrations({ toMigrationInclusive: 37 });
+      yield* runMigrations({ toMigrationInclusive: 39 });
       const repo = yield* ProjectionWorktreeRepository;
 
       yield* repo.upsert({
@@ -227,7 +227,7 @@ layer("ProjectionWorktreeRepository", (it) => {
 
   it.effect("round-trips null state fields", () =>
     Effect.gen(function* () {
-      yield* runMigrations({ toMigrationInclusive: 37 });
+      yield* runMigrations({ toMigrationInclusive: 39 });
       const repo = yield* ProjectionWorktreeRepository;
 
       yield* repo.upsert({
@@ -260,9 +260,55 @@ layer("ProjectionWorktreeRepository", (it) => {
     }),
   );
 
+  it.effect("findByWorkItem returns the matching Jira worktree", () =>
+    Effect.gen(function* () {
+      yield* runMigrations({ toMigrationInclusive: 39 });
+      const repo = yield* ProjectionWorktreeRepository;
+
+      yield* repo.upsert({
+        worktreeId: WorktreeId.make("w-jira-kan-4"),
+        projectId: ProjectId.make("proj-jira"),
+        title: "SUPER TOLL",
+        branch: "KAN-4-super-toll",
+        worktreePath: "/tmp/KAN-4-super-toll",
+        origin: "issue",
+        prNumber: null,
+        issueNumber: null,
+        prTitle: null,
+        issueTitle: null,
+        prState: null,
+        prIsDraft: null,
+        issueState: null,
+        workItemProvider: "jira",
+        workItemKey: "KAN-4",
+        workItemTitle: "SUPER TOLL",
+        workItemState: "open",
+        workItemStateName: "Next to come",
+        workItemUrl: "https://ryco-app.atlassian.net/browse/KAN-4",
+        createdAt: "2026-05-17T00:00:00.000Z",
+        updatedAt: "2026-05-17T00:00:00.000Z",
+        archivedAt: null,
+        manualPosition: 0,
+      });
+
+      const found = yield* repo.findByWorkItem({
+        projectId: ProjectId.make("proj-jira"),
+        provider: "jira",
+        key: "KAN-4",
+      });
+      assert.equal(found, "w-jira-kan-4");
+      const round = yield* repo.getById({ worktreeId: WorktreeId.make("w-jira-kan-4") });
+      assert.isTrue(Option.isSome(round));
+      if (Option.isSome(round)) {
+        assert.equal(round.value.workItemState, "open");
+        assert.equal(round.value.workItemStateName, "Next to come");
+      }
+    }),
+  );
+
   it.effect("findActiveByLinkedNumber finds non-archived worktrees by PR number", () =>
     Effect.gen(function* () {
-      yield* runMigrations({ toMigrationInclusive: 37 });
+      yield* runMigrations({ toMigrationInclusive: 39 });
       const repo = yield* ProjectionWorktreeRepository;
 
       yield* repo.upsert({
@@ -317,7 +363,7 @@ layer("ProjectionWorktreeRepository", (it) => {
 
   it.effect("findActiveByLinkedNumber returns empty when no match", () =>
     Effect.gen(function* () {
-      yield* runMigrations({ toMigrationInclusive: 37 });
+      yield* runMigrations({ toMigrationInclusive: 39 });
       const repo = yield* ProjectionWorktreeRepository;
 
       const ids = yield* repo.findActiveByLinkedNumber({

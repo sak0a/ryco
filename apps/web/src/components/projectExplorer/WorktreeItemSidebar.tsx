@@ -1,5 +1,6 @@
 import type { ChangeRequest, SourceControlLabel } from "@ryco/contracts";
-import { CircleDotIcon, GitPullRequestIcon, TicketCheckIcon, UsersIcon } from "lucide-react";
+import { CircleDotIcon, GitPullRequestIcon, UsersIcon } from "lucide-react";
+import { AtlassianJiraIcon } from "../Icons";
 import { cn } from "../../lib/utils";
 import { avatarUrlForAuthor, hashAuthorToHue } from "./CommentThread.logic";
 import { LabelChip } from "./LabelChip";
@@ -157,12 +158,12 @@ function WorkItemKeyList(props: {
               className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-foreground text-xs hover:bg-accent/60"
               aria-label={`View Jira work item ${key}`}
             >
-              <TicketCheckIcon className="size-3" />
+              <AtlassianJiraIcon className="size-3" />
               <span>{key}</span>
             </button>
           ) : (
             <span className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-foreground text-xs">
-              <TicketCheckIcon className="size-3" />
+              <AtlassianJiraIcon className="size-3" />
               <span>{key}</span>
             </span>
           )}

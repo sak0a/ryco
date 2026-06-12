@@ -194,6 +194,12 @@ export interface SidebarWorktreeSummary {
   prState: "open" | "closed" | "merged" | null;
   prIsDraft: boolean | null;
   issueState: "open" | "closed" | null;
+  workItemProvider: "jira" | null;
+  workItemKey: string | null;
+  workItemTitle: string | null;
+  workItemState: "open" | "in_progress" | "done" | "closed" | "unknown" | null;
+  workItemStateName: string | null;
+  workItemUrl: string | null;
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;

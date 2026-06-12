@@ -18,6 +18,7 @@ import {
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import { ComposerSourceControlContext } from "./sourceControl.ts";
+import { WorkItemProviderKind, WorkItemState } from "./workItems.ts";
 import {
   IssueState,
   PullRequestState,
@@ -750,6 +751,12 @@ const WorktreeCreateCommand = Schema.Struct({
   issueNumber: Schema.NullOr(Schema.Number),
   prTitle: Schema.NullOr(TrimmedNonEmptyString),
   issueTitle: Schema.NullOr(TrimmedNonEmptyString),
+  workItemProvider: Schema.optional(Schema.NullOr(WorkItemProviderKind)),
+  workItemKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workItemTitle: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workItemState: Schema.optional(Schema.NullOr(WorkItemState)),
+  workItemStateName: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workItemUrl: Schema.optional(Schema.NullOr(Schema.String)),
   createdAt: IsoDateTime,
 });
 
@@ -1218,6 +1225,12 @@ export const WorktreeCreatedPayload = Schema.Struct({
   issueNumber: Schema.NullOr(Schema.Number),
   prTitle: Schema.NullOr(TrimmedNonEmptyString),
   issueTitle: Schema.NullOr(TrimmedNonEmptyString),
+  workItemProvider: Schema.optional(Schema.NullOr(WorkItemProviderKind)),
+  workItemKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workItemTitle: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workItemState: Schema.optional(Schema.NullOr(WorkItemState)),
+  workItemStateName: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workItemUrl: Schema.optional(Schema.NullOr(Schema.String)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

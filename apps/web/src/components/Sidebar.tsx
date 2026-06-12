@@ -2,14 +2,12 @@ import {
   ArchiveIcon,
   ArrowUpDownIcon,
   CloudIcon,
-  CircleDotIcon,
   CopyIcon,
   Edit3Icon,
   ExternalLinkIcon,
   FolderIcon,
   FolderPlusIcon,
   FolderOpenIcon,
-  GitPullRequestIcon,
   MoreHorizontalIcon,
   PlusIcon,
   SearchIcon,
@@ -32,6 +30,7 @@ import {
 import { ProjectFavicon } from "./ProjectFavicon";
 import {
   AzureDevOpsIcon,
+  AtlassianJiraIcon,
   BitbucketIcon,
   ForgejoIcon,
   GitHubIcon,
@@ -39,6 +38,7 @@ import {
   GitLabIcon,
   type Icon,
 } from "./Icons";
+import { JiraProjectPicker } from "./atlassian/JiraProjectPicker";
 import { autoAnimate, type AnimationController } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -129,6 +129,8 @@ import {
 import { useModelPickerOpen } from "../modelPickerOpenState";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { useGitStatus, type GitStatusState } from "../lib/gitStatusState";
+import { buildJiraProjectUnlinkInput } from "../lib/atlassianProjectLinks";
+import { resolveJiraProjectOpenUrl } from "../lib/workItemLocalLinks";
 import { readLocalApi } from "../localApi";
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -247,12 +249,12 @@ import { openInPreferredEditor } from "../editorPreferences";
 import { CommandDialogTrigger } from "./ui/command";
 import { readEnvironmentApi } from "../environmentApi";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
-import { ProjectExplorerDialog } from "./projectExplorer/ProjectExplorerDialog";
-import { NewWorktreeDialog, type NewWorktreeDialogTab } from "./worktrees/NewWorktreeDialog";
 import {
-  changeRequestListQueryOptions,
-  issueListQueryOptions,
-} from "~/lib/sourceControlContextRpc";
+  ProjectExplorerDialog,
+  type ProjectExplorerTabId,
+} from "./projectExplorer/ProjectExplorerDialog";
+import { NewWorktreeDialog, type NewWorktreeDialogTab } from "./worktrees/NewWorktreeDialog";
+import { workItemsQueryKeys } from "~/lib/workItemsRpc";
 import { useServerKeybindings } from "../rpc/serverState";
 import {
   derivePhysicalProjectKey,
@@ -279,9 +281,6 @@ import {
 import { SidebarProviderUpdatePill } from "./sidebar/SidebarProviderUpdatePill";
 const THREAD_PREVIEW_LIMIT = 6;
 
-function stopSpanPointerPropagation(event: React.PointerEvent<HTMLSpanElement>) {
-  event.stopPropagation();
-}
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
   created_at: "Created at",
@@ -1145,116 +1144,6 @@ interface SidebarProjectItemProps {
   dragHandleProps: SortableProjectHandleProps | null;
 }
 
-function ProjectSourceControlBadges(props: {
-  issueCount: number;
-  pullRequestCount: number;
-  onIssuesClick?: (() => void) | undefined;
-  onPullRequestsClick?: (() => void) | undefined;
-}) {
-  if (props.issueCount === 0 && props.pullRequestCount === 0) {
-    return null;
-  }
-
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1">
-      {props.issueCount > 0 ? (
-        <ProjectSourceControlBadge
-          count={props.issueCount}
-          label="Open issues"
-          tone="issues"
-          icon={<CircleDotIcon className="size-2.5" />}
-          onClick={props.onIssuesClick}
-        />
-      ) : null}
-      {props.pullRequestCount > 0 ? (
-        <ProjectSourceControlBadge
-          count={props.pullRequestCount}
-          label="Open pull requests"
-          tone="pullRequests"
-          icon={<GitPullRequestIcon className="size-2.5" />}
-          onClick={props.onPullRequestsClick}
-        />
-      ) : null}
-    </span>
-  );
-}
-
-function ProjectSourceControlBadge(props: {
-  count: number;
-  icon: React.ReactNode;
-  label: string;
-  tone: "issues" | "pullRequests";
-  onClick?: (() => void) | undefined;
-}) {
-  const toneClassName =
-    props.tone === "issues"
-      ? "border-emerald-500/16 bg-emerald-500/10 text-emerald-500 dark:text-emerald-400"
-      : "border-blue-500/16 bg-blue-500/10 text-blue-500 dark:text-blue-400";
-  const toneHoverClassName =
-    props.tone === "issues" ? "hover:bg-emerald-500/20" : "hover:bg-blue-500/20";
-
-  const baseClassName =
-    "inline-flex h-4 shrink-0 items-center justify-center gap-0.5 rounded-sm border px-1 text-[9px] font-semibold tabular-nums leading-none";
-  const summary = `${props.label}: ${props.count}`;
-  const actionLabel = `View ${props.count} ${props.tone === "issues" ? "open issues" : "open pull requests"}`;
-
-  if (props.onClick) {
-    const handleClick = (event: React.MouseEvent<HTMLSpanElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      props.onClick?.();
-    };
-    const handleKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        event.stopPropagation();
-        props.onClick?.();
-      }
-    };
-    // Renders as <span role="button"> rather than <button>: this badge is
-    // mounted inside <SidebarMenuButton>, and nesting native <button>
-    // elements is invalid HTML and emits a React hydration warning.
-    return (
-      <span
-        role="button"
-        tabIndex={0}
-        className={cn(
-          baseClassName,
-          toneClassName,
-          toneHoverClassName,
-          "cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring",
-        )}
-        title={summary}
-        aria-label={actionLabel}
-        onClick={handleClick}
-        onKeyDown={handleKeyDown}
-        onPointerDown={stopSpanPointerPropagation}
-        onPointerDownCapture={stopSpanPointerPropagation}
-      >
-        {props.icon}
-        <span>{formatCompactSourceControlCount(props.count)}</span>
-      </span>
-    );
-  }
-
-  return (
-    <span className={cn(baseClassName, toneClassName)} title={summary} aria-label={summary}>
-      {props.icon}
-      <span>{formatCompactSourceControlCount(props.count)}</span>
-    </span>
-  );
-}
-
-function formatCompactSourceControlCount(count: number): string {
-  return count > 99 ? "99+" : String(count);
-}
-
-function sumSourceControlQueryCounts(
-  queries: ReadonlyArray<{ readonly data?: ReadonlyArray<unknown> | undefined }>,
-): number {
-  return queries.reduce((total, query) => total + (query.data?.length ?? 0), 0);
-}
-
 function useHasIntersectedViewport(
   rootMargin = "160px 0px",
 ): [(node: HTMLElement | null) => void, boolean] {
@@ -1434,10 +1323,13 @@ function resolveProjectRemoteLink(
 }
 
 function ProjectSettingsMenu(props: {
+  jiraProjectOpenUrlByProjectKey: ReadonlyMap<string, string>;
   project: SidebarProjectSnapshot;
   onCopyPath: (member: SidebarProjectGroupMember) => void;
   onGrouping: (member: SidebarProjectGroupMember) => void;
   onNewFolderWithProject: (project: SidebarProjectSnapshot) => void;
+  onOpenJiraProject: (member: SidebarProjectGroupMember) => void;
+  onOpenOverview: () => void;
   onOpenRemote: (member: SidebarProjectGroupMember) => void;
   onRemove: (member: SidebarProjectGroupMember) => void;
   onRename: (member: SidebarProjectGroupMember) => void;
@@ -1448,6 +1340,10 @@ function ProjectSettingsMenu(props: {
       member.repositoryIdentity,
       member.preferredRemoteName,
     );
+    const jiraProjectUrl =
+      props.jiraProjectOpenUrlByProjectKey.get(
+        scopedProjectKey(scopeProjectRef(member.environmentId, member.id)),
+      ) ?? null;
     const RemoteIcon = resolveRepositoryProviderIcon(remoteLink?.provider);
     return (
       <>
@@ -1459,6 +1355,15 @@ function ProjectSettingsMenu(props: {
           <MenuItem onClick={() => props.onOpenRemote(member)} className="min-h-7 py-1 sm:text-xs">
             <RemoteIcon className="size-3.5" />
             Open remote
+          </MenuItem>
+        ) : null}
+        {jiraProjectUrl ? (
+          <MenuItem
+            onClick={() => props.onOpenJiraProject(member)}
+            className="min-h-7 py-1 sm:text-xs"
+          >
+            <AtlassianJiraIcon className="size-3.5" />
+            Open Jira project
           </MenuItem>
         ) : null}
         <MenuSeparator />
@@ -1490,6 +1395,10 @@ function ProjectSettingsMenu(props: {
   if (props.project.memberProjects.length === 1) {
     return (
       <MenuGroup>
+        <MenuItem onClick={props.onOpenOverview} className="min-h-7 py-1 sm:text-xs">
+          <FolderOpenIcon className="size-3.5" />
+          Project overview
+        </MenuItem>
         <MenuItem
           onClick={() => props.onNewFolderWithProject(props.project)}
           className="min-h-7 py-1 sm:text-xs"
@@ -1506,6 +1415,10 @@ function ProjectSettingsMenu(props: {
   return (
     <>
       <MenuGroup>
+        <MenuItem onClick={props.onOpenOverview} className="min-h-7 py-1 sm:text-xs">
+          <FolderOpenIcon className="size-3.5" />
+          Project overview
+        </MenuItem>
         <MenuItem
           onClick={() => props.onNewFolderWithProject(props.project)}
           className="min-h-7 py-1 sm:text-xs"
@@ -2018,7 +1931,6 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
   const client = connection?.client ?? null;
   const [jiraConnectionValue, setJiraConnectionValue] = useState(ATLASSIAN_NONE_VALUE);
   const [bitbucketConnectionValue, setBitbucketConnectionValue] = useState(ATLASSIAN_NONE_VALUE);
-  const [jiraSiteUrl, setJiraSiteUrl] = useState("");
   const [jiraProjectKeys, setJiraProjectKeys] = useState("");
   const [bitbucketWorkspace, setBitbucketWorkspace] = useState("");
   const [bitbucketRepoSlug, setBitbucketRepoSlug] = useState("");
@@ -2076,7 +1988,6 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
         link?.bitbucketConnectionId ?? bitbucketConnections[0]?.connectionId,
       ),
     );
-    setJiraSiteUrl(link?.jiraSiteUrl ?? jiraConnections[0]?.baseUrl ?? "");
     setJiraProjectKeys(link?.jiraProjectKeys.join(", ") ?? "");
     setBitbucketWorkspace(link?.bitbucketWorkspace ?? remote.workspace);
     setBitbucketRepoSlug(link?.bitbucketRepoSlug ?? remote.repoSlug);
@@ -2090,6 +2001,11 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
 
   const markDirty = () => {
     dirtyRef.current = true;
+  };
+
+  const invalidateAtlassianProjectSettings = () => {
+    void queryClient.invalidateQueries({ queryKey: ["atlassian"] });
+    void queryClient.invalidateQueries({ queryKey: ["workItems"] });
   };
 
   const saveMutation = useMutation({
@@ -2106,7 +2022,7 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
         jiraConnectionId: nullableAtlassianConnectionId(jiraConnectionValue),
         bitbucketConnectionId: nullableAtlassianConnectionId(bitbucketConnectionValue),
         jiraCloudId: projectLinkQuery.data?.jiraCloudId ?? null,
-        jiraSiteUrl: jiraSiteUrl.trim() || null,
+        jiraSiteUrl: null,
         jiraProjectKeys: splitAtlassianProjectKeys(jiraProjectKeys),
         bitbucketWorkspace: bitbucketWorkspace.trim() || null,
         bitbucketRepoSlug: bitbucketRepoSlug.trim() || null,
@@ -2120,8 +2036,7 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
     },
     onSuccess: () => {
       dirtyRef.current = false;
-      void queryClient.invalidateQueries({ queryKey: ["atlassian"] });
-      void queryClient.invalidateQueries({ queryKey: ["workItems"] });
+      invalidateAtlassianProjectSettings();
       toastManager.add(
         stackedThreadToast({
           type: "success",
@@ -2141,8 +2056,53 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
     },
   });
 
+  const unlinkJiraMutation = useMutation({
+    mutationFn: async () => {
+      if (!client || !target) throw new Error("Project connection is unavailable.");
+      return client.atlassian.saveProjectLink(
+        buildJiraProjectUnlinkInput({
+          projectId: target.id,
+          existing: projectLinkQuery.data ?? null,
+        }),
+      );
+    },
+    onSuccess: () => {
+      dirtyRef.current = false;
+      setJiraConnectionValue(ATLASSIAN_NONE_VALUE);
+      setJiraProjectKeys("");
+      invalidateAtlassianProjectSettings();
+      toastManager.add(
+        stackedThreadToast({
+          type: "success",
+          title: "Jira project unlinked",
+          description: "Bitbucket mapping and project templates were left unchanged.",
+        }),
+      );
+    },
+    onError: (error) => {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not unlink Jira project",
+          description: error instanceof Error ? error.message : "The project link was not saved.",
+        }),
+      );
+    },
+  });
+
   const isLoading = projectLinkQuery.isLoading || connectionsQuery.isLoading;
-  const disabled = client === null || target === null || saveMutation.isPending;
+  const disabled =
+    client === null || target === null || saveMutation.isPending || unlinkJiraMutation.isPending;
+  const jiraLinked =
+    projectLinkQuery.data?.jiraConnectionId !== null &&
+    projectLinkQuery.data?.jiraConnectionId !== undefined &&
+    projectLinkQuery.data.jiraProjectKeys.length > 0;
+  const selectedJiraConnectionId = nullableAtlassianConnectionId(jiraConnectionValue);
+  const selectedJiraConnection = jiraConnections.find(
+    (connection) => connection.connectionId === selectedJiraConnectionId,
+  );
+  const selectedJiraSiteUrl =
+    selectedJiraConnection?.baseUrl ?? projectLinkQuery.data?.jiraSiteUrl ?? "";
 
   return (
     <div className="space-y-5">
@@ -2222,20 +2182,18 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
       <section className="space-y-3">
         <div className="text-xs font-medium text-foreground">Repository mapping</div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <ProjectSettingsField label="Jira site URL">
-            <Input
-              size="sm"
-              value={jiraSiteUrl}
-              inputMode="url"
+          <ProjectSettingsField label="Jira project keys">
+            <JiraProjectPicker
+              environmentId={target?.environmentId ?? null}
+              connectionId={selectedJiraConnectionId}
+              siteUrl={selectedJiraSiteUrl}
+              projectKeys={jiraProjectKeys}
               disabled={disabled}
-              placeholder="https://your-team.atlassian.net"
-              onChange={(event) => {
+              onProjectKeysChange={(value) => {
                 markDirty();
-                setJiraSiteUrl(event.currentTarget.value);
+                setJiraProjectKeys(value);
               }}
             />
-          </ProjectSettingsField>
-          <ProjectSettingsField label="Jira project keys">
             <Input
               size="sm"
               value={jiraProjectKeys}
@@ -2357,15 +2315,27 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
         <p className="text-[11px] text-muted-foreground">
           Tokens live in Source Control settings. These defaults belong only to this project.
         </p>
-        <Button
-          type="button"
-          size="sm"
-          className="h-8 shrink-0"
-          disabled={disabled}
-          onClick={() => saveMutation.mutate()}
-        >
-          {saveMutation.isPending ? "Saving..." : "Save Atlassian"}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive-outline"
+            className="h-8"
+            disabled={disabled || !jiraLinked}
+            onClick={() => unlinkJiraMutation.mutate()}
+          >
+            {unlinkJiraMutation.isPending ? "Unlinking..." : "Unlink Jira"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="h-8"
+            disabled={disabled}
+            onClick={() => saveMutation.mutate()}
+          >
+            {saveMutation.isPending ? "Saving..." : "Save Atlassian"}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -2560,8 +2530,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     useState<NewWorktreeDialogTab>("branches");
   const [explorerDialog, setExplorerDialog] = useState<{
     open: boolean;
-    initialTab: "issues" | "prs";
-  }>({ open: false, initialTab: "issues" });
+    initialTab: ProjectExplorerTabId;
+  }>({ open: false, initialTab: "overview" });
   const [setProjectHeaderVisibilityNode, projectHeaderHasIntersected] = useHasIntersectedViewport();
   const [projectRenameTarget, setProjectRenameTarget] = useState<SidebarProjectGroupMember | null>(
     null,
@@ -2649,39 +2619,61 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     }
     return counts;
   }, [memberProjectByScopedKey, project.memberProjects, projectThreads]);
-  const shouldQuerySourceControlCounts = shouldQuerySidebarSourceControlCounts({
+  const shouldQueryProjectIntegrations = shouldQuerySidebarSourceControlCounts({
     explorerOpen: explorerDialog.open,
     projectVisible: projectHeaderHasIntersected,
   });
-  const sourceControlIssueQueries = useQueries({
-    queries: project.memberProjects.map((member) =>
-      issueListQueryOptions({
-        environmentId: member.environmentId,
-        cwd: member.cwd,
-        state: "open",
-        limit: 100,
-        enabled: shouldQuerySourceControlCounts,
-      }),
-    ),
+  const atlassianProjectLinkQueries = useQueries({
+    queries: project.memberProjects.map((member) => ({
+      queryKey: workItemsQueryKeys.projectLink(member.environmentId, member.id),
+      queryFn: async () => {
+        const environmentConnection = readEnvironmentConnection(member.environmentId);
+        if (!environmentConnection) return null;
+        return environmentConnection.client.atlassian.getProjectLink({ projectId: member.id });
+      },
+      enabled: shouldQueryProjectIntegrations,
+      staleTime: 60_000,
+    })),
   });
-  const sourceControlPullRequestQueries = useQueries({
-    queries: project.memberProjects.map((member) =>
-      changeRequestListQueryOptions({
-        environmentId: member.environmentId,
-        cwd: member.cwd,
-        state: "open",
-        limit: 100,
-        enabled: shouldQuerySourceControlCounts,
-      }),
-    ),
-  });
-  const sourceControlCounts = useMemo(
-    () => ({
-      issues: sumSourceControlQueryCounts(sourceControlIssueQueries),
-      pullRequests: sumSourceControlQueryCounts(sourceControlPullRequestQueries),
-    }),
-    [sourceControlIssueQueries, sourceControlPullRequestQueries],
+  const atlassianConnectionEnvironmentIds = useMemo(
+    () => Array.from(new Set(project.memberProjects.map((member) => member.environmentId))),
+    [project.memberProjects],
   );
+  const atlassianConnectionQueries = useQueries({
+    queries: atlassianConnectionEnvironmentIds.map((environmentId) => ({
+      queryKey: ["atlassian", "connections", environmentId] as const,
+      queryFn: async () => {
+        const environmentConnection = readEnvironmentConnection(environmentId);
+        if (!environmentConnection) return [];
+        return environmentConnection.client.atlassian.listConnections();
+      },
+      enabled: shouldQueryProjectIntegrations,
+      staleTime: 60_000,
+    })),
+  });
+  const atlassianConnectionsByEnvironmentId = useMemo(
+    () =>
+      new Map(
+        atlassianConnectionEnvironmentIds.map(
+          (environmentId, index) =>
+            [environmentId, atlassianConnectionQueries[index]?.data ?? []] as const,
+        ),
+      ),
+    [atlassianConnectionEnvironmentIds, atlassianConnectionQueries],
+  );
+  const jiraProjectOpenUrlByProjectKey = useMemo(() => {
+    const urls = new Map<string, string>();
+    project.memberProjects.forEach((member, index) => {
+      const url = resolveJiraProjectOpenUrl({
+        link: atlassianProjectLinkQueries[index]?.data ?? null,
+        connections: atlassianConnectionsByEnvironmentId.get(member.environmentId) ?? [],
+      });
+      if (url) {
+        urls.set(scopedProjectKey(scopeProjectRef(member.environmentId, member.id)), url);
+      }
+    });
+    return urls;
+  }, [atlassianConnectionsByEnvironmentId, atlassianProjectLinkQueries, project.memberProjects]);
 
   const { projectStatus, visibleProjectThreads, orderedProjectThreadKeys } = useMemo(() => {
     const resolveProjectThreadStatus = (thread: SidebarThreadSummary) => {
@@ -2937,6 +2929,42 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     });
   }, []);
 
+  const openProjectJiraLink = useCallback(
+    (member: SidebarProjectGroupMember) => {
+      const url =
+        jiraProjectOpenUrlByProjectKey.get(
+          scopedProjectKey(scopeProjectRef(member.environmentId, member.id)),
+        ) ?? null;
+      if (!url) {
+        toastManager.add({
+          type: "warning",
+          title: "No Jira project link available",
+        });
+        return;
+      }
+
+      const api = readLocalApi();
+      if (!api) {
+        toastManager.add({
+          type: "error",
+          title: "Link opening is unavailable.",
+        });
+        return;
+      }
+
+      void api.shell.openExternal(url).catch((error) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Unable to open Jira project",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      });
+    },
+    [jiraProjectOpenUrlByProjectKey],
+  );
+
   const removeProject = useCallback(
     async (member: SidebarProjectGroupMember, options: { force?: boolean } = {}): Promise<void> => {
       const memberProjectRef = scopeProjectRef(member.environmentId, member.id);
@@ -3083,8 +3111,18 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         if (!api) return;
 
         const actionHandlers = new Map<string, () => Promise<void> | void>();
+        actionHandlers.set("project-overview", () => {
+          setExplorerDialog({ open: true, initialTab: "overview" });
+        });
         const makeLeaf = (
-          action: "settings" | "open-remote" | "rename" | "grouping" | "copy-path" | "delete",
+          action:
+            | "settings"
+            | "open-remote"
+            | "open-jira"
+            | "rename"
+            | "grouping"
+            | "copy-path"
+            | "delete",
           member: SidebarProjectGroupMember,
           options?: {
             destructive?: boolean;
@@ -3099,6 +3137,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 return;
               case "open-remote":
                 openProjectRemoteLink(member);
+                return;
+              case "open-jira":
+                openProjectJiraLink(member);
                 return;
               case "rename":
                 openProjectRenameDialog(member);
@@ -3123,7 +3164,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         };
 
         const buildTargetedItem = (
-          action: "settings" | "open-remote" | "rename" | "grouping" | "copy-path" | "delete",
+          action:
+            | "settings"
+            | "open-remote"
+            | "open-jira"
+            | "rename"
+            | "grouping"
+            | "copy-path"
+            | "delete",
           label: string,
           options?: {
             destructive?: boolean;
@@ -3158,7 +3206,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             resolveProjectRemoteLink(member.repositoryIdentity, member.preferredRemoteName) !==
             null,
         );
+        const hasAnyJiraProjectLink = project.memberProjects.some((member) =>
+          jiraProjectOpenUrlByProjectKey.has(
+            scopedProjectKey(scopeProjectRef(member.environmentId, member.id)),
+          ),
+        );
         const menuItems: ContextMenuItem<string>[] = [
+          { id: "project-overview", label: "Project overview" },
           buildTargetedItem("settings", "Project settings"),
           ...(hasAnyRemoteLink
             ? [
@@ -3168,6 +3222,16 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                       member.repositoryIdentity,
                       member.preferredRemoteName,
                     ) === null,
+                }),
+              ]
+            : []),
+          ...(hasAnyJiraProjectLink
+            ? [
+                buildTargetedItem("open-jira", "Open Jira project", {
+                  isDisabled: (member) =>
+                    !jiraProjectOpenUrlByProjectKey.has(
+                      scopedProjectKey(scopeProjectRef(member.environmentId, member.id)),
+                    ),
                 }),
               ]
             : []),
@@ -3194,7 +3258,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [
       copyPathToClipboard,
       handleRemoveProject,
+      jiraProjectOpenUrlByProjectKey,
       openProjectGroupingDialog,
+      openProjectJiraLink,
       openProjectRemoteLink,
       openProjectRenameDialog,
       openProjectSettingsDialog,
@@ -3460,6 +3526,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     setNewWorktreeInitialTab("branches");
     setNewWorktreeDialogOpen(true);
   }, []);
+
+  const handleOpenProjectOverviewClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setExplorerDialog({ open: true, initialTab: "overview" });
+    },
+    [],
+  );
 
   const createThreadInWorktree = useCallback(
     (worktreeNode: SidebarTreeWorktree) => {
@@ -4253,7 +4328,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         <SidebarMenuButton
           ref={dragHandleProps?.setActivatorNodeRef}
           size="sm"
-          className={`gap-2 px-2 py-1.5 pr-14 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground ${
+          className={`gap-2 px-2 py-1.5 pr-20 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground ${
             isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
           }`}
           {...(dragHandleProps ? dragHandleProps.attributes : {})}
@@ -4287,12 +4362,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground/90">
               {project.displayName}
             </span>
-            <ProjectSourceControlBadges
-              issueCount={sourceControlCounts.issues}
-              pullRequestCount={sourceControlCounts.pullRequests}
-              onIssuesClick={() => setExplorerDialog({ open: true, initialTab: "issues" })}
-              onPullRequestsClick={() => setExplorerDialog({ open: true, initialTab: "prs" })}
-            />
             {project.groupedProjectCount > 1 ? (
               <span className="shrink-0 text-[10px] text-muted-foreground/60">
                 {project.groupedProjectCount} projects
@@ -4327,6 +4396,24 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         <Tooltip>
           <TooltipTrigger
             render={
+              <div className="pointer-events-none absolute top-1 right-[3.25rem] opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
+                <button
+                  type="button"
+                  aria-label={`Open project overview for ${project.displayName}`}
+                  data-testid="project-overview-button"
+                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                  onClick={handleOpenProjectOverviewClick}
+                >
+                  <FolderOpenIcon className="size-3.5" />
+                </button>
+              </div>
+            }
+          />
+          <TooltipPopup side="top">Project overview</TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
               <div className="pointer-events-none absolute top-1 right-7 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
                 <button
                   type="button"
@@ -4358,12 +4445,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           </Tooltip>
           <MenuPopup align="end" side="bottom" className="min-w-48">
             <ProjectSettingsMenu
+              jiraProjectOpenUrlByProjectKey={jiraProjectOpenUrlByProjectKey}
               project={project}
               onCopyPath={(member) => {
                 copyPathToClipboard(member.cwd, { path: member.cwd });
               }}
               onGrouping={openProjectGroupingDialog}
               onNewFolderWithProject={onNewFolderWithProject}
+              onOpenJiraProject={openProjectJiraLink}
+              onOpenOverview={() => setExplorerDialog({ open: true, initialTab: "overview" })}
               onOpenRemote={openProjectRemoteLink}
               onRemove={(member) => {
                 void handleRemoveProject(member);

@@ -600,10 +600,13 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(
         Layer.mock(JiraWorkItemService)({
+          listProjects: () => Effect.succeed([]),
           list: () => Effect.succeed([]),
           search: () => Effect.succeed([]),
           get: () => Effect.die("not implemented in test"),
           addComment: () => Effect.die("not implemented in test"),
+          editComment: () => Effect.die("not implemented in test"),
+          update: () => Effect.die("not implemented in test"),
           listTransitions: () => Effect.succeed([]),
           transition: () => Effect.die("not implemented in test"),
           ...options?.layers?.jiraWorkItemService,
@@ -677,8 +680,11 @@ const buildAppUnderTest = (options?: {
           getById: () => Effect.succeed(Option.none()),
           listByProjectId: () => Effect.succeed([]),
           findByOrigin: () => Effect.succeed(null),
+          findByWorkItem: () => Effect.succeed(null),
+          findActiveByLinkedNumber: () => Effect.succeed([]),
           markArchived: () => Effect.void,
           markRestored: () => Effect.void,
+          updateMeta: () => Effect.void,
           deleteById: () => Effect.void,
           setManualPosition: () => Effect.void,
           ...options?.layers?.projectionWorktreeRepository,
@@ -3232,6 +3238,221 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(worktreeCreate?.branch, createdWorktreeInput?.newRefName);
       assert.equal(worktreeCreate?.issueNumber, 42);
       assert.equal(worktreeCreate?.issueTitle, "Fix broken reconnects");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("creates project worktrees from Jira work items", () =>
+    Effect.gen(function* () {
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const generateBranchName = vi.fn<TextGenerationShape["generateBranchName"]>((_input) =>
+        Effect.succeed({ branch: "super-toll" }),
+      );
+      const createWorktree = vi.fn(
+        (input: Parameters<GitVcsDriver.GitVcsDriverShape["createWorktree"]>[0]) =>
+          Effect.succeed({
+            worktree: {
+              refName: input.newRefName ?? input.refName,
+              path: "/tmp/project-jira-worktree",
+            },
+          }),
+      );
+
+      yield* buildAppUnderTest({
+        layers: {
+          gitVcsDriver: {
+            createWorktree,
+          },
+          vcsStatusBroadcaster: {
+            refreshStatus: () =>
+              Effect.succeed({
+                isRepo: true,
+                hasPrimaryRemote: true,
+                isDefaultRef: false,
+                refName: "KAN-4-super-toll",
+                hasWorkingTreeChanges: false,
+                workingTree: { files: [], insertions: 0, deletions: 0 },
+                hasUpstream: false,
+                aheadCount: 0,
+                behindCount: 0,
+                aheadOfDefaultCount: 0,
+                pr: null,
+              }),
+          },
+          textGeneration: {
+            generateBranchName,
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+          },
+          projectionSnapshotQuery: {
+            getProjectShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: defaultProjectId,
+                  title: "Default Project",
+                  workspaceRoot: "/tmp/project",
+                  projectMetadataDir: ".ryco",
+                  repositoryIdentity: null,
+                  defaultModelSelection,
+                  customSystemPrompt: null,
+                  customAvatarContentHash: null,
+                  preferredRemoteName: null,
+                  scripts: [],
+                  createdAt: "2026-05-10T00:00:00.000Z",
+                  updatedAt: "2026-05-10T00:00:00.000Z",
+                }),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.gitCreateWorktreeForProject]({
+            projectId: defaultProjectId,
+            intent: {
+              kind: "workItem",
+              provider: "jira",
+              key: "KAN-4",
+              title: "SUPER TOLL",
+              state: "open",
+              stateName: "Next to come",
+              url: "https://ryco-app.atlassian.net/browse/KAN-4",
+            },
+          }),
+        ),
+      );
+
+      const createdWorktreeInput = createWorktree.mock.calls[0]?.[0];
+      assert.equal(createdWorktreeInput?.refName, "HEAD");
+      assert.equal(createdWorktreeInput?.newRefName, "KAN-4-super-toll");
+      const branchGenerationInput = generateBranchName.mock.calls[0]?.[0];
+      assert.match(branchGenerationInput?.message ?? "", /KAN-4/);
+      assert.match(branchGenerationInput?.message ?? "", /SUPER TOLL/);
+
+      const worktreeCreate = dispatchedCommands.find(
+        (command): command is Extract<OrchestrationCommand, { type: "worktree.create" }> =>
+          command.type === "worktree.create",
+      );
+      assert.equal(worktreeCreate?.origin, "issue");
+      assert.equal(worktreeCreate?.issueNumber, null);
+      assert.equal(worktreeCreate?.workItemProvider, "jira");
+      assert.equal(worktreeCreate?.workItemKey, "KAN-4");
+      assert.equal(worktreeCreate?.workItemTitle, "SUPER TOLL");
+      assert.equal(worktreeCreate?.workItemState, "open");
+      assert.equal(worktreeCreate?.workItemStateName, "Next to come");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("creates Jira work item worktrees from an existing branch", () =>
+    Effect.gen(function* () {
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const generateBranchName = vi.fn<TextGenerationShape["generateBranchName"]>((_input) =>
+        Effect.succeed({ branch: "should-not-be-used" }),
+      );
+      const createWorktree = vi.fn(
+        (input: Parameters<GitVcsDriver.GitVcsDriverShape["createWorktree"]>[0]) =>
+          Effect.succeed({
+            worktree: {
+              refName: input.newRefName ?? input.refName,
+              path: "/tmp/project-jira-existing-branch-worktree",
+            },
+          }),
+      );
+
+      yield* buildAppUnderTest({
+        layers: {
+          gitVcsDriver: {
+            createWorktree,
+          },
+          vcsStatusBroadcaster: {
+            refreshStatus: () =>
+              Effect.succeed({
+                isRepo: true,
+                hasPrimaryRemote: true,
+                isDefaultRef: false,
+                refName: "feature/KAN-4-existing",
+                hasWorkingTreeChanges: false,
+                workingTree: { files: [], insertions: 0, deletions: 0 },
+                hasUpstream: false,
+                aheadCount: 0,
+                behindCount: 0,
+                aheadOfDefaultCount: 0,
+                pr: null,
+              }),
+          },
+          textGeneration: {
+            generateBranchName,
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+          },
+          projectionSnapshotQuery: {
+            getProjectShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: defaultProjectId,
+                  title: "Default Project",
+                  workspaceRoot: "/tmp/project",
+                  projectMetadataDir: ".ryco",
+                  repositoryIdentity: null,
+                  defaultModelSelection,
+                  customSystemPrompt: null,
+                  customAvatarContentHash: null,
+                  preferredRemoteName: null,
+                  scripts: [],
+                  createdAt: "2026-05-10T00:00:00.000Z",
+                  updatedAt: "2026-05-10T00:00:00.000Z",
+                }),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.gitCreateWorktreeForProject]({
+            projectId: defaultProjectId,
+            intent: {
+              kind: "workItem",
+              provider: "jira",
+              key: "KAN-4",
+              title: "SUPER TOLL",
+              state: "open",
+              stateName: "Next to come",
+              url: "https://ryco-app.atlassian.net/browse/KAN-4",
+              branchSource: "existing",
+              branchName: "feature/KAN-4-existing",
+            },
+          }),
+        ),
+      );
+
+      const createdWorktreeInput = createWorktree.mock.calls[0]?.[0];
+      assert.equal(createdWorktreeInput?.refName, "feature/KAN-4-existing");
+      assert.equal(createdWorktreeInput?.newRefName, undefined);
+      assert.equal(generateBranchName.mock.calls.length, 0);
+
+      const worktreeCreate = dispatchedCommands.find(
+        (command): command is Extract<OrchestrationCommand, { type: "worktree.create" }> =>
+          command.type === "worktree.create",
+      );
+      assert.equal(worktreeCreate?.branch, "feature/KAN-4-existing");
+      assert.equal(worktreeCreate?.workItemProvider, "jira");
+      assert.equal(worktreeCreate?.workItemKey, "KAN-4");
+      assert.equal(worktreeCreate?.workItemTitle, "SUPER TOLL");
+      assert.equal(worktreeCreate?.workItemState, "open");
+      assert.equal(worktreeCreate?.workItemStateName, "Next to come");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

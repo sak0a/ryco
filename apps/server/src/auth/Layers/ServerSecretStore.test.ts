@@ -162,6 +162,28 @@ it.layer(NodeServices.layer)("ServerSecretStoreLive", (it) => {
     }).pipe(Effect.provide(makeServerSecretStoreLayer())),
   );
 
+  it.effect("persists and reads nested secret names", () =>
+    Effect.gen(function* () {
+      const secretStore = yield* ServerSecretStore;
+
+      yield* secretStore.set("atlassian/bitbucket-token/atl-conn-1", Uint8Array.from([1, 2, 3]));
+      const secret = yield* secretStore.get("atlassian/bitbucket-token/atl-conn-1");
+
+      expect(Array.from(secret ?? new Uint8Array())).toEqual([1, 2, 3]);
+    }).pipe(Effect.provide(makeServerSecretStoreLayer())),
+  );
+
+  it.effect("creates nested secret names when generating random values", () =>
+    Effect.gen(function* () {
+      const secretStore = yield* ServerSecretStore;
+
+      const generated = yield* secretStore.getOrCreateRandom("atlassian/jira-token/atl-conn-1", 16);
+      const persisted = yield* secretStore.get("atlassian/jira-token/atl-conn-1");
+
+      expect(Array.from(persisted ?? new Uint8Array())).toEqual(Array.from(generated));
+    }).pipe(Effect.provide(makeServerSecretStoreLayer())),
+  );
+
   it.effect("returns the persisted secret when concurrent creators race", () =>
     Effect.gen(function* () {
       const secretStore = yield* ServerSecretStore;

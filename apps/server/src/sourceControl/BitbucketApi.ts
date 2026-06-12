@@ -12,10 +12,15 @@ import { detectSourceControlProviderFromRemoteUrl } from "@ryco/shared/sourceCon
 import * as BitbucketIssues from "./bitbucketIssues.ts";
 import * as BitbucketPullRequests from "./bitbucketPullRequests.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
+import { manualBitbucketTokenSecretName } from "../atlassian/AtlassianConnectionService.ts";
+import { ServerSecretStore } from "../auth/Services/ServerSecretStore.ts";
+import { AtlassianConnectionRepository } from "../persistence/Services/AtlassianConnections.ts";
+import type { AtlassianConnectionRecord } from "../persistence/Services/AtlassianConnections.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
 const DEFAULT_API_BASE_URL = "https://api.bitbucket.org/2.0";
+const textDecoder = new TextDecoder();
 
 const BitbucketApiEnvConfig = Config.all({
   baseUrl: Config.string("RYCO_BITBUCKET_API_BASE_URL").pipe(
@@ -60,10 +65,26 @@ const RawBitbucketRepositorySchema = Schema.Struct({
   mainbranch: Schema.optional(
     Schema.NullOr(
       Schema.Struct({
-        name: TrimmedNonEmptyString,
+        name: Schema.optional(TrimmedNonEmptyString),
       }),
     ),
   ),
+});
+
+const RawBitbucketRepositoryListSchema = Schema.Struct({
+  values: Schema.Array(RawBitbucketRepositorySchema),
+  next: Schema.optional(TrimmedNonEmptyString),
+});
+
+const RawBitbucketWorkspaceAccessListSchema = Schema.Struct({
+  values: Schema.Array(
+    Schema.Struct({
+      workspace: Schema.Struct({
+        slug: TrimmedNonEmptyString,
+      }),
+    }),
+  ),
+  next: Schema.optional(TrimmedNonEmptyString),
 });
 
 const RawBitbucketBranchingModelSchema = Schema.Struct({
@@ -94,6 +115,19 @@ export interface BitbucketRepositoryLocator {
   readonly repoSlug: string;
 }
 
+interface BitbucketCredential {
+  readonly source: "stored" | "env";
+  readonly kind: "basic" | "bearer";
+  readonly email: Option.Option<string>;
+  readonly token: string;
+  readonly detail: string;
+}
+
+const DEFAULT_REPOSITORY_SEARCH_LIMIT = 25;
+const MAX_REPOSITORY_SEARCH_LIMIT = 50;
+const BITBUCKET_WORKSPACE_PAGE_LIMIT = 10;
+const BITBUCKET_REPOSITORY_PAGE_LIMIT = 2;
+
 export interface BitbucketApiShape {
   readonly probeAuth: Effect.Effect<SourceControlProviderAuth, never>;
   readonly listPullRequests: (input: {
@@ -120,6 +154,18 @@ export interface BitbucketApiShape {
     readonly context?: SourceControlProvider.SourceControlProviderContext;
     readonly repository: string;
   }) => Effect.Effect<SourceControlRepositoryCloneUrls, BitbucketApiError>;
+  readonly searchRepositories: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProvider.SourceControlProviderContext;
+    readonly query?: string;
+    readonly limit?: number;
+  }) => Effect.Effect<ReadonlyArray<SourceControlRepositoryCloneUrls>, BitbucketApiError>;
+  readonly cloneAuthentication: (input: {
+    readonly remoteUrl: string;
+  }) => Effect.Effect<
+    SourceControlProvider.SourceControlCloneAuthentication | null,
+    BitbucketApiError
+  >;
   readonly createRepository: (input: {
     readonly cwd: string;
     readonly repository: string;
@@ -310,6 +356,107 @@ function normalizeRepositoryCloneUrls(
   };
 }
 
+function repositorySearchLimit(limit: number | undefined): number {
+  return Math.max(
+    1,
+    Math.min(
+      Number.isFinite(limit)
+        ? Math.floor(limit ?? DEFAULT_REPOSITORY_SEARCH_LIMIT)
+        : DEFAULT_REPOSITORY_SEARCH_LIMIT,
+      MAX_REPOSITORY_SEARCH_LIMIT,
+    ),
+  );
+}
+
+function escapeBitbucketQueryValue(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function bitbucketRepositorySearchFilter(query: string): string | null {
+  const trimmed = query.trim();
+  if (trimmed.length === 0) return null;
+  const escaped = escapeBitbucketQueryValue(trimmed);
+  return `(name ~ "${escaped}" OR full_name ~ "${escaped}")`;
+}
+
+function repositorySlugFromNameWithOwner(nameWithOwner: string): string {
+  return nameWithOwner.split("/").at(-1)?.trim() ?? nameWithOwner;
+}
+
+function repositoryMatchesQuery(
+  repository: SourceControlRepositoryCloneUrls,
+  query: string,
+): boolean {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery.length === 0) return true;
+  return [
+    repository.nameWithOwner,
+    repositorySlugFromNameWithOwner(repository.nameWithOwner),
+    repository.url,
+    repository.sshUrl,
+  ].some((value) => value.toLowerCase().includes(normalizedQuery));
+}
+
+function repositorySearchRank(
+  repository: SourceControlRepositoryCloneUrls,
+  normalizedQuery: string,
+): number {
+  if (normalizedQuery.length === 0) return 0;
+  const nameWithOwner = repository.nameWithOwner.toLowerCase();
+  const repoSlug = repositorySlugFromNameWithOwner(repository.nameWithOwner).toLowerCase();
+  if (nameWithOwner === normalizedQuery) return 0;
+  if (repoSlug === normalizedQuery) return 1;
+  if (nameWithOwner.startsWith(normalizedQuery)) return 2;
+  if (repoSlug.startsWith(normalizedQuery)) return 3;
+  return 4;
+}
+
+function uniqueRankedRepositories(input: {
+  readonly repositories: ReadonlyArray<SourceControlRepositoryCloneUrls>;
+  readonly query: string;
+  readonly limit: number;
+}): ReadonlyArray<SourceControlRepositoryCloneUrls> {
+  const seen = new Set<string>();
+  const normalizedQuery = input.query.trim().toLowerCase();
+  return input.repositories
+    .filter((repository) => {
+      if (!repositoryMatchesQuery(repository, input.query)) return false;
+      const key = repository.nameWithOwner.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((repository, index) => ({ repository, index }))
+    .toSorted((left, right) => {
+      const leftRank = repositorySearchRank(left.repository, normalizedQuery);
+      const rightRank = repositorySearchRank(right.repository, normalizedQuery);
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      if (normalizedQuery.length === 0) return left.index - right.index;
+      return left.repository.nameWithOwner.localeCompare(right.repository.nameWithOwner);
+    })
+    .slice(0, input.limit)
+    .map((entry) => entry.repository);
+}
+
+function isBitbucketHttpsRemoteUrl(remoteUrl: string): boolean {
+  try {
+    const url = new URL(remoteUrl);
+    return url.protocol === "https:" && url.hostname.toLowerCase() === "bitbucket.org";
+  } catch {
+    return false;
+  }
+}
+
+function gitCloneAuthenticationFromCredential(
+  credential: BitbucketCredential,
+): SourceControlProvider.SourceControlCloneAuthentication {
+  return {
+    kind: "http-basic",
+    username: credential.kind === "bearer" ? "x-token-auth" : "x-bitbucket-api-token-auth",
+    password: credential.token,
+  };
+}
+
 function defaultChangeRequestTargetBranch(input: {
   readonly repository: typeof RawBitbucketRepositorySchema.Type;
   readonly branchingModel: typeof RawBitbucketBranchingModelSchema.Type | null;
@@ -398,6 +545,82 @@ function authFromConfig(
   };
 }
 
+function credentialFromConfig(
+  config: Config.Success<typeof BitbucketApiEnvConfig>,
+): BitbucketCredential | null {
+  if (Option.isSome(config.accessToken)) {
+    return {
+      source: "env",
+      kind: "bearer",
+      email: Option.none(),
+      token: config.accessToken.value,
+      detail: "Bitbucket access token is configured.",
+    };
+  }
+
+  if (Option.isSome(config.email) && Option.isSome(config.apiToken)) {
+    return {
+      source: "env",
+      kind: "basic",
+      email: config.email,
+      token: config.apiToken.value,
+      detail: "Bitbucket API token is configured.",
+    };
+  }
+
+  return null;
+}
+
+function unauthenticatedAuth(): SourceControlProviderAuth {
+  return {
+    status: "unauthenticated",
+    account: Option.none(),
+    host: Option.some("bitbucket.org"),
+    detail: Option.some(
+      "Save a Bitbucket app password in Settings -> Source Control -> Atlassian, or set RYCO_BITBUCKET_EMAIL and RYCO_BITBUCKET_API_TOKEN on the server.",
+    ),
+  };
+}
+
+function credentialAuthStatus(credential: BitbucketCredential): SourceControlProviderAuth {
+  return {
+    status: "unknown",
+    account: credential.email,
+    host: Option.some("bitbucket.org"),
+    detail: Option.some(
+      credential.source === "stored"
+        ? "Saved Bitbucket app password is configured, but auth status could not be verified."
+        : credential.detail,
+    ),
+  };
+}
+
+function failedCredentialAuthStatus(
+  credential: BitbucketCredential,
+  error: BitbucketApiError,
+): SourceControlProviderAuth {
+  const invalid = error.status === 401 || error.status === 403;
+  return {
+    status: invalid ? "unauthenticated" : "unknown",
+    account: credential.email,
+    host: Option.some("bitbucket.org"),
+    detail: Option.some(
+      credential.source === "stored"
+        ? `Saved Bitbucket app password could not be verified. ${error.detail}`
+        : `${credential.detail} ${error.detail}`,
+    ),
+  };
+}
+
+function isConnectedBitbucketTokenConnection(record: AtlassianConnectionRecord): boolean {
+  return (
+    record.status === "connected" &&
+    record.kind === "bitbucket_token" &&
+    record.products.includes("bitbucket") &&
+    record.capabilities.includes("bitbucket:read")
+  );
+}
+
 function requestError(operation: string, cause: unknown): BitbucketApiError {
   return new BitbucketApiError({
     operation,
@@ -433,6 +656,8 @@ function responseError(
 
 export const make = Effect.fn("makeBitbucketApi")(function* () {
   const config = yield* BitbucketApiEnvConfig;
+  const atlassianConnections = yield* AtlassianConnectionRepository;
+  const secretStore = yield* ServerSecretStore;
   const httpClient = yield* HttpClient.HttpClient;
   const fileSystem = yield* FileSystem.FileSystem;
   const git = yield* GitVcsDriver.GitVcsDriver;
@@ -440,13 +665,67 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
 
   const apiUrl = (path: string) => `${config.baseUrl.replace(/\/+$/u, "")}${path}`;
 
-  const withAuth = (request: HttpClientRequest.HttpClientRequest) => {
-    if (Option.isSome(config.accessToken)) {
-      return request.pipe(HttpClientRequest.bearerToken(config.accessToken.value));
+  const envCredential = credentialFromConfig(config);
+
+  const resolveStoredCredential = Effect.fn("BitbucketApi.resolveStoredCredential")(function* (
+    operation: string,
+  ) {
+    const candidates = yield* atlassianConnections.list({ status: "connected" }).pipe(
+      Effect.map((items) => items.filter(isConnectedBitbucketTokenConnection)),
+      Effect.mapError(
+        (cause) =>
+          new BitbucketApiError({
+            operation,
+            detail: "Failed to read saved Bitbucket connections.",
+            cause,
+          }),
+      ),
+    );
+
+    for (const connection of candidates) {
+      const email = connection.accountEmail?.trim();
+      if (!email) continue;
+      const tokenBytes = yield* secretStore
+        .get(manualBitbucketTokenSecretName(connection.connectionId))
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new BitbucketApiError({
+                operation,
+                detail: `Failed to read saved Bitbucket token for ${connection.label}.`,
+                cause,
+              }),
+          ),
+        );
+      if (!tokenBytes || tokenBytes.length === 0) continue;
+      const token = textDecoder.decode(tokenBytes).trim();
+      if (!token) continue;
+
+      return {
+        source: "stored" as const,
+        kind: "basic" as const,
+        email: Option.some(email),
+        token,
+        detail: `Saved Bitbucket app password ${connection.label} is configured.`,
+      };
     }
-    if (Option.isSome(config.email) && Option.isSome(config.apiToken)) {
-      return request.pipe(HttpClientRequest.basicAuth(config.email.value, config.apiToken.value));
+
+    return null;
+  });
+
+  const resolveCredential = (operation: string) =>
+    resolveStoredCredential(operation).pipe(Effect.map((stored) => stored ?? envCredential));
+
+  const applyAuth = (
+    request: HttpClientRequest.HttpClientRequest,
+    credential: BitbucketCredential | null,
+  ) => {
+    if (!credential) return request;
+    if (credential.kind === "bearer") {
+      return request.pipe(HttpClientRequest.bearerToken(credential.token));
     }
+    const email = Option.getOrUndefined(credential.email);
+    if (email) return request.pipe(HttpClientRequest.basicAuth(email, credential.token));
     return request;
   };
 
@@ -475,7 +754,23 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
     request: HttpClientRequest.HttpClientRequest,
     schema: S,
   ): Effect.Effect<S["Type"], BitbucketApiError, S["DecodingServices"]> =>
-    httpClient.execute(withAuth(request.pipe(HttpClientRequest.acceptJson))).pipe(
+    resolveCredential(operation).pipe(
+      Effect.flatMap((credential) =>
+        httpClient.execute(applyAuth(request.pipe(HttpClientRequest.acceptJson), credential)),
+      ),
+      Effect.mapError((cause) =>
+        isBitbucketApiError(cause) ? cause : requestError(operation, cause),
+      ),
+      Effect.flatMap((response) => decodeResponse(operation, schema, response)),
+    );
+
+  const executeJsonWithCredential = <S extends Schema.Top>(
+    operation: string,
+    request: HttpClientRequest.HttpClientRequest,
+    schema: S,
+    credential: BitbucketCredential,
+  ): Effect.Effect<S["Type"], BitbucketApiError, S["DecodingServices"]> =>
+    httpClient.execute(applyAuth(request.pipe(HttpClientRequest.acceptJson), credential)).pipe(
       Effect.mapError((cause) => requestError(operation, cause)),
       Effect.flatMap((response) => decodeResponse(operation, schema, response)),
     );
@@ -484,8 +779,11 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
     operation: string,
     request: HttpClientRequest.HttpClientRequest,
   ): Effect.Effect<string, BitbucketApiError> =>
-    httpClient.execute(withAuth(request)).pipe(
-      Effect.mapError((cause) => requestError(operation, cause)),
+    resolveCredential(operation).pipe(
+      Effect.flatMap((credential) => httpClient.execute(applyAuth(request, credential))),
+      Effect.mapError((cause) =>
+        isBitbucketApiError(cause) ? cause : requestError(operation, cause),
+      ),
       Effect.flatMap((response) =>
         HttpClientResponse.matchStatus({
           "2xx": (success) =>
@@ -500,9 +798,15 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
     readonly context?: SourceControlProvider.SourceControlProviderContext;
     readonly repository?: string;
   }) {
-    const fromRepository =
-      input.repository !== undefined ? parseBitbucketRepositorySlug(input.repository) : null;
-    if (fromRepository) return fromRepository;
+    if (input.repository !== undefined) {
+      const fromRepository = parseBitbucketRepositorySlug(input.repository);
+      if (fromRepository) return fromRepository;
+      return yield* new BitbucketApiError({
+        operation: "resolveRepository",
+        detail:
+          "Bitbucket repositories must be specified as workspace/repository, or selected from repository search.",
+      });
+    }
 
     const fromContext =
       input.context?.provider.kind === "bitbucket"
@@ -559,6 +863,93 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
     readonly context?: SourceControlProvider.SourceControlProviderContext;
     readonly repository?: string;
   }) => resolveRepository(input).pipe(Effect.flatMap(getRepositoryFromLocator));
+
+  const listAccessibleWorkspaces = Effect.fn("BitbucketApi.listAccessibleWorkspaces")(function* () {
+    const workspaces = new Set<string>();
+    let nextUrl: string | null = apiUrl("/user/workspaces");
+
+    for (let page = 0; nextUrl && page < BITBUCKET_WORKSPACE_PAGE_LIMIT; page += 1) {
+      const response: Schema.Schema.Type<typeof RawBitbucketWorkspaceAccessListSchema> =
+        yield* executeJson(
+          "listAccessibleWorkspaces",
+          HttpClientRequest.get(nextUrl, page === 0 ? { urlParams: { pagelen: "50" } } : {}),
+          RawBitbucketWorkspaceAccessListSchema,
+        );
+
+      for (const item of response.values) {
+        workspaces.add(item.workspace.slug);
+      }
+      nextUrl = response.next ?? null;
+    }
+
+    return [...workspaces];
+  });
+
+  const listWorkspaceRepositories = Effect.fn("BitbucketApi.listWorkspaceRepositories")(
+    function* (input: {
+      readonly workspace: string;
+      readonly query: string;
+      readonly limit: number;
+    }) {
+      const repositories: Array<SourceControlRepositoryCloneUrls> = [];
+      const filter = bitbucketRepositorySearchFilter(input.query);
+      let nextUrl: string | null = apiUrl(`/repositories/${encodeURIComponent(input.workspace)}`);
+
+      for (let page = 0; nextUrl && page < BITBUCKET_REPOSITORY_PAGE_LIMIT; page += 1) {
+        const response: Schema.Schema.Type<typeof RawBitbucketRepositoryListSchema> =
+          yield* executeJson(
+            "listWorkspaceRepositories",
+            HttpClientRequest.get(
+              nextUrl,
+              page === 0
+                ? {
+                    urlParams: {
+                      pagelen: String(Math.min(100, Math.max(input.limit, 25))),
+                      sort: "-updated_on",
+                      ...(filter ? { q: filter } : {}),
+                    },
+                  }
+                : {},
+            ),
+            RawBitbucketRepositoryListSchema,
+          );
+
+        repositories.push(...response.values.map(normalizeRepositoryCloneUrls));
+        nextUrl = response.next ?? null;
+      }
+
+      return repositories;
+    },
+  );
+
+  const searchRepositories = Effect.fn("BitbucketApi.searchRepositories")(function* (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProvider.SourceControlProviderContext;
+    readonly query?: string;
+    readonly limit?: number;
+  }) {
+    const query = input.query?.trim() ?? "";
+    const limit = repositorySearchLimit(input.limit);
+    const workspaces = yield* listAccessibleWorkspaces();
+    const repositoryLists = yield* Effect.all(
+      workspaces.map((workspace) => listWorkspaceRepositories({ workspace, query, limit })),
+      { concurrency: 4 },
+    );
+
+    return uniqueRankedRepositories({
+      repositories: repositoryLists.flat(),
+      query,
+      limit,
+    });
+  });
+
+  const cloneAuthentication = Effect.fn("BitbucketApi.cloneAuthentication")(function* (input: {
+    readonly remoteUrl: string;
+  }) {
+    if (!isBitbucketHttpsRemoteUrl(input.remoteUrl)) return null;
+    const credential = yield* resolveCredential("cloneAuthentication");
+    return credential ? gitCloneAuthenticationFromCredential(credential) : null;
+  });
 
   const getBranchingModelFromLocator = (repository: BitbucketRepositoryLocator) =>
     executeJson(
@@ -635,18 +1026,31 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
   });
 
   return BitbucketApi.of({
-    probeAuth: executeJson(
-      "probeAuth",
-      HttpClientRequest.get(apiUrl("/user")),
-      BitbucketUserSchema,
-    ).pipe(
-      Effect.map((user) => ({
-        status: "authenticated" as const,
-        account: nonEmpty(user.username ?? user.display_name ?? user.account_id),
-        host: Option.some("bitbucket.org"),
-        detail: Option.none<string>(),
-      })),
-      Effect.catch(() => Effect.succeed(authFromConfig(config))),
+    probeAuth: resolveCredential("probeAuth").pipe(
+      Effect.flatMap((credential) => {
+        if (!credential) return Effect.succeed(unauthenticatedAuth());
+        return executeJsonWithCredential(
+          "probeAuth",
+          HttpClientRequest.get(apiUrl("/user")),
+          BitbucketUserSchema,
+          credential,
+        ).pipe(
+          Effect.map((user) => ({
+            status: "authenticated" as const,
+            account: nonEmpty(user.username ?? user.display_name ?? user.account_id).pipe(
+              Option.orElse(() => credential.email),
+            ),
+            host: Option.some("bitbucket.org"),
+            detail: Option.none<string>(),
+          })),
+          Effect.catch((error) => Effect.succeed(failedCredentialAuthStatus(credential, error))),
+        );
+      }),
+      Effect.catch(() =>
+        Effect.succeed(
+          envCredential ? credentialAuthStatus(envCredential) : authFromConfig(config),
+        ),
+      ),
     ),
     listPullRequests: (input) =>
       resolveRepository(input).pipe(
@@ -685,6 +1089,8 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
       ),
     getRepositoryCloneUrls: (input) =>
       getRepository(input).pipe(Effect.map(normalizeRepositoryCloneUrls)),
+    searchRepositories: (input) => searchRepositories(input),
+    cloneAuthentication: (input) => cloneAuthentication(input),
     createRepository: (input) =>
       requireRepositoryLocator("createRepository", input.repository).pipe(
         Effect.flatMap((repository) =>

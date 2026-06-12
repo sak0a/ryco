@@ -282,6 +282,12 @@ function mapWorktree(
     prState: worktree.prState ?? null,
     prIsDraft: worktree.prIsDraft ?? null,
     issueState: worktree.issueState ?? null,
+    workItemProvider: worktree.workItemProvider ?? null,
+    workItemKey: worktree.workItemKey ?? null,
+    workItemTitle: worktree.workItemTitle ?? null,
+    workItemState: worktree.workItemState ?? null,
+    workItemStateName: worktree.workItemStateName ?? null,
+    workItemUrl: worktree.workItemUrl ?? null,
     createdAt: worktree.createdAt,
     updatedAt: worktree.updatedAt,
     archivedAt: worktree.archivedAt,
@@ -530,6 +536,12 @@ function sidebarWorktreesEqual(
     left.prState === right.prState &&
     left.prIsDraft === right.prIsDraft &&
     left.issueState === right.issueState &&
+    left.workItemProvider === right.workItemProvider &&
+    left.workItemKey === right.workItemKey &&
+    left.workItemTitle === right.workItemTitle &&
+    left.workItemState === right.workItemState &&
+    left.workItemStateName === right.workItemStateName &&
+    left.workItemUrl === right.workItemUrl &&
     left.createdAt === right.createdAt &&
     left.updatedAt === right.updatedAt &&
     left.archivedAt === right.archivedAt &&
@@ -2137,6 +2149,12 @@ function applyEnvironmentOrchestrationEvent(
             prState: null,
             prIsDraft: null,
             issueState: null,
+            workItemProvider: event.payload.workItemProvider ?? null,
+            workItemKey: event.payload.workItemKey ?? null,
+            workItemTitle: event.payload.workItemTitle ?? null,
+            workItemState: event.payload.workItemState ?? null,
+            workItemStateName: event.payload.workItemStateName ?? null,
+            workItemUrl: event.payload.workItemUrl ?? null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             archivedAt: null,

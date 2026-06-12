@@ -207,7 +207,7 @@ export function makeBitbucketDiscovery(
     kind: "bitbucket",
     label: "Bitbucket",
     installHint:
-      "Set RYCO_BITBUCKET_EMAIL and RYCO_BITBUCKET_API_TOKEN on the server (use a Bitbucket API token with pull request and repository scopes).",
+      "Save a Bitbucket app password in Settings -> Source Control -> Atlassian, or set RYCO_BITBUCKET_EMAIL and RYCO_BITBUCKET_API_TOKEN on the server.",
     probeAuth: bitbucket.probeAuth,
   };
 }

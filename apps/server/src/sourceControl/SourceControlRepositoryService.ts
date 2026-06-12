@@ -12,16 +12,22 @@ import {
   type SourceControlRepositoryCloneUrls,
   type SourceControlRepositoryInfo,
   type SourceControlRepositoryLookupInput,
+  type SourceControlRepositorySearchInput,
+  type SourceControlRepositorySearchResult,
 } from "@ryco/contracts";
 
 import { ServerConfig } from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import type * as SourceControlProvider from "./SourceControlProvider.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 
 export interface SourceControlRepositoryServiceShape {
   readonly lookupRepository: (
     input: SourceControlRepositoryLookupInput,
   ) => Effect.Effect<SourceControlRepositoryInfo, SourceControlRepositoryError>;
+  readonly searchRepositories: (
+    input: SourceControlRepositorySearchInput,
+  ) => Effect.Effect<SourceControlRepositorySearchResult, SourceControlRepositoryError>;
   readonly cloneRepository: (
     input: SourceControlCloneRepositoryInput,
   ) => Effect.Effect<SourceControlCloneRepositoryResult, SourceControlRepositoryError>;
@@ -100,6 +106,50 @@ function selectRemoteUrl(
   }
 }
 
+function isBareRepositoryReference(repository: string): boolean {
+  return !repository.includes("/") && !repository.includes(":");
+}
+
+function repositorySlug(nameWithOwner: string): string {
+  return nameWithOwner.split("/").at(-1)?.trim() ?? nameWithOwner;
+}
+
+function exactBareRepositoryMatches(
+  repositories: ReadonlyArray<SourceControlRepositoryCloneUrls>,
+  repository: string,
+): ReadonlyArray<SourceControlRepositoryCloneUrls> {
+  const normalized = repository.trim().toLowerCase();
+  return repositories.filter(
+    (item) =>
+      item.nameWithOwner.toLowerCase() === normalized ||
+      repositorySlug(item.nameWithOwner).toLowerCase() === normalized,
+  );
+}
+
+function selectSingleRepositorySearchMatch(input: {
+  readonly repositories: ReadonlyArray<SourceControlRepositoryCloneUrls>;
+  readonly repository: string;
+}): SourceControlRepositoryCloneUrls | null {
+  const exactMatches = exactBareRepositoryMatches(input.repositories, input.repository);
+  const candidates = exactMatches.length > 0 ? exactMatches : input.repositories;
+  return candidates.length === 1 ? (candidates[0] ?? null) : null;
+}
+
+function defaultCloneProtocol(input: {
+  readonly requestedProtocol?: SourceControlCloneProtocol;
+  readonly provider?: SourceControlProvider.SourceControlProviderShape | null;
+}): SourceControlCloneProtocol | undefined {
+  if (input.requestedProtocol) return input.requestedProtocol;
+  return input.provider?.cloneAuthentication ? "https" : undefined;
+}
+
+const GIT_ASKPASS_SCRIPT = `#!/bin/sh
+case "$1" in
+  *Username*|*username*) printf '%s\\n' "$RYCO_GIT_USERNAME" ;;
+  *) printf '%s\\n' "$RYCO_GIT_PASSWORD" ;;
+esac
+`;
+
 function expandHomePath(input: string, path: Path.Path): string {
   if (input === "~") {
     return NodeOS.homedir();
@@ -151,6 +201,25 @@ function validateCloneRemoteUrl(
   );
 }
 
+function isHttpsCloneUrl(remoteUrl: string): boolean {
+  try {
+    return new URL(remoteUrl).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function removeUrlCredentials(remoteUrl: string): string {
+  try {
+    const url = new URL(remoteUrl);
+    url.username = "";
+    url.password = "";
+    return url.toString();
+  } catch {
+    return remoteUrl;
+  }
+}
+
 export const make = Effect.fn("makeSourceControlRepositoryService")(function* () {
   const config = yield* ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -175,6 +244,39 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
     );
   };
 
+  const resolveRepositoryCloneUrls = Effect.fn(
+    "SourceControlRepositoryService.resolveRepositoryCloneUrls",
+  )(function* (input: {
+    readonly operation: string;
+    readonly providerKind: Exclude<SourceControlProviderKind, "unknown">;
+    readonly provider: SourceControlProvider.SourceControlProviderShape;
+    readonly cwd: string;
+    readonly repository: string;
+  }) {
+    const repository = input.repository.trim();
+    if (isBareRepositoryReference(repository) && input.provider.searchRepositories) {
+      const matches = yield* input.provider.searchRepositories({
+        cwd: input.cwd,
+        query: repository,
+        limit: 10,
+      });
+      const match = selectSingleRepositorySearchMatch({ repositories: matches, repository });
+      if (match) return match;
+      if (matches.length > 1) {
+        return yield* repositoryError({
+          operation: input.operation,
+          provider: input.providerKind,
+          detail: `Multiple ${input.providerKind} repositories match "${repository}". Select one from the repository list or enter the full workspace/repository name.`,
+        });
+      }
+    }
+
+    return yield* input.provider.getRepositoryCloneUrls({
+      cwd: input.cwd,
+      repository,
+    });
+  });
+
   const lookupRepository = Effect.fn("SourceControlRepositoryService.lookupRepository")(function* (
     input: SourceControlRepositoryLookupInput,
   ) {
@@ -183,12 +285,39 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
       provider: input.provider,
     });
     const provider = yield* providers.get(providerKind);
-    const urls = yield* provider.getRepositoryCloneUrls({
+    const urls = yield* resolveRepositoryCloneUrls({
+      operation: "lookupRepository",
+      providerKind,
+      provider,
       cwd: input.cwd ?? config.cwd,
       repository: input.repository.trim(),
     });
     return toRepositoryInfo(providerKind, urls);
   });
+
+  const searchRepositories = Effect.fn("SourceControlRepositoryService.searchRepositories")(
+    function* (input: SourceControlRepositorySearchInput) {
+      const providerKind = yield* ensureConcreteProvider({
+        operation: "searchRepositories",
+        provider: input.provider,
+      });
+      const provider = yield* providers.get(providerKind);
+      if (!provider.searchRepositories) {
+        return yield* repositoryError({
+          operation: "searchRepositories",
+          provider: providerKind,
+          detail: `${providerKind} repository search is not implemented yet.`,
+        });
+      }
+
+      const urls = yield* provider.searchRepositories({
+        cwd: input.cwd ?? config.cwd,
+        ...(input.query !== undefined ? { query: input.query.trim() } : {}),
+        ...(input.limit !== undefined ? { limit: input.limit } : {}),
+      });
+      return { repositories: urls.map((item) => toRepositoryInfo(providerKind, item)) };
+    },
+  );
 
   const normalizeDestinationPath = Effect.fn("SourceControlRepositoryService.normalizeDestination")(
     function* (destinationPath: string) {
@@ -247,14 +376,29 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
     let repository: SourceControlRepositoryInfo | null = null;
     let remoteUrl = input.remoteUrl?.trim() ?? null;
     let provider: SourceControlProviderKind = input.provider ?? "unknown";
+    let cloneProvider: SourceControlProvider.SourceControlProviderShape | null = null;
 
     if (input.provider && input.repository) {
-      repository = yield* lookupRepository({
+      const providerKind = yield* ensureConcreteProvider({
+        operation: "cloneRepository",
         provider: input.provider,
-        repository: input.repository,
-        cwd: preparedDestination.parentPath,
       });
-      remoteUrl = selectRemoteUrl(repository, input.protocol);
+      cloneProvider = yield* providers.get(providerKind);
+      const urls = yield* resolveRepositoryCloneUrls({
+        operation: "cloneRepository",
+        providerKind,
+        provider: cloneProvider,
+        cwd: preparedDestination.parentPath,
+        repository: input.repository.trim(),
+      });
+      repository = toRepositoryInfo(providerKind, urls);
+      remoteUrl = selectRemoteUrl(
+        urls,
+        defaultCloneProtocol({
+          provider: cloneProvider,
+          ...(input.protocol !== undefined ? { requestedProtocol: input.protocol } : {}),
+        }),
+      );
       provider = input.provider;
     }
 
@@ -267,18 +411,55 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
     }
 
     const validatedRemoteUrl = yield* validateCloneRemoteUrl(remoteUrl, provider);
+    if (!cloneProvider && isHttpsCloneUrl(validatedRemoteUrl)) {
+      const detectedProvider = providers.detectProviderFromRemoteUrl(validatedRemoteUrl);
+      if (detectedProvider?.kind && detectedProvider.kind !== "unknown") {
+        cloneProvider = yield* providers.get(detectedProvider.kind);
+        provider = detectedProvider.kind;
+      }
+    }
+    const cloneAuthentication =
+      cloneProvider?.cloneAuthentication && isHttpsCloneUrl(validatedRemoteUrl)
+        ? yield* cloneProvider.cloneAuthentication({ remoteUrl: validatedRemoteUrl })
+        : null;
+    const cloneRemoteUrl = cloneAuthentication
+      ? removeUrlCredentials(validatedRemoteUrl)
+      : validatedRemoteUrl;
 
-    yield* git.execute({
-      operation: "SourceControlRepositoryService.cloneRepository",
-      cwd: preparedDestination.parentPath,
-      args: ["clone", "--", validatedRemoteUrl, preparedDestination.directoryName],
-      timeoutMs: 120_000,
-      maxOutputBytes: 256 * 1024,
-    });
+    const executeClone = (env?: NodeJS.ProcessEnv) =>
+      git.execute({
+        operation: "SourceControlRepositoryService.cloneRepository",
+        cwd: preparedDestination.parentPath,
+        args: ["clone", "--", cloneRemoteUrl, preparedDestination.directoryName],
+        timeoutMs: 120_000,
+        maxOutputBytes: 256 * 1024,
+        ...(env ? { env } : {}),
+      });
+
+    if (cloneAuthentication) {
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const askpassDir = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "ryco-git-askpass-",
+          });
+          const askpassPath = path.join(askpassDir, "askpass.sh");
+          yield* fileSystem.writeFileString(askpassPath, GIT_ASKPASS_SCRIPT);
+          yield* fileSystem.chmod(askpassPath, 0o700);
+          yield* executeClone({
+            GIT_ASKPASS: askpassPath,
+            GIT_TERMINAL_PROMPT: "0",
+            RYCO_GIT_USERNAME: cloneAuthentication.username,
+            RYCO_GIT_PASSWORD: cloneAuthentication.password,
+          });
+        }),
+      );
+    } else {
+      yield* executeClone();
+    }
 
     return {
       cwd: preparedDestination.destinationPath,
-      remoteUrl: validatedRemoteUrl,
+      remoteUrl: cloneRemoteUrl,
       repository,
     };
   });
@@ -345,6 +526,8 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
   return SourceControlRepositoryService.of({
     lookupRepository: (input) =>
       lookupRepository(input).pipe(mapRepositoryError("lookupRepository", input.provider)),
+    searchRepositories: (input) =>
+      searchRepositories(input).pipe(mapRepositoryError("searchRepositories", input.provider)),
     cloneRepository: (input) =>
       cloneRepository(input).pipe(
         mapRepositoryError("cloneRepository", input.provider ?? "unknown"),

@@ -66,13 +66,21 @@ function processOutput(): GitVcsDriver.ExecuteGitResult {
 
 function makeLayer(input: {
   readonly provider?: SourceControlProvider.SourceControlProviderShape;
+  readonly detectedProviderKind?: SourceControlProvider.SourceControlProviderShape["kind"] | null;
   readonly git?: Partial<GitVcsDriver.GitVcsDriverShape>;
 }) {
   return SourceControlRepositoryService.layer.pipe(
     Layer.provide(
       Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
         get: () => Effect.succeed(input.provider ?? makeProvider()),
-        detectProviderFromRemoteUrl: () => null,
+        detectProviderFromRemoteUrl: () =>
+          input.detectedProviderKind
+            ? {
+                kind: input.detectedProviderKind,
+                name: input.detectedProviderKind,
+                baseUrl: "https://bitbucket.org",
+              }
+            : null,
       }),
     ),
     Layer.provide(
@@ -117,6 +125,53 @@ it.effect("looks up repositories through the requested provider without search",
   }).pipe(Effect.provide(makeLayer({ provider })));
 });
 
+it.effect("searches repositories through providers that support repository search", () => {
+  const calls: Array<{ cwd: string; query: string | undefined; limit: number | undefined }> = [];
+  const provider = makeProvider({
+    searchRepositories: (input) =>
+      Effect.sync(() => {
+        calls.push({ cwd: input.cwd, query: input.query, limit: input.limit });
+        return [CLONE_URLS];
+      }),
+  });
+
+  return Effect.gen(function* () {
+    const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+    const result = yield* service.searchRepositories({
+      provider: "github",
+      query: " ryco ",
+      limit: 10,
+      cwd: "/workspace",
+    });
+
+    assert.deepStrictEqual(result, {
+      repositories: [{ provider: "github", ...CLONE_URLS }],
+    });
+    assert.deepStrictEqual(calls, [{ cwd: "/workspace", query: "ryco", limit: 10 }]);
+  }).pipe(Effect.provide(makeLayer({ provider })));
+});
+
+it.effect(
+  "resolves bare repository names through repository search when exactly one match exists",
+  () => {
+    const provider = makeProvider({
+      getRepositoryCloneUrls: () => Effect.die("unexpected direct repository lookup"),
+      searchRepositories: () => Effect.succeed([CLONE_URLS]),
+    });
+
+    return Effect.gen(function* () {
+      const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+      const result = yield* service.lookupRepository({
+        provider: "github",
+        repository: "ryco",
+        cwd: "/workspace",
+      });
+
+      assert.deepStrictEqual(result, { provider: "github", ...CLONE_URLS });
+    }).pipe(Effect.provide(makeLayer({ provider })));
+  },
+);
+
 it.effect("clones a looked-up repository into the requested destination", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -153,6 +208,127 @@ it.effect("clones a looked-up repository into the requested destination", () =>
             execute: (input) =>
               Effect.sync(() => {
                 cloneCalls.push({ cwd: input.cwd, args: input.args });
+                return processOutput();
+              }),
+          },
+        }),
+      ),
+    );
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("uses provider clone auth and HTTPS when the provider supplies clone credentials", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const parent = yield* fs.makeTempDirectoryScoped({
+      prefix: "ryco-source-control-clone-parent-",
+    });
+    const destinationPath = `${parent}/ryco`;
+    const cloneCalls: Array<{
+      cwd: string;
+      args: ReadonlyArray<string>;
+      env: NodeJS.ProcessEnv | undefined;
+    }> = [];
+    const provider = makeProvider({
+      getRepositoryCloneUrls: () =>
+        Effect.succeed({
+          ...CLONE_URLS,
+          url: "https://octocat@github.com/octocat/ryco",
+        }),
+      cloneAuthentication: () =>
+        Effect.succeed({
+          kind: "http-basic" as const,
+          username: "x-bitbucket-api-token-auth",
+          password: "secret-token",
+        }),
+    });
+
+    yield* Effect.gen(function* () {
+      const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+      const result = yield* service.cloneRepository({
+        provider: "github",
+        repository: "octocat/ryco",
+        destinationPath,
+      });
+
+      assert.deepStrictEqual(result, {
+        cwd: destinationPath,
+        remoteUrl: CLONE_URLS.url,
+        repository: {
+          provider: "github",
+          ...CLONE_URLS,
+          url: "https://octocat@github.com/octocat/ryco",
+        },
+      });
+      assert.deepStrictEqual(cloneCalls[0]?.args, ["clone", "--", CLONE_URLS.url, "ryco"]);
+      assert.strictEqual(cloneCalls[0]?.env?.RYCO_GIT_USERNAME, "x-bitbucket-api-token-auth");
+      assert.strictEqual(cloneCalls[0]?.env?.RYCO_GIT_PASSWORD, "secret-token");
+      assert.strictEqual(cloneCalls[0]?.env?.GIT_TERMINAL_PROMPT, "0");
+      assert.ok(cloneCalls[0]?.env?.GIT_ASKPASS);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          provider,
+          git: {
+            execute: (input) =>
+              Effect.sync(() => {
+                cloneCalls.push({ cwd: input.cwd, args: input.args, env: input.env });
+                return processOutput();
+              }),
+          },
+        }),
+      ),
+    );
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("uses detected provider clone auth for raw HTTPS clone URLs", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const parent = yield* fs.makeTempDirectoryScoped({
+      prefix: "ryco-source-control-clone-parent-",
+    });
+    const destinationPath = `${parent}/bitbucket-test`;
+    const cloneCalls: Array<{
+      args: ReadonlyArray<string>;
+      env: NodeJS.ProcessEnv | undefined;
+    }> = [];
+    const provider = makeProvider({
+      kind: "bitbucket",
+      cloneAuthentication: () =>
+        Effect.succeed({
+          kind: "http-basic" as const,
+          username: "x-bitbucket-api-token-auth",
+          password: "secret-token",
+        }),
+    });
+
+    yield* Effect.gen(function* () {
+      const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+      const result = yield* service.cloneRepository({
+        remoteUrl: "https://ryco-app-admin@bitbucket.org/ryco-app/ryco-post-index.git",
+        destinationPath,
+      });
+
+      assert.strictEqual(result.remoteUrl, "https://bitbucket.org/ryco-app/ryco-post-index.git");
+      assert.deepStrictEqual(cloneCalls[0]?.args, [
+        "clone",
+        "--",
+        "https://bitbucket.org/ryco-app/ryco-post-index.git",
+        "bitbucket-test",
+      ]);
+      assert.strictEqual(cloneCalls[0]?.env?.RYCO_GIT_USERNAME, "x-bitbucket-api-token-auth");
+      assert.strictEqual(cloneCalls[0]?.env?.RYCO_GIT_PASSWORD, "secret-token");
+      assert.ok(cloneCalls[0]?.env?.GIT_ASKPASS);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          provider,
+          detectedProviderKind: "bitbucket",
+          git: {
+            execute: (input) =>
+              Effect.sync(() => {
+                cloneCalls.push({ args: input.args, env: input.env });
                 return processOutput();
               }),
           },

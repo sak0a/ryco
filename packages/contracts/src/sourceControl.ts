@@ -450,6 +450,19 @@ export const SourceControlRepositoryLookupInput = Schema.Struct({
 });
 export type SourceControlRepositoryLookupInput = typeof SourceControlRepositoryLookupInput.Type;
 
+export const SourceControlRepositorySearchInput = Schema.Struct({
+  provider: SourceControlProviderKind,
+  query: Schema.optional(Schema.String),
+  cwd: Schema.optional(TrimmedNonEmptyString),
+  limit: Schema.optional(PositiveInt),
+});
+export type SourceControlRepositorySearchInput = typeof SourceControlRepositorySearchInput.Type;
+
+export const SourceControlRepositorySearchResult = Schema.Struct({
+  repositories: Schema.Array(SourceControlRepositoryInfo),
+});
+export type SourceControlRepositorySearchResult = typeof SourceControlRepositorySearchResult.Type;
+
 export const SourceControlCloneRepositoryInput = Schema.Struct({
   provider: Schema.optional(SourceControlProviderKind),
   repository: Schema.optional(TrimmedNonEmptyString),
@@ -585,33 +598,24 @@ export interface SourceControlDetailContentOutput<
   readonly truncated: boolean;
 }
 
-function utf8ByteLength(codePoint: number): number {
-  if (codePoint <= 0x7f) return 1;
-  if (codePoint <= 0x7ff) return 2;
-  if (codePoint <= 0xffff) return 3;
-  return 4;
+const utf8Encoder = new TextEncoder();
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
+
+function decodeUtf8Prefix(bytes: Uint8Array): string {
+  for (let end = bytes.length; end >= 0; end -= 1) {
+    try {
+      return utf8Decoder.decode(bytes.subarray(0, end));
+    } catch {
+      // Drop a trailing partial multi-byte character and try again.
+    }
+  }
+  return "";
 }
 
 function truncateUtf8(value: string, maxBytes: number): { value: string; truncated: boolean } {
-  let byteLength = 0;
-  let end = 0;
-
-  for (let index = 0; index < value.length; ) {
-    const codePoint = value.codePointAt(index);
-    if (codePoint === undefined) break;
-
-    const codeUnitLength = codePoint > 0xffff ? 2 : 1;
-    const nextByteLength = byteLength + utf8ByteLength(codePoint);
-    if (nextByteLength > maxBytes) {
-      return { value: value.slice(0, end), truncated: true };
-    }
-
-    byteLength = nextByteLength;
-    end = index + codeUnitLength;
-    index = end;
-  }
-
-  return { value, truncated: false };
+  const bytes = utf8Encoder.encode(value);
+  if (bytes.byteLength <= maxBytes) return { value, truncated: false };
+  return { value: decodeUtf8Prefix(bytes.subarray(0, maxBytes)), truncated: true };
 }
 
 export function truncateSourceControlDetailContent<C extends SourceControlDetailContentCommentLike>(
