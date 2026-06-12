@@ -50,6 +50,7 @@ import {
 import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
 import { buildTokenReductionInstructions, checkRtkAvailability } from "../../tokenReduction.ts";
 import {
   CodexResumeCursorSchema,
@@ -1390,6 +1391,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const managedNativeEventLogger =
     options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+  const runtimeEventQueueMetrics = yield* makeServerQueueMetrics({
+    queue: "provider.adapter.runtimeEvents",
+    component: "CodexAdapter",
+    provider: PROVIDER,
+    providerInstanceId: boundInstanceId,
+  });
   const sessions = new Map<ThreadId, CodexAdapterSessionContext>();
 
   const startSession: CodexAdapterShape["startSession"] = (input) =>
@@ -1465,6 +1472,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               return;
             }
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
+            yield* runtimeEventQueueMetrics.recordEnqueued(runtimeEvents.length);
           }),
         ).pipe(Effect.forkChild);
 
@@ -1791,6 +1799,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
   yield* Effect.acquireRelease(Effect.void, () =>
     stopAll().pipe(
+      Effect.andThen(runtimeEventQueueMetrics.reset),
       Effect.andThen(Queue.shutdown(runtimeEventQueue)),
       Effect.andThen(managedNativeEventLogger?.close() ?? Effect.void),
       Effect.ignore,
@@ -1814,7 +1823,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     hasSession,
     stopAll,
     get streamEvents() {
-      return Stream.fromQueue(runtimeEventQueue);
+      return Stream.fromQueue(runtimeEventQueue).pipe(
+        Stream.tap(() => runtimeEventQueueMetrics.recordDequeued()),
+      );
     },
   } satisfies CodexAdapterShape;
 });

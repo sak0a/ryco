@@ -71,6 +71,7 @@ import {
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
 import { buildTokenReductionInstructions, checkRtkAvailability } from "../../tokenReduction.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { formatProjectCustomSystemPrompt } from "../ProjectCustomSystemPrompt.ts";
@@ -1029,13 +1030,22 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   const sessions = new Map<ThreadId, ClaudeSessionContext>();
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+  const runtimeEventQueueMetrics = yield* makeServerQueueMetrics({
+    queue: "provider.adapter.runtimeEvents",
+    component: "ClaudeAdapter",
+    provider: PROVIDER,
+    providerInstanceId: boundInstanceId,
+  });
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   const nextEventId = Effect.map(Random.nextUUIDv4, (id) => EventId.make(id));
   const makeEventStamp = () => Effect.all({ eventId: nextEventId, createdAt: nowIso });
 
   const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-    Queue.offer(runtimeEventQueue, event).pipe(Effect.asVoid);
+    Queue.offer(runtimeEventQueue, event).pipe(
+      Effect.andThen(runtimeEventQueueMetrics.recordEnqueued()),
+      Effect.asVoid,
+    );
 
   const logNativeSdkMessage = Effect.fn("logNativeSdkMessage")(function* (
     context: ClaudeSessionContext,
@@ -3296,7 +3306,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           emitExitEvent: false,
         }),
       { discard: true },
-    ).pipe(Effect.tap(() => Queue.shutdown(runtimeEventQueue))),
+    ).pipe(
+      Effect.tap(() => runtimeEventQueueMetrics.reset),
+      Effect.tap(() => Queue.shutdown(runtimeEventQueue)),
+    ),
   );
 
   return {
@@ -3316,7 +3329,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     hasSession,
     stopAll,
     get streamEvents() {
-      return Stream.fromQueue(runtimeEventQueue);
+      return Stream.fromQueue(runtimeEventQueue).pipe(
+        Stream.tap(() => runtimeEventQueueMetrics.recordDequeued()),
+      );
     },
   } satisfies ClaudeAdapterShape;
 });

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../../composerDraftStore";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useSettings } from "../../hooks/useSettings";
-import { sortThreads } from "../../lib/threadSort";
+import { usePerfMark } from "../../perf/tabSwitchInstrumentation";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
 import {
   getRightPanelMode,
@@ -14,8 +14,10 @@ import {
   type RightPanelRouteSearch,
 } from "../../rightPanelRouteSearch";
 import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../../store";
-import { createThreadSelectorByRef } from "../../storeSelectors";
-import { getThreadFromEnvironmentState } from "../../threadDerivation";
+import {
+  createEnvironmentFallbackThreadRefSelector,
+  createThreadSelectorByRef,
+} from "../../storeSelectors";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import {
   buildOpenFilesSearch,
@@ -36,25 +38,27 @@ export function ChatThreadRouteView({
   threadRef: ScopedThreadRef | null;
   search: RightPanelRouteSearch;
 }) {
+  usePerfMark("ChatThreadRouteView");
   const navigate = useNavigate();
   const bootstrapComplete = useStore(
     (store) => selectEnvironmentState(store, threadRef?.environmentId ?? null).bootstrapComplete,
   );
   const serverThread = useStore(useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]));
   const threadExists = useStore((store) => selectThreadExistsByRef(store, threadRef));
-  const environmentState = useStore((store) =>
-    selectEnvironmentState(store, threadRef?.environmentId ?? null),
-  );
-  const environmentHasServerThreads = environmentState.threadIds.length > 0;
-  const environmentThreads = useMemo(
-    () =>
-      environmentState.threadIds.flatMap((threadId) => {
-        const thread = getThreadFromEnvironmentState(environmentState, threadId);
-        return thread ? [thread] : [];
-      }),
-    [environmentState],
+  const environmentHasServerThreads = useStore(
+    (store) => selectEnvironmentState(store, threadRef?.environmentId ?? null).threadIds.length > 0,
   );
   const sidebarThreadSortOrder = useSettings((settings) => settings.sidebarThreadSortOrder);
+  const fallbackThreadRef = useStore(
+    useMemo(
+      () =>
+        createEnvironmentFallbackThreadRefSelector(
+          threadRef?.environmentId ?? null,
+          sidebarThreadSortOrder,
+        ),
+      [sidebarThreadSortOrder, threadRef?.environmentId],
+    ),
+  );
   const draftThreadExists = useComposerDraftStore((store) =>
     threadRef ? store.getDraftThreadByRef(threadRef) !== null : false,
   );
@@ -281,14 +285,10 @@ export function ChatThreadRouteView({
     }
 
     if (!routeThreadExists && environmentHasAnyThreads) {
-      const fallbackThread = sortThreads(environmentThreads, sidebarThreadSortOrder)[0];
-      if (fallbackThread) {
+      if (fallbackThreadRef) {
         void navigate({
           to: "/$environmentId/$threadId",
-          params: buildThreadRouteParams({
-            environmentId: fallbackThread.environmentId,
-            threadId: fallbackThread.id,
-          }),
+          params: buildThreadRouteParams(fallbackThreadRef),
           replace: true,
         });
       } else {
@@ -298,10 +298,9 @@ export function ChatThreadRouteView({
   }, [
     bootstrapComplete,
     environmentHasAnyThreads,
-    environmentThreads,
+    fallbackThreadRef,
     navigate,
     routeThreadExists,
-    sidebarThreadSortOrder,
     threadRef,
   ]);
 

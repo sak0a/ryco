@@ -44,6 +44,10 @@ import { ProjectionWorktreeRepositoryLive } from "../../persistence/Layers/Proje
 import { ProjectAvatarStore } from "../../project/Services/ProjectAvatarStore.ts";
 import { ServerConfig } from "../../config.ts";
 import {
+  isServerPerfProfileEnabled,
+  recordServerPerf,
+} from "../../observability/PerfInstrumentation.ts";
+import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
 } from "../Services/ProjectionPipeline.ts";
@@ -149,6 +153,14 @@ function derivePendingUserInputCountFromActivities(
   }
 
   return openRequestIds.size;
+}
+
+function bucketCount(count: number): string {
+  if (count <= 0) return "0";
+  if (count < 100) return "1-99";
+  if (count < 1_000) return "100-999";
+  if (count < 10_000) return "1000-9999";
+  return "10000-plus";
 }
 
 function deriveHasActionableProposedPlan(input: {
@@ -558,6 +570,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const refreshThreadShellSummary = Effect.fn("refreshThreadShellSummary")(function* (
       threadId: ThreadId,
     ) {
+      const perfEnabled = isServerPerfProfileEnabled();
+      const startedAtMs = perfEnabled ? Date.now() : 0;
       const existingRow = yield* projectionThreadRepository.getById({
         threadId,
       });
@@ -595,6 +609,19 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         pendingUserInputCount,
         hasActionableProposedPlan: hasActionableProposedPlan ? 1 : 0,
       });
+      if (perfEnabled) {
+        const totalRows =
+          messages.length + proposedPlans.length + activities.length + pendingApprovals.length;
+        yield* Effect.sync(() =>
+          recordServerPerf(
+            `server.orchestration.projection.threadShellSummary.rows.${bucketCount(totalRows)}.messages.${bucketCount(messages.length)}`,
+            {
+              count: 1,
+              durationMs: Math.max(0, Date.now() - startedAtMs),
+            },
+          ),
+        );
+      }
     });
 
     const applyThreadsProjection: ProjectorDefinition["apply"] = Effect.fn(
@@ -1588,6 +1615,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       projector: ProjectorDefinition,
       event: OrchestrationEvent,
     ) {
+      const perfEnabled = isServerPerfProfileEnabled();
+      const startedAtMs = perfEnabled ? Date.now() : 0;
       const attachmentSideEffects: AttachmentSideEffects = {
         deletedThreadIds: new Set<string>(),
         prunedThreadRelativePaths: new Map<string, Set<string>>(),
@@ -1604,6 +1633,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           ),
         ),
       );
+      if (perfEnabled) {
+        const durationMs = Math.max(0, Date.now() - startedAtMs);
+        yield* Effect.sync(() => {
+          recordServerPerf(
+            `server.orchestration.projection.projector.${event.type}.${projector.name}`,
+            {
+              count: 1,
+              durationMs,
+            },
+          );
+          recordServerPerf(`server.orchestration.projection.transaction.${event.type}`, {
+            count: 1,
+          });
+        });
+      }
 
       yield* runAttachmentSideEffects(attachmentSideEffects).pipe(
         Effect.catch((cause) =>
@@ -1647,8 +1691,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     });
 
     const projectEvent: OrchestrationProjectionPipelineShape["projectEvent"] = (event) =>
-      Effect.forEach(projectors, (projector) => runProjectorForEvent(projector, event), {
-        concurrency: 1,
+      Effect.gen(function* () {
+        const perfEnabled = isServerPerfProfileEnabled();
+        const startedAtMs = perfEnabled ? Date.now() : 0;
+        yield* Effect.forEach(projectors, (projector) => runProjectorForEvent(projector, event), {
+          concurrency: 1,
+        });
+        if (perfEnabled) {
+          yield* Effect.sync(() =>
+            recordServerPerf(`server.orchestration.projection.fanout.${event.type}`, {
+              count: 1,
+              durationMs: Math.max(0, Date.now() - startedAtMs),
+            }),
+          );
+        }
       }).pipe(
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),

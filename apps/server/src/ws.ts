@@ -63,7 +63,10 @@ import {
   observeRpcStream,
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
-import { recordServerPerfPayload } from "./observability/PerfInstrumentation.ts";
+import {
+  isServerPerfProfileEnabled,
+  recordServerPerfPayload,
+} from "./observability/PerfInstrumentation.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
@@ -2064,6 +2067,8 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
             Effect.succeed(
               makeReplayableThreadStream(
                 Effect.gen(function* () {
+                  const perfEnabled = isServerPerfProfileEnabled();
+                  const startedAtMs = perfEnabled ? Date.now() : 0;
                   const [threadDetail, snapshotSequence] = yield* Effect.all([
                     projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
                       Effect.mapError(
@@ -2093,10 +2098,20 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
                     });
                   }
 
-                  return {
+                  const snapshot = {
                     snapshotSequence,
                     thread: threadDetail.value,
                   };
+                  if (perfEnabled) {
+                    yield* Effect.sync(() =>
+                      recordServerPerfPayload(
+                        "server.ws.orchestration.subscribeThread.snapshot",
+                        snapshot,
+                        { durationMs: Math.max(0, Date.now() - startedAtMs) },
+                      ),
+                    );
+                  }
+                  return snapshot;
                 }),
                 input.threadId,
               ).pipe(
