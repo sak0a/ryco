@@ -861,6 +861,211 @@ describe("ProviderRuntimeIngestion", () => {
     ).toBe(false);
   });
 
+  it("caps child assistant buffers before choosing completion fallback text", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const longDelta = "stream ".repeat(4_100);
+    const fallbackText = `final ${"x".repeat(24_010)}`;
+
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-collab-started-for-cap"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-child-cap"),
+      itemId: asItemId("collab-cap"),
+      payload: {
+        itemType: "collab_agent_tool_call",
+        status: "inProgress",
+        data: {
+          item: {
+            type: "collabAgentToolCall",
+            id: "collab-cap",
+            tool: "spawnAgent",
+            prompt: "You are a researcher. Inspect large output.",
+            receiverThreadIds: ["child-thread-cap"],
+            senderThreadId: "parent-thread",
+            status: "inProgress",
+            agentsStates: {
+              "child-thread-cap": {
+                status: "running",
+              },
+            },
+          },
+        },
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-child-assistant-delta-cap"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-child-cap"),
+      itemId: asItemId("child-message-cap"),
+      raw: {
+        source: "codex.app-server.notification",
+        method: "item/agentMessage/delta",
+        payload: {
+          threadId: "child-thread-cap",
+        },
+      },
+      payload: {
+        streamKind: "assistant_text",
+        delta: longDelta,
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-child-assistant-completed-cap"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-child-cap"),
+      itemId: asItemId("child-message-cap"),
+      raw: {
+        source: "codex.app-server.notification",
+        method: "item/completed",
+        payload: {
+          threadId: "child-thread-cap",
+        },
+      },
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: fallbackText,
+      },
+    });
+
+    const expectedActivityId = "agent-message:thread-1:child-thread-cap:child-message-cap";
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.id === expectedActivityId &&
+          typeof activity.payload === "object" &&
+          activity.payload !== null &&
+          (activity.payload as Record<string, unknown>).streaming === false,
+      ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === expectedActivityId,
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(payload?.text).toEqual(expect.stringMatching(/^final /));
+    expect(typeof payload?.text === "string" ? payload.text.length : 0).toBeLessThanOrEqual(24_000);
+  });
+
+  it("clears incomplete child assistant buffers on runtime errors", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-collab-started-for-error-cleanup"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-child-error-cleanup"),
+      itemId: asItemId("collab-error-cleanup"),
+      payload: {
+        itemType: "collab_agent_tool_call",
+        status: "inProgress",
+        data: {
+          item: {
+            type: "collabAgentToolCall",
+            id: "collab-error-cleanup",
+            tool: "spawnAgent",
+            prompt: "You are a researcher. Inspect error cleanup.",
+            receiverThreadIds: ["child-thread-error-cleanup"],
+            senderThreadId: "parent-thread",
+            status: "inProgress",
+            agentsStates: {
+              "child-thread-error-cleanup": {
+                status: "running",
+              },
+            },
+          },
+        },
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-child-assistant-delta-error-cleanup"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-child-error-cleanup"),
+      itemId: asItemId("child-message-error-cleanup"),
+      raw: {
+        source: "codex.app-server.notification",
+        method: "item/agentMessage/delta",
+        payload: {
+          threadId: "child-thread-error-cleanup",
+        },
+      },
+      payload: {
+        streamKind: "assistant_text",
+        delta: "stale child text",
+      },
+    });
+    harness.emit({
+      type: "runtime.error",
+      eventId: asEventId("evt-runtime-error-subagent-cleanup"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-child-error-cleanup"),
+      payload: {
+        message: "Provider session failed",
+        class: "provider_error",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-child-assistant-completed-error-cleanup"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-child-error-cleanup"),
+      itemId: asItemId("child-message-error-cleanup"),
+      raw: {
+        source: "codex.app-server.notification",
+        method: "item/completed",
+        payload: {
+          threadId: "child-thread-error-cleanup",
+        },
+      },
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+    await harness.drain();
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "runtime.error",
+      ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) =>
+        entry.id ===
+        "agent-message:thread-1:child-thread-error-cleanup:child-message-error-cleanup",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(payload?.text).toBe("stale child text");
+    expect(payload?.streaming).toBe(true);
+  });
+
   it("preserves completed tool metadata on projected tool activities", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

@@ -244,6 +244,10 @@ function subagentMessageBufferKey(input: {
   return `${input.threadId}:${input.providerThreadId}:${input.providerItemId}`;
 }
 
+function cappedSubagentMessageText(value: string): string {
+  return truncateActivityText(value, MAX_BUFFERED_ASSISTANT_CHARS);
+}
+
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
   const trimmed = planMarkdown?.trim();
   if (!trimmed) {
@@ -1105,7 +1109,9 @@ const make = Effect.gen(function* () {
         providerThreadId: input.providerThreadId,
         providerItemId: input.providerItemId,
       });
-      const text = `${subagentMessageTextByKey.get(key) ?? ""}${input.delta}`;
+      const text = cappedSubagentMessageText(
+        `${subagentMessageTextByKey.get(key) ?? ""}${input.delta}`,
+      );
       subagentMessageTextByKey.set(key, text);
       yield* upsertSubagentMessageActivity({
         ...input,
@@ -1143,6 +1149,16 @@ const make = Effect.gen(function* () {
         text,
         streaming: false,
       });
+    });
+
+  const clearSubagentMessageBuffersForThread = (threadId: ThreadId) =>
+    Effect.sync(() => {
+      const prefix = `${threadId}:`;
+      for (const key of subagentMessageTextByKey.keys()) {
+        if (key.startsWith(prefix)) {
+          subagentMessageTextByKey.delete(key);
+        }
+      }
     });
 
   const appendBufferedAssistantText = (messageId: MessageId, delta: string) =>
@@ -1953,10 +1969,12 @@ const make = Effect.gen(function* () {
             updatedAt: now,
           });
         }
+        yield* clearSubagentMessageBuffersForThread(thread.id);
       }
 
       if (event.type === "session.exited") {
         yield* clearTurnStateForSession(thread.id);
+        yield* clearSubagentMessageBuffersForThread(thread.id);
       }
 
       if (event.type === "runtime.error") {
@@ -1987,6 +2005,11 @@ const make = Effect.gen(function* () {
             createdAt: now,
           });
         }
+        yield* clearSubagentMessageBuffersForThread(thread.id);
+      }
+
+      if (event.type === "session.state.changed" && event.payload.state === "error") {
+        yield* clearSubagentMessageBuffersForThread(thread.id);
       }
 
       if (event.type === "thread.metadata.updated" && event.payload.name) {
