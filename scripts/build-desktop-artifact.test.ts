@@ -16,6 +16,7 @@ import { assert, it } from "@effect/vitest";
 import { ConfigProvider, Effect, Option, Stream } from "effect";
 
 import {
+  ANTHROPIC_CLAUDE_AGENT_SDK_NATIVE_PACKAGE_PATHS,
   COMMAND_OUTPUT_TAIL_LENGTH,
   COPILOT_SDK_PACKAGE_JSON_PATH,
   DESKTOP_BUILD_FILES,
@@ -24,6 +25,7 @@ import {
   LINUX_ICON_SIZES,
   MAC_UNSIGNED_INSTALL_HELPER_NAME,
   MAC_UNSIGNED_README_NAME,
+  PRUNED_DESKTOP_DEPENDENCY_PATHS,
   appendOutputTail,
   collectCommandStream,
   createMacUnsignedInstallReadme,
@@ -33,6 +35,7 @@ import {
   createStagePatchedDependencies,
   formatCommandFailureMessage,
   formatOutputSection,
+  pruneExternalizedDesktopDependencies,
   resolveElectronBuilderDebugEnv,
   resolveBuildOptions,
   resolveDesktopBuildIconAssets,
@@ -434,6 +437,14 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "!node_modules/@github/copilot-linux-x64/**",
       "!node_modules/@github/copilot-win32-arm64/**",
       "!node_modules/@github/copilot-win32-x64/**",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/**",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64/**",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/**",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64-musl/**",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/**",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl/**",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-win32-arm64/**",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**",
     ]);
     assert.deepStrictEqual(EXTERNALIZED_DESKTOP_DEPENDENCY_PATHS, [
       "node_modules/@github/copilot",
@@ -444,8 +455,82 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "node_modules/@github/copilot-win32-arm64",
       "node_modules/@github/copilot-win32-x64",
     ]);
+    assert.deepStrictEqual(ANTHROPIC_CLAUDE_AGENT_SDK_NATIVE_PACKAGE_PATHS, [
+      "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64",
+      "node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64",
+      "node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64",
+      "node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64-musl",
+      "node_modules/@anthropic-ai/claude-agent-sdk-linux-x64",
+      "node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl",
+      "node_modules/@anthropic-ai/claude-agent-sdk-win32-arm64",
+      "node_modules/@anthropic-ai/claude-agent-sdk-win32-x64",
+    ]);
+    assert.deepStrictEqual(PRUNED_DESKTOP_DEPENDENCY_PATHS, [
+      ...EXTERNALIZED_DESKTOP_DEPENDENCY_PATHS,
+      ...ANTHROPIC_CLAUDE_AGENT_SDK_NATIVE_PACKAGE_PATHS,
+    ]);
     assert.equal(COPILOT_SDK_PACKAGE_JSON_PATH, "node_modules/@github/copilot-sdk/package.json");
   });
+
+  it.effect("prunes bundled provider CLI payloads without removing JS SDKs or sharp", () =>
+    Effect.gen(function* () {
+      const tempRoot = mkdtempSync(path.join(tmpdir(), "ryco-desktop-prune-"));
+      try {
+        const stageAppDir = path.join(tempRoot, "app");
+        const copilotSdkPackageJson = path.join(stageAppDir, COPILOT_SDK_PACKAGE_JSON_PATH);
+        const anthropicNativeDir = path.join(
+          stageAppDir,
+          "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64",
+        );
+        const anthropicSdkDir = path.join(
+          stageAppDir,
+          "node_modules/@anthropic-ai/claude-agent-sdk",
+        );
+        const anthropicPeerSdkDir = path.join(stageAppDir, "node_modules/@anthropic-ai/sdk");
+        const sharpDir = path.join(stageAppDir, "node_modules/sharp");
+
+        for (const dir of [
+          path.dirname(copilotSdkPackageJson),
+          path.join(stageAppDir, "node_modules/@github/copilot"),
+          anthropicNativeDir,
+          anthropicSdkDir,
+          anthropicPeerSdkDir,
+          sharpDir,
+        ]) {
+          mkdirSync(dir, { recursive: true });
+        }
+        writeFileSync(
+          copilotSdkPackageJson,
+          [
+            "{",
+            '  "dependencies": {',
+            '    "@github/copilot": "1.0.0",',
+            '    "keep": "1.0.0"',
+            "  }",
+            "}",
+            "",
+          ].join("\n"),
+        );
+        writeFileSync(path.join(anthropicNativeDir, "claude"), "native claude binary");
+        writeFileSync(path.join(anthropicSdkDir, "sdk.mjs"), "export {}");
+        writeFileSync(path.join(anthropicPeerSdkDir, "index.mjs"), "export {}");
+        writeFileSync(path.join(sharpDir, "index.js"), "module.exports = {}");
+
+        yield* pruneExternalizedDesktopDependencies(stageAppDir);
+
+        assert.equal(existsSync(path.join(stageAppDir, "node_modules/@github/copilot")), false);
+        assert.equal(existsSync(anthropicNativeDir), false);
+        assert.equal(existsSync(anthropicSdkDir), true);
+        assert.equal(existsSync(anthropicPeerSdkDir), true);
+        assert.equal(existsSync(sharpDir), true);
+        const prunedCopilotSdkPackageJson = readFileSync(copilotSdkPackageJson, "utf8");
+        assert.equal(prunedCopilotSdkPackageJson.includes('"@github/copilot"'), false);
+        assert.equal(prunedCopilotSdkPackageJson.includes('"keep": "1.0.0"'), true);
+      } finally {
+        rmSync(tempRoot, { recursive: true, force: true });
+      }
+    }),
+  );
 
   it("generates an unsigned macOS install helper for stable and nightly bundle names", () => {
     assert.equal(MAC_UNSIGNED_INSTALL_HELPER_NAME, "Install Ryco.command");
