@@ -38,6 +38,8 @@ measurements identify a target.
 - [x] **Finished**: Ran `bun fmt`, `bun lint`, and `bun typecheck`.
 - [x] **Finished**: Ran targeted tests for queue metrics and web fallback selector with
       `bun run test`.
+- [x] **Finished**: Kept this checklist aligned to the current branch validation state after
+      follow-up review fixes.
 
 ### Runtime Reliability
 

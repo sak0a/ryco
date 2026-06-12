@@ -73,7 +73,11 @@ function walkFiles(root: string, dir = root): string[] {
     .toSorted();
 }
 
-function readInitialAssetRefs(distDir: string): Set<string> {
+export function normalizeHtmlAssetRef(rawRef: string): string {
+  return rawRef.replace(/^\.\//u, "").replace(/^\//u, "").split(/[?#]/u)[0] ?? "";
+}
+
+export function readInitialAssetRefs(distDir: string): Set<string> {
   const htmlPath = path.join(distDir, "index.html");
   if (!fs.existsSync(htmlPath)) {
     return new Set();
@@ -85,7 +89,7 @@ function readInitialAssetRefs(distDir: string): Set<string> {
     if (!rawRef || rawRef.startsWith("http://") || rawRef.startsWith("https://")) {
       continue;
     }
-    const normalized = rawRef.replace(/^\//u, "").split(/[?#]/u)[0];
+    const normalized = normalizeHtmlAssetRef(rawRef);
     if (normalized && fs.existsSync(path.join(distDir, normalized))) {
       refs.add(normalized);
     }
@@ -182,9 +186,16 @@ function main(): void {
   printMarkdownReport({ distDir, rows, top });
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
+function isCliEntrypoint(): boolean {
+  const scriptPath = process.argv[1];
+  return scriptPath !== undefined && path.resolve(scriptPath) === fileURLToPath(import.meta.url);
+}
+
+if (isCliEntrypoint()) {
+  try {
+    main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
 }
