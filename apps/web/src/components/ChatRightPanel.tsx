@@ -122,6 +122,7 @@ export const LazyRightPanel = (props: {
   mode: DiffPanelMode;
   panelMode: RightPanelMode | null;
   openedPanelModes: ReadonlyArray<RightPanelMode>;
+  openedAgentKeys: ReadonlyArray<string>;
   onClosePanelTab: (input: { mode: RightPanelMode; agentKey?: string }) => void;
 }) => {
   return (
@@ -148,6 +149,7 @@ export const LazyRightPanel = (props: {
           mode={props.mode}
           panelMode={props.panelMode}
           openedPanelModes={props.openedPanelModes}
+          openedAgentKeys={props.openedAgentKeys}
           onClosePanelTab={props.onClosePanelTab}
         />
       </Suspense>
@@ -159,6 +161,7 @@ export const RightPanelInlineSidebar = (props: {
   open: boolean;
   panelMode: RightPanelMode | null;
   openedPanelModes: ReadonlyArray<RightPanelMode>;
+  openedAgentKeys: ReadonlyArray<string>;
   onClosePanelTab: (input: { mode: RightPanelMode; agentKey?: string }) => void;
   onClose: () => void;
   onOpen: () => void;
@@ -262,6 +265,7 @@ export const RightPanelInlineSidebar = (props: {
                 mode="sidebar"
                 panelMode={panelMode}
                 openedPanelModes={props.openedPanelModes}
+                openedAgentKeys={props.openedAgentKeys}
                 onClosePanelTab={props.onClosePanelTab}
               />
             ) : null}

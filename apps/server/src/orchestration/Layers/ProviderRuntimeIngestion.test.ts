@@ -751,6 +751,116 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.streaming).toBe(false);
   });
 
+  it("routes child assistant streams to subagent activities without main-chat messages", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-collab-started"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-child"),
+      itemId: asItemId("collab-1"),
+      payload: {
+        itemType: "collab_agent_tool_call",
+        status: "inProgress",
+        title: "Subagent task",
+        detail: "You are a researcher. Inspect the retry flow.",
+        data: {
+          item: {
+            type: "collabAgentToolCall",
+            id: "collab-1",
+            tool: "spawnAgent",
+            prompt: "You are a researcher. Inspect the retry flow.",
+            receiverThreadIds: ["child-thread-1"],
+            senderThreadId: "parent-thread",
+            status: "inProgress",
+            agentsStates: {
+              "child-thread-1": {
+                status: "running",
+              },
+            },
+          },
+        },
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-child-assistant-delta"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-child"),
+      itemId: asItemId("child-message-1"),
+      raw: {
+        source: "codex.app-server.notification",
+        method: "item/agentMessage/delta",
+        payload: {
+          threadId: "child-thread-1",
+        },
+      },
+      payload: {
+        streamKind: "assistant_text",
+        delta: "checking retry paths",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-child-assistant-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-child"),
+      itemId: asItemId("child-message-1"),
+      providerRefs: {
+        providerItemId: "child-message-1",
+        providerTurnId: "child-turn-1",
+      },
+      raw: {
+        source: "codex.app-server.notification",
+        method: "item/completed",
+        payload: {
+          threadId: "child-thread-1",
+        },
+      },
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: "checking retry paths and reporting findings",
+      },
+    });
+
+    const expectedActivityId = "agent-message:thread-1:child-thread-1:child-message-1";
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.id === expectedActivityId &&
+          typeof activity.payload === "object" &&
+          activity.payload !== null &&
+          (activity.payload as Record<string, unknown>).streaming === false,
+      ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === expectedActivityId,
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("agent.message");
+    expect(payload?.text).toBe("checking retry paths and reporting findings");
+    expect(payload?.providerThreadId).toBe("child-thread-1");
+    expect(payload?.providerItemId).toBe("child-message-1");
+    expect(
+      thread.messages.some((message: ProviderRuntimeTestMessage) =>
+        message.text.includes("checking retry paths"),
+      ),
+    ).toBe(false);
+  });
+
   it("preserves completed tool metadata on projected tool activities", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

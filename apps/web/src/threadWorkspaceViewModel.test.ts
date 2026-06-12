@@ -88,6 +88,133 @@ describe("deriveThreadSubagents", () => {
     });
   });
 
+  it("uses Codex collab metadata and attaches child agent messages", () => {
+    const activities = [
+      makeActivity({
+        id: "agent-start",
+        kind: "tool.started",
+        createdAt: "2026-06-04T10:00:00.000Z",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          providerItemId: "collab-1",
+          data: {
+            item: {
+              type: "collabAgentToolCall",
+              id: "collab-1",
+              tool: "spawnAgent",
+              prompt: "You are a researcher. Inspect the retry flow.",
+              receiverThreadIds: ["child-thread-1"],
+              senderThreadId: "parent-thread",
+              status: "inProgress",
+              agentsStates: {
+                "child-thread-1": {
+                  status: "running",
+                  message: "Inspecting retry paths",
+                },
+              },
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "child-message",
+        kind: "agent.message",
+        createdAt: "2026-06-04T10:00:04.000Z",
+        payload: {
+          itemType: "assistant_message",
+          providerThreadId: "child-thread-1",
+          providerItemId: "msg-child-1",
+          text: "The retry flow drops partial stream state.",
+        },
+      }),
+    ];
+
+    expect(deriveThreadSubagents(activities)[0]).toMatchObject({
+      key: "subagent:collab-1",
+      name: "Researcher",
+      status: "running",
+      tool: "spawnAgent",
+      detail: "You are a researcher. Inspect the retry flow.",
+      providerThreadIds: ["child-thread-1"],
+      messages: [
+        {
+          id: "msg-child-1",
+          text: "The retry flow drops partial stream state.",
+          providerThreadId: "child-thread-1",
+        },
+      ],
+    });
+  });
+
+  it("does not attach unrelated agent messages to a subagent", () => {
+    const activities = [
+      makeActivity({
+        id: "agent-start",
+        kind: "tool.started",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          data: {
+            item: {
+              type: "collabAgentToolCall",
+              id: "collab-1",
+              tool: "spawnAgent",
+              prompt: "Investigate failures",
+              receiverThreadIds: ["child-thread-1"],
+              senderThreadId: "parent-thread",
+              status: "completed",
+              agentsStates: {},
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "main-message",
+        kind: "agent.message",
+        payload: {
+          itemType: "assistant_message",
+          providerThreadId: "parent-thread",
+          providerItemId: "msg-main",
+          text: "Main assistant answer.",
+        },
+      }),
+    ];
+
+    expect(deriveThreadSubagents(activities)[0]?.messages).toEqual([]);
+  });
+
+  it("uses lifecycle completion even when nested Codex agent state is stale", () => {
+    const activities = [
+      makeActivity({
+        id: "agent-done",
+        kind: "tool.completed",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "completed",
+          data: {
+            item: {
+              type: "collabAgentToolCall",
+              id: "collab-1",
+              tool: "spawnAgent",
+              prompt: "You are a researcher. Inspect the retry flow.",
+              receiverThreadIds: ["child-thread-1"],
+              status: "inProgress",
+              agentsStates: {
+                "child-thread-1": {
+                  status: "running",
+                },
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    expect(deriveThreadSubagents(activities)[0]).toMatchObject({
+      status: "finished",
+    });
+  });
+
   it("attaches collapsed work-log entries back to lifecycle rows", () => {
     const activities = [
       makeActivity({

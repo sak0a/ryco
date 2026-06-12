@@ -429,19 +429,34 @@ const PlanSidebar = memo(function PlanSidebar({
           ? pullRequest.checksError
           : undefined;
 
+  const contentScroller = (children: ReactNode) =>
+    mode === "sidebar" ? (
+      <div
+        className="min-h-0 max-h-[inherit] overflow-y-auto overscroll-contain [scrollbar-gutter:stable]"
+        data-slot="scroll-area-viewport"
+      >
+        {children}
+      </div>
+    ) : (
+      <ScrollArea className="min-h-0 flex-1" scrollbarGutter>
+        {children}
+      </ScrollArea>
+    );
+
   return (
     <div
       className={cn(
         "flex min-h-0 flex-col backdrop-blur",
         mode === "sidebar" &&
-          "my-3 mr-3 max-h-[min(calc(100%-1.5rem),42rem)] w-[340px] shrink-0 self-start overflow-hidden rounded-lg border border-border/70 bg-card/90 shadow-xl supports-[backdrop-filter]:bg-card/75",
+          "my-3 mr-3 w-[340px] shrink-0 self-start overflow-hidden rounded-lg border border-border/70 bg-card/90 shadow-xl supports-[backdrop-filter]:bg-card/75",
         mode === "sheet" && "h-full w-full bg-card/90 supports-[backdrop-filter]:bg-card/75",
         mode === "floating" &&
           "pointer-events-auto max-h-[min(72vh,42rem)] w-[min(360px,calc(100vw_-_1.5rem))] rounded-lg border border-border/60 bg-card/95 shadow-xl dark:bg-card/90",
       )}
+      style={mode === "sidebar" ? { maxHeight: "calc(100% - 1.5rem)" } : undefined}
     >
       {/* Content */}
-      <ScrollArea className="min-h-0 flex-1" scrollbarGutter>
+      {contentScroller(
         <div className="space-y-3 p-2.5">
           {sourceControlActions || branchControl ? (
             <div className="space-y-1.5">
@@ -834,8 +849,8 @@ const PlanSidebar = memo(function PlanSidebar({
               })}
             </div>
           ) : null}
-        </div>
-      </ScrollArea>
+        </div>,
+      )}
     </div>
   );
 });

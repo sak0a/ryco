@@ -28,6 +28,7 @@ describe("RightPanelInlineSidebar", () => {
         open
         panelMode={null}
         openedPanelModes={[]}
+        openedAgentKeys={[]}
         onClosePanelTab={vi.fn()}
         onClose={vi.fn()}
         onOpen={vi.fn()}
@@ -51,6 +52,7 @@ describe("RightPanelInlineSidebar", () => {
         open={false}
         panelMode={null}
         openedPanelModes={[]}
+        openedAgentKeys={[]}
         onClosePanelTab={vi.fn()}
         onClose={vi.fn()}
         onOpen={vi.fn()}
