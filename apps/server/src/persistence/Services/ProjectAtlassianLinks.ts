@@ -29,6 +29,13 @@ export const GetProjectAtlassianLinkInput = Schema.Struct({
 });
 export type GetProjectAtlassianLinkInput = typeof GetProjectAtlassianLinkInput.Type;
 
+export const ClearProjectAtlassianConnectionReferencesInput = Schema.Struct({
+  connectionId: AtlassianConnectionId,
+  updatedAt: IsoDateTime,
+});
+export type ClearProjectAtlassianConnectionReferencesInput =
+  typeof ClearProjectAtlassianConnectionReferencesInput.Type;
+
 export const UpsertProjectAtlassianLinkInput = ProjectAtlassianLinkRecord;
 export type UpsertProjectAtlassianLinkInput = typeof UpsertProjectAtlassianLinkInput.Type;
 
@@ -44,6 +51,9 @@ export interface ProjectAtlassianLinkRepositoryShape {
   ) => Effect.Effect<void, ProjectAtlassianLinkRepositoryError>;
   readonly deleteByProjectId: (
     input: GetProjectAtlassianLinkInput,
+  ) => Effect.Effect<void, ProjectAtlassianLinkRepositoryError>;
+  readonly clearConnectionReferences: (
+    input: ClearProjectAtlassianConnectionReferencesInput,
   ) => Effect.Effect<void, ProjectAtlassianLinkRepositoryError>;
 }
 

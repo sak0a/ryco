@@ -598,11 +598,24 @@ export interface SourceControlDetailContentOutput<
   readonly truncated: boolean;
 }
 
+const utf8Encoder = new TextEncoder();
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
+
+function decodeUtf8Prefix(bytes: Uint8Array): string {
+  for (let end = bytes.length; end >= 0; end -= 1) {
+    try {
+      return utf8Decoder.decode(bytes.subarray(0, end));
+    } catch {
+      // Drop a trailing partial multi-byte character and try again.
+    }
+  }
+  return "";
+}
+
 function truncateUtf8(value: string, maxBytes: number): { value: string; truncated: boolean } {
-  if (Buffer.byteLength(value, "utf8") <= maxBytes) return { value, truncated: false };
-  const buf = Buffer.from(value, "utf8").subarray(0, maxBytes);
-  // Avoid splitting a multi-byte char at the tail.
-  return { value: buf.toString("utf8"), truncated: true };
+  const bytes = utf8Encoder.encode(value);
+  if (bytes.byteLength <= maxBytes) return { value, truncated: false };
+  return { value: decodeUtf8Prefix(bytes.subarray(0, maxBytes)), truncated: true };
 }
 
 export function truncateSourceControlDetailContent<C extends SourceControlDetailContentCommentLike>(

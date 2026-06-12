@@ -443,7 +443,7 @@ function AtlassianConfiguration() {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Could not disconnect Atlassian account",
+          title: "Could not delete Atlassian connection",
           description: error instanceof Error ? error.message : "The connection was not changed.",
         }),
       );
@@ -666,7 +666,7 @@ function AtlassianConfiguration() {
                 size="icon-xs"
                 variant="ghost"
                 className="size-7 self-start text-muted-foreground hover:text-destructive sm:self-auto"
-                aria-label={`Disconnect ${item.label}`}
+                aria-label={`Delete ${item.label}`}
                 disabled={disconnectMutation.isPending || item.readonly}
                 onClick={() => disconnectMutation.mutate(item)}
               >

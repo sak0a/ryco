@@ -81,6 +81,8 @@ function makeLayer(input: {
           ),
         upsert: () => Effect.die("unexpected project link upsert"),
         deleteByProjectId: () => Effect.die("unexpected project link delete"),
+        clearConnectionReferences: () =>
+          Effect.die("unexpected project link connection reference clear"),
       }),
     ),
     Layer.provide(
