@@ -109,17 +109,18 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
-  BotIcon,
   CircleAlertIcon,
   CircleOffIcon,
-  GaugeIcon,
+  ClipboardListIcon,
+  HammerIcon,
   ListTodoIcon,
+  Minimize2Icon,
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
   PenLineIcon,
+  ScaleIcon,
   XIcon,
-  ZapIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
 import { getProviderInteractionModeToggle } from "../../providerModels";
@@ -194,13 +195,13 @@ const tokenModeConfig: Record<
     label: "Balanced",
     triggerLabel: "Balanced",
     description: "Favor concise answers and targeted reads without hiding important detail.",
-    icon: GaugeIcon,
+    icon: ScaleIcon,
   },
   aggressive: {
     label: "Aggressive",
     triggerLabel: "Aggressive",
     description: "Minimize prose and avoid copying large outputs unless needed.",
-    icon: ZapIcon,
+    icon: Minimize2Icon,
   },
 };
 
@@ -264,6 +265,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
   const RuntimeModeIcon = runtimeModeOption.icon;
   const tokenModeOption = tokenModeConfig[props.tokenMode];
   const TokenModeIcon = tokenModeOption.icon;
+  const InteractionModeIcon = props.interactionMode === "plan" ? ClipboardListIcon : HammerIcon;
   const tokenModeControlStyle = useUiStateStore((state) => state.tokenModeControlStyle);
   const wideComposerControlsAutoCollapse = useUiStateStore(
     (state) => state.wideComposerControlsAutoCollapse,
@@ -305,7 +307,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
           >
             <ComposerExpandableLabelControl
               collapsed={wideComposerControlsAutoCollapse}
-              icon={<BotIcon className="size-4 sm:size-3.5" />}
+              icon={<InteractionModeIcon className="size-4 sm:size-3.5" />}
               label={props.interactionMode === "plan" ? "Plan" : "Build"}
             />
           </Button>
