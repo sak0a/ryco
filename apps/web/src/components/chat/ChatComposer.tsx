@@ -207,6 +207,7 @@ const tokenModeConfig: Record<
 
 const tokenModeOptions = Object.keys(tokenModeConfig) as AgentTokenMode[];
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
+const SELECT_OPEN_SUPPRESSION_MS = 300;
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-slot="popover-popup"]',
@@ -272,18 +273,55 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
   );
   const [runtimeModeSelectOpen, setRuntimeModeSelectOpen] = useState(false);
   const [tokenModeSelectOpen, setTokenModeSelectOpen] = useState(false);
+  const [runtimeModeSelectOpenSuppressed, setRuntimeModeSelectOpenSuppressed] = useState(false);
+  const [tokenModeSelectOpenSuppressed, setTokenModeSelectOpenSuppressed] = useState(false);
   const runtimeModeSuppressOpenUntilRef = useRef(0);
   const tokenModeSuppressOpenUntilRef = useRef(0);
+  const runtimeModeSuppressOpenTimeoutRef = useRef<number | null>(null);
+  const tokenModeSuppressOpenTimeoutRef = useRef<number | null>(null);
   const isSelectOpenSuppressed = useCallback((suppressUntilRef: { current: number }) => {
     return performance.now() < suppressUntilRef.current;
   }, []);
-  const closeRuntimeModeSelectAfterItemPress = useCallback(() => {
-    runtimeModeSuppressOpenUntilRef.current = performance.now() + 300;
-    window.setTimeout(() => setRuntimeModeSelectOpen(false), 0);
+  const startRuntimeModeOpenSuppression = useCallback(() => {
+    runtimeModeSuppressOpenUntilRef.current = performance.now() + SELECT_OPEN_SUPPRESSION_MS;
+    setRuntimeModeSelectOpenSuppressed(true);
+    if (runtimeModeSuppressOpenTimeoutRef.current !== null) {
+      window.clearTimeout(runtimeModeSuppressOpenTimeoutRef.current);
+    }
+    runtimeModeSuppressOpenTimeoutRef.current = window.setTimeout(() => {
+      runtimeModeSuppressOpenTimeoutRef.current = null;
+      setRuntimeModeSelectOpenSuppressed(false);
+    }, SELECT_OPEN_SUPPRESSION_MS);
   }, []);
+  const startTokenModeOpenSuppression = useCallback(() => {
+    tokenModeSuppressOpenUntilRef.current = performance.now() + SELECT_OPEN_SUPPRESSION_MS;
+    setTokenModeSelectOpenSuppressed(true);
+    if (tokenModeSuppressOpenTimeoutRef.current !== null) {
+      window.clearTimeout(tokenModeSuppressOpenTimeoutRef.current);
+    }
+    tokenModeSuppressOpenTimeoutRef.current = window.setTimeout(() => {
+      tokenModeSuppressOpenTimeoutRef.current = null;
+      setTokenModeSelectOpenSuppressed(false);
+    }, SELECT_OPEN_SUPPRESSION_MS);
+  }, []);
+  const closeRuntimeModeSelectAfterItemPress = useCallback(() => {
+    startRuntimeModeOpenSuppression();
+    window.setTimeout(() => setRuntimeModeSelectOpen(false), 0);
+  }, [startRuntimeModeOpenSuppression]);
   const closeTokenModeSelectAfterItemPress = useCallback(() => {
-    tokenModeSuppressOpenUntilRef.current = performance.now() + 300;
+    startTokenModeOpenSuppression();
     window.setTimeout(() => setTokenModeSelectOpen(false), 0);
+  }, [startTokenModeOpenSuppression]);
+
+  useEffect(() => {
+    return () => {
+      if (runtimeModeSuppressOpenTimeoutRef.current !== null) {
+        window.clearTimeout(runtimeModeSuppressOpenTimeoutRef.current);
+      }
+      if (tokenModeSuppressOpenTimeoutRef.current !== null) {
+        window.clearTimeout(tokenModeSuppressOpenTimeoutRef.current);
+      }
+    };
   }, []);
 
   return (
@@ -328,7 +366,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
         onValueChange={(value) => {
           if (!value) return;
           props.onRuntimeModeChange(value);
-          runtimeModeSuppressOpenUntilRef.current = performance.now() + 300;
+          startRuntimeModeOpenSuppression();
           setRuntimeModeSelectOpen(false);
         }}
       >
@@ -347,6 +385,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
         >
           <ComposerExpandableLabelControl
             collapsed={wideComposerControlsAutoCollapse}
+            expanded={runtimeModeSelectOpen || runtimeModeSelectOpenSuppressed}
             icon={<RuntimeModeIcon className="size-4" />}
             label={<SelectValue>{runtimeModeOption.triggerLabel}</SelectValue>}
           />
@@ -392,7 +431,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
         onValueChange={(value) => {
           if (!value) return;
           props.onTokenModeChange(value as AgentTokenMode);
-          tokenModeSuppressOpenUntilRef.current = performance.now() + 300;
+          startTokenModeOpenSuppression();
           setTokenModeSelectOpen(false);
         }}
       >
@@ -411,6 +450,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
           {wideComposerControlsAutoCollapse ? (
             <ComposerExpandableLabelControl
               collapsed
+              expanded={tokenModeSelectOpen || tokenModeSelectOpenSuppressed}
               icon={<TokenModeIcon className="size-4" />}
               label={<SelectValue>{tokenModeOption.triggerLabel}</SelectValue>}
             />

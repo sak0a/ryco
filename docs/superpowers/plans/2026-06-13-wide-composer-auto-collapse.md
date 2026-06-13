@@ -12,5 +12,5 @@
 - [x] Wire the primitive into wide composer mode controls: Build/Plan, runtime/security, token mode, and plan sidebar.
 - [x] Preserve compact composer behavior and preserve `tokenModeControlStyle` whenever auto-collapse is disabled.
 - [x] Add browser/component coverage for settings, token-style override, wide/compact behavior, and focus/hover expansion hooks.
-- [x] Run verification: targeted `bun run test` suites, `bun fmt`, `bun lint`, and `bun typecheck`.
-- [x] Browser-verify the local app after the frontend change.
+- [x] Run verification locally: targeted `bun run --cwd apps/web test` suites for UI state and browser components, `bun fmt`, `bun lint`, and `bun typecheck`.
+- [x] Browser-verify the local app after the frontend change: smoke check confirmed runtime/token dropdowns close without reopening and label animation duration is `0.3s`.

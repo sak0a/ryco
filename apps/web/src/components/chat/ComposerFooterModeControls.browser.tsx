@@ -21,9 +21,19 @@ const baseProps = {
   onTogglePlanSidebar: vi.fn(),
 };
 
+// Must exceed ChatComposer's select reopen suppression window.
+const POPUP_CLOSE_VERIFICATION_DELAY_MS = 350;
+
 function expectSelectPopupClosed() {
   const popup = document.querySelector<HTMLElement>('[data-slot="select-popup"]');
   expect(popup === null || popup.hasAttribute("data-closed")).toBe(true);
+}
+
+function expectExpandableLabelExpanded(triggerLabel: string, expanded: boolean) {
+  const label = document.querySelector<HTMLElement>(
+    `[aria-label="${triggerLabel}"] [data-composer-expandable-label="true"]`,
+  );
+  expect(label?.classList.contains("max-w-40")).toBe(expanded);
 }
 
 function wait(ms: number): Promise<void> {
@@ -93,6 +103,34 @@ describe("ComposerFooterModeControls", () => {
     });
   });
 
+  it("keeps select labels expanded while popups are open and close suppression is active", async () => {
+    mounted = await render(<ComposerFooterModeControls {...baseProps} />);
+
+    await page.getByLabelText("Runtime mode: Full access").click();
+    await vi.waitFor(() => {
+      expectExpandableLabelExpanded("Runtime mode: Full access", true);
+    });
+    await page.getByRole("option", { name: /Supervised/ }).click();
+    await vi.waitFor(() => {
+      expectSelectPopupClosed();
+      expectExpandableLabelExpanded("Runtime mode: Full access", true);
+    });
+    await wait(POPUP_CLOSE_VERIFICATION_DELAY_MS);
+    expectExpandableLabelExpanded("Runtime mode: Full access", false);
+
+    await page.getByLabelText("Token mode: Balanced").click();
+    await vi.waitFor(() => {
+      expectExpandableLabelExpanded("Token mode: Balanced", true);
+    });
+    await page.getByRole("option", { name: /Balanced/ }).click();
+    await vi.waitFor(() => {
+      expectSelectPopupClosed();
+      expectExpandableLabelExpanded("Token mode: Balanced", true);
+    });
+    await wait(POPUP_CLOSE_VERIFICATION_DELAY_MS);
+    expectExpandableLabelExpanded("Token mode: Balanced", false);
+  });
+
   it("closes runtime mode popup after selecting a different value", async () => {
     const onRuntimeModeChange = vi.fn();
     mounted = await render(
@@ -108,7 +146,7 @@ describe("ComposerFooterModeControls", () => {
     await vi.waitFor(() => {
       expectSelectPopupClosed();
     });
-    await wait(350);
+    await wait(POPUP_CLOSE_VERIFICATION_DELAY_MS);
     expectSelectPopupClosed();
   });
 
@@ -121,7 +159,7 @@ describe("ComposerFooterModeControls", () => {
     await vi.waitFor(() => {
       expectSelectPopupClosed();
     });
-    await wait(350);
+    await wait(POPUP_CLOSE_VERIFICATION_DELAY_MS);
     expectSelectPopupClosed();
   });
 });
