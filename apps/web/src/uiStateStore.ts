@@ -15,7 +15,7 @@ const LEGACY_PERSISTED_STATE_KEYS = [
   "codething:renderer-state:v1",
 ] as const;
 
-export type ReasoningIndicatorStyle = "icon-dots" | "text";
+export type ReasoningIndicatorStyle = "icon-dots" | "dots" | "text";
 export type TokenModeControlStyle = "icon-text" | "icon" | "text";
 
 const DEFAULT_REASONING_INDICATOR_STYLE: ReasoningIndicatorStyle = "icon-dots";
@@ -23,7 +23,9 @@ const DEFAULT_TOKEN_MODE_CONTROL_STYLE: TokenModeControlStyle = "icon-text";
 const DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE = true;
 
 function sanitizeReasoningIndicatorStyle(value: unknown): ReasoningIndicatorStyle {
-  return value === "text" || value === "icon-dots" ? value : DEFAULT_REASONING_INDICATOR_STYLE;
+  return value === "text" || value === "dots" || value === "icon-dots"
+    ? value
+    : DEFAULT_REASONING_INDICATOR_STYLE;
 }
 
 function sanitizeTokenModeControlStyle(value: unknown): TokenModeControlStyle {

@@ -987,6 +987,11 @@ describe("uiStateStore — reasoningIndicatorStyle", () => {
     expect(next.reasoningIndicatorStyle).toBe("text");
   });
 
+  it("setReasoningIndicatorStyle supports dots-only style", () => {
+    const next = setReasoningIndicatorStyle(makeUiState(), "dots");
+    expect(next.reasoningIndicatorStyle).toBe("dots");
+  });
+
   it("setReasoningIndicatorStyle is a no-op when value is unchanged", () => {
     const state = makeUiState({ reasoningIndicatorStyle: "text" });
     expect(setReasoningIndicatorStyle(state, "text")).toBe(state);
@@ -999,6 +1004,15 @@ describe("uiStateStore — reasoningIndicatorStyle", () => {
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!) as PersistedUiState;
     expect(parsed.reasoningIndicatorStyle).toBe("text");
+  });
+
+  it("persists the dots-only reasoning style and reads it back", () => {
+    const state = setReasoningIndicatorStyle(makeUiState(), "dots");
+    persistState(state);
+    const raw = localStorageStub.getItem(PERSISTED_STATE_KEY);
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw!) as PersistedUiState;
+    expect(parsed.reasoningIndicatorStyle).toBe("dots");
   });
 
   it("persists the token mode control style and reads it back", () => {

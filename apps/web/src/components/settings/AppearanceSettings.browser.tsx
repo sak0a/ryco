@@ -42,6 +42,7 @@ describe("AppearanceSettingsPanel", () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
+    useUiStateStore.getState().setReasoningIndicatorStyle("icon-dots");
     useUiStateStore.getState().setWideComposerControlsAutoCollapse(true);
     useUiStateStore.getState().setTokenModeControlStyle("icon-text");
   });
@@ -58,6 +59,7 @@ describe("AppearanceSettingsPanel", () => {
     document.documentElement.className = "";
     document.getElementById(THEME_STYLE_ELEMENT_ID)?.remove();
     document.getElementById(APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID)?.remove();
+    useUiStateStore.getState().setReasoningIndicatorStyle("icon-dots");
     useUiStateStore.getState().setWideComposerControlsAutoCollapse(true);
     useUiStateStore.getState().setTokenModeControlStyle("icon-text");
   });
@@ -196,5 +198,21 @@ describe("AppearanceSettingsPanel", () => {
         page.getByText("How token efficiency appears when wide composer auto-collapse is off."),
       )
       .toBeInTheDocument();
+  });
+
+  it("updates composer control display styles", async () => {
+    mounted = await render(<AppearanceSettingsPanel />);
+
+    await page.getByRole("radio", { name: /Dots only/ }).click();
+    expect(useUiStateStore.getState().reasoningIndicatorStyle).toBe("dots");
+
+    await expect
+      .element(page.getByRole("button", { name: "Reset reasoning indicator to default" }))
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Reset reasoning indicator to default" }).click();
+    expect(useUiStateStore.getState().reasoningIndicatorStyle).toBe("icon-dots");
+
+    await page.getByRole("radio", { name: /Icon only/ }).click();
+    expect(useUiStateStore.getState().tokenModeControlStyle).toBe("icon");
   });
 });
