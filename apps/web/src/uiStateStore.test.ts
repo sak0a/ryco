@@ -26,6 +26,7 @@ import {
   setThreadChangedFilesExpanded,
   setThreadWorkEntryExpanded,
   setTokenModeControlStyle,
+  setWideComposerControlsAutoCollapse,
   syncProjects,
   syncThreads,
   type UiState,
@@ -44,6 +45,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     defaultAdvertisedEndpointKey: null,
     reasoningIndicatorStyle: "icon-dots",
     tokenModeControlStyle: "icon-text",
+    wideComposerControlsAutoCollapse: true,
     ...overrides,
   };
 }
@@ -1006,5 +1008,28 @@ describe("uiStateStore — reasoningIndicatorStyle", () => {
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!) as PersistedUiState;
     expect(parsed.tokenModeControlStyle).toBe("icon");
+  });
+
+  it("defaults wide composer controls auto-collapse to enabled", () => {
+    expect(makeUiState().wideComposerControlsAutoCollapse).toBe(true);
+  });
+
+  it("setWideComposerControlsAutoCollapse returns a new state with the chosen value", () => {
+    const next = setWideComposerControlsAutoCollapse(makeUiState(), false);
+    expect(next.wideComposerControlsAutoCollapse).toBe(false);
+  });
+
+  it("setWideComposerControlsAutoCollapse is a no-op when value is unchanged", () => {
+    const state = makeUiState({ wideComposerControlsAutoCollapse: false });
+    expect(setWideComposerControlsAutoCollapse(state, false)).toBe(state);
+  });
+
+  it("persists wide composer controls auto-collapse and reads it back", () => {
+    const state = setWideComposerControlsAutoCollapse(makeUiState(), false);
+    persistState(state);
+    const raw = localStorageStub.getItem(PERSISTED_STATE_KEY);
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw!) as PersistedUiState;
+    expect(parsed.wideComposerControlsAutoCollapse).toBe(false);
   });
 });

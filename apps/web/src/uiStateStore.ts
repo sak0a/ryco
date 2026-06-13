@@ -20,6 +20,7 @@ export type TokenModeControlStyle = "icon-text" | "icon" | "text";
 
 const DEFAULT_REASONING_INDICATOR_STYLE: ReasoningIndicatorStyle = "icon-dots";
 const DEFAULT_TOKEN_MODE_CONTROL_STYLE: TokenModeControlStyle = "icon-text";
+const DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE = true;
 
 function sanitizeReasoningIndicatorStyle(value: unknown): ReasoningIndicatorStyle {
   return value === "text" || value === "icon-dots" ? value : DEFAULT_REASONING_INDICATOR_STYLE;
@@ -29,6 +30,10 @@ function sanitizeTokenModeControlStyle(value: unknown): TokenModeControlStyle {
   return value === "icon" || value === "text" || value === "icon-text"
     ? value
     : DEFAULT_TOKEN_MODE_CONTROL_STYLE;
+}
+
+function sanitizeWideComposerControlsAutoCollapse(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE;
 }
 
 export interface PersistedUiState {
@@ -42,6 +47,7 @@ export interface PersistedUiState {
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
   reasoningIndicatorStyle?: ReasoningIndicatorStyle;
   tokenModeControlStyle?: TokenModeControlStyle;
+  wideComposerControlsAutoCollapse?: boolean;
 }
 
 export type UiProjectFolderId = string;
@@ -93,6 +99,7 @@ export interface UiEndpointState {
 export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {
   reasoningIndicatorStyle: ReasoningIndicatorStyle;
   tokenModeControlStyle: TokenModeControlStyle;
+  wideComposerControlsAutoCollapse: boolean;
 }
 
 export interface SyncProjectInput {
@@ -120,6 +127,7 @@ const initialState: UiState = {
   defaultAdvertisedEndpointKey: null,
   reasoningIndicatorStyle: DEFAULT_REASONING_INDICATOR_STYLE,
   tokenModeControlStyle: DEFAULT_TOKEN_MODE_CONTROL_STYLE,
+  wideComposerControlsAutoCollapse: DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE,
 };
 
 const persistedCollapsedProjectCwds = new Set<string>();
@@ -434,6 +442,9 @@ function readPersistedState(): UiState {
       ),
       reasoningIndicatorStyle: sanitizeReasoningIndicatorStyle(parsed.reasoningIndicatorStyle),
       tokenModeControlStyle: sanitizeTokenModeControlStyle(parsed.tokenModeControlStyle),
+      wideComposerControlsAutoCollapse: sanitizeWideComposerControlsAutoCollapse(
+        parsed.wideComposerControlsAutoCollapse,
+      ),
     };
   } catch {
     return initialState;
@@ -544,6 +555,7 @@ export function persistState(state: UiState): void {
         threadChangedFilesExpandedById,
         reasoningIndicatorStyle: state.reasoningIndicatorStyle,
         tokenModeControlStyle: state.tokenModeControlStyle,
+        wideComposerControlsAutoCollapse: state.wideComposerControlsAutoCollapse,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -1031,6 +1043,16 @@ export function setTokenModeControlStyle(state: UiState, style: TokenModeControl
   };
 }
 
+export function setWideComposerControlsAutoCollapse(state: UiState, enabled: boolean): UiState {
+  if (state.wideComposerControlsAutoCollapse === enabled) {
+    return state;
+  }
+  return {
+    ...state,
+    wideComposerControlsAutoCollapse: enabled,
+  };
+}
+
 export function toggleProject(state: UiState, projectId: string): UiState {
   const expanded = state.projectExpandedById[projectId] ?? true;
   return {
@@ -1362,6 +1384,7 @@ interface UiStateStore extends UiState {
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
   setReasoningIndicatorStyle: (style: ReasoningIndicatorStyle) => void;
   setTokenModeControlStyle: (style: TokenModeControlStyle) => void;
+  setWideComposerControlsAutoCollapse: (enabled: boolean) => void;
   toggleProject: (projectId: string) => void;
   setProjectExpanded: (projectId: string, expanded: boolean) => void;
   createProjectFolder: (name: string, initialProjectKeys?: readonly string[]) => void;
@@ -1407,6 +1430,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
   setReasoningIndicatorStyle: (style) => set((state) => setReasoningIndicatorStyle(state, style)),
   setTokenModeControlStyle: (style) => set((state) => setTokenModeControlStyle(state, style)),
+  setWideComposerControlsAutoCollapse: (enabled) =>
+    set((state) => setWideComposerControlsAutoCollapse(state, enabled)),
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),
   setProjectExpanded: (projectId, expanded) =>
     set((state) => setProjectExpanded(state, projectId, expanded)),

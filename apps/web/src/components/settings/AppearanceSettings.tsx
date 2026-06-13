@@ -75,6 +75,7 @@ import {
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import {
   SettingResetButton,
@@ -151,6 +152,12 @@ export function AppearanceSettingsPanel() {
   const setReasoningIndicatorStyle = useUiStateStore((state) => state.setReasoningIndicatorStyle);
   const tokenModeControlStyle = useUiStateStore((state) => state.tokenModeControlStyle);
   const setTokenModeControlStyle = useUiStateStore((state) => state.setTokenModeControlStyle);
+  const wideComposerControlsAutoCollapse = useUiStateStore(
+    (state) => state.wideComposerControlsAutoCollapse,
+  );
+  const setWideComposerControlsAutoCollapse = useUiStateStore(
+    (state) => state.setWideComposerControlsAutoCollapse,
+  );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ThemeDefinition | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -712,8 +719,27 @@ export function AppearanceSettingsPanel() {
           }
         />
         <SettingsRow
+          title="Auto-collapse wide composer labels"
+          description="Show long composer mode labels only on hover or focus."
+          resetAction={
+            !wideComposerControlsAutoCollapse ? (
+              <SettingResetButton
+                label="wide composer labels"
+                onClick={() => setWideComposerControlsAutoCollapse(true)}
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={wideComposerControlsAutoCollapse}
+              onCheckedChange={(checked) => setWideComposerControlsAutoCollapse(Boolean(checked))}
+              aria-label="Auto-collapse wide composer labels"
+            />
+          }
+        />
+        <SettingsRow
           title="Token mode style"
-          description="How the token efficiency mode appears in the composer bar."
+          description="How token efficiency appears when wide composer auto-collapse is off."
           resetAction={
             tokenModeControlStyle !== "icon-text" ? (
               <SettingResetButton

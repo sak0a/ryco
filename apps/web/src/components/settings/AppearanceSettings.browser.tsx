@@ -16,6 +16,7 @@ import {
   FONT_FAMILY_SANS_OPTIONS,
   SURFACE_TRANSPARENCY_OPTIONS,
 } from "../../themes/appearancePreferences";
+import { useUiStateStore } from "../../uiStateStore";
 import { AppearanceSettingsPanel } from "./AppearanceSettings";
 
 describe("AppearanceSettingsPanel", () => {
@@ -41,6 +42,8 @@ describe("AppearanceSettingsPanel", () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
+    useUiStateStore.getState().setWideComposerControlsAutoCollapse(true);
+    useUiStateStore.getState().setTokenModeControlStyle("icon-text");
   });
 
   afterEach(async () => {
@@ -55,6 +58,8 @@ describe("AppearanceSettingsPanel", () => {
     document.documentElement.className = "";
     document.getElementById(THEME_STYLE_ELEMENT_ID)?.remove();
     document.getElementById(APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID)?.remove();
+    useUiStateStore.getState().setWideComposerControlsAutoCollapse(true);
+    useUiStateStore.getState().setTokenModeControlStyle("icon-text");
   });
 
   it("lists built-in themes and applies a selected built-in theme", async () => {
@@ -165,6 +170,31 @@ describe("AppearanceSettingsPanel", () => {
       .toBeInTheDocument();
     await expect
       .element(page.getByRole("button", { name: "Reset transparency to default" }))
+      .toBeInTheDocument();
+  });
+
+  it("toggles and resets wide composer auto-collapse", async () => {
+    mounted = await render(<AppearanceSettingsPanel />);
+
+    const autoCollapseSwitch = page.getByLabelText("Auto-collapse wide composer labels");
+    await expect.element(autoCollapseSwitch).toBeChecked();
+
+    await autoCollapseSwitch.click();
+    await expect.element(autoCollapseSwitch).not.toBeChecked();
+    expect(useUiStateStore.getState().wideComposerControlsAutoCollapse).toBe(false);
+
+    await expect
+      .element(page.getByRole("button", { name: "Reset wide composer labels to default" }))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Reset wide composer labels to default" }).click();
+    await expect.element(autoCollapseSwitch).toBeChecked();
+    expect(useUiStateStore.getState().wideComposerControlsAutoCollapse).toBe(true);
+
+    await expect
+      .element(
+        page.getByText("How token efficiency appears when wide composer auto-collapse is off."),
+      )
       .toBeInTheDocument();
   });
 });
