@@ -1,16 +1,17 @@
-# Source Control Integrations
+# Source Control And Work-Item Integrations
 
-Ryco connects directly to your Git hosting provider so you can create pull requests, review code, and manage repositories without leaving your editor. Work stays in flow—no more jumping between browser tabs and terminal windows.
+Ryco connects to Git hosting providers and Jira so you can create pull requests, review code, manage repositories, and start work from tracked issues without leaving the app.
 
 ## Supported Providers
 
 Ryco works with the platforms your team already uses:
 
-- **GitHub** – Pull requests, repository creation, and clone integration
-- **GitLab** – Merge requests, repository publishing, and hosted clones
+- **GitHub** – Pull requests, issues, comments/reactions, repository creation, clone integration, and GitHub Actions status/logs
+- **GitLab** – Merge requests, issues, repository publishing, and hosted clones
 - **Forgejo / Codeberg** – Pull requests, issues, repository publishing, and hosted clones
-- **Bitbucket** – Pull request workflows (via API token authentication)
-- **Azure DevOps** – Pull request support for Microsoft-hosted repositories
+- **Bitbucket** – Pull requests, issues, repository publishing, hosted clones, and Atlassian token workflows
+- **Azure DevOps** – Pull requests and work-item-backed issue flows for Microsoft-hosted repositories
+- **Jira Cloud** – Project-linked work items, detail views, comments, field updates, transitions, and branch/worktree linkage
 
 ## What You Can Do
 
@@ -41,6 +42,23 @@ Ryco works with the platforms your team already uses:
 - See if your current branch already has an open PR/MR
 - Open the review directly in your browser with one click
 - Check out a teammate's branch to review code locally
+- Inspect PR details, comments, changed files, and workflow/check status from the project explorer where supported
+
+### Work From Issues And Jira Tickets
+
+**Use issues as agent context**
+
+- Search issues and pull/merge requests from the composer with the `#` trigger
+- Attach title, body, metadata, and recent comments to the next agent turn
+- Use issue or PR context to create branches, worktrees, commits, and PR descriptions
+
+**Use Jira as a work-item system**
+
+- Add a Jira token from **Settings → Source Control → Atlassian Workflow**
+- Link a project to Jira project keys from the project settings panel
+- Browse Jira work items in the project explorer's **Jira** tab
+- View details, add/edit comments, update supported fields, and move work items through available transitions
+- Start worktrees/branches from Jira keys and show linked Jira chips in the sidebar and chat header
 
 ### Know Your Setup at a Glance
 
@@ -82,7 +100,9 @@ That's it—you can now clone, publish, and create pull requests.
 
 ### For Bitbucket
 
-Bitbucket uses API tokens instead of a CLI tool:
+Bitbucket can use environment variables or stored Atlassian tokens.
+
+For environment-variable setup:
 
 1. Create an API token in your Atlassian account with read/write access to pull requests and repositories
 2. Add these environment variables to the environment running Ryco:
@@ -91,6 +111,18 @@ Bitbucket uses API tokens instead of a CLI tool:
    export RYCO_BITBUCKET_API_TOKEN="your-token"
    ```
 3. Restart Ryco and verify the connection in **Source Control settings**
+
+For in-app setup, open **Settings → Source Control → Atlassian Workflow** and save a Bitbucket token.
+
+### For Jira Cloud
+
+Jira currently uses manual Atlassian API tokens.
+
+1. Create an Atlassian API token for the Jira account you want Ryco to use.
+2. Open **Settings → Source Control → Atlassian Workflow**.
+3. Save a Jira token with your Jira site URL, account email, and API token.
+4. Open a project's settings panel and link the Jira connection plus one or more Jira project keys.
+5. Use the project explorer's **Jira** tab to browse, search, update, comment on, and transition work items.
 
 ### For Forgejo / Codeberg
 
@@ -171,6 +203,7 @@ Then restart Ryco and verify the connection in **Source Control settings**.
 
 - **Provider shows "Not authenticated"** – Run the login command for that provider (e.g., `gh auth login`) in a terminal on the server, then rescan in Settings
 - **Bitbucket not connecting** – Double-check your environment variables are set in the correct shell profile and the server was restarted
+- **Jira tab is empty** – Confirm a Jira token is saved, the project is linked to the right Jira project keys, and the token account can see those issues
 - **Forgejo not connecting** – If you use `fj`, run `fj auth list` and `fj -H codeberg.org whoami` on the server, then restart Ryco and rescan. If that works but Ryco still cannot authenticate, set `RYCO_FORGEJO_CLI_KEYS_FILE` to the `fj` `keys.json` path. If you use environment variables, confirm `RYCO_FORGEJO_BASE_URL` points at the instance root and the token has repository access.
 - **Can't push to a remote** – Verify your Git remote URL matches the provider you've authenticated with (SSH vs HTTPS remotes may need different credentials)
 
@@ -181,3 +214,4 @@ Then restart Ryco and verify the connection in **Source Control settings**.
 - [Forgejo API Usage](https://forgejo.org/docs/latest/user/api-usage/)
 - [Forgejo CLI (`fj`)](https://codeberg.org/forgejo-contrib/forgejo-cli)
 - [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/)
+- [Atlassian API tokens](https://id.atlassian.com/manage-profile/security/api-tokens)

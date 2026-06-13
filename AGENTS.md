@@ -7,7 +7,7 @@
 
 ## Project Snapshot
 
-Ryco is a minimal web GUI for using coding agents like Codex and Claude.
+Ryco is a minimal web GUI for using coding agents including Codex, Claude, GitHub Copilot, OpenCode, and Cursor.
 
 This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term maintainability is encouraged.
 
@@ -25,25 +25,41 @@ Long term maintainability is a core priority. If you add new functionality, firs
 
 ## Package Roles
 
-- `apps/server`: Node.js WebSocket server. Wraps Codex app-server (JSON-RPC over stdio), serves the React web app, and manages provider sessions.
-- `apps/web`: React/Vite UI. Owns session UX, conversation/event rendering, and client-side state. Connects to the server via WebSocket.
-- `packages/contracts`: Shared effect/Schema schemas and TypeScript contracts for provider events, WebSocket protocol, and model/session types. Keep this package schema-only — no runtime logic.
+- `apps/server`: HTTP/WebSocket backend and `ryco-cli` package. Serves the React app, owns provider sessions, orchestration, persistence, terminals, git/source-control operations, auth, and remote/pairing endpoints.
+- `apps/web`: React/Vite UI. Owns session UX, conversation/event rendering, settings, project/source-control views, and client-side state. Connects to one or more Ryco servers over WebSocket.
+- `apps/desktop`: Electron shell. Starts a desktop-scoped backend process, wires desktop APIs such as file dialogs/updates/SSH prompts, and loads the shared web app.
+- `apps/marketing`: Astro marketing/download site.
+- `packages/contracts`: Shared Effect Schema schemas and TypeScript contracts for RPC, provider events, orchestration, settings, model/session types, keybindings, source control, and work items. Keep this package schema-only — no runtime logic.
 - `packages/shared`: Shared runtime utilities consumed by both server and web. Uses explicit subpath exports (e.g. `@ryco/shared/git`) — no barrel index.
+- `packages/client-runtime`: Client-side environment/endpoint helpers shared by web and desktop clients.
+- `packages/effect-codex-app-server`: Effect-based Codex app-server JSON-RPC protocol/client wrapper.
+- `packages/effect-acp`: Effect-based Agent Client Protocol schema/client/agent helpers used by ACP providers.
+- `packages/ssh`: SSH config/auth/command/tunnel utilities for desktop-managed remote access.
+- `packages/tailscale`: Tailscale endpoint and Serve helpers for remote access.
 
-## Codex App Server (Important)
+## Provider Runtime Architecture (Important)
 
-Ryco is currently Codex-first. The server starts `codex app-server` (JSON-RPC over stdio) per provider session, then streams structured events to the browser through WebSocket push messages.
+Ryco supports multiple provider drivers: Codex, Claude, GitHub Copilot, OpenCode, and Cursor. Provider instances are configured through `ServerSettings.providerInstances`; each instance has a stable `ProviderInstanceId`, driver-specific config, optional environment variables, display name, accent color, and enabled state.
 
-How we use it in this codebase:
+Current provider runtime shape:
 
-- Session startup/resume and turn lifecycle are brokered in `apps/server/src/codexAppServerManager.ts`.
-- Provider dispatch and thread event logging are coordinated in `apps/server/src/providerManager.ts`.
-- WebSocket server routes NativeApi methods in `apps/server/src/wsServer.ts`.
-- Web app consumes orchestration domain events via WebSocket push on channel `orchestration.domainEvent` (provider runtime activity is projected into orchestration events server-side).
+- Built-in drivers are registered in `apps/server/src/provider/builtInDrivers.ts`.
+- Driver-specific adapters live under `apps/server/src/provider/Drivers/*Driver.ts` and `apps/server/src/provider/Layers/*Adapter.ts`.
+- Provider instance construction and hot reload are coordinated by `apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts`.
+- Turn/session lifecycle is brokered by `apps/server/src/provider/Layers/ProviderService.ts`.
+- Provider runtime events are projected into orchestration by `apps/server/src/orchestration/Services/ProviderRuntimeIngestion.ts`, `ProviderCommandReactor.ts`, `CheckpointReactor.ts`, and `OrchestrationEngine.ts`.
+- WebSocket RPC and push streams are routed in `apps/server/src/ws.ts`; orchestration updates are consumed by the web app through the RPC client in `apps/web/src/rpc/`.
+
+Provider protocol notes:
+
+- Codex uses `codex app-server` via JSON-RPC over stdio, wrapped by `packages/effect-codex-app-server`.
+- Claude uses the Anthropic Claude Agent SDK.
+- Copilot, OpenCode, and Cursor are implemented as first-party drivers; Cursor uses ACP, and shared ACP helpers live in `packages/effect-acp`.
 
 Docs:
 
 - Codex App Server docs: https://developers.openai.com/codex/sdk/#app-server
+- Provider user guides: `docs/providers/codex.md`, `docs/providers/claude.md`
 
 ## Reference Repos
 

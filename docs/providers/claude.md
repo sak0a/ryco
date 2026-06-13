@@ -2,6 +2,9 @@
 
 This guide is for people who want to use more than one Claude setup in Ryco.
 
+There is no separate root `CLAUDE.md` in this repository. This file is the current Claude provider
+guide.
+
 Common reasons:
 
 - use separate work and personal Claude accounts

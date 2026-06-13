@@ -1,6 +1,6 @@
 # ryco-cli
 
-Ryco is a minimal web GUI for coding agents. The CLI starts the Ryco server, serves the bundled web app, and connects it to local provider CLIs such as Codex, Claude, GitHub Copilot, OpenCode, and Cursor.
+Ryco is a minimal web GUI for coding agents. The CLI starts the Ryco server, serves the bundled web app, and connects it to local provider runtimes such as Codex, Claude, GitHub Copilot, OpenCode, and Cursor.
 
 Ryco is early WIP. Expect bugs and breaking changes.
 
@@ -26,8 +26,9 @@ Install and authenticate at least one provider before using Ryco:
 - Codex: install the Codex CLI and run `codex login`
 - Claude: install Claude Code and run `claude auth login`
 - OpenCode: install OpenCode and run `opencode auth login`
+- GitHub Copilot and Cursor: install/authenticate the provider CLI expected by the corresponding SDK/runtime, then verify live status in Settings
 
-Ryco discovers available providers from the machine running the CLI.
+Ryco discovers available providers from the machine running the CLI. Provider binaries, custom homes, server URLs, per-instance environment variables, display names, and accent colors are configured in Settings.
 
 ## Usage
 
@@ -63,6 +64,8 @@ Common options:
 - `--mode web|desktop`: runtime mode
 - `--no-browser`: disable automatic browser opening
 - `--auto-bootstrap-project-from-cwd`: create a project for the current working directory on startup when missing
+- `--tailscale-serve`: expose this backend over HTTPS on the Tailnet through Tailscale Serve
+- `--log-websocket-events`: emit server-side WebSocket traffic logs for debugging
 
 Useful commands:
 

@@ -3,7 +3,7 @@
 Ryco reads keybindings from:
 
 - `~/.ryco/userdata/keybindings.json`
-- legacy fallback: `~/.ryco/userdata/keybindings.json`
+- dev mode: `$RYCO_HOME/dev/keybindings.json`
 
 The file must be a JSON array of rules:
 
@@ -24,11 +24,36 @@ See the full schema for more details: [`packages/contracts/src/keybindings.ts`](
   { "key": "mod+d", "command": "terminal.split", "when": "terminalFocus" },
   { "key": "mod+n", "command": "terminal.new", "when": "terminalFocus" },
   { "key": "mod+w", "command": "terminal.close", "when": "terminalFocus" },
+  { "key": "mod+p", "command": "workspace.files", "when": "!terminalFocus" },
+  { "key": "ctrl+shift+g", "command": "workspace.review", "when": "!terminalFocus" },
+  { "key": "ctrl+`", "command": "workspace.terminal", "when": "!terminalFocus" },
+  { "key": "mod+d", "command": "diff.toggle", "when": "!terminalFocus" },
   { "key": "mod+k", "command": "commandPalette.toggle", "when": "!terminalFocus" },
   { "key": "mod+n", "command": "chat.new", "when": "!terminalFocus" },
   { "key": "mod+shift+o", "command": "chat.new", "when": "!terminalFocus" },
   { "key": "mod+shift+n", "command": "chat.newLocal", "when": "!terminalFocus" },
-  { "key": "mod+o", "command": "editor.openFavorite" }
+  { "key": "mod+shift+m", "command": "modelPicker.toggle", "when": "!terminalFocus" },
+  { "key": "mod+o", "command": "editor.openFavorite" },
+  { "key": "mod+shift+[", "command": "thread.previous" },
+  { "key": "mod+shift+]", "command": "thread.next" },
+  { "key": "mod+1", "command": "thread.jump.1" },
+  { "key": "mod+2", "command": "thread.jump.2" },
+  { "key": "mod+3", "command": "thread.jump.3" },
+  { "key": "mod+4", "command": "thread.jump.4" },
+  { "key": "mod+5", "command": "thread.jump.5" },
+  { "key": "mod+6", "command": "thread.jump.6" },
+  { "key": "mod+7", "command": "thread.jump.7" },
+  { "key": "mod+8", "command": "thread.jump.8" },
+  { "key": "mod+9", "command": "thread.jump.9" },
+  { "key": "mod+1", "command": "modelPicker.jump.1", "when": "modelPickerOpen" },
+  { "key": "mod+2", "command": "modelPicker.jump.2", "when": "modelPickerOpen" },
+  { "key": "mod+3", "command": "modelPicker.jump.3", "when": "modelPickerOpen" },
+  { "key": "mod+4", "command": "modelPicker.jump.4", "when": "modelPickerOpen" },
+  { "key": "mod+5", "command": "modelPicker.jump.5", "when": "modelPickerOpen" },
+  { "key": "mod+6", "command": "modelPicker.jump.6", "when": "modelPickerOpen" },
+  { "key": "mod+7", "command": "modelPicker.jump.7", "when": "modelPickerOpen" },
+  { "key": "mod+8", "command": "modelPicker.jump.8", "when": "modelPickerOpen" },
+  { "key": "mod+9", "command": "modelPicker.jump.9", "when": "modelPickerOpen" }
 ]
 ```
 
@@ -52,10 +77,18 @@ Invalid rules are ignored. Invalid config files are ignored. Warnings are logged
 - `terminal.split`: split terminal (in focused terminal context by default)
 - `terminal.new`: create new terminal (in focused terminal context by default)
 - `terminal.close`: close/kill the focused terminal (in focused terminal context by default)
+- `workspace.files`: open the thread workspace files view
+- `workspace.review`: open the thread review/diff view
+- `workspace.terminal`: open the thread terminal view
+- `diff.toggle`: toggle the diff panel
 - `commandPalette.toggle`: open or close the global command palette
 - `chat.new`: create a new chat thread preserving the active thread's branch/worktree state
 - `chat.newLocal`: create a new chat thread for the active project in a new environment (local/worktree determined by app settings (default `local`))
 - `editor.openFavorite`: open current project/worktree in the last-used editor
+- `modelPicker.toggle`: open or close the model picker
+- `modelPicker.jump.1` through `modelPicker.jump.9`: pick a visible model by position while the model picker is open
+- `thread.previous` / `thread.next`: navigate between threads
+- `thread.jump.1` through `thread.jump.9`: jump to a visible thread by position
 - `script.{id}.run`: run a project script by id (for example `script.test.run`)
 
 ### Key Syntax

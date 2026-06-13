@@ -22,7 +22,7 @@ If you want a log message to show up in the trace file, emit it inside an active
 
 ### Traces
 
-Completed spans are written as NDJSON records to `serverTracePath` (by default, `~/.ryco/userdata/logs/server.trace.ndjson`; legacy installs may still use `~/.ryco/userdata/logs/server.trace.ndjson`).
+Completed spans are written as NDJSON records to `serverTracePath` (by default, `~/.ryco/userdata/logs/server.trace.ndjson`; dev mode uses `$RYCO_HOME/dev/logs/server.trace.ndjson`).
 
 Important fields in each record:
 
@@ -65,15 +65,15 @@ You do not need any extra env vars. Just run the app normally and inspect `serve
 Examples:
 
 ```bash
-npx ryco
+npx ryco-cli
 ```
 
 ```bash
-node --run dev
+bun run dev
 ```
 
 ```bash
-node --run dev:desktop
+bun run dev:desktop
 ```
 
 ### Option 2: Run With A Local LGTM Stack
@@ -116,19 +116,19 @@ export RYCO_TRACE_TIMING_ENABLED=true
 CLI:
 
 ```bash
-npx ryco
+npx ryco-cli
 ```
 
 Monorepo web/server dev:
 
 ```bash
-node --run dev
+bun run dev
 ```
 
 Monorepo desktop dev:
 
 ```bash
-node --run dev:desktop
+bun run dev:desktop
 ```
 
 Packaged desktop app:
