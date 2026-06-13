@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./apps/marketing/public/icon.png" width="128" alt="Ryco" />
+<img src="./assets/ryco-logo.png" width="128" alt="Ryco" />
 
 # Ryco
 

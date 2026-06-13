@@ -28,7 +28,6 @@ Long term maintainability is a core priority. If you add new functionality, firs
 - `apps/server`: HTTP/WebSocket backend and `ryco-cli` package. Serves the React app, owns provider sessions, orchestration, persistence, terminals, git/source-control operations, auth, and remote/pairing endpoints.
 - `apps/web`: React/Vite UI. Owns session UX, conversation/event rendering, settings, project/source-control views, and client-side state. Connects to one or more Ryco servers over WebSocket.
 - `apps/desktop`: Electron shell. Starts a desktop-scoped backend process, wires desktop APIs such as file dialogs/updates/SSH prompts, and loads the shared web app.
-- `apps/marketing`: Astro marketing/download site.
 - `packages/contracts`: Shared Effect Schema schemas and TypeScript contracts for RPC, provider events, orchestration, settings, model/session types, keybindings, source control, and work items. Keep this package schema-only — no runtime logic.
 - `packages/shared`: Shared runtime utilities consumed by both server and web. Uses explicit subpath exports (e.g. `@ryco/shared/git`) — no barrel index.
 - `packages/client-runtime`: Client-side environment/endpoint helpers shared by web and desktop clients.
