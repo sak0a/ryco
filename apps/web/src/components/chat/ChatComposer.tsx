@@ -87,6 +87,7 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
+import { ComposerExpandableLabelControl } from "./ComposerExpandableLabelControl";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import {
@@ -108,17 +109,18 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
-  BotIcon,
   CircleAlertIcon,
   CircleOffIcon,
-  GaugeIcon,
+  ClipboardListIcon,
+  HammerIcon,
   ListTodoIcon,
+  Minimize2Icon,
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
   PenLineIcon,
+  ScaleIcon,
   XIcon,
-  ZapIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
 import { getProviderInteractionModeToggle } from "../../providerModels";
@@ -193,18 +195,19 @@ const tokenModeConfig: Record<
     label: "Balanced",
     triggerLabel: "Balanced",
     description: "Favor concise answers and targeted reads without hiding important detail.",
-    icon: GaugeIcon,
+    icon: ScaleIcon,
   },
   aggressive: {
     label: "Aggressive",
     triggerLabel: "Aggressive",
     description: "Minimize prose and avoid copying large outputs unless needed.",
-    icon: ZapIcon,
+    icon: Minimize2Icon,
   },
 };
 
 const tokenModeOptions = Object.keys(tokenModeConfig) as AgentTokenMode[];
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
+const SELECT_OPEN_SUPPRESSION_MS = 300;
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-slot="popover-popup"]',
@@ -246,7 +249,7 @@ function isInsideComposerFloatingLayer(element: Element): boolean {
   return element.closest(COMPOSER_FLOATING_LAYER_SELECTOR) !== null;
 }
 
-const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
+export const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
@@ -263,7 +266,63 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   const RuntimeModeIcon = runtimeModeOption.icon;
   const tokenModeOption = tokenModeConfig[props.tokenMode];
   const TokenModeIcon = tokenModeOption.icon;
+  const InteractionModeIcon = props.interactionMode === "plan" ? ClipboardListIcon : HammerIcon;
   const tokenModeControlStyle = useUiStateStore((state) => state.tokenModeControlStyle);
+  const wideComposerControlsAutoCollapse = useUiStateStore(
+    (state) => state.wideComposerControlsAutoCollapse,
+  );
+  const [runtimeModeSelectOpen, setRuntimeModeSelectOpen] = useState(false);
+  const [tokenModeSelectOpen, setTokenModeSelectOpen] = useState(false);
+  const [runtimeModeSelectOpenSuppressed, setRuntimeModeSelectOpenSuppressed] = useState(false);
+  const [tokenModeSelectOpenSuppressed, setTokenModeSelectOpenSuppressed] = useState(false);
+  const runtimeModeSuppressOpenUntilRef = useRef(0);
+  const tokenModeSuppressOpenUntilRef = useRef(0);
+  const runtimeModeSuppressOpenTimeoutRef = useRef<number | null>(null);
+  const tokenModeSuppressOpenTimeoutRef = useRef<number | null>(null);
+  const isSelectOpenSuppressed = useCallback((suppressUntilRef: { current: number }) => {
+    return performance.now() < suppressUntilRef.current;
+  }, []);
+  const startRuntimeModeOpenSuppression = useCallback(() => {
+    runtimeModeSuppressOpenUntilRef.current = performance.now() + SELECT_OPEN_SUPPRESSION_MS;
+    setRuntimeModeSelectOpenSuppressed(true);
+    if (runtimeModeSuppressOpenTimeoutRef.current !== null) {
+      window.clearTimeout(runtimeModeSuppressOpenTimeoutRef.current);
+    }
+    runtimeModeSuppressOpenTimeoutRef.current = window.setTimeout(() => {
+      runtimeModeSuppressOpenTimeoutRef.current = null;
+      setRuntimeModeSelectOpenSuppressed(false);
+    }, SELECT_OPEN_SUPPRESSION_MS);
+  }, []);
+  const startTokenModeOpenSuppression = useCallback(() => {
+    tokenModeSuppressOpenUntilRef.current = performance.now() + SELECT_OPEN_SUPPRESSION_MS;
+    setTokenModeSelectOpenSuppressed(true);
+    if (tokenModeSuppressOpenTimeoutRef.current !== null) {
+      window.clearTimeout(tokenModeSuppressOpenTimeoutRef.current);
+    }
+    tokenModeSuppressOpenTimeoutRef.current = window.setTimeout(() => {
+      tokenModeSuppressOpenTimeoutRef.current = null;
+      setTokenModeSelectOpenSuppressed(false);
+    }, SELECT_OPEN_SUPPRESSION_MS);
+  }, []);
+  const closeRuntimeModeSelectAfterItemPress = useCallback(() => {
+    startRuntimeModeOpenSuppression();
+    window.setTimeout(() => setRuntimeModeSelectOpen(false), 0);
+  }, [startRuntimeModeOpenSuppression]);
+  const closeTokenModeSelectAfterItemPress = useCallback(() => {
+    startTokenModeOpenSuppression();
+    window.setTimeout(() => setTokenModeSelectOpen(false), 0);
+  }, [startTokenModeOpenSuppression]);
+
+  useEffect(() => {
+    return () => {
+      if (runtimeModeSuppressOpenTimeoutRef.current !== null) {
+        window.clearTimeout(runtimeModeSuppressOpenTimeoutRef.current);
+      }
+      if (tokenModeSuppressOpenTimeoutRef.current !== null) {
+        window.clearTimeout(tokenModeSuppressOpenTimeoutRef.current);
+      }
+    };
+  }, []);
 
   return (
     <>
@@ -273,20 +332,22 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
         <>
           <Button
             variant="ghost"
-            className="shrink-0 whitespace-nowrap px-1.5 text-muted-foreground/70 hover:text-foreground/80 sm:px-2"
+            className="group/composer-label-control shrink-0 whitespace-nowrap px-1.5 text-muted-foreground/70 hover:text-foreground/80 sm:px-2"
             size="xs"
             type="button"
             onClick={props.onToggleInteractionMode}
+            aria-label={props.interactionMode === "plan" ? "Plan mode" : "Build mode"}
             title={
               props.interactionMode === "plan"
                 ? "Plan mode — click to return to normal build mode"
                 : "Default mode — click to enter plan mode"
             }
           >
-            <BotIcon />
-            <span className="sr-only sm:not-sr-only">
-              {props.interactionMode === "plan" ? "Plan" : "Build"}
-            </span>
+            <ComposerExpandableLabelControl
+              collapsed={wideComposerControlsAutoCollapse}
+              icon={<InteractionModeIcon className="size-4 sm:size-3.5" />}
+              label={props.interactionMode === "plan" ? "Plan" : "Build"}
+            />
           </Button>
 
           <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
@@ -295,21 +356,39 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 
       <Select
         value={props.runtimeMode}
-        onValueChange={(value) => props.onRuntimeModeChange(value!)}
+        open={runtimeModeSelectOpen}
+        onOpenChange={(open) => {
+          if (open && isSelectOpenSuppressed(runtimeModeSuppressOpenUntilRef)) {
+            return;
+          }
+          setRuntimeModeSelectOpen(open);
+        }}
+        onValueChange={(value) => {
+          if (!value) return;
+          props.onRuntimeModeChange(value);
+          startRuntimeModeOpenSuppression();
+          setRuntimeModeSelectOpen(false);
+        }}
       >
         <SelectTrigger
           variant="ghost"
           size="xs"
           className={cn(
-            "gap-1 px-1.5 font-medium sm:px-1.5",
+            "group/composer-label-control gap-1 px-1.5 font-medium sm:px-1.5",
+            wideComposerControlsAutoCollapse &&
+              "min-w-7 justify-center px-1 sm:px-1 [&_[data-slot=select-icon]]:hidden",
             props.runtimeMode === "full-access" &&
               "text-orange-700 hover:text-orange-800 dark:text-orange-400 dark:hover:text-orange-300",
           )}
-          aria-label="Runtime mode"
+          aria-label={`Runtime mode: ${runtimeModeOption.triggerLabel}`}
           title={runtimeModeOption.description}
         >
-          <RuntimeModeIcon className="size-4" />
-          <SelectValue>{runtimeModeOption.triggerLabel}</SelectValue>
+          <ComposerExpandableLabelControl
+            collapsed={wideComposerControlsAutoCollapse}
+            expanded={runtimeModeSelectOpen || runtimeModeSelectOpenSuppressed}
+            icon={<RuntimeModeIcon className="size-4" />}
+            label={<SelectValue>{runtimeModeOption.triggerLabel}</SelectValue>}
+          />
         </SelectTrigger>
         <SelectPopup
           alignItemWithTrigger={false}
@@ -319,7 +398,12 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             const option = runtimeModeConfig[mode];
             const OptionIcon = option.icon;
             return (
-              <SelectItem key={mode} value={mode} className="min-w-0 py-1.5">
+              <SelectItem
+                key={mode}
+                value={mode}
+                className="min-w-0 py-1.5"
+                onClick={closeRuntimeModeSelectAfterItemPress}
+              >
                 <div className="grid min-w-0 gap-0.5">
                   <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
                     <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -337,22 +421,47 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 
       <Select
         value={props.tokenMode}
-        onValueChange={(value) => props.onTokenModeChange(value as AgentTokenMode)}
+        open={tokenModeSelectOpen}
+        onOpenChange={(open) => {
+          if (open && isSelectOpenSuppressed(tokenModeSuppressOpenUntilRef)) {
+            return;
+          }
+          setTokenModeSelectOpen(open);
+        }}
+        onValueChange={(value) => {
+          if (!value) return;
+          props.onTokenModeChange(value as AgentTokenMode);
+          startTokenModeOpenSuppression();
+          setTokenModeSelectOpen(false);
+        }}
       >
         <SelectTrigger
           variant="ghost"
           size="xs"
           className={cn(
-            "gap-1 px-1.5 font-medium text-muted-foreground/80 hover:text-foreground/80 sm:px-1.5",
-            tokenModeControlStyle === "icon" && "min-w-7 justify-center px-1 sm:px-1",
+            "group/composer-label-control gap-1 px-1.5 font-medium text-muted-foreground/80 hover:text-foreground/80 sm:px-1.5",
+            (wideComposerControlsAutoCollapse || tokenModeControlStyle === "icon") &&
+              "min-w-7 justify-center px-1 sm:px-1",
+            wideComposerControlsAutoCollapse && "[&_[data-slot=select-icon]]:hidden",
           )}
-          aria-label="Token mode"
+          aria-label={`Token mode: ${tokenModeOption.triggerLabel}`}
           title={tokenModeOption.description}
         >
-          {tokenModeControlStyle !== "text" ? <TokenModeIcon className="size-4" /> : null}
-          {tokenModeControlStyle !== "icon" ? (
-            <SelectValue>{tokenModeOption.triggerLabel}</SelectValue>
-          ) : null}
+          {wideComposerControlsAutoCollapse ? (
+            <ComposerExpandableLabelControl
+              collapsed
+              expanded={tokenModeSelectOpen || tokenModeSelectOpenSuppressed}
+              icon={<TokenModeIcon className="size-4" />}
+              label={<SelectValue>{tokenModeOption.triggerLabel}</SelectValue>}
+            />
+          ) : (
+            <>
+              {tokenModeControlStyle !== "text" ? <TokenModeIcon className="size-4" /> : null}
+              {tokenModeControlStyle !== "icon" ? (
+                <SelectValue>{tokenModeOption.triggerLabel}</SelectValue>
+              ) : null}
+            </>
+          )}
         </SelectTrigger>
         <SelectPopup
           alignItemWithTrigger={false}
@@ -362,7 +471,12 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             const option = tokenModeConfig[mode];
             const OptionIcon = option.icon;
             return (
-              <SelectItem key={mode} value={mode} className="min-w-0 py-1.5">
+              <SelectItem
+                key={mode}
+                value={mode}
+                className="min-w-0 py-1.5"
+                onClick={closeTokenModeSelectAfterItemPress}
+              >
                 <div className="grid min-w-0 gap-0.5">
                   <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
                     <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -384,7 +498,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
           <Button
             variant="ghost"
             className={cn(
-              "shrink-0 whitespace-nowrap px-1.5 sm:px-2",
+              "group/composer-label-control shrink-0 whitespace-nowrap px-1.5 sm:px-2",
               props.planSidebarOpen
                 ? "text-blue-400 hover:text-blue-300"
                 : "text-muted-foreground/70 hover:text-foreground/80",
@@ -392,14 +506,18 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             size="xs"
             type="button"
             onClick={props.onTogglePlanSidebar}
+            aria-label={props.planSidebarLabel}
             title={
               props.planSidebarOpen
                 ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
                 : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`
             }
           >
-            <ListTodoIcon />
-            <span className="sr-only sm:not-sr-only">{props.planSidebarLabel}</span>
+            <ComposerExpandableLabelControl
+              collapsed={wideComposerControlsAutoCollapse}
+              icon={<ListTodoIcon className="size-4 sm:size-3.5" />}
+              label={props.planSidebarLabel}
+            />
           </Button>
         </>
       ) : null}

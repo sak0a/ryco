@@ -119,6 +119,28 @@ describe("ReasoningChip", () => {
     });
   });
 
+  it("renders dots without an icon in dots-only style", async () => {
+    useUiStateStore.getState().setReasoningIndicatorStyle("dots");
+    mounted = await render(
+      <ReasoningChip
+        descriptor={effortDescriptor}
+        descriptors={[effortDescriptor]}
+        prompt=""
+        primarySelectDescriptorId="effort"
+        ultrathinkInBodyText={false}
+        ultrathinkPromptControlled={false}
+        onChangeDescriptors={vi.fn()}
+        onPromptChange={vi.fn()}
+      />,
+    );
+    await vi.waitFor(() => {
+      const button = document.querySelector("button");
+      expect(button?.querySelector("svg")).toBeNull();
+      expect(button?.textContent?.trim() ?? "").toBe("");
+      expect(document.querySelectorAll('[data-testid="reasoning-dot-on"]').length).toBe(3);
+    });
+  });
+
   it("opens the menu on click and applies the chosen level", async () => {
     const onChangeDescriptors = vi.fn();
     useUiStateStore.getState().setReasoningIndicatorStyle("icon-dots");

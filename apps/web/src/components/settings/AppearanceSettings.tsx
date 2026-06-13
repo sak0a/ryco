@@ -8,13 +8,14 @@ import {
   DownloadIcon,
   GaugeIcon,
   type LucideIcon,
+  Minimize2Icon,
   PencilIcon,
   PlusIcon,
   RadiusIcon,
+  ScaleIcon,
   Trash2Icon,
   TypeIcon,
   UploadIcon,
-  ZapIcon,
 } from "lucide-react";
 import {
   type ChangeEvent,
@@ -75,6 +76,7 @@ import {
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import {
   SettingResetButton,
@@ -97,6 +99,11 @@ const REASONING_INDICATOR_OPTIONS = [
     description: "Brain icon with intensity dots",
   },
   {
+    value: "dots" as const,
+    label: "Dots only",
+    description: "Intensity dots without the icon",
+  },
+  {
     value: "text" as const,
     label: "Text label",
     description: "Color-tinted abbreviated text",
@@ -113,14 +120,14 @@ const TOKEN_MODE_CONTROL_OPTIONS = [
     label: "Icon + text",
     description: "Show the mode icon and label",
     preview: "Balanced",
-    icon: GaugeIcon,
+    icon: ScaleIcon,
   },
   {
     value: "icon" as const,
     label: "Icon only",
     description: "Use the compact mode icon",
     preview: "",
-    icon: ZapIcon,
+    icon: Minimize2Icon,
   },
   {
     value: "text" as const,
@@ -145,12 +152,34 @@ const TRANSPARENCY_PREVIEW_OPACITY: Record<string, number> = {
   glass: 0.72,
 };
 
+function ReasoningDotsPreview() {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map((position) => (
+        <span
+          key={position}
+          className={cn(
+            "size-[5px] rounded-full bg-current",
+            position <= 3 ? "opacity-100" : "opacity-30",
+          )}
+        />
+      ))}
+    </span>
+  );
+}
+
 export function AppearanceSettingsPanel() {
   const { theme, setTheme, resolvedTheme, activeThemeId, setActiveTheme } = useTheme();
   const reasoningIndicatorStyle = useUiStateStore((state) => state.reasoningIndicatorStyle);
   const setReasoningIndicatorStyle = useUiStateStore((state) => state.setReasoningIndicatorStyle);
   const tokenModeControlStyle = useUiStateStore((state) => state.tokenModeControlStyle);
   const setTokenModeControlStyle = useUiStateStore((state) => state.setTokenModeControlStyle);
+  const wideComposerControlsAutoCollapse = useUiStateStore(
+    (state) => state.wideComposerControlsAutoCollapse,
+  );
+  const setWideComposerControlsAutoCollapse = useUiStateStore(
+    (state) => state.setWideComposerControlsAutoCollapse,
+  );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ThemeDefinition | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -686,23 +715,15 @@ export function AppearanceSettingsPanel() {
                         "bg-indigo-500/15 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300",
                       )}
                     >
-                      {option.value === "icon-dots" ? (
-                        <>
-                          <BrainIcon aria-hidden="true" className="size-3" />
-                          <span className="inline-flex items-center gap-0.5">
-                            {[1, 2, 3, 4, 5].map((position) => (
-                              <span
-                                key={position}
-                                className={cn(
-                                  "size-[5px] rounded-full bg-current",
-                                  position <= 3 ? "opacity-100" : "opacity-30",
-                                )}
-                              />
-                            ))}
-                          </span>
-                        </>
-                      ) : (
+                      {option.value === "text" ? (
                         <span>High</span>
+                      ) : (
+                        <>
+                          {option.value === "icon-dots" ? (
+                            <BrainIcon aria-hidden="true" className="size-3" />
+                          ) : null}
+                          <ReasoningDotsPreview />
+                        </>
                       )}
                     </span>
                   </button>
@@ -712,8 +733,27 @@ export function AppearanceSettingsPanel() {
           }
         />
         <SettingsRow
+          title="Auto-collapse wide composer labels"
+          description="Show long composer mode labels only on hover or focus."
+          resetAction={
+            !wideComposerControlsAutoCollapse ? (
+              <SettingResetButton
+                label="wide composer labels"
+                onClick={() => setWideComposerControlsAutoCollapse(true)}
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={wideComposerControlsAutoCollapse}
+              onCheckedChange={(checked) => setWideComposerControlsAutoCollapse(Boolean(checked))}
+              aria-label="Auto-collapse wide composer labels"
+            />
+          }
+        />
+        <SettingsRow
           title="Token mode style"
-          description="How the token efficiency mode appears in the composer bar."
+          description="How token efficiency appears when wide composer auto-collapse is off."
           resetAction={
             tokenModeControlStyle !== "icon-text" ? (
               <SettingResetButton

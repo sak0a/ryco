@@ -87,6 +87,20 @@ export const ReasoningChip = memo(function ReasoningChip(props: ReasoningChipPro
     ? scaleOptions.findIndex((option) => option.id === effectiveValue)
     : -1;
   const ordinal = currentScaleIndex >= 0 ? currentScaleIndex + 1 : 0;
+  const dotIndicator = (
+    <span className="inline-flex items-center gap-0.5">
+      {Array.from({ length: totalDots }, (_, index) => {
+        const on = index + 1 <= ordinal;
+        return (
+          <span
+            key={index}
+            data-testid={on ? "reasoning-dot-on" : "reasoning-dot-off"}
+            className={cn("size-[5px] rounded-full bg-current", on ? "opacity-100" : "opacity-30")}
+          />
+        );
+      })}
+    </span>
+  );
 
   return (
     <Menu>
@@ -110,22 +124,10 @@ export const ReasoningChip = memo(function ReasoningChip(props: ReasoningChipPro
           <span>{abbreviation}</span>
         ) : (
           <>
-            <BrainIcon aria-hidden="true" className="size-3" />
-            <span className="inline-flex items-center gap-0.5">
-              {Array.from({ length: totalDots }, (_, index) => {
-                const on = index + 1 <= ordinal;
-                return (
-                  <span
-                    key={index}
-                    data-testid={on ? "reasoning-dot-on" : "reasoning-dot-off"}
-                    className={cn(
-                      "size-[5px] rounded-full bg-current",
-                      on ? "opacity-100" : "opacity-30",
-                    )}
-                  />
-                );
-              })}
-            </span>
+            {indicatorStyle === "icon-dots" ? (
+              <BrainIcon aria-hidden="true" className="size-3" />
+            ) : null}
+            {dotIndicator}
           </>
         )}
       </MenuTrigger>
