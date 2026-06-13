@@ -14,6 +14,7 @@ import { useStore } from "../../store";
 import { createThreadSelectorAcrossEnvironments } from "../../storeSelectors";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import {
+  buildOpenAgentSearch,
   buildOpenFilesSearch,
   buildOpenReviewSearch,
   buildOpenTerminalSearch,
@@ -61,12 +62,15 @@ export function DraftChatThreadRouteView({
   const previewOpen = search.preview === "1";
   const rightPanelMode: RightPanelMode | null = getRightPanelMode(search);
   const rightPanelOpen = isRightPanelOpen(search);
+  const activeAgentKey =
+    search.workspaceTab === "agent" && search.workspaceAgentKey ? search.workspaceAgentKey : null;
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const [rightPanelMountState, setRightPanelMountState] = useState(() => ({
     draftId,
     hasOpenedDiff: diffOpen,
     hasOpenedPreview: previewOpen,
     hasOpenedTerminal: rightPanelMode === "terminal",
+    openedAgentKeys: activeAgentKey ? [activeAgentKey] : [],
   }));
   const hasOpenedDiff =
     rightPanelMountState.draftId === draftId ? rightPanelMountState.hasOpenedDiff : diffOpen;
@@ -76,6 +80,15 @@ export function DraftChatThreadRouteView({
     rightPanelMountState.draftId === draftId
       ? rightPanelMountState.hasOpenedTerminal
       : rightPanelMode === "terminal";
+  const openedAgentKeys = useMemo(() => {
+    const keys =
+      rightPanelMountState.draftId === draftId
+        ? rightPanelMountState.openedAgentKeys
+        : activeAgentKey
+          ? [activeAgentKey]
+          : [];
+    return activeAgentKey && !keys.includes(activeAgentKey) ? [...keys, activeAgentKey] : keys;
+  }, [activeAgentKey, draftId, rightPanelMountState]);
   const [lastOpenedRightPanelMode, setLastOpenedRightPanelMode] = useState<RightPanelMode>(
     () => rightPanelMode ?? "files",
   );
@@ -108,19 +121,22 @@ export function DraftChatThreadRouteView({
             (previous.draftId === draftId
               ? previous.hasOpenedTerminal
               : rightPanelMode === "terminal") || panelMode === "terminal",
+          openedAgentKeys:
+            previous.draftId === draftId ? previous.openedAgentKeys : openedAgentKeys,
         };
         if (
           previous.draftId === nextState.draftId &&
           previous.hasOpenedDiff === nextState.hasOpenedDiff &&
           previous.hasOpenedPreview === nextState.hasOpenedPreview &&
-          previous.hasOpenedTerminal === nextState.hasOpenedTerminal
+          previous.hasOpenedTerminal === nextState.hasOpenedTerminal &&
+          previous.openedAgentKeys === nextState.openedAgentKeys
         ) {
           return previous;
         }
         return nextState;
       });
     },
-    [diffOpen, draftId, previewOpen, rightPanelMode],
+    [diffOpen, draftId, openedAgentKeys, previewOpen, rightPanelMode],
   );
   const closeRightPanel = useCallback(() => {
     void navigate({
@@ -131,6 +147,10 @@ export function DraftChatThreadRouteView({
   }, [draftId, navigate]);
   const openRightPanel = useCallback(() => {
     const nextSearch = (previous: Record<string, unknown>) => {
+      const lastAgentKey = openedAgentKeys[openedAgentKeys.length - 1];
+      if (lastOpenedRightPanelMode === "agent" && lastAgentKey) {
+        return buildOpenAgentSearch(previous, lastAgentKey);
+      }
       if (lastOpenedRightPanelMode === "files" && hasOpenedPreview) {
         return buildOpenFilesSearch(previous);
       }
@@ -149,6 +169,9 @@ export function DraftChatThreadRouteView({
       if (hasOpenedTerminal) {
         return buildOpenTerminalSearch(previous);
       }
+      if (lastAgentKey) {
+        return buildOpenAgentSearch(previous, lastAgentKey);
+      }
       return buildOpenWorkspaceSearch(previous);
     };
     void navigate({
@@ -163,6 +186,7 @@ export function DraftChatThreadRouteView({
     hasOpenedTerminal,
     lastOpenedRightPanelMode,
     navigate,
+    openedAgentKeys,
   ]);
   const toggleRightPanel = useCallback(() => {
     if (rightPanelOpen) {
@@ -174,11 +198,37 @@ export function DraftChatThreadRouteView({
   const closePanelTab = useCallback(
     (input: { mode: RightPanelMode; agentKey?: string }) => {
       if (input.mode === "agent") {
-        if (rightPanelMode === "agent") {
+        const nextOpenedAgentKeys = openedAgentKeys.filter((key) => key !== input.agentKey);
+        setRightPanelMountState((previous) => ({
+          draftId,
+          hasOpenedDiff: previous.draftId === draftId ? previous.hasOpenedDiff : hasOpenedDiff,
+          hasOpenedPreview:
+            previous.draftId === draftId ? previous.hasOpenedPreview : hasOpenedPreview,
+          hasOpenedTerminal:
+            previous.draftId === draftId ? previous.hasOpenedTerminal : hasOpenedTerminal,
+          openedAgentKeys: nextOpenedAgentKeys,
+        }));
+
+        if (rightPanelMode === "agent" && activeAgentKey === input.agentKey) {
           void navigate({
             to: "/draft/$draftId",
             params: { draftId },
-            search: (previous) => buildOpenWorkspaceSearch(previous),
+            search: (previous) => {
+              const nextAgentKey = nextOpenedAgentKeys[nextOpenedAgentKeys.length - 1];
+              if (nextAgentKey) {
+                return buildOpenAgentSearch(previous, nextAgentKey);
+              }
+              if (hasOpenedPreview) {
+                return buildOpenFilesSearch(previous);
+              }
+              if (hasOpenedDiff) {
+                return buildOpenReviewSearch(previous);
+              }
+              if (hasOpenedTerminal) {
+                return buildOpenTerminalSearch(previous);
+              }
+              return buildOpenWorkspaceSearch(previous);
+            },
           });
         }
         return;
@@ -196,12 +246,15 @@ export function DraftChatThreadRouteView({
           hasOpenedDiff: nextHasOpenedDiff,
           hasOpenedPreview: nextHasOpenedPreview,
           hasOpenedTerminal: nextHasOpenedTerminal,
+          openedAgentKeys:
+            previous.draftId === draftId ? previous.openedAgentKeys : openedAgentKeys,
         };
         if (
           previous.draftId === nextState.draftId &&
           previous.hasOpenedDiff === nextState.hasOpenedDiff &&
           previous.hasOpenedPreview === nextState.hasOpenedPreview &&
-          previous.hasOpenedTerminal === nextState.hasOpenedTerminal
+          previous.hasOpenedTerminal === nextState.hasOpenedTerminal &&
+          previous.openedAgentKeys === nextState.openedAgentKeys
         ) {
           return previous;
         }
@@ -230,7 +283,16 @@ export function DraftChatThreadRouteView({
         search: nextSearch,
       });
     },
-    [draftId, hasOpenedDiff, hasOpenedPreview, hasOpenedTerminal, navigate, rightPanelMode],
+    [
+      activeAgentKey,
+      draftId,
+      hasOpenedDiff,
+      hasOpenedPreview,
+      hasOpenedTerminal,
+      navigate,
+      openedAgentKeys,
+      rightPanelMode,
+    ],
   );
 
   useEffect(() => {
@@ -239,6 +301,43 @@ export function DraftChatThreadRouteView({
       markRightPanelOpened(rightPanelMode);
     }
   }, [markRightPanelOpened, rightPanelMode]);
+
+  useEffect(() => {
+    if (!activeAgentKey) {
+      return;
+    }
+    setRightPanelMountState((previous) => {
+      const baseAgentKeys = previous.draftId === draftId ? previous.openedAgentKeys : [];
+      if (baseAgentKeys.includes(activeAgentKey)) {
+        return previous.draftId === draftId
+          ? previous
+          : {
+              draftId,
+              hasOpenedDiff,
+              hasOpenedPreview,
+              hasOpenedTerminal,
+              openedAgentKeys: baseAgentKeys,
+            };
+      }
+      return {
+        draftId,
+        hasOpenedDiff: previous.draftId === draftId ? previous.hasOpenedDiff : diffOpen,
+        hasOpenedPreview: previous.draftId === draftId ? previous.hasOpenedPreview : previewOpen,
+        hasOpenedTerminal:
+          previous.draftId === draftId ? previous.hasOpenedTerminal : rightPanelMode === "terminal",
+        openedAgentKeys: [...baseAgentKeys, activeAgentKey],
+      };
+    });
+  }, [
+    activeAgentKey,
+    diffOpen,
+    draftId,
+    hasOpenedDiff,
+    hasOpenedPreview,
+    hasOpenedTerminal,
+    previewOpen,
+    rightPanelMode,
+  ]);
 
   useEffect(() => {
     if (!canonicalThreadRef) {
@@ -282,7 +381,8 @@ export function DraftChatThreadRouteView({
     hasOpenedPreview ||
     rightPanelMode === "terminal" ||
     hasOpenedTerminal ||
-    rightPanelMode === "agent";
+    rightPanelMode === "agent" ||
+    openedAgentKeys.length > 0;
   const mountedRightPanelMode: RightPanelMode | null = rightPanelOpen
     ? rightPanelMode
     : lastOpenedRightPanelMode;
@@ -308,6 +408,7 @@ export function DraftChatThreadRouteView({
           open={rightPanelOpen}
           panelMode={mountedRightPanelMode}
           openedPanelModes={openedPanelModes}
+          openedAgentKeys={openedAgentKeys}
           onClosePanelTab={closePanelTab}
           onClose={closeRightPanel}
           onOpen={openRightPanel}
@@ -339,6 +440,7 @@ export function DraftChatThreadRouteView({
             mode="sheet"
             panelMode={mountedRightPanelMode}
             openedPanelModes={openedPanelModes}
+            openedAgentKeys={openedAgentKeys}
             onClosePanelTab={closePanelTab}
           />
         ) : null}

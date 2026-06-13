@@ -3,7 +3,8 @@ import "../index.css";
 import { render } from "vitest-browser-react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import ThreadWorkspacePanel from "./ThreadWorkspacePanel";
+import ThreadWorkspacePanel, { AgentThreadPanel } from "./ThreadWorkspacePanel";
+import type { ThreadSubagentView } from "../threadWorkspaceViewModel";
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => vi.fn(),
@@ -54,6 +55,7 @@ describe("ThreadWorkspacePanel", () => {
         mode="sidebar"
         panelMode={null}
         openedPanelModes={[]}
+        openedAgentKeys={[]}
         onClosePanelTab={vi.fn()}
       />,
       { container: host },
@@ -70,5 +72,46 @@ describe("ThreadWorkspacePanel", () => {
     expect(
       Math.abs(workspaceRoot!.getBoundingClientRect().width - host.clientWidth),
     ).toBeLessThanOrEqual(1);
+  });
+
+  it("scrolls long subagent transcripts inside the agent panel", async () => {
+    const host = document.createElement("div");
+    host.style.width = "420px";
+    host.style.height = "320px";
+    document.body.append(host);
+
+    const subagent: ThreadSubagentView = {
+      key: "subagent:researcher",
+      name: "Researcher",
+      status: "running",
+      tool: "spawnAgent",
+      detail: "Inspect the retry flow.",
+      providerThreadIds: ["child-thread-1"],
+      startedAt: "2026-06-04T10:00:00.000Z",
+      updatedAt: "2026-06-04T10:00:00.000Z",
+      entries: [],
+      messages: Array.from({ length: 24 }, (_, index) => ({
+        id: `message-${index}`,
+        createdAt: `2026-06-04T10:00:${String(index).padStart(2, "0")}.000Z`,
+        providerThreadId: "child-thread-1",
+        text: `Finding ${index + 1}: this is a deliberately long subagent transcript entry that should remain inside the scroll container rather than expanding the whole panel.`,
+      })),
+    };
+
+    mounted = await render(
+      <AgentThreadPanel subagent={subagent} agentKey="subagent:researcher" />,
+      { container: host },
+    );
+
+    const viewport = document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+
+    expect(viewport).not.toBeNull();
+    expect(viewport!.clientHeight).toBeGreaterThan(0);
+    expect(viewport!.scrollHeight).toBeGreaterThan(viewport!.clientHeight);
+
+    viewport!.scrollTop = viewport!.scrollHeight;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+
+    expect(viewport!.scrollTop).toBeGreaterThan(0);
   });
 });

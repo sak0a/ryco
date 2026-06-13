@@ -36,6 +36,7 @@ import {
   type ThreadSubagentStatus,
   type ThreadSubagentView,
 } from "../threadWorkspaceViewModel";
+import { buildTabs, type WorkspaceTab } from "../threadWorkspaceTabs";
 import { readEnvironmentApi } from "../environmentApi";
 import { shortcutLabelForCommand } from "../keybindings";
 import type { TerminalContextSelection } from "../lib/terminalContext";
@@ -59,20 +60,6 @@ import type { DiffPanelMode } from "./DiffPanelShell";
 import DiffPanel from "./DiffPanel";
 import PreviewPanel from "./PreviewPanel";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-
-type WorkspaceTab =
-  | {
-      key: "files" | "review" | "terminal";
-      label: string;
-      mode: Exclude<RightPanelMode, "agent">;
-    }
-  | {
-      key: string;
-      label: string;
-      mode: "agent";
-      agentKey: string;
-      status: ThreadSubagentStatus;
-    };
 
 function statusBucket(status: ThreadSubagentStatus): "idle" | "in_progress" | "review" | "done" {
   if (status === "running") return "in_progress";
@@ -129,7 +116,10 @@ function AgentStatusName(props: { agent: Pick<ThreadSubagentView, "name" | "stat
   );
 }
 
-function AgentThreadPanel(props: { subagent: ThreadSubagentView | null; agentKey: string | null }) {
+export function AgentThreadPanel(props: {
+  subagent: ThreadSubagentView | null;
+  agentKey: string | null;
+}) {
   if (!props.subagent) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center">
@@ -152,7 +142,7 @@ function AgentThreadPanel(props: { subagent: ThreadSubagentView | null; agentKey
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="border-b border-border/60 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <BotIcon className="size-4 shrink-0 text-muted-foreground" />
@@ -168,9 +158,41 @@ function AgentThreadPanel(props: { subagent: ThreadSubagentView | null; agentKey
             {props.subagent.detail}
           </p>
         ) : null}
+        {props.subagent.tool || props.subagent.providerThreadIds.length > 0 ? (
+          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
+            {props.subagent.tool ? (
+              <span className="rounded-md border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                {props.subagent.tool}
+              </span>
+            ) : null}
+            {props.subagent.providerThreadIds.slice(0, 2).map((threadId) => (
+              <span
+                key={threadId}
+                className="max-w-40 truncate rounded-md border border-border/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/70"
+              >
+                {threadId}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-3 p-4">
+          {props.subagent.messages.length > 0
+            ? props.subagent.messages.map((message) => (
+                <div key={message.id} className="rounded-md border border-border/60 bg-card/40 p-3">
+                  <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
+                    <p className="truncate text-xs font-medium text-foreground">Subagent</p>
+                    {message.providerThreadId ? (
+                      <span className="truncate font-mono text-[10px] text-muted-foreground/55">
+                        {message.providerThreadId}
+                      </span>
+                    ) : null}
+                  </div>
+                  <ChatMarkdown text={message.text} cwd={undefined} isStreaming={false} />
+                </div>
+              ))
+            : null}
           {props.subagent.entries.length > 0 ? (
             props.subagent.entries.map((entry) => (
               <div key={entry.id} className="rounded-md border border-border/60 bg-card/40 p-3">
@@ -201,7 +223,7 @@ function AgentThreadPanel(props: { subagent: ThreadSubagentView | null; agentKey
                 ) : null}
               </div>
             ))
-          ) : (
+          ) : props.subagent.messages.length === 0 ? (
             <div className="flex min-h-48 flex-col items-center justify-center rounded-md border border-dashed border-border/70 bg-card/20 p-6 text-center">
               <MessageSquareTextIcon className="size-5 text-muted-foreground/60" />
               <p className="mt-3 text-sm font-medium text-foreground">No transcript captured yet</p>
@@ -210,7 +232,7 @@ function AgentThreadPanel(props: { subagent: ThreadSubagentView | null; agentKey
                 when the provider exposes them.
               </p>
             </div>
-          )}
+          ) : null}
         </div>
       </ScrollArea>
     </div>
@@ -455,51 +477,6 @@ function WorkspaceTerminalPanel() {
   );
 }
 
-function buildTabs(input: {
-  subagents: ReadonlyArray<ThreadSubagentView>;
-  activeAgentKey: string | null;
-  openedPanelModes: ReadonlyArray<RightPanelMode>;
-}) {
-  const tabs: WorkspaceTab[] = [];
-  const openedModes = new Set(input.openedPanelModes);
-  if (openedModes.has("files")) {
-    tabs.push({ key: "files", label: "Files", mode: "files" });
-  }
-  if (openedModes.has("review")) {
-    tabs.push({ key: "review", label: "Review", mode: "review" });
-  }
-  if (openedModes.has("terminal")) {
-    tabs.push({ key: "terminal", label: "Terminal", mode: "terminal" });
-  }
-  const visibleSubagents = input.activeAgentKey
-    ? input.subagents.some((subagent) => subagent.key === input.activeAgentKey)
-      ? input.subagents
-      : [
-          ...input.subagents,
-          {
-            key: input.activeAgentKey,
-            name: "Subagent",
-            status: "idle" as const,
-            detail: null,
-            startedAt: "",
-            updatedAt: "",
-            entries: [],
-          },
-        ]
-    : [];
-
-  for (const subagent of visibleSubagents) {
-    tabs.push({
-      key: subagent.key,
-      label: subagent.name,
-      mode: "agent",
-      agentKey: subagent.key,
-      status: subagent.status,
-    });
-  }
-  return tabs;
-}
-
 function LauncherCard(props: {
   label: string;
   description: string;
@@ -632,6 +609,7 @@ export default function ThreadWorkspacePanel(props: {
   mode: DiffPanelMode;
   panelMode: RightPanelMode | null;
   openedPanelModes: ReadonlyArray<RightPanelMode>;
+  openedAgentKeys: ReadonlyArray<string>;
   onClosePanelTab: (input: { mode: RightPanelMode; agentKey?: string }) => void;
 }) {
   const { onClosePanelTab } = props;
@@ -666,9 +644,10 @@ export default function ThreadWorkspacePanel(props: {
       buildTabs({
         subagents,
         activeAgentKey: agentKey,
+        openedAgentKeys: props.openedAgentKeys,
         openedPanelModes,
       }),
-    [agentKey, openedPanelModes, subagents],
+    [agentKey, openedPanelModes, props.openedAgentKeys, subagents],
   );
   const activeTabKey = activeMode === "agent" ? agentKey : activeMode;
 
@@ -867,7 +846,7 @@ export default function ThreadWorkspacePanel(props: {
         </Button>
       </div>
       <div
-        className="min-h-0 flex-1 overflow-hidden"
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
         id={workspaceTabPanelId(activeTabKey)}
         role="tabpanel"
         aria-labelledby={activeTabKey ? workspaceTabId(activeTabKey) : undefined}

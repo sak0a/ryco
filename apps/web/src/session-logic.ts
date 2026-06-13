@@ -597,6 +597,7 @@ function shouldIncludeActivityInWorkLog(
   return (
     activity.kind !== "tool.started" &&
     activity.kind !== "task.started" &&
+    activity.kind !== "agent.message" &&
     activity.kind !== "context-window.updated" &&
     !isContextCompactionActivity(activity) &&
     activity.summary !== "Checkpoint captured" &&

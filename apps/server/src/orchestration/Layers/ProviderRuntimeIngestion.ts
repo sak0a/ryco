@@ -3,6 +3,7 @@ import {
   type AssistantDeliveryMode,
   CommandId,
   DEFAULT_AGENT_TOKEN_MODE,
+  EventId,
   MessageId,
   type OrchestrationEvent,
   type OrchestrationMessage,
@@ -180,6 +181,71 @@ function maxCheckpointTurnCount(
 
 function truncateDetail(value: string, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
+}
+
+function truncateActivityText(value: string, limit = 24_000): string {
+  return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function asTrimmedString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function rawPayloadThreadId(event: ProviderRuntimeEvent): string | undefined {
+  return asTrimmedString(asRecord(event.raw?.payload)?.threadId);
+}
+
+function collabReceiverThreadIdsFromRuntimeEvent(event: ProviderRuntimeEvent): string[] {
+  if (
+    event.type !== "item.started" &&
+    event.type !== "item.updated" &&
+    event.type !== "item.completed"
+  ) {
+    return [];
+  }
+  if (event.payload.itemType !== "collab_agent_tool_call") {
+    return [];
+  }
+
+  const data = asRecord(event.payload.data);
+  const item = asRecord(data?.item);
+  const receiverThreadIds = item?.type === "collabAgentToolCall" ? item.receiverThreadIds : [];
+  return Array.isArray(receiverThreadIds)
+    ? receiverThreadIds.flatMap((entry) => {
+        const threadId = asTrimmedString(entry);
+        return threadId ? [threadId] : [];
+      })
+    : [];
+}
+
+function subagentMessageActivityId(input: {
+  threadId: ThreadId;
+  providerThreadId: string;
+  providerItemId: string;
+}): EventId {
+  return EventId.make(
+    `agent-message:${input.threadId}:${input.providerThreadId}:${input.providerItemId}`,
+  );
+}
+
+function subagentMessageBufferKey(input: {
+  threadId: ThreadId;
+  providerThreadId: string;
+  providerItemId: string;
+}): string {
+  return `${input.threadId}:${input.providerThreadId}:${input.providerItemId}`;
+}
+
+function cappedSubagentMessageText(value: string): string {
+  return truncateActivityText(value, MAX_BUFFERED_ASSISTANT_CHARS);
 }
 
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
@@ -588,6 +654,8 @@ function runtimeEventToActivities(
           payload: {
             itemType: event.payload.itemType,
             ...(event.payload.status ? { status: event.payload.status } : {}),
+            ...(event.itemId ? { providerItemId: event.itemId } : {}),
+            ...(event.providerRefs ? { providerRefs: event.providerRefs } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
           },
@@ -610,6 +678,9 @@ function runtimeEventToActivities(
           summary: event.payload.title ?? "Tool",
           payload: {
             itemType: event.payload.itemType,
+            ...(event.payload.status ? { status: event.payload.status } : {}),
+            ...(event.itemId ? { providerItemId: event.itemId } : {}),
+            ...(event.providerRefs ? { providerRefs: event.providerRefs } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
           },
@@ -632,7 +703,11 @@ function runtimeEventToActivities(
           summary: `${event.payload.title ?? "Tool"} started`,
           payload: {
             itemType: event.payload.itemType,
+            ...(event.payload.status ? { status: event.payload.status } : {}),
+            ...(event.itemId ? { providerItemId: event.itemId } : {}),
+            ...(event.providerRefs ? { providerRefs: event.providerRefs } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -654,6 +729,8 @@ const make = Effect.gen(function* () {
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
   const liveAssistantDeltaBuffers = new Map<string, LiveAssistantDeltaBuffer>();
+  const subagentProviderThreadIdsByThread = new Map<string, Set<string>>();
+  const subagentMessageTextByKey = new Map<string, string>();
   let nextLiveAssistantDeltaBufferGeneration = 1;
   let enqueueRuntimeInput: ((input: RuntimeIngestionInput) => Effect.Effect<void>) | null = null;
 
@@ -950,6 +1027,137 @@ const make = Effect.gen(function* () {
           key,
           commandTag: "assistant-delta-coalesced-threshold",
         });
+      }
+    });
+
+  const rememberSubagentProviderThreadIds = (threadId: ThreadId, event: ProviderRuntimeEvent) =>
+    Effect.sync(() => {
+      const receiverThreadIds = collabReceiverThreadIdsFromRuntimeEvent(event);
+      if (receiverThreadIds.length === 0) {
+        return;
+      }
+      const key = String(threadId);
+      const existing = subagentProviderThreadIdsByThread.get(key) ?? new Set<string>();
+      for (const receiverThreadId of receiverThreadIds) {
+        existing.add(receiverThreadId);
+      }
+      subagentProviderThreadIdsByThread.set(key, existing);
+    });
+
+  const isKnownSubagentProviderThread = (
+    threadId: ThreadId,
+    providerThreadId: string | undefined,
+  ) => {
+    if (!providerThreadId) {
+      return false;
+    }
+    return subagentProviderThreadIdsByThread.get(String(threadId))?.has(providerThreadId) ?? false;
+  };
+
+  const upsertSubagentMessageActivity = (input: {
+    event: ProviderRuntimeEvent;
+    threadId: ThreadId;
+    providerThreadId: string;
+    providerItemId: string;
+    text: string;
+    streaming: boolean;
+    createdAt: string;
+  }) =>
+    Effect.gen(function* () {
+      const sessionSequence = (input.event as ProviderRuntimeEvent & { sessionSequence?: number })
+        .sessionSequence;
+      yield* orchestrationEngine.dispatch({
+        type: "thread.activity.append",
+        commandId: providerCommandId(input.event, "subagent-message-upsert"),
+        threadId: input.threadId,
+        activity: {
+          id: subagentMessageActivityId({
+            threadId: input.threadId,
+            providerThreadId: input.providerThreadId,
+            providerItemId: input.providerItemId,
+          }),
+          createdAt: input.createdAt,
+          tone: "info",
+          kind: "agent.message",
+          summary: input.streaming ? "Agent message streaming" : "Agent message",
+          payload: {
+            itemType: "assistant_message",
+            text: truncateActivityText(input.text),
+            streaming: input.streaming,
+            providerThreadId: input.providerThreadId,
+            providerItemId: input.providerItemId,
+            ...(input.event.providerRefs ? { providerRefs: input.event.providerRefs } : {}),
+          },
+          turnId: toTurnId(input.event.turnId) ?? null,
+          ...(sessionSequence !== undefined ? { sequence: sessionSequence } : {}),
+        },
+        createdAt: input.createdAt,
+      });
+    });
+
+  const appendSubagentMessageDelta = (input: {
+    event: ProviderRuntimeEvent;
+    threadId: ThreadId;
+    providerThreadId: string;
+    providerItemId: string;
+    delta: string;
+    createdAt: string;
+  }) =>
+    Effect.gen(function* () {
+      const key = subagentMessageBufferKey({
+        threadId: input.threadId,
+        providerThreadId: input.providerThreadId,
+        providerItemId: input.providerItemId,
+      });
+      const text = cappedSubagentMessageText(
+        `${subagentMessageTextByKey.get(key) ?? ""}${input.delta}`,
+      );
+      subagentMessageTextByKey.set(key, text);
+      yield* upsertSubagentMessageActivity({
+        ...input,
+        text,
+        streaming: true,
+      });
+    });
+
+  const completeSubagentMessage = (input: {
+    event: ProviderRuntimeEvent;
+    threadId: ThreadId;
+    providerThreadId: string;
+    providerItemId: string;
+    fallbackText?: string | undefined;
+    createdAt: string;
+  }) =>
+    Effect.gen(function* () {
+      const key = subagentMessageBufferKey({
+        threadId: input.threadId,
+        providerThreadId: input.providerThreadId,
+        providerItemId: input.providerItemId,
+      });
+      const bufferedText = subagentMessageTextByKey.get(key) ?? "";
+      subagentMessageTextByKey.delete(key);
+      const fallbackText = input.fallbackText ?? "";
+      const text =
+        hasRenderableAssistantText(fallbackText) && fallbackText.length >= bufferedText.length
+          ? fallbackText
+          : bufferedText;
+      if (!hasRenderableAssistantText(text)) {
+        return;
+      }
+      yield* upsertSubagentMessageActivity({
+        ...input,
+        text,
+        streaming: false,
+      });
+    });
+
+  const clearSubagentMessageBuffersForThread = (threadId: ThreadId) =>
+    Effect.sync(() => {
+      const prefix = `${threadId}:`;
+      for (const key of subagentMessageTextByKey.keys()) {
+        if (key.startsWith(prefix)) {
+          subagentMessageTextByKey.delete(key);
+        }
       }
     });
 
@@ -1386,6 +1594,13 @@ const make = Effect.gen(function* () {
         });
       }
 
+      yield* rememberSubagentProviderThreadIds(thread.id, event);
+      const eventProviderThreadId = rawPayloadThreadId(event);
+      const isSubagentProviderThread = isKnownSubagentProviderThread(
+        thread.id,
+        eventProviderThreadId,
+      );
+
       const shouldApplyThreadLifecycle = (() => {
         if (!STRICT_PROVIDER_LIFECYCLE_GUARD) {
           return true;
@@ -1507,7 +1722,21 @@ const make = Effect.gen(function* () {
       const proposedPlanDelta =
         event.type === "turn.proposed.delta" ? event.payload.delta : undefined;
 
-      if (assistantDelta && assistantDelta.length > 0) {
+      if (
+        assistantDelta &&
+        assistantDelta.length > 0 &&
+        isSubagentProviderThread &&
+        eventProviderThreadId
+      ) {
+        yield* appendSubagentMessageDelta({
+          event,
+          threadId: thread.id,
+          providerThreadId: eventProviderThreadId,
+          providerItemId: String(event.itemId ?? event.eventId),
+          delta: assistantDelta,
+          createdAt: now,
+        });
+      } else if (assistantDelta && assistantDelta.length > 0) {
         const turnId = toTurnId(event.turnId);
         const assistantMessageId = yield* getOrCreateAssistantMessageId({
           threadId: thread.id,
@@ -1598,11 +1827,24 @@ const make = Effect.gen(function* () {
       }
 
       const assistantCompletion =
-        event.type === "item.completed" && event.payload.itemType === "assistant_message"
+        event.type === "item.completed" &&
+        event.payload.itemType === "assistant_message" &&
+        !isSubagentProviderThread
           ? {
               messageId: MessageId.make(
                 `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
               ),
+              fallbackText: event.payload.detail,
+            }
+          : undefined;
+      const subagentMessageCompletion =
+        event.type === "item.completed" &&
+        event.payload.itemType === "assistant_message" &&
+        isSubagentProviderThread &&
+        eventProviderThreadId
+          ? {
+              providerThreadId: eventProviderThreadId,
+              providerItemId: String(event.itemId ?? event.eventId),
               fallbackText: event.payload.detail,
             }
           : undefined;
@@ -1667,6 +1909,19 @@ const make = Effect.gen(function* () {
         }
       }
 
+      if (subagentMessageCompletion) {
+        yield* completeSubagentMessage({
+          event,
+          threadId: thread.id,
+          providerThreadId: subagentMessageCompletion.providerThreadId,
+          providerItemId: subagentMessageCompletion.providerItemId,
+          ...(subagentMessageCompletion.fallbackText !== undefined
+            ? { fallbackText: subagentMessageCompletion.fallbackText }
+            : {}),
+          createdAt: now,
+        });
+      }
+
       if (proposedPlanCompletion) {
         const detailedThread = yield* getLoadedThreadDetail();
         yield* finalizeBufferedProposedPlan({
@@ -1714,10 +1969,12 @@ const make = Effect.gen(function* () {
             updatedAt: now,
           });
         }
+        yield* clearSubagentMessageBuffersForThread(thread.id);
       }
 
       if (event.type === "session.exited") {
         yield* clearTurnStateForSession(thread.id);
+        yield* clearSubagentMessageBuffersForThread(thread.id);
       }
 
       if (event.type === "runtime.error") {
@@ -1748,6 +2005,11 @@ const make = Effect.gen(function* () {
             createdAt: now,
           });
         }
+        yield* clearSubagentMessageBuffersForThread(thread.id);
+      }
+
+      if (event.type === "session.state.changed" && event.payload.state === "error") {
+        yield* clearSubagentMessageBuffersForThread(thread.id);
       }
 
       if (event.type === "thread.metadata.updated" && event.payload.name) {

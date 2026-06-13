@@ -318,7 +318,7 @@ function OverviewSidebarMotionFrame(props: {
       aria-hidden={props.open ? undefined : true}
       inert={props.open ? undefined : true}
       className={cn(
-        "min-h-0 shrink-0 overflow-hidden transition-[width,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+        "h-full min-h-0 shrink-0 overflow-hidden transition-[width,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
         active ? "w-(--overview-sidebar-frame-width) opacity-100" : "w-0 opacity-0",
       )}
       style={
@@ -329,7 +329,7 @@ function OverviewSidebarMotionFrame(props: {
     >
       <div
         className={cn(
-          "min-h-0 w-(--overview-sidebar-frame-width) transition-[translate,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transition-none",
+          "h-full min-h-0 w-(--overview-sidebar-frame-width) transition-[translate,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transition-none",
           active ? "translate-x-0 opacity-100" : "translate-x-5 opacity-0",
         )}
       >
