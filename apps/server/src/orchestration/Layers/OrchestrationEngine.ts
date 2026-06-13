@@ -28,6 +28,7 @@ import {
   orchestrationCommandsTotal,
   orchestrationCommandDuration,
 } from "../../observability/Metrics.ts";
+import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
 import { toPersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
@@ -117,6 +118,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   let commandReadModel = createEmptyReadModel(new Date().toISOString());
 
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
+  const commandQueueMetrics = yield* makeServerQueueMetrics({
+    queue: "orchestration.command",
+    component: "OrchestrationEngine",
+  });
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
 
   const projectEventsOntoReadModel = (
@@ -317,8 +322,14 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   yield* projectionPipeline.bootstrap;
   commandReadModel = yield* projectionSnapshotQuery.getCommandReadModel();
 
-  const worker = Effect.forever(Queue.take(commandQueue).pipe(Effect.flatMap(processEnvelope)));
+  const worker = Effect.forever(
+    Queue.take(commandQueue).pipe(
+      Effect.tap(() => commandQueueMetrics.recordDequeued()),
+      Effect.flatMap(processEnvelope),
+    ),
+  );
   yield* Effect.forkScoped(worker);
+  yield* Effect.addFinalizer(() => commandQueueMetrics.reset);
   yield* Effect.logDebug("orchestration engine started").pipe(
     Effect.annotateLogs({ sequence: commandReadModel.snapshotSequence }),
   );
@@ -335,6 +346,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     Effect.gen(function* () {
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
       yield* Queue.offer(commandQueue, { command, result, startedAtMs: Date.now() });
+      yield* commandQueueMetrics.recordEnqueued();
       return yield* Deferred.await(result);
     });
 

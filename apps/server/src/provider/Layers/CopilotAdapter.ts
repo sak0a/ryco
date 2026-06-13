@@ -14,6 +14,7 @@ import type { PermissionRequestResult, SessionConfig, SessionEvent } from "@gith
 import { Effect, Queue, Random, Stream } from "effect";
 
 import { ServerConfig } from "../../config.ts";
+import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
 import { getProviderOptionStringSelectionValue } from "@ryco/shared/model";
 import { makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { ProviderAdapterRequestError, ProviderAdapterSessionNotFoundError } from "../Errors.ts";
@@ -66,6 +67,12 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       : undefined);
   const sessions = new Map<ThreadId, ActiveCopilotSession>();
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+  const runtimeEventQueueMetrics = yield* makeServerQueueMetrics({
+    queue: "provider.adapter.runtimeEvents",
+    component: "CopilotAdapter",
+    provider: COPILOT_DRIVER_KIND,
+    providerInstanceId: instanceId,
+  });
 
   const nextEventId = Effect.map(Random.nextUUIDv4, (id) => EventId.make(id));
   const makeEventStamp = () =>
@@ -86,7 +93,10 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
   };
 
   const emit = (events: ReadonlyArray<ProviderRuntimeEvent>) =>
-    Queue.offerAll(runtimeEventQueue, events).pipe(Effect.asVoid);
+    Queue.offerAll(runtimeEventQueue, events).pipe(
+      Effect.andThen(runtimeEventQueueMetrics.recordEnqueued(events.length)),
+      Effect.asVoid,
+    );
 
   const logNativeEvent = Effect.fn("logCopilotNativeEvent")(function* (
     threadId: ThreadId,
@@ -404,6 +414,8 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       yield* emit([event]);
     });
 
+  const stopAll = makeStopAll(sessionDeps);
+
   return {
     provider: COPILOT_DRIVER_KIND,
     capabilities: {
@@ -419,9 +431,11 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
     hasSession: makeHasSession(sessionDeps),
     readThread: makeReadThread(sessionDeps),
     rollbackThread: makeRollbackThread(),
-    stopAll: makeStopAll(sessionDeps),
+    stopAll: () => stopAll().pipe(Effect.tap(() => runtimeEventQueueMetrics.reset)),
     get streamEvents() {
-      return Stream.fromQueue(runtimeEventQueue);
+      return Stream.fromQueue(runtimeEventQueue).pipe(
+        Stream.tap(() => runtimeEventQueueMetrics.recordDequeued()),
+      );
     },
   } satisfies CopilotAdapterShape;
 });

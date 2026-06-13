@@ -761,6 +761,14 @@ export const DESKTOP_BUILD_FILES = [
   "!node_modules/@github/copilot-linux-x64/**",
   "!node_modules/@github/copilot-win32-arm64/**",
   "!node_modules/@github/copilot-win32-x64/**",
+  "!node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/**",
+  "!node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64/**",
+  "!node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/**",
+  "!node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64-musl/**",
+  "!node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/**",
+  "!node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl/**",
+  "!node_modules/@anthropic-ai/claude-agent-sdk-win32-arm64/**",
+  "!node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**",
 ] as const;
 
 export const EXTERNALIZED_DESKTOP_DEPENDENCY_PATHS = [
@@ -771,6 +779,22 @@ export const EXTERNALIZED_DESKTOP_DEPENDENCY_PATHS = [
   "node_modules/@github/copilot-linux-x64",
   "node_modules/@github/copilot-win32-arm64",
   "node_modules/@github/copilot-win32-x64",
+] as const;
+
+export const ANTHROPIC_CLAUDE_AGENT_SDK_NATIVE_PACKAGE_PATHS = [
+  "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64",
+  "node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64",
+  "node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64",
+  "node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64-musl",
+  "node_modules/@anthropic-ai/claude-agent-sdk-linux-x64",
+  "node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl",
+  "node_modules/@anthropic-ai/claude-agent-sdk-win32-arm64",
+  "node_modules/@anthropic-ai/claude-agent-sdk-win32-x64",
+] as const;
+
+export const PRUNED_DESKTOP_DEPENDENCY_PATHS = [
+  ...EXTERNALIZED_DESKTOP_DEPENDENCY_PATHS,
+  ...ANTHROPIC_CLAUDE_AGENT_SDK_NATIVE_PACKAGE_PATHS,
 ] as const;
 
 export const COPILOT_SDK_PACKAGE_JSON_PATH = "node_modules/@github/copilot-sdk/package.json";
@@ -865,28 +889,28 @@ const stageMacUnsignedInstallAssets = Effect.fn("stageMacUnsignedInstallAssets")
   yield* fs.writeFileString(assetPaths.readmeFilePath, createMacUnsignedInstallReadme(productName));
 });
 
-const pruneExternalizedDesktopDependencies = Effect.fn("pruneExternalizedDesktopDependencies")(
-  function* (stageAppDir: string) {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const sdkPackageJsonPath = path.join(stageAppDir, COPILOT_SDK_PACKAGE_JSON_PATH);
+export const pruneExternalizedDesktopDependencies = Effect.fn(
+  "pruneExternalizedDesktopDependencies",
+)(function* (stageAppDir: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const sdkPackageJsonPath = path.join(stageAppDir, COPILOT_SDK_PACKAGE_JSON_PATH);
 
-    if (yield* fs.exists(sdkPackageJsonPath)) {
-      const rawPackageJson = yield* fs.readFileString(sdkPackageJsonPath);
-      const packageJson = JSON.parse(rawPackageJson) as {
-        dependencies?: Record<string, string>;
-      };
-      if (packageJson.dependencies) {
-        delete packageJson.dependencies["@github/copilot"];
-        yield* fs.writeFileString(sdkPackageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
-      }
+  if (yield* fs.exists(sdkPackageJsonPath)) {
+    const rawPackageJson = yield* fs.readFileString(sdkPackageJsonPath);
+    const packageJson = JSON.parse(rawPackageJson) as {
+      dependencies?: Record<string, string>;
+    };
+    if (packageJson.dependencies) {
+      delete packageJson.dependencies["@github/copilot"];
+      yield* fs.writeFileString(sdkPackageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
     }
+  }
 
-    for (const dependencyPath of EXTERNALIZED_DESKTOP_DEPENDENCY_PATHS) {
-      yield* fs.remove(path.join(stageAppDir, dependencyPath), { recursive: true, force: true });
-    }
-  },
-);
+  for (const dependencyPath of PRUNED_DESKTOP_DEPENDENCY_PATHS) {
+    yield* fs.remove(path.join(stageAppDir, dependencyPath), { recursive: true, force: true });
+  }
+});
 
 export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   platform: typeof BuildPlatform.Type,

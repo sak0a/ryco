@@ -20,6 +20,7 @@ import { formatSourceControlContextsForAgent } from "@ryco/shared/sourceControlC
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
   ProviderAdapterProcessError,
@@ -469,6 +470,12 @@ export function makeOpenCodeAdapter(
     const managedNativeEventLogger =
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
     const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const runtimeEventQueueMetrics = yield* makeServerQueueMetrics({
+      queue: "provider.adapter.runtimeEvents",
+      component: "OpenCodeAdapter",
+      provider: PROVIDER,
+      providerInstanceId: boundInstanceId,
+    });
     const sessions = new Map<ThreadId, OpenCodeSessionContext>();
 
     // Layer-level finalizer: when the adapter layer shuts down, stop every
@@ -496,11 +503,17 @@ export function makeOpenCodeAdapter(
         if (managedNativeEventLogger !== undefined) {
           yield* managedNativeEventLogger.close();
         }
-      }).pipe(Effect.ensuring(Queue.shutdown(runtimeEvents))),
+      }).pipe(
+        Effect.ensuring(runtimeEventQueueMetrics.reset),
+        Effect.ensuring(Queue.shutdown(runtimeEvents)),
+      ),
     );
 
     const emit = (event: ProviderRuntimeEvent) =>
-      Queue.offer(runtimeEvents, event).pipe(Effect.asVoid);
+      Queue.offer(runtimeEvents, event).pipe(
+        Effect.andThen(runtimeEventQueueMetrics.recordEnqueued()),
+        Effect.asVoid,
+      );
     const writeNativeEvent = (
       threadId: ThreadId,
       event: {
@@ -1433,7 +1446,9 @@ export function makeOpenCodeAdapter(
       rollbackThread,
       stopAll,
       get streamEvents() {
-        return Stream.fromQueue(runtimeEvents);
+        return Stream.fromQueue(runtimeEvents).pipe(
+          Stream.tap(() => runtimeEventQueueMetrics.recordDequeued()),
+        );
       },
     } satisfies OpenCodeAdapterShape;
   });

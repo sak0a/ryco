@@ -19,6 +19,10 @@ export const metricNames = {
   providerTurnDuration: "ryco_provider_turn_duration",
   providerRuntimeEventsTotal: "ryco_provider_runtime_events_total",
   providerEventLogRecordsDroppedTotal: "ryco_provider_event_log_records_dropped_total",
+  runtimeQueueEnqueuesTotal: "ryco_runtime_queue_enqueues_total",
+  runtimeQueueDequeuesTotal: "ryco_runtime_queue_dequeues_total",
+  runtimeQueueDepth: "ryco_runtime_queue_depth",
+  runtimeQueueHighWater: "ryco_runtime_queue_high_water",
   startupCommandGateEnqueuesTotal: "ryco_startup_command_gate_enqueues_total",
   startupCommandGateQueueDepth: "ryco_startup_command_gate_queue_depth",
   startupCommandGateQueueHighWater: "ryco_startup_command_gate_queue_high_water",
@@ -86,6 +90,22 @@ export const providerEventLogRecordsDroppedTotal = Metric.counter(
     description: "Total provider observability log records dropped by bounded logging queues.",
   },
 );
+
+export const runtimeQueueEnqueuesTotal = Metric.counter(metricNames.runtimeQueueEnqueuesTotal, {
+  description: "Total runtime queue enqueue attempts by queue.",
+});
+
+export const runtimeQueueDequeuesTotal = Metric.counter(metricNames.runtimeQueueDequeuesTotal, {
+  description: "Total runtime queue dequeues by queue.",
+});
+
+export const runtimeQueueDepth = Metric.gauge(metricNames.runtimeQueueDepth, {
+  description: "Current tracked runtime queue depth.",
+});
+
+export const runtimeQueueHighWater = Metric.gauge(metricNames.runtimeQueueHighWater, {
+  description: "Highest observed tracked runtime queue depth.",
+});
 
 export const startupCommandGateEnqueuesTotal = Metric.counter(
   metricNames.startupCommandGateEnqueuesTotal,
