@@ -59,36 +59,40 @@ vi.mock("@pierre/diffs/react", () => ({
   ),
 }));
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: vi.fn((options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
-    const queryKind = options.queryKey[1];
-    if (queryKind === "listEntries") {
+vi.mock("~/rpc/queryClient", async () => {
+  const actual = await vi.importActual<typeof import("~/rpc/queryClient")>("~/rpc/queryClient");
+  return {
+    ...actual,
+    useQuery: vi.fn((options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
+      const queryKind = options.queryKey[1];
+      if (queryKind === "listEntries") {
+        return {
+          data: { entries: previewHarness.entries, truncated: false },
+          error: null,
+          isLoading: false,
+          isFetching: false,
+          refetch: vi.fn().mockResolvedValue({
+            data: { entries: previewHarness.entries, truncated: false },
+          }),
+        };
+      }
+
+      const relativePath = options.queryKey[4] as string | null;
+      if (options.enabled !== false && relativePath) {
+        previewHarness.readAttempts.push(relativePath);
+      }
       return {
-        data: { entries: previewHarness.entries, truncated: false },
+        data: relativePath ? previewHarness.readFiles.get(relativePath) : undefined,
         error: null,
         isLoading: false,
         isFetching: false,
         refetch: vi.fn().mockResolvedValue({
-          data: { entries: previewHarness.entries, truncated: false },
+          data: relativePath ? previewHarness.readFiles.get(relativePath) : undefined,
         }),
       };
-    }
-
-    const relativePath = options.queryKey[4] as string | null;
-    if (options.enabled !== false && relativePath) {
-      previewHarness.readAttempts.push(relativePath);
-    }
-    return {
-      data: relativePath ? previewHarness.readFiles.get(relativePath) : undefined,
-      error: null,
-      isLoading: false,
-      isFetching: false,
-      refetch: vi.fn().mockResolvedValue({
-        data: relativePath ? previewHarness.readFiles.get(relativePath) : undefined,
-      }),
-    };
-  }),
-}));
+    }),
+  };
+});
 
 vi.mock("@tanstack/react-router", () => ({
   useParams: vi.fn((options?: { select?: (params: Record<string, string>) => unknown }) => {

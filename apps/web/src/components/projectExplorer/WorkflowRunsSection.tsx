@@ -5,7 +5,7 @@ import type {
   SourceControlWorkflowStep,
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "~/rpc/queryClient";
 import { useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {

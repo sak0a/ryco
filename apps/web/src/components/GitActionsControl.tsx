@@ -7,11 +7,11 @@ import type {
   SourceControlCloneProtocol,
   SourceControlProviderDiscoveryItem,
   SourceControlProviderKind,
+  SourceControlPublishRepositoryInput,
   SourceControlPublishRepositoryResult,
   SourceControlRepositoryVisibility,
   VcsStatusResult,
 } from "@ryco/contracts";
-import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Option } from "effect";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -71,19 +71,19 @@ import { stackedThreadToast, toastManager, type ThreadToastData } from "~/compon
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { openInPreferredEditor } from "~/editorPreferences";
 import {
-  gitInitMutationOptions,
-  gitMutationKeys,
-  gitPullMutationOptions,
-  gitRunStackedActionMutationOptions,
-  sourceControlPublishRepositoryMutationOptions,
-} from "~/lib/gitReactQuery";
+  gitMutationTrackingKey,
+  gitScopeKey,
+  useGitMutation,
+  useIsGitMutating,
+} from "~/rpc/useGit";
 import { refreshGitStatus, useGitStatus } from "~/lib/gitStatusState";
 import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
 import { hasNoShortcutModifiers } from "~/keybindings";
 import { newCommandId, randomUUID } from "~/lib/utils";
 import { resolvePathLinkTarget } from "~/terminal-links";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
-import { readEnvironmentApi } from "~/environmentApi";
+import { ensureEnvironmentApi, readEnvironmentApi } from "~/environmentApi";
+import { requireEnvironmentConnection } from "~/environments/runtime";
 import { readLocalApi } from "~/localApi";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
 import { useStore } from "~/store";
@@ -133,6 +133,16 @@ interface ActiveGitActionProgress {
   hookName: string | null;
   lastOutputLine: string | null;
   currentPhaseLabel: string | null;
+}
+
+interface RunGitStackedActionArgs {
+  actionId: string;
+  action: GitStackedAction;
+  commitMessage?: string;
+  featureBranch?: boolean;
+  filePaths?: string[];
+  worktreeId?: WorktreeId | null;
+  onProgress?: (event: GitActionProgressEvent) => void;
 }
 
 interface RunGitActionWithToastInput {
@@ -373,7 +383,6 @@ interface PublishRepositoryDialogProps {
 }
 
 function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
-  const queryClient = useQueryClient();
   const sourceControlDiscovery = useSourceControlDiscovery();
   const [publishProvider, setPublishProvider] = useState<PublishProviderKind>("github");
   const [publishRepository, setPublishRepository] = useState("");
@@ -388,13 +397,19 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
     null,
   );
   const [hasUserEditedPublishRepository, setHasUserEditedPublishRepository] = useState(false);
-  const publishRepositoryMutation = useMutation(
-    sourceControlPublishRepositoryMutationOptions({
-      environmentId: props.environmentId,
-      cwd: props.gitCwd,
-      queryClient,
-    }),
-  );
+  const publishRepositoryMutation = useGitMutation({
+    mutationFn: (args: Omit<SourceControlPublishRepositoryInput, "cwd">) => {
+      if (!props.gitCwd || !props.environmentId) {
+        throw new Error("Repository publishing is unavailable.");
+      }
+      return ensureEnvironmentApi(props.environmentId).sourceControl.publishRepository({
+        cwd: props.gitCwd,
+        ...args,
+      });
+    },
+    invalidates: props.gitCwd ? [gitScopeKey(props.gitCwd)] : [],
+    trackingKey: gitMutationTrackingKey("publish-repository", props.environmentId, props.gitCwd),
+  });
   const publishAccountByProvider = useMemo(() => {
     const accounts: Record<PublishProviderKind, string | null> = {
       github: null,
@@ -999,7 +1014,6 @@ export default function GitActionsControl({
   );
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const setThreadBranch = useStore((store) => store.setThreadBranch);
-  const queryClient = useQueryClient();
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
   const [dialogCommitMessage, setDialogCommitMessage] = useState("");
   const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set());
@@ -1118,31 +1132,76 @@ export default function GitActionsControl({
   const allSelected = excludedFiles.size === 0;
   const noneSelected = selectedFiles.length === 0;
 
-  const initMutation = useMutation(
-    gitInitMutationOptions({ environmentId: activeEnvironmentId, cwd: gitCwd, queryClient }),
+  const gitScopes = useMemo(() => (gitCwd ? [gitScopeKey(gitCwd)] : []), [gitCwd]);
+  const runStackedActionTrackingKey = gitMutationTrackingKey(
+    "run-stacked-action",
+    activeEnvironmentId,
+    gitCwd,
+  );
+  const pullTrackingKey = gitMutationTrackingKey("pull", activeEnvironmentId, gitCwd);
+  const publishTrackingKey = gitMutationTrackingKey(
+    "publish-repository",
+    activeEnvironmentId,
+    gitCwd,
   );
 
-  const runImmediateGitActionMutation = useMutation(
-    gitRunStackedActionMutationOptions({
-      environmentId: activeEnvironmentId,
-      cwd: gitCwd,
-      queryClient,
-    }),
-  );
-  const pullMutation = useMutation(
-    gitPullMutationOptions({ environmentId: activeEnvironmentId, cwd: gitCwd, queryClient }),
-  );
+  const initMutation = useGitMutation({
+    mutationFn: () => {
+      if (!gitCwd || !activeEnvironmentId) {
+        throw new Error("Git init is unavailable.");
+      }
+      return ensureEnvironmentApi(activeEnvironmentId).vcs.init({ cwd: gitCwd });
+    },
+    invalidates: gitScopes,
+    invalidateOn: "settled",
+  });
 
-  const isRunStackedActionRunning =
-    useIsMutating({
-      mutationKey: gitMutationKeys.runStackedAction(activeEnvironmentId, gitCwd),
-    }) > 0;
-  const isPullRunning =
-    useIsMutating({ mutationKey: gitMutationKeys.pull(activeEnvironmentId, gitCwd) }) > 0;
-  const isPublishRunning =
-    useIsMutating({
-      mutationKey: gitMutationKeys.publishRepository(activeEnvironmentId, gitCwd),
-    }) > 0;
+  const runImmediateGitActionMutation = useGitMutation<
+    RunGitStackedActionArgs,
+    GitRunStackedActionResult
+  >({
+    mutationFn: ({
+      actionId,
+      action,
+      commitMessage,
+      featureBranch,
+      filePaths,
+      worktreeId,
+      onProgress,
+    }) => {
+      if (!gitCwd || !activeEnvironmentId) {
+        throw new Error("Git action is unavailable.");
+      }
+      return requireEnvironmentConnection(activeEnvironmentId).client.git.runStackedAction(
+        {
+          action,
+          actionId,
+          cwd: gitCwd,
+          ...(worktreeId ? { worktreeId } : {}),
+          ...(commitMessage ? { commitMessage } : {}),
+          ...(featureBranch ? { featureBranch: true } : {}),
+          ...(filePaths && filePaths.length > 0 ? { filePaths } : {}),
+        },
+        ...(onProgress ? [{ onProgress }] : []),
+      );
+    },
+    invalidates: gitScopes,
+    trackingKey: runStackedActionTrackingKey,
+  });
+  const pullMutation = useGitMutation({
+    mutationFn: () => {
+      if (!gitCwd || !activeEnvironmentId) {
+        throw new Error("Git pull is unavailable.");
+      }
+      return ensureEnvironmentApi(activeEnvironmentId).vcs.pull({ cwd: gitCwd });
+    },
+    invalidates: gitScopes,
+    trackingKey: pullTrackingKey,
+  });
+
+  const isRunStackedActionRunning = useIsGitMutating(runStackedActionTrackingKey);
+  const isPullRunning = useIsGitMutating(pullTrackingKey);
+  const isPublishRunning = useIsGitMutating(publishTrackingKey);
   const isGitActionRunning = isRunStackedActionRunning || isPullRunning || isPublishRunning;
   const isSelectingWorktreeBase =
     !activeServerThread &&

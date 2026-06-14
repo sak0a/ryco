@@ -32,7 +32,7 @@ To verify at runtime, temporarily add `useDevPropDiff(props, "ComponentName")` a
 
 ### Follow-up (Phase 2.1)
 
-1. **Split `TimelineRowSharedState`** — move `completionSummary`, `timestampFormat`, `skills`, theme/cwd fields to refs or sub-context so streaming updates to `activeTurnInProgress` / `isWorking` do not rebuild the full context value passed to every row.
+1. ~~**Split `TimelineRowSharedState`**~~ ✅ Done — split into `TimelineStreamingCtx` + `TimelineStableCtx`
 2. **`skills` prop** — already falls back to `EMPTY_TIMELINE_SKILLS`; ensure parent never passes a fresh `[]` literal.
 
 ---
@@ -46,7 +46,7 @@ To verify at runtime, temporarily add `useDevPropDiff(props, "ComponentName")` a
 
 | Prop | Cause | Priority | Phase 2 action |
 |------|-------|----------|----------------|
-| **`onSend`** | Plain `async function` in render — **new identity every render** | **P0** | Wrap in `useCallback` or pass via ref |
+| **`onSend`** | Plain `async function` in render — **new identity every render** | **P0** | ✅ Fixed via ref-backed stable `useCallback` wrapper in ChatView |
 | `activeThread` | Store object reference updates during streaming | P1 | Pass scalar slices where possible; avoid whole thread if composer only needs ids/settings |
 | `providerStatuses` | Cast from hook; likely new array reference | P1 | Memoize in parent or select stable snapshot |
 | `pendingApprovals`, `pendingUserInputs` | New array refs on orchestration push | P2 | Expected during approval flows |
@@ -61,7 +61,7 @@ To verify at runtime, temporarily add `useDevPropDiff(props, "ComponentName")` a
 
 ### Follow-up (Phase 2.1)
 
-1. **Stabilize `onSend`** — highest leverage single fix for composer re-renders during unrelated ChatView updates.
+1. ~~**Stabilize `onSend`**~~ ✅ Done — ref-backed stable callback in ChatView
 2. Audit whether `ChatComposer` needs full `activeThread` or can take `activeThreadId` + `modelSelection` + `activities` slices.
 
 ---

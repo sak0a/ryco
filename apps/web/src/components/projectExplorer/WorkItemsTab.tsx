@@ -10,7 +10,7 @@ import type {
 } from "@ryco/contracts";
 import { scopeProjectRef } from "@ryco/client-runtime";
 import { DateTime, Option } from "effect";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "~/rpc/queryClient";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useShallow } from "zustand/react/shallow";
 import { ExternalLinkIcon, FlagIcon, GitBranchIcon, RotateCwIcon, SearchIcon } from "lucide-react";
@@ -26,11 +26,8 @@ import {
   findLinkedWorkItemWorktrees,
   type LinkedWorkItemWorktree,
 } from "~/lib/workItemLocalLinks";
-import {
-  workItemListQueryOptions,
-  workItemsQueryKeys,
-  workItemSearchQueryOptions,
-} from "~/lib/workItemsRpc";
+import { workItemsQueryKeys } from "~/lib/workItemsRpc";
+import { invalidateWorkItems, useWorkItemList, useWorkItemSearch } from "~/rpc/useWorkItems";
 import { selectSidebarWorktreesForProjectRef, useStore } from "~/store";
 import { cn } from "~/lib/utils";
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
@@ -122,15 +119,13 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
     projectLink?.jiraConnectionId !== undefined &&
     projectLink.jiraProjectKeys.length > 0;
 
-  const listQuery = useQuery(
-    workItemListQueryOptions({
-      environmentId: props.environmentId,
-      projectId: props.projectId,
-      state: props.stateFilter,
-      limit: 100,
-      enabled: configured,
-    }),
-  );
+  const listQuery = useWorkItemList({
+    environmentId: props.environmentId,
+    projectId: props.projectId,
+    state: props.stateFilter,
+    limit: 100,
+    enabled: configured,
+  });
 
   const cachedItems = useMemo(() => listQuery.data ?? [], [listQuery.data]);
   const filteredItems = useMemo(() => {
@@ -145,15 +140,13 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
   }, [cachedItems, props.query]);
 
   const needsServerSearch = filteredItems.length === 0 && debouncedQuery.trim().length >= 2;
-  const searchQuery = useQuery(
-    workItemSearchQueryOptions({
-      environmentId: props.environmentId,
-      projectId: props.projectId,
-      query: debouncedQuery,
-      limit: 50,
-      enabled: configured && needsServerSearch,
-    }),
-  );
+  const searchQuery = useWorkItemSearch({
+    environmentId: props.environmentId,
+    projectId: props.projectId,
+    query: debouncedQuery,
+    limit: 50,
+    enabled: configured && needsServerSearch,
+  });
 
   const items = useMemo(
     () => (needsServerSearch ? (searchQuery.data ?? []) : filteredItems),
@@ -192,11 +185,11 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
       }),
     [branchRefsQuery.data, items, projectWorktrees],
   );
-  const invalidateWorkItems = () => {
+  const refreshWorkItemsData = () => {
     void queryClient.invalidateQueries({
       queryKey: workItemsQueryKeys.projectLink(props.environmentId, props.projectId),
     });
-    void queryClient.invalidateQueries({ queryKey: workItemsQueryKeys.all });
+    invalidateWorkItems({ environmentId: props.environmentId, projectId: props.projectId });
   };
   const unlinkMutation = useMutation({
     mutationFn: async () => {
@@ -210,7 +203,7 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
     },
     onSuccess: () => {
       props.onQueryChange("");
-      invalidateWorkItems();
+      refreshWorkItemsData();
       toastManager.add(
         stackedThreadToast({
           type: "success",
@@ -302,7 +295,7 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
           connections={jiraConnections}
           connectionsPending={connectionsQuery.isLoading}
           projectLink={projectLink}
-          onSaved={invalidateWorkItems}
+          onSaved={refreshWorkItemsData}
         />
       )}
     </div>

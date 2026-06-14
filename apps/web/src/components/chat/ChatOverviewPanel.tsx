@@ -1,5 +1,10 @@
-import type { EnvironmentId, SourceControlWorkflowJob } from "@ryco/contracts";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import type {
+  EnvironmentId,
+  ScopedThreadRef,
+  SourceControlWorkflowRunListResult,
+  ThreadId,
+} from "@ryco/contracts";
+import { useQueryClient } from "~/rpc/queryClient";
 import {
   useCallback,
   useEffect,
@@ -9,18 +14,21 @@ import {
   type ReactNode,
 } from "react";
 import { useGitStatus } from "~/lib/gitStatusState";
+import { sourceControlContextQueryKeys } from "~/lib/sourceControlContextRpc";
+import { invalidateOverviewSourceControl } from "~/rpc/overviewAtoms";
 import {
-  changeRequestDetailQueryOptions,
-  changeRequestListQueryOptions,
-  sourceControlContextQueryKeys,
-  workflowRunJobsQueryOptions,
-  workflowRunsQueryOptions,
-} from "~/lib/sourceControlContextRpc";
+  useOverviewChangeRequestList,
+  useOverviewPullRequestDetail,
+  useOverviewWorkflowRunJobs,
+  useOverviewWorkflowRuns,
+} from "~/rpc/useOverview";
 import { cn } from "~/lib/utils";
 import PlanSidebar, { type OverviewPanelItem, type OverviewPullRequestState } from "../PlanSidebar";
 import type { ActivePlanState, LatestProposedPlanState } from "../../session-logic";
 import type { ThreadSubagentView } from "../../threadWorkspaceViewModel";
-import type { GitActionPostPushEvent } from "../GitActionsControl";
+import type { DraftId } from "../../composerDraftStore";
+import { BranchToolbarBranchSelector } from "../BranchToolbarBranchSelector";
+import GitActionsControl, { type GitActionPostPushEvent } from "../GitActionsControl";
 import {
   createPostPushWorkflowDiscoveryWatch,
   type PostPushWorkflowDiscoveryWatch,
@@ -191,6 +199,7 @@ export function usePostPushWorkflowWatch() {
       void queryClient.invalidateQueries({
         queryKey: sourceControlContextQueryKeys.workflows(event.environmentId, event.cwd),
       });
+      invalidateOverviewSourceControl(event.cwd);
     },
     [queryClient],
   );
@@ -210,6 +219,97 @@ export function usePostPushWorkflowWatch() {
   }, []);
 
   return { postPushWorkflowWatch, handlePostPush, clearWatch } as const;
+}
+
+export interface OverviewPanelControlsInput {
+  gitCwd: string | null;
+  activeThreadRef: ScopedThreadRef | null;
+  routeKind: "server" | "draft";
+  draftId: DraftId | null;
+  onPostPush: (event: GitActionPostPushEvent) => void;
+  branchControlThread: { environmentId: EnvironmentId; id: ThreadId } | null;
+  isGitRepo: boolean;
+  canOverrideServerThreadBranch: boolean;
+  activeThreadBranch: string | null;
+  onActiveThreadBranchOverrideChange: (refName: string | null) => void;
+  envLocked: boolean;
+  onComposerFocusRequest: () => void;
+  canCheckoutPullRequestIntoThread: boolean;
+  onCheckoutPullRequestRequest: (reference: string) => void;
+}
+
+export interface OverviewPanelControls {
+  sourceControlActions: ReactNode;
+  branchControl: ReactNode;
+}
+
+export function useOverviewPanelControls(input: OverviewPanelControlsInput): OverviewPanelControls {
+  const {
+    gitCwd,
+    activeThreadRef,
+    routeKind,
+    draftId,
+    onPostPush,
+    branchControlThread,
+    isGitRepo,
+    canOverrideServerThreadBranch,
+    activeThreadBranch,
+    onActiveThreadBranchOverrideChange,
+    envLocked,
+    onComposerFocusRequest,
+    canCheckoutPullRequestIntoThread,
+    onCheckoutPullRequestRequest,
+  } = input;
+
+  const sourceControlActions = useMemo<ReactNode>(
+    () =>
+      gitCwd && activeThreadRef ? (
+        <GitActionsControl
+          gitCwd={gitCwd}
+          activeThreadRef={activeThreadRef}
+          {...(routeKind === "draft" && draftId ? { draftId } : {})}
+          onPostPush={onPostPush}
+          showLabels
+        />
+      ) : null,
+    [gitCwd, activeThreadRef, routeKind, draftId, onPostPush],
+  );
+
+  const branchControl = useMemo<ReactNode>(
+    () =>
+      branchControlThread && isGitRepo ? (
+        <BranchToolbarBranchSelector
+          className="max-w-[168px] justify-end px-1.5"
+          environmentId={branchControlThread.environmentId}
+          threadId={branchControlThread.id}
+          {...(routeKind === "draft" && draftId ? { draftId } : {})}
+          {...(canOverrideServerThreadBranch
+            ? {
+                activeThreadBranchOverride: activeThreadBranch,
+                onActiveThreadBranchOverrideChange,
+              }
+            : {})}
+          envLocked={envLocked}
+          onComposerFocusRequest={onComposerFocusRequest}
+          {...(canCheckoutPullRequestIntoThread ? { onCheckoutPullRequestRequest } : {})}
+        />
+      ) : null,
+    [
+      branchControlThread,
+      isGitRepo,
+      routeKind,
+      draftId,
+      canOverrideServerThreadBranch,
+      activeThreadBranch,
+      onActiveThreadBranchOverrideChange,
+      envLocked,
+      onComposerFocusRequest,
+      canCheckoutPullRequestIntoThread,
+      onCheckoutPullRequestRequest,
+    ],
+  );
+
+  return { sourceControlActions, branchControl };
 }
 
 export function ChatOverviewPanel(
@@ -247,22 +347,18 @@ export function ChatOverviewPanel(
   const overviewBranchName =
     activeWorktreeBranch ?? activeThreadBranch ?? gitStatusQuery.data?.refName ?? null;
 
-  const overviewBranchPullRequestsQuery = useQuery({
-    ...changeRequestListQueryOptions({
-      environmentId,
-      cwd: gitCwd,
-      state: "open",
-      limit: 50,
-      enabled:
-        overviewBranchName !== null &&
-        activeWorktreePrNumber == null &&
-        gitStatusQuery.data?.pr == null,
-    }),
+  const overviewBranchPullRequestList = useOverviewChangeRequestList({
+    environmentId,
+    cwd: gitCwd,
+    enabled:
+      overviewBranchName !== null &&
+      activeWorktreePrNumber == null &&
+      gitStatusQuery.data?.pr == null,
   });
 
   const overviewBranchPullRequest = useMemo(
-    () => findChangeRequestForBranch(overviewBranchPullRequestsQuery.data, overviewBranchName),
-    [overviewBranchName, overviewBranchPullRequestsQuery.data],
+    () => findChangeRequestForBranch(overviewBranchPullRequestList.data, overviewBranchName),
+    [overviewBranchName, overviewBranchPullRequestList.data],
   );
 
   const postPushWorkflowWatchForContext = selectActivePostPushWorkflowDiscoveryWatch({
@@ -294,21 +390,15 @@ export function ChatOverviewPanel(
     overviewPullRequestNumber !== null ? String(overviewPullRequestNumber) : null;
   const overviewGitProvider = gitStatusQuery.data?.sourceControlProvider?.kind ?? null;
 
-  const overviewPullRequestDetailQuery = useQuery({
-    ...changeRequestDetailQueryOptions({
-      environmentId,
-      cwd: gitCwd,
-      reference: overviewPullRequestReference,
-      enabled: overviewPullRequestNumber !== null,
-    }),
-    refetchInterval: (query) => {
-      const detail = query.state.data;
-      return detail?.state === "open" ? 30_000 : false;
-    },
+  const overviewPullRequestDetail = useOverviewPullRequestDetail({
+    environmentId,
+    cwd: gitCwd,
+    reference: overviewPullRequestReference,
+    enabled: overviewPullRequestNumber !== null,
   });
 
   const overviewPullRequestProvider =
-    overviewPullRequestDetailQuery.data?.provider ??
+    overviewPullRequestDetail.data?.provider ??
     overviewBranchPullRequest?.provider ??
     overviewGitProvider;
 
@@ -319,17 +409,8 @@ export function ChatOverviewPanel(
   const overviewWorkflowRunsEnabled =
     overviewWorkflowRunsSupported && overviewPullRequestNumber !== null;
 
-  const overviewWorkflowRunsQuery = useQuery({
-    ...workflowRunsQueryOptions({
-      environmentId,
-      cwd: gitCwd,
-      pullRequestNumber: overviewPullRequestNumber,
-      commitSha: activePostPushWorkflowWatch?.commitSha ?? null,
-      limit: 20,
-      enabled: overviewWorkflowRunsEnabled,
-    }),
-    refetchInterval: (query) => {
-      const data = query.state.data;
+  const resolveWorkflowRunsIntervalMs = useCallback(
+    (data: SourceControlWorkflowRunListResult | null): number | false => {
       const status = data
         ? getPrCheckStatusFromWorkflowRuns({
             runs: data.runs,
@@ -346,6 +427,16 @@ export function ChatOverviewPanel(
         statusRefreshable: status ? shouldRefreshPrCheckStatus(status) : false,
       });
     },
+    [activePostPushWorkflowWatch],
+  );
+
+  const overviewWorkflowRuns = useOverviewWorkflowRuns({
+    environmentId,
+    cwd: gitCwd,
+    pullRequestNumber: overviewPullRequestNumber,
+    commitSha: activePostPushWorkflowWatch?.commitSha ?? null,
+    enabled: overviewWorkflowRunsEnabled,
+    resolveIntervalMs: resolveWorkflowRunsIntervalMs,
   });
 
   useEffect(() => {
@@ -353,65 +444,43 @@ export function ChatOverviewPanel(
     if (
       !hasDiscoveredPostPushWorkflowRun({
         watch: activePostPushWorkflowWatch,
-        runs: overviewWorkflowRunsQuery.data?.runs,
+        runs: overviewWorkflowRuns.data?.runs,
       })
     ) {
       return;
     }
     onPostPushDiscoveryComplete();
-  }, [
-    activePostPushWorkflowWatch,
-    overviewWorkflowRunsQuery.data?.runs,
-    onPostPushDiscoveryComplete,
-  ]);
+  }, [activePostPushWorkflowWatch, overviewWorkflowRuns.data?.runs, onPostPushDiscoveryComplete]);
 
   const overviewActiveWorkflowRunId = useMemo(() => {
-    const runs = overviewWorkflowRunsQuery.data?.runs ?? [];
+    const runs = overviewWorkflowRuns.data?.runs ?? [];
     return runs.find(isOverviewActiveWorkflowRun)?.runId ?? null;
-  }, [overviewWorkflowRunsQuery.data]);
+  }, [overviewWorkflowRuns.data]);
 
   const overviewWorkflowDetailRunIds = useMemo(
     () =>
       resolveWorkflowDetailRunIds({
         workflowRunsSupported: overviewWorkflowRunsSupported,
         pullRequestNumber: overviewPullRequestNumber,
-        runs: overviewWorkflowRunsQuery.data?.runs,
+        runs: overviewWorkflowRuns.data?.runs,
         activeWorkflowRunId: overviewActiveWorkflowRunId,
       }),
     [
       overviewActiveWorkflowRunId,
       overviewPullRequestNumber,
-      overviewWorkflowRunsQuery.data?.runs,
+      overviewWorkflowRuns.data?.runs,
       overviewWorkflowRunsSupported,
     ],
   );
 
-  const overviewWorkflowRunJobQueries = useQueries({
-    queries: overviewWorkflowDetailRunIds.map((runId) => ({
-      ...workflowRunJobsQueryOptions({
-        environmentId,
-        cwd: gitCwd,
-        runId,
-        enabled: overviewWorkflowRunsSupported && overviewPullRequestNumber !== null,
-      }),
-      refetchInterval: overviewActiveWorkflowRunId === runId ? 30_000 : false,
-    })),
-  });
-
-  const overviewWorkflowJobsByRunId = useMemo(() => {
-    const jobsByRunId = new Map<string, ReadonlyArray<SourceControlWorkflowJob>>();
-    overviewWorkflowDetailRunIds.forEach((runId, index) => {
-      const jobs = overviewWorkflowRunJobQueries[index]?.data?.jobs;
-      if (jobs) {
-        jobsByRunId.set(runId, jobs);
-      }
+  const { jobsByRunId: overviewWorkflowJobsByRunId, isLoading: overviewWorkflowRunJobsLoading } =
+    useOverviewWorkflowRunJobs({
+      environmentId,
+      cwd: gitCwd,
+      runIds: overviewWorkflowDetailRunIds,
+      activeRunId: overviewActiveWorkflowRunId,
+      enabled: overviewWorkflowRunsSupported && overviewPullRequestNumber !== null,
     });
-    return jobsByRunId;
-  }, [overviewWorkflowDetailRunIds, overviewWorkflowRunJobQueries]);
-
-  const overviewWorkflowRunJobsLoading = overviewWorkflowRunJobQueries.some(
-    (query) => query.isLoading,
-  );
 
   const overviewPullRequest = useMemo<OverviewPullRequestState | null>(() => {
     if (overviewPullRequestNumber === null) {
@@ -419,14 +488,12 @@ export function ChatOverviewPanel(
     }
     const gitPr = gitStatusQuery.data?.pr ?? null;
     const branchPr = overviewBranchPullRequest;
-    const detail = overviewPullRequestDetailQuery.data ?? null;
-    const workflowData = overviewWorkflowRunsSupported
-      ? (overviewWorkflowRunsQuery.data ?? null)
-      : null;
+    const detail = overviewPullRequestDetail.data ?? null;
+    const workflowData = overviewWorkflowRunsSupported ? (overviewWorkflowRuns.data ?? null) : null;
     const checksQueryError = selectOverviewChecksError({
       workflowRunsSupported: overviewWorkflowRunsSupported,
-      workflowError: overviewWorkflowRunsQuery.error,
-      detailError: overviewPullRequestDetailQuery.error,
+      workflowError: overviewWorkflowRuns.error,
+      detailError: overviewPullRequestDetail.error,
     });
     const activeWorkflowJobDetail =
       overviewActiveWorkflowRunId === null
@@ -435,8 +502,8 @@ export function ChatOverviewPanel(
     const checkStatus =
       workflowData && overviewWorkflowRunsSupported
         ? getPrCheckStatusForQuery({
-            isLoading: overviewWorkflowRunsQuery.isLoading,
-            error: overviewWorkflowRunsQuery.error,
+            isLoading: overviewWorkflowRuns.isLoading,
+            error: overviewWorkflowRuns.error,
             status: getPrCheckStatusFromWorkflowRuns({
               runs: workflowData.runs,
               headSha: sourceControlOptionValue(workflowData.headSha),
@@ -448,8 +515,8 @@ export function ChatOverviewPanel(
             ? getPrCheckStatusFromChangeRequest(branchPr)
             : getPrCheckStatusForQuery({
                 isLoading:
-                  (overviewWorkflowRunsSupported && overviewWorkflowRunsQuery.isLoading) ||
-                  overviewPullRequestDetailQuery.isLoading,
+                  (overviewWorkflowRunsSupported && overviewWorkflowRuns.isLoading) ||
+                  overviewPullRequestDetail.isLoading,
                 error: checksQueryError,
                 status: null,
               });
@@ -506,8 +573,8 @@ export function ChatOverviewPanel(
             : {}),
       checkStatus,
       checksLoading:
-        (overviewWorkflowRunsSupported && overviewWorkflowRunsQuery.isLoading) ||
-        overviewPullRequestDetailQuery.isLoading ||
+        (overviewWorkflowRunsSupported && overviewWorkflowRuns.isLoading) ||
+        overviewPullRequestDetail.isLoading ||
         overviewWorkflowRunJobsLoading,
       ...(checksError ? { checksError } : {}),
       ...(detail?.mergeability ? { mergeability: detail.mergeability } : {}),
@@ -529,30 +596,30 @@ export function ChatOverviewPanel(
     overviewBranchPullRequest,
     overviewWorkflowJobsByRunId,
     overviewWorkflowRunJobsLoading,
-    overviewPullRequestDetailQuery.data,
-    overviewPullRequestDetailQuery.error,
-    overviewPullRequestDetailQuery.isLoading,
+    overviewPullRequestDetail.data,
+    overviewPullRequestDetail.error,
+    overviewPullRequestDetail.isLoading,
     overviewPullRequestNumber,
     overviewWorkflowRunsSupported,
-    overviewWorkflowRunsQuery.data,
-    overviewWorkflowRunsQuery.error,
-    overviewWorkflowRunsQuery.isLoading,
+    overviewWorkflowRuns.data,
+    overviewWorkflowRuns.error,
+    overviewWorkflowRuns.isLoading,
   ]);
 
   const overviewItems = useMemo<OverviewPanelItem[]>(
     () =>
       buildOverviewItems({
         gitStatusData: gitStatusQuery.data,
-        overviewPullRequestDetailData: overviewPullRequestDetailQuery.data ?? null,
-        overviewPullRequestDetailIsLoading: overviewPullRequestDetailQuery.isLoading,
+        overviewPullRequestDetailData: overviewPullRequestDetail.data ?? null,
+        overviewPullRequestDetailIsLoading: overviewPullRequestDetail.isLoading,
         overviewPullRequestNumber,
         activeEnvironmentUnavailableState,
       }),
     [
       activeEnvironmentUnavailableState,
       gitStatusQuery.data,
-      overviewPullRequestDetailQuery.data,
-      overviewPullRequestDetailQuery.isLoading,
+      overviewPullRequestDetail.data,
+      overviewPullRequestDetail.isLoading,
       overviewPullRequestNumber,
     ],
   );

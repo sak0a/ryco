@@ -11,7 +11,7 @@ import {
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
 } from "@ryco/contracts";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "~/rpc/queryClient";
 import { useNavigate } from "@tanstack/react-router";
 import { Option } from "effect";
 import {

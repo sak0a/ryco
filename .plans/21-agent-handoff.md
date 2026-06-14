@@ -70,11 +70,13 @@ After A+B land, run full `bun fmt && bun lint && bun typecheck && bun run test` 
 
 | File | Lines | Notes |
 |------|-------|-------|
-| `Sidebar.tsx` | ~5,440 | Phase 1.6 target next (folder/project list) |
-| `ChatView.tsx` | ~4,663 | Phase 1.2 ChatOverviewPanel next |
-| `ChatComposer.tsx` | ~3,070 | Phase 1.4 |
-| `executeChatSendTurn.ts` | 521 | Phase 1.1 complete |
-| `sidebar/ProjectSettingsDialog.tsx` | 1,005 | Phase 1.5 complete |
+| `Sidebar.tsx` | ~3,896 | Thread rows extracted; target <2,500 |
+| `ChatView.tsx` | ~3,984 | Overview controls moved to panel hook |
+| `ChatComposer.tsx` | ~2,388 | Footer + send pipeline extracted; target <2,000 |
+| `rpc/protocol.ts` | 325 | Phase 3.1 |
+| `store.ts` | 2,825 | Shell push coalescing added |
+| `composerDraftStore.ts` | 1,949 | Phase 1.7 done |
+| `composerDraftPersistence.ts` | 1,253 | Phase 1.7 |
 
 ## Commands
 
@@ -103,12 +105,29 @@ cd apps/web && bun run test -- src/perf src/hooks/chatSessionActions.test.ts src
 | Phase 1.1 useChatSessionActions | ✅ Done | Interrupt/approval/user-input/revert |
 | Phase 1.1 send extraction | ✅ Done | `executeChatSendTurn.ts` + tests |
 | Phase 1.5 ProjectSettingsDialog | ✅ Done | `sidebar/ProjectSettingsDialog.tsx` (−921 lines) |
-| Phase 1.2 ChatOverviewPanel | ⬜ Pending | |
-| Phase 3 AtomRpc | ⬜ Pending | See `effect-atom.md` |
+| Phase 1.2 ChatOverviewPanel | ✅ Done | `ChatOverviewPanel.tsx` (−473 lines from ChatView) |
+| Phase 1.3 ChatTerminalShell | ✅ Done | `ChatTerminalShell.tsx` (−194 lines from ChatView) |
+| Phase 1.4 ComposerAttachmentMenus + Footer | ✅ Done | Composer 2837 → 2388; `ComposerFooter.tsx`, `ComposerSendPipeline.ts` |
+| Phase 1.6 Sidebar thread rows | ✅ Done | `SidebarThreadRow.tsx`, `SidebarProjectThreadList.tsx`; Sidebar 4652 → 3896 |
+| Phase 1.2 overview controls | ✅ Done | `useOverviewPanelControls` in ChatOverviewPanel |
+| Phase 2.3 diff cache | ✅ Done | `diffParseCache.ts` + DiffPanel wiring |
+| Phase 2.4 store coalescing | ✅ Done | `createShellEventCoalescer` + tests in store.test.ts |
+| Phase 3.1 RPC protocol | ✅ Done | `rpc/protocol.ts` extracted from wsTransport |
+| Phase 1.7 composerDraftPersistence | ✅ Done | store 3214 → 1949 lines |
+| Phase 2.1 hot-path props | ✅ Partial | Timeline context split + stable `onSend` ref |
+| Phase 5.3 Diagnostics panel | ✅ Done | Route + panel + redaction tests |
 
 ---
 
-## Risk notes for next agent
+## In progress (2026-06-14 batch 2)
+
+11 Opus subagents launched in parallel:
+- Phase 4.3 projection indexes + pagination
+- Split SidebarProjectItem + ws/context.ts
+- ChatView further extraction
+- Phase 3.5: desktop/sourceControl/workItems/overview/settings atoms + React Query removal finale
+- Phase 5.3 Diagnostics panel
+- Phase 5.1 Auth middleware — ✅ Already in repo (`ServerAuthPolicy`); verify-only, no changes
 
 - **`ChatView.tsx` hook ordering:** `useChatSessionActions` must stay **after** `setThreadError` and **before** any use of `respondingUserInputRequestIds` / `isRevertingCheckpoint` (currently placed right after `activeThreadId`).
 - **Send rollback path** touches refs (`promptRef`, `composerImagesRef`) — keep rollback in one module with clear `SendTurnRollback` interface.

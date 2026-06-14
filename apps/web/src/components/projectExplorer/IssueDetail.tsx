@@ -4,7 +4,7 @@ import type {
   SourceControlIssueDetail,
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "~/rpc/queryClient";
 import { useCallback, useRef, useState } from "react";
 import { CircleDotIcon, FileTextIcon, MessageSquareIcon, SendIcon } from "lucide-react";
 import { errorMessage } from "~/lib/errorMessage";

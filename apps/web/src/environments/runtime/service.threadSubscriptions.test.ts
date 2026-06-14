@@ -1,4 +1,3 @@
-import { QueryClient } from "@tanstack/react-query";
 import {
   EnvironmentId,
   ProjectId,
@@ -228,7 +227,7 @@ describe("retainThreadDetailSubscription", () => {
       resetEnvironmentServiceForTests,
     } = await import("./service");
 
-    const stop = startEnvironmentConnectionService(new QueryClient());
+    const stop = startEnvironmentConnectionService();
     const environmentId = EnvironmentId.make("env-1");
     const threadId = ThreadId.make("thread-1");
 
@@ -268,7 +267,7 @@ describe("retainThreadDetailSubscription", () => {
       startEnvironmentConnectionService,
     } = await import("./service");
 
-    const stop = startEnvironmentConnectionService(new QueryClient());
+    const stop = startEnvironmentConnectionService();
 
     expect(mockCreateEnvironmentConnection).not.toHaveBeenCalled();
     expect(listEnvironmentConnections()).toEqual([]);
@@ -284,7 +283,7 @@ describe("retainThreadDetailSubscription", () => {
       resetEnvironmentServiceForTests,
     } = await import("./service");
 
-    const stop = startEnvironmentConnectionService(new QueryClient());
+    const stop = startEnvironmentConnectionService();
     const environmentId = EnvironmentId.make("env-1");
     const threadId = ThreadId.make("thread-active");
 
@@ -350,7 +349,7 @@ describe("retainThreadDetailSubscription", () => {
       resetEnvironmentServiceForTests,
     } = await import("./service");
 
-    const stop = startEnvironmentConnectionService(new QueryClient());
+    const stop = startEnvironmentConnectionService();
     savedEnvironmentRegistryListener?.();
     await vi.advanceTimersByTimeAsync(2500);
     await vi.waitFor(() => {
@@ -403,7 +402,7 @@ describe("retainThreadDetailSubscription", () => {
     const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
       await import("./service");
 
-    const stop = startEnvironmentConnectionService(new QueryClient());
+    const stop = startEnvironmentConnectionService();
     expect(mockConnectionReconnects).toHaveLength(1);
 
     visibilityState = "hidden";
@@ -454,7 +453,7 @@ describe("retainThreadDetailSubscription", () => {
     const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
       await import("./service");
 
-    const stop = startEnvironmentConnectionService(new QueryClient());
+    const stop = startEnvironmentConnectionService();
     expect(mockConnectionReconnects).toHaveLength(1);
 
     visibilityState = "hidden";
@@ -475,7 +474,7 @@ describe("retainThreadDetailSubscription", () => {
       resetEnvironmentServiceForTests,
     } = await import("./service");
 
-    const stop = startEnvironmentConnectionService(new QueryClient());
+    const stop = startEnvironmentConnectionService();
     const environmentId = EnvironmentId.make("env-1");
 
     for (let index = 0; index < 12; index += 1) {
@@ -499,7 +498,7 @@ describe("retainThreadDetailSubscription", () => {
       resetEnvironmentServiceForTests,
     } = await import("./service");
 
-    const stop = startEnvironmentConnectionService(new QueryClient());
+    const stop = startEnvironmentConnectionService();
     const environmentId = EnvironmentId.make("env-1");
     const threadId = ThreadId.make("thread-2");
 

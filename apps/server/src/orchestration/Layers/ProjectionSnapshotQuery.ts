@@ -54,6 +54,15 @@ import {
   type ProjectionSnapshotQueryShape,
 } from "../Services/ProjectionSnapshotQuery.ts";
 
+/**
+ * Maximum number of messages hydrated per thread for snapshot/detail reads.
+ *
+ * Threads with more than this many messages are truncated to the most recent
+ * page so the server never streams unbounded history on connect. The client
+ * virtualizes the timeline and can lazily request older pages.
+ */
+const MAX_THREAD_SNAPSHOT_MESSAGES = 500;
+
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot);
 const decodeThread = Schema.decodeUnknownEffect(OrchestrationThread);
@@ -441,7 +450,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
-        FROM projection_thread_messages
+        FROM (
+          SELECT
+            *,
+            ROW_NUMBER() OVER (
+              PARTITION BY thread_id
+              ORDER BY created_at DESC, message_id DESC
+            ) AS recency_rank
+          FROM projection_thread_messages
+        )
+        WHERE recency_rank <= ${MAX_THREAD_SNAPSHOT_MESSAGES}
         ORDER BY thread_id ASC, created_at ASC, message_id ASC
       `,
   });
@@ -738,8 +756,13 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
-        FROM projection_thread_messages
-        WHERE thread_id = ${threadId}
+        FROM (
+          SELECT *
+          FROM projection_thread_messages
+          WHERE thread_id = ${threadId}
+          ORDER BY created_at DESC, message_id DESC
+          LIMIT ${MAX_THREAD_SNAPSHOT_MESSAGES}
+        )
         ORDER BY created_at ASC, message_id ASC
       `,
   });

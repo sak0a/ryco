@@ -6,12 +6,16 @@ import {
   SparklesIcon,
 } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "~/rpc/queryClient";
+import {
+  invalidateAtlassian,
+  useAtlassianConnections,
+  useAtlassianProjectLink,
+} from "~/rpc/useAtlassian";
 import {
   PROJECT_CUSTOM_SYSTEM_PROMPT_MAX_CHARS,
   type AtlassianConnectionId,
   type AtlassianConnectionSummary,
-  type AtlassianProjectLink,
   type RepositoryIdentity,
 } from "@ryco/contracts";
 import type { SidebarProjectGroupMember } from "../../sidebarProjectGrouping";
@@ -470,21 +474,14 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
   const dirtyRef = useRef(false);
   const initializedTargetRef = useRef<string | null>(null);
 
-  const projectLinkQuery = useQuery({
-    queryKey: ["atlassian", "project-link", target?.environmentId ?? null, target?.id ?? null],
-    queryFn: async (): Promise<AtlassianProjectLink | null> => {
-      if (!client || !target) return null;
-      return client.atlassian.getProjectLink({ projectId: target.id });
-    },
+  const projectLinkQuery = useAtlassianProjectLink({
+    environmentId: target?.environmentId ?? null,
+    projectId: target?.id ?? null,
     enabled: client !== null && target !== null,
   });
 
-  const connectionsQuery = useQuery({
-    queryKey: ["atlassian", "connections", target?.environmentId ?? null],
-    queryFn: async () => {
-      if (!client) return [];
-      return client.atlassian.listConnections();
-    },
+  const connectionsQuery = useAtlassianConnections({
+    environmentId: target?.environmentId ?? null,
     enabled: client !== null,
   });
 
@@ -531,6 +528,7 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
   };
 
   const invalidateAtlassianProjectSettings = () => {
+    invalidateAtlassian({ environmentId: target?.environmentId ?? null });
     void queryClient.invalidateQueries({ queryKey: ["atlassian"] });
     void queryClient.invalidateQueries({ queryKey: ["workItems"] });
   };

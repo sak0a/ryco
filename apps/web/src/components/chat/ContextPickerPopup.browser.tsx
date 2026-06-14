@@ -5,17 +5,6 @@ import { render } from "vitest-browser-react";
 import { page, userEvent } from "vite-plus/test/browser";
 import type { ChangeRequest, EnvironmentId, SourceControlIssueSummary } from "@ryco/contracts";
 
-// ---------------------------------------------------------------------------
-// Mock TanStack Query so we can inject test data without a real server
-// ---------------------------------------------------------------------------
-
-type UseQueryArgs = {
-  queryKey?: ReadonlyArray<unknown>;
-  queryFn?: unknown;
-  enabled?: boolean;
-  staleTime?: number;
-};
-
 const issueListData: SourceControlIssueSummary[] = [
   {
     provider: "github",
@@ -48,91 +37,27 @@ const prListData: ChangeRequest[] = [
   },
 ];
 
-vi.mock("~/lib/sourceControlContextRpc", () => ({
-  issueListQueryOptions: vi.fn((input: { environmentId: unknown; cwd: string; state: string }) => ({
-    queryKey: [
-      "sourceControl",
-      "issues",
-      input.environmentId,
-      input.cwd,
-      "list",
-      input.state,
-      null,
-    ],
-    queryFn: () => issueListData,
-    enabled: true,
-    staleTime: 60_000,
-  })),
-  changeRequestListQueryOptions: vi.fn(
-    (input: { environmentId: unknown; cwd: string; state: string }) => ({
-      queryKey: [
-        "sourceControl",
-        "changeRequests",
-        input.environmentId,
-        input.cwd,
-        "list",
-        input.state,
-        null,
-      ],
-      queryFn: () => prListData,
-      enabled: true,
-      staleTime: 60_000,
-    }),
-  ),
-  searchIssuesQueryOptions: vi.fn((input: { query: string; enabled?: boolean }) => ({
-    queryKey: ["sourceControl", "issues", null, null, "search", input.query, null],
-    queryFn: () => [],
-    enabled: input.enabled ?? false,
-    staleTime: 30_000,
-  })),
-  searchChangeRequestsQueryOptions: vi.fn((input: { query: string; enabled?: boolean }) => ({
-    queryKey: ["sourceControl", "changeRequests", null, null, "search", input.query, null],
-    queryFn: () => [],
-    enabled: input.enabled ?? false,
-    staleTime: 30_000,
-  })),
+// ---------------------------------------------------------------------------
+// Mock the atom-backed source-control hooks so we can inject test data
+// without a real server.
+// ---------------------------------------------------------------------------
+
+function readyState<T>(data: T) {
+  return { data, isLoading: false, isFetching: false, error: null };
+}
+
+function searchState(input: { enabled?: boolean }) {
+  // Server search is only consulted when enabled; the tests exercise the
+  // client-side filter path, so the search result stays empty.
+  return { data: input.enabled ? [] : null, isLoading: false, isFetching: false, error: null };
+}
+
+vi.mock("~/rpc/useSourceControl", () => ({
+  useSourceControlIssueList: vi.fn(() => readyState(issueListData)),
+  useSourceControlChangeRequestList: vi.fn(() => readyState(prListData)),
+  useSourceControlIssueSearch: vi.fn((input: { enabled?: boolean }) => searchState(input)),
+  useSourceControlChangeRequestSearch: vi.fn((input: { enabled?: boolean }) => searchState(input)),
 }));
-
-// ---------------------------------------------------------------------------
-// Replace useQuery with a test double that executes the queryFn immediately
-// ---------------------------------------------------------------------------
-
-vi.mock("@tanstack/react-query", async () => {
-  const actual =
-    await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query");
-
-  const cache = new Map<string, unknown>();
-
-  return {
-    ...actual,
-    useQuery: (options: UseQueryArgs) => {
-      const key = JSON.stringify(options.queryKey);
-      if (options.enabled === false) {
-        return { data: undefined, isLoading: false, error: null };
-      }
-      if (!cache.has(key)) {
-        // Synchronously run the queryFn so the component has data on first render
-        const fn = options.queryFn as (() => unknown) | undefined;
-        if (fn) {
-          const result = fn();
-          if (result instanceof Promise) {
-            // store a pending marker; react will re-render once it resolves
-            result.then((data) => cache.set(key, data));
-          } else {
-            cache.set(key, result);
-          }
-        }
-      }
-      const data = cache.get(key);
-      return {
-        data,
-        isLoading: data === undefined,
-        error: null,
-      };
-    },
-    useQueryClient: () => ({}),
-  };
-});
 
 // ---------------------------------------------------------------------------
 // Import the component under test AFTER mocks are registered

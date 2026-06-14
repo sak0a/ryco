@@ -1,0 +1,267 @@
+import { EnvironmentId, type ProjectSearchEntriesResult } from "@ryco/contracts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+
+const { searchEntries } = vi.hoisted(() => ({ searchEntries: vi.fn() }));
+
+vi.mock("~/environmentApi", () => ({
+  ensureEnvironmentApi: vi.fn(() => ({ projects: { searchEntries } })),
+}));
+
+import {
+  getProjectSearchEntriesSnapshot,
+  invalidateProjectSearchEntries,
+  releaseProjectSearchEntriesScope,
+  requestProjectSearchEntries,
+  resetProjectAtomsForTests,
+  retainProjectSearchEntriesScope,
+} from "./projectAtoms";
+
+const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
+const CWD = "/tmp/workspace";
+
+function result(...paths: ReadonlyArray<string>): ProjectSearchEntriesResult {
+  return {
+    entries: paths.map((path) => ({ kind: "file", path, parentPath: null })),
+    truncated: false,
+  } as unknown as ProjectSearchEntriesResult;
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flush(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+function snapshot(query: string) {
+  return getProjectSearchEntriesSnapshot({
+    environmentId: ENVIRONMENT_ID,
+    cwd: CWD,
+    query,
+    limit: 80,
+  });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.useFakeTimers();
+  resetProjectAtomsForTests();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  resetProjectAtomsForTests();
+});
+
+describe("projectAtoms", () => {
+  it("does not fetch when the query is empty, gating is disabled, or scope is incomplete", () => {
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "" });
+    requestProjectSearchEntries({
+      environmentId: ENVIRONMENT_ID,
+      cwd: CWD,
+      query: "src",
+      enabled: false,
+    });
+    requestProjectSearchEntries({ environmentId: null, cwd: CWD, query: "src" });
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: null, query: "src" });
+
+    expect(searchEntries).not.toHaveBeenCalled();
+  });
+
+  it("marks the first request as loading and commits the resolved result", async () => {
+    const deferred = createDeferred<ProjectSearchEntriesResult>();
+    searchEntries.mockReturnValueOnce(deferred.promise);
+
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "src" });
+    await flush();
+
+    expect(searchEntries).toHaveBeenCalledWith({ cwd: CWD, query: "src", limit: 80 });
+    expect(snapshot("src")).toEqual({
+      data: null,
+      isLoading: true,
+      isFetching: true,
+      error: null,
+    });
+
+    const entries = result("src/index.ts");
+    deferred.resolve(entries);
+    await flush();
+
+    expect(snapshot("src")).toEqual({
+      data: entries,
+      isLoading: false,
+      isFetching: false,
+      error: null,
+    });
+  });
+
+  it("keeps the previous result visible while a new query loads", async () => {
+    const first = createDeferred<ProjectSearchEntriesResult>();
+    searchEntries.mockReturnValueOnce(first.promise);
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "a" });
+    await flush();
+    const firstResult = result("a.ts");
+    first.resolve(firstResult);
+    await flush();
+
+    const second = createDeferred<ProjectSearchEntriesResult>();
+    searchEntries.mockReturnValueOnce(second.promise);
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "ab" });
+    await flush();
+
+    expect(snapshot("ab")).toEqual({
+      data: firstResult,
+      isLoading: false,
+      isFetching: true,
+      error: null,
+    });
+
+    const secondResult = result("ab.ts");
+    second.resolve(secondResult);
+    await flush();
+    expect(snapshot("ab").data).toBe(secondResult);
+  });
+
+  it("dedupes an identical in-flight query", async () => {
+    searchEntries.mockReturnValue(createDeferred<ProjectSearchEntriesResult>().promise);
+
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "src" });
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "src" });
+    await flush();
+
+    expect(searchEntries).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves a fresh cached result without refetching within the stale time", async () => {
+    const deferred = createDeferred<ProjectSearchEntriesResult>();
+    searchEntries.mockReturnValueOnce(deferred.promise);
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "src" });
+    await flush();
+    deferred.resolve(result("src/index.ts"));
+    await flush();
+
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "src" });
+    await flush();
+    expect(searchEntries).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(20_000);
+    searchEntries.mockReturnValueOnce(createDeferred<ProjectSearchEntriesResult>().promise);
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "src" });
+    await flush();
+    expect(searchEntries).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a stale response that resolves after a newer query", async () => {
+    const first = createDeferred<ProjectSearchEntriesResult>();
+    const second = createDeferred<ProjectSearchEntriesResult>();
+    searchEntries.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "a" });
+    await flush();
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "ab" });
+    await flush();
+
+    const secondResult = result("ab.ts");
+    second.resolve(secondResult);
+    await flush();
+    first.resolve(result("a.ts"));
+    await flush();
+
+    expect(snapshot("ab").data).toBe(secondResult);
+  });
+
+  it("surfaces fetch errors while keeping the previous data", async () => {
+    const first = createDeferred<ProjectSearchEntriesResult>();
+    searchEntries.mockReturnValueOnce(first.promise);
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "a" });
+    await flush();
+    const firstResult = result("a.ts");
+    first.resolve(firstResult);
+    await flush();
+
+    const second = createDeferred<ProjectSearchEntriesResult>();
+    searchEntries.mockReturnValueOnce(second.promise);
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "ab" });
+    await flush();
+    second.reject(new Error("boom"));
+    await flush();
+
+    const state = snapshot("ab");
+    expect(state.data).toBe(firstResult);
+    expect(state.isFetching).toBe(false);
+    expect(state.error).toEqual(new Error("boom"));
+  });
+
+  it("refetches retained scopes and only clears the cache for idle scopes on invalidation", async () => {
+    // Idle scope: resolves once, then invalidation clears cache without refetch.
+    const idle = createDeferred<ProjectSearchEntriesResult>();
+    searchEntries.mockReturnValueOnce(idle.promise);
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "src" });
+    await flush();
+    idle.resolve(result("src/index.ts"));
+    await flush();
+
+    invalidateProjectSearchEntries();
+    await flush();
+    expect(searchEntries).toHaveBeenCalledTimes(1);
+
+    // After invalidation the cache is empty, so the next request refetches.
+    searchEntries.mockReturnValueOnce(createDeferred<ProjectSearchEntriesResult>().promise);
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "src" });
+    await flush();
+    expect(searchEntries).toHaveBeenCalledTimes(2);
+  });
+
+  it("refetches a retained scope's last query when invalidated", async () => {
+    retainProjectSearchEntriesScope({ environmentId: ENVIRONMENT_ID, cwd: CWD, limit: 80 });
+
+    const initial = createDeferred<ProjectSearchEntriesResult>();
+    searchEntries.mockReturnValueOnce(initial.promise);
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "src" });
+    await flush();
+    initial.resolve(result("src/old.ts"));
+    await flush();
+
+    const refreshed = createDeferred<ProjectSearchEntriesResult>();
+    searchEntries.mockReturnValueOnce(refreshed.promise);
+    invalidateProjectSearchEntries();
+    await flush();
+
+    expect(searchEntries).toHaveBeenCalledTimes(2);
+    const refreshedResult = result("src/new.ts");
+    refreshed.resolve(refreshedResult);
+    await flush();
+    expect(snapshot("src").data).toBe(refreshedResult);
+
+    releaseProjectSearchEntriesScope({ environmentId: ENVIRONMENT_ID, cwd: CWD, limit: 80 });
+  });
+
+  it("scopes invalidation by cwd", async () => {
+    retainProjectSearchEntriesScope({ environmentId: ENVIRONMENT_ID, cwd: CWD, limit: 80 });
+    const other = "/tmp/other";
+    retainProjectSearchEntriesScope({ environmentId: ENVIRONMENT_ID, cwd: other, limit: 80 });
+
+    searchEntries
+      .mockReturnValueOnce(Promise.resolve(result("a.ts")))
+      .mockReturnValueOnce(Promise.resolve(result("b.ts")));
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "a" });
+    requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: other, query: "b" });
+    await flush();
+    expect(searchEntries).toHaveBeenCalledTimes(2);
+
+    searchEntries.mockReturnValueOnce(createDeferred<ProjectSearchEntriesResult>().promise);
+    invalidateProjectSearchEntries({ cwd: other });
+    await flush();
+
+    expect(searchEntries).toHaveBeenCalledTimes(3);
+    expect(searchEntries).toHaveBeenLastCalledWith({ cwd: other, query: "b", limit: 80 });
+  });
+});

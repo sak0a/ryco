@@ -1,5 +1,5 @@
 import { File as DiffsFile } from "@pierre/diffs/react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "~/rpc/queryClient";
 import { useParams, useSearch } from "@tanstack/react-router";
 import { Schema } from "effect";
 import {

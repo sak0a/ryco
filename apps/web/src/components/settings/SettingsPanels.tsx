@@ -1,5 +1,4 @@
 import { ArchiveIcon, ArchiveX } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import {
   type DesktopUpdateChannel,
@@ -26,10 +25,7 @@ import { isElectron } from "../../env";
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
-import {
-  setDesktopUpdateStateQueryData,
-  useDesktopUpdateState,
-} from "../../lib/desktopUpdateReactQuery";
+import { setDesktopUpdateState, useDesktopUpdateState } from "../../rpc/desktopUpdateAtoms";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -151,11 +147,9 @@ function AboutBrandingHeader() {
 }
 
 function AboutVersionSection() {
-  const queryClient = useQueryClient();
-  const updateStateQuery = useDesktopUpdateState();
+  const updateState = useDesktopUpdateState();
   const [isChangingUpdateChannel, setIsChangingUpdateChannel] = useState(false);
 
-  const updateState = updateStateQuery.data ?? null;
   const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
   const selectedUpdateChannel = updateState?.channel ?? "latest";
 
@@ -174,7 +168,7 @@ function AboutVersionSection() {
       void bridge
         .setUpdateChannel(channel)
         .then((state) => {
-          setDesktopUpdateStateQueryData(queryClient, state);
+          setDesktopUpdateState(state);
         })
         .catch((error: unknown) => {
           toastManager.add(
@@ -189,7 +183,7 @@ function AboutVersionSection() {
           setIsChangingUpdateChannel(false);
         });
     },
-    [queryClient, selectedUpdateChannel],
+    [selectedUpdateChannel],
   );
 
   const handleButtonClick = useCallback(() => {
@@ -202,7 +196,7 @@ function AboutVersionSection() {
       void bridge
         .downloadUpdate()
         .then((result) => {
-          setDesktopUpdateStateQueryData(queryClient, result.state);
+          setDesktopUpdateState(result.state);
         })
         .catch((error: unknown) => {
           toastManager.add(
@@ -226,7 +220,7 @@ function AboutVersionSection() {
       void bridge
         .installUpdate()
         .then((result) => {
-          setDesktopUpdateStateQueryData(queryClient, result.state);
+          setDesktopUpdateState(result.state);
         })
         .catch((error: unknown) => {
           toastManager.add(
@@ -244,7 +238,7 @@ function AboutVersionSection() {
     void bridge
       .checkForUpdate()
       .then((result) => {
-        setDesktopUpdateStateQueryData(queryClient, result.state);
+        setDesktopUpdateState(result.state);
         if (!result.checked) {
           toastManager.add(
             stackedThreadToast({
@@ -265,7 +259,7 @@ function AboutVersionSection() {
           }),
         );
       });
-  }, [queryClient, updateState]);
+  }, [updateState]);
 
   const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
   const buttonTooltip = updateState ? getDesktopUpdateButtonTooltip(updateState) : null;

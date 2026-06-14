@@ -9,9 +9,86 @@ import {
   type ProposedPlan,
   type TurnDiffSummary,
 } from "../../types";
-import { type MessageId } from "@ryco/contracts";
+import {
+  type EnvironmentId,
+  type MessageId,
+  type ServerProviderSkill,
+  type TurnId,
+} from "@ryco/contracts";
+import { type TimestampFormat } from "@ryco/contracts/settings";
+import { type ExpandedImagePreview } from "./ExpandedImagePreview";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
+
+// ---------------------------------------------------------------------------
+// Timeline row context split — streaming-frequent vs stable fields.
+// `MessagesTimeline` provides two separate React contexts so that streaming
+// transitions (activeTurnInProgress / isWorking / …) do not invalidate the
+// stable context value (theme/cwd/skills/timestampFormat/callbacks) consumed
+// by rows that only depend on stable state.
+// ---------------------------------------------------------------------------
+
+/** Frequently changing state — updates across a turn's lifecycle. */
+export interface TimelineStreamingState {
+  activeTurnInProgress: boolean;
+  activeTurnId: TurnId | null;
+  isWorking: boolean;
+  isRevertingCheckpoint: boolean;
+  completionSummary: string | null;
+  openDiffTurnId: TurnId | null;
+}
+
+/** Infrequently changing state — settings, per-thread context, and callbacks. */
+export interface TimelineStableState {
+  timestampFormat: TimestampFormat;
+  routeThreadKey: string;
+  markdownCwd: string | undefined;
+  resolvedTheme: "light" | "dark";
+  workspaceRoot: string | undefined;
+  skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  activeThreadEnvironmentId: EnvironmentId;
+  onRevertUserMessage: (messageId: MessageId) => void;
+  onImageExpand: (preview: ExpandedImagePreview) => void;
+  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onCloseDiff: () => void;
+}
+
+/**
+ * Normalizes the streaming-frequent context value, copying only the streaming
+ * fields. Excess keys (e.g. accidentally-passed stable fields) are dropped so
+ * the streaming context never carries stable state that would broaden churn.
+ */
+export function buildTimelineStreamingState(input: TimelineStreamingState): TimelineStreamingState {
+  return {
+    activeTurnInProgress: input.activeTurnInProgress,
+    activeTurnId: input.activeTurnId,
+    isWorking: input.isWorking,
+    isRevertingCheckpoint: input.isRevertingCheckpoint,
+    completionSummary: input.completionSummary,
+    openDiffTurnId: input.openDiffTurnId,
+  };
+}
+
+/**
+ * Normalizes the stable context value, copying only the stable fields. Excess
+ * keys (e.g. accidentally-passed streaming fields) are dropped so the stable
+ * context identity is unaffected by streaming transitions.
+ */
+export function buildTimelineStableState(input: TimelineStableState): TimelineStableState {
+  return {
+    timestampFormat: input.timestampFormat,
+    routeThreadKey: input.routeThreadKey,
+    markdownCwd: input.markdownCwd,
+    resolvedTheme: input.resolvedTheme,
+    workspaceRoot: input.workspaceRoot,
+    skills: input.skills,
+    activeThreadEnvironmentId: input.activeThreadEnvironmentId,
+    onRevertUserMessage: input.onRevertUserMessage,
+    onImageExpand: input.onImageExpand,
+    onOpenTurnDiff: input.onOpenTurnDiff,
+    onCloseDiff: input.onCloseDiff,
+  };
+}
 
 export function isErroredWorkEntry(entry: WorkLogEntry): boolean {
   if (entry.tone === "error") return true;

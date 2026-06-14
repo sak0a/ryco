@@ -13,7 +13,7 @@ import type {
 } from "@ryco/contracts";
 import { scopeProjectRef } from "@ryco/client-runtime";
 import { DateTime, Option } from "effect";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "~/rpc/queryClient";
 import { useShallow } from "zustand/react/shallow";
 import {
   ArrowDownIcon,
@@ -42,7 +42,7 @@ import {
 } from "~/lib/workItemLocalLinks";
 import { searchChangeRequestsQueryOptions } from "~/lib/sourceControlContextRpc";
 import { errorMessage } from "~/lib/errorMessage";
-import { workItemDetailQueryOptions, workItemsQueryKeys } from "~/lib/workItemsRpc";
+import { invalidateWorkItems, setWorkItemDetailCache, useWorkItemDetail } from "~/rpc/useWorkItems";
 import { selectSidebarWorktreesForProjectRef, useStore } from "~/store";
 import { AtlassianJiraIcon } from "../Icons";
 import { Button } from "../ui/button";
@@ -111,19 +111,16 @@ interface WorkItemDetailProps {
 }
 
 export function WorkItemDetail(props: WorkItemDetailProps) {
-  const queryClient = useQueryClient();
   const [editingComment, setEditingComment] = useState<WorkItemComment | null>(null);
   const [quoteInsertion, setQuoteInsertion] = useState<CommentQuoteInsertion | null>(null);
   const [descriptionDialogOpen, setDescriptionDialogOpen] = useState(false);
 
-  const detailQuery = useQuery(
-    workItemDetailQueryOptions({
-      environmentId: props.environmentId,
-      projectId: props.projectId,
-      key: props.workItemKey,
-      fullContent: true,
-    }),
-  );
+  const detailQuery = useWorkItemDetail({
+    environmentId: props.environmentId,
+    projectId: props.projectId,
+    key: props.workItemKey,
+    fullContent: true,
+  });
   const linkedPrQuery = useQuery(
     searchChangeRequestsQueryOptions({
       environmentId: props.environmentId,
@@ -166,10 +163,18 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
   );
 
   const setDetailCache = (detail: WorkItemDetailModel) => {
-    queryClient.setQueryData(
-      workItemsQueryKeys.detail(props.environmentId, props.projectId, props.workItemKey, true),
+    if (!props.environmentId || !props.projectId) {
+      return;
+    }
+    setWorkItemDetailCache(
+      { environmentId: props.environmentId, projectId: props.projectId },
+      props.workItemKey,
       detail,
     );
+  };
+
+  const invalidateAllWorkItems = () => {
+    invalidateWorkItems({ environmentId: props.environmentId, projectId: props.projectId });
   };
 
   const updateMutation = useMutation({
@@ -186,7 +191,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
     },
     onSuccess: (detail) => {
       setDetailCache(detail);
-      void queryClient.invalidateQueries({ queryKey: workItemsQueryKeys.all });
+      invalidateAllWorkItems();
     },
     onError: (error) => {
       toastManager.add(
@@ -213,7 +218,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
     },
     onSuccess: (detail) => {
       setDetailCache(detail);
-      void queryClient.invalidateQueries({ queryKey: workItemsQueryKeys.all });
+      invalidateAllWorkItems();
     },
     onError: (error) => {
       toastManager.add(
@@ -242,7 +247,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
     onSuccess: (detail) => {
       setEditingComment(null);
       setDetailCache(detail);
-      void queryClient.invalidateQueries({ queryKey: workItemsQueryKeys.all });
+      invalidateAllWorkItems();
     },
     onError: (error) => {
       toastManager.add(
@@ -269,7 +274,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
     },
     onSuccess: (detail) => {
       setDetailCache(detail);
-      void queryClient.invalidateQueries({ queryKey: workItemsQueryKeys.all });
+      invalidateAllWorkItems();
     },
     onError: (error) => {
       toastManager.add(

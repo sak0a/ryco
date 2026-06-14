@@ -6,7 +6,7 @@ import type {
   WorkItemPriority,
   WorkItemSummary,
 } from "@ryco/contracts";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "~/rpc/queryClient";
 import {
   AlertTriangleIcon,
   CircleDotIcon,
@@ -20,7 +20,8 @@ import {
   issueListQueryOptions,
   workflowRunsQueryOptions,
 } from "~/lib/sourceControlContextRpc";
-import { workItemListQueryOptions, workItemsQueryKeys } from "~/lib/workItemsRpc";
+import { workItemsQueryKeys } from "~/lib/workItemsRpc";
+import { useWorkItemList } from "~/rpc/useWorkItems";
 import { workItemStateLabel } from "~/lib/workItemState";
 import { cn } from "~/lib/utils";
 import { readEnvironmentConnection } from "~/environments/runtime";
@@ -106,15 +107,13 @@ export function ProjectOverviewTab(props: ProjectOverviewTabProps) {
     projectLinkQuery.data?.jiraConnectionId !== null &&
     projectLinkQuery.data?.jiraConnectionId !== undefined &&
     projectLinkQuery.data.jiraProjectKeys.length > 0;
-  const workItemListQuery = useQuery(
-    workItemListQueryOptions({
-      environmentId: props.environmentId,
-      projectId: props.projectId,
-      state: "open",
-      limit: OVERVIEW_LIST_LIMIT,
-      enabled: jiraConfigured,
-    }),
-  );
+  const workItemListQuery = useWorkItemList({
+    environmentId: props.environmentId,
+    projectId: props.projectId,
+    state: "open",
+    limit: OVERVIEW_LIST_LIMIT,
+    enabled: jiraConfigured,
+  });
 
   const issues = useMemo(() => issueListQuery.data ?? [], [issueListQuery.data]);
   const pullRequests = useMemo(() => pullRequestListQuery.data ?? [], [pullRequestListQuery.data]);

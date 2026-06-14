@@ -1,6 +1,7 @@
 // apps/web/src/components/settings/SettingsDialog.tsx
 import { lazy, Suspense, useCallback, useState, type ComponentType } from "react";
 import {
+  ActivityIcon,
   ArchiveIcon,
   BlocksIcon,
   GitBranchIcon,
@@ -35,6 +36,7 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { id: "keybindings", label: "Keybindings", icon: KeyboardIcon },
   { id: "source-control", label: "Source Control", icon: GitBranchIcon },
   { id: "connections", label: "Connections", icon: Link2Icon },
+  { id: "diagnostics", label: "Diagnostics", icon: ActivityIcon },
   { id: "archived", label: "Archive", icon: ArchiveIcon },
 ];
 
@@ -73,6 +75,9 @@ const LazySourceControlSettingsPanel = lazy(() =>
 const LazyConnectionsSettings = lazy(() =>
   import("./ConnectionsSettings").then((module) => ({ default: module.ConnectionsSettings })),
 );
+const LazyDiagnosticsPanel = lazy(() =>
+  import("./DiagnosticsPanel").then((module) => ({ default: module.DiagnosticsPanel })),
+);
 
 function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
@@ -106,6 +111,7 @@ function SectionPanel({ section }: { section: SettingsSectionId }) {
       {section === "keybindings" ? <LazyKeybindingsSettingsPanel /> : null}
       {section === "source-control" ? <LazySourceControlSettingsPanel /> : null}
       {section === "connections" ? <LazyConnectionsSettings /> : null}
+      {section === "diagnostics" ? <LazyDiagnosticsPanel /> : null}
       {section === "archived" ? <ArchivedThreadsPanel /> : null}
     </Suspense>
   );

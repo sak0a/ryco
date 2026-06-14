@@ -6,7 +6,7 @@ import type {
   SourceControlChangeRequestFile,
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "~/rpc/queryClient";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ChevronRightIcon,

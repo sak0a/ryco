@@ -88,6 +88,51 @@ ryco auth session revoke <session-id>
 
 Run `ryco --help` or `ryco <command> --help` for the full command reference.
 
+## Testing
+
+### `WsTestClient` (websocket integration tests)
+
+`src/test/WsTestClient.ts` is a small harness for server-side websocket RPC
+integration tests. It replaces ad-hoc per-test socket wiring (`RpcClient.make` +
+protocol layer + cookie/origin parsing) with a single scoped `connect()` plus a
+few combinators. Connections are bound to the surrounding `Scope` (e.g.
+`Effect.scoped`).
+
+```ts
+import * as WsTestClient from "./test/WsTestClient.ts";
+
+// `wsUrl` already carries auth (e.g. `?wsToken=...`), as produced by the test
+// harness' `getWsServerUrl("/ws")`.
+yield *
+  Effect.scoped(
+    Effect.gen(function* () {
+      const ws = yield* WsTestClient.connect(wsUrl);
+
+      // Request/response RPC:
+      const config = yield* ws.rpc(WS_METHODS.serverGetConfig, {});
+
+      // Wait for the lifecycle welcome event:
+      const welcome = yield* ws.awaitWelcome();
+
+      // Wait for the first push on a subscription matching a predicate:
+      const ready = yield* ws.awaitPush(
+        WS_METHODS.subscribeServerLifecycle,
+        (event) => event.type === "ready",
+      );
+
+      // Record an ordered push sequence and await N events:
+      const sequence = yield* ws.trackPushSequence(WS_METHODS.subscribeServerConfig);
+      const [snapshot, update] = yield* sequence.waitForCount(2);
+    }),
+  );
+```
+
+`makeWsTestClientConnector(group)` builds the same surface for an arbitrary RPC
+group, and `makeConnectedWsTestClient(client)` wraps an already-constructed RPC
+client (used by `WsTestClient.test.ts` to unit-test the combinators without a
+socket). See `src/test/WsTestClient.test.ts` and the migrated cases in
+`src/server.test.ts` for examples.
+
 ## Links
 
 - Repository: https://github.com/sak0a/ryco

@@ -64,14 +64,6 @@ vi.mock("../editorPreferences", () => ({
   openInPreferredEditor,
 }));
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: vi.fn(() => ({
-    data: { diff: "diff --git a/src/app.ts b/src/app.ts" },
-    error: null,
-    isLoading: false,
-  })),
-}));
-
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => vi.fn(),
   useParams: vi.fn((options?: { select?: (params: Record<string, string>) => unknown }) => {
@@ -88,8 +80,12 @@ vi.mock("~/lib/gitStatusState", () => ({
   useGitStatus: () => ({ data: { isRepo: true } }),
 }));
 
-vi.mock("~/lib/providerReactQuery", () => ({
-  checkpointDiffQueryOptions: (input: unknown) => input,
+vi.mock("~/rpc/useProvider", () => ({
+  useCheckpointDiff: () => ({
+    data: { diff: "diff --git a/src/app.ts b/src/app.ts" },
+    error: null,
+    isLoading: false,
+  }),
 }));
 
 vi.mock("../hooks/useTheme", () => ({

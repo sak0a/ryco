@@ -8,6 +8,10 @@ import type {
 } from "@ryco/contracts";
 import type { KnownEnvironment } from "@ryco/client-runtime";
 
+import {
+  recordPushSequenceEvent,
+  recordPushSequenceSnapshot,
+} from "~/diagnostics/pushSequenceMonitor";
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
 
 export interface EnvironmentConnection {
@@ -127,10 +131,12 @@ export function createEnvironmentConnection(
   const unsubShell = input.client.orchestration.subscribeShell(
     (item: Parameters<Parameters<WsRpcClient["orchestration"]["subscribeShell"]>[0]>[0]) => {
       if (item.kind === "snapshot") {
+        recordPushSequenceSnapshot(environmentId, item.snapshot.snapshotSequence);
         input.syncShellSnapshot(item.snapshot, environmentId);
         bootstrapGate.resolve();
         return;
       }
+      recordPushSequenceEvent(environmentId, item.sequence);
       input.applyShellEvent(item, environmentId);
     },
     {

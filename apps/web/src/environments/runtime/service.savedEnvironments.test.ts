@@ -1,4 +1,3 @@
-import { QueryClient } from "@tanstack/react-query";
 import { EnvironmentId } from "@ryco/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -104,16 +103,12 @@ vi.mock("~/orchestrationEventEffects", () => ({
   })),
 }));
 
-vi.mock("~/lib/projectReactQuery", () => ({
-  projectQueryKeys: {
-    all: ["projects"],
-  },
+vi.mock("~/rpc/projectAtoms", () => ({
+  invalidateProjectSearchEntries: vi.fn(),
 }));
 
-vi.mock("~/lib/providerReactQuery", () => ({
-  providerQueryKeys: {
-    all: ["providers"],
-  },
+vi.mock("~/rpc/providerAtoms", () => ({
+  invalidateAllCheckpointDiffs: vi.fn(),
 }));
 
 vi.mock("~/store", () => ({
@@ -270,7 +265,7 @@ describe("saved environment startup", () => {
     const { startEnvironmentConnectionService, resetEnvironmentServiceForTests } =
       await import("./service");
 
-    const stop = startEnvironmentConnectionService(new QueryClient());
+    const stop = startEnvironmentConnectionService();
     await vi.runAllTimersAsync();
 
     const savedConnectionCall = mockCreateEnvironmentConnection.mock.calls.find(
@@ -306,7 +301,7 @@ describe("saved environment startup", () => {
     const { startEnvironmentConnectionService, resetEnvironmentServiceForTests } =
       await import("./service");
 
-    const stop = startEnvironmentConnectionService(new QueryClient());
+    const stop = startEnvironmentConnectionService();
     const registryListener = mockSavedEnvironmentRegistrySubscribe.mock.calls[0]?.[0];
     expect(registryListener).toBeTypeOf("function");
 

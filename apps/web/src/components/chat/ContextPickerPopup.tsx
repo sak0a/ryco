@@ -1,14 +1,13 @@
 import type { ChangeRequest, EnvironmentId, SourceControlIssueSummary } from "@ryco/contracts";
 import { type DragEvent, type ChangeEvent, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { PaperclipIcon } from "lucide-react";
 import {
-  issueListQueryOptions,
-  changeRequestListQueryOptions,
-  searchIssuesQueryOptions,
-  searchChangeRequestsQueryOptions,
-} from "~/lib/sourceControlContextRpc";
+  useSourceControlChangeRequestList,
+  useSourceControlChangeRequestSearch,
+  useSourceControlIssueList,
+  useSourceControlIssueSearch,
+} from "~/rpc/useSourceControl";
 import { searchSourceControlSummaries } from "./composerSourceControlContextSearch";
 import { ContextPickerList } from "./ContextPickerList";
 import { ContextPickerTabs } from "./ContextPickerTabs";
@@ -31,20 +30,16 @@ export function ContextPickerPopup(props: {
   const [debouncedQuery] = useDebouncedValue(query, { wait: 200 });
 
   // Cached list queries
-  const issueListQuery = useQuery(
-    issueListQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      state: "open",
-    }),
-  );
-  const prListQuery = useQuery(
-    changeRequestListQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      state: "open",
-    }),
-  );
+  const issueListQuery = useSourceControlIssueList({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    state: "open",
+  });
+  const prListQuery = useSourceControlChangeRequestList({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    state: "open",
+  });
 
   // Client-side filter
   const cachedIssues = issueListQuery.data ?? [];
@@ -63,22 +58,18 @@ export function ContextPickerPopup(props: {
   const needsServerSearchPrs =
     activeTab === "prs" && filteredPrs.length === 0 && debouncedQuery.length >= 2;
 
-  const serverIssueSearchQuery = useQuery(
-    searchIssuesQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      query: debouncedQuery,
-      enabled: needsServerSearchIssues,
-    }),
-  );
-  const serverPrSearchQuery = useQuery(
-    searchChangeRequestsQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      query: debouncedQuery,
-      enabled: needsServerSearchPrs,
-    }),
-  );
+  const serverIssueSearchQuery = useSourceControlIssueSearch({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    query: debouncedQuery,
+    enabled: needsServerSearchIssues,
+  });
+  const serverPrSearchQuery = useSourceControlChangeRequestSearch({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    query: debouncedQuery,
+    enabled: needsServerSearchPrs,
+  });
 
   // Effective display lists
   const displayIssues: ReadonlyArray<SourceControlIssueSummary> = needsServerSearchIssues

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
+import { EnvironmentId, TurnId } from "@ryco/contracts";
 import { type WorkLogEntry } from "../../session-logic";
 import {
+  buildTimelineStableState,
+  buildTimelineStreamingState,
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
@@ -8,6 +11,8 @@ import {
   isErroredWorkEntry,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  type TimelineStableState,
+  type TimelineStreamingState,
 } from "./MessagesTimeline.logic";
 
 function makeWorkEntry(overrides: Partial<WorkLogEntry> = {}): WorkLogEntry {
@@ -712,5 +717,80 @@ describe("computeStableMessagesTimelineRows", () => {
 
     expect(stable.result[0]).toBe(initial.result[0]);
     expect(stable.result[1]).not.toBe(initial.result[1]);
+  });
+});
+
+describe("timeline context split", () => {
+  const STREAMING_KEYS = [
+    "activeTurnInProgress",
+    "activeTurnId",
+    "isWorking",
+    "isRevertingCheckpoint",
+    "completionSummary",
+    "openDiffTurnId",
+  ];
+  const STABLE_KEYS = [
+    "timestampFormat",
+    "routeThreadKey",
+    "markdownCwd",
+    "resolvedTheme",
+    "workspaceRoot",
+    "skills",
+    "activeThreadEnvironmentId",
+    "onRevertUserMessage",
+    "onImageExpand",
+    "onOpenTurnDiff",
+    "onCloseDiff",
+  ];
+
+  function makeCombinedInput(): TimelineStreamingState & TimelineStableState {
+    return {
+      activeTurnInProgress: true,
+      activeTurnId: TurnId.make("turn-1"),
+      isWorking: true,
+      isRevertingCheckpoint: false,
+      completionSummary: "done",
+      openDiffTurnId: null,
+      timestampFormat: "locale",
+      routeThreadKey: "environment-local:thread-1",
+      markdownCwd: "/repo",
+      resolvedTheme: "light",
+      workspaceRoot: "/repo",
+      skills: [],
+      activeThreadEnvironmentId: EnvironmentId.make("environment-local"),
+      onRevertUserMessage: () => {},
+      onImageExpand: () => {},
+      onOpenTurnDiff: () => {},
+      onCloseDiff: () => {},
+    };
+  }
+
+  it("copies only the streaming-frequent fields into the streaming context", () => {
+    const result = buildTimelineStreamingState(makeCombinedInput());
+    expect(Object.keys(result).toSorted()).toEqual(STREAMING_KEYS.toSorted());
+  });
+
+  it("copies only the stable fields into the stable context", () => {
+    const result = buildTimelineStableState(makeCombinedInput());
+    expect(Object.keys(result).toSorted()).toEqual(STABLE_KEYS.toSorted());
+  });
+
+  it("partitions every shared field into exactly one context", () => {
+    const overlap = STREAMING_KEYS.filter((key) => STABLE_KEYS.includes(key));
+    expect(overlap).toEqual([]);
+    expect([...STREAMING_KEYS, ...STABLE_KEYS].toSorted()).toEqual(
+      Object.keys(makeCombinedInput()).toSorted(),
+    );
+  });
+
+  it("preserves field values and callback identity", () => {
+    const input = makeCombinedInput();
+    const streaming = buildTimelineStreamingState(input);
+    const stable = buildTimelineStableState(input);
+
+    expect(streaming.isWorking).toBe(true);
+    expect(streaming.completionSummary).toBe("done");
+    expect(stable.routeThreadKey).toBe("environment-local:thread-1");
+    expect(stable.onCloseDiff).toBe(input.onCloseDiff);
   });
 });

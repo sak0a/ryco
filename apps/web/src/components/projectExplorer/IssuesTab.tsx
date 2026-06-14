@@ -1,5 +1,5 @@
 import type { EnvironmentId, SourceControlIssueSummary } from "@ryco/contracts";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "~/rpc/queryClient";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { PlusIcon, RotateCwIcon, SearchIcon } from "lucide-react";
 import { useMemo, useState, type RefObject } from "react";
