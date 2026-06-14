@@ -1,6 +1,5 @@
 import {
   type ApprovalRequestId,
-  type ChangeRequest,
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
   type EnvironmentId,
@@ -20,7 +19,6 @@ import {
   ProviderDriverKind,
   RuntimeMode,
   AgentTokenMode,
-  type SourceControlWorkflowJob,
   TerminalOpenInput,
 } from "@ryco/contracts";
 import {
@@ -33,7 +31,7 @@ import { applyClaudePromptEffortPrefix, resolvePromptInjectedEffort } from "@ryc
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@ryco/shared/projectScripts";
 import { truncate } from "@ryco/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "effect";
 import {
   lazy,
@@ -45,19 +43,13 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
-  type ReactNode,
 } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
 import {
   issueDetailQueryOptions,
-  changeRequestListQueryOptions,
   changeRequestDetailQueryOptions,
-  sourceControlContextQueryKeys,
-  workflowRunJobsQueryOptions,
-  workflowRunsQueryOptions,
 } from "~/lib/sourceControlContextRpc";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
@@ -128,39 +120,13 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
-import GitActionsControl, { type GitActionPostPushEvent } from "./GitActionsControl";
+import GitActionsControl from "./GitActionsControl";
 import {
   matchesExactModShortcut,
   resolveShortcutCommand,
   shouldIgnoreGlobalNavigationShortcut,
   shortcutLabelForCommand,
 } from "../keybindings";
-import PlanSidebar, { type OverviewPanelItem, type OverviewPullRequestState } from "./PlanSidebar";
-import {
-  getPrCheckStatusForQuery,
-  getPrCheckStatusFromChangeRequest,
-  getPrCheckStatusFromWorkflowRuns,
-  shouldRefreshPrCheckStatus,
-  sourceControlOptionValue,
-} from "./projectExplorer/prCheckStatus";
-import {
-  areOverviewWorkflowRunsSupported,
-  buildOverviewCheckRollupRows,
-  buildOverviewWorkflowCheckRows,
-  isOverviewActiveCheckKind,
-  isOverviewActiveWorkflowRun,
-  OVERVIEW_CHECK_DETAIL_RUN_LIMIT,
-  selectOverviewChecksError,
-  summarizeActiveWorkflowJob,
-} from "./overviewPullRequestChecks.logic";
-import {
-  createPostPushWorkflowDiscoveryWatch,
-  hasDiscoveredPostPushWorkflowRun,
-  resolveWorkflowRunsRefetchInterval,
-  selectActivePostPushWorkflowDiscoveryWatch,
-  type PostPushWorkflowDiscoveryWatch,
-} from "./postPushWorkflowDiscovery.logic";
-import { buildOverviewChangesItem } from "./overviewChanges.logic";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -221,6 +187,14 @@ import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/Compos
 import { ComposerHintRow } from "./chat/ComposerHintRow";
 import type { HintRowTrigger } from "./chat/ComposerHintRow.logic";
 import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
+import {
+  ChatOverviewPanel,
+  FloatingOverviewMotionFrame,
+  OverviewSidebarMotionFrame,
+  OVERVIEW_FLOATING_EXIT_DURATION_MS,
+  OVERVIEW_SIDEBAR_EXIT_DURATION_MS,
+  usePostPushWorkflowWatch,
+} from "./chat/ChatOverviewPanel";
 import { useChatSessionActions } from "../hooks/useChatSessionActions";
 import { executeChatSendTurn } from "../hooks/executeChatSendTurn";
 import {
@@ -268,100 +242,7 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 const EMPTY_SESSION_TABS: ReadonlyArray<ChatSessionTabsItem> = Object.freeze([]);
-const OVERVIEW_FLOATING_EXIT_DURATION_MS = 260;
-const OVERVIEW_SIDEBAR_EXIT_DURATION_MS = 320;
-const OVERVIEW_SIDEBAR_FRAME_WIDTH = "calc(340px + 0.75rem)";
 const ThreadTerminalDrawer = lazy(() => import("./ThreadTerminalDrawer"));
-
-function OverviewSidebarMotionFrame(props: {
-  animate: boolean;
-  children: ReactNode;
-  open: boolean;
-}) {
-  const [entered, setEntered] = useState(!props.animate && props.open);
-
-  useEffect(() => {
-    if (!props.animate) {
-      setEntered(props.open);
-      return;
-    }
-
-    if (!props.open) {
-      setEntered(false);
-      return;
-    }
-
-    const frameId = window.requestAnimationFrame(() => setEntered(true));
-    return () => window.cancelAnimationFrame(frameId);
-  }, [props.animate, props.open]);
-
-  const active = props.animate ? props.open && entered : props.open;
-
-  return (
-    <div
-      aria-hidden={props.open ? undefined : true}
-      inert={props.open ? undefined : true}
-      className={cn(
-        "h-full min-h-0 shrink-0 overflow-hidden transition-[width,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
-        active ? "w-(--overview-sidebar-frame-width) opacity-100" : "w-0 opacity-0",
-      )}
-      style={
-        {
-          "--overview-sidebar-frame-width": OVERVIEW_SIDEBAR_FRAME_WIDTH,
-        } as CSSProperties
-      }
-    >
-      <div
-        className={cn(
-          "h-full min-h-0 w-(--overview-sidebar-frame-width) transition-[translate,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transition-none",
-          active ? "translate-x-0 opacity-100" : "translate-x-5 opacity-0",
-        )}
-      >
-        {props.children}
-      </div>
-    </div>
-  );
-}
-
-function FloatingOverviewMotionFrame(props: {
-  animate: boolean;
-  children: ReactNode;
-  open: boolean;
-}) {
-  const [entered, setEntered] = useState(!props.animate && props.open);
-
-  useEffect(() => {
-    if (!props.animate) {
-      setEntered(props.open);
-      return;
-    }
-
-    if (!props.open) {
-      setEntered(false);
-      return;
-    }
-
-    const frameId = window.requestAnimationFrame(() => setEntered(true));
-    return () => window.cancelAnimationFrame(frameId);
-  }, [props.animate, props.open]);
-
-  const active = props.animate ? props.open && entered : props.open;
-
-  return (
-    <div className="pointer-events-none absolute top-3 right-3 z-40">
-      <div
-        aria-hidden={props.open ? undefined : true}
-        inert={props.open ? undefined : true}
-        className={cn(
-          "origin-top-right transition-[translate,opacity] duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transition-none",
-          active ? "translate-x-0 opacity-100" : "translate-x-3 opacity-0",
-        )}
-      >
-        {props.children}
-      </div>
-    </div>
-  );
-}
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -369,43 +250,6 @@ type EnvironmentUnavailableState = {
 };
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
-
-function compactQueryErrorMessage(error: unknown): string | undefined {
-  if (!error) return undefined;
-  const message = error instanceof Error ? error.message : "Failed to load.";
-  const providerMatch = /^Source control provider [^ ]+ failed in [^:]+:\s*(.*)$/u.exec(message);
-  return providerMatch?.[1] ?? message;
-}
-
-function branchNameCandidates(branchName: string | null | undefined): ReadonlySet<string> {
-  const candidates = new Set<string>();
-  const trimmed = branchName?.trim() ?? "";
-  if (trimmed.length === 0) {
-    return candidates;
-  }
-  candidates.add(trimmed);
-
-  const firstSlashIndex = trimmed.indexOf("/");
-  if (firstSlashIndex > 0 && firstSlashIndex < trimmed.length - 1) {
-    const prefix = trimmed.slice(0, firstSlashIndex);
-    if (prefix === "origin" || prefix === "upstream") {
-      candidates.add(trimmed.slice(firstSlashIndex + 1));
-    }
-  }
-
-  return candidates;
-}
-
-function findChangeRequestForBranch(
-  changeRequests: ReadonlyArray<ChangeRequest> | null | undefined,
-  branchName: string | null | undefined,
-): ChangeRequest | null {
-  const candidates = branchNameCandidates(branchName);
-  if (candidates.size === 0) {
-    return null;
-  }
-  return changeRequests?.find((request) => candidates.has(request.headRefName)) ?? null;
-}
 
 function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalogEntry[] {
   return useStore(
@@ -2058,38 +1902,11 @@ export default function ChatView(props: ChatViewProps) {
     : null;
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
   const queryClient = useQueryClient();
-  const [postPushWorkflowWatch, setPostPushWorkflowWatch] =
-    useState<PostPushWorkflowDiscoveryWatch | null>(null);
-  const handlePostPushGitAction = useCallback(
-    (event: GitActionPostPushEvent) => {
-      setPostPushWorkflowWatch(
-        createPostPushWorkflowDiscoveryWatch({
-          environmentId: event.environmentId,
-          threadKey: event.threadKey,
-          cwd: event.cwd,
-          pullRequestNumber: event.pullRequestNumber,
-          commitSha: event.commitSha,
-          nowMs: Date.now(),
-        }),
-      );
-      void queryClient.invalidateQueries({
-        queryKey: sourceControlContextQueryKeys.changeRequests(event.environmentId, event.cwd),
-      });
-      void queryClient.invalidateQueries({
-        queryKey: sourceControlContextQueryKeys.workflows(event.environmentId, event.cwd),
-      });
-    },
-    [queryClient],
-  );
-  useEffect(() => {
-    if (!postPushWorkflowWatch) return;
-    const timeoutId = window.setTimeout(
-      () =>
-        setPostPushWorkflowWatch((current) => (current === postPushWorkflowWatch ? null : current)),
-      Math.max(0, postPushWorkflowWatch.expiresAtMs - Date.now()),
-    );
-    return () => window.clearTimeout(timeoutId);
-  }, [postPushWorkflowWatch]);
+  const {
+    postPushWorkflowWatch,
+    handlePostPush: handlePostPushGitAction,
+    clearWatch: clearPostPushWatch,
+  } = usePostPushWorkflowWatch();
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
   // Prefer an instance-id match so a custom Codex instance (e.g.
@@ -2113,320 +1930,6 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
-  const overviewBranchName =
-    activeWorktreeSummary?.branch ?? activeThread?.branch ?? gitStatusQuery.data?.refName ?? null;
-  const overviewBranchPullRequestsQuery = useQuery({
-    ...changeRequestListQueryOptions({
-      environmentId,
-      cwd: gitCwd,
-      state: "open",
-      limit: 50,
-      enabled:
-        overviewBranchName !== null &&
-        activeWorktreeSummary?.prNumber == null &&
-        gitStatusQuery.data?.pr == null,
-    }),
-  });
-  const overviewBranchPullRequest = useMemo(
-    () => findChangeRequestForBranch(overviewBranchPullRequestsQuery.data, overviewBranchName),
-    [overviewBranchName, overviewBranchPullRequestsQuery.data],
-  );
-  const postPushWorkflowWatchForContext = selectActivePostPushWorkflowDiscoveryWatch({
-    watch: postPushWorkflowWatch,
-    environmentId,
-    threadKey: activeThreadKey,
-    cwd: gitCwd,
-    pullRequestNumber: null,
-    nowMs: Date.now(),
-  });
-  const overviewPullRequestNumber =
-    activeWorktreeSummary?.prNumber ??
-    gitStatusQuery.data?.pr?.number ??
-    overviewBranchPullRequest?.number ??
-    postPushWorkflowWatchForContext?.pullRequestNumber ??
-    null;
-  const activePostPushWorkflowWatch = selectActivePostPushWorkflowDiscoveryWatch({
-    watch: postPushWorkflowWatchForContext,
-    environmentId,
-    threadKey: activeThreadKey,
-    cwd: gitCwd,
-    pullRequestNumber: overviewPullRequestNumber,
-    nowMs: Date.now(),
-  });
-  const overviewPullRequestReference =
-    overviewPullRequestNumber !== null ? String(overviewPullRequestNumber) : null;
-  const overviewGitProvider = gitStatusQuery.data?.sourceControlProvider?.kind ?? null;
-  const overviewPullRequestDetailQuery = useQuery({
-    ...changeRequestDetailQueryOptions({
-      environmentId,
-      cwd: gitCwd,
-      reference: overviewPullRequestReference,
-      enabled: overviewPullRequestNumber !== null,
-    }),
-    refetchInterval: (query) => {
-      const detail = query.state.data;
-      return detail?.state === "open" ? 30_000 : false;
-    },
-  });
-  const overviewPullRequestProvider =
-    overviewPullRequestDetailQuery.data?.provider ??
-    overviewBranchPullRequest?.provider ??
-    overviewGitProvider;
-  const overviewWorkflowRunsSupported = areOverviewWorkflowRunsSupported(
-    overviewPullRequestProvider,
-  );
-  const overviewWorkflowRunsEnabled =
-    overviewWorkflowRunsSupported && overviewPullRequestNumber !== null;
-  const overviewWorkflowRunsQuery = useQuery({
-    ...workflowRunsQueryOptions({
-      environmentId,
-      cwd: gitCwd,
-      pullRequestNumber: overviewPullRequestNumber,
-      commitSha: activePostPushWorkflowWatch?.commitSha ?? null,
-      limit: 20,
-      enabled: overviewWorkflowRunsEnabled,
-    }),
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      const status = data
-        ? getPrCheckStatusFromWorkflowRuns({
-            runs: data.runs,
-            headSha: sourceControlOptionValue(data.headSha),
-          })
-        : null;
-      return resolveWorkflowRunsRefetchInterval({
-        activeWatch: activePostPushWorkflowWatch,
-        nowMs: Date.now(),
-        discoveredPostPushRun: hasDiscoveredPostPushWorkflowRun({
-          watch: activePostPushWorkflowWatch,
-          runs: data?.runs,
-        }),
-        statusRefreshable: status ? shouldRefreshPrCheckStatus(status) : false,
-      });
-    },
-  });
-  useEffect(() => {
-    if (!activePostPushWorkflowWatch) return;
-    if (
-      !hasDiscoveredPostPushWorkflowRun({
-        watch: activePostPushWorkflowWatch,
-        runs: overviewWorkflowRunsQuery.data?.runs,
-      })
-    ) {
-      return;
-    }
-    setPostPushWorkflowWatch((current) =>
-      current === activePostPushWorkflowWatch ? null : current,
-    );
-  }, [activePostPushWorkflowWatch, overviewWorkflowRunsQuery.data?.runs]);
-  const overviewActiveWorkflowRunId = useMemo(() => {
-    const runs = overviewWorkflowRunsQuery.data?.runs ?? [];
-    return runs.find(isOverviewActiveWorkflowRun)?.runId ?? null;
-  }, [overviewWorkflowRunsQuery.data]);
-  const overviewWorkflowDetailRunIds = useMemo(() => {
-    if (!overviewWorkflowRunsSupported || overviewPullRequestNumber === null) return [];
-    const runs = overviewWorkflowRunsQuery.data?.runs ?? [];
-    const runIds = runs.slice(0, OVERVIEW_CHECK_DETAIL_RUN_LIMIT).map((run) => run.runId);
-    if (overviewActiveWorkflowRunId && !runIds.includes(overviewActiveWorkflowRunId)) {
-      return [overviewActiveWorkflowRunId, ...runIds].slice(0, OVERVIEW_CHECK_DETAIL_RUN_LIMIT);
-    }
-    return runIds;
-  }, [
-    overviewActiveWorkflowRunId,
-    overviewPullRequestNumber,
-    overviewWorkflowRunsQuery.data?.runs,
-    overviewWorkflowRunsSupported,
-  ]);
-  const overviewWorkflowRunJobQueries = useQueries({
-    queries: overviewWorkflowDetailRunIds.map((runId) => ({
-      ...workflowRunJobsQueryOptions({
-        environmentId,
-        cwd: gitCwd,
-        runId,
-        enabled: overviewWorkflowRunsSupported && overviewPullRequestNumber !== null,
-      }),
-      refetchInterval: overviewActiveWorkflowRunId === runId ? 30_000 : false,
-    })),
-  });
-  const overviewWorkflowJobsByRunId = useMemo(() => {
-    const jobsByRunId = new Map<string, ReadonlyArray<SourceControlWorkflowJob>>();
-    overviewWorkflowDetailRunIds.forEach((runId, index) => {
-      const jobs = overviewWorkflowRunJobQueries[index]?.data?.jobs;
-      if (jobs) {
-        jobsByRunId.set(runId, jobs);
-      }
-    });
-    return jobsByRunId;
-  }, [overviewWorkflowDetailRunIds, overviewWorkflowRunJobQueries]);
-  const overviewWorkflowRunJobsLoading = overviewWorkflowRunJobQueries.some(
-    (query) => query.isLoading,
-  );
-  const overviewPullRequest = useMemo<OverviewPullRequestState | null>(() => {
-    if (overviewPullRequestNumber === null) {
-      return null;
-    }
-    const gitPr = gitStatusQuery.data?.pr ?? null;
-    const branchPr = overviewBranchPullRequest;
-    const detail = overviewPullRequestDetailQuery.data ?? null;
-    const workflowData = overviewWorkflowRunsSupported
-      ? (overviewWorkflowRunsQuery.data ?? null)
-      : null;
-    const checksQueryError = selectOverviewChecksError({
-      workflowRunsSupported: overviewWorkflowRunsSupported,
-      workflowError: overviewWorkflowRunsQuery.error,
-      detailError: overviewPullRequestDetailQuery.error,
-    });
-    const activeWorkflowJobDetail =
-      overviewActiveWorkflowRunId === null
-        ? undefined
-        : summarizeActiveWorkflowJob(overviewWorkflowJobsByRunId.get(overviewActiveWorkflowRunId));
-    const checkStatus =
-      workflowData && overviewWorkflowRunsSupported
-        ? getPrCheckStatusForQuery({
-            isLoading: overviewWorkflowRunsQuery.isLoading,
-            error: overviewWorkflowRunsQuery.error,
-            status: getPrCheckStatusFromWorkflowRuns({
-              runs: workflowData.runs,
-              headSha: sourceControlOptionValue(workflowData.headSha),
-            }),
-          })
-        : detail
-          ? getPrCheckStatusFromChangeRequest(detail)
-          : branchPr
-            ? getPrCheckStatusFromChangeRequest(branchPr)
-            : getPrCheckStatusForQuery({
-                isLoading:
-                  (overviewWorkflowRunsSupported && overviewWorkflowRunsQuery.isLoading) ||
-                  overviewPullRequestDetailQuery.isLoading,
-                error: checksQueryError,
-                status: null,
-              });
-    const workflowRows = workflowData
-      ? buildOverviewWorkflowCheckRows({
-          runs: workflowData.runs,
-          jobsByRunId: overviewWorkflowJobsByRunId,
-        })
-      : [];
-    const rollupRows = buildOverviewCheckRollupRows({
-      rollup: detail?.checkRollup ?? branchPr?.checkRollup,
-    });
-    const hasWorkflowJobRows = Array.from(overviewWorkflowJobsByRunId.values()).some(
-      (jobs) => jobs.length > 0,
-    );
-    const latestRuns = hasWorkflowJobRows
-      ? workflowRows
-      : rollupRows.length > 0
-        ? rollupRows
-        : workflowRows;
-    if (activeWorkflowJobDetail) {
-      for (const run of latestRuns) {
-        if (
-          isOverviewActiveCheckKind(run.statusKind) &&
-          overviewActiveWorkflowRunId !== null &&
-          run.id.startsWith(`run:${overviewActiveWorkflowRunId}`)
-        ) {
-          run.activeDetail = activeWorkflowJobDetail;
-        }
-      }
-    }
-    const runs = latestRuns.filter((run) => isOverviewActiveCheckKind(run.statusKind));
-    const pullRequestUrl = detail?.url ?? gitPr?.url ?? branchPr?.url ?? null;
-    const pullRequestState =
-      detail?.state ?? activeWorktreeSummary?.prState ?? gitPr?.state ?? branchPr?.state ?? null;
-    const checksError = compactQueryErrorMessage(checksQueryError);
-
-    return {
-      number: overviewPullRequestNumber,
-      title:
-        detail?.title ??
-        gitPr?.title ??
-        branchPr?.title ??
-        activeWorktreeSummary?.title ??
-        `Pull request #${overviewPullRequestNumber}`,
-      ...(pullRequestUrl ? { url: pullRequestUrl } : {}),
-      ...(pullRequestState ? { state: pullRequestState } : {}),
-      ...(typeof detail?.commentsCount === "number"
-        ? { commentsCount: detail.commentsCount }
-        : detail
-          ? { commentsCount: detail.comments.length }
-          : typeof branchPr?.commentsCount === "number"
-            ? { commentsCount: branchPr.commentsCount }
-            : {}),
-      checkStatus,
-      checksLoading:
-        (overviewWorkflowRunsSupported && overviewWorkflowRunsQuery.isLoading) ||
-        overviewPullRequestDetailQuery.isLoading ||
-        overviewWorkflowRunJobsLoading,
-      ...(checksError ? { checksError } : {}),
-      ...(detail?.mergeability ? { mergeability: detail.mergeability } : {}),
-      hasMergeConflicts: detail?.mergeability === "conflicting",
-      activeCheckCount:
-        runs.length > 0
-          ? runs.length
-          : checkStatus && isOverviewActiveCheckKind(checkStatus.kind)
-            ? 1
-            : 0,
-      runs,
-      latestRuns,
-    };
-  }, [
-    activeWorktreeSummary?.prState,
-    activeWorktreeSummary?.title,
-    gitStatusQuery.data?.pr,
-    overviewActiveWorkflowRunId,
-    overviewBranchPullRequest,
-    overviewWorkflowJobsByRunId,
-    overviewWorkflowRunJobsLoading,
-    overviewPullRequestDetailQuery.data,
-    overviewPullRequestDetailQuery.error,
-    overviewPullRequestDetailQuery.isLoading,
-    overviewPullRequestNumber,
-    overviewWorkflowRunsSupported,
-    overviewWorkflowRunsQuery.data,
-    overviewWorkflowRunsQuery.error,
-    overviewWorkflowRunsQuery.isLoading,
-  ]);
-  const overviewItems = useMemo<OverviewPanelItem[]>(() => {
-    const items: OverviewPanelItem[] = [];
-    const gitStatus = gitStatusQuery.data;
-    if (gitStatus) {
-      const prDetail = overviewPullRequestDetailQuery.data ?? null;
-      const changesItem = buildOverviewChangesItem({
-        local: {
-          fileCount: gitStatus.workingTree.files.length,
-          insertions: gitStatus.workingTree.insertions,
-          deletions: gitStatus.workingTree.deletions,
-        },
-        pullRequest:
-          overviewPullRequestNumber !== null
-            ? {
-                changedFiles: prDetail?.changedFiles,
-                additions: prDetail?.additions,
-                deletions: prDetail?.deletions,
-                isLoading: overviewPullRequestDetailQuery.isLoading,
-              }
-            : null,
-      });
-      items.push({ ...changesItem, action: "review", icon: "changes" });
-    }
-
-    items.push({
-      label: "Environment",
-      value: activeEnvironmentUnavailableState?.label ?? "Local",
-      ...(activeEnvironmentUnavailableState
-        ? { detail: activeEnvironmentUnavailableState.connectionState }
-        : {}),
-      icon: "environment",
-    });
-
-    return items;
-  }, [
-    activeEnvironmentUnavailableState,
-    gitStatusQuery.data,
-    overviewPullRequestDetailQuery.data,
-    overviewPullRequestDetailQuery.isLoading,
-    overviewPullRequestNumber,
-  ]);
   const activeTerminalLaunchContext =
     terminalLaunchContext?.threadId === activeThreadId
       ? terminalLaunchContext
@@ -4401,21 +3904,29 @@ export default function ChatView(props: ChatViewProps) {
                 animate={!prefersReducedMotion}
                 open={showFloatingOverviewSidebar}
               >
-                <PlanSidebar
+                <ChatOverviewPanel
+                  environmentId={environmentId}
+                  gitCwd={gitCwd}
+                  activeWorktreeBranch={activeWorktreeSummary?.branch ?? null}
+                  activeThreadBranch={activeThread?.branch ?? null}
+                  activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
+                  activeWorktreePrState={activeWorktreeSummary?.prState}
+                  activeWorktreeTitle={activeWorktreeSummary?.title}
+                  postPushWorkflowWatch={postPushWorkflowWatch}
+                  activeThreadKey={activeThreadKey}
+                  activeEnvironmentUnavailableState={activeEnvironmentUnavailableState}
                   activePlan={activePlan}
-                  activeProposedPlan={sidebarProposedPlan}
-                  overviewItems={overviewItems}
-                  pullRequest={overviewPullRequest}
-                  subagents={threadSubagents}
+                  sidebarProposedPlan={sidebarProposedPlan}
+                  threadSubagents={threadSubagents}
                   sourceControlActions={overviewSourceControlActions}
                   branchControl={overviewBranchControl}
-                  environmentId={environmentId}
                   markdownCwd={gitCwd ?? undefined}
                   workspaceRoot={activeWorkspaceRoot}
                   mode="floating"
                   onOpenFiles={onOpenFilesPanel}
                   onOpenReview={onOpenReviewPanel}
                   onOpenSubagent={onOpenSubagentPanel}
+                  onPostPushDiscoveryComplete={clearPostPushWatch}
                 />
               </FloatingOverviewMotionFrame>
             ) : null}
@@ -4596,21 +4107,29 @@ export default function ChatView(props: ChatViewProps) {
             animate={!prefersReducedMotion}
             open={showInlineOverviewSidebar}
           >
-            <PlanSidebar
+            <ChatOverviewPanel
+              environmentId={environmentId}
+              gitCwd={gitCwd}
+              activeWorktreeBranch={activeWorktreeSummary?.branch ?? null}
+              activeThreadBranch={activeThread?.branch ?? null}
+              activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
+              activeWorktreePrState={activeWorktreeSummary?.prState}
+              activeWorktreeTitle={activeWorktreeSummary?.title}
+              postPushWorkflowWatch={postPushWorkflowWatch}
+              activeThreadKey={activeThreadKey}
+              activeEnvironmentUnavailableState={activeEnvironmentUnavailableState}
               activePlan={activePlan}
-              activeProposedPlan={sidebarProposedPlan}
-              overviewItems={overviewItems}
-              pullRequest={overviewPullRequest}
-              subagents={threadSubagents}
+              sidebarProposedPlan={sidebarProposedPlan}
+              threadSubagents={threadSubagents}
               sourceControlActions={overviewSourceControlActions}
               branchControl={overviewBranchControl}
-              environmentId={environmentId}
               markdownCwd={gitCwd ?? undefined}
               workspaceRoot={activeWorkspaceRoot}
               mode="sidebar"
               onOpenFiles={onOpenFilesPanel}
               onOpenReview={onOpenReviewPanel}
               onOpenSubagent={onOpenSubagentPanel}
+              onPostPushDiscoveryComplete={clearPostPushWatch}
             />
           </OverviewSidebarMotionFrame>
         ) : null}
@@ -4636,21 +4155,29 @@ export default function ChatView(props: ChatViewProps) {
       ))}
       {shouldUsePlanSidebarSheet ? (
         <RightPanelSheet open={showOverviewSidebarSheet} onClose={closePlanSidebar}>
-          <PlanSidebar
+          <ChatOverviewPanel
+            environmentId={environmentId}
+            gitCwd={gitCwd}
+            activeWorktreeBranch={activeWorktreeSummary?.branch ?? null}
+            activeThreadBranch={activeThread?.branch ?? null}
+            activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
+            activeWorktreePrState={activeWorktreeSummary?.prState}
+            activeWorktreeTitle={activeWorktreeSummary?.title}
+            postPushWorkflowWatch={postPushWorkflowWatch}
+            activeThreadKey={activeThreadKey}
+            activeEnvironmentUnavailableState={activeEnvironmentUnavailableState}
             activePlan={activePlan}
-            activeProposedPlan={sidebarProposedPlan}
-            overviewItems={overviewItems}
-            pullRequest={overviewPullRequest}
-            subagents={threadSubagents}
+            sidebarProposedPlan={sidebarProposedPlan}
+            threadSubagents={threadSubagents}
             sourceControlActions={overviewSourceControlActions}
             branchControl={overviewBranchControl}
-            environmentId={environmentId}
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeWorkspaceRoot}
             mode="sheet"
             onOpenFiles={onOpenFilesPanel}
             onOpenReview={onOpenReviewPanel}
             onOpenSubagent={onOpenSubagentPanel}
+            onPostPushDiscoveryComplete={clearPostPushWatch}
           />
         </RightPanelSheet>
       ) : null}
