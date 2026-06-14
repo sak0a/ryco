@@ -5,7 +5,7 @@ import type {
   AtlassianSaveProjectLinkInput,
   EnvironmentId,
 } from "@ryco/contracts";
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { Atom } from "effect/unstable/reactivity";
 
 import { requireEnvironmentConnection } from "~/environments/runtime";
@@ -89,36 +89,62 @@ interface KeyedAtlassianQuery<TInput, TData> {
   readonly getSnapshot: (compositeKey: string | null) => AtlassianQueryState<TData>;
 }
 
+function atlassianQueryStatesEqual<T>(
+  left: AtlassianQueryState<T>,
+  right: AtlassianQueryState<T>,
+): boolean {
+  return (
+    left.data === right.data &&
+    left.isLoading === right.isLoading &&
+    left.isFetching === right.isFetching &&
+    left.isError === right.isError &&
+    left.error === right.error
+  );
+}
+
 function useAtlassianQueryBatch<TInput, TData>(
   query: KeyedAtlassianQuery<TInput, TData>,
   inputs: ReadonlyArray<TInput>,
 ): ReadonlyArray<AtlassianQueryState<TData>> {
   const cacheKeys = useMemo(() => inputs.map((input) => query.keyOf(input)), [inputs, query]);
   const batchSignature = useMemo(() => cacheKeys.join("\u0001"), [cacheKeys]);
+  const inputsRef = useRef(inputs);
+  inputsRef.current = inputs;
+  const cacheKeysRef = useRef(cacheKeys);
+  cacheKeysRef.current = cacheKeys;
+  const snapshotRef = useRef<ReadonlyArray<AtlassianQueryState<TData>>>([]);
 
   useEffect(() => {
-    const unsubs = inputs.map((input) => query.watch(input));
+    const unsubs = inputsRef.current.map((input) => query.watch(input));
     return () => {
       for (const unsub of unsubs) unsub();
     };
-  }, [batchSignature, inputs, query]);
+  }, [batchSignature, query]);
 
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
-      const unsubs = cacheKeys.map((key) =>
+      const unsubs = cacheKeysRef.current.map((key) =>
         appAtomRegistry.subscribe(query.getAtom(key), onStoreChange),
       );
       return () => {
         for (const unsub of unsubs) unsub();
       };
     },
-    [cacheKeys, query],
+    [batchSignature, query],
   );
 
-  const getSnapshot = useCallback(
-    () => cacheKeys.map((key) => query.getSnapshot(key)),
-    [cacheKeys, query],
-  );
+  const getSnapshot = useCallback(() => {
+    const next = cacheKeysRef.current.map((key) => query.getSnapshot(key));
+    const previous = snapshotRef.current;
+    if (
+      previous.length === next.length &&
+      previous.every((state, index) => atlassianQueryStatesEqual(state, next[index]!))
+    ) {
+      return previous;
+    }
+    snapshotRef.current = next;
+    return next;
+  }, [query]);
 
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
