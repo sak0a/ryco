@@ -9,6 +9,7 @@ export type SettingsSectionId =
   | "keybindings"
   | "source-control"
   | "connections"
+  | "diagnostics"
   | "archived";
 
 interface SettingsDialogStore {

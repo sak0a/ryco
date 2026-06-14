@@ -8,17 +8,17 @@ persisted trace/log tails.
 
 ## Tasks
 
-- [ ] Add diagnostics contracts and RPC method definitions.
-- [ ] Add a bounded server diagnostics service with redaction, resource
-  sampling, trace aggregation, and capped file tail parsing.
-- [ ] Wire diagnostics into observability so local/server/browser trace
-  records populate the in-memory ring.
-- [ ] Expose read-only terminal session summaries without terminal history.
-- [ ] Add owner-only WebSocket RPC and web/local API client wiring.
-- [ ] Add the lazy-loaded Diagnostics Settings panel with overview cards,
-  resource charts, tracing/failure tables, live activity, slow client RPCs,
-  warnings, and expandable redacted raw details.
-- [ ] Add focused tests for contracts, redaction/aggregation, resource/file
-  collectors, client display logic, and settings-panel smoke coverage.
-- [ ] Run required verification: `bun fmt`, `bun lint`, and `bun typecheck`.
-- [ ] Browser-verify the settings Diagnostics panel after frontend changes.
+- [x] Add diagnostics contracts and RPC method definitions.
+- [x] Add a bounded server diagnostics service with redaction, resource
+      sampling, trace aggregation, and capped file tail parsing.
+- [x] Wire diagnostics into observability so local/server/browser trace
+      records populate the in-memory ring.
+- [x] Expose read-only terminal session summaries without terminal history.
+- [x] Add owner-only WebSocket RPC and web/local API client wiring.
+- [x] Add the lazy-loaded Diagnostics Settings panel with overview cards,
+      resource charts, tracing/failure tables, live activity, slow client RPCs,
+      warnings, and expandable redacted raw details.
+- [x] Add focused tests for contracts, redaction/aggregation, resource/file
+      collectors, client display logic, and settings-panel smoke coverage.
+- [x] Run required verification: `bun fmt`, `bun lint`, and `bun typecheck`.
+- [x] Browser-verify the settings Diagnostics panel after frontend changes.

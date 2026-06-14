@@ -2,10 +2,12 @@ import { Effect, Layer, References, Tracer } from "effect";
 import { OtlpMetrics, OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 
 import { ServerConfig } from "../../config.ts";
+import { makeDiagnosticsService } from "../../diagnostics/Layers/Diagnostics.ts";
+import { Diagnostics } from "../../diagnostics/Services/Diagnostics.ts";
 import { ServerLoggerLive } from "../../serverLogger.ts";
 import { makeLocalFileTracer } from "../LocalFileTracer.ts";
 import { BrowserTraceCollector } from "../Services/BrowserTraceCollector.ts";
-import { makeTraceSink } from "../TraceSink.ts";
+import { makeTraceSink, type TraceSink } from "../TraceSink.ts";
 
 const otlpSerializationLayer = OtlpSerialization.layerJson;
 
@@ -20,12 +22,22 @@ export const ObservabilityLive = Layer.unwrap(
 
     const tracerLayer = Layer.unwrap(
       Effect.gen(function* () {
+        const diagnostics = yield* makeDiagnosticsService(config);
         const sink = yield* makeTraceSink({
           filePath: config.serverTracePath,
           maxBytes: config.traceMaxBytes,
           maxFiles: config.traceMaxFiles,
           batchWindowMs: config.traceBatchWindowMs,
         });
+        const diagnosticsSink = {
+          filePath: sink.filePath,
+          push(record) {
+            sink.push(record);
+            diagnostics.recordTraceRecords([record]);
+          },
+          flush: sink.flush,
+          close: sink.close,
+        } satisfies TraceSink;
         const delegate =
           config.otlpTracesUrl === undefined
             ? undefined
@@ -46,17 +58,18 @@ export const ObservabilityLive = Layer.unwrap(
           maxBytes: config.traceMaxBytes,
           maxFiles: config.traceMaxFiles,
           batchWindowMs: config.traceBatchWindowMs,
-          sink,
+          sink: diagnosticsSink,
           ...(delegate ? { delegate } : {}),
         });
 
         return Layer.mergeAll(
+          Layer.succeed(Diagnostics, diagnostics),
           Layer.succeed(Tracer.Tracer, tracer),
           Layer.succeed(BrowserTraceCollector, {
             record: (records) =>
               Effect.sync(() => {
                 for (const record of records) {
-                  sink.push(record);
+                  diagnosticsSink.push(record);
                 }
               }),
           }),

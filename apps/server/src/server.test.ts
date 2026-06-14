@@ -5,6 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
   DEFAULT_SERVER_SETTINGS,
+  type DiagnosticsSnapshot,
   EnvironmentId,
   EventId,
   GitCommandError,
@@ -59,6 +60,7 @@ const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
 import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
+import { Diagnostics, type DiagnosticsShape } from "./diagnostics/Services/Diagnostics.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { resolveStaticCacheControl } from "./http.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
@@ -153,6 +155,78 @@ const testEnvironmentDescriptor = {
     repositoryIdentity: true,
   },
 };
+
+const makeDefaultDiagnosticsSnapshot = (): DiagnosticsSnapshot => {
+  const now = new Date(0).toISOString();
+  const resourceSample = {
+    sampledAt: now,
+    uptimeMs: 0,
+    memory: {
+      rssBytes: 0,
+      heapUsedBytes: 0,
+      heapTotalBytes: 0,
+      externalBytes: 0,
+      arrayBuffersBytes: 0,
+    },
+    cpu: {
+      userMicros: 0,
+      systemMicros: 0,
+      utilizationPercent: 0,
+    },
+    eventLoopDelayMs: 0,
+  };
+  return {
+    generatedAt: now,
+    serverStartedAt: now,
+    uptimeMs: 0,
+    limits: {
+      traceRecordLimit: 0,
+      resourceSampleLimit: 0,
+      fileTailBytes: 0,
+    },
+    observability: {
+      logsDirectoryPath: "/tmp/ryco-test/logs",
+      serverLogPath: "/tmp/ryco-test/logs/server.log",
+      serverTracePath: "/tmp/ryco-test/logs/server-trace.jsonl",
+      providerEventLogPath: "/tmp/ryco-test/logs/provider/events.jsonl",
+      localTracingEnabled: true,
+      otlpTracesEnabled: false,
+      otlpMetricsEnabled: false,
+    },
+    resources: {
+      current: resourceSample,
+      history: [resourceSample],
+    },
+    liveProcesses: {
+      server: {
+        pid: process.pid,
+        platform: process.platform,
+        runtime: "bun",
+        version: process.version,
+        cwd: process.cwd(),
+      },
+      terminals: [],
+      providers: [],
+    },
+    tracing: {
+      retainedSpanCount: 0,
+      recentSpans: [],
+      slowestSpans: [],
+      topSpanNames: [],
+      durationBuckets: [],
+      recentEvents: [],
+    },
+    failures: {
+      latest: [],
+      common: [],
+    },
+    client: {
+      slowRpcAcks: [],
+    },
+    warnings: [],
+  };
+};
+
 const makeDefaultOrchestrationReadModel = () => {
   const now = new Date().toISOString();
   return {
@@ -358,6 +432,7 @@ const buildAppUnderTest = (options?: {
     atlassianConnectionService?: Partial<AtlassianConnectionServiceShape>;
     jiraWorkItemService?: Partial<JiraWorkItemServiceShape>;
     textGeneration?: Partial<TextGenerationShape>;
+    diagnostics?: Partial<DiagnosticsShape>;
   };
 }) =>
   Effect.gen(function* () {
@@ -631,6 +706,7 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(
         Layer.mock(TerminalManager)({
+          listDiagnostics: Effect.succeed([]),
           ...options?.layers?.terminalManager,
         }),
       ),
@@ -745,6 +821,13 @@ const buildAppUnderTest = (options?: {
         Layer.mock(RepositoryIdentityResolver)({
           resolve: () => Effect.succeed(null),
           ...options?.layers?.repositoryIdentityResolver,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(Diagnostics)({
+          recordTraceRecords: () => undefined,
+          getSnapshot: () => Effect.succeed(makeDefaultDiagnosticsSnapshot()),
+          ...options?.layers?.diagnostics,
         }),
       ),
       Layer.provide(

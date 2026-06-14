@@ -7,6 +7,7 @@ import {
   type AuthAccessStreamEvent,
   AuthSessionId,
   CommandId,
+  type DiagnosticsProviderProcess,
   EventId,
   type GitCreateWorktreeForProjectInput,
   type GitRunStackedActionInput,
@@ -39,6 +40,7 @@ import {
   WS_METHODS,
   WsRpcGroup,
   SourceControlProviderError,
+  type ServerProvider,
 } from "@ryco/contracts";
 import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";
 import { clamp } from "effect/Number";
@@ -47,6 +49,7 @@ import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery.ts";
 import { ServerConfig } from "./config.ts";
+import { Diagnostics } from "./diagnostics/Services/Diagnostics.ts";
 import { Keybindings } from "./keybindings.ts";
 import { makeCodexMcpService } from "./mcp/CodexMcpService.ts";
 import { Open, resolveAvailableEditors } from "./open.ts";
@@ -302,6 +305,37 @@ function toAuthAccessStreamEvent(
   }
 }
 
+function toDiagnosticsProviderProcess(provider: ServerProvider): DiagnosticsProviderProcess {
+  const base = {
+    instanceId: provider.instanceId,
+    driver: provider.driver,
+    enabled: provider.enabled,
+    installed: provider.installed,
+    status: provider.status,
+    checkedAt: provider.checkedAt,
+  };
+  if (provider.displayName && provider.message) {
+    return {
+      ...base,
+      displayName: provider.displayName,
+      message: provider.message,
+    };
+  }
+  if (provider.displayName) {
+    return {
+      ...base,
+      displayName: provider.displayName,
+    };
+  }
+  if (provider.message) {
+    return {
+      ...base,
+      message: provider.message,
+    };
+  }
+  return base;
+}
+
 const makeWsRpcLayer = (session: AuthenticatedSession) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -338,6 +372,7 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
       const projectionWorktrees = yield* ProjectionWorktreeRepository;
       const atlassian = yield* AtlassianConnectionService;
       const workItems = yield* JiraWorkItemService;
+      const diagnostics = yield* Diagnostics;
       const serverCommandId = (tag: string) =>
         CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
       const linkedSourceControlRefreshAtByProject = new Map<string, number>();
@@ -1107,6 +1142,17 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
           },
           settings,
         };
+      });
+
+      const loadDiagnosticsSnapshot = Effect.gen(function* () {
+        const providers = yield* providerRegistry.getProviders;
+        const terminals = yield* terminalManager.listDiagnostics;
+        const diagnosticsProviders = providers.map(toDiagnosticsProviderProcess);
+
+        return yield* diagnostics.getSnapshot({
+          providers: diagnosticsProviders,
+          terminals,
+        });
       });
 
       const refreshGitStatus = (cwd: string) =>
@@ -2187,6 +2233,14 @@ const makeWsRpcLayer = (session: AuthenticatedSession) =>
               WS_METHODS.serverUpdateSettings,
               serverSettings.updateSettings(patch).pipe(Effect.map(redactServerSettingsForClient)),
             ),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
+        [WS_METHODS.serverGetDiagnosticsSnapshot]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.serverGetDiagnosticsSnapshot,
+            ownerEffect(WS_METHODS.serverGetDiagnosticsSnapshot, loadDiagnosticsSnapshot),
             {
               "rpc.aggregate": "server",
             },

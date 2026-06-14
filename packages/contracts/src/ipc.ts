@@ -98,6 +98,7 @@ import type {
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
 import type { EnvironmentId } from "./baseSchemas.ts";
+import type { DiagnosticsSnapshot } from "./diagnostics.ts";
 import type {
   AuthBearerBootstrapResult,
   AuthSessionState,
@@ -349,6 +350,7 @@ export interface LocalApi {
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
+    getDiagnosticsSnapshot: () => Promise<DiagnosticsSnapshot>;
     discoverSourceControl: () => Promise<SourceControlDiscoveryResult>;
     listOpinionatedPlugins: () => Promise<OpinionatedPluginListResult>;
     checkOpinionatedPlugins: (

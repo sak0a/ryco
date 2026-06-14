@@ -7,6 +7,7 @@
  * @module TerminalManager
  */
 import {
+  type DiagnosticsTerminalProcess,
   TerminalClearInput,
   TerminalCloseInput,
   TerminalEvent,
@@ -117,6 +118,12 @@ export interface TerminalManagerShape {
   readonly subscribe: (
     listener: (event: TerminalEvent) => Effect.Effect<void>,
   ) => Effect.Effect<() => void>;
+
+  /**
+   * Read terminal process/session summaries for diagnostics. History and
+   * runtime environment values are intentionally omitted.
+   */
+  readonly listDiagnostics: Effect.Effect<ReadonlyArray<DiagnosticsTerminalProcess>>;
 }
 
 /**
