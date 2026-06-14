@@ -172,6 +172,62 @@ export function resolveSendEnvMode(input: {
   return input.isGitRepo ? input.requestedEnvMode : "local";
 }
 
+export function resolveChatSendWorktreePlan(input: {
+  isServerThread: boolean;
+  isFirstMessage: boolean;
+  threadWorktreePath: string | null;
+  activeThreadBranch: string | null;
+  currentGitRefName: string | null;
+  sendEnvMode: DraftThreadEnvMode;
+}): {
+  shouldMaterializeLegacyBranchWorktree: boolean;
+  baseBranchForWorktree: string | null;
+  shouldCreateWorktree: boolean;
+} {
+  const shouldMaterializeLegacyBranchWorktree =
+    input.isServerThread &&
+    !input.isFirstMessage &&
+    input.threadWorktreePath === null &&
+    input.activeThreadBranch !== null &&
+    input.currentGitRefName !== null &&
+    input.currentGitRefName !== input.activeThreadBranch;
+
+  const baseBranchForWorktree =
+    input.isFirstMessage && input.sendEnvMode === "worktree" && !input.threadWorktreePath
+      ? input.activeThreadBranch
+      : shouldMaterializeLegacyBranchWorktree
+        ? input.activeThreadBranch
+        : null;
+
+  const shouldCreateWorktree =
+    (input.isFirstMessage && input.sendEnvMode === "worktree" && !input.threadWorktreePath) ||
+    shouldMaterializeLegacyBranchWorktree;
+
+  return {
+    shouldMaterializeLegacyBranchWorktree,
+    baseBranchForWorktree,
+    shouldCreateWorktree,
+  };
+}
+
+export function buildChatSendTitleSeed(input: {
+  trimmedPrompt: string;
+  firstImageName: string | null;
+  firstTerminalContextLabel: string | null;
+}): string {
+  const normalizedPrompt = input.trimmedPrompt.trim();
+  if (normalizedPrompt.length > 0) {
+    return normalizedPrompt;
+  }
+  if (input.firstImageName) {
+    return `Image: ${input.firstImageName}`;
+  }
+  if (input.firstTerminalContextLabel) {
+    return input.firstTerminalContextLabel;
+  }
+  return "New thread";
+}
+
 export function cloneComposerImageForRetry(
   image: ComposerImageAttachment,
 ): ComposerImageAttachment {

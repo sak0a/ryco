@@ -512,6 +512,18 @@ Current high-value span and metric boundaries include:
 - terminal session lifecycle
 - sqlite query execution
 
+### Client perf profiling
+
+The web app supports opt-in interaction profiling via `VITE_RYCO_PERF_PROFILE=1`.
+
+Instrumented interactions:
+
+- thread tab switches (`ryco:tab-switch:*` measures)
+- sidebar project expand (`ryco:sidebar-expand:*` measures)
+- component render durations (`ryco:render:*` measures)
+
+Soft budgets live in `apps/web/src/perf/budgets.ts`. See `apps/web/src/perf/README.md` for usage and inspection commands.
+
 ### Current Constraints
 
 - logs outside spans are not persisted
