@@ -34,7 +34,9 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
     workItems,
     lifecycleEvents,
     loadServerConfig,
+    loadDiagnosticsMetrics,
     loadAuthAccessSnapshot,
+    loadAdvertisedEndpoints,
     bootstrapCredentials,
     sessions,
     currentSessionId,
@@ -43,6 +45,14 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
   return defineWsHandlers({
     [WS_METHODS.serverGetConfig]: (_input) =>
       observeRpcEffect(WS_METHODS.serverGetConfig, loadServerConfig, {
+        "rpc.aggregate": "server",
+      }),
+    [WS_METHODS.serverGetAdvertisedEndpoints]: (_input) =>
+      observeRpcEffect(WS_METHODS.serverGetAdvertisedEndpoints, loadAdvertisedEndpoints, {
+        "rpc.aggregate": "server",
+      }),
+    [WS_METHODS.serverGetDiagnosticsMetrics]: (_input) =>
+      observeRpcEffect(WS_METHODS.serverGetDiagnosticsMetrics, loadDiagnosticsMetrics, {
         "rpc.aggregate": "server",
       }),
     [WS_METHODS.serverRefreshProviders]: (input) =>

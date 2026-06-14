@@ -1,4 +1,9 @@
-import type { EnvironmentId, ServerObservability, ServerProvider } from "@ryco/contracts";
+import type {
+  EnvironmentId,
+  ServerLocalDiagnosticsMetrics,
+  ServerObservability,
+  ServerProvider,
+} from "@ryco/contracts";
 
 import type { PushSequenceEnvironmentState } from "../../diagnostics/pushSequenceMonitor";
 import type {
@@ -32,7 +37,7 @@ export function redactUrl(value: string): string {
     url.password = "";
   }
 
-  for (const key of [...url.searchParams.keys()]) {
+  for (const key of url.searchParams.keys()) {
     if (SECRET_KEY_PATTERN.test(key)) {
       url.searchParams.set(key, REDACTED_PLACEHOLDER);
     }
@@ -128,7 +133,41 @@ export interface DiagnosticsBundle {
     readonly localTracingEnabled: boolean;
     readonly otlpTracesEnabled: boolean;
     readonly otlpMetricsEnabled: boolean;
+    readonly localMetrics: {
+      readonly turnQuiescenceAvgMs: number | null;
+      readonly checkpointDurationP95Ms: number | null;
+      readonly wsReconnectCount: number;
+      readonly capturedAt: string;
+    } | null;
   } | null;
+}
+
+export function formatDiagnosticsDurationMs(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "—";
+  }
+  return `${Math.round(value)} ms`;
+}
+
+export function formatDiagnosticsCount(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "—";
+  }
+  return String(Math.max(0, Math.round(value)));
+}
+
+export function summarizeLocalDiagnosticsMetrics(
+  metrics: ServerLocalDiagnosticsMetrics | null | undefined,
+): string {
+  if (!metrics) {
+    return "No local metrics captured yet.";
+  }
+
+  return [
+    `turn quiescence avg ${formatDiagnosticsDurationMs(metrics.turnQuiescenceAvgMs)}`,
+    `checkpoint p95 ${formatDiagnosticsDurationMs(metrics.checkpointDurationP95Ms)}`,
+    `WS reconnects ${formatDiagnosticsCount(metrics.wsReconnectCount)}`,
+  ].join(" · ");
 }
 
 /**
@@ -175,6 +214,14 @@ export function buildDiagnosticsBundle(input: DiagnosticsBundleInput): Diagnosti
           localTracingEnabled: input.observability.localTracingEnabled,
           otlpTracesEnabled: input.observability.otlpTracesEnabled,
           otlpMetricsEnabled: input.observability.otlpMetricsEnabled,
+          localMetrics: input.observability.localMetrics
+            ? {
+                turnQuiescenceAvgMs: input.observability.localMetrics.turnQuiescenceAvgMs,
+                checkpointDurationP95Ms: input.observability.localMetrics.checkpointDurationP95Ms,
+                wsReconnectCount: input.observability.localMetrics.wsReconnectCount,
+                capturedAt: input.observability.localMetrics.capturedAt,
+              }
+            : null,
         }
       : null,
   };

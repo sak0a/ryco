@@ -4,6 +4,7 @@ import { OtlpMetrics, OtlpSerialization, OtlpTracer } from "effect/unstable/obse
 import { ServerConfig } from "../../config.ts";
 import { ServerLoggerLive } from "../../serverLogger.ts";
 import { makeLocalFileTracer } from "../LocalFileTracer.ts";
+import { LocalDiagnosticsMetricsLive } from "../Services/LocalDiagnosticsMetrics.ts";
 import { BrowserTraceCollector } from "../Services/BrowserTraceCollector.ts";
 import { makeTraceSink } from "../TraceSink.ts";
 
@@ -79,6 +80,12 @@ export const ObservabilityLive = Layer.unwrap(
             },
           }).pipe(Layer.provideMerge(otlpSerializationLayer));
 
-    return Layer.mergeAll(ServerLoggerLive, traceReferencesLayer, tracerLayer, metricsLayer);
+    return Layer.mergeAll(
+      ServerLoggerLive,
+      traceReferencesLayer,
+      tracerLayer,
+      metricsLayer,
+      LocalDiagnosticsMetricsLive,
+    );
   }),
 );

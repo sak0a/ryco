@@ -10,7 +10,7 @@ import type {
 } from "@ryco/contracts";
 import { scopeProjectRef } from "@ryco/client-runtime";
 import { DateTime, Option } from "effect";
-import { useMutation, useQuery, useQueryClient } from "~/rpc/queryClient";
+import { useQuery } from "~/rpc/queryClient";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useShallow } from "zustand/react/shallow";
 import { ExternalLinkIcon, FlagIcon, GitBranchIcon, RotateCwIcon, SearchIcon } from "lucide-react";
@@ -26,7 +26,12 @@ import {
   findLinkedWorkItemWorktrees,
   type LinkedWorkItemWorktree,
 } from "~/lib/workItemLocalLinks";
-import { workItemsQueryKeys } from "~/lib/workItemsRpc";
+import {
+  invalidateAtlassian,
+  useAtlassianConnections,
+  useAtlassianProjectLink,
+  useSaveAtlassianProjectLinkMutation,
+} from "~/rpc/useAtlassian";
 import { invalidateWorkItems, useWorkItemList, useWorkItemSearch } from "~/rpc/useWorkItems";
 import { selectSidebarWorktreesForProjectRef, useStore } from "~/store";
 import { cn } from "~/lib/utils";
@@ -81,27 +86,19 @@ function connectionIdValue(value: AtlassianConnectionId | null | undefined): str
 }
 
 export function WorkItemsTab(props: WorkItemsTabProps) {
-  const queryClient = useQueryClient();
   const [debouncedQuery] = useDebouncedValue(props.query, { wait: 200 });
   const connection =
     props.environmentId !== null ? readEnvironmentConnection(props.environmentId) : null;
   const client = connection?.client ?? null;
 
-  const projectLinkQuery = useQuery({
-    queryKey: workItemsQueryKeys.projectLink(props.environmentId, props.projectId),
-    queryFn: async () => {
-      if (!client || !props.projectId) return null;
-      return client.atlassian.getProjectLink({ projectId: props.projectId });
-    },
+  const projectLinkQuery = useAtlassianProjectLink({
+    environmentId: props.environmentId,
+    projectId: props.projectId,
     enabled: client !== null && props.projectId !== null,
   });
 
-  const connectionsQuery = useQuery({
-    queryKey: ["atlassian", "connections", props.environmentId] as const,
-    queryFn: async () => {
-      if (!client) return [];
-      return client.atlassian.listConnections();
-    },
+  const connectionsQuery = useAtlassianConnections({
+    environmentId: props.environmentId,
     enabled: client !== null,
   });
 
@@ -186,21 +183,11 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
     [branchRefsQuery.data, items, projectWorktrees],
   );
   const refreshWorkItemsData = () => {
-    void queryClient.invalidateQueries({
-      queryKey: workItemsQueryKeys.projectLink(props.environmentId, props.projectId),
-    });
+    invalidateAtlassian({ environmentId: props.environmentId });
     invalidateWorkItems({ environmentId: props.environmentId, projectId: props.projectId });
   };
-  const unlinkMutation = useMutation({
-    mutationFn: async () => {
-      if (!client || !props.projectId) throw new Error("No project connection is available.");
-      return client.atlassian.saveProjectLink(
-        buildJiraProjectUnlinkInput({
-          projectId: props.projectId,
-          existing: projectLink,
-        }),
-      );
-    },
+  const unlinkMutation = useSaveAtlassianProjectLinkMutation({
+    environmentId: props.environmentId,
     onSuccess: () => {
       props.onQueryChange("");
       refreshWorkItemsData();
@@ -217,7 +204,7 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
         stackedThreadToast({
           type: "error",
           title: "Could not unlink Jira project",
-          description: error instanceof Error ? error.message : "The project link was not saved.",
+          description: error.message,
         }),
       );
     },
@@ -259,8 +246,15 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
               size="sm"
               variant="destructive-outline"
               className="h-8"
-              disabled={unlinkMutation.isPending}
-              onClick={() => unlinkMutation.mutate()}
+              disabled={unlinkMutation.isPending || props.projectId === null}
+              onClick={() =>
+                unlinkMutation.mutate(
+                  buildJiraProjectUnlinkInput({
+                    projectId: props.projectId as ProjectId,
+                    existing: projectLink,
+                  }),
+                )
+              }
             >
               {unlinkMutation.isPending ? <Spinner className="size-3.5" /> : null}
               Unlink Jira
@@ -503,24 +497,8 @@ function JiraProjectSetup(props: {
     dirtyRef.current = true;
   };
 
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      if (!props.client || !props.projectId) throw new Error("No project connection is available.");
-      const selectedConnectionId = connectionId.trim() as AtlassianConnectionId;
-      const keys = splitProjectKeys(projectKeys);
-      if (!selectedConnectionId || keys.length === 0) {
-        throw new Error("Select a Jira connection and at least one project key.");
-      }
-      return props.client.atlassian.saveProjectLink(
-        buildJiraProjectLinkInput({
-          projectId: props.projectId,
-          existing: props.projectLink,
-          jiraConnectionId: selectedConnectionId,
-          jiraSiteUrl: null,
-          jiraProjectKeys: keys,
-        }),
-      );
-    },
+  const saveMutation = useSaveAtlassianProjectLinkMutation({
+    environmentId: props.environmentId,
     onSuccess: () => {
       dirtyRef.current = false;
       props.onSaved();
@@ -537,7 +515,7 @@ function JiraProjectSetup(props: {
         stackedThreadToast({
           type: "error",
           title: "Could not link Jira project",
-          description: error instanceof Error ? error.message : "The project link was not saved.",
+          description: error.message,
         }),
       );
     },
@@ -587,7 +565,19 @@ function JiraProjectSetup(props: {
             className="grid gap-3"
             onSubmit={(event: FormEvent<HTMLFormElement>) => {
               event.preventDefault();
-              if (canSave) saveMutation.mutate();
+              if (!canSave || !props.projectId) return;
+              const selectedConnectionId = connectionId.trim() as AtlassianConnectionId;
+              const keys = splitProjectKeys(projectKeys);
+              if (!selectedConnectionId || keys.length === 0) return;
+              saveMutation.mutate(
+                buildJiraProjectLinkInput({
+                  projectId: props.projectId,
+                  existing: props.projectLink,
+                  jiraConnectionId: selectedConnectionId,
+                  jiraSiteUrl: null,
+                  jiraProjectKeys: keys,
+                }),
+              );
             }}
           >
             <div className="space-y-1.5">

@@ -6,7 +6,6 @@ import type {
   SourceControlChangeRequestFile,
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
-import { useQuery } from "~/rpc/queryClient";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ChevronRightIcon,
@@ -21,12 +20,12 @@ import {
   SendIcon,
 } from "lucide-react";
 import {
-  changeRequestDetailQueryOptions,
-  changeRequestDiffQueryOptions,
   useAddChangeRequestCommentMutation,
   useAddChangeRequestCommentReactionMutation,
-  workflowRunsQueryOptions,
-} from "~/lib/sourceControlContextRpc";
+  useSourceControlChangeRequestDetail,
+  useSourceControlChangeRequestDiff,
+  useSourceControlWorkflowRuns,
+} from "~/rpc/useSourceControl";
 import { errorMessage } from "~/lib/errorMessage";
 import { cn } from "~/lib/utils";
 import { ContextPickerTabs } from "../chat/ContextPickerTabs";
@@ -59,6 +58,8 @@ import { usePrCheckPassNotifications } from "./usePrCheckPassNotifications";
 import { WorktreeItemSidebar } from "./WorktreeItemSidebar";
 import { WorkflowRunsSection } from "./WorkflowRunsSection";
 
+const CHANGE_REQUEST_DETAIL_OPEN_REFETCH_INTERVAL_MS = 30_000;
+
 const dateFmt = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
   month: "long",
@@ -90,13 +91,19 @@ interface PullRequestDetailProps {
 
 export function PullRequestDetail(props: PullRequestDetailProps) {
   const reference = String(props.pullRequestNumber);
-  const detailQuery = useQuery(
-    changeRequestDetailQueryOptions({
+  const resolveDetailIntervalMs = useCallback(
+    (data: SourceControlChangeRequestDetail | null): number | false =>
+      data?.state === "open" ? CHANGE_REQUEST_DETAIL_OPEN_REFETCH_INTERVAL_MS : false,
+    [],
+  );
+  const detailQuery = useSourceControlChangeRequestDetail(
+    {
       environmentId: props.environmentId,
       cwd: props.cwd,
       reference,
       fullContent: true,
-    }),
+    },
+    resolveDetailIntervalMs,
   );
   const addCommentMutation = useAddChangeRequestCommentMutation({
     environmentId: props.environmentId,
@@ -118,7 +125,7 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
       <div className="min-h-0 flex-1 overflow-hidden">
         {detailQuery.isLoading ? (
           <SourceControlDetailLoadingState label="pull request" />
-        ) : detailQuery.isError ? (
+        ) : detailQuery.error ? (
           <SourceControlDetailErrorState
             message={errorMessage(detailQuery.error, "Failed to load pull request.")}
           />
@@ -529,16 +536,15 @@ function PullRequestTimelineCommitRow(props: {
   cwd: string | null;
   pullRequestUrl: string;
 }) {
-  const runsQuery = useQuery({
-    ...workflowRunsQueryOptions({
+  const runsQuery = useSourceControlWorkflowRuns(
+    {
       environmentId: props.environmentId,
       cwd: props.cwd,
       commitSha: props.commit.oid,
       limit: 20,
       enabled: props.provider === "github",
-    }),
-    refetchInterval: (query) => {
-      const data = query.state.data;
+    },
+    (data) => {
       if (!data) return false;
       const status = getPrCheckStatusFromWorkflowRuns({
         runs: data.runs,
@@ -546,7 +552,7 @@ function PullRequestTimelineCommitRow(props: {
       });
       return shouldRefreshPrCheckStatus(status) ? 30_000 : false;
     },
-  });
+  );
   const status = getPrCheckStatusForQuery({
     isLoading: runsQuery.isLoading,
     error: runsQuery.error,
@@ -645,12 +651,10 @@ function FilesTab(props: {
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const anyExpanded = expanded.size > 0;
-  const diffQuery = useQuery({
-    ...changeRequestDiffQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      reference: props.reference,
-    }),
+  const diffQuery = useSourceControlChangeRequestDiff({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    reference: props.reference,
     enabled:
       props.active &&
       anyExpanded &&

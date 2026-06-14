@@ -1,5 +1,4 @@
 import { File as DiffsFile } from "@pierre/diffs/react";
-import { useQuery } from "~/rpc/queryClient";
 import { useParams, useSearch } from "@tanstack/react-router";
 import { Schema } from "effect";
 import {
@@ -22,12 +21,12 @@ import {
   useState,
 } from "react";
 
-import { ensureEnvironmentApi } from "../environmentApi";
 import { parsePreviewRouteSearch } from "../previewRouteSearch";
 import { fnv1a32, resolveDiffThemeName } from "../lib/diffRendering";
 import { useSettings } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
 import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";
+import { useProjectListEntries, useProjectReadFile } from "~/rpc/useProjectPreview";
 import { selectProjectByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef } from "../threadRoutes";
@@ -311,23 +310,10 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
       : null;
   }, [activeThread?.turnDiffSummaries, selectedFilePath]);
 
-  const projectFilesQuery = useQuery({
-    queryKey: ["projects", "listEntries", activeThread?.environmentId ?? null, activeCwd],
-    queryFn: async () => {
-      if (!activeThread?.environmentId || !activeCwd) {
-        throw new Error("Project tree is unavailable.");
-      }
-      const api = ensureEnvironmentApi(activeThread.environmentId);
-      return api.projects.listEntries({ cwd: activeCwd });
-    },
+  const projectFilesQuery = useProjectListEntries({
+    environmentId: activeThread?.environmentId ?? null,
+    cwd: activeCwd,
     enabled: Boolean(activeThread?.environmentId && activeCwd && previewSearch.preview === "1"),
-    retry: 1,
-    select: (result) => ({
-      ...result,
-      entries: result.entries.toSorted((left, right) =>
-        left.path.localeCompare(right.path, undefined, { numeric: true, sensitivity: "base" }),
-      ),
-    }),
   });
   const projectFilesError =
     projectFilesQuery.error instanceof Error
@@ -393,24 +379,10 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
       ? resolvePreviewSizeGuard(selectedProjectEntryMetadata.sizeBytes)
       : null;
 
-  const selectedFileQuery = useQuery({
-    queryKey: [
-      "projects",
-      "readFile",
-      activeThread?.environmentId ?? null,
-      activeCwd,
-      selectedFilePath,
-    ],
-    queryFn: async () => {
-      if (!activeThread?.environmentId || !activeCwd || !selectedFilePath) {
-        throw new Error("File preview is unavailable.");
-      }
-      const api = ensureEnvironmentApi(activeThread.environmentId);
-      return api.projects.readFile({
-        cwd: activeCwd,
-        relativePath: selectedFilePath,
-      });
-    },
+  const selectedFileQuery = useProjectReadFile({
+    environmentId: activeThread?.environmentId ?? null,
+    cwd: activeCwd,
+    relativePath: selectedFilePath,
     enabled: Boolean(
       activeThread?.environmentId &&
       activeCwd &&
@@ -418,7 +390,6 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
       previewSearch.preview === "1" &&
       (selectedFileSizeGuard?.shouldFetch ?? true),
     ),
-    retry: 1,
   });
   const selectedFileData =
     selectedFileQuery.data?.relativePath === selectedFilePath ? selectedFileQuery.data : null;

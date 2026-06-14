@@ -144,6 +144,7 @@ vi.mock("../../environments/runtime", () => {
       server: {
         subscribeAuthAccess: (listener: Parameters<typeof authAccessHarness.subscribe>[0]) =>
           authAccessHarness.subscribe(listener),
+        getAdvertisedEndpoints: async () => [],
       },
     },
     ensureBootstrapped: async () => undefined,
@@ -752,6 +753,53 @@ describe("GeneralSettingsPanel observability", () => {
     await expect.element(page.getByText("Default", { exact: true })).toBeInTheDocument();
     await page.getByRole("button", { name: "Set as default" }).first().click();
     await expect.element(page.getByText("http://127.0.0.1:3773/").first()).toBeInTheDocument();
+  });
+
+  it("shows mixed-content warnings for HTTP advertised endpoints", async () => {
+    window.desktopBridge = createDesktopBridgeStub({
+      serverExposureState: {
+        mode: "network-accessible",
+        endpointUrl: "http://192.168.86.39:3773",
+        advertisedHost: "192.168.86.39",
+        tailscaleServeEnabled: false,
+        tailscaleServePort: 443,
+      },
+      advertisedEndpoints: [
+        {
+          id: "desktop-lan:http://192.168.86.39:3773",
+          label: "Local network",
+          provider: {
+            id: "desktop-core",
+            label: "Desktop",
+            kind: "core",
+            isAddon: false,
+          },
+          httpBaseUrl: "http://192.168.86.39:3773/",
+          wsBaseUrl: "ws://192.168.86.39:3773/",
+          reachability: "lan",
+          compatibility: {
+            hostedHttpsApp: "mixed-content-blocked",
+            desktopApp: "compatible",
+          },
+          source: "desktop-core",
+          status: "available",
+          isDefault: true,
+        },
+      ],
+    });
+    authAccessHarness.setSnapshot({
+      pairingLinks: [],
+      clientSessions: [],
+    });
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <ConnectionsSettings />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByText("Hosted app blocked")).toBeInTheDocument();
   });
 
   it("shows diagnostics inside About with a single logs-folder action", async () => {

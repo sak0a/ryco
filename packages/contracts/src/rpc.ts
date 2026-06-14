@@ -4,6 +4,7 @@ import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { OpenError, OpenInEditorInput } from "./editor.ts";
 import { AuthAccessStreamEvent, AuthRpcError } from "./auth.ts";
+import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import {
   AtlassianConnectionError,
   AtlassianConnectionSummary,
@@ -118,6 +119,7 @@ import {
 import {
   ServerConfigStreamEvent,
   ServerConfig,
+  ServerLocalDiagnosticsMetrics,
   ServerProviderUpdateError,
   ServerProviderUpdateInput,
   ServerLifecycleStreamEvent,
@@ -241,6 +243,8 @@ export const WS_METHODS = {
 
   // Server meta
   serverGetConfig: "server.getConfig",
+  serverGetAdvertisedEndpoints: "server.getAdvertisedEndpoints",
+  serverGetDiagnosticsMetrics: "server.getDiagnosticsMetrics",
   serverRefreshProviders: "server.refreshProviders",
   serverUpdateProvider: "server.updateProvider",
   serverUpsertKeybinding: "server.upsertKeybinding",
@@ -450,6 +454,18 @@ export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   payload: Schema.Struct({}),
   success: ServerConfig,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError]),
+});
+
+export const WsServerGetAdvertisedEndpointsRpc = Rpc.make(WS_METHODS.serverGetAdvertisedEndpoints, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(AdvertisedEndpoint),
+  error: AuthRpcError,
+});
+
+export const WsServerGetDiagnosticsMetricsRpc = Rpc.make(WS_METHODS.serverGetDiagnosticsMetrics, {
+  payload: Schema.Struct({}),
+  success: ServerLocalDiagnosticsMetrics,
+  error: Schema.Never,
 });
 
 export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
@@ -1171,6 +1187,8 @@ export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess,
 
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
+  WsServerGetAdvertisedEndpointsRpc,
+  WsServerGetDiagnosticsMetricsRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpdateProviderRpc,
   WsServerUpsertKeybindingRpc,

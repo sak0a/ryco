@@ -157,6 +157,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onIsAtEndChange,
 }: MessagesTimelineProps) {
   usePerfMark("MessagesTimeline");
+  const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
+  revertTurnCountRef.current = revertTurnCountByUserMessageId;
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
@@ -165,7 +167,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         isWorking,
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
-        revertTurnCountByUserMessageId,
+        revertTurnCountByUserMessageId: revertTurnCountRef.current,
       }),
     [
       timelineEntries,
@@ -173,7 +175,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isWorking,
       activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
-      revertTurnCountByUserMessageId,
     ],
   );
   const rows = useStableRows(rawRows);

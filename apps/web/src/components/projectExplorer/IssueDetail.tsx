@@ -4,15 +4,14 @@ import type {
   SourceControlIssueDetail,
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
-import { useQuery } from "~/rpc/queryClient";
 import { useCallback, useRef, useState } from "react";
 import { CircleDotIcon, FileTextIcon, MessageSquareIcon, SendIcon } from "lucide-react";
 import { errorMessage } from "~/lib/errorMessage";
 import {
-  issueDetailQueryOptions,
   useAddIssueCommentMutation,
   useAddIssueCommentReactionMutation,
-} from "~/lib/sourceControlContextRpc";
+  useSourceControlIssueDetail,
+} from "~/rpc/useSourceControl";
 import { Button } from "../ui/button";
 import { CommentComposer, CommentItem, type CommentQuoteInsertion } from "./CommentThread";
 import { buildCommentQuoteMarkdown, deriveOriginalPostAuthorRole } from "./CommentThread.logic";
@@ -50,14 +49,12 @@ interface IssueDetailProps {
 
 export function IssueDetail(props: IssueDetailProps) {
   const reference = String(props.issueNumber);
-  const detailQuery = useQuery(
-    issueDetailQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      reference,
-      fullContent: true,
-    }),
-  );
+  const detailQuery = useSourceControlIssueDetail({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    reference,
+    fullContent: true,
+  });
   const addCommentMutation = useAddIssueCommentMutation({
     environmentId: props.environmentId,
     cwd: props.cwd,
@@ -78,7 +75,7 @@ export function IssueDetail(props: IssueDetailProps) {
       <div className="min-h-0 flex-1 overflow-hidden">
         {detailQuery.isLoading ? (
           <SourceControlDetailLoadingState label="issue" />
-        ) : detailQuery.isError ? (
+        ) : detailQuery.error ? (
           <SourceControlDetailErrorState
             message={errorMessage(detailQuery.error, "Failed to load issue.")}
           />

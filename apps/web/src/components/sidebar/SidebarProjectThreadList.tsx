@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useMemo } from "react";
+import React, { memo, useEffect, useMemo, useRef } from "react";
 import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react";
 import type { ScopedThreadRef } from "@ryco/contracts";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
@@ -78,6 +78,19 @@ function threadRowKey(thread: SidebarThreadSummary): string {
   return scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
 }
 
+/** Reuse the previous key-order array when the sequence is unchanged. */
+function useStableOrderedThreadKeys(keys: readonly string[]): readonly string[] {
+  const cacheRef = useRef<readonly string[]>(keys);
+  return useMemo(() => {
+    const previous = cacheRef.current;
+    if (previous.length === keys.length && keys.every((key, index) => previous[index] === key)) {
+      return previous;
+    }
+    cacheRef.current = keys;
+    return keys;
+  }, [keys]);
+}
+
 export const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   props: SidebarProjectThreadListProps,
 ) {
@@ -118,6 +131,7 @@ export const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     expandThreadListForProject,
     collapseThreadListForProject,
   } = props;
+  const stableOrderedProjectThreadKeys = useStableOrderedThreadKeys(orderedProjectThreadKeys);
   const showMoreButtonRender = useMemo(() => <button type="button" />, []);
   const showLessButtonRender = useMemo(() => <button type="button" />, []);
 
@@ -135,7 +149,7 @@ export const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         key={threadKey}
         thread={thread}
         projectCwd={projectCwd}
-        orderedProjectThreadKeys={orderedProjectThreadKeys}
+        orderedProjectThreadKeys={stableOrderedProjectThreadKeys}
         isActive={activeRouteThreadKey === threadKey}
         jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
         appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}

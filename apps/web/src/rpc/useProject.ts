@@ -1,15 +1,22 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import {
+  EMPTY_FILESYSTEM_BROWSE_STATE,
   EMPTY_PROJECT_SEARCH_ENTRIES_STATE,
+  getFilesystemBrowseStateAtom,
   getProjectSearchEntriesStateAtom,
+  type FilesystemBrowseInput,
+  type FilesystemBrowseState,
   type ProjectSearchEntriesInput,
   type ProjectSearchEntriesState,
+  prefetchFilesystemBrowse,
   releaseProjectSearchEntriesScope,
   requestProjectSearchEntries,
+  resolveFilesystemBrowseKey,
   resolveProjectSearchEntriesScopeKey,
   retainProjectSearchEntriesScope,
+  watchFilesystemBrowse,
 } from "./projectAtoms";
 
 /**
@@ -53,3 +60,21 @@ export function useProjectSearchEntries(
   const state = useAtomValue(getProjectSearchEntriesStateAtom(scopeKey));
   return scopeKey === null ? EMPTY_PROJECT_SEARCH_ENTRIES_STATE : state;
 }
+
+/**
+ * Atom-backed replacement for the former `useQuery(filesystemBrowse)` reads in
+ * the command palette. Each environment/cwd/path tuple is cached independently
+ * with stale-time gating; `prefetchFilesystemBrowse` warms adjacent paths.
+ */
+export function useFilesystemBrowse(input: FilesystemBrowseInput): FilesystemBrowseState {
+  const browseKey = resolveFilesystemBrowseKey(input);
+  const inputRef = useRef(input);
+  inputRef.current = input;
+
+  useEffect(() => watchFilesystemBrowse(inputRef.current), [browseKey]);
+
+  const state = useAtomValue(getFilesystemBrowseStateAtom(browseKey));
+  return browseKey === null ? EMPTY_FILESYSTEM_BROWSE_STATE : state;
+}
+
+export { prefetchFilesystemBrowse };

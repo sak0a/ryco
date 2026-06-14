@@ -6,7 +6,12 @@ import type {
   WorkItemPriority,
   WorkItemSummary,
 } from "@ryco/contracts";
-import { useQuery } from "~/rpc/queryClient";
+import { useMemo, type ReactNode } from "react";
+import {
+  useSourceControlChangeRequestList,
+  useSourceControlIssueList,
+  useSourceControlWorkflowRuns,
+} from "~/rpc/useSourceControl";
 import {
   AlertTriangleIcon,
   CircleDotIcon,
@@ -14,17 +19,10 @@ import {
   GitPullRequestIcon,
   ListChecksIcon,
 } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
-import {
-  changeRequestListQueryOptions,
-  issueListQueryOptions,
-  workflowRunsQueryOptions,
-} from "~/lib/sourceControlContextRpc";
-import { workItemsQueryKeys } from "~/lib/workItemsRpc";
+import { useAtlassianProjectLink } from "~/rpc/useAtlassian";
 import { useWorkItemList } from "~/rpc/useWorkItems";
 import { workItemStateLabel } from "~/lib/workItemState";
 import { cn } from "~/lib/utils";
-import { readEnvironmentConnection } from "~/environments/runtime";
 import { AtlassianJiraIcon } from "../Icons";
 import { Button } from "../ui/button";
 
@@ -66,41 +64,27 @@ export function formatProjectOverviewCount(
 }
 
 export function ProjectOverviewTab(props: ProjectOverviewTabProps) {
-  const connection =
-    props.environmentId !== null ? readEnvironmentConnection(props.environmentId) : null;
-  const client = connection?.client ?? null;
-
-  const issueListQuery = useQuery(
-    issueListQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      state: "open",
-      limit: OVERVIEW_LIST_LIMIT,
-    }),
-  );
-  const pullRequestListQuery = useQuery(
-    changeRequestListQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      state: "open",
-      limit: OVERVIEW_LIST_LIMIT,
-    }),
-  );
-  const workflowRunsQuery = useQuery(
-    workflowRunsQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      limit: OVERVIEW_LIST_LIMIT,
-    }),
-  );
-  const projectLinkQuery = useQuery({
-    queryKey: workItemsQueryKeys.projectLink(props.environmentId, props.projectId),
-    queryFn: async () => {
-      if (!client || !props.projectId) return null;
-      return client.atlassian.getProjectLink({ projectId: props.projectId });
-    },
-    enabled: client !== null && props.projectId !== null,
-    staleTime: 60_000,
+  const issueListQuery = useSourceControlIssueList({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    state: "open",
+    limit: OVERVIEW_LIST_LIMIT,
+  });
+  const pullRequestListQuery = useSourceControlChangeRequestList({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    state: "open",
+    limit: OVERVIEW_LIST_LIMIT,
+  });
+  const workflowRunsQuery = useSourceControlWorkflowRuns({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    limit: OVERVIEW_LIST_LIMIT,
+  });
+  const projectLinkQuery = useAtlassianProjectLink({
+    environmentId: props.environmentId,
+    projectId: props.projectId,
+    enabled: props.environmentId !== null && props.projectId !== null,
   });
 
   const jiraConfigured =

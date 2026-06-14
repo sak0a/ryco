@@ -194,6 +194,29 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_SESSION_TABS: ReadonlyArray<ChatSessionTabsItem> = Object.freeze([]);
+
+function providerStatusesContentKey(providers: ReadonlyArray<ServerProvider>): string {
+  let key = `${providers.length}`;
+  for (const provider of providers) {
+    key += `\0${provider.instanceId}\0${provider.driver}\0${provider.enabled ? 1 : 0}\0${provider.status}\0${provider.installed ? 1 : 0}\0${provider.models.length}`;
+  }
+  return key;
+}
+
+function stabilizeProviderStatusesSnapshot(
+  providers: ReadonlyArray<ServerProvider>,
+  cache: { key: string; snapshot: ServerProvider[] },
+): ServerProvider[] {
+  const key = providerStatusesContentKey(providers);
+  if (key === cache.key) {
+    return cache.snapshot;
+  }
+  const snapshot = providers as ServerProvider[];
+  cache.key = key;
+  cache.snapshot = snapshot;
+  return snapshot;
+}
+
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -1073,6 +1096,16 @@ export default function ChatView(props: ChatViewProps) {
     [composerRef],
   );
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
+  const composerProviderStatusesCacheRef = useRef({
+    key: "",
+    snapshot: EMPTY_PROVIDERS,
+  });
+  const composerProviderStatuses = useMemo(
+    () =>
+      stabilizeProviderStatusesSnapshot(providerStatuses, composerProviderStatusesCacheRef.current),
+    [providerStatuses],
+  );
+  const activeThreadSessionProviderInstanceId = activeThread?.session?.providerInstanceId ?? null;
   const unlockedSelectedProvider = resolveSelectableProvider(
     providerStatuses,
     selectedProviderByThreadId ?? threadProvider ?? ProviderDriverKind.make("codex"),
@@ -2742,7 +2775,7 @@ export default function ChatView(props: ChatViewProps) {
                   draftId={draftId}
                   activeThreadId={activeThreadId}
                   activeThreadEnvironmentId={activeThread?.environmentId}
-                  activeThread={activeThread}
+                  activeThreadSessionProviderInstanceId={activeThreadSessionProviderInstanceId}
                   isServerThread={isServerThread}
                   isLocalDraftThread={isLocalDraftThread}
                   phase={phase}
@@ -2769,10 +2802,10 @@ export default function ChatView(props: ChatViewProps) {
                   interactionMode={interactionMode}
                   tokenMode={tokenMode}
                   lockedProvider={lockedProvider}
-                  providerStatuses={providerStatuses as ServerProvider[]}
+                  providerStatuses={composerProviderStatuses}
                   activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
                   activeThreadModelSelection={activeThread?.modelSelection}
-                  activeThreadActivities={activeThread?.activities}
+                  activeThreadActivities={threadActivities}
                   resolvedTheme={resolvedTheme}
                   settings={settings}
                   keybindings={keybindings}

@@ -47,6 +47,8 @@ import { SessionCredentialService } from "../auth/Services/SessionCredentialServ
 import { authorizeWsRpc, type WsRpcAccess } from "../auth/wsAuthorization.ts";
 import { AtlassianConnectionService } from "../atlassian/AtlassianConnectionService.ts";
 import { JiraWorkItemService } from "../atlassian/JiraWorkItemService.ts";
+import { AdvertisedEndpointRegistry } from "../remote/Services/AdvertisedEndpointRegistry.ts";
+import { LocalDiagnosticsMetrics } from "../observability/Services/LocalDiagnosticsMetrics.ts";
 
 import { SOURCE_CONTROL_LINKED_REFRESH_DEBOUNCE_MS } from "./context/constants.ts";
 import { toGitManagerError } from "./context/gitErrors.ts";
@@ -96,6 +98,8 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
     const projectionWorktrees = yield* ProjectionWorktreeRepository;
     const atlassian = yield* AtlassianConnectionService;
     const workItems = yield* JiraWorkItemService;
+    const localDiagnosticsMetrics = yield* LocalDiagnosticsMetrics;
+    const advertisedEndpointRegistry = yield* AdvertisedEndpointRegistry;
     const serverCommandId = (tag: string) => CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
     const linkedSourceControlRefreshAtByProject = new Map<string, number>();
 
@@ -480,12 +484,16 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
         );
     };
 
+    const loadDiagnosticsMetrics = localDiagnosticsMetrics.snapshot;
+    const loadAdvertisedEndpoints = advertisedEndpointRegistry.list;
+
     const loadServerConfig = Effect.gen(function* () {
       const keybindingsConfig = yield* keybindings.loadConfigState;
       const providers = yield* providerRegistry.getProviders;
       const settings = redactServerSettingsForClient(yield* serverSettings.getSettings);
       const environment = yield* serverEnvironment.getDescriptor;
       const auth = yield* serverAuth.getDescriptor();
+      const localMetrics = yield* loadDiagnosticsMetrics;
 
       return {
         environment,
@@ -503,6 +511,7 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
           otlpTracesEnabled: config.otlpTracesUrl !== undefined,
           ...(config.otlpMetricsUrl !== undefined ? { otlpMetricsUrl: config.otlpMetricsUrl } : {}),
           otlpMetricsEnabled: config.otlpMetricsUrl !== undefined,
+          localMetrics,
         },
         settings,
       };
@@ -616,6 +625,8 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
       makeReplayableShellStream,
       makeReplayableThreadStream,
       loadServerConfig,
+      loadAdvertisedEndpoints,
+      loadDiagnosticsMetrics,
       loadAuthAccessSnapshot,
       refreshLinkedWorktreeSourceControlStates,
       refreshStateForLinkedReference,

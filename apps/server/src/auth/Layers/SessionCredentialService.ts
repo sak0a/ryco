@@ -3,6 +3,7 @@ import { Clock, DateTime, Duration, Effect, Layer, PubSub, Ref, Schema, Stream }
 import { Option } from "effect";
 
 import { ServerConfig } from "../../config.ts";
+import { LocalDiagnosticsMetrics } from "../../observability/Services/LocalDiagnosticsMetrics.ts";
 import { AuthSessionRepositoryLive } from "../../persistence/Layers/AuthSessions.ts";
 import { AuthSessionRepository } from "../../persistence/Services/AuthSessions.ts";
 import { ServerSecretStore } from "../Services/ServerSecretStore.ts";
@@ -86,8 +87,10 @@ export const makeSessionCredentialService = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
   const secretStore = yield* ServerSecretStore;
   const authSessions = yield* AuthSessionRepository;
+  const localDiagnosticsMetrics = yield* Effect.serviceOption(LocalDiagnosticsMetrics);
   const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
   const connectedSessionsRef = yield* Ref.make(new Map<string, number>());
+  const wsReconnectEligibleSessionsRef = yield* Ref.make(new Set<string>());
   const changesPubSub = yield* PubSub.unbounded<SessionCredentialChange>();
   const cookieName = resolveSessionCookieName({
     mode: serverConfig.mode,
@@ -148,13 +151,26 @@ export const makeSessionCredentialService = Effect.gen(function* () {
     }).pipe(
       Effect.flatMap((wasDisconnected) =>
         wasDisconnected
-          ? DateTime.now.pipe(
-              Effect.flatMap((lastConnectedAt) =>
-                authSessions.setLastConnectedAt({
-                  sessionId,
-                  lastConnectedAt,
-                }),
-              ),
+          ? Ref.get(wsReconnectEligibleSessionsRef).pipe(
+              Effect.flatMap((reconnectEligible) => {
+                const shouldRecordReconnect = reconnectEligible.has(sessionId);
+                return Effect.all(
+                  [
+                    DateTime.now.pipe(
+                      Effect.flatMap((lastConnectedAt) =>
+                        authSessions.setLastConnectedAt({
+                          sessionId,
+                          lastConnectedAt,
+                        }),
+                      ),
+                    ),
+                    shouldRecordReconnect && Option.isSome(localDiagnosticsMetrics)
+                      ? localDiagnosticsMetrics.value.recordWsReconnect()
+                      : Effect.void,
+                  ],
+                  { discard: true },
+                );
+              }),
             )
           : Effect.void,
       ),
@@ -173,16 +189,25 @@ export const makeSessionCredentialService = Effect.gen(function* () {
     );
 
   const markDisconnected: SessionCredentialServiceShape["markDisconnected"] = (sessionId) =>
-    Ref.update(connectedSessionsRef, (current) => {
+    Ref.modify(connectedSessionsRef, (current) => {
       const next = new Map(current);
       const remaining = (next.get(sessionId) ?? 0) - 1;
       if (remaining > 0) {
         next.set(sessionId, remaining);
-      } else {
-        next.delete(sessionId);
+        return [false, next] as const;
       }
-      return next;
+      next.delete(sessionId);
+      return [true, next] as const;
     }).pipe(
+      Effect.flatMap((becameFullyDisconnected) =>
+        becameFullyDisconnected
+          ? Ref.update(wsReconnectEligibleSessionsRef, (current) => {
+              const next = new Set(current);
+              next.add(sessionId);
+              return next;
+            })
+          : Effect.void,
+      ),
       Effect.flatMap(() => loadActiveSession(sessionId)),
       Effect.flatMap((session) =>
         Option.isSome(session) ? emitUpsert(session.value) : Effect.void,

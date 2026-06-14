@@ -4,10 +4,8 @@ import type {
   EnvironmentId,
   ProjectId,
 } from "@ryco/contracts";
-import { Atom } from "effect/unstable/reactivity";
-
 import { requireEnvironmentConnection } from "~/environments/runtime";
-import { appAtomRegistry } from "./atomRegistry";
+import { createKeyedQueryRegistry, defineKeyedQueryByKey, KEY_SEP } from "./keyedQuery";
 
 // ---------------------------------------------------------------------------
 // Atom-backed Atlassian reads.
@@ -23,9 +21,6 @@ import { appAtomRegistry } from "./atomRegistry";
 
 const CONNECTIONS_STALE_TIME_MS = 0;
 const PROJECT_LINK_STALE_TIME_MS = 0;
-
-const KEY_SEP = "\u0000";
-const NOOP: () => void = () => undefined;
 
 export interface AtlassianQueryState<T> {
   readonly data: T | null;
@@ -43,91 +38,41 @@ const INITIAL_QUERY_STATE: AtlassianQueryState<never> = Object.freeze({
   error: null,
 });
 
-function toError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
-}
-
-// ---------------------------------------------------------------------------
-// Shared keyed-query infrastructure
-// ---------------------------------------------------------------------------
-
-const knownStateKeys = new Set<string>();
-
-const queryStateAtom = Atom.family((compositeKey: string) => {
-  knownStateKeys.add(compositeKey);
-  return Atom.make<AtlassianQueryState<unknown>>(INITIAL_QUERY_STATE).pipe(
-    Atom.keepAlive,
-    Atom.withLabel(`atlassian:${compositeKey}`),
-  );
-});
-
-const EMPTY_QUERY_ATOM = Atom.make<AtlassianQueryState<unknown>>(INITIAL_QUERY_STATE).pipe(
-  Atom.keepAlive,
-  Atom.withLabel("atlassian:null"),
-);
-
-interface QueryController {
-  readonly compositeKey: string;
-  readonly environmentId: EnvironmentId;
-  readonly projectId: ProjectId | null;
-  readonly staleTime: number;
-  readonly run: () => Promise<unknown>;
-  subscriberCount: number;
-  lastFetchedAt: number;
-  fetchToken: number;
-  hasData: boolean;
-}
-
-const controllers = new Map<string, QueryController>();
-
-function setQueryState(compositeKey: string, next: AtlassianQueryState<unknown>): void {
-  appAtomRegistry.set(queryStateAtom(compositeKey), next);
-}
-
-function getQueryState(compositeKey: string): AtlassianQueryState<unknown> {
-  return appAtomRegistry.get(queryStateAtom(compositeKey));
-}
-
-async function runController(controller: QueryController): Promise<void> {
-  const token = ++controller.fetchToken;
-  const current = getQueryState(controller.compositeKey);
-  setQueryState(controller.compositeKey, {
+const atlassianRegistry = createKeyedQueryRegistry<AtlassianQueryState<unknown>>({
+  labelPrefix: "atlassian",
+  initialState: INITIAL_QUERY_STATE,
+  buildFetchingState: (current) => ({
     data: current.data,
     isLoading: current.data === null,
     isFetching: true,
     isError: false,
     error: null,
-  });
+  }),
+  buildSuccessState: (data) => ({
+    data,
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+    error: null,
+  }),
+  buildErrorState: (current, error) => ({
+    data: current.data,
+    isLoading: false,
+    isFetching: false,
+    isError: true,
+    error,
+  }),
+});
 
-  try {
-    const data = await controller.run();
-    if (token !== controller.fetchToken) {
-      return;
-    }
-    controller.hasData = true;
-    controller.lastFetchedAt = Date.now();
-    setQueryState(controller.compositeKey, {
-      data,
-      isLoading: false,
-      isFetching: false,
-      isError: false,
-      error: null,
-    });
-  } catch (error) {
-    if (token !== controller.fetchToken) {
-      return;
-    }
-    setQueryState(controller.compositeKey, {
-      data: getQueryState(controller.compositeKey).data,
-      isLoading: false,
-      isFetching: false,
-      isError: true,
-      error: toError(error),
-    });
-  }
-}
+const { controllers, runController } = atlassianRegistry;
 
-interface QueryDefinition<TInput, TData> {
+export type AtlassianQuery<TInput, TData> = import("./keyedQuery").KeyedQueryByKey<
+  TInput,
+  TData,
+  AtlassianQueryState<TData>
+>;
+
+interface AtlassianQueryDefinition<TInput, TData> {
   readonly label: string;
   readonly staleTime: number;
   readonly isEnabled: (input: TInput) => boolean;
@@ -137,86 +82,18 @@ interface QueryDefinition<TInput, TData> {
   readonly run: (input: TInput) => Promise<TData>;
 }
 
-export interface AtlassianQuery<TInput, TData> {
-  readonly keyOf: (input: TInput) => string | null;
-  readonly watch: (input: TInput) => () => void;
-  readonly refresh: (compositeKey: string | null) => void;
-  readonly getAtom: (compositeKey: string | null) => Atom.Atom<AtlassianQueryState<TData>>;
-  readonly getSnapshot: (compositeKey: string | null) => AtlassianQueryState<TData>;
-}
-
 function defineQuery<TInput, TData>(
-  definition: QueryDefinition<TInput, TData>,
+  definition: AtlassianQueryDefinition<TInput, TData>,
 ): AtlassianQuery<TInput, TData> {
-  function keyOf(input: TInput): string | null {
-    if (!definition.isEnabled(input)) {
-      return null;
-    }
-    return `${definition.label}${KEY_SEP}${definition.buildKey(input)}`;
-  }
-
-  function getAtom(compositeKey: string | null): Atom.Atom<AtlassianQueryState<TData>> {
-    return (compositeKey === null ? EMPTY_QUERY_ATOM : queryStateAtom(compositeKey)) as Atom.Atom<
-      AtlassianQueryState<TData>
-    >;
-  }
-
-  function getSnapshot(compositeKey: string | null): AtlassianQueryState<TData> {
-    if (compositeKey === null) {
-      return INITIAL_QUERY_STATE as AtlassianQueryState<TData>;
-    }
-    return getQueryState(compositeKey) as AtlassianQueryState<TData>;
-  }
-
-  function watch(input: TInput): () => void {
-    const compositeKey = keyOf(input);
-    if (compositeKey === null) {
-      return NOOP;
-    }
-
-    let controller = controllers.get(compositeKey);
-    if (!controller) {
-      controller = {
-        compositeKey,
-        environmentId: definition.resolveEnvironmentId(input),
-        projectId: definition.resolveProjectId(input),
-        staleTime: definition.staleTime,
-        run: () => definition.run(input),
-        subscriberCount: 0,
-        lastFetchedAt: 0,
-        fetchToken: 0,
-        hasData: false,
-      };
-      controllers.set(compositeKey, controller);
-    }
-
-    controller.subscriberCount += 1;
-    if (!controller.hasData || Date.now() - controller.lastFetchedAt >= controller.staleTime) {
-      void runController(controller);
-    }
-
-    return () => {
-      const current = controllers.get(compositeKey);
-      if (!current) {
-        return;
-      }
-      current.subscriberCount = Math.max(0, current.subscriberCount - 1);
-    };
-  }
-
-  function refresh(compositeKey: string | null): void {
-    if (compositeKey === null) {
-      return;
-    }
-    const controller = controllers.get(compositeKey);
-    if (!controller) {
-      return;
-    }
-    controller.lastFetchedAt = 0;
-    void runController(controller);
-  }
-
-  return { keyOf, watch, refresh, getAtom, getSnapshot };
+  return defineKeyedQueryByKey(
+    atlassianRegistry,
+    {
+      ...definition,
+      createControllerFields: (input) => ({ projectId: definition.resolveProjectId(input) }),
+    },
+    (controller) =>
+      !controller.hasData || Date.now() - controller.lastFetchedAt >= controller.staleTime,
+  ) as AtlassianQuery<TInput, TData>;
 }
 
 function atlassianClient(environmentId: EnvironmentId) {
@@ -303,12 +180,5 @@ export function invalidateAtlassian(input?: {
 // ---------------------------------------------------------------------------
 
 export function resetAtlassianAtomsForTests(): void {
-  for (const controller of controllers.values()) {
-    controller.fetchToken += 1;
-  }
-  controllers.clear();
-  for (const compositeKey of knownStateKeys) {
-    appAtomRegistry.set(queryStateAtom(compositeKey), INITIAL_QUERY_STATE);
-  }
-  knownStateKeys.clear();
+  atlassianRegistry.resetForTests();
 }

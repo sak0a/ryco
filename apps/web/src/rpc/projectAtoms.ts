@@ -1,7 +1,11 @@
-import type { EnvironmentId, ProjectSearchEntriesResult } from "@ryco/contracts";
+import type {
+  EnvironmentId,
+  FilesystemBrowseResult,
+  ProjectSearchEntriesResult,
+} from "@ryco/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
-import { ensureEnvironmentApi } from "~/environmentApi";
+import { ensureEnvironmentApi, readEnvironmentApi } from "~/environmentApi";
 import { appAtomRegistry } from "./atomRegistry";
 
 export const DEFAULT_PROJECT_SEARCH_ENTRIES_LIMIT = 80;
@@ -338,10 +342,275 @@ export function getProjectSearchEntriesSnapshot(
   return appAtomRegistry.get(projectSearchEntriesStateAtom(scopeKey));
 }
 
+// ---------------------------------------------------------------------------
+// Filesystem browse (command palette add-project path picker)
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_FILESYSTEM_BROWSE_STALE_TIME_MS = 30_000;
+
+export interface FilesystemBrowseInput {
+  readonly environmentId: EnvironmentId | null;
+  readonly partialPath: string;
+  readonly cwd?: string | null;
+  readonly enabled?: boolean;
+  readonly staleTime?: number;
+}
+
+export interface FilesystemBrowseState {
+  readonly data: FilesystemBrowseResult | null;
+  readonly isLoading: boolean;
+  readonly isFetching: boolean;
+  readonly error: Error | null;
+  readonly isPending: boolean;
+}
+
+const INITIAL_FILESYSTEM_BROWSE_STATE: FilesystemBrowseState = Object.freeze({
+  data: null,
+  isLoading: false,
+  isFetching: false,
+  error: null,
+  isPending: true,
+});
+
+export const EMPTY_FILESYSTEM_BROWSE_STATE = INITIAL_FILESYSTEM_BROWSE_STATE;
+
+const BROWSE_KEY_SEP = "\u0000";
+const knownBrowseKeys = new Set<string>();
+
+const filesystemBrowseStateAtom = Atom.family((compositeKey: string) => {
+  knownBrowseKeys.add(compositeKey);
+  return Atom.make<FilesystemBrowseState>(INITIAL_FILESYSTEM_BROWSE_STATE).pipe(
+    Atom.keepAlive,
+    Atom.withLabel(`filesystem-browse:${compositeKey}`),
+  );
+});
+
+const EMPTY_FILESYSTEM_BROWSE_ATOM = Atom.make<FilesystemBrowseState>(
+  INITIAL_FILESYSTEM_BROWSE_STATE,
+).pipe(Atom.keepAlive, Atom.withLabel("filesystem-browse:null"));
+
+interface ResolvedFilesystemBrowseInput {
+  readonly environmentId: EnvironmentId;
+  readonly partialPath: string;
+  readonly cwd: string | null;
+  readonly staleTime: number;
+  readonly compositeKey: string;
+}
+
+interface BrowseController {
+  readonly compositeKey: string;
+  readonly environmentId: EnvironmentId;
+  readonly partialPath: string;
+  readonly cwd: string | null;
+  readonly staleTime: number;
+  subscriberCount: number;
+  lastFetchedAt: number;
+  fetchToken: number;
+  hasData: boolean;
+  fetching: boolean;
+  lastResult: FilesystemBrowseResult | null;
+}
+
+const browseControllers = new Map<string, BrowseController>();
+
+function resolveFilesystemBrowseInput(
+  input: FilesystemBrowseInput,
+): ResolvedFilesystemBrowseInput | null {
+  const enabled =
+    (input.enabled ?? true) && input.environmentId !== null && input.partialPath.length > 0;
+  if (!enabled || input.environmentId === null) {
+    return null;
+  }
+  const cwd = input.cwd ?? null;
+  const compositeKey = `${input.environmentId}${BROWSE_KEY_SEP}${cwd ?? ""}${BROWSE_KEY_SEP}${input.partialPath}`;
+  return {
+    environmentId: input.environmentId,
+    partialPath: input.partialPath,
+    cwd,
+    staleTime: input.staleTime ?? DEFAULT_FILESYSTEM_BROWSE_STALE_TIME_MS,
+    compositeKey,
+  };
+}
+
+export function resolveFilesystemBrowseKey(input: FilesystemBrowseInput): string | null {
+  return resolveFilesystemBrowseInput(input)?.compositeKey ?? null;
+}
+
+export function getFilesystemBrowseStateAtom(scopeKey: string | null) {
+  return scopeKey === null ? EMPTY_FILESYSTEM_BROWSE_ATOM : filesystemBrowseStateAtom(scopeKey);
+}
+
+function setFilesystemBrowseState(compositeKey: string, next: FilesystemBrowseState): void {
+  appAtomRegistry.set(filesystemBrowseStateAtom(compositeKey), next);
+}
+
+function getFilesystemBrowseState(compositeKey: string): FilesystemBrowseState {
+  return appAtomRegistry.get(filesystemBrowseStateAtom(compositeKey));
+}
+
+async function runBrowseController(controller: BrowseController): Promise<void> {
+  const token = ++controller.fetchToken;
+  controller.fetching = true;
+  const current = getFilesystemBrowseState(controller.compositeKey);
+  setFilesystemBrowseState(controller.compositeKey, {
+    data: current.data,
+    isLoading: current.data === null,
+    isFetching: true,
+    error: null,
+    isPending: true,
+  });
+
+  const api = readEnvironmentApi(controller.environmentId);
+  if (!api) {
+    if (token !== controller.fetchToken) {
+      return;
+    }
+    controller.fetching = false;
+    controller.hasData = true;
+    controller.lastFetchedAt = Date.now();
+    controller.lastResult = null;
+    setFilesystemBrowseState(controller.compositeKey, {
+      data: null,
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      isPending: false,
+    });
+    return;
+  }
+
+  try {
+    const data = await api.filesystem.browse({
+      partialPath: controller.partialPath,
+      ...(controller.cwd ? { cwd: controller.cwd } : {}),
+    });
+    if (token !== controller.fetchToken) {
+      return;
+    }
+    controller.fetching = false;
+    controller.hasData = true;
+    controller.lastFetchedAt = Date.now();
+    controller.lastResult = data;
+    setFilesystemBrowseState(controller.compositeKey, {
+      data,
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      isPending: false,
+    });
+  } catch (error) {
+    if (token !== controller.fetchToken) {
+      return;
+    }
+    controller.fetching = false;
+    const normalized = toError(error);
+    setFilesystemBrowseState(controller.compositeKey, {
+      data: getFilesystemBrowseState(controller.compositeKey).data,
+      isLoading: false,
+      isFetching: false,
+      error: normalized,
+      isPending: false,
+    });
+  }
+}
+
+function ensureBrowseController(resolved: ResolvedFilesystemBrowseInput): BrowseController {
+  let controller = browseControllers.get(resolved.compositeKey);
+  if (!controller) {
+    controller = {
+      compositeKey: resolved.compositeKey,
+      environmentId: resolved.environmentId,
+      partialPath: resolved.partialPath,
+      cwd: resolved.cwd,
+      staleTime: resolved.staleTime,
+      subscriberCount: 0,
+      lastFetchedAt: 0,
+      fetchToken: 0,
+      hasData: false,
+      fetching: false,
+      lastResult: null,
+    };
+    browseControllers.set(resolved.compositeKey, controller);
+  }
+  return controller;
+}
+
+function triggerFilesystemBrowseFetch(resolved: ResolvedFilesystemBrowseInput): void {
+  const controller = ensureBrowseController(resolved);
+  const isStale =
+    controller.hasData && Date.now() - controller.lastFetchedAt >= controller.staleTime;
+  if (!controller.fetching && (!controller.hasData || isStale)) {
+    void runBrowseController(controller);
+  }
+}
+
+/**
+ * Imperatively warm a filesystem browse path. Safe to call from effects or
+ * prefetch handlers; deduplicates in-flight and fresh cached reads.
+ */
+export function requestFilesystemBrowse(
+  input: FilesystemBrowseInput,
+  options?: { readonly force?: boolean },
+): void {
+  const resolved = resolveFilesystemBrowseInput(input);
+  if (resolved === null) {
+    return;
+  }
+
+  const controller = ensureBrowseController(resolved);
+  if (!options?.force) {
+    if (controller.hasData && Date.now() - controller.lastFetchedAt < resolved.staleTime) {
+      setFilesystemBrowseState(resolved.compositeKey, {
+        data: controller.lastResult,
+        isLoading: false,
+        isFetching: false,
+        error: null,
+        isPending: false,
+      });
+      return;
+    }
+    if (controller.fetching) {
+      return;
+    }
+  }
+
+  void runBrowseController(controller);
+}
+
+export function watchFilesystemBrowse(input: FilesystemBrowseInput): () => void {
+  const resolved = resolveFilesystemBrowseInput(input);
+  if (resolved === null) {
+    return () => undefined;
+  }
+
+  const controller = ensureBrowseController(resolved);
+  controller.subscriberCount += 1;
+  triggerFilesystemBrowseFetch(resolved);
+
+  return () => {
+    const current = browseControllers.get(resolved.compositeKey);
+    if (current && current.subscriberCount > 0) {
+      current.subscriberCount -= 1;
+    }
+  };
+}
+
+export function prefetchFilesystemBrowse(input: FilesystemBrowseInput): void {
+  requestFilesystemBrowse(input);
+}
+
 export function resetProjectAtomsForTests(): void {
   for (const key of knownScopeKeys) {
     appAtomRegistry.set(projectSearchEntriesStateAtom(key), INITIAL_PROJECT_SEARCH_ENTRIES_STATE);
   }
   knownScopeKeys.clear();
   scopeRuntimes.clear();
+  for (const controller of browseControllers.values()) {
+    controller.fetchToken += 1;
+  }
+  browseControllers.clear();
+  for (const key of knownBrowseKeys) {
+    appAtomRegistry.set(filesystemBrowseStateAtom(key), INITIAL_FILESYSTEM_BROWSE_STATE);
+  }
+  knownBrowseKeys.clear();
 }

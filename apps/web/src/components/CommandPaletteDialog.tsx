@@ -11,9 +11,10 @@ import {
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
 } from "@ryco/contracts";
-import { useQuery, useQueryClient } from "~/rpc/queryClient";
 import { useNavigate } from "@tanstack/react-router";
 import { Option } from "effect";
+import { prefetchFilesystemBrowse, useFilesystemBrowse } from "~/rpc/useProject";
+import { useSourceControlRepositorySearch } from "~/rpc/useSourceControl";
 import {
   ArrowDownIcon,
   ArrowLeftIcon,
@@ -374,7 +375,6 @@ function OpenCommandPaletteDialog() {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const isActionsOnly = deferredQuery.startsWith(">");
-  const queryClient = useQueryClient();
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const settings = useSettings();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
@@ -467,37 +467,16 @@ function OpenCommandPaletteDialog() {
       ? remoteProjectSourceProvider(addProjectCloneFlow.source)
       : null;
   const remoteRepositoryQuery = isRemoteProjectRepositoryStep ? deferredQuery.trim() : "";
-  const remoteRepositorySearchQuery = useQuery({
-    queryKey: [
-      "source-control",
-      "repository-search",
+  const remoteRepositorySearchQuery = useSourceControlRepositorySearch({
+    environmentId:
       addProjectCloneFlow?.step === "repository" ? addProjectCloneFlow.environmentId : null,
-      remoteRepositoryProvider,
-      remoteRepositoryQuery,
-    ],
-    queryFn: async () => {
-      if (
-        addProjectCloneFlow?.step !== "repository" ||
-        remoteRepositoryProvider !== "bitbucket" ||
-        addProjectCloneFlow.source === "url"
-      ) {
-        throw new Error("Repository search is not available for this source.");
-      }
-      const api = readEnvironmentApi(addProjectCloneFlow.environmentId);
-      if (!api) {
-        throw new Error("Environment API is not available.");
-      }
-      return api.sourceControl.searchRepositories({
-        provider: remoteRepositoryProvider,
-        ...(remoteRepositoryQuery.length > 0 ? { query: remoteRepositoryQuery } : {}),
-        limit: 25,
-      });
-    },
+    provider: remoteRepositoryProvider,
+    query: remoteRepositoryQuery,
+    limit: 25,
     enabled:
       addProjectCloneFlow?.step === "repository" &&
       addProjectCloneFlow.source !== "url" &&
       remoteRepositoryProvider === "bitbucket",
-    staleTime: 30_000,
   });
   const isBrowsing =
     !isRemoteProjectRepositoryStep && isFilesystemBrowseQuery(query, browseEnvironmentPlatform);
@@ -545,27 +524,10 @@ function OpenCommandPaletteDialog() {
   const browseFilterQuery =
     isBrowsing && !hasTrailingPathSeparator(query) ? getBrowseLeafPathSegment(query) : "";
 
-  const fetchBrowseResult = useCallback(
-    async (partialPath: string): Promise<FilesystemBrowseResult | null> => {
-      if (!browseEnvironmentId) return null;
-      const api = readEnvironmentApi(browseEnvironmentId);
-      if (!api) return null;
-      return api.filesystem.browse({
-        partialPath,
-        ...(currentProjectCwdForBrowse ? { cwd: currentProjectCwdForBrowse } : {}),
-      });
-    },
-    [browseEnvironmentId, currentProjectCwdForBrowse],
-  );
-
-  const { data: browseResult, isPending: isBrowsePending } = useQuery({
-    queryKey: [
-      "filesystemBrowse",
-      browseEnvironmentId,
-      browseDirectoryPath,
-      currentProjectCwdForBrowse,
-    ],
-    queryFn: () => fetchBrowseResult(browseDirectoryPath),
+  const browseQuery = useFilesystemBrowse({
+    environmentId: browseEnvironmentId,
+    partialPath: browseDirectoryPath,
+    cwd: currentProjectCwdForBrowse,
     staleTime: BROWSE_STALE_TIME_MS,
     enabled:
       isBrowsing &&
@@ -573,6 +535,8 @@ function OpenCommandPaletteDialog() {
       browseEnvironmentId !== null &&
       !relativePathNeedsActiveProject,
   });
+  const browseResult = browseQuery.data;
+  const isBrowsePending = browseQuery.isPending;
   const browseEntries = browseResult?.entries ?? EMPTY_BROWSE_ENTRIES;
   const { filteredEntries: filteredBrowseEntries, exactEntry: exactBrowseEntry } = useMemo(
     () => filterBrowseEntries({ browseEntries, browseFilterQuery, highlightedItemValue }),
@@ -581,18 +545,14 @@ function OpenCommandPaletteDialog() {
 
   const prefetchBrowsePath = useCallback(
     (partialPath: string) => {
-      void queryClient.prefetchQuery({
-        queryKey: [
-          "filesystemBrowse",
-          browseEnvironmentId,
-          partialPath,
-          currentProjectCwdForBrowse,
-        ],
-        queryFn: () => fetchBrowseResult(partialPath),
+      prefetchFilesystemBrowse({
+        environmentId: browseEnvironmentId,
+        partialPath,
+        cwd: currentProjectCwdForBrowse,
         staleTime: BROWSE_STALE_TIME_MS,
       });
     },
-    [browseEnvironmentId, currentProjectCwdForBrowse, fetchBrowseResult, queryClient],
+    [browseEnvironmentId, currentProjectCwdForBrowse],
   );
 
   // Keep parent navigation warm without probing highlighted child folders,
@@ -1472,7 +1432,7 @@ function OpenCommandPaletteDialog() {
       ];
     }
 
-    if (remoteRepositorySearchQuery.isError) {
+    if (remoteRepositorySearchQuery.error !== null) {
       return [
         {
           value: `remote-repositories:${addProjectCloneFlow.environmentId}:${remoteRepositoryProvider}:error`,
@@ -1501,7 +1461,6 @@ function OpenCommandPaletteDialog() {
     remoteRepositoryQuery,
     remoteRepositorySearchQuery.data?.repositories,
     remoteRepositorySearchQuery.error,
-    remoteRepositorySearchQuery.isError,
     remoteRepositorySearchQuery.isFetching,
   ]);
 
@@ -1594,7 +1553,8 @@ function OpenCommandPaletteDialog() {
     if (addProjectCloneFlow?.step === "repository" && event.key === "Enter") {
       event.preventDefault();
       const highlightedRepository = remoteRepositorySearchQuery.data?.repositories.find(
-        (repository) => remoteRepositoryItemValue(repository) === highlightedItemValue,
+        (repository: SourceControlRepositoryInfo) =>
+          remoteRepositoryItemValue(repository) === highlightedItemValue,
       );
       if (highlightedRepository) {
         continueWithRemoteRepository({

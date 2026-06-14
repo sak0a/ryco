@@ -4,10 +4,13 @@ import type { EnvironmentId, ServerProvider } from "@ryco/contracts";
 
 import {
   buildDiagnosticsBundle,
+  formatDiagnosticsCount,
+  formatDiagnosticsDurationMs,
   redactSecrets,
   redactUrl,
   REDACTED_PLACEHOLDER,
   serializeDiagnosticsBundle,
+  summarizeLocalDiagnosticsMetrics,
   type DiagnosticsBundleInput,
 } from "./DiagnosticsPanel.logic";
 
@@ -110,8 +113,27 @@ describe("buildDiagnosticsBundle", () => {
       otlpTracesUrl: "https://otlp.example.com",
       otlpTracesEnabled: false,
       otlpMetricsEnabled: false,
+      localMetrics: {
+        turnQuiescenceAvgMs: 120,
+        checkpointDurationP95Ms: 250,
+        wsReconnectCount: 2,
+        windowSampleCounts: {
+          turnQuiescence: 3,
+          checkpointDuration: 3,
+        },
+        capturedAt: "2026-06-14T00:00:00.000Z",
+      },
     },
   };
+
+  it("formats local diagnostics metrics for display", () => {
+    expect(formatDiagnosticsDurationMs(120.4)).toBe("120 ms");
+    expect(formatDiagnosticsDurationMs(null)).toBe("—");
+    expect(formatDiagnosticsCount(2)).toBe("2");
+    expect(summarizeLocalDiagnosticsMetrics(input.observability?.localMetrics ?? null)).toContain(
+      "WS reconnects 2",
+    );
+  });
 
   it("never includes secrets in the serialized export", () => {
     const serialized = serializeDiagnosticsBundle(buildDiagnosticsBundle(input));
@@ -123,6 +145,7 @@ describe("buildDiagnosticsBundle", () => {
     expect(serialized).toContain("handshake failed");
     expect(serialized).toContain("/home/user/.ryco/logs");
     expect(serialized).toContain("codex-1");
+    expect(serialized).toContain('"turnQuiescenceAvgMs": 120');
   });
 
   it("keeps the provider auth status but drops PII", () => {

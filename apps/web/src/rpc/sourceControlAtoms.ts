@@ -6,11 +6,14 @@ import type {
   SourceControlIssueDetail,
   SourceControlIssueSummary,
   SourceControlLabel,
+  SourceControlProviderKind,
+  SourceControlRepositorySearchResult,
+  SourceControlWorkflowJobLogResult,
+  SourceControlWorkflowRunJobsResult,
+  SourceControlWorkflowRunListResult,
 } from "@ryco/contracts";
-import { Atom } from "effect/unstable/reactivity";
-
 import { requireEnvironmentConnection } from "~/environments/runtime";
-import { appAtomRegistry } from "./atomRegistry";
+import { createKeyedQueryRegistry, defineKeyedQueryByInput, KEY_SEP } from "./keyedQuery";
 
 // ---------------------------------------------------------------------------
 // Atom-backed source-control context reads.
@@ -28,9 +31,12 @@ const SEARCH_STALE_TIME_MS = 30_000;
 const LABELS_STALE_TIME_MS = 5 * 60_000;
 const ASSIGNEES_STALE_TIME_MS = 5 * 60_000;
 const DETAIL_STALE_TIME_MS = 5 * 60_000;
-
-const KEY_SEP = "\u0000";
-const NOOP: () => void = () => undefined;
+const ISSUE_DETAIL_STALE_TIME_MS = 300_000;
+const CHANGE_REQUEST_DETAIL_STALE_TIME_MS = 300_000;
+const CHANGE_REQUEST_DIFF_STALE_TIME_MS = 300_000;
+const WORKFLOW_RUNS_STALE_TIME_MS = 60_000;
+const WORKFLOW_RUN_JOBS_STALE_TIME_MS = 60_000;
+const WORKFLOW_JOB_LOG_STALE_TIME_MS = 300_000;
 
 export interface SourceControlQueryState<T> {
   readonly data: T | null;
@@ -46,92 +52,44 @@ const INITIAL_QUERY_STATE: SourceControlQueryState<never> = Object.freeze({
   error: null,
 });
 
-function toError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
-}
-
-// ---------------------------------------------------------------------------
-// Shared keyed-query infrastructure
-// ---------------------------------------------------------------------------
-
-const knownStateKeys = new Set<string>();
-
-const queryStateAtom = Atom.family((compositeKey: string) => {
-  knownStateKeys.add(compositeKey);
-  return Atom.make<SourceControlQueryState<unknown>>(INITIAL_QUERY_STATE).pipe(
-    Atom.keepAlive,
-    Atom.withLabel(`source-control:${compositeKey}`),
-  );
-});
-
-const EMPTY_QUERY_ATOM = Atom.make<SourceControlQueryState<unknown>>(INITIAL_QUERY_STATE).pipe(
-  Atom.keepAlive,
-  Atom.withLabel("source-control:null"),
-);
-
-interface QueryController {
-  readonly compositeKey: string;
-  readonly environmentId: EnvironmentId;
-  readonly cwd: string;
-  readonly staleTime: number;
-  readonly run: () => Promise<unknown>;
-  subscriberCount: number;
-  lastFetchedAt: number;
-  fetchToken: number;
-  hasData: boolean;
-  fetching: boolean;
-}
-
-const controllers = new Map<string, QueryController>();
-
-function setQueryState(compositeKey: string, next: SourceControlQueryState<unknown>): void {
-  appAtomRegistry.set(queryStateAtom(compositeKey), next);
-}
-
-function getQueryState(compositeKey: string): SourceControlQueryState<unknown> {
-  return appAtomRegistry.get(queryStateAtom(compositeKey));
-}
-
-async function runController(controller: QueryController): Promise<void> {
-  const token = ++controller.fetchToken;
-  controller.fetching = true;
-  const current = getQueryState(controller.compositeKey);
-  setQueryState(controller.compositeKey, {
+const sourceControlRegistry = createKeyedQueryRegistry<SourceControlQueryState<unknown>>({
+  labelPrefix: "source-control",
+  initialState: INITIAL_QUERY_STATE,
+  buildFetchingState: (current) => ({
     data: current.data,
     isLoading: current.data === null,
     isFetching: true,
     error: null,
-  });
-
-  try {
-    const data = await controller.run();
-    if (token !== controller.fetchToken) {
-      return;
-    }
+  }),
+  buildSuccessState: (data) => ({
+    data,
+    isLoading: false,
+    isFetching: false,
+    error: null,
+  }),
+  buildErrorState: (current, error) => ({
+    data: current.data,
+    isLoading: false,
+    isFetching: false,
+    error,
+  }),
+  onRunStart: (controller) => {
+    controller.fetching = true;
+  },
+  onRunEnd: (controller) => {
     controller.fetching = false;
-    controller.hasData = true;
-    controller.lastFetchedAt = Date.now();
-    setQueryState(controller.compositeKey, {
-      data,
-      isLoading: false,
-      isFetching: false,
-      error: null,
-    });
-  } catch (error) {
-    if (token !== controller.fetchToken) {
-      return;
-    }
-    controller.fetching = false;
-    setQueryState(controller.compositeKey, {
-      data: getQueryState(controller.compositeKey).data,
-      isLoading: false,
-      isFetching: false,
-      error: toError(error),
-    });
-  }
-}
+  },
+});
 
-interface QueryDefinition<TInput, TData> {
+const { controllers, runController, clearPollTimer } = sourceControlRegistry;
+
+export type QueryBinding<TInput, TData> = import("./keyedQuery").KeyedQueryByInput<
+  TInput,
+  TData,
+  SourceControlQueryState<TData>
+>;
+
+interface SourceControlQueryDefinition<TInput, TData> {
   readonly label: string;
   readonly staleTime: number;
   readonly isEnabled: (input: TInput) => boolean;
@@ -141,78 +99,21 @@ interface QueryDefinition<TInput, TData> {
   readonly run: (input: TInput) => Promise<TData>;
 }
 
-export interface QueryBinding<TInput, TData> {
-  readonly targetKey: (input: TInput) => string | null;
-  readonly atomFor: (input: TInput) => Atom.Atom<SourceControlQueryState<TData>>;
-  readonly snapshotFor: (input: TInput) => SourceControlQueryState<TData>;
-  readonly watch: (input: TInput) => () => void;
-}
-
 function defineQuery<TInput, TData>(
-  definition: QueryDefinition<TInput, TData>,
+  definition: SourceControlQueryDefinition<TInput, TData>,
 ): QueryBinding<TInput, TData> {
-  function compositeKeyFor(input: TInput): string | null {
-    if (!definition.isEnabled(input)) {
-      return null;
-    }
-    return `${definition.label}${KEY_SEP}${definition.buildKey(input)}`;
-  }
-
-  function atomFor(input: TInput): Atom.Atom<SourceControlQueryState<TData>> {
-    const compositeKey = compositeKeyFor(input);
-    return (compositeKey === null ? EMPTY_QUERY_ATOM : queryStateAtom(compositeKey)) as Atom.Atom<
-      SourceControlQueryState<TData>
-    >;
-  }
-
-  function snapshotFor(input: TInput): SourceControlQueryState<TData> {
-    const compositeKey = compositeKeyFor(input);
-    if (compositeKey === null) {
-      return INITIAL_QUERY_STATE as SourceControlQueryState<TData>;
-    }
-    return getQueryState(compositeKey) as SourceControlQueryState<TData>;
-  }
-
-  function watch(input: TInput): () => void {
-    const compositeKey = compositeKeyFor(input);
-    if (compositeKey === null) {
-      return NOOP;
-    }
-
-    let controller = controllers.get(compositeKey);
-    if (!controller) {
-      controller = {
-        compositeKey,
-        environmentId: definition.resolveEnvironmentId(input),
-        cwd: definition.resolveCwd(input),
-        staleTime: definition.staleTime,
-        run: () => definition.run(input),
-        subscriberCount: 0,
-        lastFetchedAt: 0,
-        fetchToken: 0,
-        hasData: false,
-        fetching: false,
-      };
-      controllers.set(compositeKey, controller);
-    }
-
-    controller.subscriberCount += 1;
-    const isStale =
-      controller.hasData && Date.now() - controller.lastFetchedAt >= controller.staleTime;
-    if (!controller.fetching && (!controller.hasData || isStale)) {
-      void runController(controller);
-    }
-
-    return () => {
-      const current = controllers.get(compositeKey);
-      if (!current) {
-        return;
-      }
-      current.subscriberCount = Math.max(0, current.subscriberCount - 1);
-    };
-  }
-
-  return { targetKey: compositeKeyFor, atomFor, snapshotFor, watch };
+  return defineKeyedQueryByInput(
+    sourceControlRegistry,
+    {
+      ...definition,
+      createControllerFields: (input) => ({ cwd: definition.resolveCwd(input), fetching: false }),
+    },
+    (controller) => {
+      const isStale =
+        controller.hasData && Date.now() - controller.lastFetchedAt >= controller.staleTime;
+      return !controller.fetching && (!controller.hasData || isStale);
+    },
+  ) as QueryBinding<TInput, TData>;
 }
 
 function sourceControlClient(environmentId: EnvironmentId) {
@@ -354,6 +255,38 @@ export const changeRequestSearchBinding = defineQuery<
 });
 
 // ---------------------------------------------------------------------------
+// Remote repository search (command palette clone flow)
+// ---------------------------------------------------------------------------
+
+export interface SourceControlRepositorySearchInput {
+  readonly environmentId: EnvironmentId | null;
+  readonly provider: SourceControlProviderKind | null;
+  readonly query: string;
+  readonly limit?: number;
+  readonly enabled?: boolean;
+}
+
+export const repositorySearchBinding = defineQuery<
+  SourceControlRepositorySearchInput,
+  SourceControlRepositorySearchResult
+>({
+  label: "repositories:search",
+  staleTime: SEARCH_STALE_TIME_MS,
+  isEnabled: (input) =>
+    (input.enabled ?? true) && input.environmentId !== null && input.provider !== null,
+  buildKey: (input) =>
+    `${input.environmentId}${KEY_SEP}${input.provider}${KEY_SEP}${input.query}${KEY_SEP}${input.limit ?? 25}`,
+  resolveEnvironmentId: (input) => input.environmentId as EnvironmentId,
+  resolveCwd: () => "",
+  run: (input) =>
+    sourceControlClient(input.environmentId as EnvironmentId).searchRepositories({
+      provider: input.provider as SourceControlProviderKind,
+      ...(input.query.length > 0 ? { query: input.query } : {}),
+      ...(input.limit !== undefined ? { limit: input.limit } : {}),
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // Issue creation: labels + assignees
 // ---------------------------------------------------------------------------
 
@@ -394,6 +327,199 @@ export const issueAssigneesBinding = defineQuery<
   run: (input) =>
     sourceControlClient(input.environmentId as EnvironmentId).listIssueAssignees({
       cwd: input.cwd as string,
+    }),
+});
+
+// ---------------------------------------------------------------------------
+// Issue detail
+// ---------------------------------------------------------------------------
+
+export interface SourceControlIssueDetailInput {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+  readonly reference: string | null;
+  readonly fullContent?: boolean;
+  readonly enabled?: boolean;
+}
+
+export const issueDetailBinding = defineQuery<
+  SourceControlIssueDetailInput,
+  SourceControlIssueDetail
+>({
+  label: "issues:detail",
+  staleTime: ISSUE_DETAIL_STALE_TIME_MS,
+  isEnabled: (input) =>
+    (input.enabled ?? true) &&
+    input.environmentId !== null &&
+    input.cwd !== null &&
+    input.reference !== null,
+  buildKey: (input) =>
+    `${input.environmentId}${KEY_SEP}${input.cwd}${KEY_SEP}${input.reference}${KEY_SEP}${input.fullContent ?? false}`,
+  resolveEnvironmentId: (input) => input.environmentId as EnvironmentId,
+  resolveCwd: (input) => input.cwd as string,
+  run: (input) =>
+    sourceControlClient(input.environmentId as EnvironmentId).getIssue({
+      cwd: input.cwd as string,
+      reference: input.reference as string,
+      ...(input.fullContent ? { fullContent: true } : {}),
+    }),
+});
+
+// ---------------------------------------------------------------------------
+// Change request detail + diff
+// ---------------------------------------------------------------------------
+
+export interface SourceControlChangeRequestDetailInput {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+  readonly reference: string | null;
+  readonly fullContent?: boolean;
+  readonly enabled?: boolean;
+}
+
+export const changeRequestDetailBinding = defineQuery<
+  SourceControlChangeRequestDetailInput,
+  SourceControlChangeRequestDetail
+>({
+  label: "changeRequests:detail",
+  staleTime: CHANGE_REQUEST_DETAIL_STALE_TIME_MS,
+  isEnabled: (input) =>
+    (input.enabled ?? true) &&
+    input.environmentId !== null &&
+    input.cwd !== null &&
+    input.reference !== null,
+  buildKey: (input) =>
+    `${input.environmentId}${KEY_SEP}${input.cwd}${KEY_SEP}${input.reference}${KEY_SEP}${input.fullContent ?? false}`,
+  resolveEnvironmentId: (input) => input.environmentId as EnvironmentId,
+  resolveCwd: (input) => input.cwd as string,
+  run: (input) =>
+    sourceControlClient(input.environmentId as EnvironmentId).getChangeRequestDetail({
+      cwd: input.cwd as string,
+      reference: input.reference as string,
+      ...(input.fullContent ? { fullContent: true } : {}),
+    }),
+});
+
+export interface SourceControlChangeRequestDiffInput {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+  readonly reference: string | null;
+  readonly enabled?: boolean;
+}
+
+export const changeRequestDiffBinding = defineQuery<SourceControlChangeRequestDiffInput, string>({
+  label: "changeRequests:diff",
+  staleTime: CHANGE_REQUEST_DIFF_STALE_TIME_MS,
+  isEnabled: (input) =>
+    (input.enabled ?? true) &&
+    input.environmentId !== null &&
+    input.cwd !== null &&
+    input.reference !== null,
+  buildKey: (input) => `${input.environmentId}${KEY_SEP}${input.cwd}${KEY_SEP}${input.reference}`,
+  resolveEnvironmentId: (input) => input.environmentId as EnvironmentId,
+  resolveCwd: (input) => input.cwd as string,
+  run: (input) =>
+    sourceControlClient(input.environmentId as EnvironmentId).getChangeRequestDiff({
+      cwd: input.cwd as string,
+      reference: input.reference as string,
+    }),
+});
+
+// ---------------------------------------------------------------------------
+// Workflow runs, jobs, and logs
+// ---------------------------------------------------------------------------
+
+export interface SourceControlWorkflowRunsInput {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+  readonly pullRequestNumber?: number | null;
+  readonly commitSha?: string | null;
+  readonly limit?: number;
+  readonly enabled?: boolean;
+}
+
+export const workflowRunsBinding = defineQuery<
+  SourceControlWorkflowRunsInput,
+  SourceControlWorkflowRunListResult
+>({
+  label: "workflows:runs",
+  staleTime: WORKFLOW_RUNS_STALE_TIME_MS,
+  isEnabled: (input) =>
+    (input.enabled ?? true) && input.environmentId !== null && input.cwd !== null,
+  buildKey: (input) =>
+    `${input.environmentId}${KEY_SEP}${input.cwd}${KEY_SEP}${input.pullRequestNumber ?? ""}${KEY_SEP}${input.commitSha ?? ""}${KEY_SEP}${input.limit ?? ""}`,
+  resolveEnvironmentId: (input) => input.environmentId as EnvironmentId,
+  resolveCwd: (input) => input.cwd as string,
+  run: (input) =>
+    sourceControlClient(input.environmentId as EnvironmentId).listWorkflowRuns({
+      cwd: input.cwd as string,
+      ...(input.pullRequestNumber !== undefined && input.pullRequestNumber !== null
+        ? { pullRequestNumber: input.pullRequestNumber }
+        : {}),
+      ...(input.commitSha !== undefined && input.commitSha !== null
+        ? { commitSha: input.commitSha }
+        : {}),
+      ...(input.limit !== undefined ? { limit: input.limit } : {}),
+    }),
+});
+
+export interface SourceControlWorkflowRunJobsInput {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+  readonly runId: string | null;
+  readonly enabled?: boolean;
+}
+
+export const workflowRunJobsBinding = defineQuery<
+  SourceControlWorkflowRunJobsInput,
+  SourceControlWorkflowRunJobsResult
+>({
+  label: "workflows:jobs",
+  staleTime: WORKFLOW_RUN_JOBS_STALE_TIME_MS,
+  isEnabled: (input) =>
+    (input.enabled ?? true) &&
+    input.environmentId !== null &&
+    input.cwd !== null &&
+    input.runId !== null,
+  buildKey: (input) => `${input.environmentId}${KEY_SEP}${input.cwd}${KEY_SEP}${input.runId}`,
+  resolveEnvironmentId: (input) => input.environmentId as EnvironmentId,
+  resolveCwd: (input) => input.cwd as string,
+  run: (input) =>
+    sourceControlClient(input.environmentId as EnvironmentId).getWorkflowRunJobs({
+      cwd: input.cwd as string,
+      runId: input.runId as string,
+    }),
+});
+
+export interface SourceControlWorkflowJobLogInput {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+  readonly runId: string | null;
+  readonly jobId: string | null;
+  readonly enabled?: boolean;
+}
+
+export const workflowJobLogBinding = defineQuery<
+  SourceControlWorkflowJobLogInput,
+  SourceControlWorkflowJobLogResult
+>({
+  label: "workflows:jobLog",
+  staleTime: WORKFLOW_JOB_LOG_STALE_TIME_MS,
+  isEnabled: (input) =>
+    (input.enabled ?? false) &&
+    input.environmentId !== null &&
+    input.cwd !== null &&
+    input.runId !== null &&
+    input.jobId !== null,
+  buildKey: (input) =>
+    `${input.environmentId}${KEY_SEP}${input.cwd}${KEY_SEP}${input.runId}${KEY_SEP}${input.jobId}`,
+  resolveEnvironmentId: (input) => input.environmentId as EnvironmentId,
+  resolveCwd: (input) => input.cwd as string,
+  run: (input) =>
+    sourceControlClient(input.environmentId as EnvironmentId).getWorkflowJobLog({
+      cwd: input.cwd as string,
+      runId: input.runId as string,
+      jobId: input.jobId as string,
     }),
 });
 
@@ -531,10 +657,11 @@ export function invalidateSourceControl(input?: {
     if (environmentId !== null && controller.environmentId !== environmentId) {
       continue;
     }
-    if (cwd !== null && controller.cwd !== cwd) {
+    if (cwd !== null && (controller.cwd as string) !== cwd) {
       continue;
     }
     controller.hasData = false;
+    clearPollTimer(controller);
     if (controller.subscriberCount > 0) {
       void runController(controller);
     } else {
@@ -561,13 +688,6 @@ export function invalidateSourceControl(input?: {
 // ---------------------------------------------------------------------------
 
 export function resetSourceControlAtomsForTests(): void {
-  for (const controller of controllers.values()) {
-    controller.fetchToken += 1;
-  }
-  controllers.clear();
+  sourceControlRegistry.resetForTests();
   detailCache.clear();
-  for (const compositeKey of knownStateKeys) {
-    appAtomRegistry.set(queryStateAtom(compositeKey), INITIAL_QUERY_STATE);
-  }
-  knownStateKeys.clear();
 }

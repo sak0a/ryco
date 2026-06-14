@@ -1,11 +1,9 @@
 import { useMemo } from "react";
-import { useQueries } from "~/rpc/queryClient";
 import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime";
-import { workItemsQueryKeys } from "~/lib/workItemsRpc";
 import { resolveJiraProjectOpenUrl } from "../../../lib/workItemLocalLinks";
-import { readEnvironmentConnection } from "../../../environments/runtime";
 import { shouldQuerySidebarSourceControlCounts } from "../../Sidebar.logic";
 import type { SidebarProjectSnapshot } from "../../../sidebarProjectGrouping";
+import { useAtlassianConnectionsBatch, useAtlassianProjectLinkBatch } from "~/rpc/useAtlassian";
 
 export function useSidebarProjectJiraLinks(params: {
   project: SidebarProjectSnapshot;
@@ -17,34 +15,24 @@ export function useSidebarProjectJiraLinks(params: {
     explorerOpen,
     projectVisible,
   });
-  const atlassianProjectLinkQueries = useQueries({
-    queries: project.memberProjects.map((member) => ({
-      queryKey: workItemsQueryKeys.projectLink(member.environmentId, member.id),
-      queryFn: async () => {
-        const environmentConnection = readEnvironmentConnection(member.environmentId);
-        if (!environmentConnection) return null;
-        return environmentConnection.client.atlassian.getProjectLink({ projectId: member.id });
-      },
-      enabled: shouldQueryProjectIntegrations,
-      staleTime: 60_000,
-    })),
-  });
+  const projectLinkInputs = useMemo(
+    () =>
+      project.memberProjects.map((member) => ({
+        environmentId: member.environmentId,
+        projectId: member.id,
+        enabled: shouldQueryProjectIntegrations,
+      })),
+    [project.memberProjects, shouldQueryProjectIntegrations],
+  );
+  const atlassianProjectLinkQueries = useAtlassianProjectLinkBatch(projectLinkInputs);
   const atlassianConnectionEnvironmentIds = useMemo(
     () => Array.from(new Set(project.memberProjects.map((member) => member.environmentId))),
     [project.memberProjects],
   );
-  const atlassianConnectionQueries = useQueries({
-    queries: atlassianConnectionEnvironmentIds.map((environmentId) => ({
-      queryKey: ["atlassian", "connections", environmentId] as const,
-      queryFn: async () => {
-        const environmentConnection = readEnvironmentConnection(environmentId);
-        if (!environmentConnection) return [];
-        return environmentConnection.client.atlassian.listConnections();
-      },
-      enabled: shouldQueryProjectIntegrations,
-      staleTime: 60_000,
-    })),
-  });
+  const atlassianConnectionQueries = useAtlassianConnectionsBatch(
+    atlassianConnectionEnvironmentIds,
+    shouldQueryProjectIntegrations,
+  );
   const atlassianConnectionsByEnvironmentId = useMemo(
     () =>
       new Map(
