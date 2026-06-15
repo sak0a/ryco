@@ -194,13 +194,58 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_SESSION_TABS: ReadonlyArray<ChatSessionTabsItem> = Object.freeze([]);
+const PROVIDER_STATUS_KEY_SEPARATOR = "\0";
 
 function providerStatusesContentKey(providers: ReadonlyArray<ServerProvider>): string {
-  let key = `${providers.length}`;
+  const parts: string[] = [`${providers.length}`];
   for (const provider of providers) {
-    key += `\0${provider.instanceId}\0${provider.driver}\0${provider.enabled ? 1 : 0}\0${provider.status}\0${provider.installed ? 1 : 0}\0${provider.models.length}`;
+    parts.push(
+      provider.instanceId,
+      provider.driver,
+      provider.displayName ?? "",
+      provider.accentColor ?? "",
+      provider.badgeLabel ?? "",
+      provider.continuation?.groupKey ?? "",
+      provider.showInteractionModeToggle ? "1" : "0",
+      provider.enabled ? "1" : "0",
+      provider.status,
+      provider.installed ? "1" : "0",
+      provider.availability ?? "",
+      provider.unavailableReason ?? "",
+      provider.auth.status,
+      provider.auth.type ?? "",
+      provider.auth.label ?? "",
+      provider.auth.email ?? "",
+      provider.message ?? "",
+    );
+    for (const model of provider.models) {
+      parts.push(
+        "model",
+        model.slug,
+        model.name,
+        model.shortName ?? "",
+        model.subProvider ?? "",
+        model.isCustom ? "1" : "0",
+        JSON.stringify(model.capabilities) ?? "",
+      );
+    }
+    for (const command of provider.slashCommands) {
+      parts.push("command", command.name, command.description ?? "", command.input?.hint ?? "");
+    }
+    for (const skill of provider.skills) {
+      parts.push(
+        "skill",
+        skill.name,
+        skill.path,
+        skill.enabled ? "1" : "0",
+        skill.scope ?? "",
+        skill.displayName ?? "",
+        skill.shortDescription ?? "",
+        skill.description ?? "",
+      );
+    }
   }
-  return key;
+  return parts.join(PROVIDER_STATUS_KEY_SEPARATOR);
 }
 
 function stabilizeProviderStatusesSnapshot(

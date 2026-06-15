@@ -1317,8 +1317,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.equal(threadDetail._tag, "Some");
       if (threadDetail._tag === "Some") {
         const messages = threadDetail.value.messages;
-        assert.equal(messages.length, 500);
-        assert.equal(messages[0]?.id, asMessageId("message-0500"));
+        assert.equal(messages.length, totalMessages);
+        assert.equal(messages[0]?.id, asMessageId("message-0000"));
         assert.equal(messages[messages.length - 1]?.id, asMessageId("message-0999"));
       }
 
@@ -1326,8 +1326,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         (thread) => thread.id === ThreadId.make("thread-paged"),
       );
       assert.ok(snapshotThread);
-      assert.equal(snapshotThread?.messages.length, 500);
-      assert.equal(snapshotThread?.messages[0]?.id, asMessageId("message-0500"));
+      assert.equal(snapshotThread?.messages.length, totalMessages);
+      assert.equal(snapshotThread?.messages[0]?.id, asMessageId("message-0000"));
       assert.equal(
         snapshotThread?.messages[(snapshotThread?.messages.length ?? 0) - 1]?.id,
         asMessageId("message-0999"),

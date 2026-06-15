@@ -11,6 +11,7 @@ import { Atom } from "effect/unstable/reactivity";
 import { requireEnvironmentConnection } from "~/environments/runtime";
 import { appAtomRegistry } from "./atomRegistry";
 import { useAsyncMutation } from "./useWorkItems";
+import { invalidateWorkItems } from "./workItemsAtoms";
 import {
   type AtlassianConnectionsInput,
   type AtlassianProjectLinkInput,
@@ -184,8 +185,12 @@ export function useSaveAtlassianProjectLinkMutation(input: {
         payload,
       );
     },
-    onSuccess: () => {
+    onSuccess: (_data, payload) => {
       invalidateAtlassian({ environmentId: input.environmentId });
+      invalidateWorkItems({
+        environmentId: input.environmentId,
+        projectId: payload.projectId,
+      });
       input.onSuccess?.();
     },
     onError: (error) => {

@@ -12,6 +12,7 @@ import {
   useAtlassianConnections,
   useAtlassianProjectLink,
 } from "~/rpc/useAtlassian";
+import { invalidateWorkItems } from "~/rpc/useWorkItems";
 import {
   PROJECT_CUSTOM_SYSTEM_PROMPT_MAX_CHARS,
   type AtlassianConnectionId,
@@ -529,6 +530,10 @@ function ProjectAtlassianSettingsSection(props: { target: SidebarProjectGroupMem
 
   const invalidateAtlassianProjectSettings = () => {
     invalidateAtlassian({ environmentId: target?.environmentId ?? null });
+    invalidateWorkItems({
+      environmentId: target?.environmentId ?? null,
+      projectId: target?.id ?? null,
+    });
     void queryClient.invalidateQueries({ queryKey: ["atlassian"] });
     void queryClient.invalidateQueries({ queryKey: ["workItems"] });
   };
