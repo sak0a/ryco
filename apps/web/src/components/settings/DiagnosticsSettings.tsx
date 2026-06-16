@@ -223,35 +223,47 @@ export function DiagnosticsSettings() {
   const [loading, setLoading] = useState(true);
   const [paused, setPaused] = useState(false);
   const refreshInFlightRef = useRef(false);
+  const hasSnapshotRef = useRef(false);
+  const cancelledRef = useRef(false);
   const slowRpcAcks = useSlowRpcAckRequests();
   const nowMs = useRelativeTimeTick(1_000);
 
   const refresh = useCallback(async () => {
     if (refreshInFlightRef.current) return;
     refreshInFlightRef.current = true;
-    setLoading((current) => current && snapshot === null);
+    setLoading((current) => current && !hasSnapshotRef.current);
     try {
       const next = await ensureLocalApi().server.getDiagnosticsSnapshot();
+      if (cancelledRef.current) return;
       setSnapshot(next);
       setError(null);
+      hasSnapshotRef.current = true;
     } catch (refreshError) {
+      if (cancelledRef.current) return;
       setError(
         refreshError instanceof Error ? refreshError.message : "Unable to refresh diagnostics.",
       );
     } finally {
       refreshInFlightRef.current = false;
-      setLoading(false);
+      if (!cancelledRef.current) {
+        setLoading(false);
+      }
     }
-  }, [snapshot]);
+  }, []);
 
   useEffect(() => {
+    cancelledRef.current = false;
     void refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    if (paused) return;
+    if (paused) {
+      return () => {
+        cancelledRef.current = true;
+      };
+    }
     const id = window.setInterval(() => void refresh(), POLL_INTERVAL_MS);
-    return () => window.clearInterval(id);
+    return () => {
+      cancelledRef.current = true;
+      window.clearInterval(id);
+    };
   }, [paused, refresh]);
 
   const memorySeries = useMemo(

@@ -159,12 +159,21 @@ function toIsoFromUnixNano(value: string): string {
   }
 }
 
+function normalizeOtlpSpanStatus(code: string | undefined): DiagnosticsSpan["status"] {
+  if (!code) return "success";
+  if (code === "2" || code === "STATUS_CODE_ERROR") return "error";
+  if (code === "1" || code === "STATUS_CODE_OK") return "success";
+  if (code === "0" || code === "STATUS_CODE_UNSET") return "unset";
+  return "success";
+}
+
 function normalizeSpanSource(record: TraceRecord): DiagnosticsSpan["source"] {
   if (record.type === "effect-span") {
     return "server";
   }
-  const serviceRuntime = record.resourceAttributes["service.runtime"];
-  const serviceName = record.resourceAttributes["service.name"];
+  const resourceAttributes = record.resourceAttributes ?? {};
+  const serviceRuntime = resourceAttributes["service.runtime"];
+  const serviceName = resourceAttributes["service.name"];
   if (serviceRuntime === "ryco-web" || serviceName === "ryco-web") {
     return "browser";
   }
@@ -176,18 +185,21 @@ function normalizeSpanSource(record: TraceRecord): DiagnosticsSpan["source"] {
 
 function normalizeSpanStatus(record: TraceRecord): DiagnosticsSpan["status"] {
   if (record.type === "effect-span") {
-    if (record.exit._tag === "Success") return "success";
-    if (record.exit._tag === "Interrupted") return "interrupted";
+    const exit = record.exit;
+    if (!exit || exit._tag === "Success") return "success";
+    if (exit._tag === "Interrupted") return "interrupted";
     return "failure";
   }
-  if (record.status?.code === "2") return "error";
-  if (record.status?.code === "1") return "unset";
-  return "success";
+  return normalizeOtlpSpanStatus(record.status?.code);
 }
 
 function spanFailureMessage(record: TraceRecord): string | undefined {
-  if (record.type === "effect-span" && record.exit._tag !== "Success") {
-    return truncateMessage(record.exit.cause);
+  if (record.type === "effect-span") {
+    const exit = record.exit;
+    if (exit && exit._tag !== "Success") {
+      return truncateMessage(exit.cause);
+    }
+    return undefined;
   }
   if (record.type === "otlp-span" && record.status?.message) {
     return truncateMessage(record.status.message);
@@ -204,30 +216,39 @@ function toDiagnosticsSpan(record: TraceRecord): DiagnosticsSpan {
     spanId: record.spanId,
     ...(record.parentSpanId ? { parentSpanId: record.parentSpanId } : {}),
     name: record.name.trim() || "(unnamed span)",
-    kind: record.kind || "unknown",
+    kind: record.kind?.trim() || "unknown",
     startTime: toIsoFromUnixNano(record.startTimeUnixNano),
     endTime: toIsoFromUnixNano(record.endTimeUnixNano),
     durationMs: Math.max(0, record.durationMs),
     status: normalizeSpanStatus(record),
     ...(failureMessage ? { failureMessage } : {}),
-    attributes: redactDiagnosticValue(record.attributes) as Record<string, unknown>,
+    attributes: redactDiagnosticValue(record.attributes ?? {}) as Record<string, unknown>,
   };
+}
+
+function safeToDiagnosticsSpan(record: TraceRecord): DiagnosticsSpan | null {
+  try {
+    return toDiagnosticsSpan(record);
+  } catch {
+    return null;
+  }
 }
 
 function toDiagnosticsSpanEvents(
   records: ReadonlyArray<TraceRecord>,
 ): ReadonlyArray<DiagnosticsSpanEvent> {
   return records
-    .flatMap((record) =>
-      record.events.map((event) => ({
+    .flatMap((record) => {
+      const events = record.events ?? [];
+      return events.map((event) => ({
         traceId: record.traceId,
         spanId: record.spanId,
         spanName: record.name.trim() || "(unnamed span)",
         name: event.name.trim() || "(unnamed event)",
         time: toIsoFromUnixNano(event.timeUnixNano),
-        attributes: redactDiagnosticValue(event.attributes) as Record<string, unknown>,
-      })),
-    )
+        attributes: redactDiagnosticValue(event.attributes ?? {}) as Record<string, unknown>,
+      }));
+    })
     .toSorted((left, right) => right.time.localeCompare(left.time))
     .slice(0, EVENT_LIMIT);
 }
@@ -550,9 +571,23 @@ export const makeDiagnosticsService = Effect.fn("makeDiagnosticsService")(functi
           warnings,
         });
         const allTraceRecords = dedupeTraceRecords([...traceTail, ...traceRecords.values()]);
+        let skippedSpanRecords = 0;
         const spans = allTraceRecords
-          .map(toDiagnosticsSpan)
+          .flatMap((record) => {
+            const span = safeToDiagnosticsSpan(record);
+            if (span === null) {
+              skippedSpanRecords += 1;
+              return [];
+            }
+            return [span];
+          })
           .toSorted((left, right) => right.endTime.localeCompare(left.endTime));
+        if (skippedSpanRecords > 0) {
+          warnings.push({
+            code: "diagnostics.trace-records-skipped",
+            message: `Skipped ${skippedSpanRecords} malformed trace record(s).`,
+          });
+        }
         const failuresFromSpans = spans.flatMap((span) => failureFromSpan(span) ?? []);
         const failuresFromLogs = [
           ...(await readFailureLogTail({
