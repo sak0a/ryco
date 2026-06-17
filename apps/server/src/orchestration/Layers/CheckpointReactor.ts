@@ -25,6 +25,7 @@ import { RuntimeReceiptBus } from "../Services/RuntimeReceiptBus.ts";
 import type { CheckpointStoreError } from "../../checkpointing/Errors.ts";
 import type { OrchestrationDispatchError } from "../Errors.ts";
 import { isGitRepository } from "../../git/Utils.ts";
+import { LocalDiagnosticsMetrics } from "../../observability/Services/LocalDiagnosticsMetrics.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { WorkspaceEntries } from "../../workspace/Services/WorkspaceEntries.ts";
 
@@ -71,6 +72,7 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const checkpointStore = yield* CheckpointStore;
   const receiptBus = yield* RuntimeReceiptBus;
+  const localDiagnosticsMetrics = yield* LocalDiagnosticsMetrics;
   const workspaceEntries = yield* WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
 
@@ -204,7 +206,9 @@ const make = Effect.gen(function* () {
     readonly status: "ready" | "missing" | "error";
     readonly assistantMessageId: MessageId | undefined;
     readonly createdAt: string;
+    readonly quiescenceStartedAt?: number;
   }) {
+    const checkpointStartedAt = Date.now();
     const fromTurnCount = Math.max(0, input.turnCount - 1);
     const fromCheckpointRef = checkpointRefForThreadTurn(input.threadId, fromTurnCount);
     const targetCheckpointRef = checkpointRefForThreadTurn(input.threadId, input.turnCount);
@@ -294,6 +298,10 @@ const make = Effect.gen(function* () {
       status: input.status,
       createdAt: input.createdAt,
     });
+    yield* localDiagnosticsMetrics.recordCheckpointDurationMs(Date.now() - checkpointStartedAt);
+    if (input.quiescenceStartedAt !== undefined) {
+      yield* localDiagnosticsMetrics.recordTurnQuiescenceMs(Date.now() - input.quiescenceStartedAt);
+    }
     yield* receiptBus.publish({
       type: "turn.processing.quiesced",
       threadId: input.threadId,
@@ -324,7 +332,10 @@ const make = Effect.gen(function* () {
 
   // Captures a real git checkpoint when a turn completes via a runtime event.
   const captureCheckpointFromTurnCompletion = Effect.fn("captureCheckpointFromTurnCompletion")(
-    function* (event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>) {
+    function* (
+      event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>,
+      quiescenceStartedAt: number,
+    ) {
       const turnId = toTurnId(event.turnId);
       if (!turnId) {
         return;
@@ -384,6 +395,7 @@ const make = Effect.gen(function* () {
         status: checkpointStatusFromRuntime(event.payload.state),
         assistantMessageId: undefined,
         createdAt: event.createdAt,
+        quiescenceStartedAt,
       });
     },
   );
@@ -757,8 +769,9 @@ const make = Effect.gen(function* () {
 
     if (event.type === "turn.completed") {
       const turnId = toTurnId(event.turnId);
+      const quiescenceStartedAt = Date.now();
       yield* refreshLocalGitStatusFromTurnCompletion(event);
-      yield* captureCheckpointFromTurnCompletion(event).pipe(
+      yield* captureCheckpointFromTurnCompletion(event, quiescenceStartedAt).pipe(
         Effect.catch((error) =>
           appendCaptureFailureActivity({
             threadId: event.threadId,

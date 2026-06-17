@@ -1,7 +1,8 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
+import { DraftId } from "../../composerDraftStore";
+import { useDraftSession } from "../../composerDraftSelectors";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
 import {
@@ -35,7 +36,7 @@ export function DraftChatThreadRouteView({
 }) {
   const navigate = useNavigate();
   const draftId = DraftId.make(rawDraftId);
-  const draftSession = useComposerDraftStore((store) => store.getDraftSession(draftId));
+  const draftSession = useDraftSession(draftId);
   const serverThread = useStore(
     useMemo(
       () => createThreadSelectorAcrossEnvironments(draftSession?.threadId ?? null),

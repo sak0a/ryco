@@ -1200,6 +1200,141 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
+  it.effect("paginates message history to the most recent page for high-volume threads", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+          INSERT INTO projection_projects (
+            project_id,
+            title,
+            workspace_root,
+            default_model_selection_json,
+            scripts_json,
+            created_at,
+            updated_at,
+            deleted_at
+          )
+          VALUES (
+            'project-paged',
+            'Paged Project',
+            '/tmp/paged-project',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            '[]',
+            '2026-05-01T00:00:00.000Z',
+            '2026-05-01T00:00:01.000Z',
+            NULL
+          )
+        `;
+
+      yield* sql`
+          INSERT INTO projection_threads (
+            thread_id,
+            project_id,
+            title,
+            model_selection_json,
+            runtime_mode,
+            interaction_mode,
+            branch,
+            worktree_path,
+            latest_turn_id,
+            latest_user_message_at,
+            pending_approval_count,
+            pending_user_input_count,
+            has_actionable_proposed_plan,
+            created_at,
+            updated_at,
+            deleted_at
+          )
+          VALUES (
+            'thread-paged',
+            'project-paged',
+            'Paged Thread',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            '2026-05-01T00:00:02.000Z',
+            '2026-05-01T00:00:03.000Z',
+            NULL
+          )
+        `;
+
+      const totalMessages = 1_000;
+      const baseTime = Date.parse("2026-05-01T01:00:00.000Z");
+      yield* sql.withTransaction(
+        Effect.forEach(
+          Array.from({ length: totalMessages }, (_unused, index) => index),
+          (index) => {
+            const messageId = `message-${String(index).padStart(4, "0")}`;
+            const createdAt = new Date(baseTime + index * 1_000).toISOString();
+            return sql`
+                INSERT INTO projection_thread_messages (
+                  message_id,
+                  thread_id,
+                  turn_id,
+                  role,
+                  text,
+                  is_streaming,
+                  created_at,
+                  updated_at
+                )
+                VALUES (
+                  ${messageId},
+                  'thread-paged',
+                  'turn-paged',
+                  'assistant',
+                  ${`body ${index}`},
+                  0,
+                  ${createdAt},
+                  ${createdAt}
+                )
+              `;
+          },
+          { discard: true },
+        ),
+      );
+
+      const startedAt = Date.now();
+      const threadDetail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-paged"));
+      const snapshot = yield* snapshotQuery.getSnapshot();
+      const elapsedMs = Date.now() - startedAt;
+
+      assert.isBelow(elapsedMs, 2_000);
+
+      assert.equal(threadDetail._tag, "Some");
+      if (threadDetail._tag === "Some") {
+        const messages = threadDetail.value.messages;
+        assert.equal(messages.length, totalMessages);
+        assert.equal(messages[0]?.id, asMessageId("message-0000"));
+        assert.equal(messages[messages.length - 1]?.id, asMessageId("message-0999"));
+      }
+
+      const snapshotThread = snapshot.threads.find(
+        (thread) => thread.id === ThreadId.make("thread-paged"),
+      );
+      assert.ok(snapshotThread);
+      assert.equal(snapshotThread?.messages.length, totalMessages);
+      assert.equal(snapshotThread?.messages[0]?.id, asMessageId("message-0000"));
+      assert.equal(
+        snapshotThread?.messages[(snapshotThread?.messages.length ?? 0) - 1]?.id,
+        asMessageId("message-0999"),
+      );
+    }),
+  );
+
   it.effect("keeps deleted project and thread tombstones in the command read model", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;

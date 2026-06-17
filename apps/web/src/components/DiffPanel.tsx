@@ -1,7 +1,6 @@
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type FileDiffMetadata, Virtualizer } from "@pierre/diffs/react";
 import { useDebouncedValue } from "@tanstack/react-pacer";
-import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { scopeThreadRef } from "@ryco/client-runtime";
 import type { TurnId } from "@ryco/contracts";
@@ -27,11 +26,12 @@ import {
 } from "react";
 import { openInPreferredEditor } from "../editorPreferences";
 import { useGitStatus } from "~/lib/gitStatusState";
-import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
+import { useCheckpointDiff } from "~/rpc/useProvider";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "../localApi";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import { useTheme } from "../hooks/useTheme";
+import { DiffParseCache } from "../lib/diffParseCache";
 import { buildPatchCacheKey } from "../lib/diffRendering";
 import { resolveDiffThemeName } from "../lib/diffRendering";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
@@ -180,6 +180,30 @@ function getRenderablePatch(
 function resolveFileDiffPath(fileDiff: FileDiffMetadata): string {
   return resolveDiffFilePath(fileDiff);
 }
+
+function sortRenderableFiles(patch: RenderablePatch | null): FileDiffMetadata[] {
+  if (!patch || patch.kind !== "files") {
+    return [];
+  }
+  return patch.files.toSorted((left, right) =>
+    resolveFileDiffPath(left).localeCompare(resolveFileDiffPath(right), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }),
+  );
+}
+
+interface ParsedDiffContent {
+  readonly patch: RenderablePatch | null;
+  readonly files: FileDiffMetadata[];
+}
+
+// Parsed-diff payloads are cached across turn/file switches so re-opening a
+// previously viewed diff is instant, and rapid switching never re-parses (or
+// re-queues worker highlight jobs for) identical content. Worker jobs for files
+// that scroll out / unmount are cancelled by @pierre/diffs on unmount, so the
+// queue does not stack as the selection changes.
+const renderablePatchCache = new DiffParseCache<ParsedDiffContent>();
 
 function buildFileDiffRenderKey(fileDiff: FileDiffMetadata): string {
   return fileDiff.cacheKey ?? `${fileDiff.prevName ?? "none"}:${fileDiff.name}`;
@@ -522,17 +546,15 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     }
     return `conversation:${orderedTurnDiffSummaries.map((summary) => summary.turnId).join(",")}`;
   }, [orderedTurnDiffSummaries, selectedTurn]);
-  const activeCheckpointDiffQuery = useQuery(
-    checkpointDiffQueryOptions({
-      environmentId: activeThread?.environmentId ?? null,
-      threadId: activeThreadId,
-      fromTurnCount: activeCheckpointRange?.fromTurnCount ?? null,
-      toTurnCount: activeCheckpointRange?.toTurnCount ?? null,
-      ignoreWhitespace: diffIgnoreWhitespace,
-      cacheScope: selectedTurn ? `turn:${selectedTurn.turnId}` : conversationCacheScope,
-      enabled: isGitRepo,
-    }),
-  );
+  const activeCheckpointDiffQuery = useCheckpointDiff({
+    environmentId: activeThread?.environmentId ?? null,
+    threadId: activeThreadId,
+    fromTurnCount: activeCheckpointRange?.fromTurnCount ?? null,
+    toTurnCount: activeCheckpointRange?.toTurnCount ?? null,
+    ignoreWhitespace: diffIgnoreWhitespace,
+    cacheScope: selectedTurn ? `turn:${selectedTurn.turnId}` : conversationCacheScope,
+    enabled: isGitRepo,
+  });
   const selectedTurnCheckpointDiff = selectedTurn
     ? activeCheckpointDiffQuery.data?.diff
     : undefined;
@@ -550,21 +572,33 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const selectedPatch = selectedTurn ? selectedTurnCheckpointDiff : conversationCheckpointDiff;
   const hasResolvedPatch = typeof selectedPatch === "string";
   const hasNoNetChanges = hasResolvedPatch && selectedPatch.trim().length === 0;
-  const renderablePatch = useMemo(
-    () => getRenderablePatch(selectedPatch, `diff-panel:${resolvedTheme}`),
-    [resolvedTheme, selectedPatch],
-  );
-  const renderableFiles = useMemo(() => {
-    if (!renderablePatch || renderablePatch.kind !== "files") {
-      return [];
+  const renderableContent = useMemo<ParsedDiffContent>(() => {
+    const parseScope = `diff-panel:${resolvedTheme}`;
+    const normalizedPatch = typeof selectedPatch === "string" ? selectedPatch.trim() : "";
+    if (normalizedPatch.length === 0) {
+      return { patch: null, files: [] };
     }
-    return renderablePatch.files.toSorted((left, right) =>
-      resolveFileDiffPath(left).localeCompare(resolveFileDiffPath(right), undefined, {
-        numeric: true,
-        sensitivity: "base",
-      }),
-    );
-  }, [renderablePatch]);
+    const turnScope = selectedTurn
+      ? `turn:${selectedTurn.turnId}`
+      : (conversationCacheScope ?? "conversation");
+    const cacheKey = {
+      turnId: turnScope,
+      filePath: parseScope,
+      blobSha: buildPatchCacheKey(normalizedPatch),
+    };
+    const cached = renderablePatchCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const patch = getRenderablePatch(selectedPatch, parseScope);
+    const content: ParsedDiffContent = { patch, files: sortRenderableFiles(patch) };
+    if (patch) {
+      renderablePatchCache.set(cacheKey, content);
+    }
+    return content;
+  }, [conversationCacheScope, resolvedTheme, selectedPatch, selectedTurn]);
+  const renderablePatch = renderableContent.patch;
+  const renderableFiles = renderableContent.files;
 
   const diffSearchIndex = useMemo(() => buildDiffSearchIndex(renderableFiles), [renderableFiles]);
   const normalizedDiffSearchQuery = useMemo(

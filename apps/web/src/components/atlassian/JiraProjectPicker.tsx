@@ -1,7 +1,6 @@
 import type { AtlassianConnectionId, EnvironmentId, WorkItemProject } from "@ryco/contracts";
-import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { workItemProjectsQueryOptions } from "~/lib/workItemsRpc";
+import { useWorkItemProjects } from "~/rpc/useWorkItems";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 
 const JIRA_PROJECT_PICKER_EMPTY = "__ryco_empty_jira_project__";
@@ -41,14 +40,12 @@ export function JiraProjectPicker(props: {
     disabled = false,
     onProjectKeysChange,
   } = props;
-  const projectsQuery = useQuery(
-    workItemProjectsQueryOptions({
-      environmentId,
-      connectionId,
-      siteUrl,
-      enabled: !disabled,
-    }),
-  );
+  const projectsQuery = useWorkItemProjects({
+    environmentId,
+    connectionId,
+    siteUrl,
+    enabled: !disabled,
+  });
   const projects = projectsQuery.data ?? EMPTY_PROJECTS;
   const selectedValue = selectedProjectValue({ projectKeys, projects });
 

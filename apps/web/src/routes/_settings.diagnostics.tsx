@@ -1,0 +1,55 @@
+import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
+import { ArrowLeftIcon } from "lucide-react";
+
+import { DiagnosticsPanel } from "../components/settings/DiagnosticsPanel";
+import { Button } from "../components/ui/button";
+import { ScrollArea } from "../components/ui/scroll-area";
+import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
+import { APP_DISPLAY_NAME } from "~/branding";
+
+function DiagnosticsRouteView() {
+  const router = useRouter();
+
+  return (
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+        <header className="flex items-center gap-2 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
+          <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => {
+              if (router.history.canGoBack()) {
+                router.history.back();
+                return;
+              }
+              void router.navigate({ to: "/" });
+            }}
+          >
+            <ArrowLeftIcon className="size-3.5" />
+            Back
+          </Button>
+          <span className="text-sm font-medium text-foreground">
+            {APP_DISPLAY_NAME} · Diagnostics
+          </span>
+        </header>
+
+        <ScrollArea className="min-h-0 flex-1">
+          <DiagnosticsPanel />
+        </ScrollArea>
+      </div>
+    </SidebarInset>
+  );
+}
+
+export const Route = createFileRoute("/_settings/diagnostics")({
+  beforeLoad: ({ context }) => {
+    if (
+      context.authGateState.status !== "authenticated" &&
+      context.authGateState.status !== "hosted-static"
+    ) {
+      throw redirect({ to: "/pair", replace: true });
+    }
+  },
+  component: DiagnosticsRouteView,
+});

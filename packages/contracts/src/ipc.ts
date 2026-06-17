@@ -66,6 +66,7 @@ import type {
 import type { ProviderInstanceId } from "./providerInstance.ts";
 import type {
   ServerConfig,
+  ServerLocalDiagnosticsMetrics,
   ServerProviderUpdateInput,
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingResult,
@@ -338,6 +339,8 @@ export interface LocalApi {
   };
   server: {
     getConfig: () => Promise<ServerConfig>;
+    getAdvertisedEndpoints: () => Promise<readonly AdvertisedEndpoint[]>;
+    getDiagnosticsMetrics: () => Promise<ServerLocalDiagnosticsMetrics>;
     /**
      * Refresh provider snapshots. When `input.instanceId` is supplied only that
      * configured instance is probed; otherwise every configured instance is

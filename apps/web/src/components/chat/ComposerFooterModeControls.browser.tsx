@@ -5,7 +5,7 @@ import { page } from "vite-plus/test/browser";
 import { render } from "vitest-browser-react";
 
 import { useUiStateStore } from "../../uiStateStore";
-import { ComposerFooterModeControls } from "./ChatComposer";
+import { ComposerFooterModeControls } from "./ComposerFooter";
 
 const baseProps = {
   showInteractionModeToggle: true,

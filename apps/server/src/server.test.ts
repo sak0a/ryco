@@ -62,6 +62,7 @@ import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { Diagnostics, type DiagnosticsShape } from "./diagnostics/Services/Diagnostics.ts";
 import { makeRoutesLayer } from "./server.ts";
+import * as WsTestClient from "./test/WsTestClient.ts";
 import { resolveStaticCacheControl } from "./http.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import {
@@ -99,6 +100,8 @@ import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
 } from "./observability/Services/BrowserTraceCollector.ts";
+import { LocalDiagnosticsMetricsLive } from "./observability/Services/LocalDiagnosticsMetrics.ts";
+import { AdvertisedEndpointRegistryLive } from "./remote/AdvertisedEndpointRegistry.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import {
   ProjectSetupScriptRunner,
@@ -838,6 +841,8 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provideMerge(makeAuthTestLayer()),
+      Layer.provideMerge(LocalDiagnosticsMetricsLive),
+      Layer.provideMerge(AdvertisedEndpointRegistryLive),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(layerConfig),
@@ -2367,12 +2372,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const wsUrl = yield* getWsServerUrl("/ws");
       const events = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[WS_METHODS.subscribeServerConfig]({}).pipe(Stream.take(2), Stream.runCollect),
-        ),
+        Effect.gen(function* () {
+          const ws = yield* WsTestClient.connect(wsUrl);
+          const sequence = yield* ws.trackPushSequence(WS_METHODS.subscribeServerConfig);
+          return yield* sequence.waitForCount(2);
+        }),
       );
 
-      const [first, second] = Array.from(events);
+      const [first, second] = events;
       assert.equal(first?.type, "snapshot");
       if (first?.type === "snapshot") {
         assert.equal(first.version, 1);
@@ -2485,17 +2492,22 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         });
 
         const wsUrl = yield* getWsServerUrl("/ws");
-        const events = yield* Effect.scoped(
-          withWsRpcClient(wsUrl, (client) =>
-            client[WS_METHODS.subscribeServerLifecycle]({}).pipe(Stream.take(2), Stream.runCollect),
-          ),
+        const { welcome, ready } = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const ws = yield* WsTestClient.connect(wsUrl);
+            const welcome = yield* ws.awaitWelcome();
+            const ready = yield* ws.awaitPush(
+              WS_METHODS.subscribeServerLifecycle,
+              (event) => event.type === "ready",
+            );
+            return { welcome, ready };
+          }),
         );
 
-        const [first, second] = Array.from(events);
-        assert.equal(first?.type, "welcome");
-        assert.equal(first?.sequence, 1);
-        assert.equal(second?.type, "ready");
-        assert.equal(second?.sequence, 2);
+        assert.equal(welcome.type, "welcome");
+        assert.equal(welcome.sequence, 1);
+        assert.equal(ready.type, "ready");
+        assert.equal(ready.sequence, 2);
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -2513,13 +2525,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const wsUrl = yield* getWsServerUrl("/ws");
       const response = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[WS_METHODS.projectsSearchEntries]({
+        Effect.gen(function* () {
+          const ws = yield* WsTestClient.connect(wsUrl);
+          return yield* ws.rpc(WS_METHODS.projectsSearchEntries, {
             cwd: workspaceDir,
             query: "needle",
             limit: 10,
-          }),
-        ),
+          });
+        }),
       );
 
       assert.isAtLeast(response.entries.length, 1);

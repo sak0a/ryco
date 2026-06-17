@@ -10,7 +10,6 @@ import {
   type TerminalEvent,
   ThreadId,
 } from "@ryco/contracts";
-import { type QueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
 import {
   createKnownEnvironment,
@@ -28,8 +27,8 @@ import {
 import { ensureLocalApi } from "~/localApi";
 import { collectActiveTerminalThreadIds } from "~/lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "~/orchestrationEventEffects";
-import { projectQueryKeys } from "~/lib/projectReactQuery";
-import { providerQueryKeys } from "~/lib/providerReactQuery";
+import { invalidateProjectSearchEntries } from "~/rpc/projectAtoms";
+import { invalidateAllCheckpointDiffs } from "~/rpc/providerAtoms";
 import { getPrimaryKnownEnvironment } from "../primary";
 import { issuePrimaryWebSocketToken } from "../primary/auth";
 import {
@@ -81,7 +80,6 @@ import {
 } from "./savedEnvironmentConnectionScheduler";
 
 type EnvironmentServiceState = {
-  readonly queryClient: QueryClient;
   readonly queryInvalidationThrottler: Throttler<() => void>;
   refCount: number;
   stop: () => void;
@@ -1812,11 +1810,12 @@ export async function ensureEnvironmentConnectionBootstrapped(
   await environmentConnections.get(environmentId)?.ensureBootstrapped();
 }
 
-export function startEnvironmentConnectionService(queryClient: QueryClient): () => void {
-  if (activeService?.queryClient === queryClient) {
-    activeService.refCount += 1;
+export function startEnvironmentConnectionService(): () => void {
+  if (activeService) {
+    const existingService = activeService;
+    existingService.refCount += 1;
     return () => {
-      if (!activeService || activeService.queryClient !== queryClient) {
+      if (activeService !== existingService) {
         return;
       }
       activeService.refCount -= 1;
@@ -1834,8 +1833,8 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
         return;
       }
       needsProviderInvalidation = false;
-      void queryClient.invalidateQueries({ queryKey: providerQueryKeys.all });
-      void queryClient.invalidateQueries({ queryKey: projectQueryKeys.all });
+      invalidateAllCheckpointDiffs();
+      invalidateProjectSearchEntries();
     },
     {
       wait: 100,
@@ -1860,8 +1859,7 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
 
   const unsubscribeBrowserResumeReconnects = subscribeBrowserResumeReconnects();
 
-  activeService = {
-    queryClient,
+  const service: EnvironmentServiceState = {
     queryInvalidationThrottler,
     refCount: 1,
     stop: () => {
@@ -1870,9 +1868,10 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
       queryInvalidationThrottler.cancel();
     },
   };
+  activeService = service;
 
   return () => {
-    if (!activeService || activeService.queryClient !== queryClient) {
+    if (activeService !== service) {
       return;
     }
     activeService.refCount -= 1;

@@ -1,0 +1,599 @@
+import type {
+  AgentTokenMode,
+  ChangeRequest,
+  EnvironmentId,
+  ProviderInteractionMode,
+  ResolvedKeybindingsConfig,
+  RuntimeMode,
+  ServerProvider,
+  SourceControlIssueSummary,
+} from "@ryco/contracts";
+import type { ProviderDriverKind, ProviderInstanceId } from "@ryco/contracts";
+import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import {
+  CircleOffIcon,
+  ClipboardListIcon,
+  HammerIcon,
+  ListTodoIcon,
+  Minimize2Icon,
+  type LucideIcon,
+  LockIcon,
+  LockOpenIcon,
+  PenLineIcon,
+  ScaleIcon,
+} from "lucide-react";
+import { ComposerExpandableLabelControl } from "./ComposerExpandableLabelControl";
+import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
+import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
+import { ContextPickerButton } from "./ContextPickerButton";
+import { ContextWindowMeter } from "./ContextWindowMeter";
+import { ProviderModelPicker } from "./ProviderModelPicker";
+import { Separator } from "../ui/separator";
+import { Button } from "../ui/button";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { cn } from "~/lib/utils";
+import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
+import type { ProviderInstanceEntry } from "../../providerInstances";
+import type { AppModelOption } from "../../modelSelection";
+import { useUiStateStore } from "../../uiStateStore";
+
+const runtimeModeConfig: Record<
+  RuntimeMode,
+  { label: string; triggerLabel: string; description: string; icon: LucideIcon }
+> = {
+  "approval-required": {
+    label: "Supervised",
+    triggerLabel: "Supervised",
+    description: "Ask before commands and file changes.",
+    icon: LockIcon,
+  },
+  "auto-accept-edits": {
+    label: "Auto-accept edits",
+    triggerLabel: "Auto-accept",
+    description: "Auto-approve edits, ask before other actions.",
+    icon: PenLineIcon,
+  },
+  "full-access": {
+    label: "Full access",
+    triggerLabel: "Full access",
+    description: "Allow commands and edits without prompts.",
+    icon: LockOpenIcon,
+  },
+};
+
+const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
+
+const tokenModeConfig: Record<
+  AgentTokenMode,
+  { label: string; triggerLabel: string; description: string; icon: LucideIcon }
+> = {
+  off: {
+    label: "Off",
+    triggerLabel: "Tokens off",
+    description: "Do not add Ryco token-efficiency instructions.",
+    icon: CircleOffIcon,
+  },
+  balanced: {
+    label: "Balanced",
+    triggerLabel: "Balanced",
+    description: "Favor concise answers and targeted reads without hiding important detail.",
+    icon: ScaleIcon,
+  },
+  aggressive: {
+    label: "Aggressive",
+    triggerLabel: "Aggressive",
+    description: "Minimize prose and avoid copying large outputs unless needed.",
+    icon: Minimize2Icon,
+  },
+};
+
+const tokenModeOptions = Object.keys(tokenModeConfig) as AgentTokenMode[];
+const SELECT_OPEN_SUPPRESSION_MS = 300;
+
+export const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
+  showInteractionModeToggle: boolean;
+  interactionMode: ProviderInteractionMode;
+  runtimeMode: RuntimeMode;
+  tokenMode: AgentTokenMode;
+  showPlanToggle: boolean;
+  planSidebarLabel: string;
+  planSidebarOpen: boolean;
+  onToggleInteractionMode: () => void;
+  onRuntimeModeChange: (mode: RuntimeMode) => void;
+  onTokenModeChange: (mode: AgentTokenMode) => void;
+  onTogglePlanSidebar: () => void;
+}) {
+  const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
+  const RuntimeModeIcon = runtimeModeOption.icon;
+  const tokenModeOption = tokenModeConfig[props.tokenMode];
+  const TokenModeIcon = tokenModeOption.icon;
+  const InteractionModeIcon = props.interactionMode === "plan" ? ClipboardListIcon : HammerIcon;
+  const tokenModeControlStyle = useUiStateStore((state) => state.tokenModeControlStyle);
+  const wideComposerControlsAutoCollapse = useUiStateStore(
+    (state) => state.wideComposerControlsAutoCollapse,
+  );
+  const [runtimeModeSelectOpen, setRuntimeModeSelectOpen] = useState(false);
+  const [tokenModeSelectOpen, setTokenModeSelectOpen] = useState(false);
+  const [runtimeModeSelectOpenSuppressed, setRuntimeModeSelectOpenSuppressed] = useState(false);
+  const [tokenModeSelectOpenSuppressed, setTokenModeSelectOpenSuppressed] = useState(false);
+  const runtimeModeSuppressOpenUntilRef = useRef(0);
+  const tokenModeSuppressOpenUntilRef = useRef(0);
+  const runtimeModeSuppressOpenTimeoutRef = useRef<number | null>(null);
+  const tokenModeSuppressOpenTimeoutRef = useRef<number | null>(null);
+  const isSelectOpenSuppressed = useCallback((suppressUntilRef: { current: number }) => {
+    return performance.now() < suppressUntilRef.current;
+  }, []);
+  const startRuntimeModeOpenSuppression = useCallback(() => {
+    runtimeModeSuppressOpenUntilRef.current = performance.now() + SELECT_OPEN_SUPPRESSION_MS;
+    setRuntimeModeSelectOpenSuppressed(true);
+    if (runtimeModeSuppressOpenTimeoutRef.current !== null) {
+      window.clearTimeout(runtimeModeSuppressOpenTimeoutRef.current);
+    }
+    runtimeModeSuppressOpenTimeoutRef.current = window.setTimeout(() => {
+      runtimeModeSuppressOpenTimeoutRef.current = null;
+      setRuntimeModeSelectOpenSuppressed(false);
+    }, SELECT_OPEN_SUPPRESSION_MS);
+  }, []);
+  const startTokenModeOpenSuppression = useCallback(() => {
+    tokenModeSuppressOpenUntilRef.current = performance.now() + SELECT_OPEN_SUPPRESSION_MS;
+    setTokenModeSelectOpenSuppressed(true);
+    if (tokenModeSuppressOpenTimeoutRef.current !== null) {
+      window.clearTimeout(tokenModeSuppressOpenTimeoutRef.current);
+    }
+    tokenModeSuppressOpenTimeoutRef.current = window.setTimeout(() => {
+      tokenModeSuppressOpenTimeoutRef.current = null;
+      setTokenModeSelectOpenSuppressed(false);
+    }, SELECT_OPEN_SUPPRESSION_MS);
+  }, []);
+  const closeRuntimeModeSelectAfterItemPress = useCallback(() => {
+    startRuntimeModeOpenSuppression();
+    window.setTimeout(() => setRuntimeModeSelectOpen(false), 0);
+  }, [startRuntimeModeOpenSuppression]);
+  const closeTokenModeSelectAfterItemPress = useCallback(() => {
+    startTokenModeOpenSuppression();
+    window.setTimeout(() => setTokenModeSelectOpen(false), 0);
+  }, [startTokenModeOpenSuppression]);
+
+  useEffect(() => {
+    return () => {
+      if (runtimeModeSuppressOpenTimeoutRef.current !== null) {
+        window.clearTimeout(runtimeModeSuppressOpenTimeoutRef.current);
+      }
+      if (tokenModeSuppressOpenTimeoutRef.current !== null) {
+        window.clearTimeout(tokenModeSuppressOpenTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  return (
+    <>
+      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+
+      {props.showInteractionModeToggle ? (
+        <>
+          <Button
+            variant="ghost"
+            className="group/composer-label-control shrink-0 whitespace-nowrap px-1.5 text-muted-foreground/70 hover:text-foreground/80 sm:px-2"
+            size="xs"
+            type="button"
+            onClick={props.onToggleInteractionMode}
+            aria-label={props.interactionMode === "plan" ? "Plan mode" : "Build mode"}
+            title={
+              props.interactionMode === "plan"
+                ? "Plan mode — click to return to normal build mode"
+                : "Default mode — click to enter plan mode"
+            }
+          >
+            <ComposerExpandableLabelControl
+              collapsed={wideComposerControlsAutoCollapse}
+              icon={<InteractionModeIcon className="size-4 sm:size-3.5" />}
+              label={props.interactionMode === "plan" ? "Plan" : "Build"}
+            />
+          </Button>
+
+          <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+        </>
+      ) : null}
+
+      <Select
+        value={props.runtimeMode}
+        open={runtimeModeSelectOpen}
+        onOpenChange={(open) => {
+          if (open && isSelectOpenSuppressed(runtimeModeSuppressOpenUntilRef)) {
+            return;
+          }
+          setRuntimeModeSelectOpen(open);
+        }}
+        onValueChange={(value) => {
+          if (!value) return;
+          props.onRuntimeModeChange(value);
+          startRuntimeModeOpenSuppression();
+          setRuntimeModeSelectOpen(false);
+        }}
+      >
+        <SelectTrigger
+          variant="ghost"
+          size="xs"
+          className={cn(
+            "group/composer-label-control gap-1 px-1.5 font-medium sm:px-1.5",
+            wideComposerControlsAutoCollapse &&
+              "min-w-7 justify-center px-1 sm:px-1 [&_[data-slot=select-icon]]:hidden",
+            props.runtimeMode === "full-access" &&
+              "text-orange-700 hover:text-orange-800 dark:text-orange-400 dark:hover:text-orange-300",
+          )}
+          aria-label={`Runtime mode: ${runtimeModeOption.triggerLabel}`}
+          title={runtimeModeOption.description}
+        >
+          <ComposerExpandableLabelControl
+            collapsed={wideComposerControlsAutoCollapse}
+            expanded={runtimeModeSelectOpen || runtimeModeSelectOpenSuppressed}
+            icon={<RuntimeModeIcon className="size-4" />}
+            label={<SelectValue>{runtimeModeOption.triggerLabel}</SelectValue>}
+          />
+        </SelectTrigger>
+        <SelectPopup
+          alignItemWithTrigger={false}
+          className="w-56 p-0.5 [&_[data-slot=select-item]]:min-h-7"
+        >
+          {runtimeModeOptions.map((mode) => {
+            const option = runtimeModeConfig[mode];
+            const OptionIcon = option.icon;
+            return (
+              <SelectItem
+                key={mode}
+                value={mode}
+                className="min-w-0 py-1.5"
+                onClick={closeRuntimeModeSelectAfterItemPress}
+              >
+                <div className="grid min-w-0 gap-0.5">
+                  <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                    <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                    {option.label}
+                  </span>
+                  <span className="text-muted-foreground text-xs leading-4">
+                    {option.description}
+                  </span>
+                </div>
+              </SelectItem>
+            );
+          })}
+        </SelectPopup>
+      </Select>
+
+      <Select
+        value={props.tokenMode}
+        open={tokenModeSelectOpen}
+        onOpenChange={(open) => {
+          if (open && isSelectOpenSuppressed(tokenModeSuppressOpenUntilRef)) {
+            return;
+          }
+          setTokenModeSelectOpen(open);
+        }}
+        onValueChange={(value) => {
+          if (!value) return;
+          props.onTokenModeChange(value as AgentTokenMode);
+          startTokenModeOpenSuppression();
+          setTokenModeSelectOpen(false);
+        }}
+      >
+        <SelectTrigger
+          variant="ghost"
+          size="xs"
+          className={cn(
+            "group/composer-label-control gap-1 px-1.5 font-medium text-muted-foreground/80 hover:text-foreground/80 sm:px-1.5",
+            (wideComposerControlsAutoCollapse || tokenModeControlStyle === "icon") &&
+              "min-w-7 justify-center px-1 sm:px-1",
+            wideComposerControlsAutoCollapse && "[&_[data-slot=select-icon]]:hidden",
+          )}
+          aria-label={`Token mode: ${tokenModeOption.triggerLabel}`}
+          title={tokenModeOption.description}
+        >
+          {wideComposerControlsAutoCollapse ? (
+            <ComposerExpandableLabelControl
+              collapsed
+              expanded={tokenModeSelectOpen || tokenModeSelectOpenSuppressed}
+              icon={<TokenModeIcon className="size-4" />}
+              label={<SelectValue>{tokenModeOption.triggerLabel}</SelectValue>}
+            />
+          ) : (
+            <>
+              {tokenModeControlStyle !== "text" ? <TokenModeIcon className="size-4" /> : null}
+              {tokenModeControlStyle !== "icon" ? (
+                <SelectValue>{tokenModeOption.triggerLabel}</SelectValue>
+              ) : null}
+            </>
+          )}
+        </SelectTrigger>
+        <SelectPopup
+          alignItemWithTrigger={false}
+          className="w-60 p-0.5 [&_[data-slot=select-item]]:min-h-7"
+        >
+          {tokenModeOptions.map((mode) => {
+            const option = tokenModeConfig[mode];
+            const OptionIcon = option.icon;
+            return (
+              <SelectItem
+                key={mode}
+                value={mode}
+                className="min-w-0 py-1.5"
+                onClick={closeTokenModeSelectAfterItemPress}
+              >
+                <div className="grid min-w-0 gap-0.5">
+                  <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                    <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                    {option.label}
+                  </span>
+                  <span className="text-muted-foreground text-xs leading-4">
+                    {option.description}
+                  </span>
+                </div>
+              </SelectItem>
+            );
+          })}
+        </SelectPopup>
+      </Select>
+
+      {props.showPlanToggle ? (
+        <>
+          <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+          <Button
+            variant="ghost"
+            className={cn(
+              "group/composer-label-control shrink-0 whitespace-nowrap px-1.5 sm:px-2",
+              props.planSidebarOpen
+                ? "text-blue-400 hover:text-blue-300"
+                : "text-muted-foreground/70 hover:text-foreground/80",
+            )}
+            size="xs"
+            type="button"
+            onClick={props.onTogglePlanSidebar}
+            aria-label={props.planSidebarLabel}
+            title={
+              props.planSidebarOpen
+                ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
+                : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`
+            }
+          >
+            <ComposerExpandableLabelControl
+              collapsed={wideComposerControlsAutoCollapse}
+              icon={<ListTodoIcon className="size-4 sm:size-3.5" />}
+              label={props.planSidebarLabel}
+            />
+          </Button>
+        </>
+      ) : null}
+    </>
+  );
+});
+
+export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(props: {
+  compact: boolean;
+  activeContextWindow: ReturnType<typeof deriveLatestContextWindowSnapshot>;
+  contextWindowRateLimits: ServerProvider["rateLimits"] | undefined;
+  isPreparingWorktree: boolean;
+  pendingAction: {
+    questionIndex: number;
+    isLastQuestion: boolean;
+    canAdvance: boolean;
+    isResponding: boolean;
+    isComplete: boolean;
+  } | null;
+  isRunning: boolean;
+  showPlanFollowUpPrompt: boolean;
+  promptHasText: boolean;
+  isSendBusy: boolean;
+  isConnecting: boolean;
+  isEnvironmentUnavailable: boolean;
+  hasSendableContent: boolean;
+  preserveComposerFocusOnPointerDown?: boolean;
+  onPreviousPendingQuestion: () => void;
+  onInterrupt: () => void;
+  onImplementPlanInNewThread: () => void;
+}) {
+  return (
+    <>
+      {props.activeContextWindow ? (
+        <ContextWindowMeter
+          usage={props.activeContextWindow}
+          rateLimits={props.contextWindowRateLimits}
+        />
+      ) : null}
+      {props.isPreparingWorktree ? (
+        <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
+      ) : null}
+      <ComposerPrimaryActions
+        compact={props.compact}
+        pendingAction={props.pendingAction}
+        isRunning={props.isRunning}
+        showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
+        promptHasText={props.promptHasText}
+        isSendBusy={props.isSendBusy}
+        isConnecting={props.isConnecting}
+        isEnvironmentUnavailable={props.isEnvironmentUnavailable}
+        isPreparingWorktree={props.isPreparingWorktree}
+        hasSendableContent={props.hasSendableContent}
+        preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
+        onPreviousPendingQuestion={props.onPreviousPendingQuestion}
+        onInterrupt={props.onInterrupt}
+        onImplementPlanInNewThread={props.onImplementPlanInNewThread}
+      />
+    </>
+  );
+});
+
+export interface ComposerFooterProps {
+  isFooterCompact: boolean;
+  isPrimaryActionsCompact: boolean;
+  isMobileViewport: boolean;
+  hideOnMobilePendingAnswers: boolean;
+
+  // Context picker
+  environmentId: EnvironmentId;
+  gitCwd: string | null;
+  hasSourceControlRemote: boolean;
+  onSelectIssue: (issue: SourceControlIssueSummary) => void;
+  onSelectChangeRequest: (cr: ChangeRequest) => void;
+  onAttachFile: (file: File) => void;
+
+  // Model picker
+  selectedInstanceId: ProviderInstanceId;
+  selectedModel: string;
+  lockedProvider: ProviderDriverKind | null;
+  lockedContinuationGroupKey: string | null;
+  providerInstanceEntries: ReadonlyArray<ProviderInstanceEntry>;
+  keybindings: ResolvedKeybindingsConfig;
+  modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<AppModelOption>>;
+  terminalOpen: boolean;
+  isModelPickerOpen: boolean;
+  modelPickerIconClassName?: string | undefined;
+  onModelPickerOpenChange: (open: boolean) => void;
+  onProviderModelSelect: (instanceId: ProviderInstanceId, model: string) => void;
+
+  // Mode controls
+  showInteractionModeToggle: boolean;
+  showPlanSidebarToggle: boolean;
+  interactionMode: ProviderInteractionMode;
+  runtimeMode: RuntimeMode;
+  tokenMode: AgentTokenMode;
+  planSidebarLabel: string;
+  planSidebarOpen: boolean;
+  providerTraitsMenuContent: ReactNode;
+  providerTraitsChips: ReactNode;
+  onToggleInteractionMode: () => void;
+  onTogglePlanSidebar: () => void;
+  onRuntimeModeChange: (mode: RuntimeMode) => void;
+  onTokenModeChange: (mode: AgentTokenMode) => void;
+
+  // Primary actions
+  activeContextWindow: ReturnType<typeof deriveLatestContextWindowSnapshot>;
+  contextWindowRateLimits: ServerProvider["rateLimits"] | undefined;
+  pendingAction: {
+    questionIndex: number;
+    isLastQuestion: boolean;
+    canAdvance: boolean;
+    isResponding: boolean;
+    isComplete: boolean;
+  } | null;
+  isRunning: boolean;
+  showPlanFollowUpPrompt: boolean;
+  promptHasText: boolean;
+  isSendBusy: boolean;
+  isConnecting: boolean;
+  isEnvironmentUnavailable: boolean;
+  isPreparingWorktree: boolean;
+  hasSendableContent: boolean;
+  onPreviousPendingQuestion: () => void;
+  onInterrupt: () => void;
+  onImplementPlanInNewThread: () => void;
+}
+
+export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooterProps) {
+  return (
+    <div
+      data-chat-composer-footer="true"
+      data-chat-composer-footer-compact={props.isFooterCompact ? "true" : "false"}
+      className={cn(
+        "flex min-w-0 flex-nowrap items-center justify-between gap-1.5 overflow-visible px-2 pb-2 sm:px-2.5 sm:pb-2.5",
+        props.isFooterCompact ? "gap-1.5" : "sm:gap-0",
+        props.hideOnMobilePendingAnswers && "hidden sm:flex",
+      )}
+    >
+      <div className="-m-0.5 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto p-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <ContextPickerButton
+          environmentId={props.environmentId}
+          cwd={props.gitCwd ?? ""}
+          hasSourceControlRemote={props.hasSourceControlRemote}
+          onSelectIssue={props.onSelectIssue}
+          onSelectChangeRequest={props.onSelectChangeRequest}
+          onAttachFile={props.onAttachFile}
+        />
+        <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+        <ProviderModelPicker
+          compact={props.isFooterCompact}
+          activeInstanceId={props.selectedInstanceId}
+          model={props.selectedModel}
+          lockedProvider={props.lockedProvider}
+          lockedContinuationGroupKey={props.lockedContinuationGroupKey}
+          instanceEntries={props.providerInstanceEntries}
+          keybindings={props.keybindings}
+          modelOptionsByInstance={props.modelOptionsByInstance}
+          terminalOpen={props.terminalOpen}
+          open={props.isModelPickerOpen}
+          triggerSize="xs"
+          {...(props.modelPickerIconClassName
+            ? { activeProviderIconClassName: props.modelPickerIconClassName }
+            : {})}
+          onOpenChange={props.onModelPickerOpenChange}
+          onInstanceModelChange={props.onProviderModelSelect}
+        />
+
+        {props.isFooterCompact ? (
+          <CompactComposerControlsMenu
+            activePlan={props.showPlanSidebarToggle}
+            interactionMode={props.interactionMode}
+            planSidebarLabel={props.planSidebarLabel}
+            planSidebarOpen={props.planSidebarOpen}
+            runtimeMode={props.runtimeMode}
+            tokenMode={props.tokenMode}
+            showInteractionModeToggle={props.showInteractionModeToggle}
+            traitsMenuContent={props.providerTraitsMenuContent}
+            onToggleInteractionMode={props.onToggleInteractionMode}
+            onTogglePlanSidebar={props.onTogglePlanSidebar}
+            onRuntimeModeChange={props.onRuntimeModeChange}
+            onTokenModeChange={props.onTokenModeChange}
+          />
+        ) : (
+          <>
+            {props.providerTraitsChips ? (
+              <>
+                <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+                {props.providerTraitsChips}
+              </>
+            ) : null}
+            <ComposerFooterModeControls
+              showInteractionModeToggle={props.showInteractionModeToggle}
+              interactionMode={props.interactionMode}
+              runtimeMode={props.runtimeMode}
+              tokenMode={props.tokenMode}
+              showPlanToggle={props.showPlanSidebarToggle}
+              planSidebarLabel={props.planSidebarLabel}
+              planSidebarOpen={props.planSidebarOpen}
+              onToggleInteractionMode={props.onToggleInteractionMode}
+              onRuntimeModeChange={props.onRuntimeModeChange}
+              onTokenModeChange={props.onTokenModeChange}
+              onTogglePlanSidebar={props.onTogglePlanSidebar}
+            />
+          </>
+        )}
+      </div>
+
+      {/* Right side: send / stop button */}
+      <div
+        data-chat-composer-actions="right"
+        data-chat-composer-primary-actions-compact={
+          props.isPrimaryActionsCompact ? "true" : "false"
+        }
+        className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
+      >
+        <ComposerFooterPrimaryActions
+          compact={props.isPrimaryActionsCompact}
+          activeContextWindow={props.activeContextWindow}
+          contextWindowRateLimits={props.contextWindowRateLimits}
+          pendingAction={props.pendingAction}
+          isRunning={props.isRunning}
+          showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
+          promptHasText={props.promptHasText}
+          isSendBusy={props.isSendBusy}
+          isConnecting={props.isConnecting}
+          isEnvironmentUnavailable={props.isEnvironmentUnavailable}
+          isPreparingWorktree={props.isPreparingWorktree}
+          hasSendableContent={props.hasSendableContent}
+          preserveComposerFocusOnPointerDown={props.isMobileViewport}
+          onPreviousPendingQuestion={props.onPreviousPendingQuestion}
+          onInterrupt={props.onInterrupt}
+          onImplementPlanInNewThread={props.onImplementPlanInNewThread}
+        />
+      </div>
+    </div>
+  );
+});

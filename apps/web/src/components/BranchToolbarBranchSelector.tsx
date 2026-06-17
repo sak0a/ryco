@@ -1,6 +1,5 @@
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime";
 import type { EnvironmentId, VcsRef, ThreadId } from "@ryco/contracts";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronDownIcon } from "lucide-react";
 import {
@@ -16,7 +15,7 @@ import {
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { readEnvironmentApi } from "../environmentApi";
-import { gitBranchSearchInfiniteQueryOptions, gitQueryKeys } from "../lib/gitReactQuery";
+import { gitScopeKey, invalidateScopes, prefetchBranches, useGitBranches } from "../rpc/useGit";
 import { useGitStatus } from "../lib/gitStatusState";
 import { newCommandId } from "../lib/utils";
 import { cn } from "../lib/utils";
@@ -192,7 +191,6 @@ export function BranchToolbarBranchSelector({
   // ---------------------------------------------------------------------------
   // Git ref queries
   // ---------------------------------------------------------------------------
-  const queryClient = useQueryClient();
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
   const [branchQuery, setBranchQuery] = useState("");
   const deferredBranchQuery = useDeferredValue(branchQuery);
@@ -203,28 +201,21 @@ export function BranchToolbarBranchSelector({
 
   useEffect(() => {
     if (!branchCwd) return;
-    void queryClient.prefetchInfiniteQuery(
-      gitBranchSearchInfiniteQueryOptions({ environmentId, cwd: branchCwd, query: "" }),
-    );
-  }, [branchCwd, environmentId, queryClient]);
+    prefetchBranches({ environmentId, cwd: branchCwd, query: "" });
+  }, [branchCwd, environmentId]);
 
   const {
-    data: branchesSearchData,
+    refs,
+    totalCount: totalBranchCount,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
     isPending: isBranchesSearchPending,
-  } = useInfiniteQuery(
-    gitBranchSearchInfiniteQueryOptions({
-      environmentId,
-      cwd: branchCwd,
-      query: deferredTrimmedBranchQuery,
-    }),
-  );
-  const refs = useMemo(
-    () => branchesSearchData?.pages.flatMap((page) => page.refs) ?? [],
-    [branchesSearchData?.pages],
-  );
+  } = useGitBranches({
+    environmentId,
+    cwd: branchCwd,
+    query: deferredTrimmedBranchQuery,
+  });
   const currentGitBranch =
     branchStatusQuery.data?.refName ?? refs.find((refName) => refName.current)?.name ?? null;
   const sourceControlPresentation = useMemo(
@@ -289,7 +280,6 @@ export function BranchToolbarBranchSelector({
   );
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
   const shouldVirtualizeBranchList = filteredBranchPickerItems.length > 40;
-  const totalBranchCount = branchesSearchData?.pages[0]?.totalCount ?? 0;
   const branchStatusText = isBranchesSearchPending
     ? "Loading refs..."
     : isFetchingNextPage
@@ -304,9 +294,7 @@ export function BranchToolbarBranchSelector({
   const runBranchAction = (action: () => Promise<void>) => {
     startBranchActionTransition(async () => {
       await action().catch(() => undefined);
-      await queryClient
-        .invalidateQueries({ queryKey: gitQueryKeys.refs(environmentId, branchCwd) })
-        .catch(() => undefined);
+      invalidateScopes([gitScopeKey(branchCwd)]);
     });
   };
 
@@ -421,11 +409,9 @@ export function BranchToolbarBranchSelector({
         setBranchQuery("");
         return;
       }
-      void queryClient.invalidateQueries({
-        queryKey: gitQueryKeys.refs(environmentId, branchCwd),
-      });
+      invalidateScopes([gitScopeKey(branchCwd)]);
     },
-    [branchCwd, environmentId, queryClient],
+    [branchCwd],
   );
 
   const branchListScrollElementRef = useRef<HTMLDivElement | null>(null);
@@ -445,7 +431,7 @@ export function BranchToolbarBranchSelector({
       return;
     }
 
-    void fetchNextPage().catch(() => undefined);
+    fetchNextPage();
   }, [fetchNextPage, hasNextPage, isBranchMenuOpen, isFetchingNextPage]);
   const branchListRef = useRef<LegendListRef | null>(null);
   const setBranchListRef = useCallback((element: HTMLDivElement | null) => {
@@ -622,7 +608,7 @@ export function BranchToolbarBranchSelector({
               drawDistance={336}
               onEndReached={() => {
                 if (hasNextPage && !isFetchingNextPage) {
-                  void fetchNextPage().catch(() => undefined);
+                  fetchNextPage();
                 }
               }}
               style={{ maxHeight: "14rem" }}

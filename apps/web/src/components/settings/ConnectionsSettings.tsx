@@ -443,10 +443,10 @@ function isTailscaleHttpsEndpoint(endpoint: AdvertisedEndpoint): boolean {
 }
 
 function endpointDefaultPreferenceKey(endpoint: AdvertisedEndpoint): string {
-  if (endpoint.id.startsWith("desktop-loopback:")) {
+  if (endpoint.id.startsWith("desktop-loopback:") || endpoint.id.startsWith("server-loopback:")) {
     return "desktop-core:loopback:http";
   }
-  if (endpoint.id.startsWith("desktop-lan:")) {
+  if (endpoint.id.startsWith("desktop-lan:") || endpoint.id.startsWith("server-network:")) {
     return "desktop-core:lan:http";
   }
   if (endpoint.id.startsWith("tailscale-ip:")) {
@@ -464,6 +464,32 @@ function endpointDefaultPreferenceKey(endpoint: AdvertisedEndpoint): string {
   }
 
   return `${endpoint.provider.id}:${endpoint.reachability}:${scheme}:${endpoint.label}`;
+}
+
+function hostedHttpsCompatibilityLabel(
+  compatibility: AdvertisedEndpoint["compatibility"]["hostedHttpsApp"],
+): string | null {
+  switch (compatibility) {
+    case "mixed-content-blocked":
+      return "Hosted app blocked";
+    case "requires-configuration":
+      return "Setup required for hosted app";
+    default:
+      return null;
+  }
+}
+
+function hostedHttpsCompatibilityDescription(
+  compatibility: AdvertisedEndpoint["compatibility"]["hostedHttpsApp"],
+): string | null {
+  switch (compatibility) {
+    case "mixed-content-blocked":
+      return "The hosted HTTPS app cannot connect to HTTP endpoints because browsers block mixed content.";
+    case "requires-configuration":
+      return "Configure HTTPS access before using this endpoint from the hosted app.";
+    default:
+      return null;
+  }
 }
 
 function resolveAdvertisedEndpointPairingUrl(
@@ -1132,6 +1158,12 @@ const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
 }: AdvertisedEndpointListRowProps) {
   const isAvailable = endpoint.status === "available";
   const needsTailscaleSetup = isTailscaleHttpsEndpoint(endpoint) && endpoint.status !== "available";
+  const hostedCompatibilityLabel = hostedHttpsCompatibilityLabel(
+    endpoint.compatibility.hostedHttpsApp,
+  );
+  const hostedCompatibilityDescription = hostedHttpsCompatibilityDescription(
+    endpoint.compatibility.hostedHttpsApp,
+  );
   const canDisableTailscaleServe =
     isTailscaleHttpsEndpoint(endpoint) && endpoint.status === "available";
   const shouldShowEndpointUrl = !needsTailscaleSetup;
@@ -1157,6 +1189,15 @@ const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
           {!isAvailable ? (
             <span className="shrink-0 rounded-md border border-border/70 px-1 py-0.5 text-[10px] text-muted-foreground">
               Setup required
+            </span>
+          ) : null}
+          {hostedCompatibilityLabel ? (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[10px] text-amber-700 dark:text-amber-300"
+              title={hostedCompatibilityDescription ?? undefined}
+            >
+              <TriangleAlertIcon aria-hidden className="size-3" />
+              {hostedCompatibilityLabel}
             </span>
           ) : null}
         </div>
@@ -1217,6 +1258,17 @@ function NetworkAccessDescription({
   const summary = (
     <>
       <span className="min-w-0 truncate">{endpoint.httpBaseUrl}</span>
+      {hostedHttpsCompatibilityLabel(endpoint.compatibility.hostedHttpsApp) ? (
+        <span
+          className="inline-flex shrink-0 items-center gap-1 text-[11px] text-amber-700 dark:text-amber-300"
+          title={
+            hostedHttpsCompatibilityDescription(endpoint.compatibility.hostedHttpsApp) ?? undefined
+          }
+        >
+          <TriangleAlertIcon aria-hidden className="size-3" />
+          {hostedHttpsCompatibilityLabel(endpoint.compatibility.hostedHttpsApp)}
+        </span>
+      ) : null}
       {hiddenEndpointCount > 0 ? (
         <span className="shrink-0 text-xs font-medium">
           {expanded ? "Hide" : `+${hiddenEndpointCount}`}
@@ -2039,8 +2091,18 @@ export function ConnectionsSettings() {
         });
     } else {
       setDesktopServerExposureState(null);
-      setDesktopAdvertisedEndpoints([]);
-      setDesktopServerExposureError(null);
+      void getPrimaryEnvironmentConnection()
+        .client.server.getAdvertisedEndpoints()
+        .then((endpoints) => {
+          if (cancelled) return;
+          setDesktopAdvertisedEndpoints(endpoints);
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return;
+          const message =
+            error instanceof Error ? error.message : "Failed to load reachable endpoints.";
+          setDesktopServerExposureError(message);
+        });
     }
 
     return () => {

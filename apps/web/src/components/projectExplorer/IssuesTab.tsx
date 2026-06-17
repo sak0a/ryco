@@ -1,9 +1,12 @@
 import type { EnvironmentId, SourceControlIssueSummary } from "@ryco/contracts";
-import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { PlusIcon, RotateCwIcon, SearchIcon } from "lucide-react";
-import { useMemo, useState, type RefObject } from "react";
-import { issueListQueryOptions, searchIssuesQueryOptions } from "~/lib/sourceControlContextRpc";
+import { useCallback, useMemo, useState, type RefObject } from "react";
+import {
+  invalidateSourceControl,
+  useSourceControlIssueList,
+  useSourceControlIssueSearch,
+} from "~/rpc/useSourceControl";
 import { searchSourceControlSummaries } from "../chat/composerSourceControlContextSearch";
 import { NewIssueDialog } from "../issues/NewIssueDialog";
 import { Button } from "../ui/button";
@@ -27,14 +30,12 @@ export function IssuesTab(props: IssuesTabProps) {
   const [debouncedQuery] = useDebouncedValue(props.query, { wait: 200 });
   const [showNewIssueDialog, setShowNewIssueDialog] = useState(false);
 
-  const listQuery = useQuery(
-    issueListQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      state: props.stateFilter,
-      limit: 100,
-    }),
-  );
+  const listQuery = useSourceControlIssueList({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    state: props.stateFilter,
+    limit: 100,
+  });
 
   const cachedItems = useMemo(() => listQuery.data ?? [], [listQuery.data]);
   const filteredItems = useMemo(
@@ -43,21 +44,27 @@ export function IssuesTab(props: IssuesTabProps) {
   );
 
   const needsServerSearch = filteredItems.length === 0 && debouncedQuery.trim().length >= 2;
-  const serverSearchQuery = useQuery(
-    searchIssuesQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      query: debouncedQuery,
-      limit: 50,
-      enabled: needsServerSearch,
-    }),
-  );
+  const serverSearchQuery = useSourceControlIssueSearch({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    query: debouncedQuery,
+    limit: 50,
+    enabled: needsServerSearch,
+  });
 
   const items: ReadonlyArray<SourceControlIssueSummary> = needsServerSearch
     ? (serverSearchQuery.data ?? [])
     : filteredItems;
   const isLoading = listQuery.isLoading || (needsServerSearch && serverSearchQuery.isLoading);
   const error = listQuery.error ?? (needsServerSearch ? serverSearchQuery.error : null);
+  const isFetching = listQuery.isFetching || (needsServerSearch && serverSearchQuery.isFetching);
+
+  const refreshIssues = useCallback(() => {
+    if (props.environmentId === null || props.cwd === null) {
+      return;
+    }
+    invalidateSourceControl({ environmentId: props.environmentId, cwd: props.cwd });
+  }, [props.environmentId, props.cwd]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -88,11 +95,11 @@ export function IssuesTab(props: IssuesTabProps) {
           type="button"
           size="icon"
           variant="ghost"
-          onClick={() => listQuery.refetch()}
-          disabled={listQuery.isFetching}
+          onClick={refreshIssues}
+          disabled={isFetching}
           aria-label="Refresh"
         >
-          <RotateCwIcon className={listQuery.isFetching ? "size-3.5 animate-spin" : "size-3.5"} />
+          <RotateCwIcon className={isFetching ? "size-3.5 animate-spin" : "size-3.5"} />
         </Button>
       </div>
 
@@ -120,9 +127,7 @@ export function IssuesTab(props: IssuesTabProps) {
           onOpenChange={setShowNewIssueDialog}
           environmentId={props.environmentId}
           cwd={props.cwd}
-          onCreated={() => {
-            void listQuery.refetch();
-          }}
+          onCreated={refreshIssues}
         />
       ) : null}
     </div>

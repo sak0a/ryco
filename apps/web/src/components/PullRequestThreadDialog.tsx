@@ -1,17 +1,14 @@
-import type {
-  EnvironmentId,
-  GitResolvePullRequestResult,
-  ProjectId,
-  ThreadId,
-} from "@ryco/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { EnvironmentId, ProjectId, ThreadId } from "@ryco/contracts";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { ensureEnvironmentApi } from "~/environmentApi";
 import {
-  gitPreparePullRequestThreadMutationOptions,
-  gitResolvePullRequestQueryOptions,
-} from "~/lib/gitReactQuery";
+  gitScopeKey,
+  useCachedResolvedPullRequest,
+  useGitMutation,
+  useResolvePullRequest,
+} from "~/rpc/useGit";
 import { useGitStatus } from "~/lib/gitStatusState";
 import { hasNoShortcutModifiers } from "~/keybindings";
 import { cn } from "~/lib/utils";
@@ -51,7 +48,6 @@ export function PullRequestThreadDialog({
   onOpenChange,
   onPrepared,
 }: PullRequestThreadDialogProps) {
-  const queryClient = useQueryClient();
   const referenceInputRef = useRef<HTMLInputElement>(null);
   const [reference, setReference] = useState(initialReference ?? "");
   const [referenceDirty, setReferenceDirty] = useState(false);
@@ -89,29 +85,32 @@ export function PullRequestThreadDialog({
 
   const parsedReference = parsePullRequestReference(reference);
   const parsedDebouncedReference = parsePullRequestReference(debouncedReference);
-  const resolvePullRequestQuery = useQuery(
-    gitResolvePullRequestQueryOptions({
-      environmentId,
-      cwd,
-      reference: open ? parsedDebouncedReference : null,
-    }),
-  );
-  const cachedPullRequest = useMemo(() => {
-    if (!cwd || !parsedReference) {
-      return null;
-    }
-    const cached = queryClient.getQueryData<GitResolvePullRequestResult>([
-      "git",
-      "pull-request",
-      environmentId,
-      cwd,
-      parsedReference,
-    ]);
-    return cached?.pullRequest ?? null;
-  }, [cwd, environmentId, parsedReference, queryClient]);
-  const preparePullRequestThreadMutation = useMutation(
-    gitPreparePullRequestThreadMutationOptions({ environmentId, cwd, projectId, queryClient }),
-  );
+  const resolvePullRequestQuery = useResolvePullRequest({
+    environmentId,
+    cwd,
+    reference: open ? parsedDebouncedReference : null,
+  });
+  const cachedResolvedPullRequest = useCachedResolvedPullRequest({
+    environmentId,
+    cwd,
+    reference: parsedReference,
+  });
+  const cachedPullRequest = cachedResolvedPullRequest?.pullRequest ?? null;
+  const preparePullRequestThreadMutation = useGitMutation({
+    mutationFn: (args: { reference: string; mode: "local" | "worktree"; threadId?: ThreadId }) => {
+      if (!cwd || !environmentId) {
+        throw new Error("Pull request thread preparation is unavailable.");
+      }
+      return ensureEnvironmentApi(environmentId).git.preparePullRequestThread({
+        cwd,
+        reference: args.reference,
+        mode: args.mode,
+        ...(projectId ? { projectId } : {}),
+        ...(args.threadId ? { threadId: args.threadId } : {}),
+      });
+    },
+    invalidates: cwd ? [gitScopeKey(cwd)] : [],
+  });
 
   const liveResolvedPullRequest =
     parsedReference !== null && parsedReference === parsedDebouncedReference

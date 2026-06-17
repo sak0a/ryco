@@ -9,7 +9,7 @@ import type {
   SourceControlIssueComment,
   SourceControlIssueDetail,
 } from "@ryco/contracts";
-import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQueryClient } from "~/rpc/queryClient";
 import { requireEnvironmentConnection } from "~/environments/runtime";
 
 type SourceControlWorkflowRerunPayload =

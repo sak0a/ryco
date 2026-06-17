@@ -1,12 +1,12 @@
 import type { ChangeRequest, EnvironmentId, SourceControlIssueSummary } from "@ryco/contracts";
-import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { SearchIcon, RotateCwIcon } from "lucide-react";
-import { useMemo, type RefObject } from "react";
+import { useCallback, useMemo, type RefObject } from "react";
 import {
-  changeRequestListQueryOptions,
-  searchChangeRequestsQueryOptions,
-} from "~/lib/sourceControlContextRpc";
+  invalidateSourceControl,
+  useSourceControlChangeRequestList,
+  useSourceControlChangeRequestSearch,
+} from "~/rpc/useSourceControl";
 import { searchSourceControlSummaries } from "../chat/composerSourceControlContextSearch";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -33,21 +33,25 @@ interface PullRequestsTabProps {
 export function PullRequestsTab(props: PullRequestsTabProps) {
   const [debouncedQuery] = useDebouncedValue(props.query, { wait: 200 });
 
-  const listQuery = useQuery({
-    ...changeRequestListQueryOptions({
+  const resolveListIntervalMs = useCallback(
+    (data: ReadonlyArray<ChangeRequest> | null): number | false => {
+      if (!data) return false;
+      return data.some((pr) => shouldRefreshPrCheckStatus(getPrCheckStatusFromChangeRequest(pr)))
+        ? 30_000
+        : false;
+    },
+    [],
+  );
+
+  const listQuery = useSourceControlChangeRequestList(
+    {
       environmentId: props.environmentId,
       cwd: props.cwd,
       state: props.stateFilter,
       limit: 100,
-    }),
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      return Array.isArray(data) &&
-        data.some((pr) => shouldRefreshPrCheckStatus(getPrCheckStatusFromChangeRequest(pr)))
-        ? 30_000
-        : false;
     },
-  });
+    resolveListIntervalMs,
+  );
 
   const cachedItems = useMemo(() => listQuery.data ?? [], [listQuery.data]);
   const filteredItems = useMemo(
@@ -62,15 +66,13 @@ export function PullRequestsTab(props: PullRequestsTabProps) {
   );
 
   const needsServerSearch = filteredItems.length === 0 && debouncedQuery.trim().length >= 2;
-  const serverSearchQuery = useQuery(
-    searchChangeRequestsQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      query: debouncedQuery,
-      limit: 50,
-      enabled: needsServerSearch,
-    }),
-  );
+  const serverSearchQuery = useSourceControlChangeRequestSearch({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    query: debouncedQuery,
+    limit: 50,
+    enabled: needsServerSearch,
+  });
 
   const items = useMemo<ReadonlyArray<ChangeRequest>>(
     () => (needsServerSearch ? (serverSearchQuery.data ?? []) : filteredItems),
@@ -94,6 +96,13 @@ export function PullRequestsTab(props: PullRequestsTabProps) {
 
   usePrCheckPassNotifications(notificationTargets);
 
+  const refreshPullRequests = useCallback(() => {
+    if (props.environmentId === null || props.cwd === null) {
+      return;
+    }
+    invalidateSourceControl({ environmentId: props.environmentId, cwd: props.cwd });
+  }, [props.environmentId, props.cwd]);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-border/60 border-b px-4 py-2.5">
@@ -115,7 +124,7 @@ export function PullRequestsTab(props: PullRequestsTabProps) {
           type="button"
           size="icon"
           variant="ghost"
-          onClick={() => listQuery.refetch()}
+          onClick={refreshPullRequests}
           disabled={listQuery.isFetching}
           aria-label="Refresh"
         >

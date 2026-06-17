@@ -11,12 +11,15 @@ import {
   TurnId,
   WorktreeId,
   type OrchestrationEvent,
+  type OrchestrationShellStreamEvent,
 } from "@ryco/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyOrchestrationEvent,
   applyOrchestrationEvents,
+  applyShellEvent,
+  createShellEventCoalescer,
   removeEnvironmentState,
   selectEnvironmentState,
   selectProjectsAcrossEnvironments,
@@ -25,6 +28,7 @@ import {
   setSidebarWorktreeTitle,
   setThreadBranch,
   selectThreadsAcrossEnvironments,
+  SHELL_COALESCE_THRESHOLD_EVENTS_PER_MS,
   type AppState,
   type EnvironmentState,
 } from "./store";
@@ -1420,5 +1424,172 @@ describe("incremental orchestration updates", () => {
       state: "running",
     });
     expect(threadsOf(next)[0]?.latestTurn?.sourceProposedPlan).toBeUndefined();
+  });
+});
+
+describe("shell push coalescing", () => {
+  function makeThreadShellUpsertEvent(params: {
+    threadId: ThreadId;
+    sequence: number;
+    title: string;
+    updatedAt: string;
+    turnState: "running" | "completed";
+  }): Extract<OrchestrationShellStreamEvent, { kind: "thread-upserted" }> {
+    const turnId = TurnId.make(`turn-${params.threadId}`);
+    return {
+      kind: "thread-upserted",
+      sequence: params.sequence,
+      thread: {
+        id: params.threadId,
+        projectId: ProjectId.make("project-1"),
+        title: params.title,
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        latestTurn: {
+          turnId,
+          state: params.turnState,
+          requestedAt: "2026-02-27T00:00:00.000Z",
+          startedAt: "2026-02-27T00:00:01.000Z",
+          completedAt: params.turnState === "completed" ? params.updatedAt : null,
+          assistantMessageId: null,
+        },
+        createdAt: "2026-02-27T00:00:00.000Z",
+        updatedAt: params.updatedAt,
+        archivedAt: null,
+        session: {
+          threadId: params.threadId,
+          status: params.turnState === "running" ? "running" : "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: params.turnState === "running" ? turnId : null,
+          lastError: null,
+          updatedAt: params.updatedAt,
+        },
+        latestUserMessageAt: null,
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+        hasActionableProposedPlan: false,
+      },
+    };
+  }
+
+  // A burst of shell upserts across two threads that flips turn/session state
+  // between running and completed on each event.
+  function recordedShellEventSequence(): Array<
+    Extract<OrchestrationShellStreamEvent, { kind: "thread-upserted" }>
+  > {
+    const threadA = ThreadId.make("thread-a");
+    const threadB = ThreadId.make("thread-b");
+    return Array.from({ length: 40 }, (_unused, index) => {
+      const threadId = index % 2 === 0 ? threadA : threadB;
+      const turnState = index % 4 < 2 ? "running" : "completed";
+      return makeThreadShellUpsertEvent({
+        threadId,
+        sequence: index + 1,
+        title: `Thread ${threadId} @ ${index}`,
+        updatedAt: `2026-02-27T00:00:${String(index).padStart(2, "0")}.000Z`,
+        turnState,
+      });
+    });
+  }
+
+  function foldShellEvents(
+    base: AppState,
+    events: ReadonlyArray<Extract<OrchestrationShellStreamEvent, { kind: "thread-upserted" }>>,
+  ): AppState {
+    return events.reduce((state, event) => applyShellEvent(state, event, localEnvironmentId), base);
+  }
+
+  it("produces the same final turn state when coalescing a high-frequency burst", () => {
+    const base = makeEmptyState();
+    const events = recordedShellEventSequence();
+
+    // Reference behavior: apply every event immediately (pre-change behavior).
+    const reference = foldShellEvents(base, events);
+
+    let committed: AppState = base;
+    const scheduled: Array<() => void> = [];
+    const coalescer = createShellEventCoalescer({
+      getState: () => committed,
+      commitState: (next) => {
+        committed = next;
+      },
+      // Constant clock => zero span => infinite events/ms => always over threshold.
+      now: () => 0,
+      schedule: (callback) => {
+        scheduled.push(callback);
+      },
+    });
+
+    for (const event of events) {
+      coalescer.enqueue(event, localEnvironmentId);
+    }
+
+    // The burst must have been coalesced into a single deferred frame flush.
+    expect(scheduled).toHaveLength(1);
+    expect(coalescer.hasPending()).toBe(true);
+
+    for (const flushFrame of scheduled) {
+      flushFrame();
+    }
+
+    expect(coalescer.hasPending()).toBe(false);
+    expect(committed).toEqual(reference);
+
+    const threadA = ThreadId.make("thread-a");
+    const threadB = ThreadId.make("thread-b");
+    const committedEnv = selectEnvironmentState(committed, localEnvironmentId);
+    const referenceEnv = selectEnvironmentState(reference, localEnvironmentId);
+    expect(committedEnv.threadTurnStateById[threadA]).toEqual(
+      referenceEnv.threadTurnStateById[threadA],
+    );
+    expect(committedEnv.threadTurnStateById[threadB]).toEqual(
+      referenceEnv.threadTurnStateById[threadB],
+    );
+    expect(committedEnv.threadSessionById[threadA]).toEqual(
+      referenceEnv.threadSessionById[threadA],
+    );
+    expect(committedEnv.sidebarThreadSummaryById[threadB]).toEqual(
+      referenceEnv.sidebarThreadSummaryById[threadB],
+    );
+  });
+
+  it("applies shell events immediately when the rate stays under the threshold", () => {
+    const base = makeEmptyState();
+    const events = recordedShellEventSequence();
+    const reference = foldShellEvents(base, events);
+
+    let committed: AppState = base;
+    const scheduled: Array<() => void> = [];
+    let clock = 0;
+    const coalescer = createShellEventCoalescer({
+      getState: () => committed,
+      commitState: (next) => {
+        committed = next;
+      },
+      // Space events far enough apart to stay well under the threshold.
+      now: () => {
+        clock += 1000 / SHELL_COALESCE_THRESHOLD_EVENTS_PER_MS + 5;
+        return clock;
+      },
+      schedule: (callback) => {
+        scheduled.push(callback);
+      },
+    });
+
+    for (const event of events) {
+      coalescer.enqueue(event, localEnvironmentId);
+    }
+
+    // No frame was scheduled; every event committed synchronously.
+    expect(scheduled).toHaveLength(0);
+    expect(coalescer.hasPending()).toBe(false);
+    expect(committed).toEqual(reference);
   });
 });

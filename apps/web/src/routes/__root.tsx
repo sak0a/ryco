@@ -5,7 +5,6 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect } from "react";
-import type { QueryClient } from "@tanstack/react-query";
 import type { AuthSessionState } from "@ryco/contracts";
 
 import { APP_DISPLAY_NAME } from "../branding";
@@ -34,9 +33,7 @@ export interface RootBeforeLoadContext {
 let cachedReadyRootContext: RootBeforeLoadContext | null = null;
 let pendingReadyRootContext: Promise<RootBeforeLoadContext> | null = null;
 
-export const Route = createRootRouteWithContext<{
-  queryClient: QueryClient;
-}>()({
+export const Route = createRootRouteWithContext<Record<string, never>>()({
   beforeLoad: ({ location }) => resolveRootBeforeLoadContext(location.pathname),
   component: RootRouteView,
   errorComponent: RootRouteErrorView,

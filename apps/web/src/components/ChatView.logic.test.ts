@@ -20,6 +20,8 @@ import {
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
+  resolveChatSendWorktreePlan,
+  buildChatSendTitleSeed,
   shouldWriteThreadErrorToCurrentServerThread,
   threadIsPromotedAndPersisted,
   waitForStartedServerThread,
@@ -100,6 +102,95 @@ describe("resolveSendEnvMode", () => {
   it("forces local mode for non-git repositories", () => {
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: false })).toBe("local");
     expect(resolveSendEnvMode({ requestedEnvMode: "local", isGitRepo: false })).toBe("local");
+  });
+});
+
+describe("resolveChatSendWorktreePlan", () => {
+  it("prepares a first-message worktree when send mode is worktree", () => {
+    expect(
+      resolveChatSendWorktreePlan({
+        isServerThread: true,
+        isFirstMessage: true,
+        threadWorktreePath: null,
+        activeThreadBranch: "main",
+        currentGitRefName: "main",
+        sendEnvMode: "worktree",
+      }),
+    ).toEqual({
+      shouldMaterializeLegacyBranchWorktree: false,
+      baseBranchForWorktree: "main",
+      shouldCreateWorktree: true,
+    });
+  });
+
+  it("materializes a legacy branch-only thread into a worktree on later sends", () => {
+    expect(
+      resolveChatSendWorktreePlan({
+        isServerThread: true,
+        isFirstMessage: false,
+        threadWorktreePath: null,
+        activeThreadBranch: "feature/foo",
+        currentGitRefName: "main",
+        sendEnvMode: "local",
+      }),
+    ).toEqual({
+      shouldMaterializeLegacyBranchWorktree: true,
+      baseBranchForWorktree: "feature/foo",
+      shouldCreateWorktree: true,
+    });
+  });
+
+  it("skips worktree creation for local send mode on an existing thread", () => {
+    expect(
+      resolveChatSendWorktreePlan({
+        isServerThread: true,
+        isFirstMessage: false,
+        threadWorktreePath: null,
+        activeThreadBranch: "main",
+        currentGitRefName: "main",
+        sendEnvMode: "local",
+      }),
+    ).toEqual({
+      shouldMaterializeLegacyBranchWorktree: false,
+      baseBranchForWorktree: null,
+      shouldCreateWorktree: false,
+    });
+  });
+});
+
+describe("buildChatSendTitleSeed", () => {
+  it("prefers trimmed prompt text", () => {
+    expect(
+      buildChatSendTitleSeed({
+        trimmedPrompt: "Fix sidebar perf",
+        firstImageName: "shot.png",
+        firstTerminalContextLabel: "Terminal 1",
+      }),
+    ).toBe("Fix sidebar perf");
+  });
+
+  it("falls back to image and terminal labels", () => {
+    expect(
+      buildChatSendTitleSeed({
+        trimmedPrompt: "",
+        firstImageName: "shot.png",
+        firstTerminalContextLabel: null,
+      }),
+    ).toBe("Image: shot.png");
+    expect(
+      buildChatSendTitleSeed({
+        trimmedPrompt: "   ",
+        firstImageName: null,
+        firstTerminalContextLabel: "Terminal 1",
+      }),
+    ).toBe("Terminal 1");
+    expect(
+      buildChatSendTitleSeed({
+        trimmedPrompt: "",
+        firstImageName: null,
+        firstTerminalContextLabel: null,
+      }),
+    ).toBe("New thread");
   });
 });
 

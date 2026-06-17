@@ -88,6 +88,8 @@ const rpcClientMock = {
   },
   server: {
     getConfig: vi.fn(),
+    getAdvertisedEndpoints: vi.fn(),
+    getDiagnosticsMetrics: vi.fn(),
     refreshProviders: vi.fn(),
     updateProvider: vi.fn(),
     upsertKeybinding: vi.fn(),

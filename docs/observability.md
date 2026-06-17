@@ -42,8 +42,9 @@ Metrics are not written to a local file.
 - local persistence: none
 - remote export: OTLP only, when configured
 - current definitions: `apps/server/src/observability/Metrics.ts`
+- in-app snapshot: `server.getDiagnosticsMetrics` RPC exposes rolling-window stats for the Diagnostics panel (turn quiescence average, checkpoint duration p95, websocket reconnect count). These counters live in process memory only and reset whenever the server restarts.
 
-If OTLP is not configured, metrics still exist in-process, but you will not have a local artifact to inspect.
+If OTLP is not configured, metrics still exist in-process, but you will not have a local artifact to inspect outside the Diagnostics panel.
 
 ### Related Artifacts
 
@@ -512,8 +513,20 @@ Current high-value span and metric boundaries include:
 - terminal session lifecycle
 - sqlite query execution
 
+### Client perf profiling
+
+The web app supports opt-in interaction profiling via `VITE_RYCO_PERF_PROFILE=1`.
+
+Instrumented interactions:
+
+- thread tab switches (`ryco:tab-switch:*` measures)
+- sidebar project expand (`ryco:sidebar-expand:*` measures)
+- component render durations (`ryco:render:*` measures)
+
+Soft budgets live in `apps/web/src/perf/budgets.ts`. See `apps/web/src/perf/README.md` for usage and inspection commands.
+
 ### Current Constraints
 
 - logs outside spans are not persisted
-- metrics are not snapshotted locally
+- metrics are not snapshotted locally to disk; use the Diagnostics panel or OTLP export for inspection
 - the old `serverLogPath` still exists in config for compatibility, but the trace file is the persisted artifact that matters

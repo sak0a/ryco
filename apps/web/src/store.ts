@@ -2632,6 +2632,115 @@ export function setSidebarWorktreeTitle(
   );
 }
 
+// ---------------------------------------------------------------------------
+// Shell push coalescing
+//
+// The shell stream (project / thread / worktree shell upserts) can burst at a
+// very high rate while an active turn emits many tool events.  Applying each
+// event synchronously triggers a `set` and a full sidebar re-render, which can
+// freeze the UI under load.  When the incoming rate exceeds
+// SHELL_COALESCE_THRESHOLD_EVENTS_PER_MS, shell events are buffered and flushed
+// once per animation frame, collapsing many renders into one.
+//
+// Turn *content* deltas (message / activity streaming) flow through the
+// orchestration and detail streams and are NEVER coalesced here — streaming
+// stays immediate.  Every other store mutator flushes buffered shell events
+// first so cross-stream ordering and synchronous `getState()` reads stay
+// correct (e.g. a pending `thread-upserted` can never resurrect a thread that a
+// later `removeThread` deleted).
+// ---------------------------------------------------------------------------
+
+export const SHELL_COALESCE_THRESHOLD_EVENTS_PER_MS = 10;
+const SHELL_COALESCE_RATE_WINDOW_MS = 8;
+
+interface ShellEventCoalescerDeps {
+  readonly getState: () => AppState;
+  readonly commitState: (next: AppState) => void;
+  readonly now?: () => number;
+  readonly schedule?: (callback: () => void) => void;
+  readonly thresholdEventsPerMs?: number;
+  readonly rateWindowMs?: number;
+}
+
+export interface ShellEventCoalescer {
+  readonly enqueue: (event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) => void;
+  readonly flush: () => void;
+  readonly hasPending: () => boolean;
+}
+
+function defaultScheduleFrame(callback: () => void): void {
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => callback());
+    return;
+  }
+  setTimeout(callback, 0);
+}
+
+function defaultNow(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+}
+
+export function createShellEventCoalescer(deps: ShellEventCoalescerDeps): ShellEventCoalescer {
+  const now = deps.now ?? defaultNow;
+  const schedule = deps.schedule ?? defaultScheduleFrame;
+  const thresholdEventsPerMs = deps.thresholdEventsPerMs ?? SHELL_COALESCE_THRESHOLD_EVENTS_PER_MS;
+  const rateWindowMs = deps.rateWindowMs ?? SHELL_COALESCE_RATE_WINDOW_MS;
+
+  let queue: Array<{ event: OrchestrationShellStreamEvent; environmentId: EnvironmentId }> = [];
+  let recentTimestamps: number[] = [];
+  let framePending = false;
+
+  function exceedsRateThreshold(): boolean {
+    if (recentTimestamps.length < 2) {
+      return false;
+    }
+    const span = recentTimestamps[recentTimestamps.length - 1]! - recentTimestamps[0]!;
+    const eventsPerMs = span <= 0 ? Number.POSITIVE_INFINITY : recentTimestamps.length / span;
+    return eventsPerMs > thresholdEventsPerMs;
+  }
+
+  function flush(): void {
+    framePending = false;
+    if (queue.length === 0) {
+      return;
+    }
+    const pending = queue;
+    queue = [];
+    let nextState = deps.getState();
+    for (const item of pending) {
+      nextState = applyShellEvent(nextState, item.event, item.environmentId);
+    }
+    deps.commitState(nextState);
+  }
+
+  function enqueue(event: OrchestrationShellStreamEvent, environmentId: EnvironmentId): void {
+    const timestamp = now();
+    recentTimestamps.push(timestamp);
+    const windowStart = timestamp - rateWindowMs;
+    while (recentTimestamps.length > 0 && recentTimestamps[0]! < windowStart) {
+      recentTimestamps.shift();
+    }
+    queue.push({ event, environmentId });
+
+    if (exceedsRateThreshold()) {
+      if (!framePending) {
+        framePending = true;
+        schedule(flush);
+      }
+      return;
+    }
+    flush();
+  }
+
+  return {
+    enqueue,
+    flush,
+    hasPending: () => queue.length > 0,
+  };
+}
+
 interface AppStore extends AppState {
   setActiveEnvironmentId: (environmentId: EnvironmentId) => void;
   removeEnvironmentState: (environmentId: EnvironmentId) => void;
@@ -2661,26 +2770,56 @@ interface AppStore extends AppState {
   ) => void;
 }
 
-export const useStore = create<AppStore>((set) => ({
-  ...initialState,
-  setActiveEnvironmentId: (environmentId) =>
-    set((state) => setActiveEnvironmentId(state, environmentId)),
-  removeEnvironmentState: (environmentId) =>
-    set((state) => removeEnvironmentState(state, environmentId)),
-  syncServerShellSnapshot: (snapshot, environmentId) =>
-    set((state) => syncServerShellSnapshot(state, snapshot, environmentId)),
-  syncServerThreadDetail: (thread, environmentId) =>
-    set((state) => syncServerThreadDetail(state, thread, environmentId)),
-  applyOrchestrationEvent: (event, environmentId) =>
-    set((state) => applyOrchestrationEvent(state, event, environmentId)),
-  applyOrchestrationEvents: (events, environmentId) =>
-    set((state) => applyOrchestrationEvents(state, events, environmentId)),
-  applyShellEvent: (event, environmentId) =>
-    set((state) => applyShellEvent(state, event, environmentId)),
-  removeThread: (threadRef) => set((state) => removeThreadByRef(state, threadRef)),
-  setError: (threadId, error) => set((state) => setError(state, threadId, error)),
-  setThreadBranch: (threadRef, branch, worktreePath) =>
-    set((state) => setThreadBranch(state, threadRef, branch, worktreePath)),
-  setSidebarWorktreeTitle: (environmentId, worktreeId, title, updatedAt) =>
-    set((state) => setSidebarWorktreeTitle(state, environmentId, worktreeId, title, updatedAt)),
-}));
+export const useStore = create<AppStore>((set, get) => {
+  // Buffers high-frequency shell-stream events and flushes them once per frame
+  // under load.  All non-shell mutators flush it first to preserve ordering.
+  const shellCoalescer = createShellEventCoalescer({
+    getState: get,
+    commitState: (next) => set(next),
+  });
+
+  return {
+    ...initialState,
+    setActiveEnvironmentId: (environmentId) => {
+      shellCoalescer.flush();
+      set((state) => setActiveEnvironmentId(state, environmentId));
+    },
+    removeEnvironmentState: (environmentId) => {
+      shellCoalescer.flush();
+      set((state) => removeEnvironmentState(state, environmentId));
+    },
+    syncServerShellSnapshot: (snapshot, environmentId) => {
+      shellCoalescer.flush();
+      set((state) => syncServerShellSnapshot(state, snapshot, environmentId));
+    },
+    syncServerThreadDetail: (thread, environmentId) => {
+      shellCoalescer.flush();
+      set((state) => syncServerThreadDetail(state, thread, environmentId));
+    },
+    applyOrchestrationEvent: (event, environmentId) => {
+      shellCoalescer.flush();
+      set((state) => applyOrchestrationEvent(state, event, environmentId));
+    },
+    applyOrchestrationEvents: (events, environmentId) => {
+      shellCoalescer.flush();
+      set((state) => applyOrchestrationEvents(state, events, environmentId));
+    },
+    applyShellEvent: (event, environmentId) => shellCoalescer.enqueue(event, environmentId),
+    removeThread: (threadRef) => {
+      shellCoalescer.flush();
+      set((state) => removeThreadByRef(state, threadRef));
+    },
+    setError: (threadId, error) => {
+      shellCoalescer.flush();
+      set((state) => setError(state, threadId, error));
+    },
+    setThreadBranch: (threadRef, branch, worktreePath) => {
+      shellCoalescer.flush();
+      set((state) => setThreadBranch(state, threadRef, branch, worktreePath));
+    },
+    setSidebarWorktreeTitle: (environmentId, worktreeId, title, updatedAt) => {
+      shellCoalescer.flush();
+      set((state) => setSidebarWorktreeTitle(state, environmentId, worktreeId, title, updatedAt));
+    },
+  };
+});

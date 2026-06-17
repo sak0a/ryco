@@ -2,9 +2,11 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { getWebPerfReporter, isWebPerfProfileEnabled, readWebPerfNow } from "./perfInstrumentation";
 
 export const TAB_SWITCH_MARK_PREFIX = "ryco:tab-switch:";
+export const SIDEBAR_EXPAND_MARK_PREFIX = "ryco:sidebar-expand:";
 export const COMPONENT_RENDER_MARK_PREFIX = "ryco:render:";
 
 export type TabSwitchPhase = "click" | "first-paint";
+export type SidebarExpandPhase = "click" | "first-paint";
 
 export function makeTabSwitchMarkName(phase: TabSwitchPhase, key: string): string {
   if (!key) {
@@ -25,6 +27,34 @@ export function markTabSwitchFirstPaint(key: string): void {
   performance.mark(name);
   try {
     performance.measure(`ryco:tab-switch:${key}`, makeTabSwitchMarkName("click", key), name);
+  } catch {
+    // No matching click mark — initial mount, ignore.
+  }
+}
+
+export function makeSidebarExpandMarkName(phase: SidebarExpandPhase, key: string): string {
+  if (!key) {
+    throw new Error("sidebar-expand mark name requires a non-empty key");
+  }
+  return `${SIDEBAR_EXPAND_MARK_PREFIX}${phase}:${key}`;
+}
+
+export function markSidebarExpandClick(key: string): void {
+  if (!isWebPerfProfileEnabled() || typeof performance === "undefined") return;
+  performance.mark(makeSidebarExpandMarkName("click", key));
+}
+
+export function markSidebarExpandFirstPaint(key: string): void {
+  if (!isWebPerfProfileEnabled() || typeof performance === "undefined") return;
+  const name = makeSidebarExpandMarkName("first-paint", key);
+  if (performance.getEntriesByName(name).length > 0) return;
+  performance.mark(name);
+  try {
+    performance.measure(
+      `ryco:sidebar-expand:${key}`,
+      makeSidebarExpandMarkName("click", key),
+      name,
+    );
   } catch {
     // No matching click mark — initial mount, ignore.
   }

@@ -42,6 +42,8 @@ import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
+  buildTimelineStableState,
+  buildTimelineStreamingState,
   computeStableMessagesTimelineRows,
   isErroredWorkEntry,
   MAX_VISIBLE_WORK_LOG_ENTRIES,
@@ -50,6 +52,8 @@ import {
   resolveAssistantMessageCopyState,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
+  type TimelineStableState,
+  type TimelineStreamingState,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -73,33 +77,18 @@ import { SkillInlineText } from "./SkillInlineText";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 
 // ---------------------------------------------------------------------------
-// Context — shared state consumed by every row component via useContext.
-// Propagates through LegendList's memo boundaries for shared callbacks and
-// non-row-scoped state. `nowIso` is intentionally excluded — self-ticking
-// components (WorkingTimer, LiveElapsed) handle it.
+// Context — shared state consumed by row components via useContext. Split into
+// two contexts so streaming transitions (activeTurnInProgress / isWorking / …)
+// do not invalidate the stable context value (theme/cwd/skills/timestampFormat/
+// callbacks). Rows that only read stable state skip re-rendering during
+// streaming. Propagates through LegendList's memo boundaries. `nowIso` is
+// intentionally excluded — self-ticking components (WorkingTimer, LiveElapsed)
+// handle it.
 // ---------------------------------------------------------------------------
 
-interface TimelineRowSharedState {
-  activeTurnInProgress: boolean;
-  activeTurnId: TurnId | null | undefined;
-  isWorking: boolean;
-  isRevertingCheckpoint: boolean;
-  completionSummary: string | null;
-  timestampFormat: TimestampFormat;
-  routeThreadKey: string;
-  markdownCwd: string | undefined;
-  resolvedTheme: "light" | "dark";
-  workspaceRoot: string | undefined;
-  skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
-  activeThreadEnvironmentId: EnvironmentId;
-  onRevertUserMessage: (messageId: MessageId) => void;
-  onImageExpand: (preview: ExpandedImagePreview) => void;
-  openDiffTurnId: TurnId | null;
-  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
-  onCloseDiff: () => void;
-}
-
-const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
+const TimelineStreamingCtx = createContext<TimelineStreamingState>(null!);
+const TimelineStableCtx = createContext<TimelineStableState>(null!);
+const NOOP_CLOSE_DIFF = () => {};
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
@@ -168,6 +157,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onIsAtEndChange,
 }: MessagesTimelineProps) {
   usePerfMark("MessagesTimeline");
+  const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
+  revertTurnCountRef.current = revertTurnCountByUserMessageId;
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
@@ -176,7 +167,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         isWorking,
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
-        revertTurnCountByUserMessageId,
+        revertTurnCountByUserMessageId: revertTurnCountRef.current,
       }),
     [
       timelineEntries,
@@ -184,7 +175,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isWorking,
       activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
-      revertTurnCountByUserMessageId,
     ],
   );
   const rows = useStableRows(rawRows);
@@ -214,34 +204,46 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [listRef, onIsAtEndChange, rows.length]);
 
-  // Memoised context value — only changes on state transitions, NOT on
-  // every streaming chunk. Callbacks from ChatView are useCallback-stable.
-  const sharedState = useMemo<TimelineRowSharedState>(
-    () => ({
-      activeTurnInProgress,
-      activeTurnId: activeTurnId ?? null,
-      isWorking,
-      isRevertingCheckpoint,
-      completionSummary,
-      timestampFormat,
-      routeThreadKey,
-      markdownCwd,
-      resolvedTheme,
-      workspaceRoot,
-      skills,
-      activeThreadEnvironmentId,
-      onRevertUserMessage,
-      onImageExpand,
-      openDiffTurnId,
-      onOpenTurnDiff,
-      onCloseDiff: onCloseDiff ?? (() => {}),
-    }),
+  // Streaming-frequent context — rebuilt on turn-lifecycle transitions.
+  const streamingState = useMemo<TimelineStreamingState>(
+    () =>
+      buildTimelineStreamingState({
+        activeTurnInProgress,
+        activeTurnId: activeTurnId ?? null,
+        isWorking,
+        isRevertingCheckpoint,
+        completionSummary,
+        openDiffTurnId,
+      }),
     [
       activeTurnInProgress,
       activeTurnId,
       isWorking,
       isRevertingCheckpoint,
       completionSummary,
+      openDiffTurnId,
+    ],
+  );
+
+  // Stable context — identity preserved across streaming transitions so rows
+  // that only read stable state do not re-render. Callbacks from ChatView are
+  // useCallback-stable.
+  const stableState = useMemo<TimelineStableState>(
+    () =>
+      buildTimelineStableState({
+        timestampFormat,
+        routeThreadKey,
+        markdownCwd,
+        resolvedTheme,
+        workspaceRoot,
+        skills,
+        activeThreadEnvironmentId,
+        onRevertUserMessage,
+        onImageExpand,
+        onOpenTurnDiff,
+        onCloseDiff: onCloseDiff ?? NOOP_CLOSE_DIFF,
+      }),
+    [
       timestampFormat,
       routeThreadKey,
       markdownCwd,
@@ -251,14 +253,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRevertUserMessage,
       onImageExpand,
-      openDiffTurnId,
       onOpenTurnDiff,
       onCloseDiff,
     ],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
-  // from TimelineRowCtx, which propagates through LegendList's memo.
+  // from the split timeline contexts, which propagate through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
       <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden" data-timeline-root="true">
@@ -279,23 +280,25 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }
 
   return (
-    <TimelineRowCtx.Provider value={sharedState}>
-      <LegendList<MessagesTimelineRow>
-        ref={listRef}
-        data={rows}
-        keyExtractor={keyExtractor}
-        renderItem={renderItem}
-        estimatedItemSize={90}
-        initialScrollAtEnd
-        maintainScrollAtEnd
-        maintainScrollAtEndThreshold={0.1}
-        maintainVisibleContentPosition
-        onScroll={handleScroll}
-        className="h-full overflow-x-hidden overscroll-y-contain px-3 [scrollbar-gutter:stable] sm:px-5"
-        ListHeaderComponent={TIMELINE_LIST_HEADER}
-        ListFooterComponent={TIMELINE_LIST_FOOTER}
-      />
-    </TimelineRowCtx.Provider>
+    <TimelineStableCtx.Provider value={stableState}>
+      <TimelineStreamingCtx.Provider value={streamingState}>
+        <LegendList<MessagesTimelineRow>
+          ref={listRef}
+          data={rows}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          estimatedItemSize={90}
+          initialScrollAtEnd
+          maintainScrollAtEnd
+          maintainScrollAtEndThreshold={0.1}
+          maintainVisibleContentPosition
+          onScroll={handleScroll}
+          className="h-full overflow-x-hidden overscroll-y-contain px-3 [scrollbar-gutter:stable] sm:px-5"
+          ListHeaderComponent={TIMELINE_LIST_HEADER}
+          ListFooterComponent={TIMELINE_LIST_FOOTER}
+        />
+      </TimelineStreamingCtx.Provider>
+    </TimelineStableCtx.Provider>
   );
 });
 
@@ -313,7 +316,10 @@ type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["grouped
 type TimelineRow = MessagesTimelineRow;
 
 function TimelineRowContent({ row }: { row: TimelineRow }) {
-  const ctx = use(TimelineRowCtx);
+  // This row renderer reads both contexts (it depends on streaming + stable
+  // fields), so it re-renders on streaming transitions as before. The merged
+  // object is local — it does not propagate through any context boundary.
+  const ctx = { ...use(TimelineStableCtx), ...use(TimelineStreamingCtx) };
 
   return (
     <div
@@ -608,7 +614,8 @@ const WorkGroupSection = memo(function WorkGroupSection({
 }: {
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
 }) {
-  const { activeTurnId, isWorking, workspaceRoot } = use(TimelineRowCtx);
+  const { activeTurnId, isWorking } = use(TimelineStreamingCtx);
+  const { workspaceRoot } = use(TimelineStableCtx);
   const [isExpanded, setIsExpanded] = useState(false);
   const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
   const visibleEntries =
@@ -677,7 +684,7 @@ const ContextCompactionMarkerRow = memo(function ContextCompactionMarkerRow({
   createdAt: string;
   label: string;
 }) {
-  const { timestampFormat } = use(TimelineRowCtx);
+  const { timestampFormat } = use(TimelineStableCtx);
   const timestamp = formatTimestamp(createdAt, timestampFormat);
 
   return (
@@ -1377,7 +1384,7 @@ const ExpandableWorkEntryRow = memo(function ExpandableWorkEntryRow(props: {
   workspaceRoot: string | undefined;
 }) {
   const { workEntry, workspaceRoot } = props;
-  const { routeThreadKey } = use(TimelineRowCtx);
+  const { routeThreadKey } = use(TimelineStableCtx);
   const stored = useUiStateStore(
     (store) => store.threadWorkEntryExpandedById[routeThreadKey]?.[workEntry.id],
   );
