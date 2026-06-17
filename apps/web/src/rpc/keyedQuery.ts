@@ -27,6 +27,7 @@ export interface KeyedQueryRegistryConfig<TState> {
   readonly buildFetchingState: (current: TState) => TState;
   readonly buildSuccessState: (data: unknown) => TState;
   readonly buildErrorState: (current: TState, error: Error) => TState;
+  readonly selectPollData?: (state: TState) => unknown;
   readonly onRunStart?: (controller: KeyedQueryControllerBase & Record<string, unknown>) => void;
   readonly onRunEnd?: (
     controller: KeyedQueryControllerBase & Record<string, unknown>,
@@ -133,7 +134,10 @@ export function createKeyedQueryRegistry<TState>(
     if (!resolveIntervalMs) {
       return;
     }
-    const interval = resolveIntervalMs(getQueryState(controller.compositeKey));
+    const state = getQueryState(controller.compositeKey);
+    const interval = resolveIntervalMs(
+      config.selectPollData ? config.selectPollData(state) : state,
+    );
     if (interval === false || interval <= 0) {
       return;
     }

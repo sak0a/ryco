@@ -39,6 +39,7 @@ vi.mock("~/environments/runtime", () => ({
 }));
 
 import {
+  changeRequestListBinding,
   fetchSourceControlChangeRequestDetail,
   fetchSourceControlIssueDetail,
   invalidateSourceControl,
@@ -74,6 +75,16 @@ function issue(number: number) {
     number,
     title: `Issue ${number}`,
     url: `https://example.test/issues/${number}`,
+    state: "open",
+  } as never;
+}
+
+function changeRequest(number: number) {
+  return {
+    provider: "github",
+    number,
+    title: `Pull request ${number}`,
+    url: `https://example.test/pull/${number}`,
     state: "open",
   } as never;
 }
@@ -194,6 +205,26 @@ describe("sourceControlAtoms — issue search gating", () => {
     });
     await flush();
     expect(searchIssues).toHaveBeenCalledWith({ cwd: CWD, query: "bug" });
+    release();
+  });
+});
+
+describe("sourceControlAtoms — change request list polling", () => {
+  it("passes fetched data rather than query state into poll interval resolvers", async () => {
+    const data = [changeRequest(1)];
+    listChangeRequests.mockResolvedValue(data);
+    const resolveIntervalMs = vi.fn((items: ReadonlyArray<unknown> | null) =>
+      items?.some(() => false) ? 30_000 : false,
+    );
+
+    const input = { environmentId: ENVIRONMENT_ID, cwd: CWD, state: "open" as const };
+    const release = changeRequestListBinding.watch(input, resolveIntervalMs);
+    await flush();
+
+    expect(listChangeRequests).toHaveBeenCalledWith({ cwd: CWD, state: "open" });
+    expect(resolveIntervalMs).toHaveBeenCalledWith(data);
+    expect(changeRequestListBinding.snapshotFor(input).data).toBe(data);
+
     release();
   });
 });
