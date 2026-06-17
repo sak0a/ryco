@@ -1,11 +1,13 @@
 import { Cause, Effect, Option, Schema, Stream } from "effect";
 import {
   CommandId,
+  type DiagnosticsProviderProcess,
   EventId,
   type GitRunStackedActionInput,
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
   ProjectId,
+  type ServerProvider,
   type ThreadId,
   SourceControlProviderError,
   WsRpcGroup,
@@ -14,6 +16,7 @@ import { RpcGroup } from "effect/unstable/rpc";
 
 import { CheckpointDiffQuery } from "../checkpointing/Services/CheckpointDiffQuery.ts";
 import { ServerConfig } from "../config.ts";
+import { Diagnostics } from "../diagnostics/Services/Diagnostics.ts";
 import { Keybindings } from "../keybindings.ts";
 import { makeCodexMcpService } from "../mcp/CodexMcpService.ts";
 import { Open, resolveAvailableEditors } from "../open.ts";
@@ -63,6 +66,19 @@ export {
   ORCHESTRATION_REPLAY_PAGE_MAX_LIMIT,
 } from "./context/constants.ts";
 
+function toDiagnosticsProviderProcess(provider: ServerProvider): DiagnosticsProviderProcess {
+  return {
+    instanceId: provider.instanceId,
+    driver: provider.driver,
+    enabled: provider.enabled,
+    installed: provider.installed,
+    status: provider.status,
+    checkedAt: provider.checkedAt,
+    ...(provider.displayName ? { displayName: provider.displayName } : {}),
+    ...(provider.message ? { message: provider.message } : {}),
+  };
+}
+
 export const makeWsRpcContext = (session: AuthenticatedSession) =>
   Effect.gen(function* () {
     const currentSessionId = session.sessionId;
@@ -98,6 +114,7 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
     const projectionWorktrees = yield* ProjectionWorktreeRepository;
     const atlassian = yield* AtlassianConnectionService;
     const workItems = yield* JiraWorkItemService;
+    const diagnostics = yield* Diagnostics;
     const localDiagnosticsMetrics = yield* LocalDiagnosticsMetrics;
     const advertisedEndpointRegistry = yield* AdvertisedEndpointRegistry;
     const serverCommandId = (tag: string) => CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
@@ -486,6 +503,14 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
 
     const loadDiagnosticsMetrics = localDiagnosticsMetrics.snapshot;
     const loadAdvertisedEndpoints = advertisedEndpointRegistry.list;
+    const loadDiagnosticsSnapshot = Effect.gen(function* () {
+      const providers = yield* providerRegistry.getProviders;
+      const terminals = yield* terminalManager.listDiagnostics;
+      return yield* diagnostics.getSnapshot({
+        providers: providers.map(toDiagnosticsProviderProcess),
+        terminals,
+      });
+    });
 
     const loadServerConfig = Effect.gen(function* () {
       const keybindingsConfig = yield* keybindings.loadConfigState;
@@ -627,6 +652,7 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
       loadServerConfig,
       loadAdvertisedEndpoints,
       loadDiagnosticsMetrics,
+      loadDiagnosticsSnapshot,
       loadAuthAccessSnapshot,
       refreshLinkedWorktreeSourceControlStates,
       refreshStateForLinkedReference,

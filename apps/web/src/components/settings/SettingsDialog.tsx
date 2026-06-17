@@ -75,8 +75,8 @@ const LazySourceControlSettingsPanel = lazy(() =>
 const LazyConnectionsSettings = lazy(() =>
   import("./ConnectionsSettings").then((module) => ({ default: module.ConnectionsSettings })),
 );
-const LazyDiagnosticsPanel = lazy(() =>
-  import("./DiagnosticsPanel").then((module) => ({ default: module.DiagnosticsPanel })),
+const LazyDiagnosticsSettings = lazy(() =>
+  import("./DiagnosticsSettings").then((module) => ({ default: module.DiagnosticsSettings })),
 );
 
 function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
@@ -111,7 +111,7 @@ function SectionPanel({ section }: { section: SettingsSectionId }) {
       {section === "keybindings" ? <LazyKeybindingsSettingsPanel /> : null}
       {section === "source-control" ? <LazySourceControlSettingsPanel /> : null}
       {section === "connections" ? <LazyConnectionsSettings /> : null}
-      {section === "diagnostics" ? <LazyDiagnosticsPanel /> : null}
+      {section === "diagnostics" ? <LazyDiagnosticsSettings /> : null}
       {section === "archived" ? <ArchivedThreadsPanel /> : null}
     </Suspense>
   );

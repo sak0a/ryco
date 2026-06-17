@@ -2,6 +2,7 @@ import path from "node:path";
 
 import {
   DEFAULT_TERMINAL_ID,
+  type DiagnosticsTerminalProcess,
   type TerminalEvent,
   type TerminalSessionSnapshot,
   type TerminalSessionStatus,
@@ -162,6 +163,21 @@ function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
     status: session.status,
     pid: session.pid,
     history: session.history,
+    exitCode: session.exitCode,
+    exitSignal: session.exitSignal,
+    updatedAt: session.updatedAt,
+  };
+}
+
+function diagnosticsSnapshot(session: TerminalSessionState): DiagnosticsTerminalProcess {
+  return {
+    threadId: session.threadId,
+    terminalId: session.terminalId,
+    cwd: session.cwd,
+    worktreePath: session.worktreePath,
+    status: session.status,
+    pid: session.pid,
+    hasRunningSubprocess: session.hasRunningSubprocess,
     exitCode: session.exitCode,
     exitSignal: session.exitSignal,
     updatedAt: session.updatedAt,
@@ -1929,6 +1945,13 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       clear,
       restart,
       close,
+      listDiagnostics: SynchronizedRef.get(managerStateRef).pipe(
+        Effect.map((state) =>
+          [...state.sessions.values()]
+            .map(diagnosticsSnapshot)
+            .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+        ),
+      ),
       subscribe: (listener) =>
         Effect.sync(() => {
           terminalEventListeners.add(listener);
