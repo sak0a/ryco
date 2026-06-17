@@ -7,6 +7,19 @@ import {
   outcomeFromExit,
 } from "./Attributes.ts";
 
+export {
+  DEFAULT_ROLLING_WINDOW_MAX_SAMPLES,
+  DEFAULT_ROLLING_WINDOW_MS,
+  RollingDurationWindow,
+} from "./RollingDurationWindow.ts";
+export {
+  LocalDiagnosticsMetrics,
+  LocalDiagnosticsMetricsLive,
+  makeLocalDiagnosticsMetrics,
+  type LocalDiagnosticsMetricsShape,
+  type ServerLocalDiagnosticsMetricsSnapshot,
+} from "./Services/LocalDiagnosticsMetrics.ts";
+
 export const metricNames = {
   rpcRequestsTotal: "ryco_rpc_requests_total",
   rpcRequestDuration: "ryco_rpc_request_duration",

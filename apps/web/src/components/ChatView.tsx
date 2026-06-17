@@ -1,28 +1,20 @@
 import {
-  type ApprovalRequestId,
-  type ChangeRequest,
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
-  type ProjectScript,
   type ProjectId,
-  type ProviderApprovalDecision,
   ProviderInstanceId,
   type ServerProvider,
-  type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type ThreadId,
   type TurnId,
-  type KeybindingCommand,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   ProviderDriverKind,
   RuntimeMode,
   AgentTokenMode,
-  type SourceControlWorkflowJob,
-  TerminalOpenInput,
 } from "@ryco/contracts";
 import {
   parseScopedThreadKey,
@@ -30,58 +22,26 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@ryco/client-runtime";
-import {
-  applyClaudePromptEffortPrefix,
-  createModelSelection,
-  resolvePromptInjectedEffort,
-} from "@ryco/shared/model";
-import { projectScriptCwd, projectScriptRuntimeEnv } from "@ryco/shared/projectScripts";
+import { applyClaudePromptEffortPrefix, resolvePromptInjectedEffort } from "@ryco/shared/model";
+import { projectScriptCwd } from "@ryco/shared/projectScripts";
 import { truncate } from "@ryco/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "~/rpc/queryClient";
 import { DateTime } from "effect";
-import {
-  lazy,
-  memo,
-  Suspense,
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
 import {
   issueDetailQueryOptions,
-  changeRequestListQueryOptions,
   changeRequestDetailQueryOptions,
-  sourceControlContextQueryKeys,
-  workflowRunJobsQueryOptions,
-  workflowRunsQueryOptions,
 } from "~/lib/sourceControlContextRpc";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
-import { readLocalApi } from "../localApi";
 import { isRightPanelOpen, parseRightPanelRouteSearch } from "../rightPanelRouteSearch";
-import {
-  buildOpenAgentSearch,
-  buildOpenFilesSearch,
-  buildOpenReviewSearch,
-  buildOpenTerminalSearch,
-  buildOpenWorkspaceSearch,
-  stripWorkspacePanelSearchParams,
-} from "../workspaceRouteSearch";
-import { deriveThreadSubagents, type ThreadSubagentView } from "../threadWorkspaceViewModel";
-import {
-  collapseExpandedComposerCursor,
-  parseStandaloneComposerSlashCommand,
-} from "../composer-logic";
+import { deriveThreadSubagents } from "../threadWorkspaceViewModel";
+import { parseStandaloneComposerSlashCommand } from "../composer-logic";
 import {
   deriveCompletionDividerBeforeEntryId,
   derivePhase,
@@ -95,13 +55,6 @@ import {
   formatElapsed,
 } from "../session-logic";
 import { type LegendListRef } from "@legendapp/list/react";
-import {
-  buildPendingUserInputAnswers,
-  derivePendingUserInputProgress,
-  setPendingUserInputCustomAnswer,
-  togglePendingUserInputOptionSelection,
-  type PendingUserInputDraftAnswer,
-} from "../pendingUserInput";
 import {
   selectProjectsAcrossEnvironments,
   selectSidebarThreadsForProjectRef,
@@ -120,72 +73,29 @@ import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_AGENT_TOKEN_MODE,
   DEFAULT_RUNTIME_MODE,
-  DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
   type ChatMessage,
-  type SessionPhase,
-  type Thread,
   type TurnDiffSummary,
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { PREFERS_REDUCED_MOTION_QUERY } from "../lib/perf/motion";
 import { useDelayedUnmount } from "../hooks/useDelayedUnmount";
-import { useCommandPaletteStore } from "../commandPaletteStore";
-import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
-import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
-import GitActionsControl, { type GitActionPostPushEvent } from "./GitActionsControl";
 import {
   matchesExactModShortcut,
-  resolveShortcutCommand,
   shouldIgnoreGlobalNavigationShortcut,
   shortcutLabelForCommand,
 } from "../keybindings";
-import PlanSidebar, { type OverviewPanelItem, type OverviewPullRequestState } from "./PlanSidebar";
-import {
-  getPrCheckStatusForQuery,
-  getPrCheckStatusFromChangeRequest,
-  getPrCheckStatusFromWorkflowRuns,
-  shouldRefreshPrCheckStatus,
-  sourceControlOptionValue,
-} from "./projectExplorer/prCheckStatus";
-import {
-  areOverviewWorkflowRunsSupported,
-  buildOverviewCheckRollupRows,
-  buildOverviewWorkflowCheckRows,
-  isOverviewActiveCheckKind,
-  isOverviewActiveWorkflowRun,
-  OVERVIEW_CHECK_DETAIL_RUN_LIMIT,
-  selectOverviewChecksError,
-  summarizeActiveWorkflowJob,
-} from "./overviewPullRequestChecks.logic";
-import {
-  createPostPushWorkflowDiscoveryWatch,
-  hasDiscoveredPostPushWorkflowRun,
-  resolveWorkflowRunsRefetchInterval,
-  selectActivePostPushWorkflowDiscoveryWatch,
-  type PostPushWorkflowDiscoveryWatch,
-} from "./postPushWorkflowDiscovery.logic";
-import { buildOverviewChangesItem } from "./overviewChanges.logic";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
-import { type NewProjectScriptInput } from "./ProjectScriptsControl";
-import {
-  commandForProjectScript,
-  nextProjectScriptId,
-  projectScriptIdFromCommand,
-} from "~/projectScripts";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
-import { useEvent } from "../hooks/useEvent";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
-import { isTerminalFocused } from "../lib/terminalFocus";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
 import {
   reconnectSavedEnvironment,
@@ -199,14 +109,10 @@ import {
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
-import {
-  appendTerminalContextsToPrompt,
-  formatTerminalContextLabel,
-  type TerminalContextDraft,
-  type TerminalContextSelection,
-} from "../lib/terminalContext";
+import { type TerminalContextDraft, type TerminalContextSelection } from "../lib/terminalContext";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { PersistentThreadTerminalDrawer } from "./chat/ChatTerminalShell";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { NewWorktreeDialog, type NewWorktreeDialogTab } from "./worktrees/NewWorktreeDialog";
@@ -218,14 +124,10 @@ import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { deriveRevertTurnCountByUserMessageId } from "./chat/MessagesTimeline.logic";
 import { ChatHeader } from "./chat/ChatHeader";
 import { type ChatSessionTabsItem } from "./chat/ChatSessionTabs";
-import { createTabPrefetchController } from "./chat/ChatSessionTabsPrefetch";
+import { useChatSessionTabsPrefetch } from "./chat/useChatSessionTabsPrefetch";
 import { createSessionTabsSelector, draftThreadToSidebarSummary } from "../sessionTabs.selectors";
 import type { SidebarThreadSummary } from "../types";
-import {
-  markTabSwitchClick,
-  markTabSwitchFirstPaint,
-  usePerfMark,
-} from "../perf/tabSwitchInstrumentation";
+import { markTabSwitchClick, usePerfMark } from "../perf/tabSwitchInstrumentation";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
@@ -236,27 +138,39 @@ import { ComposerHintRow } from "./chat/ComposerHintRow";
 import type { HintRowTrigger } from "./chat/ComposerHintRow.logic";
 import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
 import {
+  ChatOverviewPanel,
+  FloatingOverviewMotionFrame,
+  OverviewSidebarMotionFrame,
+  OVERVIEW_FLOATING_EXIT_DURATION_MS,
+  OVERVIEW_SIDEBAR_EXIT_DURATION_MS,
+  usePostPushWorkflowWatch,
+  useOverviewPanelControls,
+} from "./chat/ChatOverviewPanel";
+import { useChatGlobalShortcuts } from "./chat/useChatGlobalShortcuts";
+import { useChatPendingUserInput } from "./chat/useChatPendingUserInput";
+import { useChatWorkspacePanels } from "./chat/useChatWorkspacePanels";
+import { useThreadPlanCatalog } from "./chat/useThreadPlanCatalog";
+import { useLocalDispatchState } from "./chat/useLocalDispatchState";
+import { useChatProjectScripts } from "./chat/useChatProjectScripts";
+import { useChatAttachmentPreviewHandoff } from "./chat/useChatAttachmentPreviewHandoff";
+import { useChatSessionActions } from "../hooks/useChatSessionActions";
+import { executeChatSendTurn } from "../hooks/executeChatSendTurn";
+import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
   collectUserMessageBlobPreviewUrls,
-  createLocalDispatchSnapshot,
   deriveComposerSendState,
-  hasServerAcknowledgedLocalDispatch,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
-  type LocalDispatchSnapshot,
   PullRequestDialogState,
-  cloneComposerImageForRetry,
   deriveLockedProvider,
-  readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
-  revokeBlobPreviewUrl,
+  resolveChatSendWorktreePlan,
   revokeUserMessagePreviewUrls,
   shouldWriteThreadErrorToCurrentServerThread,
   waitForStartedServerThread,
-  refreshStaleSourceControlContexts,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useComposerHandleContext } from "../composerHandleContext";
@@ -276,265 +190,83 @@ import {
   resolveServerConfigVersionMismatch,
 } from "../versionSkew";
 
-const IMAGE_ONLY_BOOTSTRAP_PROMPT =
-  "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
-const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
-const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 const EMPTY_SESSION_TABS: ReadonlyArray<ChatSessionTabsItem> = Object.freeze([]);
-const OVERVIEW_FLOATING_EXIT_DURATION_MS = 260;
-const OVERVIEW_SIDEBAR_EXIT_DURATION_MS = 320;
-const OVERVIEW_SIDEBAR_FRAME_WIDTH = "calc(340px + 0.75rem)";
-const ThreadTerminalDrawer = lazy(() => import("./ThreadTerminalDrawer"));
+const PROVIDER_STATUS_KEY_SEPARATOR = "\0";
 
-function OverviewSidebarMotionFrame(props: {
-  animate: boolean;
-  children: ReactNode;
-  open: boolean;
-}) {
-  const [entered, setEntered] = useState(!props.animate && props.open);
-
-  useEffect(() => {
-    if (!props.animate) {
-      setEntered(props.open);
-      return;
+function providerStatusesContentKey(providers: ReadonlyArray<ServerProvider>): string {
+  const parts: string[] = [`${providers.length}`];
+  for (const provider of providers) {
+    parts.push(
+      provider.instanceId,
+      provider.driver,
+      provider.displayName ?? "",
+      provider.accentColor ?? "",
+      provider.badgeLabel ?? "",
+      provider.continuation?.groupKey ?? "",
+      provider.showInteractionModeToggle ? "1" : "0",
+      provider.enabled ? "1" : "0",
+      provider.status,
+      provider.installed ? "1" : "0",
+      provider.availability ?? "",
+      provider.unavailableReason ?? "",
+      provider.auth.status,
+      provider.auth.type ?? "",
+      provider.auth.label ?? "",
+      provider.auth.email ?? "",
+      provider.message ?? "",
+    );
+    for (const model of provider.models) {
+      parts.push(
+        "model",
+        model.slug,
+        model.name,
+        model.shortName ?? "",
+        model.subProvider ?? "",
+        model.isCustom ? "1" : "0",
+        JSON.stringify(model.capabilities) ?? "",
+      );
     }
-
-    if (!props.open) {
-      setEntered(false);
-      return;
+    for (const command of provider.slashCommands) {
+      parts.push("command", command.name, command.description ?? "", command.input?.hint ?? "");
     }
-
-    const frameId = window.requestAnimationFrame(() => setEntered(true));
-    return () => window.cancelAnimationFrame(frameId);
-  }, [props.animate, props.open]);
-
-  const active = props.animate ? props.open && entered : props.open;
-
-  return (
-    <div
-      aria-hidden={props.open ? undefined : true}
-      inert={props.open ? undefined : true}
-      className={cn(
-        "h-full min-h-0 shrink-0 overflow-hidden transition-[width,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
-        active ? "w-(--overview-sidebar-frame-width) opacity-100" : "w-0 opacity-0",
-      )}
-      style={
-        {
-          "--overview-sidebar-frame-width": OVERVIEW_SIDEBAR_FRAME_WIDTH,
-        } as CSSProperties
-      }
-    >
-      <div
-        className={cn(
-          "h-full min-h-0 w-(--overview-sidebar-frame-width) transition-[translate,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transition-none",
-          active ? "translate-x-0 opacity-100" : "translate-x-5 opacity-0",
-        )}
-      >
-        {props.children}
-      </div>
-    </div>
-  );
+    for (const skill of provider.skills) {
+      parts.push(
+        "skill",
+        skill.name,
+        skill.path,
+        skill.enabled ? "1" : "0",
+        skill.scope ?? "",
+        skill.displayName ?? "",
+        skill.shortDescription ?? "",
+        skill.description ?? "",
+      );
+    }
+  }
+  return parts.join(PROVIDER_STATUS_KEY_SEPARATOR);
 }
 
-function FloatingOverviewMotionFrame(props: {
-  animate: boolean;
-  children: ReactNode;
-  open: boolean;
-}) {
-  const [entered, setEntered] = useState(!props.animate && props.open);
-
-  useEffect(() => {
-    if (!props.animate) {
-      setEntered(props.open);
-      return;
-    }
-
-    if (!props.open) {
-      setEntered(false);
-      return;
-    }
-
-    const frameId = window.requestAnimationFrame(() => setEntered(true));
-    return () => window.cancelAnimationFrame(frameId);
-  }, [props.animate, props.open]);
-
-  const active = props.animate ? props.open && entered : props.open;
-
-  return (
-    <div className="pointer-events-none absolute top-3 right-3 z-40">
-      <div
-        aria-hidden={props.open ? undefined : true}
-        inert={props.open ? undefined : true}
-        className={cn(
-          "origin-top-right transition-[translate,opacity] duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transition-none",
-          active ? "translate-x-0 opacity-100" : "translate-x-3 opacity-0",
-        )}
-      >
-        {props.children}
-      </div>
-    </div>
-  );
+function stabilizeProviderStatusesSnapshot(
+  providers: ReadonlyArray<ServerProvider>,
+  cache: { key: string; snapshot: ServerProvider[] },
+): ServerProvider[] {
+  const key = providerStatusesContentKey(providers);
+  if (key === cache.key) {
+    return cache.snapshot;
+  }
+  const snapshot = providers as ServerProvider[];
+  cache.key = key;
+  cache.snapshot = snapshot;
+  return snapshot;
 }
+
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly connectionState: "connecting" | "disconnected" | "error";
 };
-
-type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
-
-function compactQueryErrorMessage(error: unknown): string | undefined {
-  if (!error) return undefined;
-  const message = error instanceof Error ? error.message : "Failed to load.";
-  const providerMatch = /^Source control provider [^ ]+ failed in [^:]+:\s*(.*)$/u.exec(message);
-  return providerMatch?.[1] ?? message;
-}
-
-function branchNameCandidates(branchName: string | null | undefined): ReadonlySet<string> {
-  const candidates = new Set<string>();
-  const trimmed = branchName?.trim() ?? "";
-  if (trimmed.length === 0) {
-    return candidates;
-  }
-  candidates.add(trimmed);
-
-  const firstSlashIndex = trimmed.indexOf("/");
-  if (firstSlashIndex > 0 && firstSlashIndex < trimmed.length - 1) {
-    const prefix = trimmed.slice(0, firstSlashIndex);
-    if (prefix === "origin" || prefix === "upstream") {
-      candidates.add(trimmed.slice(firstSlashIndex + 1));
-    }
-  }
-
-  return candidates;
-}
-
-function findChangeRequestForBranch(
-  changeRequests: ReadonlyArray<ChangeRequest> | null | undefined,
-  branchName: string | null | undefined,
-): ChangeRequest | null {
-  const candidates = branchNameCandidates(branchName);
-  if (candidates.size === 0) {
-    return null;
-  }
-  return changeRequests?.find((request) => candidates.has(request.headRefName)) ?? null;
-}
-
-function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalogEntry[] {
-  return useStore(
-    useMemo(() => {
-      let previousThreadIds: readonly ThreadId[] = [];
-      let previousResult: ThreadPlanCatalogEntry[] = [];
-      let previousEntries = new Map<
-        ThreadId,
-        {
-          shell: object | null;
-          proposedPlanIds: readonly string[] | undefined;
-          proposedPlansById: Record<string, Thread["proposedPlans"][number]> | undefined;
-          entry: ThreadPlanCatalogEntry;
-        }
-      >();
-
-      return (state) => {
-        const sameThreadIds =
-          previousThreadIds.length === threadIds.length &&
-          previousThreadIds.every((id, index) => id === threadIds[index]);
-        const nextEntries = new Map<
-          ThreadId,
-          {
-            shell: object | null;
-            proposedPlanIds: readonly string[] | undefined;
-            proposedPlansById: Record<string, Thread["proposedPlans"][number]> | undefined;
-            entry: ThreadPlanCatalogEntry;
-          }
-        >();
-        const nextResult: ThreadPlanCatalogEntry[] = [];
-        let changed = !sameThreadIds;
-
-        for (const threadId of threadIds) {
-          let shell: object | undefined;
-          let proposedPlanIds: readonly string[] | undefined;
-          let proposedPlansById: Record<string, Thread["proposedPlans"][number]> | undefined;
-
-          for (const environmentState of Object.values(state.environmentStateById)) {
-            const matchedShell = environmentState.threadShellById[threadId];
-            if (!matchedShell) {
-              continue;
-            }
-            shell = matchedShell;
-            proposedPlanIds = environmentState.proposedPlanIdsByThreadId[threadId];
-            proposedPlansById = environmentState.proposedPlanByThreadId[threadId] as
-              | Record<string, Thread["proposedPlans"][number]>
-              | undefined;
-            break;
-          }
-
-          if (!shell) {
-            const previous = previousEntries.get(threadId);
-            if (
-              previous &&
-              previous.shell === null &&
-              previous.proposedPlanIds === undefined &&
-              previous.proposedPlansById === undefined
-            ) {
-              nextEntries.set(threadId, previous);
-              continue;
-            }
-            changed = true;
-            nextEntries.set(threadId, {
-              shell: null,
-              proposedPlanIds: undefined,
-              proposedPlansById: undefined,
-              entry: { id: threadId, proposedPlans: EMPTY_PROPOSED_PLANS },
-            });
-            continue;
-          }
-
-          const previous = previousEntries.get(threadId);
-          if (
-            previous &&
-            previous.shell === shell &&
-            previous.proposedPlanIds === proposedPlanIds &&
-            previous.proposedPlansById === proposedPlansById
-          ) {
-            nextEntries.set(threadId, previous);
-            nextResult.push(previous.entry);
-            continue;
-          }
-
-          changed = true;
-          const proposedPlans =
-            proposedPlanIds && proposedPlanIds.length > 0 && proposedPlansById
-              ? proposedPlanIds.flatMap((planId) => {
-                  const proposedPlan = proposedPlansById?.[planId];
-                  return proposedPlan ? [proposedPlan] : [];
-                })
-              : EMPTY_PROPOSED_PLANS;
-          const entry = { id: threadId, proposedPlans };
-          nextEntries.set(threadId, {
-            shell,
-            proposedPlanIds,
-            proposedPlansById,
-            entry,
-          });
-          nextResult.push(entry);
-        }
-
-        if (!changed && previousResult.length === nextResult.length) {
-          return previousResult;
-        }
-
-        previousThreadIds = threadIds;
-        previousEntries = nextEntries;
-        previousResult = nextResult;
-        return nextResult;
-      };
-    }, [threadIds]),
-  );
-}
 
 function formatOutgoingPrompt(params: {
   provider: ProviderDriverKind;
@@ -547,8 +279,6 @@ function formatOutgoingPrompt(params: {
   const promptEffort = resolvePromptInjectedEffort(caps, params.effort);
   return applyClaudePromptEffortPrefix(params.text, promptEffort);
 }
-const SCRIPT_TERMINAL_COLS = 120;
-const SCRIPT_TERMINAL_ROWS = 30;
 
 type ChatViewProps =
   | {
@@ -583,263 +313,6 @@ interface TerminalLaunchContext {
   cwd: string;
   worktreePath: string | null;
 }
-
-type PersistentTerminalLaunchContext = Pick<TerminalLaunchContext, "cwd" | "worktreePath">;
-
-function useLocalDispatchState(input: {
-  activeThread: Thread | undefined;
-  activeLatestTurn: Thread["latestTurn"] | null;
-  phase: SessionPhase;
-  activePendingApproval: ApprovalRequestId | null;
-  activePendingUserInput: ApprovalRequestId | null;
-  threadError: string | null | undefined;
-}) {
-  const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(null);
-
-  const beginLocalDispatch = useCallback(
-    (options?: { preparingWorktree?: boolean }) => {
-      const preparingWorktree = Boolean(options?.preparingWorktree);
-      setLocalDispatch((current) => {
-        if (current) {
-          return current.preparingWorktree === preparingWorktree
-            ? current
-            : { ...current, preparingWorktree };
-        }
-        return createLocalDispatchSnapshot(input.activeThread, options);
-      });
-    },
-    [input.activeThread],
-  );
-
-  const resetLocalDispatch = useCallback(() => {
-    setLocalDispatch(null);
-  }, []);
-
-  const serverAcknowledgedLocalDispatch = useMemo(
-    () =>
-      hasServerAcknowledgedLocalDispatch({
-        localDispatch,
-        phase: input.phase,
-        latestTurn: input.activeLatestTurn,
-        session: input.activeThread?.session ?? null,
-        hasPendingApproval: input.activePendingApproval !== null,
-        hasPendingUserInput: input.activePendingUserInput !== null,
-        threadError: input.threadError,
-      }),
-    [
-      input.activeLatestTurn,
-      input.activePendingApproval,
-      input.activePendingUserInput,
-      input.activeThread?.session,
-      input.phase,
-      input.threadError,
-      localDispatch,
-    ],
-  );
-
-  useEffect(() => {
-    if (!serverAcknowledgedLocalDispatch) {
-      return;
-    }
-    resetLocalDispatch();
-  }, [resetLocalDispatch, serverAcknowledgedLocalDispatch]);
-
-  return {
-    beginLocalDispatch,
-    resetLocalDispatch,
-    localDispatchStartedAt: localDispatch?.startedAt ?? null,
-    isPreparingWorktree: localDispatch?.preparingWorktree ?? false,
-    isSendBusy: localDispatch !== null && !serverAcknowledgedLocalDispatch,
-  };
-}
-
-interface PersistentThreadTerminalDrawerProps {
-  threadRef: { environmentId: EnvironmentId; threadId: ThreadId };
-  threadId: ThreadId;
-  visible: boolean;
-  launchContext: PersistentTerminalLaunchContext | null;
-  focusRequestId: number;
-  splitShortcutLabel: string | undefined;
-  newShortcutLabel: string | undefined;
-  closeShortcutLabel: string | undefined;
-  keybindings: ResolvedKeybindingsConfig;
-  onAddTerminalContext: (selection: TerminalContextSelection) => void;
-}
-
-const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDrawer({
-  threadRef,
-  threadId,
-  visible,
-  launchContext,
-  focusRequestId,
-  splitShortcutLabel,
-  newShortcutLabel,
-  closeShortcutLabel,
-  keybindings,
-  onAddTerminalContext,
-}: PersistentThreadTerminalDrawerProps) {
-  const serverThread = useStore(useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]));
-  const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
-  const projectRef = serverThread
-    ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
-    : draftThread
-      ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
-      : null;
-  const project = useStore(useMemo(() => createProjectSelectorByRef(projectRef), [projectRef]));
-  const terminalState = useTerminalStateStore((state) =>
-    selectThreadTerminalState(state.terminalStateByThreadKey, threadRef),
-  );
-  const storeSetTerminalHeight = useTerminalStateStore((state) => state.setTerminalHeight);
-  const storeSplitTerminal = useTerminalStateStore((state) => state.splitTerminal);
-  const storeNewTerminal = useTerminalStateStore((state) => state.newTerminal);
-  const storeSetActiveTerminal = useTerminalStateStore((state) => state.setActiveTerminal);
-  const storeCloseTerminal = useTerminalStateStore((state) => state.closeTerminal);
-  const [localFocusRequestId, setLocalFocusRequestId] = useState(0);
-  const worktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
-  const effectiveWorktreePath = useMemo(() => {
-    if (launchContext !== null) {
-      return launchContext.worktreePath;
-    }
-    return worktreePath;
-  }, [launchContext, worktreePath]);
-  const cwd = useMemo(
-    () =>
-      launchContext?.cwd ??
-      (project
-        ? projectScriptCwd({
-            project: { cwd: project.cwd },
-            worktreePath: effectiveWorktreePath,
-          })
-        : null),
-    [effectiveWorktreePath, launchContext?.cwd, project],
-  );
-  const runtimeEnv = useMemo(
-    () =>
-      project
-        ? projectScriptRuntimeEnv({
-            project: { cwd: project.cwd },
-            worktreePath: effectiveWorktreePath,
-          })
-        : {},
-    [effectiveWorktreePath, project],
-  );
-
-  const bumpFocusRequestId = useCallback(() => {
-    if (!visible) {
-      return;
-    }
-    setLocalFocusRequestId((value) => value + 1);
-  }, [visible]);
-
-  const setTerminalHeight = useCallback(
-    (height: number) => {
-      storeSetTerminalHeight(threadRef, height);
-    },
-    [storeSetTerminalHeight, threadRef],
-  );
-
-  const splitTerminal = useCallback(() => {
-    storeSplitTerminal(threadRef, `terminal-${randomUUID()}`);
-    bumpFocusRequestId();
-  }, [bumpFocusRequestId, storeSplitTerminal, threadRef]);
-
-  const createNewTerminal = useCallback(() => {
-    storeNewTerminal(threadRef, `terminal-${randomUUID()}`);
-    bumpFocusRequestId();
-  }, [bumpFocusRequestId, storeNewTerminal, threadRef]);
-
-  const activateTerminal = useCallback(
-    (terminalId: string) => {
-      storeSetActiveTerminal(threadRef, terminalId);
-      bumpFocusRequestId();
-    },
-    [bumpFocusRequestId, storeSetActiveTerminal, threadRef],
-  );
-
-  const closeTerminal = useCallback(
-    (terminalId: string) => {
-      const api = readEnvironmentApi(threadRef.environmentId);
-      if (!api) return;
-      const isFinalTerminal = terminalState.terminalIds.length <= 1;
-      const fallbackExitWrite = () =>
-        api.terminal.write({ threadId, terminalId, data: "exit\n" }).catch(() => undefined);
-
-      if ("close" in api.terminal && typeof api.terminal.close === "function") {
-        void (async () => {
-          if (isFinalTerminal) {
-            await api.terminal.clear({ threadId, terminalId }).catch(() => undefined);
-          }
-          await api.terminal.close({
-            threadId,
-            terminalId,
-            deleteHistory: true,
-          });
-        })().catch(() => fallbackExitWrite());
-      } else {
-        void fallbackExitWrite();
-      }
-
-      storeCloseTerminal(threadRef, terminalId);
-      bumpFocusRequestId();
-    },
-    [bumpFocusRequestId, storeCloseTerminal, terminalState.terminalIds.length, threadId, threadRef],
-  );
-
-  const handleAddTerminalContext = useCallback(
-    (selection: TerminalContextSelection) => {
-      if (!visible) {
-        return;
-      }
-      onAddTerminalContext(selection);
-    },
-    [onAddTerminalContext, visible],
-  );
-
-  if (!project || !terminalState.terminalOpen || !cwd) {
-    return null;
-  }
-
-  return (
-    <div className={visible ? undefined : "hidden"}>
-      <Suspense
-        fallback={
-          <div
-            className="thread-terminal-drawer relative flex min-w-0 shrink-0 items-center border-border/80 border-t bg-background px-4 text-muted-foreground text-sm"
-            style={{ height: terminalState.terminalHeight }}
-          >
-            Loading terminal...
-          </div>
-        }
-      >
-        <ThreadTerminalDrawer
-          threadRef={threadRef}
-          threadId={threadId}
-          cwd={cwd}
-          worktreePath={effectiveWorktreePath}
-          runtimeEnv={runtimeEnv}
-          visible={visible}
-          height={terminalState.terminalHeight}
-          terminalIds={terminalState.terminalIds}
-          runningTerminalIds={terminalState.runningTerminalIds}
-          activeTerminalId={terminalState.activeTerminalId}
-          terminalGroups={terminalState.terminalGroups}
-          activeTerminalGroupId={terminalState.activeTerminalGroupId}
-          focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
-          onSplitTerminal={splitTerminal}
-          onNewTerminal={createNewTerminal}
-          splitShortcutLabel={visible ? splitShortcutLabel : undefined}
-          newShortcutLabel={visible ? newShortcutLabel : undefined}
-          closeShortcutLabel={visible ? closeShortcutLabel : undefined}
-          keybindings={keybindings}
-          onActiveTerminalChange={activateTerminal}
-          onCloseTerminal={closeTerminal}
-          onHeightChange={setTerminalHeight}
-          onAddTerminalContext={handleAddTerminalContext}
-        />
-      </Suspense>
-    </div>
-  );
-});
 
 export default function ChatView(props: ChatViewProps) {
   usePerfMark("ChatView");
@@ -941,16 +414,6 @@ export default function ChatView(props: ChatViewProps) {
     Record<string, string | null>
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
-  const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
-  const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
-  const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
-    ApprovalRequestId[]
-  >([]);
-  const [pendingUserInputAnswersByRequestId, setPendingUserInputAnswersByRequestId] = useState<
-    Record<string, Record<string, PendingUserInputDraftAnswer>>
-  >({});
-  const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
-    useState<Record<string, number>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(true);
   const [overviewFloatingOpen, setOverviewFloatingOpen] = useState(false);
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
@@ -971,9 +434,6 @@ export default function ChatView(props: ChatViewProps) {
   const [terminalLaunchContext, setTerminalLaunchContext] = useState<TerminalLaunchContext | null>(
     null,
   );
-  const [attachmentPreviewHandoffByMessageId, setAttachmentPreviewHandoffByMessageId] = useState<
-    Record<string, string[]>
-  >({});
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
   const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
     LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
@@ -982,8 +442,6 @@ export default function ChatView(props: ChatViewProps) {
   );
   const legendListRef = useRef<LegendListRef | null>(null);
   const isAtEndRef = useRef(true);
-  const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
-  const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
 
@@ -1080,6 +538,45 @@ export default function ChatView(props: ChatViewProps) {
   const diffOpen = rawSearch.diff === "1";
   const workspacePanelOpen = props.workspacePanelOpen ?? isRightPanelOpen(rawSearch);
   const activeThreadId = activeThread?.id ?? null;
+  const setThreadError = useCallback(
+    (targetThreadId: ThreadId | null, error: string | null) => {
+      if (!targetThreadId) return;
+      const nextError = sanitizeThreadErrorMessage(error);
+      const isCurrentServerThread = shouldWriteThreadErrorToCurrentServerThread({
+        serverThread,
+        routeThreadRef,
+        targetThreadId,
+      });
+      if (isCurrentServerThread) {
+        setStoreThreadError(targetThreadId, nextError);
+        return;
+      }
+      const localDraftErrorKey = draftId ?? targetThreadId;
+      setLocalDraftErrorsByDraftId((existing) => {
+        if ((existing[localDraftErrorKey] ?? null) === nextError) {
+          return existing;
+        }
+        return {
+          ...existing,
+          [localDraftErrorKey]: nextError,
+        };
+      });
+    },
+    [draftId, routeThreadRef, serverThread, setStoreThreadError],
+  );
+  const {
+    interruptTurn: onInterrupt,
+    respondToApproval: onRespondToApproval,
+    respondToUserInput: onRespondToUserInput,
+    revertToTurnCount,
+    respondingRequestIds,
+    respondingUserInputRequestIds,
+    isRevertingCheckpoint,
+  } = useChatSessionActions({
+    environmentId,
+    activeThreadId,
+    setThreadError,
+  });
   const activeThreadRef = useMemo(
     () => (activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null),
     [activeThread],
@@ -1208,55 +705,10 @@ export default function ChatView(props: ChatViewProps) {
     [navigate],
   );
 
-  const prefetchControllerRef = useRef<ReturnType<typeof createTabPrefetchController> | null>(null);
-  useEffect(() => {
-    const controller = createTabPrefetchController({
-      retain: (key) => {
-        const ref = parseScopedThreadKey(key);
-        if (!ref) return () => {};
-        return retainThreadDetailSubscription(ref.environmentId, ref.threadId);
-      },
-      releaseDelayMs: 250,
-    });
-    prefetchControllerRef.current = controller;
-    return () => {
-      controller.dispose();
-      prefetchControllerRef.current = null;
-    };
-  }, []);
-  const handleTabPrefetchEnter = useCallback(
-    (key: string) => prefetchControllerRef.current?.enter(key),
-    [],
-  );
-  const handleTabPrefetchLeave = useCallback(
-    (key: string) => prefetchControllerRef.current?.leave(key),
-    [],
-  );
-
-  // Speculatively warm WS subscriptions for every sibling tab in the
-  // active worktree. Subscriptions are reference-counted by
-  // retainThreadDetailSubscription, so the active route's own retain
-  // is not duplicated and idle ones are evicted by the existing cap.
-  // This makes cold clicks (no hover) behave like warm clicks.
-  useEffect(() => {
-    if (activeWorktreeSessionTabs.length === 0) return;
-    const releases: Array<() => void> = [];
-    for (const tab of activeWorktreeSessionTabs) {
-      if (tab.key === activeSessionTabKey) continue;
-      const ref = parseScopedThreadKey(tab.key);
-      if (!ref) continue;
-      releases.push(retainThreadDetailSubscription(ref.environmentId, ref.threadId));
-    }
-    return () => {
-      for (const release of releases) release();
-    };
-  }, [activeWorktreeSessionTabs, activeSessionTabKey]);
-
-  useEffect(() => {
-    if (!activeSessionTabKey) return;
-    const key = activeSessionTabKey;
-    queueMicrotask(() => markTabSwitchFirstPaint(key));
-  }, [activeSessionTabKey]);
+  const { handleTabPrefetchEnter, handleTabPrefetchLeave } = useChatSessionTabsPrefetch({
+    activeWorktreeSessionTabs,
+    activeSessionTabKey,
+  });
 
   useEffect(() => {
     if (routeKind !== "server") {
@@ -1689,6 +1141,16 @@ export default function ChatView(props: ChatViewProps) {
     [composerRef],
   );
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
+  const composerProviderStatusesCacheRef = useRef({
+    key: "",
+    snapshot: EMPTY_PROVIDERS,
+  });
+  const composerProviderStatuses = useMemo(
+    () =>
+      stabilizeProviderStatusesSnapshot(providerStatuses, composerProviderStatusesCacheRef.current),
+    [providerStatuses],
+  );
+  const activeThreadSessionProviderInstanceId = activeThread?.session?.providerInstanceId ?? null;
   const unlockedSelectedProvider = resolveSelectableProvider(
     providerStatuses,
     selectedProviderByThreadId ?? threadProvider ?? ProviderDriverKind.make("codex"),
@@ -1712,39 +1174,24 @@ export default function ChatView(props: ChatViewProps) {
     () => deriveThreadSubagents(threadActivities),
     [threadActivities],
   );
-  const activePendingUserInput = pendingUserInputs[0] ?? null;
-  const activePendingDraftAnswers = useMemo(
-    () =>
-      activePendingUserInput
-        ? (pendingUserInputAnswersByRequestId[activePendingUserInput.requestId] ??
-          EMPTY_PENDING_USER_INPUT_ANSWERS)
-        : EMPTY_PENDING_USER_INPUT_ANSWERS,
-    [activePendingUserInput, pendingUserInputAnswersByRequestId],
-  );
-  const activePendingQuestionIndex = activePendingUserInput
-    ? (pendingUserInputQuestionIndexByRequestId[activePendingUserInput.requestId] ?? 0)
-    : 0;
-  const activePendingProgress = useMemo(
-    () =>
-      activePendingUserInput
-        ? derivePendingUserInputProgress(
-            activePendingUserInput.questions,
-            activePendingDraftAnswers,
-            activePendingQuestionIndex,
-          )
-        : null,
-    [activePendingDraftAnswers, activePendingQuestionIndex, activePendingUserInput],
-  );
-  const activePendingResolvedAnswers = useMemo(
-    () =>
-      activePendingUserInput
-        ? buildPendingUserInputAnswers(activePendingUserInput.questions, activePendingDraftAnswers)
-        : null,
-    [activePendingDraftAnswers, activePendingUserInput],
-  );
-  const activePendingIsResponding = activePendingUserInput
-    ? respondingUserInputRequestIds.includes(activePendingUserInput.requestId)
-    : false;
+  const {
+    activePendingUserInput,
+    activePendingDraftAnswers,
+    activePendingQuestionIndex,
+    activePendingProgress,
+    activePendingResolvedAnswers,
+    activePendingIsResponding,
+    onSelectActivePendingUserInputOption,
+    onChangeActivePendingUserInputCustomAnswer,
+    onAdvanceActivePendingUserInput,
+    onPreviousActivePendingUserInputQuestion,
+  } = useChatPendingUserInput({
+    pendingUserInputs,
+    respondingUserInputRequestIds,
+    readComposer,
+    promptRef,
+    onRespondToUserInput,
+  });
   const activeProposedPlan = useMemo(() => {
     if (!latestTurnSettled) {
       return null;
@@ -1791,147 +1238,12 @@ export default function ChatView(props: ChatViewProps) {
     activeThread?.session ?? null,
     localDispatchStartedAt,
   );
-  useEffect(() => {
-    attachmentPreviewHandoffByMessageIdRef.current = attachmentPreviewHandoffByMessageId;
-  }, [attachmentPreviewHandoffByMessageId]);
-  const clearAttachmentPreviewHandoff = useCallback(
-    (messageId: MessageId, previewUrls?: ReadonlyArray<string>) => {
-      delete attachmentPreviewPromotionInFlightByMessageIdRef.current[messageId];
-      const currentPreviewUrls =
-        previewUrls ?? attachmentPreviewHandoffByMessageIdRef.current[messageId] ?? [];
-      setAttachmentPreviewHandoffByMessageId((existing) => {
-        if (!(messageId in existing)) {
-          return existing;
-        }
-        const next = { ...existing };
-        delete next[messageId];
-        attachmentPreviewHandoffByMessageIdRef.current = next;
-        return next;
-      });
-      for (const previewUrl of currentPreviewUrls) {
-        revokeBlobPreviewUrl(previewUrl);
-      }
-    },
-    [],
-  );
-  const clearAttachmentPreviewHandoffs = useCallback(() => {
-    attachmentPreviewPromotionInFlightByMessageIdRef.current = {};
-    for (const previewUrls of Object.values(attachmentPreviewHandoffByMessageIdRef.current)) {
-      for (const previewUrl of previewUrls) {
-        revokeBlobPreviewUrl(previewUrl);
-      }
-    }
-    attachmentPreviewHandoffByMessageIdRef.current = {};
-    setAttachmentPreviewHandoffByMessageId({});
-  }, []);
-  useEffect(() => {
-    return () => {
-      clearAttachmentPreviewHandoffs();
-      for (const message of optimisticUserMessagesRef.current) {
-        revokeUserMessagePreviewUrls(message);
-      }
-    };
-  }, [clearAttachmentPreviewHandoffs]);
-  const handoffAttachmentPreviews = useCallback((messageId: MessageId, previewUrls: string[]) => {
-    if (previewUrls.length === 0) return;
-
-    const previousPreviewUrls = attachmentPreviewHandoffByMessageIdRef.current[messageId] ?? [];
-    for (const previewUrl of previousPreviewUrls) {
-      if (!previewUrls.includes(previewUrl)) {
-        revokeBlobPreviewUrl(previewUrl);
-      }
-    }
-    setAttachmentPreviewHandoffByMessageId((existing) => {
-      const next = {
-        ...existing,
-        [messageId]: previewUrls,
-      };
-      attachmentPreviewHandoffByMessageIdRef.current = next;
-      return next;
-    });
-  }, []);
   const serverMessages = activeThread?.messages;
-  useEffect(() => {
-    if (typeof Image === "undefined" || !serverMessages || serverMessages.length === 0) {
-      return;
-    }
-
-    const cleanups: Array<() => void> = [];
-
-    for (const [messageId, handoffPreviewUrls] of Object.entries(
-      attachmentPreviewHandoffByMessageId,
-    )) {
-      if (attachmentPreviewPromotionInFlightByMessageIdRef.current[messageId]) {
-        continue;
-      }
-
-      const serverMessage = serverMessages.find(
-        (message) => message.id === messageId && message.role === "user",
-      );
-      if (!serverMessage?.attachments || serverMessage.attachments.length === 0) {
-        continue;
-      }
-
-      const serverPreviewUrls = serverMessage.attachments.flatMap((attachment) =>
-        attachment.type === "image" && attachment.previewUrl ? [attachment.previewUrl] : [],
-      );
-      if (
-        serverPreviewUrls.length === 0 ||
-        serverPreviewUrls.length !== handoffPreviewUrls.length ||
-        serverPreviewUrls.some((previewUrl) => previewUrl.startsWith("blob:"))
-      ) {
-        continue;
-      }
-
-      attachmentPreviewPromotionInFlightByMessageIdRef.current[messageId] = true;
-
-      let cancelled = false;
-      const imageInstances: HTMLImageElement[] = [];
-
-      const preloadServerPreviews = Promise.all(
-        serverPreviewUrls.map(
-          (previewUrl) =>
-            new Promise<void>((resolve, reject) => {
-              const image = new Image();
-              imageInstances.push(image);
-              const handleLoad = () => resolve();
-              const handleError = () =>
-                reject(new Error(`Failed to load server preview for ${messageId}.`));
-              image.addEventListener("load", handleLoad, { once: true });
-              image.addEventListener("error", handleError, { once: true });
-              image.src = previewUrl;
-            }),
-        ),
-      );
-
-      void preloadServerPreviews
-        .then(() => {
-          if (cancelled) {
-            return;
-          }
-          clearAttachmentPreviewHandoff(messageId as MessageId, handoffPreviewUrls);
-        })
-        .catch(() => {
-          if (!cancelled) {
-            delete attachmentPreviewPromotionInFlightByMessageIdRef.current[messageId];
-          }
-        });
-
-      cleanups.push(() => {
-        cancelled = true;
-        delete attachmentPreviewPromotionInFlightByMessageIdRef.current[messageId];
-        for (const image of imageInstances) {
-          image.src = "";
-        }
-      });
-    }
-
-    return () => {
-      for (const cleanup of cleanups) {
-        cleanup();
-      }
-    };
-  }, [attachmentPreviewHandoffByMessageId, clearAttachmentPreviewHandoff, serverMessages]);
+  const { attachmentPreviewHandoffByMessageId, handoffAttachmentPreviews } =
+    useChatAttachmentPreviewHandoff({
+      serverMessages,
+      optimisticUserMessagesRef,
+    });
   const timelineMessages = useMemo(() => {
     const messages = serverMessages ?? [];
     const serverMessagesWithPreviewHandoff =
@@ -2040,38 +1352,11 @@ export default function ChatView(props: ChatViewProps) {
     : null;
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
   const queryClient = useQueryClient();
-  const [postPushWorkflowWatch, setPostPushWorkflowWatch] =
-    useState<PostPushWorkflowDiscoveryWatch | null>(null);
-  const handlePostPushGitAction = useCallback(
-    (event: GitActionPostPushEvent) => {
-      setPostPushWorkflowWatch(
-        createPostPushWorkflowDiscoveryWatch({
-          environmentId: event.environmentId,
-          threadKey: event.threadKey,
-          cwd: event.cwd,
-          pullRequestNumber: event.pullRequestNumber,
-          commitSha: event.commitSha,
-          nowMs: Date.now(),
-        }),
-      );
-      void queryClient.invalidateQueries({
-        queryKey: sourceControlContextQueryKeys.changeRequests(event.environmentId, event.cwd),
-      });
-      void queryClient.invalidateQueries({
-        queryKey: sourceControlContextQueryKeys.workflows(event.environmentId, event.cwd),
-      });
-    },
-    [queryClient],
-  );
-  useEffect(() => {
-    if (!postPushWorkflowWatch) return;
-    const timeoutId = window.setTimeout(
-      () =>
-        setPostPushWorkflowWatch((current) => (current === postPushWorkflowWatch ? null : current)),
-      Math.max(0, postPushWorkflowWatch.expiresAtMs - Date.now()),
-    );
-    return () => window.clearTimeout(timeoutId);
-  }, [postPushWorkflowWatch]);
+  const {
+    postPushWorkflowWatch,
+    handlePostPush: handlePostPushGitAction,
+    clearWatch: clearPostPushWatch,
+  } = usePostPushWorkflowWatch();
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
   // Prefer an instance-id match so a custom Codex instance (e.g.
@@ -2095,320 +1380,6 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
-  const overviewBranchName =
-    activeWorktreeSummary?.branch ?? activeThread?.branch ?? gitStatusQuery.data?.refName ?? null;
-  const overviewBranchPullRequestsQuery = useQuery({
-    ...changeRequestListQueryOptions({
-      environmentId,
-      cwd: gitCwd,
-      state: "open",
-      limit: 50,
-      enabled:
-        overviewBranchName !== null &&
-        activeWorktreeSummary?.prNumber == null &&
-        gitStatusQuery.data?.pr == null,
-    }),
-  });
-  const overviewBranchPullRequest = useMemo(
-    () => findChangeRequestForBranch(overviewBranchPullRequestsQuery.data, overviewBranchName),
-    [overviewBranchName, overviewBranchPullRequestsQuery.data],
-  );
-  const postPushWorkflowWatchForContext = selectActivePostPushWorkflowDiscoveryWatch({
-    watch: postPushWorkflowWatch,
-    environmentId,
-    threadKey: activeThreadKey,
-    cwd: gitCwd,
-    pullRequestNumber: null,
-    nowMs: Date.now(),
-  });
-  const overviewPullRequestNumber =
-    activeWorktreeSummary?.prNumber ??
-    gitStatusQuery.data?.pr?.number ??
-    overviewBranchPullRequest?.number ??
-    postPushWorkflowWatchForContext?.pullRequestNumber ??
-    null;
-  const activePostPushWorkflowWatch = selectActivePostPushWorkflowDiscoveryWatch({
-    watch: postPushWorkflowWatchForContext,
-    environmentId,
-    threadKey: activeThreadKey,
-    cwd: gitCwd,
-    pullRequestNumber: overviewPullRequestNumber,
-    nowMs: Date.now(),
-  });
-  const overviewPullRequestReference =
-    overviewPullRequestNumber !== null ? String(overviewPullRequestNumber) : null;
-  const overviewGitProvider = gitStatusQuery.data?.sourceControlProvider?.kind ?? null;
-  const overviewPullRequestDetailQuery = useQuery({
-    ...changeRequestDetailQueryOptions({
-      environmentId,
-      cwd: gitCwd,
-      reference: overviewPullRequestReference,
-      enabled: overviewPullRequestNumber !== null,
-    }),
-    refetchInterval: (query) => {
-      const detail = query.state.data;
-      return detail?.state === "open" ? 30_000 : false;
-    },
-  });
-  const overviewPullRequestProvider =
-    overviewPullRequestDetailQuery.data?.provider ??
-    overviewBranchPullRequest?.provider ??
-    overviewGitProvider;
-  const overviewWorkflowRunsSupported = areOverviewWorkflowRunsSupported(
-    overviewPullRequestProvider,
-  );
-  const overviewWorkflowRunsEnabled =
-    overviewWorkflowRunsSupported && overviewPullRequestNumber !== null;
-  const overviewWorkflowRunsQuery = useQuery({
-    ...workflowRunsQueryOptions({
-      environmentId,
-      cwd: gitCwd,
-      pullRequestNumber: overviewPullRequestNumber,
-      commitSha: activePostPushWorkflowWatch?.commitSha ?? null,
-      limit: 20,
-      enabled: overviewWorkflowRunsEnabled,
-    }),
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      const status = data
-        ? getPrCheckStatusFromWorkflowRuns({
-            runs: data.runs,
-            headSha: sourceControlOptionValue(data.headSha),
-          })
-        : null;
-      return resolveWorkflowRunsRefetchInterval({
-        activeWatch: activePostPushWorkflowWatch,
-        nowMs: Date.now(),
-        discoveredPostPushRun: hasDiscoveredPostPushWorkflowRun({
-          watch: activePostPushWorkflowWatch,
-          runs: data?.runs,
-        }),
-        statusRefreshable: status ? shouldRefreshPrCheckStatus(status) : false,
-      });
-    },
-  });
-  useEffect(() => {
-    if (!activePostPushWorkflowWatch) return;
-    if (
-      !hasDiscoveredPostPushWorkflowRun({
-        watch: activePostPushWorkflowWatch,
-        runs: overviewWorkflowRunsQuery.data?.runs,
-      })
-    ) {
-      return;
-    }
-    setPostPushWorkflowWatch((current) =>
-      current === activePostPushWorkflowWatch ? null : current,
-    );
-  }, [activePostPushWorkflowWatch, overviewWorkflowRunsQuery.data?.runs]);
-  const overviewActiveWorkflowRunId = useMemo(() => {
-    const runs = overviewWorkflowRunsQuery.data?.runs ?? [];
-    return runs.find(isOverviewActiveWorkflowRun)?.runId ?? null;
-  }, [overviewWorkflowRunsQuery.data]);
-  const overviewWorkflowDetailRunIds = useMemo(() => {
-    if (!overviewWorkflowRunsSupported || overviewPullRequestNumber === null) return [];
-    const runs = overviewWorkflowRunsQuery.data?.runs ?? [];
-    const runIds = runs.slice(0, OVERVIEW_CHECK_DETAIL_RUN_LIMIT).map((run) => run.runId);
-    if (overviewActiveWorkflowRunId && !runIds.includes(overviewActiveWorkflowRunId)) {
-      return [overviewActiveWorkflowRunId, ...runIds].slice(0, OVERVIEW_CHECK_DETAIL_RUN_LIMIT);
-    }
-    return runIds;
-  }, [
-    overviewActiveWorkflowRunId,
-    overviewPullRequestNumber,
-    overviewWorkflowRunsQuery.data?.runs,
-    overviewWorkflowRunsSupported,
-  ]);
-  const overviewWorkflowRunJobQueries = useQueries({
-    queries: overviewWorkflowDetailRunIds.map((runId) => ({
-      ...workflowRunJobsQueryOptions({
-        environmentId,
-        cwd: gitCwd,
-        runId,
-        enabled: overviewWorkflowRunsSupported && overviewPullRequestNumber !== null,
-      }),
-      refetchInterval: overviewActiveWorkflowRunId === runId ? 30_000 : false,
-    })),
-  });
-  const overviewWorkflowJobsByRunId = useMemo(() => {
-    const jobsByRunId = new Map<string, ReadonlyArray<SourceControlWorkflowJob>>();
-    overviewWorkflowDetailRunIds.forEach((runId, index) => {
-      const jobs = overviewWorkflowRunJobQueries[index]?.data?.jobs;
-      if (jobs) {
-        jobsByRunId.set(runId, jobs);
-      }
-    });
-    return jobsByRunId;
-  }, [overviewWorkflowDetailRunIds, overviewWorkflowRunJobQueries]);
-  const overviewWorkflowRunJobsLoading = overviewWorkflowRunJobQueries.some(
-    (query) => query.isLoading,
-  );
-  const overviewPullRequest = useMemo<OverviewPullRequestState | null>(() => {
-    if (overviewPullRequestNumber === null) {
-      return null;
-    }
-    const gitPr = gitStatusQuery.data?.pr ?? null;
-    const branchPr = overviewBranchPullRequest;
-    const detail = overviewPullRequestDetailQuery.data ?? null;
-    const workflowData = overviewWorkflowRunsSupported
-      ? (overviewWorkflowRunsQuery.data ?? null)
-      : null;
-    const checksQueryError = selectOverviewChecksError({
-      workflowRunsSupported: overviewWorkflowRunsSupported,
-      workflowError: overviewWorkflowRunsQuery.error,
-      detailError: overviewPullRequestDetailQuery.error,
-    });
-    const activeWorkflowJobDetail =
-      overviewActiveWorkflowRunId === null
-        ? undefined
-        : summarizeActiveWorkflowJob(overviewWorkflowJobsByRunId.get(overviewActiveWorkflowRunId));
-    const checkStatus =
-      workflowData && overviewWorkflowRunsSupported
-        ? getPrCheckStatusForQuery({
-            isLoading: overviewWorkflowRunsQuery.isLoading,
-            error: overviewWorkflowRunsQuery.error,
-            status: getPrCheckStatusFromWorkflowRuns({
-              runs: workflowData.runs,
-              headSha: sourceControlOptionValue(workflowData.headSha),
-            }),
-          })
-        : detail
-          ? getPrCheckStatusFromChangeRequest(detail)
-          : branchPr
-            ? getPrCheckStatusFromChangeRequest(branchPr)
-            : getPrCheckStatusForQuery({
-                isLoading:
-                  (overviewWorkflowRunsSupported && overviewWorkflowRunsQuery.isLoading) ||
-                  overviewPullRequestDetailQuery.isLoading,
-                error: checksQueryError,
-                status: null,
-              });
-    const workflowRows = workflowData
-      ? buildOverviewWorkflowCheckRows({
-          runs: workflowData.runs,
-          jobsByRunId: overviewWorkflowJobsByRunId,
-        })
-      : [];
-    const rollupRows = buildOverviewCheckRollupRows({
-      rollup: detail?.checkRollup ?? branchPr?.checkRollup,
-    });
-    const hasWorkflowJobRows = Array.from(overviewWorkflowJobsByRunId.values()).some(
-      (jobs) => jobs.length > 0,
-    );
-    const latestRuns = hasWorkflowJobRows
-      ? workflowRows
-      : rollupRows.length > 0
-        ? rollupRows
-        : workflowRows;
-    if (activeWorkflowJobDetail) {
-      for (const run of latestRuns) {
-        if (
-          isOverviewActiveCheckKind(run.statusKind) &&
-          overviewActiveWorkflowRunId !== null &&
-          run.id.startsWith(`run:${overviewActiveWorkflowRunId}`)
-        ) {
-          run.activeDetail = activeWorkflowJobDetail;
-        }
-      }
-    }
-    const runs = latestRuns.filter((run) => isOverviewActiveCheckKind(run.statusKind));
-    const pullRequestUrl = detail?.url ?? gitPr?.url ?? branchPr?.url ?? null;
-    const pullRequestState =
-      detail?.state ?? activeWorktreeSummary?.prState ?? gitPr?.state ?? branchPr?.state ?? null;
-    const checksError = compactQueryErrorMessage(checksQueryError);
-
-    return {
-      number: overviewPullRequestNumber,
-      title:
-        detail?.title ??
-        gitPr?.title ??
-        branchPr?.title ??
-        activeWorktreeSummary?.title ??
-        `Pull request #${overviewPullRequestNumber}`,
-      ...(pullRequestUrl ? { url: pullRequestUrl } : {}),
-      ...(pullRequestState ? { state: pullRequestState } : {}),
-      ...(typeof detail?.commentsCount === "number"
-        ? { commentsCount: detail.commentsCount }
-        : detail
-          ? { commentsCount: detail.comments.length }
-          : typeof branchPr?.commentsCount === "number"
-            ? { commentsCount: branchPr.commentsCount }
-            : {}),
-      checkStatus,
-      checksLoading:
-        (overviewWorkflowRunsSupported && overviewWorkflowRunsQuery.isLoading) ||
-        overviewPullRequestDetailQuery.isLoading ||
-        overviewWorkflowRunJobsLoading,
-      ...(checksError ? { checksError } : {}),
-      ...(detail?.mergeability ? { mergeability: detail.mergeability } : {}),
-      hasMergeConflicts: detail?.mergeability === "conflicting",
-      activeCheckCount:
-        runs.length > 0
-          ? runs.length
-          : checkStatus && isOverviewActiveCheckKind(checkStatus.kind)
-            ? 1
-            : 0,
-      runs,
-      latestRuns,
-    };
-  }, [
-    activeWorktreeSummary?.prState,
-    activeWorktreeSummary?.title,
-    gitStatusQuery.data?.pr,
-    overviewActiveWorkflowRunId,
-    overviewBranchPullRequest,
-    overviewWorkflowJobsByRunId,
-    overviewWorkflowRunJobsLoading,
-    overviewPullRequestDetailQuery.data,
-    overviewPullRequestDetailQuery.error,
-    overviewPullRequestDetailQuery.isLoading,
-    overviewPullRequestNumber,
-    overviewWorkflowRunsSupported,
-    overviewWorkflowRunsQuery.data,
-    overviewWorkflowRunsQuery.error,
-    overviewWorkflowRunsQuery.isLoading,
-  ]);
-  const overviewItems = useMemo<OverviewPanelItem[]>(() => {
-    const items: OverviewPanelItem[] = [];
-    const gitStatus = gitStatusQuery.data;
-    if (gitStatus) {
-      const prDetail = overviewPullRequestDetailQuery.data ?? null;
-      const changesItem = buildOverviewChangesItem({
-        local: {
-          fileCount: gitStatus.workingTree.files.length,
-          insertions: gitStatus.workingTree.insertions,
-          deletions: gitStatus.workingTree.deletions,
-        },
-        pullRequest:
-          overviewPullRequestNumber !== null
-            ? {
-                changedFiles: prDetail?.changedFiles,
-                additions: prDetail?.additions,
-                deletions: prDetail?.deletions,
-                isLoading: overviewPullRequestDetailQuery.isLoading,
-              }
-            : null,
-      });
-      items.push({ ...changesItem, action: "review", icon: "changes" });
-    }
-
-    items.push({
-      label: "Environment",
-      value: activeEnvironmentUnavailableState?.label ?? "Local",
-      ...(activeEnvironmentUnavailableState
-        ? { detail: activeEnvironmentUnavailableState.connectionState }
-        : {}),
-      icon: "environment",
-    });
-
-    return items;
-  }, [
-    activeEnvironmentUnavailableState,
-    gitStatusQuery.data,
-    overviewPullRequestDetailQuery.data,
-    overviewPullRequestDetailQuery.isLoading,
-    overviewPullRequestNumber,
-  ]);
   const activeTerminalLaunchContext =
     terminalLaunchContext?.threadId === activeThreadId
       ? terminalLaunchContext
@@ -2440,142 +1411,30 @@ export default function ChatView(props: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "terminal.close", terminalShortcutLabelOptions),
     [keybindings, terminalShortcutLabelOptions],
   );
-  const onOpenReviewPanel = useEvent(() => {
-    if (!isServerThread) {
-      return;
-    }
-    onDiffPanelOpen?.();
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: {
-        environmentId,
-        threadId,
-      },
-      replace: true,
-      search: (previous) => buildOpenReviewSearch(previous),
-    });
-  });
-  const onToggleDiff = useEvent(() => {
-    if (!isServerThread) {
-      return;
-    }
-    if (!diffOpen) {
-      onOpenReviewPanel();
-      return;
-    }
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: {
-        environmentId,
-        threadId,
-      },
-      replace: true,
-      search: (previous) =>
-        diffOpen
-          ? {
-              ...stripWorkspacePanelSearchParams(previous),
-              diff: undefined,
-              diffTurnId: undefined,
-              diffFilePath: undefined,
-              preview: undefined,
-              workspaceOpen: undefined,
-              workspaceTab: undefined,
-              workspaceAgentKey: undefined,
-            }
-          : buildOpenReviewSearch(previous),
-    });
-  });
-  const onOpenFilesPanel = useEvent(() => {
-    if (!activeProject) {
-      return;
-    }
-    onPreviewPanelOpen?.();
-    const nextSearch = (previous: Record<string, unknown>) => buildOpenFilesSearch(previous);
-    if (routeKind === "draft" && draftId) {
-      void navigate({
-        to: "/draft/$draftId",
-        params: { draftId },
-        replace: true,
-        search: nextSearch,
-      });
-      return;
-    }
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: {
-        environmentId,
-        threadId,
-      },
-      replace: true,
-      search: nextSearch,
-    });
-  });
-  const onOpenTerminalPanel = useEvent(() => {
-    onTerminalPanelOpen?.();
-    const nextSearch = (previous: Record<string, unknown>) => buildOpenTerminalSearch(previous);
-    if (routeKind === "draft" && draftId) {
-      void navigate({
-        to: "/draft/$draftId",
-        params: { draftId },
-        replace: true,
-        search: nextSearch,
-      });
-      return;
-    }
-    if (!isServerThread) {
-      return;
-    }
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: {
-        environmentId,
-        threadId,
-      },
-      replace: true,
-      search: nextSearch,
-    });
-  });
-  const onToggleWorkspacePanel = useEvent(() => {
-    if (externalToggleWorkspacePanel) {
-      externalToggleWorkspacePanel();
-      return;
-    }
-    const nextSearch = (previous: Record<string, unknown>) =>
-      workspacePanelOpen
-        ? {
-            ...stripWorkspacePanelSearchParams(previous),
-            diff: undefined,
-            diffTurnId: undefined,
-            diffFilePath: undefined,
-            preview: undefined,
-            workspaceOpen: undefined,
-            workspaceTab: undefined,
-            workspaceAgentKey: undefined,
-          }
-        : buildOpenWorkspaceSearch(previous);
-
-    if (routeKind === "draft" && draftId) {
-      void navigate({
-        to: "/draft/$draftId",
-        params: { draftId },
-        replace: true,
-        search: nextSearch,
-      });
-      return;
-    }
-
-    if (!isServerThread) {
-      return;
-    }
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: {
-        environmentId,
-        threadId,
-      },
-      replace: true,
-      search: nextSearch,
-    });
+  const {
+    onOpenReviewPanel,
+    onToggleDiff,
+    onOpenFilesPanel,
+    onOpenTerminalPanel,
+    onToggleWorkspacePanel,
+    onOpenTurnDiff,
+    onCloseDiff,
+    onOpenSubagentPanel,
+  } = useChatWorkspacePanels({
+    navigate,
+    environmentId,
+    threadId,
+    routeKind,
+    draftId,
+    isServerThread,
+    hasActiveProject: Boolean(activeProject),
+    diffOpen,
+    workspacePanelOpen,
+    externalToggleWorkspacePanel,
+    onDiffPanelOpen,
+    onPreviewPanelOpen,
+    onTerminalPanelOpen,
+    onAgentPanelOpen,
   });
   const envLocked = Boolean(
     activeThread &&
@@ -2610,33 +1469,6 @@ export default function ChatView(props: ChatViewProps) {
     null;
   const hasReachedSplitLimit =
     (activeTerminalGroup?.terminalIds.length ?? 0) >= MAX_TERMINALS_PER_GROUP;
-  const setThreadError = useCallback(
-    (targetThreadId: ThreadId | null, error: string | null) => {
-      if (!targetThreadId) return;
-      const nextError = sanitizeThreadErrorMessage(error);
-      const isCurrentServerThread = shouldWriteThreadErrorToCurrentServerThread({
-        serverThread,
-        routeThreadRef,
-        targetThreadId,
-      });
-      if (isCurrentServerThread) {
-        setStoreThreadError(targetThreadId, nextError);
-        return;
-      }
-      const localDraftErrorKey = draftId ?? targetThreadId;
-      setLocalDraftErrorsByDraftId((existing) => {
-        if ((existing[localDraftErrorKey] ?? null) === nextError) {
-          return existing;
-        }
-        return {
-          ...existing,
-          [localDraftErrorKey]: nextError,
-        };
-      });
-    },
-    [draftId, routeThreadRef, serverThread, setStoreThreadError],
-  );
-
   const focusComposer = useCallback(() => {
     readComposer()?.focusAtEnd();
   }, [readComposer]);
@@ -2712,229 +1544,23 @@ export default function ChatView(props: ChatViewProps) {
       terminalState.terminalIds.length,
     ],
   );
-  const runProjectScript = useEvent(
-    async (
-      script: ProjectScript,
-      options?: {
-        cwd?: string;
-        env?: Record<string, string>;
-        worktreePath?: string | null;
-        preferNewTerminal?: boolean;
-        rememberAsLastInvoked?: boolean;
-      },
-    ) => {
-      const api = readEnvironmentApi(environmentId);
-      if (!api || !activeThreadId || !activeProject || !activeThread) return;
-      if (options?.rememberAsLastInvoked !== false) {
-        setLastInvokedScriptByProjectId((current) => {
-          if (current[activeProject.id] === script.id) return current;
-          return { ...current, [activeProject.id]: script.id };
-        });
-      }
-      const targetCwd = options?.cwd ?? gitCwd ?? activeProject.cwd;
-      const baseTerminalId =
-        terminalState.activeTerminalId ||
-        terminalState.terminalIds[0] ||
-        DEFAULT_THREAD_TERMINAL_ID;
-      const isBaseTerminalBusy = terminalState.runningTerminalIds.includes(baseTerminalId);
-      const wantsNewTerminal = Boolean(options?.preferNewTerminal) || isBaseTerminalBusy;
-      const shouldCreateNewTerminal = wantsNewTerminal;
-      const targetTerminalId = shouldCreateNewTerminal
-        ? `terminal-${randomUUID()}`
-        : baseTerminalId;
-      const targetWorktreePath = options?.worktreePath ?? activeThread.worktreePath ?? null;
-
-      setTerminalLaunchContext({
-        threadId: activeThreadId,
-        cwd: targetCwd,
-        worktreePath: targetWorktreePath,
-      });
-      setTerminalOpen(true);
-      if (!activeThreadRef) {
-        return;
-      }
-      if (shouldCreateNewTerminal) {
-        storeNewTerminal(activeThreadRef, targetTerminalId);
-      } else {
-        storeSetActiveTerminal(activeThreadRef, targetTerminalId);
-      }
-      setTerminalFocusRequestId((value) => value + 1);
-
-      const runtimeEnv = projectScriptRuntimeEnv({
-        project: {
-          cwd: activeProject.cwd,
-        },
-        worktreePath: targetWorktreePath,
-        ...(options?.env ? { extraEnv: options.env } : {}),
-      });
-      const openTerminalInput: TerminalOpenInput = shouldCreateNewTerminal
-        ? {
-            threadId: activeThreadId,
-            terminalId: targetTerminalId,
-            cwd: targetCwd,
-            ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
-            env: runtimeEnv,
-            cols: SCRIPT_TERMINAL_COLS,
-            rows: SCRIPT_TERMINAL_ROWS,
-          }
-        : {
-            threadId: activeThreadId,
-            terminalId: targetTerminalId,
-            cwd: targetCwd,
-            ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
-            env: runtimeEnv,
-          };
-
-      try {
-        await api.terminal.open(openTerminalInput);
-        await api.terminal.write({
-          threadId: activeThreadId,
-          terminalId: targetTerminalId,
-          data: `${script.command}\r`,
-        });
-      } catch (error) {
-        setThreadError(
-          activeThreadId,
-          error instanceof Error ? error.message : `Failed to run script "${script.name}".`,
-        );
-      }
-    },
-  );
-
-  const persistProjectScripts = useCallback(
-    async (input: {
-      projectId: ProjectId;
-      projectCwd: string;
-      previousScripts: ProjectScript[];
-      nextScripts: ProjectScript[];
-      keybinding?: string | null;
-      keybindingCommand: KeybindingCommand;
-    }) => {
-      const api = readEnvironmentApi(environmentId);
-      if (!api) return;
-
-      await api.orchestration.dispatchCommand({
-        type: "project.meta.update",
-        commandId: newCommandId(),
-        projectId: input.projectId,
-        scripts: input.nextScripts,
-      });
-
-      const keybindingRule = decodeProjectScriptKeybindingRule({
-        keybinding: input.keybinding,
-        command: input.keybindingCommand,
-      });
-
-      if (isElectron && keybindingRule) {
-        const localApi = readLocalApi();
-        if (!localApi) {
-          throw new Error("Local API unavailable.");
-        }
-        await localApi.server.upsertKeybinding(keybindingRule);
-      }
-    },
-    [environmentId],
-  );
-  const saveProjectScript = useCallback(
-    async (input: NewProjectScriptInput) => {
-      if (!activeProject) return;
-      const nextId = nextProjectScriptId(
-        input.name,
-        activeProject.scripts.map((script) => script.id),
-      );
-      const nextScript: ProjectScript = {
-        id: nextId,
-        name: input.name,
-        command: input.command,
-        icon: input.icon,
-        runOnWorktreeCreate: input.runOnWorktreeCreate,
-      };
-      const nextScripts = input.runOnWorktreeCreate
-        ? [
-            ...activeProject.scripts.map((script) =>
-              script.runOnWorktreeCreate ? { ...script, runOnWorktreeCreate: false } : script,
-            ),
-            nextScript,
-          ]
-        : [...activeProject.scripts, nextScript];
-
-      await persistProjectScripts({
-        projectId: activeProject.id,
-        projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
-        nextScripts,
-        keybinding: input.keybinding,
-        keybindingCommand: commandForProjectScript(nextId),
-      });
-    },
-    [activeProject, persistProjectScripts],
-  );
-  const updateProjectScript = useCallback(
-    async (scriptId: string, input: NewProjectScriptInput) => {
-      if (!activeProject) return;
-      const existingScript = activeProject.scripts.find((script) => script.id === scriptId);
-      if (!existingScript) {
-        throw new Error("Script not found.");
-      }
-
-      const updatedScript: ProjectScript = {
-        ...existingScript,
-        name: input.name,
-        command: input.command,
-        icon: input.icon,
-        runOnWorktreeCreate: input.runOnWorktreeCreate,
-      };
-      const nextScripts = activeProject.scripts.map((script) =>
-        script.id === scriptId
-          ? updatedScript
-          : input.runOnWorktreeCreate
-            ? { ...script, runOnWorktreeCreate: false }
-            : script,
-      );
-
-      await persistProjectScripts({
-        projectId: activeProject.id,
-        projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
-        nextScripts,
-        keybinding: input.keybinding,
-        keybindingCommand: commandForProjectScript(scriptId),
-      });
-    },
-    [activeProject, persistProjectScripts],
-  );
-  const deleteProjectScript = useCallback(
-    async (scriptId: string) => {
-      if (!activeProject) return;
-      const nextScripts = activeProject.scripts.filter((script) => script.id !== scriptId);
-
-      const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name;
-
-      try {
-        await persistProjectScripts({
-          projectId: activeProject.id,
-          projectCwd: activeProject.cwd,
-          previousScripts: activeProject.scripts,
-          nextScripts,
-          keybinding: null,
-          keybindingCommand: commandForProjectScript(scriptId),
-        });
-        toastManager.add({
-          type: "success",
-          title: `Deleted action "${deletedName ?? "Unknown"}"`,
-        });
-      } catch (error) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not delete action",
-            description: error instanceof Error ? error.message : "An unexpected error occurred.",
-          }),
-        );
-      }
-    },
-    [activeProject, persistProjectScripts],
-  );
+  const { runProjectScript, saveProjectScript, updateProjectScript, deleteProjectScript } =
+    useChatProjectScripts({
+      environmentId,
+      activeThread,
+      activeThreadId,
+      activeThreadRef,
+      activeProject,
+      gitCwd,
+      terminalState,
+      setLastInvokedScriptByProjectId,
+      setTerminalLaunchContext,
+      setTerminalOpen,
+      storeNewTerminal,
+      storeSetActiveTerminal,
+      setTerminalFocusRequestId,
+      setThreadError,
+    });
 
   const handleRuntimeModeChange = useCallback(
     (mode: RuntimeMode) => {
@@ -3140,10 +1766,6 @@ export default function ChatView(props: ChatViewProps) {
   ]);
 
   useEffect(() => {
-    setIsRevertingCheckpoint(false);
-  }, [activeThread?.id]);
-
-  useEffect(() => {
     if (!activeThread?.id || terminalState.terminalOpen) return;
     const frame = window.requestAnimationFrame(() => {
       focusComposer();
@@ -3213,36 +1835,27 @@ export default function ChatView(props: ChatViewProps) {
     canOverrideServerThreadBranch && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
-  const overviewSourceControlActions =
-    gitCwd && activeThreadRef ? (
-      <GitActionsControl
-        gitCwd={gitCwd}
-        activeThreadRef={activeThreadRef}
-        {...(routeKind === "draft" && draftId ? { draftId } : {})}
-        onPostPush={handlePostPushGitAction}
-        showLabels
-      />
-    ) : null;
-  const overviewBranchControl =
-    activeThread && isGitRepo ? (
-      <BranchToolbarBranchSelector
-        className="max-w-[168px] justify-end px-1.5"
-        environmentId={activeThread.environmentId}
-        threadId={activeThread.id}
-        {...(routeKind === "draft" && draftId ? { draftId } : {})}
-        {...(canOverrideServerThreadBranch
-          ? {
-              activeThreadBranchOverride: activeThreadBranch,
-              onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
-            }
-          : {})}
-        envLocked={envLocked}
-        onComposerFocusRequest={scheduleComposerFocus}
-        {...(canCheckoutPullRequestIntoThread
-          ? { onCheckoutPullRequestRequest: openPullRequestDialog }
-          : {})}
-      />
-    ) : null;
+  const {
+    sourceControlActions: overviewSourceControlActions,
+    branchControl: overviewBranchControl,
+  } = useOverviewPanelControls({
+    gitCwd,
+    activeThreadRef,
+    routeKind,
+    draftId,
+    onPostPush: handlePostPushGitAction,
+    branchControlThread: activeThread
+      ? { environmentId: activeThread.environmentId, id: activeThread.id }
+      : null,
+    isGitRepo,
+    canOverrideServerThreadBranch,
+    activeThreadBranch,
+    onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+    envLocked,
+    onComposerFocusRequest: scheduleComposerFocus,
+    canCheckoutPullRequestIntoThread,
+    onCheckoutPullRequestRequest: openPullRequestDialog,
+  });
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
     isGitRepo,
@@ -3382,188 +1995,47 @@ export default function ChatView(props: ChatViewProps) {
     return () => window.removeEventListener("keydown", handler, true);
   }, []);
 
-  useEffect(() => {
-    const handler = (event: globalThis.KeyboardEvent) => {
-      if (!activeThreadId || useCommandPaletteStore.getState().open || event.defaultPrevented) {
-        return;
-      }
-      const modelPickerOpen = readComposer()?.isModelPickerOpen() ?? false;
-      const shortcutContext = {
-        terminalFocus: isTerminalFocused(),
-        terminalOpen: Boolean(terminalState.terminalOpen),
-        modelPickerOpen,
-      };
-
-      const command = resolveShortcutCommand(event, keybindings, {
-        context: shortcutContext,
-      });
-      if (
-        shouldIgnoreGlobalNavigationShortcut(event) &&
-        (command !== "modelPicker.toggle" || !modelPickerOpen)
-      ) {
-        return;
-      }
-      if (!command) return;
-
-      if (command === "terminal.toggle") {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleTerminalVisibility();
-        return;
-      }
-
-      if (command === "terminal.split") {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!terminalState.terminalOpen) {
-          setTerminalOpen(true);
-        }
-        splitTerminal();
-        return;
-      }
-
-      if (command === "terminal.close") {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!terminalState.terminalOpen) return;
-        closeTerminal(terminalState.activeTerminalId);
-        return;
-      }
-
-      if (command === "terminal.new") {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!terminalState.terminalOpen) {
-          setTerminalOpen(true);
-        }
-        createNewTerminal();
-        return;
-      }
-
-      if (command === "diff.toggle") {
-        event.preventDefault();
-        event.stopPropagation();
-        onToggleDiff();
-        return;
-      }
-
-      if (command === "workspace.files") {
-        event.preventDefault();
-        event.stopPropagation();
-        onOpenFilesPanel();
-        return;
-      }
-
-      if (command === "workspace.review") {
-        event.preventDefault();
-        event.stopPropagation();
-        onOpenReviewPanel();
-        return;
-      }
-
-      if (command === "workspace.terminal") {
-        event.preventDefault();
-        event.stopPropagation();
-        onOpenTerminalPanel();
-        return;
-      }
-
-      if (command === "modelPicker.toggle") {
-        event.preventDefault();
-        event.stopPropagation();
-        readComposer()?.toggleModelPicker();
-        return;
-      }
-
-      const scriptId = projectScriptIdFromCommand(command);
-      if (!scriptId || !activeProject) return;
-      const script = activeProject.scripts.find((entry) => entry.id === scriptId);
-      if (!script) return;
-      event.preventDefault();
-      event.stopPropagation();
-      void runProjectScript(script);
-    };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [
-    activeProject,
-    terminalState.terminalOpen,
-    terminalState.activeTerminalId,
+  useChatGlobalShortcuts({
     activeThreadId,
+    keybindings,
+    terminalOpen: terminalState.terminalOpen,
+    activeTerminalId: terminalState.activeTerminalId,
+    readComposer,
+    activeProject,
+    toggleTerminalVisibility,
+    splitTerminal,
     closeTerminal,
     createNewTerminal,
     setTerminalOpen,
-    runProjectScript,
-    splitTerminal,
-    keybindings,
     onToggleDiff,
     onOpenFilesPanel,
     onOpenReviewPanel,
     onOpenTerminalPanel,
-    readComposer,
-    toggleTerminalVisibility,
-  ]);
+    runProjectScript,
+  });
 
   const onRevertToTurnCount = useCallback(
     async (turnCount: number) => {
-      const api = readEnvironmentApi(environmentId);
-      const localApi = readLocalApi();
-      if (!api || !localApi || !activeThread || isRevertingCheckpoint) return;
-
-      if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
-        setThreadError(
-          activeThread.id,
-          `Reconnect ${activeEnvironmentUnavailableLabel} before reverting checkpoints.`,
-        );
-        return;
-      }
-      if (phase === "running" || isSendBusy || isConnecting) {
-        setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
-        return;
-      }
-      const confirmed = await localApi.dialogs.confirm(
-        [
-          `Revert this thread to checkpoint ${turnCount}?`,
-          "This will discard newer messages and turn diffs in this thread.",
-          "This action cannot be undone.",
-        ].join("\n"),
-      );
-      if (!confirmed) {
-        return;
-      }
-
-      setIsRevertingCheckpoint(true);
-      setThreadError(activeThread.id, null);
-      try {
-        await api.orchestration.dispatchCommand({
-          type: "thread.checkpoint.revert",
-          commandId: newCommandId(),
-          threadId: activeThread.id,
-          turnCount,
-          createdAt: new Date().toISOString(),
-        });
-      } catch (err) {
-        setThreadError(
-          activeThread.id,
-          err instanceof Error ? err.message : "Failed to revert thread state.",
-        );
-      }
-      setIsRevertingCheckpoint(false);
+      await revertToTurnCount({
+        thread: activeThread ?? null,
+        turnCount,
+        environmentUnavailable: activeEnvironmentUnavailable,
+        environmentUnavailableLabel: activeEnvironmentUnavailableLabel,
+        turnInProgress: phase === "running" || isSendBusy || isConnecting,
+      });
     },
     [
-      activeThread,
       activeEnvironmentUnavailable,
       activeEnvironmentUnavailableLabel,
-      environmentId,
+      activeThread,
       isConnecting,
-      isRevertingCheckpoint,
       isSendBusy,
       phase,
-      setThreadError,
+      revertToTurnCount,
     ],
   );
 
-  const onSend = async (e?: { preventDefault: () => void }) => {
+  const runSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readEnvironmentApi(environmentId);
     if (
@@ -3648,463 +2120,116 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
-    const shouldMaterializeLegacyBranchWorktree =
-      isServerThread &&
-      !isFirstMessage &&
-      activeThread.worktreePath === null &&
-      activeThreadBranch !== null &&
-      gitStatusQuery.data !== null &&
-      gitStatusQuery.data.refName !== activeThreadBranch;
-    const baseBranchForWorktree =
-      isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
-        ? activeThreadBranch
-        : shouldMaterializeLegacyBranchWorktree
-          ? activeThreadBranch
-          : null;
+    const { shouldMaterializeLegacyBranchWorktree, baseBranchForWorktree, shouldCreateWorktree } =
+      resolveChatSendWorktreePlan({
+        isServerThread,
+        isFirstMessage,
+        threadWorktreePath: activeThread.worktreePath,
+        activeThreadBranch,
+        currentGitRefName: gitStatusQuery.data?.refName ?? null,
+        sendEnvMode,
+      });
 
     // In worktree mode, require an explicit base branch so we don't silently
     // fall back to local execution when branch selection is missing.
-    const shouldCreateWorktree =
-      (isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath) ||
-      shouldMaterializeLegacyBranchWorktree;
     if (shouldCreateWorktree && !activeThreadBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
     }
 
-    sendInFlightRef.current = true;
-    beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
-
-    const composerImagesSnapshot = [...composerImages];
-    const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
-    const composerSourceControlContextsSnapshot = [...composerSourceControlContexts];
-    const messageTextForSend = appendTerminalContextsToPrompt(
-      promptForSend,
-      composerTerminalContextsSnapshot,
-    );
-    const messageIdForSend = newMessageId();
-    const messageCreatedAt = new Date().toISOString();
-    const outgoingMessageText = formatOutgoingPrompt({
-      provider: ctxSelectedProvider,
-      model: ctxSelectedModel,
-      models: ctxSelectedProviderModels,
-      effort: ctxSelectedPromptEffort,
-      text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
-    });
-    const turnAttachmentsPromise = Promise.all(
-      composerImagesSnapshot.map(async (image) => ({
-        type: "image" as const,
-        name: image.name,
-        mimeType: image.mimeType,
-        sizeBytes: image.sizeBytes,
-        dataUrl: await readFileAsDataUrl(image.file),
-      })),
-    );
-    const optimisticAttachments = composerImagesSnapshot.map((image) => ({
-      type: "image" as const,
-      id: image.id,
-      name: image.name,
-      mimeType: image.mimeType,
-      sizeBytes: image.sizeBytes,
-      previewUrl: image.previewUrl,
-    }));
-    // Scroll to the current end *before* adding the optimistic message.
-    // This sets LegendList's internal isAtEnd=true so maintainScrollAtEnd
-    // automatically pins to the new item when the data changes.
-    isAtEndRef.current = true;
-    showScrollDebouncer.current.cancel();
-    setShowScrollToBottom(false);
-    await legendListRef.current?.scrollToEnd?.({ animated: false });
-
-    setOptimisticUserMessages((existing) => [
-      ...existing,
-      {
-        id: messageIdForSend,
-        role: "user",
-        text: outgoingMessageText,
-        ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
-        createdAt: messageCreatedAt,
-        streaming: false,
-      },
-    ]);
-
-    setThreadError(threadIdForSend, null);
-    setComposerDraftTokenMode(scopeThreadRef(environmentId, threadIdForSend), tokenMode);
-    if (isLocalDraftThread) {
-      setDraftThreadContext(composerDraftTarget, { tokenMode });
-    }
-    if (expiredTerminalContextCount > 0) {
-      const toastCopy = buildExpiredTerminalContextToastCopy(
+    await executeChatSendTurn({
+      composer: {
+        prompt: promptForSend,
+        trimmedPrompt: trimmed,
+        images: composerImages,
+        sendableTerminalContexts: sendableComposerTerminalContexts,
+        sourceControlContexts: composerSourceControlContexts,
+        selectedProvider: ctxSelectedProvider,
+        selectedModel: ctxSelectedModel,
+        selectedProviderModels: ctxSelectedProviderModels,
+        selectedPromptEffort: ctxSelectedPromptEffort,
+        selectedModelSelection: ctxSelectedModelSelection,
         expiredTerminalContextCount,
-        "omitted",
-      );
-      toastManager.add(
-        stackedThreadToast({
-          type: "warning",
-          title: toastCopy.title,
-          description: toastCopy.description,
-        }),
-      );
-    }
-    promptRef.current = "";
-    clearComposerDraftContent(composerDraftTarget);
-    setComposerDraftTokenMode(composerDraftTarget, tokenMode);
-    readComposer()?.resetCursorState();
-
-    let turnStartSucceeded = false;
-    await (async () => {
-      let firstComposerImageName: string | null = null;
-      if (composerImagesSnapshot.length > 0) {
-        const firstComposerImage = composerImagesSnapshot[0];
-        if (firstComposerImage) {
-          firstComposerImageName = firstComposerImage.name;
-        }
-      }
-      let titleSeed = trimmed;
-      if (!titleSeed) {
-        if (firstComposerImageName) {
-          titleSeed = `Image: ${firstComposerImageName}`;
-        } else if (composerTerminalContextsSnapshot.length > 0) {
-          titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
-        } else {
-          titleSeed = "New thread";
-        }
-      }
-      const title = truncate(titleSeed);
-      const threadCreateModelSelection = createModelSelection(
-        ctxSelectedModelSelection.instanceId,
-        ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
-        ctxSelectedModelSelection.options,
-      );
-
-      // Auto-title from first message
-      if (isFirstMessage && isServerThread) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.meta.update",
-          commandId: newCommandId(),
-          threadId: threadIdForSend,
-          title,
-        });
-      }
-
-      if (isServerThread) {
-        await persistThreadSettingsForNextTurn({
-          threadId: threadIdForSend,
-          createdAt: messageCreatedAt,
-          ...(ctxSelectedModel ? { modelSelection: ctxSelectedModelSelection } : {}),
-          runtimeMode,
-          interactionMode,
-          tokenMode,
-        });
-      }
-
-      const turnAttachments = await turnAttachmentsPromise;
-      // Refresh stale source-control contexts before sending (best-effort).
-      const freshSourceControlContexts = await refreshStaleSourceControlContexts(
-        composerSourceControlContextsSnapshot,
-        {
-          fetcher: async (ctx) => {
-            const cwd = gitCwd;
-            if (!cwd) return ctx;
-            const now = DateTime.fromDateUnsafe(new Date());
-            const staleAfterDate = DateTime.fromDateUnsafe(new Date(Date.now() + 5 * 60 * 1000));
-            if (ctx.kind === "issue") {
-              const detail = await queryClient.fetchQuery(
-                issueDetailQueryOptions({
-                  environmentId,
-                  cwd,
-                  reference: String(ctx.detail.number),
-                }),
-              );
-              return {
-                ...ctx,
-                detail,
-                fetchedAt: now,
-                staleAfter: staleAfterDate,
-              };
-            }
-            const detail = await queryClient.fetchQuery(
-              changeRequestDetailQueryOptions({
-                environmentId,
-                cwd,
-                reference: String(ctx.detail.number),
-              }),
-            );
-            return {
-              ...ctx,
-              detail,
-              fetchedAt: now,
-              staleAfter: staleAfterDate,
-            };
-          },
-        },
-      );
-      const bootstrap =
-        isLocalDraftThread || baseBranchForWorktree
-          ? {
-              ...(isLocalDraftThread
-                ? {
-                    createThread: {
-                      projectId: activeProject.id,
-                      title,
-                      modelSelection: threadCreateModelSelection,
-                      runtimeMode,
-                      interactionMode,
-                      tokenMode,
-                      branch: activeThreadBranch,
-                      worktreePath: activeThread.worktreePath,
-                      createdAt: activeThread.createdAt,
-                    },
-                  }
-                : {}),
-              ...(baseBranchForWorktree
-                ? {
-                    prepareWorktree: {
-                      projectCwd: activeProject.cwd,
-                      baseBranch: baseBranchForWorktree,
-                      ...(shouldMaterializeLegacyBranchWorktree
-                        ? {}
-                        : { branch: buildTemporaryWorktreeBranchName() }),
-                    },
-                    runSetupScript: true,
-                  }
-                : {}),
-            }
-          : undefined;
-      beginLocalDispatch({ preparingWorktree: false });
-      await api.orchestration.dispatchCommand({
-        type: "thread.turn.start",
-        commandId: newCommandId(),
+      },
+      thread: {
         threadId: threadIdForSend,
-        message: {
-          messageId: messageIdForSend,
-          role: "user",
-          text: outgoingMessageText,
-          attachments: turnAttachments,
+        isFirstMessage,
+        isServerThread,
+        isLocalDraftThread,
+        activeThreadBranch,
+        worktreePath: activeThread.worktreePath,
+        createdAt: activeThread.createdAt,
+        projectId: activeProject.id,
+      },
+      worktree: {
+        shouldMaterializeLegacyBranchWorktree,
+        baseBranchForWorktree,
+        shouldCreateWorktree,
+      },
+      settings: { runtimeMode, interactionMode, tokenMode },
+      project: {
+        projectId: activeProject.id,
+        projectCwd: activeProject.cwd,
+        defaultModelSelection: activeProject.defaultModelSelection ?? null,
+      },
+      scroll: {
+        scrollToEndBeforeOptimistic: async () => {
+          isAtEndRef.current = true;
+          showScrollDebouncer.current.cancel();
+          setShowScrollToBottom(false);
+          await legendListRef.current?.scrollToEnd?.({ animated: false });
         },
-        modelSelection: ctxSelectedModelSelection,
-        titleSeed: title,
-        runtimeMode,
-        interactionMode,
-        tokenMode,
-        ...(bootstrap ? { bootstrap } : {}),
-        ...(freshSourceControlContexts.length > 0
-          ? { sourceControlContexts: freshSourceControlContexts }
-          : {}),
-        createdAt: messageCreatedAt,
-      });
-      turnStartSucceeded = true;
-    })().catch(async (err: unknown) => {
-      if (
-        !turnStartSucceeded &&
-        promptRef.current.length === 0 &&
-        composerImagesRef.current.length === 0 &&
-        composerTerminalContextsRef.current.length === 0
-      ) {
-        setOptimisticUserMessages((existing) => {
-          const removed = existing.filter((message) => message.id === messageIdForSend);
-          for (const message of removed) {
-            revokeUserMessagePreviewUrls(message);
+      },
+      draft: {
+        composerDraftTarget,
+        environmentId,
+        clearComposerDraftContent,
+        setComposerDraftTokenMode,
+        setComposerDraftPrompt,
+        addComposerDraftImages,
+        setComposerDraftTerminalContexts,
+        setDraftThreadContext,
+      },
+      dispatch: {
+        api,
+        beginLocalDispatch,
+        resetLocalDispatch,
+        setOptimisticUserMessages,
+        setThreadError,
+      },
+      refs: { promptRef, composerImagesRef, composerTerminalContextsRef, sendInFlightRef },
+      sourceControl: {
+        fetcher: async (ctx) => {
+          const cwd = gitCwd;
+          if (!cwd) return ctx;
+          const now = DateTime.fromDateUnsafe(new Date());
+          const staleAfterDate = DateTime.fromDateUnsafe(new Date(Date.now() + 5 * 60 * 1000));
+          if (ctx.kind === "issue") {
+            const detail = await queryClient.fetchQuery(
+              issueDetailQueryOptions({ environmentId, cwd, reference: String(ctx.detail.number) }),
+            );
+            return { ...ctx, detail, fetchedAt: now, staleAfter: staleAfterDate };
           }
-          const next = existing.filter((message) => message.id !== messageIdForSend);
-          return next.length === existing.length ? existing : next;
-        });
-        promptRef.current = promptForSend;
-        const retryComposerImages = composerImagesSnapshot.map(cloneComposerImageForRetry);
-        composerImagesRef.current = retryComposerImages;
-        composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
-        setComposerDraftPrompt(composerDraftTarget, promptForSend);
-        addComposerDraftImages(composerDraftTarget, retryComposerImages);
-        setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
-        readComposer()?.resetCursorState({
-          cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),
-          prompt: promptForSend,
-          detectTrigger: true,
-        });
-      }
-      setThreadError(
-        threadIdForSend,
-        err instanceof Error ? err.message : "Failed to send message.",
-      );
-    });
-    sendInFlightRef.current = false;
-    if (!turnStartSucceeded) {
-      resetLocalDispatch();
-    }
-  };
-
-  const onInterrupt = async () => {
-    const api = readEnvironmentApi(environmentId);
-    if (!api || !activeThread) return;
-    await api.orchestration.dispatchCommand({
-      type: "thread.turn.interrupt",
-      commandId: newCommandId(),
-      threadId: activeThread.id,
-      createdAt: new Date().toISOString(),
-    });
-  };
-
-  const onRespondToApproval = useCallback(
-    async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => {
-      const api = readEnvironmentApi(environmentId);
-      if (!api || !activeThreadId) return;
-
-      setRespondingRequestIds((existing) =>
-        existing.includes(requestId) ? existing : [...existing, requestId],
-      );
-      await api.orchestration
-        .dispatchCommand({
-          type: "thread.approval.respond",
-          commandId: newCommandId(),
-          threadId: activeThreadId,
-          requestId,
-          decision,
-          createdAt: new Date().toISOString(),
-        })
-        .catch((err: unknown) => {
-          setThreadError(
-            activeThreadId,
-            err instanceof Error ? err.message : "Failed to submit approval decision.",
+          const detail = await queryClient.fetchQuery(
+            changeRequestDetailQueryOptions({
+              environmentId,
+              cwd,
+              reference: String(ctx.detail.number),
+            }),
           );
-        });
-      setRespondingRequestIds((existing) => existing.filter((id) => id !== requestId));
-    },
-    [activeThreadId, environmentId, setThreadError],
-  );
-
-  const onRespondToUserInput = useCallback(
-    async (requestId: ApprovalRequestId, answers: Record<string, unknown>) => {
-      const api = readEnvironmentApi(environmentId);
-      if (!api || !activeThreadId) return;
-
-      setRespondingUserInputRequestIds((existing) =>
-        existing.includes(requestId) ? existing : [...existing, requestId],
-      );
-      await api.orchestration
-        .dispatchCommand({
-          type: "thread.user-input.respond",
-          commandId: newCommandId(),
-          threadId: activeThreadId,
-          requestId,
-          answers,
-          createdAt: new Date().toISOString(),
-        })
-        .catch((err: unknown) => {
-          setThreadError(
-            activeThreadId,
-            err instanceof Error ? err.message : "Failed to submit user input.",
-          );
-        });
-      setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
-    },
-    [activeThreadId, environmentId, setThreadError],
-  );
-
-  const setActivePendingUserInputQuestionIndex = useCallback(
-    (nextQuestionIndex: number) => {
-      if (!activePendingUserInput) {
-        return;
-      }
-      setPendingUserInputQuestionIndexByRequestId((existing) => ({
-        ...existing,
-        [activePendingUserInput.requestId]: nextQuestionIndex,
-      }));
-    },
-    [activePendingUserInput],
-  );
-
-  const onSelectActivePendingUserInputOption = useCallback(
-    (questionId: string, optionLabel: string) => {
-      if (!activePendingUserInput) {
-        return;
-      }
-      setPendingUserInputAnswersByRequestId((existing) => {
-        const question =
-          (activePendingProgress?.activeQuestion?.id === questionId
-            ? activePendingProgress.activeQuestion
-            : undefined) ??
-          activePendingUserInput.questions.find((entry) => entry.id === questionId);
-        if (!question) {
-          return existing;
-        }
-
-        return {
-          ...existing,
-          [activePendingUserInput.requestId]: {
-            ...existing[activePendingUserInput.requestId],
-            [questionId]: togglePendingUserInputOptionSelection(
-              question,
-              existing[activePendingUserInput.requestId]?.[questionId],
-              optionLabel,
-            ),
-          },
-        };
-      });
-      promptRef.current = "";
-      readComposer()?.resetCursorState({ cursor: 0 });
-    },
-    [activePendingProgress?.activeQuestion, activePendingUserInput, readComposer],
-  );
-
-  const onChangeActivePendingUserInputCustomAnswer = useCallback(
-    (
-      questionId: string,
-      value: string,
-      nextCursor: number,
-      expandedCursor: number,
-      _cursorAdjacentToMention: boolean,
-    ) => {
-      if (!activePendingUserInput) {
-        return;
-      }
-      promptRef.current = value;
-      setPendingUserInputAnswersByRequestId((existing) => ({
-        ...existing,
-        [activePendingUserInput.requestId]: {
-          ...existing[activePendingUserInput.requestId],
-          [questionId]: setPendingUserInputCustomAnswer(
-            existing[activePendingUserInput.requestId]?.[questionId],
-            value,
-          ),
+          return { ...ctx, detail, fetchedAt: now, staleAfter: staleAfterDate };
         },
-      }));
-      const snapshot = readComposer()?.readSnapshot();
-      if (
-        snapshot?.value !== value ||
-        snapshot.cursor !== nextCursor ||
-        snapshot.expandedCursor !== expandedCursor
-      ) {
-        readComposer()?.focusAt(nextCursor);
-      }
-    },
-    [activePendingUserInput, readComposer],
-  );
-
-  const onAdvanceActivePendingUserInput = useCallback(() => {
-    if (!activePendingUserInput || !activePendingProgress) {
-      return;
-    }
-    if (activePendingProgress.isLastQuestion) {
-      if (activePendingResolvedAnswers) {
-        void onRespondToUserInput(activePendingUserInput.requestId, activePendingResolvedAnswers);
-      }
-      return;
-    }
-    setActivePendingUserInputQuestionIndex(activePendingProgress.questionIndex + 1);
-  }, [
-    activePendingProgress,
-    activePendingResolvedAnswers,
-    activePendingUserInput,
-    onRespondToUserInput,
-    setActivePendingUserInputQuestionIndex,
-  ]);
-
-  const onPreviousActivePendingUserInputQuestion = useCallback(() => {
-    if (!activePendingProgress) {
-      return;
-    }
-    setActivePendingUserInputQuestionIndex(Math.max(activePendingProgress.questionIndex - 1, 0));
-  }, [activePendingProgress, setActivePendingUserInputQuestionIndex]);
+      },
+      persistSettings: { persistThreadSettingsForNextTurn },
+      composerHandle: { readComposer },
+      formatOutgoingPrompt,
+    });
+  };
+  const runSendRef = useRef(runSend);
+  runSendRef.current = runSend;
+  const onSend = useCallback((e?: { preventDefault: () => void }) => {
+    void runSendRef.current(e);
+  }, []);
 
   const onSubmitPlanFollowUp = useCallback(
     async ({
@@ -4464,78 +2589,6 @@ export default function ChatView(props: ChatViewProps) {
   const onExpandTimelineImage = useCallback((preview: ExpandedImagePreview) => {
     setExpandedImage(preview);
   }, []);
-  const onOpenTurnDiff = useCallback(
-    (turnId: TurnId, filePath?: string) => {
-      if (!isServerThread) {
-        return;
-      }
-      onDiffPanelOpen?.();
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: {
-          environmentId,
-          threadId,
-        },
-        search: (previous) =>
-          buildOpenReviewSearch(previous, {
-            diffTurnId: turnId,
-            diffFilePath: filePath ?? undefined,
-          }),
-      });
-    },
-    [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
-  );
-  const onCloseDiff = useCallback(() => {
-    if (!isServerThread) {
-      return;
-    }
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: {
-        environmentId,
-        threadId,
-      },
-      search: (previous) => ({
-        ...stripWorkspacePanelSearchParams(previous),
-        diff: undefined,
-        diffTurnId: undefined,
-        diffFilePath: undefined,
-        preview: undefined,
-        workspaceOpen: undefined,
-        workspaceTab: undefined,
-        workspaceAgentKey: undefined,
-      }),
-    });
-  }, [environmentId, isServerThread, navigate, threadId]);
-  const onOpenSubagentPanel = useCallback(
-    (subagent: ThreadSubagentView) => {
-      onAgentPanelOpen?.();
-      const nextSearch = (previous: Record<string, unknown>) =>
-        buildOpenAgentSearch(previous, subagent.key);
-
-      if (routeKind === "draft" && draftId) {
-        void navigate({
-          to: "/draft/$draftId",
-          params: { draftId },
-          search: nextSearch,
-        });
-        return;
-      }
-
-      if (!isServerThread) {
-        return;
-      }
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: {
-          environmentId,
-          threadId,
-        },
-        search: nextSearch,
-      });
-    },
-    [draftId, environmentId, isServerThread, navigate, onAgentPanelOpen, routeKind, threadId],
-  );
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
@@ -4698,21 +2751,29 @@ export default function ChatView(props: ChatViewProps) {
                 animate={!prefersReducedMotion}
                 open={showFloatingOverviewSidebar}
               >
-                <PlanSidebar
+                <ChatOverviewPanel
+                  environmentId={environmentId}
+                  gitCwd={gitCwd}
+                  activeWorktreeBranch={activeWorktreeSummary?.branch ?? null}
+                  activeThreadBranch={activeThread?.branch ?? null}
+                  activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
+                  activeWorktreePrState={activeWorktreeSummary?.prState}
+                  activeWorktreeTitle={activeWorktreeSummary?.title}
+                  postPushWorkflowWatch={postPushWorkflowWatch}
+                  activeThreadKey={activeThreadKey}
+                  activeEnvironmentUnavailableState={activeEnvironmentUnavailableState}
                   activePlan={activePlan}
-                  activeProposedPlan={sidebarProposedPlan}
-                  overviewItems={overviewItems}
-                  pullRequest={overviewPullRequest}
-                  subagents={threadSubagents}
+                  sidebarProposedPlan={sidebarProposedPlan}
+                  threadSubagents={threadSubagents}
                   sourceControlActions={overviewSourceControlActions}
                   branchControl={overviewBranchControl}
-                  environmentId={environmentId}
                   markdownCwd={gitCwd ?? undefined}
                   workspaceRoot={activeWorkspaceRoot}
                   mode="floating"
                   onOpenFiles={onOpenFilesPanel}
                   onOpenReview={onOpenReviewPanel}
                   onOpenSubagent={onOpenSubagentPanel}
+                  onPostPushDiscoveryComplete={clearPostPushWatch}
                 />
               </FloatingOverviewMotionFrame>
             ) : null}
@@ -4759,7 +2820,7 @@ export default function ChatView(props: ChatViewProps) {
                   draftId={draftId}
                   activeThreadId={activeThreadId}
                   activeThreadEnvironmentId={activeThread?.environmentId}
-                  activeThread={activeThread}
+                  activeThreadSessionProviderInstanceId={activeThreadSessionProviderInstanceId}
                   isServerThread={isServerThread}
                   isLocalDraftThread={isLocalDraftThread}
                   phase={phase}
@@ -4786,10 +2847,10 @@ export default function ChatView(props: ChatViewProps) {
                   interactionMode={interactionMode}
                   tokenMode={tokenMode}
                   lockedProvider={lockedProvider}
-                  providerStatuses={providerStatuses as ServerProvider[]}
+                  providerStatuses={composerProviderStatuses}
                   activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
                   activeThreadModelSelection={activeThread?.modelSelection}
-                  activeThreadActivities={activeThread?.activities}
+                  activeThreadActivities={threadActivities}
                   resolvedTheme={resolvedTheme}
                   settings={settings}
                   keybindings={keybindings}
@@ -4893,21 +2954,29 @@ export default function ChatView(props: ChatViewProps) {
             animate={!prefersReducedMotion}
             open={showInlineOverviewSidebar}
           >
-            <PlanSidebar
+            <ChatOverviewPanel
+              environmentId={environmentId}
+              gitCwd={gitCwd}
+              activeWorktreeBranch={activeWorktreeSummary?.branch ?? null}
+              activeThreadBranch={activeThread?.branch ?? null}
+              activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
+              activeWorktreePrState={activeWorktreeSummary?.prState}
+              activeWorktreeTitle={activeWorktreeSummary?.title}
+              postPushWorkflowWatch={postPushWorkflowWatch}
+              activeThreadKey={activeThreadKey}
+              activeEnvironmentUnavailableState={activeEnvironmentUnavailableState}
               activePlan={activePlan}
-              activeProposedPlan={sidebarProposedPlan}
-              overviewItems={overviewItems}
-              pullRequest={overviewPullRequest}
-              subagents={threadSubagents}
+              sidebarProposedPlan={sidebarProposedPlan}
+              threadSubagents={threadSubagents}
               sourceControlActions={overviewSourceControlActions}
               branchControl={overviewBranchControl}
-              environmentId={environmentId}
               markdownCwd={gitCwd ?? undefined}
               workspaceRoot={activeWorkspaceRoot}
               mode="sidebar"
               onOpenFiles={onOpenFilesPanel}
               onOpenReview={onOpenReviewPanel}
               onOpenSubagent={onOpenSubagentPanel}
+              onPostPushDiscoveryComplete={clearPostPushWatch}
             />
           </OverviewSidebarMotionFrame>
         ) : null}
@@ -4933,21 +3002,29 @@ export default function ChatView(props: ChatViewProps) {
       ))}
       {shouldUsePlanSidebarSheet ? (
         <RightPanelSheet open={showOverviewSidebarSheet} onClose={closePlanSidebar}>
-          <PlanSidebar
+          <ChatOverviewPanel
+            environmentId={environmentId}
+            gitCwd={gitCwd}
+            activeWorktreeBranch={activeWorktreeSummary?.branch ?? null}
+            activeThreadBranch={activeThread?.branch ?? null}
+            activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
+            activeWorktreePrState={activeWorktreeSummary?.prState}
+            activeWorktreeTitle={activeWorktreeSummary?.title}
+            postPushWorkflowWatch={postPushWorkflowWatch}
+            activeThreadKey={activeThreadKey}
+            activeEnvironmentUnavailableState={activeEnvironmentUnavailableState}
             activePlan={activePlan}
-            activeProposedPlan={sidebarProposedPlan}
-            overviewItems={overviewItems}
-            pullRequest={overviewPullRequest}
-            subagents={threadSubagents}
+            sidebarProposedPlan={sidebarProposedPlan}
+            threadSubagents={threadSubagents}
             sourceControlActions={overviewSourceControlActions}
             branchControl={overviewBranchControl}
-            environmentId={environmentId}
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeWorkspaceRoot}
             mode="sheet"
             onOpenFiles={onOpenFilesPanel}
             onOpenReview={onOpenReviewPanel}
             onOpenSubagent={onOpenSubagentPanel}
+            onPostPushDiscoveryComplete={clearPostPushWatch}
           />
         </RightPanelSheet>
       ) : null}

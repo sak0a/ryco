@@ -12,3 +12,11 @@
 10. `10-unify-process-session-abstraction.md`
 19. `19-version-control-phase-1-vcs-driver-foundation.md`
 20. `20-version-control-phase-2-source-control-provider-foundation.md`
+21. `21-concrete-improvement-roadmap.md` — **master sequencing plan** for UI splits, perf, AtomRpc, server modularization, remote/auth, and small features
+22. `21-agent-handoff.md` — **agent continuation prompt** with current implementation status and parallel subagent tasks
+
+### Roadmap implementation status (2026-06-14)
+
+- ✅ Phase 0.1 perf budget harness
+- ✅ Phase 1.1 partial (`useChatSessionActions`, send worktree/title helpers)
+- ⬜ See `21-agent-handoff.md` for next tasks

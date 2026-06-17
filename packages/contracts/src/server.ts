@@ -241,6 +241,18 @@ export type ServerProviders = typeof ServerProviders.Type;
 export const isProviderAvailable = (snapshot: ServerProvider): boolean =>
   snapshot.availability !== "unavailable";
 
+export const ServerLocalDiagnosticsMetrics = Schema.Struct({
+  turnQuiescenceAvgMs: Schema.NullOr(Schema.Number),
+  checkpointDurationP95Ms: Schema.NullOr(Schema.Number),
+  wsReconnectCount: NonNegativeInt,
+  windowSampleCounts: Schema.Struct({
+    turnQuiescence: NonNegativeInt,
+    checkpointDuration: NonNegativeInt,
+  }),
+  capturedAt: IsoDateTime,
+});
+export type ServerLocalDiagnosticsMetrics = typeof ServerLocalDiagnosticsMetrics.Type;
+
 export const ServerObservability = Schema.Struct({
   logsDirectoryPath: TrimmedNonEmptyString,
   localTracingEnabled: Schema.Boolean,
@@ -248,6 +260,7 @@ export const ServerObservability = Schema.Struct({
   otlpTracesEnabled: Schema.Boolean,
   otlpMetricsUrl: Schema.optional(TrimmedNonEmptyString),
   otlpMetricsEnabled: Schema.Boolean,
+  localMetrics: Schema.optional(ServerLocalDiagnosticsMetrics),
 });
 export type ServerObservability = typeof ServerObservability.Type;
 

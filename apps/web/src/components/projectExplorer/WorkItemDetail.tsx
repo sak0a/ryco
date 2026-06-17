@@ -13,7 +13,7 @@ import type {
 } from "@ryco/contracts";
 import { scopeProjectRef } from "@ryco/client-runtime";
 import { DateTime, Option } from "effect";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "~/rpc/queryClient";
 import { useShallow } from "zustand/react/shallow";
 import {
   ArrowDownIcon,
@@ -32,7 +32,6 @@ import {
   SparklesIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { requireEnvironmentConnection } from "~/environments/runtime";
 import { readEnvironmentApi } from "~/environmentApi";
 import { cn } from "~/lib/utils";
 import {
@@ -42,7 +41,14 @@ import {
 } from "~/lib/workItemLocalLinks";
 import { searchChangeRequestsQueryOptions } from "~/lib/sourceControlContextRpc";
 import { errorMessage } from "~/lib/errorMessage";
-import { workItemDetailQueryOptions, workItemsQueryKeys } from "~/lib/workItemsRpc";
+import {
+  useAddWorkItemCommentMutation,
+  useEditWorkItemCommentMutation,
+  useImproveWorkItemDescriptionMutation,
+  useTransitionWorkItemMutation,
+  useUpdateWorkItemMutation,
+  useWorkItemDetail,
+} from "~/rpc/useWorkItems";
 import { selectSidebarWorktreesForProjectRef, useStore } from "~/store";
 import { AtlassianJiraIcon } from "../Icons";
 import { Button } from "../ui/button";
@@ -111,19 +117,21 @@ interface WorkItemDetailProps {
 }
 
 export function WorkItemDetail(props: WorkItemDetailProps) {
-  const queryClient = useQueryClient();
   const [editingComment, setEditingComment] = useState<WorkItemComment | null>(null);
   const [quoteInsertion, setQuoteInsertion] = useState<CommentQuoteInsertion | null>(null);
   const [descriptionDialogOpen, setDescriptionDialogOpen] = useState(false);
 
-  const detailQuery = useQuery(
-    workItemDetailQueryOptions({
-      environmentId: props.environmentId,
-      projectId: props.projectId,
-      key: props.workItemKey,
-      fullContent: true,
-    }),
-  );
+  const detailQuery = useWorkItemDetail({
+    environmentId: props.environmentId,
+    projectId: props.projectId,
+    key: props.workItemKey,
+    fullContent: true,
+  });
+  const mutationScope = {
+    environmentId: props.environmentId,
+    projectId: props.projectId,
+    key: props.workItemKey,
+  };
   const linkedPrQuery = useQuery(
     searchChangeRequestsQueryOptions({
       environmentId: props.environmentId,
@@ -165,29 +173,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
     ),
   );
 
-  const setDetailCache = (detail: WorkItemDetailModel) => {
-    queryClient.setQueryData(
-      workItemsQueryKeys.detail(props.environmentId, props.projectId, props.workItemKey, true),
-      detail,
-    );
-  };
-
-  const updateMutation = useMutation({
-    mutationFn: async (fields: WorkItemUpdateFields) => {
-      if (!props.environmentId || !props.projectId) {
-        throw new Error("Cannot update this Jira work item.");
-      }
-      const client = requireEnvironmentConnection(props.environmentId).client;
-      return client.workItems.update({
-        projectId: props.projectId,
-        key: props.workItemKey,
-        fields,
-      });
-    },
-    onSuccess: (detail) => {
-      setDetailCache(detail);
-      void queryClient.invalidateQueries({ queryKey: workItemsQueryKeys.all });
-    },
+  const updateMutation = useUpdateWorkItemMutation(mutationScope, {
     onError: (error) => {
       toastManager.add(
         stackedThreadToast({
@@ -198,23 +184,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
       );
     },
   });
-
-  const addCommentMutation = useMutation({
-    mutationFn: async (body: string) => {
-      if (!props.environmentId || !props.projectId || body.trim().length === 0) {
-        throw new Error("Cannot add an empty Jira comment.");
-      }
-      const client = requireEnvironmentConnection(props.environmentId).client;
-      return client.workItems.addComment({
-        projectId: props.projectId,
-        key: props.workItemKey,
-        body: body.trim(),
-      });
-    },
-    onSuccess: (detail) => {
-      setDetailCache(detail);
-      void queryClient.invalidateQueries({ queryKey: workItemsQueryKeys.all });
-    },
+  const addCommentMutation = useAddWorkItemCommentMutation(mutationScope, {
     onError: (error) => {
       toastManager.add(
         stackedThreadToast({
@@ -225,25 +195,8 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
       );
     },
   });
-
-  const editCommentMutation = useMutation({
-    mutationFn: async (input: { readonly commentId: string; readonly body: string }) => {
-      if (!props.environmentId || !props.projectId || input.body.trim().length === 0) {
-        throw new Error("Cannot save an empty Jira comment.");
-      }
-      const client = requireEnvironmentConnection(props.environmentId).client;
-      return client.workItems.editComment({
-        projectId: props.projectId,
-        key: props.workItemKey,
-        commentId: input.commentId,
-        body: input.body.trim(),
-      });
-    },
-    onSuccess: (detail) => {
-      setEditingComment(null);
-      setDetailCache(detail);
-      void queryClient.invalidateQueries({ queryKey: workItemsQueryKeys.all });
-    },
+  const editCommentMutation = useEditWorkItemCommentMutation(mutationScope, {
+    onEditCommentSuccess: () => setEditingComment(null),
     onError: (error) => {
       toastManager.add(
         stackedThreadToast({
@@ -254,23 +207,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
       );
     },
   });
-
-  const transitionMutation = useMutation({
-    mutationFn: async (transitionId: string) => {
-      if (!props.environmentId || !props.projectId) {
-        throw new Error("Cannot transition this Jira work item.");
-      }
-      const client = requireEnvironmentConnection(props.environmentId).client;
-      return client.workItems.transition({
-        projectId: props.projectId,
-        key: props.workItemKey,
-        transitionId,
-      });
-    },
-    onSuccess: (detail) => {
-      setDetailCache(detail);
-      void queryClient.invalidateQueries({ queryKey: workItemsQueryKeys.all });
-    },
+  const transitionMutation = useTransitionWorkItemMutation(mutationScope, {
     onError: (error) => {
       toastManager.add(
         stackedThreadToast({
@@ -281,23 +218,10 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
       );
     },
   });
-
-  const improveDescriptionMutation = useMutation({
-    mutationFn: async (input: { readonly rough: string; readonly instructions: string }) => {
-      if (!props.environmentId || !props.cwd) {
-        throw new Error("AI description improvement requires an active project path.");
-      }
-      const client = requireEnvironmentConnection(props.environmentId).client;
-      return client.textGeneration.generateIssueContent({
-        cwd: props.cwd,
-        mode: "polish",
-        rough: input.rough,
-        currentTitle: detailQuery.data?.title,
-        ...(input.instructions.trim().length > 0
-          ? { customInstructions: input.instructions.trim() }
-          : {}),
-      });
-    },
+  const improveDescriptionMutation = useImproveWorkItemDescriptionMutation({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    currentTitle: detailQuery.data?.title,
   });
 
   const detail = detailQuery.data;

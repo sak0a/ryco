@@ -79,6 +79,7 @@ import * as GitVcsDriver from "../src/vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../src/vcs/VcsDriverRegistry.ts";
 import { VcsStatusBroadcaster } from "../src/vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../src/git/GitWorkflowService.ts";
+import { LocalDiagnosticsMetricsLive } from "../src/observability/Services/LocalDiagnosticsMetrics.ts";
 import * as VcsProcess from "../src/vcs/VcsProcess.ts";
 
 function runGit(cwd: string, args: ReadonlyArray<string>) {
@@ -332,6 +333,7 @@ export const makeOrchestrationIntegrationHarness = (
     );
     const checkpointReactorLayer = CheckpointReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
+      Layer.provideMerge(LocalDiagnosticsMetricsLive),
       Layer.provideMerge(
         Layer.succeed(VcsStatusBroadcaster, {
           getStatus: () => Effect.die("getStatus should not be called in this test"),
@@ -372,6 +374,7 @@ export const makeOrchestrationIntegrationHarness = (
     const layer = Layer.empty.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(orchestrationReactorLayer),
+      Layer.provideMerge(LocalDiagnosticsMetricsLive),
       Layer.provide(persistenceLayer),
       Layer.provideMerge(RepositoryIdentityResolverLive),
       Layer.provideMerge(ServerSettingsService.layerTest()),

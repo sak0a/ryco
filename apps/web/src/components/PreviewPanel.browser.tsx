@@ -5,6 +5,8 @@ import { page } from "vite-plus/test/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
+import { AppAtomRegistryProvider, resetAppAtomRegistryForTests } from "../rpc/atomRegistry";
+import { resetProjectPreviewAtomsForTests } from "../rpc/projectPreviewAtoms";
 import PreviewPanel from "./PreviewPanel";
 import { PREVIEW_FILE_SIZE_LIMIT_BYTES } from "./PreviewPanel.logic";
 
@@ -59,37 +61,6 @@ vi.mock("@pierre/diffs/react", () => ({
   ),
 }));
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: vi.fn((options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
-    const queryKind = options.queryKey[1];
-    if (queryKind === "listEntries") {
-      return {
-        data: { entries: previewHarness.entries, truncated: false },
-        error: null,
-        isLoading: false,
-        isFetching: false,
-        refetch: vi.fn().mockResolvedValue({
-          data: { entries: previewHarness.entries, truncated: false },
-        }),
-      };
-    }
-
-    const relativePath = options.queryKey[4] as string | null;
-    if (options.enabled !== false && relativePath) {
-      previewHarness.readAttempts.push(relativePath);
-    }
-    return {
-      data: relativePath ? previewHarness.readFiles.get(relativePath) : undefined,
-      error: null,
-      isLoading: false,
-      isFetching: false,
-      refetch: vi.fn().mockResolvedValue({
-        data: relativePath ? previewHarness.readFiles.get(relativePath) : undefined,
-      }),
-    };
-  }),
-}));
-
 vi.mock("@tanstack/react-router", () => ({
   useParams: vi.fn((options?: { select?: (params: Record<string, string>) => unknown }) => {
     const params = previewHarness.routeParams;
@@ -104,11 +75,20 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("../environmentApi", () => ({
   ensureEnvironmentApi: () => ({
     projects: {
-      listEntries: vi.fn().mockResolvedValue({
-        entries: previewHarness.entries,
-        truncated: false,
+      listEntries: vi.fn().mockImplementation(() =>
+        Promise.resolve({
+          entries: previewHarness.entries,
+          truncated: false,
+        }),
+      ),
+      readFile: vi.fn().mockImplementation(({ relativePath }: { relativePath: string }) => {
+        previewHarness.readAttempts.push(relativePath);
+        const result = previewHarness.readFiles.get(relativePath);
+        if (!result) {
+          return Promise.reject(new Error("ENOENT: no such file"));
+        }
+        return Promise.resolve(result);
       }),
-      readFile: vi.fn(),
       stageFileReference: vi.fn(),
     },
   }),
@@ -176,6 +156,14 @@ vi.mock("./chat/ChangedFilesTree", () => ({
   ),
 }));
 
+function renderPreviewPanel() {
+  return render(
+    <AppAtomRegistryProvider>
+      <PreviewPanel mode="sheet" />
+    </AppAtomRegistryProvider>,
+  );
+}
+
 describe("PreviewPanel", () => {
   let mounted:
     | (Awaited<ReturnType<typeof render>> & {
@@ -186,6 +174,8 @@ describe("PreviewPanel", () => {
 
   beforeEach(() => {
     previewHarness.reset();
+    resetAppAtomRegistryForTests();
+    resetProjectPreviewAtomsForTests();
   });
 
   afterEach(async () => {
@@ -196,6 +186,8 @@ describe("PreviewPanel", () => {
     mounted = null;
     document.body.innerHTML = "";
     previewHarness.reset();
+    resetAppAtomRegistryForTests();
+    resetProjectPreviewAtomsForTests();
   });
 
   it("places the workspace tree on the right and filters visible files", async () => {
@@ -205,7 +197,7 @@ describe("PreviewPanel", () => {
       { path: "README.md", kind: "file", sizeBytes: 64 },
     ];
 
-    mounted = await render(<PreviewPanel mode="sheet" />);
+    mounted = await renderPreviewPanel();
 
     const contentPanel = document.querySelector("[data-preview-content-panel]");
     const fileRail = document.querySelector("[data-preview-file-rail]");
@@ -228,7 +220,7 @@ describe("PreviewPanel", () => {
       { path: "src/app.ts", kind: "file", sizeBytes: 64 },
     ];
 
-    mounted = await render(<PreviewPanel mode="sheet" />);
+    mounted = await renderPreviewPanel();
 
     const fileRail = document.querySelector<HTMLElement>("[data-preview-file-rail]");
     expect(fileRail).not.toBeNull();
@@ -266,7 +258,7 @@ describe("PreviewPanel", () => {
       mimeType: "image/png",
     });
 
-    mounted = await render(<PreviewPanel mode="sheet" />);
+    mounted = await renderPreviewPanel();
     await page.getByRole("button", { name: "assets/logo.png" }).click();
 
     const image = page.getByRole("img", { name: "assets/logo.png" });
@@ -286,7 +278,7 @@ describe("PreviewPanel", () => {
       contents: "const answer = 42;",
     });
 
-    mounted = await render(<PreviewPanel mode="sheet" />);
+    mounted = await renderPreviewPanel();
     await page.getByRole("button", { name: "src/app.ts" }).click();
 
     await expect.element(page.getByText("const answer = 42;")).toBeInTheDocument();
@@ -301,7 +293,7 @@ describe("PreviewPanel", () => {
       },
     ];
 
-    mounted = await render(<PreviewPanel mode="sheet" />);
+    mounted = await renderPreviewPanel();
     await page.getByRole("button", { name: "logs/huge.log" }).click();
 
     await expect.element(page.getByText(/File is too large to preview/)).toBeInTheDocument();
@@ -323,7 +315,7 @@ describe("PreviewPanel", () => {
       contents: "const draft = true;",
     });
 
-    mounted = await render(<PreviewPanel mode="sheet" />);
+    mounted = await renderPreviewPanel();
     await page.getByRole("button", { name: "src/app.ts" }).click();
 
     await expect.element(page.getByText("const draft = true;")).toBeInTheDocument();

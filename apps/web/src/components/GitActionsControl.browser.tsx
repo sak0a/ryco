@@ -26,7 +26,6 @@ const {
   activeRunStackedActionDeferredRef,
   activeDraftThreadRef,
   hasServerThreadRef,
-  invalidateGitQueriesSpy,
   refreshGitStatusSpy,
   runStackedActionMutateAsyncSpy,
   setDraftThreadContextSpy,
@@ -39,7 +38,6 @@ const {
   activeRunStackedActionDeferredRef: { current: createDeferredPromise<never>() },
   activeDraftThreadRef: { current: null as unknown },
   hasServerThreadRef: { current: true },
-  invalidateGitQueriesSpy: vi.fn(() => Promise.resolve()),
   refreshGitStatusSpy: vi.fn(() => Promise.resolve(null)),
   runStackedActionMutateAsyncSpy: vi.fn(() => activeRunStackedActionDeferredRef.current.promise),
   setDraftThreadContextSpy: vi.fn(),
@@ -49,39 +47,6 @@ const {
   toastPromiseSpy: vi.fn(),
   toastUpdateSpy: vi.fn(),
 }));
-
-vi.mock("@tanstack/react-query", async () => {
-  const actual =
-    await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query");
-
-  return {
-    ...actual,
-    useIsMutating: vi.fn(() => 0),
-    useMutation: vi.fn((options: { __kind?: string }) => {
-      if (options.__kind === "run-stacked-action") {
-        return {
-          mutateAsync: runStackedActionMutateAsyncSpy,
-          isPending: false,
-        };
-      }
-
-      if (options.__kind === "pull") {
-        return {
-          mutateAsync: vi.fn(),
-          isPending: false,
-        };
-      }
-
-      return {
-        mutate: vi.fn(),
-        mutateAsync: vi.fn(),
-        isPending: false,
-      };
-    }),
-    useQuery: vi.fn(() => ({ data: null, error: null })),
-    useQueryClient: vi.fn(() => ({})),
-  };
-});
 
 vi.mock("~/components/ui/toast", () => ({
   toastManager: {
@@ -97,17 +62,31 @@ vi.mock("~/editorPreferences", () => ({
   openInPreferredEditor: vi.fn(),
 }));
 
-vi.mock("~/lib/gitReactQuery", () => ({
-  gitInitMutationOptions: vi.fn(() => ({ __kind: "init" })),
-  gitMutationKeys: {
-    publishRepository: vi.fn(() => ["publish-repository"]),
-    pull: vi.fn(() => ["pull"]),
-    runStackedAction: vi.fn(() => ["run-stacked-action"]),
-  },
-  gitPullMutationOptions: vi.fn(() => ({ __kind: "pull" })),
-  gitRunStackedActionMutationOptions: vi.fn(() => ({ __kind: "run-stacked-action" })),
-  invalidateGitQueries: invalidateGitQueriesSpy,
-  sourceControlPublishRepositoryMutationOptions: vi.fn(() => ({ __kind: "publish-repository" })),
+vi.mock("~/rpc/useGit", () => ({
+  gitMutationTrackingKey: (kind: string, environmentId: string | null, cwd: string | null) =>
+    `git-mutation:${kind}:${environmentId ?? ""}:${cwd ?? ""}`,
+  gitScopeKey: (cwd: string | null) => `git:${cwd ?? ""}`,
+  invalidateScopes: vi.fn(),
+  useIsGitMutating: vi.fn(() => false),
+  useGitMutation: vi.fn((options: { trackingKey?: string | null }) => {
+    const trackingKey = options.trackingKey ?? "";
+    if (typeof trackingKey === "string" && trackingKey.includes("run-stacked-action")) {
+      return {
+        mutate: vi.fn(),
+        mutateAsync: runStackedActionMutateAsyncSpy,
+        isPending: false,
+        error: null,
+        reset: vi.fn(),
+      };
+    }
+    return {
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+      isPending: false,
+      error: null,
+      reset: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock("~/lib/gitStatusState", () => ({

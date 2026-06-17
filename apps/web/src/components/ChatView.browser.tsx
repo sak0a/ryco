@@ -58,6 +58,7 @@ import {
 import { isMacPlatform } from "../lib/utils";
 import { __resetLocalApiForTests } from "../localApi";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
+import { resetProjectAtomsForTests } from "../rpc/projectAtoms";
 import { getServerConfig } from "../rpc/serverState";
 import { getRouter } from "../router";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
@@ -1853,6 +1854,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     wsRequests.length = 0;
     customWsRpcResolver = null;
     __resetEnvironmentApiOverridesForTests();
+    resetProjectAtomsForTests();
     resetSavedEnvironmentRegistryStoreForTests();
     resetSavedEnvironmentRuntimeStoreForTests();
     Reflect.deleteProperty(window, "desktopBridge");

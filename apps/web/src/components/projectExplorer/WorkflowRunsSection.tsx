@@ -5,7 +5,6 @@ import type {
   SourceControlWorkflowStep,
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
-import { useQuery } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -22,12 +21,13 @@ import {
   UserIcon,
 } from "lucide-react";
 import {
-  changeRequestListQueryOptions,
+  invalidateSourceControl,
   useRerunWorkflowMutation,
-  workflowJobLogQueryOptions,
-  workflowRunJobsQueryOptions,
-  workflowRunsQueryOptions,
-} from "~/lib/sourceControlContextRpc";
+  useSourceControlChangeRequestList,
+  useSourceControlWorkflowJobLog,
+  useSourceControlWorkflowRunJobs,
+  useSourceControlWorkflowRuns,
+} from "~/rpc/useSourceControl";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
@@ -215,26 +215,23 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [expandedGroupOverrides, setExpandedGroupOverrides] = useState<Record<string, boolean>>({});
   const shouldGroupRuns = props.groupRunsBySource === true && props.pullRequestNumber == null;
-  const changeRequestsQuery = useQuery(
-    changeRequestListQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      state: "all",
-      limit: 100,
-      enabled: shouldGroupRuns,
-    }),
-  );
-  const runsQuery = useQuery({
-    ...workflowRunsQueryOptions({
+  const changeRequestsQuery = useSourceControlChangeRequestList({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    state: "all",
+    limit: 100,
+    enabled: shouldGroupRuns,
+  });
+  const runsQuery = useSourceControlWorkflowRuns(
+    {
       environmentId: props.environmentId,
       cwd: props.cwd,
       ...(props.pullRequestNumber !== undefined
         ? { pullRequestNumber: props.pullRequestNumber }
         : {}),
       limit: 20,
-    }),
-    refetchInterval: (query) => {
-      const data = query.state.data;
+    },
+    (data) => {
       if (!data) return false;
       const status = getPrCheckStatusFromWorkflowRuns({
         runs: data.runs,
@@ -242,7 +239,7 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
       });
       return shouldRefreshPrCheckStatus(status) ? 30_000 : false;
     },
-  });
+  );
 
   const runs = runsQuery.data?.runs ?? EMPTY_WORKFLOW_RUNS;
   const runGroups = useMemo(
@@ -318,7 +315,11 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
           type="button"
           size="sm"
           variant="ghost"
-          onClick={() => runsQuery.refetch()}
+          onClick={() => {
+            if (props.environmentId !== null && props.cwd !== null) {
+              invalidateSourceControl({ environmentId: props.environmentId, cwd: props.cwd });
+            }
+          }}
           disabled={runsQuery.isFetching}
         >
           <RotateCwIcon className={runsQuery.isFetching ? "size-3.5 animate-spin" : "size-3.5"} />
@@ -361,7 +362,7 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
             <Spinner className="size-4" />
             Loading workflow runs…
           </div>
-        ) : runsQuery.isError ? (
+        ) : runsQuery.error ? (
           <WorkflowStateMessage
             tone="error"
             message={errorMessage(runsQuery.error, "Failed to load workflow runs.")}
@@ -678,14 +679,12 @@ function WorkflowRunJobsPanel(props: {
   cwd: string | null;
   run: SourceControlWorkflowRun;
 }) {
-  const jobsQuery = useQuery(
-    workflowRunJobsQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      runId: props.run.runId,
-      enabled: true,
-    }),
-  );
+  const jobsQuery = useSourceControlWorkflowRunJobs({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    runId: props.run.runId,
+    enabled: true,
+  });
 
   const jobs = jobsQuery.data?.jobs ?? [];
   const failedJobs = jobs.filter(
@@ -705,7 +704,7 @@ function WorkflowRunJobsPanel(props: {
           <Spinner className="size-3.5" />
           Loading jobs…
         </div>
-      ) : jobsQuery.isError ? (
+      ) : jobsQuery.error ? (
         <WorkflowStateMessage
           tone="error"
           message={errorMessage(jobsQuery.error, "Failed to load workflow jobs.")}
@@ -872,15 +871,13 @@ function WorkflowJobLog(props: {
   runId: string;
   jobId: string;
 }) {
-  const logQuery = useQuery(
-    workflowJobLogQueryOptions({
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      runId: props.runId,
-      jobId: props.jobId,
-      enabled: true,
-    }),
-  );
+  const logQuery = useSourceControlWorkflowJobLog({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    runId: props.runId,
+    jobId: props.jobId,
+    enabled: true,
+  });
 
   return (
     <div className="border-border/60 border-t bg-background/60">
@@ -889,7 +886,7 @@ function WorkflowJobLog(props: {
           <Spinner className="size-3.5" />
           Loading log…
         </div>
-      ) : logQuery.isError ? (
+      ) : logQuery.error ? (
         <WorkflowStateMessage
           tone="error"
           message={errorMessage(logQuery.error, "Failed to load workflow log.")}

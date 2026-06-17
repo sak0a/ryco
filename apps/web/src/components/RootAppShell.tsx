@@ -2,7 +2,6 @@ import { type ServerLifecycleWelcomePayload } from "@ryco/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime";
 import { Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 
 import { AppSidebarLayout } from "./AppSidebarLayout";
 import { CommandPalette } from "./CommandPalette";
@@ -129,11 +128,9 @@ function AuthenticatedTracingBootstrap() {
 }
 
 function EnvironmentConnectionManagerBootstrap() {
-  const queryClient = useQueryClient();
-
   useEffect(() => {
-    return startEnvironmentConnectionService(queryClient);
-  }, [queryClient]);
+    return startEnvironmentConnectionService();
+  }, []);
 
   return null;
 }

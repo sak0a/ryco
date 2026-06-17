@@ -1,7 +1,8 @@
 import { KeyRoundIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { Option } from "effect";
 import { type FormEvent, type ReactNode, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "~/rpc/queryClient";
+import { invalidateAtlassian, useAtlassianConnections } from "~/rpc/useAtlassian";
 import type {
   AtlassianConnectionSummary,
   SourceControlProviderKind,
@@ -350,12 +351,9 @@ function AtlassianConfiguration() {
 
   const connection = getPrimaryEnvironmentConnection();
   const client = connection?.client ?? null;
-  const connectionsQuery = useQuery({
-    queryKey: atlassianConnectionQueryKey,
-    queryFn: async () => {
-      if (!client) return [];
-      return client.atlassian.listConnections();
-    },
+  const environmentId = connection?.environmentId ?? null;
+  const connectionsQuery = useAtlassianConnections({
+    environmentId,
     enabled: client !== null,
   });
 
@@ -373,6 +371,7 @@ function AtlassianConfiguration() {
       setBitbucketLabel("Bitbucket");
       setBitbucketEmail("");
       setBitbucketToken("");
+      invalidateAtlassian({ environmentId });
       void queryClient.invalidateQueries({ queryKey: atlassianConnectionQueryKey });
       void refreshSourceControlDiscovery();
       toastManager.add(
@@ -410,6 +409,7 @@ function AtlassianConfiguration() {
       setJiraEmail("");
       setJiraSiteUrl("");
       setJiraToken("");
+      invalidateAtlassian({ environmentId });
       void queryClient.invalidateQueries({ queryKey: atlassianConnectionQueryKey });
       toastManager.add(
         stackedThreadToast({
@@ -436,6 +436,7 @@ function AtlassianConfiguration() {
       return client.atlassian.disconnect({ connectionId: item.connectionId });
     },
     onSuccess: () => {
+      invalidateAtlassian({ environmentId });
       void queryClient.invalidateQueries({ queryKey: atlassianConnectionQueryKey });
       void refreshSourceControlDiscovery();
     },
@@ -478,6 +479,7 @@ function AtlassianConfiguration() {
   };
 
   const items = connectionsQuery.data ?? [];
+  const connectionsPending = connectionsQuery.data === null && !connectionsQuery.isError;
 
   return (
     <>
@@ -619,7 +621,7 @@ function AtlassianConfiguration() {
       </div>
 
       <div className="border-t border-border/60">
-        {connectionsQuery.isPending ? (
+        {connectionsPending ? (
           <div className="flex items-center gap-2 px-4 py-4 text-xs text-muted-foreground sm:px-5">
             <Spinner className="size-3.5" />
             Loading Atlassian connections

@@ -1,14 +1,13 @@
 import type { EnvironmentId } from "@ryco/contracts";
-import { useQuery } from "@tanstack/react-query";
 import { RotateCwIcon, SparklesIcon } from "lucide-react";
 import { useEffect, useReducer } from "react";
 import {
-  buildIssueAssigneesQueryOptions,
-  buildIssueLabelsQueryOptions,
   useCreateIssueMutation,
   useGenerateBranchNameMutation,
   useGenerateIssueContentMutation,
-} from "~/lib/issueCreationRpc";
+  useSourceControlIssueAssignees,
+  useSourceControlIssueLabels,
+} from "~/rpc/useSourceControl";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -36,12 +35,14 @@ export interface NewIssueDialogProps {
 export function NewIssueDialog(props: NewIssueDialogProps) {
   const [state, dispatch] = useReducer(newIssueDialogReducer, initialNewIssueState);
 
-  const labelsQuery = useQuery(
-    buildIssueLabelsQueryOptions({ environmentId: props.environmentId, cwd: props.cwd }),
-  );
-  const assigneesQuery = useQuery(
-    buildIssueAssigneesQueryOptions({ environmentId: props.environmentId, cwd: props.cwd }),
-  );
+  const labelsQuery = useSourceControlIssueLabels({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+  });
+  const assigneesQuery = useSourceControlIssueAssignees({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+  });
 
   const polish = useGenerateIssueContentMutation({ environmentId: props.environmentId });
   const branchGen = useGenerateBranchNameMutation({ environmentId: props.environmentId });

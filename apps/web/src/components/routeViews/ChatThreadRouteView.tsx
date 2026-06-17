@@ -2,7 +2,12 @@ import type { ScopedThreadRef } from "@ryco/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../../composerDraftStore";
+import { finalizePromotedDraftThreadByRef } from "../../composerDraftStore";
+import {
+  useDraftThreadByRef,
+  useDraftThreadExistsByRef,
+  useEnvironmentHasDraftThreads,
+} from "../../composerDraftSelectors";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useSettings } from "../../hooks/useSettings";
 import { usePerfMark } from "../../perf/tabSwitchInstrumentation";
@@ -60,18 +65,9 @@ export function ChatThreadRouteView({
       [sidebarThreadSortOrder, threadRef?.environmentId],
     ),
   );
-  const draftThreadExists = useComposerDraftStore((store) =>
-    threadRef ? store.getDraftThreadByRef(threadRef) !== null : false,
-  );
-  const draftThread = useComposerDraftStore((store) =>
-    threadRef ? store.getDraftThreadByRef(threadRef) : null,
-  );
-  const environmentHasDraftThreads = useComposerDraftStore((store) => {
-    if (!threadRef) {
-      return false;
-    }
-    return store.hasDraftThreadsInEnvironment(threadRef.environmentId);
-  });
+  const draftThreadExists = useDraftThreadExistsByRef(threadRef);
+  const draftThread = useDraftThreadByRef(threadRef);
+  const environmentHasDraftThreads = useEnvironmentHasDraftThreads(threadRef?.environmentId);
   const routeThreadExists = threadExists || draftThreadExists;
   const serverThreadStarted = threadHasStarted(serverThread);
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
