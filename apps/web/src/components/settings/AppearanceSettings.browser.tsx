@@ -14,6 +14,7 @@ import {
   APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID,
   FONT_FAMILY_MONO_OPTIONS,
   FONT_FAMILY_SANS_OPTIONS,
+  PRIMARY_COLOR_OPTIONS,
   SURFACE_TRANSPARENCY_OPTIONS,
 } from "../../themes/appearancePreferences";
 import { useUiStateStore } from "../../uiStateStore";
@@ -68,24 +69,22 @@ describe("AppearanceSettingsPanel", () => {
     mounted = await render(<AppearanceSettingsPanel />);
 
     await expect.element(page.getByRole("radio", { name: /Default/ })).toBeInTheDocument();
-    await expect.element(page.getByText("Solarized Dark", { exact: true })).toBeInTheDocument();
+    await expect.element(page.getByText("Midnight Graphite", { exact: true })).toBeInTheDocument();
     await expect.element(page.getByText("Nord", { exact: true })).toBeInTheDocument();
     await expect.element(page.getByText("One Dark Pro", { exact: true })).toBeInTheDocument();
     await expect.element(page.getByText("Dracula", { exact: true })).toBeInTheDocument();
     await expect.element(page.getByText("GitHub", { exact: true })).toBeInTheDocument();
     await expect.element(page.getByText("Catppuccin", { exact: true })).toBeInTheDocument();
     await expect.element(page.getByText("Tokyo Night", { exact: true })).toBeInTheDocument();
-    await expect.element(page.getByText("Monokai", { exact: true })).toBeInTheDocument();
-    await expect.element(page.getByText("Gruvbox Material", { exact: true })).toBeInTheDocument();
     await expect
       .element(page.getByText("Cursor Dark Inspired", { exact: true }))
-      .toBeInTheDocument();
+      .not.toBeInTheDocument();
 
-    await page.getByRole("radio", { name: /Nord/ }).click();
+    await page.getByRole("radio", { name: /Midnight Graphite/ }).click();
 
-    expect(localStorage.getItem(ACTIVE_THEME_STORAGE_KEY)).toBe("nord");
+    expect(localStorage.getItem(ACTIVE_THEME_STORAGE_KEY)).toBe("midnight-graphite");
     await vi.waitFor(() => {
-      expect(document.getElementById(THEME_STYLE_ELEMENT_ID)?.textContent).toContain("#2e3440");
+      expect(document.getElementById(THEME_STYLE_ELEMENT_ID)?.textContent).toContain("#040404");
     });
 
     await page.getByRole("radio", { name: /One Dark Pro/ }).click();
@@ -128,24 +127,35 @@ describe("AppearanceSettingsPanel", () => {
     const transparencyValue = SURFACE_TRANSPARENCY_OPTIONS.find(
       (option) => option.label === "High",
     )?.value;
+    const primaryColorValue = PRIMARY_COLOR_OPTIONS.find(
+      (option) => option.label === "Teal",
+    )?.value;
 
     await expect.element(page.getByText("Interface controls")).toBeInTheDocument();
     await page.getByRole("radio", { name: `Use ${interfaceFontLabel} for interface font` }).click();
     await page.getByRole("radio", { name: `Use ${codeFontLabel} for code font` }).click();
     await page.getByRole("button", { name: "Set text size to Large" }).click();
     await page.getByRole("button", { name: "Set corner radius to Square" }).click();
+    expect(
+      JSON.parse(localStorage.getItem(APPEARANCE_PREFERENCES_STORAGE_KEY) ?? "{}").primaryColorMode,
+    ).toBeUndefined();
+    await page.getByText("Use theme", { exact: true }).click();
+    await page.getByRole("radio", { name: "Use Teal as primary color" }).click();
     await page.getByRole("button", { name: "Set transparency to High" }).click();
 
     await vi.waitFor(() => {
       expect(interfaceFontValue).toBeDefined();
       expect(codeFontValue).toBeDefined();
       expect(transparencyValue).toBeDefined();
+      expect(primaryColorValue).toBeDefined();
       expect(JSON.parse(localStorage.getItem(APPEARANCE_PREFERENCES_STORAGE_KEY) ?? "{}")).toEqual(
         expect.objectContaining({
           fontFamilySans: interfaceFontValue,
           fontFamilyMono: codeFontValue,
           fontSizeBase: "18px",
           radius: "0rem",
+          primaryColorMode: "custom",
+          primaryColor: primaryColorValue,
           surfaceTransparency: transparencyValue,
         }),
       );
@@ -156,6 +166,7 @@ describe("AppearanceSettingsPanel", () => {
     expect(style?.textContent).toContain('--font-family-mono: "Geist Mono"');
     expect(style?.textContent).toContain("--font-size-base: 18px");
     expect(style?.textContent).toContain("--radius: 0rem");
+    expect(style?.textContent).toContain(`--primary: ${primaryColorValue}`);
     expect(style?.textContent).toContain("--app-surface-opacity: 78%");
 
     await expect
@@ -169,6 +180,9 @@ describe("AppearanceSettingsPanel", () => {
       .toBeInTheDocument();
     await expect
       .element(page.getByRole("button", { name: "Reset corner radius to default" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Reset primary color to default" }))
       .toBeInTheDocument();
     await expect
       .element(page.getByRole("button", { name: "Reset transparency to default" }))

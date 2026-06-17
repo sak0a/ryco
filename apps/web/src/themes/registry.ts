@@ -164,7 +164,7 @@ export function updateCustomTheme(id: string, next: ThemeDefinition): void {
   const replacement: ThemeDefinition = { ...next, builtIn: false };
   const updated = [...themes.slice(0, index), replacement, ...themes.slice(index + 1)];
   setCustomThemes(updated);
-  if (getActiveThemeId() === id && id !== next.id) {
+  if (getStoredActiveThemeId() === id && id !== next.id) {
     setActiveThemeId(next.id);
   }
 }
@@ -173,7 +173,7 @@ export function deleteCustomTheme(id: string): void {
   if (isBuiltInThemeId(id)) return;
   const themes = getCustomThemes().filter((theme) => theme.id !== id);
   setCustomThemes(themes);
-  if (getActiveThemeId() === id) {
+  if (getStoredActiveThemeId() === id) {
     setActiveThemeId(DEFAULT_THEME_ID);
     applyThemeToDocument(DEFAULT_THEME);
   }
@@ -209,8 +209,14 @@ export function findTheme(id: string | null | undefined): ThemeDefinition {
 }
 
 export function getActiveThemeId(): string {
+  const stored = getStoredActiveThemeId();
+  return getAllThemes().some((theme) => theme.id === stored) ? stored : DEFAULT_THEME_ID;
+}
+
+function getStoredActiveThemeId(): string {
   if (typeof localStorage === "undefined") return DEFAULT_THEME_ID;
-  return localStorage.getItem(ACTIVE_THEME_STORAGE_KEY) ?? DEFAULT_THEME_ID;
+  const stored = localStorage.getItem(ACTIVE_THEME_STORAGE_KEY);
+  return stored ?? DEFAULT_THEME_ID;
 }
 
 export function setActiveThemeId(id: string): void {

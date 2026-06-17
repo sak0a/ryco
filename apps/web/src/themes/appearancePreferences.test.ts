@@ -4,9 +4,11 @@ import {
   APPEARANCE_PREFERENCES_STORAGE_KEY,
   APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID,
   DEFAULT_APPEARANCE_PREFERENCES,
+  PRIMARY_COLOR_OPTIONS,
   applyAppearancePreferencesToDocument,
   getAppearancePreferences,
   hasAppearancePreferenceOverride,
+  normalizePrimaryColor,
   resetAppearancePreference,
   setAppearancePreference,
 } from "./appearancePreferences";
@@ -61,6 +63,8 @@ describe("appearance preferences", () => {
     expect(hasAppearancePreferenceOverride("fontFamilyMono")).toBe(false);
     expect(hasAppearancePreferenceOverride("fontSizeBase")).toBe(false);
     expect(hasAppearancePreferenceOverride("radius")).toBe(false);
+    expect(hasAppearancePreferenceOverride("primaryColorMode")).toBe(false);
+    expect(hasAppearancePreferenceOverride("primaryColor")).toBe(false);
     expect(hasAppearancePreferenceOverride("surfaceTransparency")).toBe(false);
   });
 
@@ -85,6 +89,8 @@ describe("appearance preferences", () => {
         fontFamilyMono: "Papyrus",
         fontSizeBase: "500px",
         radius: "url(javascript:alert(1))",
+        primaryColorMode: "always",
+        primaryColor: "url(javascript:alert(1))",
         surfaceTransparency: "invisible",
       }),
     );
@@ -92,14 +98,28 @@ describe("appearance preferences", () => {
 
     setAppearancePreference("fontFamilySans", "serif");
     setAppearancePreference("radius", "999rem");
+    setAppearancePreference("primaryColorMode", "always");
+    setAppearancePreference("primaryColor", "not-a-color");
     setAppearancePreference("surfaceTransparency", "opaque");
     expect(getAppearancePreferences().fontFamilySans).toBe(
       DEFAULT_APPEARANCE_PREFERENCES.fontFamilySans,
     );
     expect(getAppearancePreferences().radius).toBe(DEFAULT_APPEARANCE_PREFERENCES.radius);
+    expect(getAppearancePreferences().primaryColorMode).toBe(
+      DEFAULT_APPEARANCE_PREFERENCES.primaryColorMode,
+    );
+    expect(getAppearancePreferences().primaryColor).toBe(
+      DEFAULT_APPEARANCE_PREFERENCES.primaryColor,
+    );
     expect(getAppearancePreferences().surfaceTransparency).toBe(
       DEFAULT_APPEARANCE_PREFERENCES.surfaceTransparency,
     );
+  });
+
+  it("normalizes custom primary colors", () => {
+    expect(normalizePrimaryColor("#ABC")).toBe("#aabbcc");
+    expect(normalizePrimaryColor("0EA5E9")).toBe("#0ea5e9");
+    expect(normalizePrimaryColor("transparent")).toBeNull();
   });
 
   it("resets a single preference without touching the other", () => {
@@ -149,6 +169,8 @@ describe("appearance preferences", () => {
 
     setAppearancePreference("fontSizeBase", "18px");
     setAppearancePreference("radius", "0rem");
+    setAppearancePreference("primaryColorMode", "custom");
+    setAppearancePreference("primaryColor", "#0EA5E9");
     setAppearancePreference("surfaceTransparency", "high");
     applyAppearancePreferencesToDocument();
 
@@ -163,6 +185,9 @@ describe("appearance preferences", () => {
     expect(style?.textContent).toContain("--radius-sm: 0px !important;");
     expect(style?.textContent).toContain("--radius-4xl: 0px !important;");
     expect(style?.textContent).toContain("--font-size-base: 18px;");
+    expect(style?.textContent).toContain(
+      ":root, :root.dark { --primary: #0ea5e9; --ring: #0ea5e9; --primary-foreground: #ffffff; }",
+    );
     expect(style?.textContent).toContain("--app-surface-opacity: 78%;");
     expect(style?.textContent).toContain("--app-glass-light-popover-alpha: 78%;");
     expect(style?.textContent).toContain("--app-dialog-viewport-light-alpha: 37%;");
@@ -197,6 +222,7 @@ describe("appearance preferences", () => {
 
     const style = appended.find((node) => node.id === APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID);
     expect(style?.textContent).toContain("--app-surface-opacity: 100%;");
+    expect(style?.textContent).not.toContain(`--primary: ${PRIMARY_COLOR_OPTIONS[0].value};`);
     expect(style?.textContent).toContain("--app-muted-surface-opacity: 100%;");
     expect(style?.textContent).toContain("--app-glass-light-start-alpha: 0%;");
     expect(style?.textContent).toContain("--app-glass-light-popover-alpha: 100%;");

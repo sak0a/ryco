@@ -19,6 +19,7 @@ import { DEFAULT_AGENT_TOKEN_MODE } from "@ryco/contracts";
 import { cn } from "../../lib/utils";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { ensureLocalApi } from "../../localApi";
+import { tokenModeOptions, tokenModePresentation } from "../../tokenModePresentation";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -82,20 +83,6 @@ function impactLabel(plugin: OpinionatedPluginCatalogItem): string {
 function scopeLabel(plugin: OpinionatedPluginCatalogItem): string {
   return plugin.scope === "global" ? "Global" : "Provider";
 }
-
-const tokenModeLabels: Record<AgentTokenMode, string> = {
-  off: "Off",
-  balanced: "Balanced",
-  aggressive: "Aggressive",
-};
-
-const tokenModeDescriptions: Record<AgentTokenMode, string> = {
-  off: "No Ryco token-efficiency instructions are added.",
-  balanced: "Concise responses and targeted reads while preserving important detail.",
-  aggressive: "Shortest practical responses and strongest pressure to avoid large output copies.",
-};
-
-const tokenModeOptions = Object.keys(tokenModeLabels) as AgentTokenMode[];
 
 function pluginSortValue(pluginId: OpinionatedPluginId): number {
   switch (pluginId) {
@@ -179,6 +166,9 @@ function PluginTargetRow({
 export function OpinionatedPluginsSettingsPanel() {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
+  const selectedTokenMode = settings.defaultAgentTokenMode ?? DEFAULT_AGENT_TOKEN_MODE;
+  const selectedTokenModeOption = tokenModePresentation[selectedTokenMode];
+  const SelectedTokenModeIcon = selectedTokenModeOption.icon;
   const [plugins, setPlugins] = useState<ReadonlyArray<OpinionatedPluginCatalogItem>>([]);
   const [statuses, setStatuses] = useState<ReadonlyArray<OpinionatedPluginStatus>>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -307,27 +297,35 @@ export function OpinionatedPluginsSettingsPanel() {
           description="Applied to new threads and draft sessions. Existing threads keep their own mode."
           control={
             <Select
-              value={settings.defaultAgentTokenMode ?? DEFAULT_AGENT_TOKEN_MODE}
+              value={selectedTokenMode}
               onValueChange={(value) =>
                 updateSettings({ defaultAgentTokenMode: value as AgentTokenMode })
               }
             >
-              <SelectTrigger className="w-full sm:w-44" aria-label="Default token mode">
-                <SelectValue>
-                  {tokenModeLabels[settings.defaultAgentTokenMode ?? DEFAULT_AGENT_TOKEN_MODE]}
-                </SelectValue>
+              <SelectTrigger className="w-full sm:w-52" aria-label="Default token mode">
+                <span className="inline-flex min-w-0 items-center gap-2">
+                  <SelectedTokenModeIcon className="size-4 shrink-0 text-muted-foreground" />
+                  <SelectValue>{selectedTokenModeOption.triggerLabel}</SelectValue>
+                </span>
               </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {tokenModeOptions.map((mode) => (
-                  <SelectItem key={mode} hideIndicator value={mode}>
-                    <div className="grid min-w-0 gap-0.5">
-                      <span className="font-medium text-foreground">{tokenModeLabels[mode]}</span>
-                      <span className="text-muted-foreground text-xs leading-4">
-                        {tokenModeDescriptions[mode]}
-                      </span>
-                    </div>
-                  </SelectItem>
-                ))}
+              <SelectPopup align="end" alignItemWithTrigger={false} className="w-60">
+                {tokenModeOptions.map((mode) => {
+                  const option = tokenModePresentation[mode];
+                  const OptionIcon = option.icon;
+                  return (
+                    <SelectItem key={mode} hideIndicator value={mode}>
+                      <div className="grid min-w-0 gap-0.5">
+                        <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                          <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                          {option.label}
+                        </span>
+                        <span className="text-muted-foreground text-xs leading-4">
+                          {option.description}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  );
+                })}
               </SelectPopup>
             </Select>
           }

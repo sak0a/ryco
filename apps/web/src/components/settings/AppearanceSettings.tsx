@@ -9,6 +9,7 @@ import {
   GaugeIcon,
   type LucideIcon,
   Minimize2Icon,
+  PaletteIcon,
   PencilIcon,
   PlusIcon,
   RadiusIcon,
@@ -35,6 +36,7 @@ import {
   FONT_FAMILY_MONO_OPTIONS,
   FONT_FAMILY_SANS_OPTIONS,
   FONT_SIZE_OPTIONS,
+  PRIMARY_COLOR_OPTIONS,
   RADIUS_OPTIONS,
   SURFACE_TRANSPARENCY_OPTIONS,
   applyAppearancePreferencesToDocument,
@@ -78,6 +80,7 @@ import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
+import { ColorPicker } from "../ui/color-picker";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -219,6 +222,26 @@ export function AppearanceSettingsPanel() {
 
   const handleAppearancePreferenceReset = useCallback((key: AppearancePreferenceKey) => {
     resetAppearancePreference(key);
+    applyAppearancePreferencesToDocument();
+    setAppearancePreferencesState(getAppearancePreferences());
+  }, []);
+
+  const handlePrimaryColorReset = useCallback(() => {
+    resetAppearancePreference("primaryColorMode");
+    resetAppearancePreference("primaryColor");
+    applyAppearancePreferencesToDocument();
+    setAppearancePreferencesState(getAppearancePreferences());
+  }, []);
+
+  const handlePrimaryColorModeChange = useCallback((custom: boolean) => {
+    setAppearancePreference("primaryColorMode", custom ? "custom" : "theme");
+    applyAppearancePreferencesToDocument();
+    setAppearancePreferencesState(getAppearancePreferences());
+  }, []);
+
+  const handlePrimaryColorChange = useCallback((value: string) => {
+    setAppearancePreference("primaryColor", value);
+    setAppearancePreference("primaryColorMode", "custom");
     applyAppearancePreferencesToDocument();
     setAppearancePreferencesState(getAppearancePreferences());
   }, []);
@@ -461,6 +484,24 @@ export function AppearanceSettingsPanel() {
                   />
                 </span>
               }
+            />
+          }
+        />
+        <SettingsRow
+          title="Primary color"
+          description="Theme palettes control buttons by default; enable a custom color to pin one app accent."
+          resetAction={
+            hasAppearancePreferenceOverride("primaryColorMode") ||
+            hasAppearancePreferenceOverride("primaryColor") ? (
+              <SettingResetButton label="primary color" onClick={handlePrimaryColorReset} />
+            ) : null
+          }
+          control={
+            <PrimaryColorPreferencePicker
+              mode={appearancePreferences.primaryColorMode}
+              value={appearancePreferences.primaryColor}
+              onModeChange={handlePrimaryColorModeChange}
+              onColorChange={handlePrimaryColorChange}
             />
           }
         />
@@ -950,6 +991,136 @@ function FontPreferencePicker({
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function PrimaryColorPreferencePicker({
+  mode,
+  value,
+  onModeChange,
+  onColorChange,
+}: {
+  mode: string;
+  value: string;
+  onModeChange: (custom: boolean) => void;
+  onColorChange: (value: string) => void;
+}) {
+  const custom = mode === "custom";
+  const normalizedValue = /^#[0-9a-f]{6}$/i.test(value)
+    ? value.toLowerCase()
+    : PRIMARY_COLOR_OPTIONS[0].value;
+  const current = PRIMARY_COLOR_OPTIONS.find((option) => option.value === normalizedValue);
+  const customPickerClassName = cn(
+    "h-12 w-full rounded-md border px-2 py-1.5 text-left shadow-none",
+    custom && !current
+      ? "border-primary bg-primary/8 text-foreground ring-1 ring-primary/35"
+      : "border-border/70 text-muted-foreground hover:border-foreground/25 hover:bg-muted/45",
+    !custom && "cursor-not-allowed opacity-55 hover:border-border/70 hover:bg-transparent",
+  );
+  const customPickerContent = (
+    <span className="flex size-full min-w-0 items-center gap-2">
+      <span
+        aria-hidden
+        className="size-5 shrink-0 rounded-full border border-black/10 shadow-xs dark:border-white/20"
+        style={{ backgroundColor: normalizedValue }}
+      />
+      <span className="min-w-0">
+        <span className="block truncate text-[12px] font-semibold leading-4">Custom</span>
+        <span className="block truncate font-mono text-[10px] leading-3 opacity-75">
+          {normalizedValue}
+        </span>
+      </span>
+    </span>
+  );
+
+  return (
+    <div className="w-full sm:w-96">
+      <div className="mb-2 flex min-h-9 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/60 text-muted-foreground">
+            <PaletteIcon className="size-3.5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-foreground">
+              {custom ? (current?.label ?? "Custom") : "Theme color"}
+            </span>
+            <span className="block truncate text-[11px] text-muted-foreground">
+              {custom ? normalizedValue : "Active palette"}
+            </span>
+          </span>
+        </div>
+        <label className="flex h-9 shrink-0 items-center gap-2 rounded-md border border-border/70 bg-background px-2 text-xs text-muted-foreground shadow-xs/5">
+          <span>Use theme</span>
+          <Switch
+            checked={!custom}
+            onCheckedChange={(checked) => onModeChange(!checked)}
+            aria-label="Use theme primary color"
+          />
+        </label>
+      </div>
+      <div
+        role="radiogroup"
+        aria-label="Primary color"
+        className="grid grid-cols-2 gap-1.5 sm:grid-cols-4"
+      >
+        {PRIMARY_COLOR_OPTIONS.map((option) => {
+          const selected = normalizedValue === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={custom && selected}
+              aria-label={`Use ${option.label} as primary color`}
+              title={`${option.label} (${option.value})`}
+              onClick={() => onColorChange(option.value)}
+              disabled={!custom}
+              className={cn(
+                "flex min-h-12 min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                custom && selected
+                  ? "border-primary bg-primary/8 text-foreground ring-1 ring-primary/35"
+                  : "border-border/70 text-muted-foreground hover:border-foreground/25 hover:bg-muted/45",
+                !custom &&
+                  "cursor-not-allowed opacity-55 hover:border-border/70 hover:bg-transparent",
+              )}
+            >
+              <span
+                aria-hidden
+                className="size-5 shrink-0 rounded-full border border-black/10 shadow-xs dark:border-white/20"
+                style={{ backgroundColor: option.value }}
+              />
+              <span className="min-w-0">
+                <span className="block truncate text-[12px] font-semibold leading-4">
+                  {option.label}
+                </span>
+                <span className="block truncate text-[10px] leading-3 opacity-75">
+                  {option.description}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+        {custom ? (
+          <ColorPicker
+            value={normalizedValue}
+            onChange={onColorChange}
+            ariaLabel="Pick custom primary color"
+            triggerClassName={customPickerClassName}
+          >
+            {customPickerContent}
+          </ColorPicker>
+        ) : (
+          <button
+            type="button"
+            disabled
+            aria-label="Pick custom primary color"
+            className={customPickerClassName}
+          >
+            {customPickerContent}
+          </button>
+        )}
       </div>
     </div>
   );

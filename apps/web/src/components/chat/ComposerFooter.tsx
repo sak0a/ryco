@@ -11,16 +11,13 @@ import type {
 import type { ProviderDriverKind, ProviderInstanceId } from "@ryco/contracts";
 import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
-  CircleOffIcon,
   ClipboardListIcon,
   HammerIcon,
   ListTodoIcon,
-  Minimize2Icon,
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
   PenLineIcon,
-  ScaleIcon,
 } from "lucide-react";
 import { ComposerExpandableLabelControl } from "./ComposerExpandableLabelControl";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
@@ -36,6 +33,7 @@ import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import type { AppModelOption } from "../../modelSelection";
 import { useUiStateStore } from "../../uiStateStore";
+import { tokenModeOptions, tokenModePresentation } from "../../tokenModePresentation";
 
 const runtimeModeConfig: Record<
   RuntimeMode,
@@ -63,31 +61,6 @@ const runtimeModeConfig: Record<
 
 const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
 
-const tokenModeConfig: Record<
-  AgentTokenMode,
-  { label: string; triggerLabel: string; description: string; icon: LucideIcon }
-> = {
-  off: {
-    label: "Off",
-    triggerLabel: "Tokens off",
-    description: "Do not add Ryco token-efficiency instructions.",
-    icon: CircleOffIcon,
-  },
-  balanced: {
-    label: "Balanced",
-    triggerLabel: "Balanced",
-    description: "Favor concise answers and targeted reads without hiding important detail.",
-    icon: ScaleIcon,
-  },
-  aggressive: {
-    label: "Aggressive",
-    triggerLabel: "Aggressive",
-    description: "Minimize prose and avoid copying large outputs unless needed.",
-    icon: Minimize2Icon,
-  },
-};
-
-const tokenModeOptions = Object.keys(tokenModeConfig) as AgentTokenMode[];
 const SELECT_OPEN_SUPPRESSION_MS = 300;
 
 export const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
@@ -105,7 +78,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
 }) {
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
   const RuntimeModeIcon = runtimeModeOption.icon;
-  const tokenModeOption = tokenModeConfig[props.tokenMode];
+  const tokenModeOption = tokenModePresentation[props.tokenMode];
   const TokenModeIcon = tokenModeOption.icon;
   const InteractionModeIcon = props.interactionMode === "plan" ? ClipboardListIcon : HammerIcon;
   const tokenModeControlStyle = useUiStateStore((state) => state.tokenModeControlStyle);
@@ -309,7 +282,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
           className="w-60 p-0.5 [&_[data-slot=select-item]]:min-h-7"
         >
           {tokenModeOptions.map((mode) => {
-            const option = tokenModeConfig[mode];
+            const option = tokenModePresentation[mode];
             const OptionIcon = option.icon;
             return (
               <SelectItem

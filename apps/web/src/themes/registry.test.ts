@@ -72,8 +72,8 @@ describe("findTheme", () => {
   });
 
   it("returns the matching built-in theme when present", () => {
-    const found = findTheme("solarized-dark");
-    expect(found.id).toBe("solarized-dark");
+    const found = findTheme("midnight-graphite");
+    expect(found.id).toBe("midnight-graphite");
     expect(found.builtIn).toBe(true);
   });
 });
@@ -184,6 +184,22 @@ describe("isBuiltInThemeId", () => {
   });
 });
 
+describe("getActiveThemeId", () => {
+  beforeEach(() => {
+    installLocalStorage();
+  });
+
+  afterEach(() => {
+    uninstallLocalStorage();
+  });
+
+  it("falls back to the default theme when a stored id no longer exists", () => {
+    localStorage.setItem(ACTIVE_THEME_STORAGE_KEY, "solarized-dark");
+
+    expect(getActiveThemeId()).toBe(DEFAULT_THEME_ID);
+  });
+});
+
 describe("built-in themes", () => {
   it("uses unique ids", () => {
     const ids = BUILT_IN_THEMES.map((theme) => theme.id);
@@ -209,11 +225,6 @@ describe("built-in themes", () => {
     });
     expect(findTheme("catppuccin")).toMatchObject({
       id: "catppuccin",
-      light: expect.any(Object),
-      dark: expect.any(Object),
-    });
-    expect(findTheme("gruvbox-material")).toMatchObject({
-      id: "gruvbox-material",
       light: expect.any(Object),
       dark: expect.any(Object),
     });

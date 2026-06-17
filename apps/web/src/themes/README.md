@@ -1,6 +1,6 @@
 # Theme System
 
-A VS Code-style custom theming system for Ryco. Users can pick from built-in themes, install community themes, and author their own — overriding chrome color, scrollbar, and status tokens. Global interface controls such as font family, text size, corner radius, and surface transparency live outside themes so they stay consistent while users switch palettes.
+A VS Code-style custom theming system for Ryco. Users can pick from built-in themes, install community themes, and author their own — overriding chrome color, scrollbar, and status tokens. Global interface controls such as font family, text size, corner radius, optional primary color override, and surface transparency live outside themes so they stay consistent while users switch palettes.
 
 ## Goal
 
@@ -19,7 +19,7 @@ apps/web/src/
 │   ├── types.ts               ThemeDefinition + token name allow-list
 │   ├── builtin.ts             Default light/dark tokens as data
 │   ├── registry.ts            Storage, lookup, CSS injection
-│   ├── appearancePreferences.ts Global font/text-size/radius/transparency preferences
+│   ├── appearancePreferences.ts Global font/text-size/radius/primary/transparency preferences
 │   └── README.md              You are here.
 └── hooks/
     └── useTheme.ts            Light/dark toggle + active-theme application
@@ -30,7 +30,7 @@ apps/web/src/
 1. `useTheme` reads `ryco:theme` (light/dark/system) → toggles `.dark` class on `<html>`
 2. `useTheme` reads `ryco:active-theme` → looks up theme in registry → calls `applyThemeToDocument`
 3. `applyThemeToDocument` writes a `<style id="ryco-active-theme">` tag containing `:root { --x: ... } :root.dark { --y: ... }`
-4. `applyAppearancePreferencesToDocument` writes `<style id="ryco-appearance-preferences">` for global controls like `--font-family-sans`, `--font-family-mono`, `--font-size-base`, `--radius`, and the `--app-*` surface transparency variables
+4. `applyAppearancePreferencesToDocument` writes `<style id="ryco-appearance-preferences">` for global controls like `--font-family-sans`, `--font-family-mono`, `--font-size-base`, `--radius`, optional `--primary`/`--ring`, and the `--app-*` surface transparency variables
 5. Because these style tags are appended after `index.css`, their variables win — but only ones the theme or preference layer defines, so partial themes work.
 
 **Key invariant:** `index.css` always contains the _full_ default token set. Any theme is a _patch_ on top, never a replacement. Global appearance preferences are a second patch after themes, so palette changes cannot unexpectedly change typography, resize, or reshape the UI.
@@ -63,7 +63,7 @@ What shipped:
   - Color mode selector — light/dark/system (moved from General to consolidate appearance settings).
   - Active theme description + "Built-in" badge surfaced as the row's status text.
   - Reset-to-default chips on both rows when not at defaults.
-- **Three new built-in themes** appended to `BUILT_IN_THEMES`: `solarized-dark` (both variants), `nord` (dark variant; light falls back to default), `high-contrast` (both variants, monochrome with yellow accents).
+- **Built-in themes** are curated in `BUILT_IN_THEMES`; the current set includes Default, Midnight Graphite, Nord, High Contrast, One Dark Pro, Dracula, GitHub, Catppuccin, and Tokyo Night.
 - **Settings shell** (`routes/settings.tsx`) now shows "Restore defaults" on `/settings/appearance` in addition to `/settings/general`.
 - **Unit tests** (`themes/registry.test.ts`): `findTheme` fallback, `resolveTokens` merging (overlay over base, partial themes), `tokensToCss` output shape.
 

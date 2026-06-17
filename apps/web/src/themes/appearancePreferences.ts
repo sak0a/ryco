@@ -7,6 +7,8 @@ export const APPEARANCE_PREFERENCE_KEYS = [
   "fontFamilyMono",
   "fontSizeBase",
   "radius",
+  "primaryColorMode",
+  "primaryColor",
   "surfaceTransparency",
 ] as const;
 
@@ -111,11 +113,28 @@ export const SURFACE_TRANSPARENCY_OPTIONS = [
   { value: "glass", label: "Glass", description: "28%" },
 ] as const satisfies ReadonlyArray<AppearancePreferenceOption>;
 
+export const PRIMARY_COLOR_MODE_OPTIONS = [
+  { value: "theme", label: "Theme", description: "Use palette" },
+  { value: "custom", label: "Custom", description: "Override" },
+] as const satisfies ReadonlyArray<AppearancePreferenceOption>;
+
+export const PRIMARY_COLOR_OPTIONS = [
+  { value: "#4f46e5", label: "Indigo", description: "Default" },
+  { value: "#0ea5e9", label: "Sky", description: "Clear" },
+  { value: "#14b8a6", label: "Teal", description: "Calm" },
+  { value: "#22c55e", label: "Green", description: "Active" },
+  { value: "#f59e0b", label: "Amber", description: "Warm" },
+  { value: "#f43f5e", label: "Rose", description: "Bright" },
+  { value: "#a855f7", label: "Violet", description: "Sharp" },
+] as const satisfies ReadonlyArray<AppearancePreferenceOption>;
+
 export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
   fontFamilySans: FONT_FAMILY_SANS_OPTIONS[0].value,
   fontFamilyMono: FONT_FAMILY_MONO_OPTIONS[0].value,
   fontSizeBase: "16px",
   radius: "0.625rem",
+  primaryColorMode: "theme",
+  primaryColor: PRIMARY_COLOR_OPTIONS[0].value,
   surfaceTransparency: "default",
 };
 
@@ -134,6 +153,8 @@ const OPTION_VALUES: Record<AppearancePreferenceKey, ReadonlySet<string>> = {
   fontFamilyMono: new Set(FONT_FAMILY_MONO_OPTIONS.map((option) => option.value)),
   fontSizeBase: new Set(FONT_SIZE_OPTIONS.map((option) => option.value)),
   radius: new Set(RADIUS_OPTIONS.map((option) => option.value)),
+  primaryColorMode: new Set(PRIMARY_COLOR_MODE_OPTIONS.map((option) => option.value)),
+  primaryColor: new Set(PRIMARY_COLOR_OPTIONS.map((option) => option.value)),
   surfaceTransparency: new Set(SURFACE_TRANSPARENCY_OPTIONS.map((option) => option.value)),
 };
 
@@ -160,7 +181,9 @@ function parseStoredOverrides(): Partial<AppearancePreferences> {
     const next: Partial<AppearancePreferences> = {};
     for (const key of APPEARANCE_PREFERENCE_KEYS) {
       if (isValidPreferenceValue(key, candidate[key])) {
-        next[key] = candidate[key];
+        const value =
+          key === "primaryColor" ? normalizePrimaryColor(candidate[key]) : candidate[key];
+        if (typeof value === "string") next[key] = value;
       }
     }
     return next;
@@ -182,7 +205,9 @@ export function isValidPreferenceValue(
   key: AppearancePreferenceKey,
   value: unknown,
 ): value is string {
-  return typeof value === "string" && OPTION_VALUES[key].has(value);
+  if (typeof value !== "string") return false;
+  if (key === "primaryColor") return normalizePrimaryColor(value) !== null;
+  return OPTION_VALUES[key].has(value);
 }
 
 export function getAppearancePreferences(): AppearancePreferences {
@@ -195,11 +220,13 @@ export function hasAppearancePreferenceOverride(key: AppearancePreferenceKey): b
 
 export function setAppearancePreference(key: AppearancePreferenceKey, value: string): void {
   if (!isValidPreferenceValue(key, value)) return;
+  const normalizedValue = key === "primaryColor" ? normalizePrimaryColor(value) : value;
+  if (!normalizedValue) return;
   const overrides = parseStoredOverrides();
-  if (value === DEFAULT_APPEARANCE_PREFERENCES[key]) {
+  if (normalizedValue === DEFAULT_APPEARANCE_PREFERENCES[key]) {
     delete overrides[key];
   } else {
-    overrides[key] = value;
+    overrides[key] = normalizedValue;
   }
   writeStoredOverrides(overrides);
 }
@@ -214,8 +241,24 @@ export function applyAppearancePreferencesToDocument(): void {
   if (typeof document === "undefined" || typeof document.getElementById !== "function") return;
   const preferences = getAppearancePreferences();
   const style = ensureAppearancePreferencesStyleElement();
-  style.textContent = `:root { --font-family-sans: ${preferences.fontFamilySans}; --font-family-mono: ${preferences.fontFamilyMono}; --font-size-base: ${preferences.fontSizeBase}; ${buildRadiusCssVariables(preferences.radius)} ${buildSurfaceTransparencyCssVariables(preferences.surfaceTransparency)} }`;
+  style.textContent = `:root { --font-family-sans: ${preferences.fontFamilySans}; --font-family-mono: ${preferences.fontFamilyMono}; --font-size-base: ${preferences.fontSizeBase}; ${buildRadiusCssVariables(preferences.radius)} ${buildSurfaceTransparencyCssVariables(preferences.surfaceTransparency)} }${buildPrimaryColorCssRule(preferences)}`;
   dispatchAppearancePreferencesChangeEvent();
+}
+
+export function normalizePrimaryColor(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  const shortMatch = /^#?([0-9a-f]{3})$/i.exec(trimmed);
+  if (shortMatch?.[1]) {
+    return `#${shortMatch[1]
+      .split("")
+      .map((char) => `${char}${char}`)
+      .join("")
+      .toLowerCase()}`;
+  }
+  const longMatch = /^#?([0-9a-f]{6})$/i.exec(trimmed);
+  if (!longMatch?.[1]) return null;
+  return `#${longMatch[1].toLowerCase()}`;
 }
 
 function buildRadiusCssVariables(radius: string): string {
@@ -260,6 +303,28 @@ function buildSurfaceTransparencyCssVariables(surfaceTransparency: string): stri
   ]
     .map(([name, value]) => `${name}: ${value};`)
     .join(" ");
+}
+
+function buildPrimaryColorCssRule(preferences: AppearancePreferences): string {
+  if (preferences.primaryColorMode !== "custom") return "";
+  const primaryColor = normalizePrimaryColor(preferences.primaryColor);
+  if (!primaryColor) return "";
+  const primaryForeground = resolvePrimaryForeground(primaryColor);
+  return ` :root, :root.dark { --primary: ${primaryColor}; --ring: ${primaryColor}; --primary-foreground: ${primaryForeground}; }`;
+}
+
+function resolvePrimaryForeground(hex: string): string {
+  const normalized = normalizePrimaryColor(hex);
+  if (!normalized) return "#ffffff";
+  const r = Number.parseInt(normalized.slice(1, 3), 16);
+  const g = Number.parseInt(normalized.slice(3, 5), 16);
+  const b = Number.parseInt(normalized.slice(5, 7), 16);
+  const srgb = [r, g, b].map((channel) => {
+    const value = channel / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = 0.2126 * srgb[0]! + 0.7152 * srgb[1]! + 0.0722 * srgb[2]!;
+  return luminance > 0.46 ? "#0f172a" : "#ffffff";
 }
 
 function formatPercent(percent: number): string {
