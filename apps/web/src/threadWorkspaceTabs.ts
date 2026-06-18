@@ -1,5 +1,6 @@
 import type { RightPanelMode } from "./rightPanelRouteSearch";
 import {
+  deriveSubagentAccentColor,
   findThreadSubagent,
   type ThreadSubagentStatus,
   type ThreadSubagentView,
@@ -16,6 +17,7 @@ export type WorkspaceTab =
       label: string;
       mode: "agent";
       agentKey: string;
+      accentColor: string;
       status: ThreadSubagentStatus;
     };
 
@@ -45,6 +47,7 @@ export function buildTabs(input: {
     const subagent = findThreadSubagent(input.subagents, agentKey) ?? {
       key: agentKey,
       name: "Subagent",
+      accentColor: deriveSubagentAccentColor(agentKey),
       status: "idle" as const,
       tool: null,
       detail: null,
@@ -59,6 +62,7 @@ export function buildTabs(input: {
       label: subagent.name,
       mode: "agent",
       agentKey: subagent.key,
+      accentColor: subagent.accentColor,
       status: subagent.status,
     });
   }

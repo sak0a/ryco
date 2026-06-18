@@ -7,6 +7,7 @@ function makeSubagent(overrides: Pick<ThreadSubagentView, "key" | "name">): Thre
   return {
     key: overrides.key,
     name: overrides.name,
+    accentColor: "#2563eb",
     status: "running",
     tool: null,
     detail: null,
@@ -47,6 +48,7 @@ describe("buildTabs", () => {
         label: "Subagent",
         mode: "agent",
         agentKey: "subagent:missing",
+        accentColor: expect.any(String),
       }),
     ]);
   });

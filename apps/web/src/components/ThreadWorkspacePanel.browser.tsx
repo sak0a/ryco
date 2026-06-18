@@ -83,6 +83,7 @@ describe("ThreadWorkspacePanel", () => {
     const subagent: ThreadSubagentView = {
       key: "subagent:researcher",
       name: "Researcher",
+      accentColor: "#2563eb",
       status: "running",
       tool: "spawnAgent",
       detail: "Inspect the retry flow.",

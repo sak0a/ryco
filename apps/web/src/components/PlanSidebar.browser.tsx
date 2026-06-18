@@ -23,6 +23,7 @@ describe("PlanSidebar checks tooltip", () => {
           {
             key: "subagent:researcher",
             name: "Researcher",
+            accentColor: "#2563eb",
             status: "running",
             tool: "spawnAgent",
             detail: "Inspect one task.",
@@ -62,6 +63,7 @@ describe("PlanSidebar checks tooltip", () => {
     const subagents: ThreadSubagentView[] = Array.from({ length: 30 }, (_, index) => ({
       key: `subagent:${index}`,
       name: `Researcher ${index + 1}`,
+      accentColor: "#2563eb",
       status: index % 3 === 0 ? "finished" : "running",
       tool: "spawnAgent",
       detail: `Inspect task ${index + 1} and report progress.`,

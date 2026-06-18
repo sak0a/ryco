@@ -15,7 +15,14 @@ import {
   XIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+} from "react";
 
 import {
   getRightPanelMode,
@@ -93,7 +100,14 @@ function TabIcon(props: { tab: WorkspaceTab; active: boolean }) {
     props.active ? "text-foreground" : "text-muted-foreground",
   );
   if (props.tab.mode === "agent") {
-    return <BotIcon className={className} />;
+    return (
+      <span
+        className="flex size-4 shrink-0 items-center justify-center rounded-[4px] text-white shadow-sm"
+        style={subagentAccentStyle(props.tab.accentColor)}
+      >
+        <BotIcon className="size-2.5" />
+      </span>
+    );
   }
   if (props.tab.key === "review") {
     return <GitCompareIcon className={className} />;
@@ -102,6 +116,13 @@ function TabIcon(props: { tab: WorkspaceTab; active: boolean }) {
     return <TerminalIcon className={className} />;
   }
   return <FileTextIcon className={className} />;
+}
+
+function subagentAccentStyle(accentColor: string): CSSProperties {
+  return {
+    backgroundColor: accentColor,
+    color: "#fff",
+  };
 }
 
 function AgentStatusName(props: { agent: Pick<ThreadSubagentView, "name" | "status"> }) {
@@ -141,31 +162,38 @@ export function AgentThreadPanel(props: {
     );
   }
 
+  const subagent = props.subagent;
+
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="border-b border-border/60 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
-          <BotIcon className="size-4 shrink-0 text-muted-foreground" />
+          <span
+            className="flex size-6 shrink-0 items-center justify-center rounded-md text-white shadow-sm"
+            style={subagentAccentStyle(subagent.accentColor)}
+          >
+            <BotIcon className="size-3.5" />
+          </span>
           <p className="min-w-0 flex-1 text-sm font-medium">
-            <AgentStatusName agent={props.subagent} />
+            <AgentStatusName agent={subagent} />
           </p>
           <span className="shrink-0 rounded-md border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-            {statusLabel(props.subagent.status)}
+            {statusLabel(subagent.status)}
           </span>
         </div>
-        {props.subagent.detail ? (
+        {subagent.detail ? (
           <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-            {props.subagent.detail}
+            {subagent.detail}
           </p>
         ) : null}
-        {props.subagent.tool || props.subagent.providerThreadIds.length > 0 ? (
+        {subagent.tool || subagent.providerThreadIds.length > 0 ? (
           <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
-            {props.subagent.tool ? (
+            {subagent.tool ? (
               <span className="rounded-md border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                {props.subagent.tool}
+                {subagent.tool}
               </span>
             ) : null}
-            {props.subagent.providerThreadIds.slice(0, 2).map((threadId) => (
+            {subagent.providerThreadIds.slice(0, 2).map((threadId) => (
               <span
                 key={threadId}
                 className="max-w-40 truncate rounded-md border border-border/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/70"
@@ -178,11 +206,15 @@ export function AgentThreadPanel(props: {
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-3 p-4">
-          {props.subagent.messages.length > 0
-            ? props.subagent.messages.map((message) => (
-                <div key={message.id} className="rounded-md border border-border/60 bg-card/40 p-3">
+          {subagent.messages.length > 0
+            ? subagent.messages.map((message) => (
+                <div
+                  key={message.id}
+                  className="rounded-md border border-l-2 border-border/60 bg-card/40 p-3"
+                  style={{ borderLeftColor: subagent.accentColor }}
+                >
                   <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
-                    <p className="truncate text-xs font-medium text-foreground">Subagent</p>
+                    <p className="truncate text-xs font-medium text-foreground">{subagent.name}</p>
                     {message.providerThreadId ? (
                       <span className="truncate font-mono text-[10px] text-muted-foreground/55">
                         {message.providerThreadId}
@@ -193,8 +225,8 @@ export function AgentThreadPanel(props: {
                 </div>
               ))
             : null}
-          {props.subagent.entries.length > 0 ? (
-            props.subagent.entries.map((entry) => (
+          {subagent.entries.length > 0 ? (
+            subagent.entries.map((entry) => (
               <div key={entry.id} className="rounded-md border border-border/60 bg-card/40 p-3">
                 <div className="flex min-w-0 items-center gap-2">
                   <span
@@ -202,7 +234,7 @@ export function AgentThreadPanel(props: {
                       "size-2 shrink-0 rounded-full",
                       entry.tone === "error"
                         ? "bg-destructive"
-                        : props.subagent?.status === "running"
+                        : subagent.status === "running"
                           ? "bg-sky-400"
                           : "bg-emerald-400",
                     )}
@@ -223,7 +255,7 @@ export function AgentThreadPanel(props: {
                 ) : null}
               </div>
             ))
-          ) : props.subagent.messages.length === 0 ? (
+          ) : subagent.messages.length === 0 ? (
             <div className="flex min-h-48 flex-col items-center justify-center rounded-md border border-dashed border-border/70 bg-card/20 p-6 text-center">
               <MessageSquareTextIcon className="size-5 text-muted-foreground/60" />
               <p className="mt-3 text-sm font-medium text-foreground">No transcript captured yet</p>
@@ -578,7 +610,10 @@ function WorkspaceLauncher(props: {
                   className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border/50 bg-card/35 px-4 py-3 text-left transition-colors hover:border-border hover:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => props.onSelectTab(tab)}
                 >
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background/50 text-muted-foreground">
+                  <span
+                    className="flex size-9 shrink-0 items-center justify-center rounded-lg text-white shadow-sm"
+                    style={subagentAccentStyle(tab.accentColor)}
+                  >
                     <BotIcon className="size-4" />
                   </span>
                   <span className="min-w-0 flex-1">

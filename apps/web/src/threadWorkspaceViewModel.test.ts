@@ -88,6 +88,47 @@ describe("deriveThreadSubagents", () => {
     });
   });
 
+  it("assigns stable fallback names and accent colors when provider metadata has no name", () => {
+    const activities = [
+      makeActivity({
+        id: "agent-one",
+        sequence: 1,
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          data: {
+            toolCallId: "toolu-one",
+          },
+        },
+      }),
+      makeActivity({
+        id: "agent-two",
+        sequence: 2,
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          data: {
+            toolCallId: "toolu-two",
+          },
+        },
+      }),
+    ];
+
+    const firstPass = deriveThreadSubagents(activities);
+    const secondPass = deriveThreadSubagents(activities.toReversed());
+    const identity = (subagent: (typeof firstPass)[number]) => ({
+      key: subagent.key,
+      name: subagent.name,
+      accentColor: subagent.accentColor,
+    });
+
+    expect(firstPass).toHaveLength(2);
+    expect(firstPass.map((subagent) => subagent.name)).not.toContain("Subagent 1");
+    expect(new Set(firstPass.map((subagent) => subagent.name)).size).toBe(2);
+    expect(firstPass.every((subagent) => /^#[0-9a-f]{6}$/i.test(subagent.accentColor))).toBe(true);
+    expect(secondPass.map(identity)).toEqual(firstPass.map(identity));
+  });
+
   it("uses Codex collab metadata and attaches child agent messages", () => {
     const activities = [
       makeActivity({

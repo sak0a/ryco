@@ -820,7 +820,10 @@ const PlanSidebar = memo(function PlanSidebar({
                     className="group flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-muted/50"
                     onClick={() => onOpenSubagent?.(subagent)}
                   >
-                    <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground group-hover:text-foreground">
+                    <span
+                      className="flex size-5 shrink-0 items-center justify-center rounded-md text-white shadow-sm"
+                      style={{ backgroundColor: subagent.accentColor }}
+                    >
                       <BotIcon className="size-3.5" />
                     </span>
                     <span className="min-w-0 flex-1">

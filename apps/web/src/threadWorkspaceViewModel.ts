@@ -14,6 +14,7 @@ export interface ThreadSubagentMessageView {
 export interface ThreadSubagentView {
   key: string;
   name: string;
+  accentColor: string;
   status: ThreadSubagentStatus;
   tool: string | null;
   detail: string | null;
@@ -45,6 +46,44 @@ const GENERIC_SUBAGENT_TITLES = new Set([
   "tool call",
 ]);
 
+const FALLBACK_SUBAGENT_NAMES = [
+  "Ada",
+  "Averroes",
+  "Bohr",
+  "Curie",
+  "Darwin",
+  "Euclid",
+  "Faraday",
+  "Harvey",
+  "Hilbert",
+  "Hopper",
+  "Kepler",
+  "Lovelace",
+  "Mencius",
+  "Noether",
+  "Newton",
+  "Pascal",
+  "Ramanujan",
+  "Shannon",
+  "Turing",
+  "Zuse",
+] as const;
+
+const SUBAGENT_ACCENT_COLORS = [
+  "#2563eb",
+  "#dc2626",
+  "#16a34a",
+  "#ca8a04",
+  "#9333ea",
+  "#0891b2",
+  "#db2777",
+  "#ea580c",
+  "#4f46e5",
+  "#0d9488",
+  "#7c3aed",
+  "#65a30d",
+] as const;
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
@@ -73,6 +112,44 @@ function normalizeForKey(value: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
   return normalized || "agent";
+}
+
+function hashString(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function pickStableValue<T>(values: readonly [T, ...T[]], key: string, offset = 0): T {
+  return values[(hashString(key) + offset) % values.length] ?? values[0];
+}
+
+function normalizedDisplayName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function fallbackSubagentName(key: string, usedNames: ReadonlySet<string>): string {
+  const startIndex = hashString(key) % FALLBACK_SUBAGENT_NAMES.length;
+  for (let offset = 0; offset < FALLBACK_SUBAGENT_NAMES.length; offset += 1) {
+    const name = FALLBACK_SUBAGENT_NAMES[(startIndex + offset) % FALLBACK_SUBAGENT_NAMES.length];
+    if (name && !usedNames.has(normalizedDisplayName(name))) {
+      return name;
+    }
+  }
+
+  const baseName = pickStableValue(FALLBACK_SUBAGENT_NAMES, key);
+  let suffix = 2;
+  while (usedNames.has(normalizedDisplayName(`${baseName} ${suffix}`))) {
+    suffix += 1;
+  }
+  return `${baseName} ${suffix}`;
+}
+
+export function deriveSubagentAccentColor(key: string): string {
+  return pickStableValue(SUBAGENT_ACCENT_COLORS, key);
 }
 
 function titleCaseCompact(value: string): string {
@@ -540,29 +617,34 @@ export function deriveThreadSubagents(
     });
   }
 
-  let fallbackIndex = 1;
-  return [...subagents.values()]
-    .toSorted((left, right) => left.startedAt.localeCompare(right.startedAt))
-    .map((subagent) => {
-      const name = subagent.name ?? `Subagent ${fallbackIndex}`;
-      if (!subagent.name) {
-        fallbackIndex += 1;
-      }
-      return {
-        key: subagent.key,
-        name,
-        status: subagent.status,
-        tool: subagent.tool,
-        detail: subagent.detail,
-        providerThreadIds: [...subagent.providerThreadIds],
-        startedAt: subagent.startedAt,
-        updatedAt: subagent.updatedAt,
-        entries: subagent.entries,
-        messages: subagent.messages.toSorted((left, right) =>
-          left.createdAt.localeCompare(right.createdAt),
-        ),
-      };
-    });
+  const sortedSubagents = [...subagents.values()].toSorted((left, right) =>
+    left.startedAt.localeCompare(right.startedAt),
+  );
+  const usedNames = new Set(
+    sortedSubagents.flatMap((subagent) =>
+      subagent.name ? [normalizedDisplayName(subagent.name)] : [],
+    ),
+  );
+
+  return sortedSubagents.map((subagent) => {
+    const name = subagent.name ?? fallbackSubagentName(subagent.key, usedNames);
+    usedNames.add(normalizedDisplayName(name));
+    return {
+      key: subagent.key,
+      name,
+      accentColor: deriveSubagentAccentColor(subagent.key),
+      status: subagent.status,
+      tool: subagent.tool,
+      detail: subagent.detail,
+      providerThreadIds: [...subagent.providerThreadIds],
+      startedAt: subagent.startedAt,
+      updatedAt: subagent.updatedAt,
+      entries: subagent.entries,
+      messages: subagent.messages.toSorted((left, right) =>
+        left.createdAt.localeCompare(right.createdAt),
+      ),
+    };
+  });
 }
 
 export function findThreadSubagent(
