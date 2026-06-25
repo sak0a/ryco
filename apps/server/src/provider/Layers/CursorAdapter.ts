@@ -62,6 +62,7 @@ import {
 import {
   type AcpSessionMode,
   type AcpSessionModeState,
+  type AcpSubagentSummaryState,
   parsePermissionRequest,
 } from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
@@ -125,6 +126,8 @@ interface CursorSessionContext {
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
+  readonly startedSubagentIds: Set<string>;
+  readonly completedSubagentIds: Set<string>;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
   stopped: boolean;
@@ -329,6 +332,84 @@ export function makeCursorAdapter(
 
     const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
       PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
+
+    const offerAcpSubagentRuntimeEvents = Effect.fn("offerAcpSubagentRuntimeEvents")(function* (
+      ctx: CursorSessionContext,
+      subagentState: AcpSubagentSummaryState | undefined,
+      rawPayload: unknown,
+    ) {
+      if (!subagentState) {
+        return;
+      }
+
+      const subagentId = String(subagentState.subagent.subagentId);
+      if (!ctx.startedSubagentIds.has(subagentId)) {
+        ctx.startedSubagentIds.add(subagentId);
+        yield* offerRuntimeEvent({
+          type: "subagent.started",
+          ...(yield* makeEventStamp()),
+          provider: PROVIDER,
+          threadId: ctx.threadId,
+          ...(ctx.activeTurnId ? { turnId: ctx.activeTurnId } : {}),
+          payload: {
+            subagent: subagentState.subagent,
+          },
+          raw: {
+            source: "acp.jsonrpc",
+            method: "session/update",
+            payload: rawPayload,
+          },
+        });
+      }
+
+      if (
+        subagentState.status === "completed" ||
+        subagentState.status === "failed" ||
+        subagentState.status === "stopped"
+      ) {
+        if (ctx.completedSubagentIds.has(subagentId)) {
+          return;
+        }
+        ctx.completedSubagentIds.add(subagentId);
+        yield* offerRuntimeEvent({
+          type: "subagent.completed",
+          ...(yield* makeEventStamp()),
+          provider: PROVIDER,
+          threadId: ctx.threadId,
+          ...(ctx.activeTurnId ? { turnId: ctx.activeTurnId } : {}),
+          payload: {
+            subagent: subagentState.subagent,
+            status: subagentState.status,
+            ...(subagentState.summary ? { summary: subagentState.summary } : {}),
+          },
+          raw: {
+            source: "acp.jsonrpc",
+            method: "session/update",
+            payload: rawPayload,
+          },
+        });
+        return;
+      }
+
+      yield* offerRuntimeEvent({
+        type: "subagent.updated",
+        ...(yield* makeEventStamp()),
+        provider: PROVIDER,
+        threadId: ctx.threadId,
+        ...(ctx.activeTurnId ? { turnId: ctx.activeTurnId } : {}),
+        payload: {
+          subagent: subagentState.subagent,
+          ...(subagentState.status ? { status: subagentState.status } : {}),
+          ...(subagentState.summary ? { summary: subagentState.summary } : {}),
+          ...(subagentState.detail ? { detail: subagentState.detail } : {}),
+        },
+        raw: {
+          source: "acp.jsonrpc",
+          method: "session/update",
+          payload: rawPayload,
+        },
+      });
+    });
 
     const getThreadSemaphore = (threadId: string) =>
       SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
@@ -714,6 +795,8 @@ export function makeCursorAdapter(
             pendingApprovals,
             pendingUserInputs,
             turns: [],
+            startedSubagentIds: new Set(),
+            completedSubagentIds: new Set(),
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
             stopped: false,
@@ -780,6 +863,11 @@ export function makeCursorAdapter(
                         toolCall: event.toolCall,
                         rawPayload: event.rawPayload,
                       }),
+                    );
+                    yield* offerAcpSubagentRuntimeEvents(
+                      ctx,
+                      event.toolCall.subagent,
+                      event.rawPayload,
                     );
                     return;
                   case "ContentDelta":

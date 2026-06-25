@@ -55,6 +55,7 @@ const runtimeMock = {
     promptAsyncError: null as Error | null,
     closeError: null as Error | null,
     messages: [] as MessageEntry[],
+    children: [] as Array<unknown>,
     subscribedEvents: [] as unknown[],
   },
   reset() {
@@ -68,6 +69,7 @@ const runtimeMock = {
     this.state.promptAsyncError = null;
     this.state.closeError = null;
     this.state.messages = [];
+    this.state.children = [];
     this.state.subscribedEvents = [];
   },
 };
@@ -132,6 +134,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           }
         },
         messages: async () => ({ data: runtimeMock.state.messages }),
+        children: async () => ({ data: runtimeMock.state.children }),
         revert: async ({ sessionID, messageID }: { sessionID: string; messageID?: string }) => {
           runtimeMock.state.revertCalls.push({
             sessionID,
@@ -569,6 +572,152 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         ["Hello", " world", "!"],
       );
       assert.equal(secondUpdate.latestText, "Hello world!");
+    }),
+  );
+
+  it.effect("correlates OpenCode subtask parts with child session transcript deltas", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-subagent");
+      const rootSessionId = "http://127.0.0.1:9999/session";
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: rootSessionId,
+            part: {
+              id: "subtask-part-1",
+              sessionID: rootSessionId,
+              messageID: "root-message-1",
+              type: "subtask",
+              prompt: "Inspect retry handling and report back.",
+              description: "Inspect retry handling",
+              agent: "code-reviewer",
+            },
+            time: Date.now(),
+          },
+        },
+        {
+          type: "session.created",
+          properties: {
+            sessionID: "child-session-1",
+            info: {
+              id: "child-session-1",
+              slug: "child-session-1",
+              projectID: "project-1",
+              directory: "/tmp/project",
+              parentID: rootSessionId,
+              title: "Retry review",
+              version: "test",
+              time: {
+                created: Date.now(),
+                updated: Date.now(),
+              },
+            },
+          },
+        },
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: "child-session-1",
+            info: {
+              id: "child-message-1",
+              sessionID: "child-session-1",
+              role: "assistant",
+              time: {
+                created: Date.now(),
+              },
+              parentID: "parent-message-1",
+              modelID: "test-model",
+              providerID: "test-provider",
+              mode: "build",
+              agent: "code-reviewer",
+              path: {
+                cwd: "/tmp/project",
+                root: "/tmp/project",
+              },
+              cost: 0,
+              tokens: {
+                input: 0,
+                output: 0,
+                reasoning: 0,
+                cache: {
+                  read: 0,
+                  write: 0,
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "child-session-1",
+            part: {
+              id: "child-text-1",
+              sessionID: "child-session-1",
+              messageID: "child-message-1",
+              type: "text",
+              text: "",
+            },
+            time: Date.now(),
+          },
+        },
+        {
+          type: "message.part.delta",
+          properties: {
+            sessionID: "child-session-1",
+            messageID: "child-message-1",
+            partID: "child-text-1",
+            field: "text",
+            delta: "Retry handling looks stable.",
+          },
+        },
+      ];
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.take(6),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      const subagentStarted = events.find((event) => event.type === "subagent.started");
+      const boundUpdate = events.find(
+        (event) =>
+          event.type === "subagent.updated" &&
+          event.payload.subagent.providerSessionId === "child-session-1",
+      );
+      const childDelta = events.find((event) => event.type === "subagent.message.delta");
+
+      assert.equal(subagentStarted?.type, "subagent.started");
+      if (subagentStarted?.type === "subagent.started") {
+        assert.equal(subagentStarted.payload.subagent.description, "Inspect retry handling");
+        assert.equal(subagentStarted.payload.subagent.capability, "summary");
+      }
+      assert.equal(boundUpdate?.type, "subagent.updated");
+      if (boundUpdate?.type === "subagent.updated") {
+        assert.equal(boundUpdate.payload.subagent.capability, "transcript");
+        assert.equal(boundUpdate.payload.subagent.providerSessionId, "child-session-1");
+      }
+      assert.equal(childDelta?.type, "subagent.message.delta");
+      if (childDelta?.type === "subagent.message.delta") {
+        assert.equal(childDelta.payload.delta, "Retry handling looks stable.");
+        assert.equal(childDelta.payload.providerSessionId, "child-session-1");
+        assert.equal(
+          childDelta.payload.subagentId,
+          boundUpdate?.type === "subagent.updated"
+            ? boundUpdate.payload.subagent.subagentId
+            : undefined,
+        );
+      }
     }),
   );
 

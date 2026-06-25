@@ -20,7 +20,12 @@ import type {
   ScopedThreadRef,
   WorktreeId,
 } from "@ryco/contracts";
-import { isProviderDriverKind, ProviderDriverKind } from "@ryco/contracts";
+import {
+  DEFAULT_THREAD_KIND,
+  DEFAULT_THREAD_VISIBILITY,
+  isProviderDriverKind,
+  ProviderDriverKind,
+} from "@ryco/contracts";
 import type { ThreadId, TurnId } from "@ryco/contracts";
 import { Schema } from "effect";
 import { resolveModelSlugForProvider } from "@ryco/shared/model";
@@ -42,6 +47,7 @@ import {
 import { resolveEnvironmentHttpUrl } from "./environments/runtime";
 import { sanitizeThreadErrorMessage } from "./rpc/transportError";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
+import { isNormalThreadVisibility } from "./threadVisibility";
 import {
   isWebPerfProfileEnabled,
   readWebPerfNow,
@@ -318,6 +324,10 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     worktreeId: thread.worktreeId ?? null,
+    threadKind: thread.threadKind ?? DEFAULT_THREAD_KIND,
+    visibility: thread.visibility ?? DEFAULT_THREAD_VISIBILITY,
+    parentThreadId: thread.parentThreadId ?? null,
+    parentSubagentId: thread.parentSubagentId ?? null,
     manualStatusBucket: thread.manualStatusBucket ?? null,
     manualPosition: thread.manualPosition ?? 0,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
@@ -351,6 +361,10 @@ function mapThreadShell(
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     worktreeId: thread.worktreeId ?? null,
+    threadKind: thread.threadKind ?? DEFAULT_THREAD_KIND,
+    visibility: thread.visibility ?? DEFAULT_THREAD_VISIBILITY,
+    parentThreadId: thread.parentThreadId ?? null,
+    parentSubagentId: thread.parentSubagentId ?? null,
     manualStatusBucket: thread.manualStatusBucket ?? null,
     manualPosition: thread.manualPosition ?? 0,
   };
@@ -374,6 +388,10 @@ function mapThreadShell(
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     worktreeId: thread.worktreeId ?? null,
+    threadKind: thread.threadKind ?? DEFAULT_THREAD_KIND,
+    visibility: thread.visibility ?? DEFAULT_THREAD_VISIBILITY,
+    parentThreadId: thread.parentThreadId ?? null,
+    parentSubagentId: thread.parentSubagentId ?? null,
     manualStatusBucket: thread.manualStatusBucket ?? null,
     manualPosition: thread.manualPosition ?? 0,
     latestUserMessageAt: thread.latestUserMessageAt,
@@ -407,6 +425,10 @@ function toThreadShell(thread: Thread): ThreadShell {
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     worktreeId: thread.worktreeId,
+    threadKind: thread.threadKind ?? DEFAULT_THREAD_KIND,
+    visibility: thread.visibility ?? DEFAULT_THREAD_VISIBILITY,
+    parentThreadId: thread.parentThreadId ?? null,
+    parentSubagentId: thread.parentSubagentId ?? null,
     manualStatusBucket: thread.manualStatusBucket,
     manualPosition: thread.manualPosition,
   };
@@ -483,6 +505,10 @@ function sidebarThreadSummariesEqual(
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
     left.worktreeId === right.worktreeId &&
+    left.threadKind === right.threadKind &&
+    left.visibility === right.visibility &&
+    left.parentThreadId === right.parentThreadId &&
+    left.parentSubagentId === right.parentSubagentId &&
     left.manualStatusBucket === right.manualStatusBucket &&
     left.manualPosition === right.manualPosition &&
     left.latestUserMessageAt === right.latestUserMessageAt &&
@@ -511,6 +537,10 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
     left.worktreeId === right.worktreeId &&
+    left.threadKind === right.threadKind &&
+    left.visibility === right.visibility &&
+    left.parentThreadId === right.parentThreadId &&
+    left.parentSubagentId === right.parentSubagentId &&
     left.manualStatusBucket === right.manualStatusBucket &&
     left.manualPosition === right.manualPosition
   );
@@ -1852,6 +1882,10 @@ function applyEnvironmentOrchestrationEvent(
           branch: event.payload.branch,
           worktreePath: event.payload.worktreePath,
           worktreeId: null,
+          threadKind: event.payload.threadKind ?? DEFAULT_THREAD_KIND,
+          visibility: event.payload.visibility ?? DEFAULT_THREAD_VISIBILITY,
+          parentThreadId: event.payload.parentThreadId ?? null,
+          parentSubagentId: event.payload.parentSubagentId ?? null,
           manualStatusBucket: null,
           manualPosition: 0,
           latestTurn: null,
@@ -2382,7 +2416,9 @@ export function selectSidebarThreadsAcrossEnvironments(state: AppState): Sidebar
   return getEnvironmentEntries(state).flatMap(([environmentId, environmentState]) =>
     environmentState.threadIds.flatMap((threadId) => {
       const thread = environmentState.sidebarThreadSummaryById[threadId];
-      return thread && thread.environmentId === environmentId ? [thread] : [];
+      return thread && thread.environmentId === environmentId && isNormalThreadVisibility(thread)
+        ? [thread]
+        : [];
     }),
   );
 }
@@ -2434,7 +2470,7 @@ export function selectSidebarThreadsForProjectRef(
   const threadIds = environmentState.threadIdsByProjectId[ref.projectId] ?? EMPTY_THREAD_IDS;
   return threadIds.flatMap((threadId) => {
     const thread = environmentState.sidebarThreadSummaryById[threadId];
-    return thread ? [thread] : [];
+    return thread && isNormalThreadVisibility(thread) ? [thread] : [];
   });
 }
 

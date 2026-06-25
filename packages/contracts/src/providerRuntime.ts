@@ -7,6 +7,7 @@ import {
   PositiveInt,
   RuntimeItemId,
   RuntimeRequestId,
+  RuntimeSubagentId,
   RuntimeTaskId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -178,6 +179,10 @@ const ProviderRuntimeEventType = Schema.Literals([
   "task.started",
   "task.progress",
   "task.completed",
+  "subagent.started",
+  "subagent.updated",
+  "subagent.completed",
+  "subagent.message.delta",
   "hook.started",
   "hook.progress",
   "hook.completed",
@@ -229,6 +234,10 @@ const UserInputResolvedType = Schema.Literal("user-input.resolved");
 const TaskStartedType = Schema.Literal("task.started");
 const TaskProgressType = Schema.Literal("task.progress");
 const TaskCompletedType = Schema.Literal("task.completed");
+const SubagentStartedType = Schema.Literal("subagent.started");
+const SubagentUpdatedType = Schema.Literal("subagent.updated");
+const SubagentCompletedType = Schema.Literal("subagent.completed");
+const SubagentMessageDeltaType = Schema.Literal("subagent.message.delta");
 const HookStartedType = Schema.Literal("hook.started");
 const HookProgressType = Schema.Literal("hook.progress");
 const HookCompletedType = Schema.Literal("hook.completed");
@@ -484,6 +493,70 @@ const TaskCompletedPayload = Schema.Struct({
   usage: Schema.optional(Schema.Unknown),
 });
 export type TaskCompletedPayload = typeof TaskCompletedPayload.Type;
+
+export const RuntimeSubagentOrigin = Schema.Literals(["native", "managed", "inferred"]);
+export type RuntimeSubagentOrigin = typeof RuntimeSubagentOrigin.Type;
+
+export const RuntimeSubagentCapability = Schema.Literals(["transcript", "summary", "managed"]);
+export type RuntimeSubagentCapability = typeof RuntimeSubagentCapability.Type;
+
+export const RuntimeSubagentStatus = Schema.Literals([
+  "starting",
+  "running",
+  "completed",
+  "failed",
+  "stopped",
+]);
+export type RuntimeSubagentStatus = typeof RuntimeSubagentStatus.Type;
+
+export const SubagentRef = Schema.Struct({
+  subagentId: RuntimeSubagentId,
+  origin: RuntimeSubagentOrigin,
+  capability: RuntimeSubagentCapability,
+  label: Schema.optional(TrimmedNonEmptyStringSchema),
+  description: Schema.optional(TrimmedNonEmptyStringSchema),
+  providerSessionId: Schema.optional(TrimmedNonEmptyStringSchema),
+  providerThreadId: Schema.optional(TrimmedNonEmptyStringSchema),
+  providerTaskId: Schema.optional(RuntimeTaskId),
+  parentProviderItemId: Schema.optional(ProviderItemId),
+  childThreadId: Schema.optional(ThreadId),
+  metadata: Schema.optional(UnknownRecordSchema),
+});
+export type SubagentRef = typeof SubagentRef.Type;
+
+const SubagentStartedPayload = Schema.Struct({
+  subagent: SubagentRef,
+});
+export type SubagentStartedPayload = typeof SubagentStartedPayload.Type;
+
+const SubagentUpdatedPayload = Schema.Struct({
+  subagent: SubagentRef,
+  status: Schema.optional(RuntimeSubagentStatus),
+  summary: Schema.optional(TrimmedNonEmptyStringSchema),
+  detail: Schema.optional(TrimmedNonEmptyStringSchema),
+  usage: Schema.optional(Schema.Unknown),
+});
+export type SubagentUpdatedPayload = typeof SubagentUpdatedPayload.Type;
+
+const SubagentCompletedPayload = Schema.Struct({
+  subagent: SubagentRef,
+  status: Schema.Literals(["completed", "failed", "stopped"]),
+  summary: Schema.optional(TrimmedNonEmptyStringSchema),
+  usage: Schema.optional(Schema.Unknown),
+});
+export type SubagentCompletedPayload = typeof SubagentCompletedPayload.Type;
+
+const SubagentMessageDeltaPayload = Schema.Struct({
+  subagentId: RuntimeSubagentId,
+  delta: Schema.String,
+  streamKind: Schema.optional(RuntimeContentStreamKind),
+  role: Schema.optional(Schema.Literals(["assistant", "user", "system"])),
+  providerSessionId: Schema.optional(TrimmedNonEmptyStringSchema),
+  providerThreadId: Schema.optional(TrimmedNonEmptyStringSchema),
+  providerMessageId: Schema.optional(TrimmedNonEmptyStringSchema),
+  contentIndex: Schema.optional(Schema.Int),
+});
+export type SubagentMessageDeltaPayload = typeof SubagentMessageDeltaPayload.Type;
 
 const HookStartedPayload = Schema.Struct({
   hookId: TrimmedNonEmptyStringSchema,
@@ -844,6 +917,36 @@ const ProviderRuntimeTaskCompletedEvent = Schema.Struct({
 });
 export type ProviderRuntimeTaskCompletedEvent = typeof ProviderRuntimeTaskCompletedEvent.Type;
 
+const ProviderRuntimeSubagentStartedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: SubagentStartedType,
+  payload: SubagentStartedPayload,
+});
+export type ProviderRuntimeSubagentStartedEvent = typeof ProviderRuntimeSubagentStartedEvent.Type;
+
+const ProviderRuntimeSubagentUpdatedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: SubagentUpdatedType,
+  payload: SubagentUpdatedPayload,
+});
+export type ProviderRuntimeSubagentUpdatedEvent = typeof ProviderRuntimeSubagentUpdatedEvent.Type;
+
+const ProviderRuntimeSubagentCompletedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: SubagentCompletedType,
+  payload: SubagentCompletedPayload,
+});
+export type ProviderRuntimeSubagentCompletedEvent =
+  typeof ProviderRuntimeSubagentCompletedEvent.Type;
+
+const ProviderRuntimeSubagentMessageDeltaEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: SubagentMessageDeltaType,
+  payload: SubagentMessageDeltaPayload,
+});
+export type ProviderRuntimeSubagentMessageDeltaEvent =
+  typeof ProviderRuntimeSubagentMessageDeltaEvent.Type;
+
 const ProviderRuntimeHookStartedEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: HookStartedType,
@@ -998,6 +1101,10 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeTaskStartedEvent,
   ProviderRuntimeTaskProgressEvent,
   ProviderRuntimeTaskCompletedEvent,
+  ProviderRuntimeSubagentStartedEvent,
+  ProviderRuntimeSubagentUpdatedEvent,
+  ProviderRuntimeSubagentCompletedEvent,
+  ProviderRuntimeSubagentMessageDeltaEvent,
   ProviderRuntimeHookStartedEvent,
   ProviderRuntimeHookProgressEvent,
   ProviderRuntimeHookCompletedEvent,

@@ -18,6 +18,10 @@ function makeThread(overrides: Partial<SidebarThreadSummary>): SidebarThreadSumm
     branch: "main",
     worktreePath: "/tmp/wt",
     worktreeId: "wt-1",
+    threadKind: "normal",
+    visibility: "normal",
+    parentThreadId: null,
+    parentSubagentId: null,
     manualStatusBucket: null,
     latestUserMessageAt: null,
     hasPendingApprovals: false,
@@ -94,6 +98,24 @@ describe("createSessionTabsSelector", () => {
     ];
     const result = select(threads, { worktreeId: "wt-1", worktreePath: "/tmp/match" });
     expect(result.map((item) => item.key.split(":").at(-1))).toEqual(["x"]);
+  });
+
+  it("hides nested managed subagent threads", () => {
+    const select = createSessionTabsSelector();
+    const threads = [
+      makeThread({ id: "parent" as never, worktreeId: "wt-1", worktreePath: "/tmp/wt" }),
+      makeThread({
+        id: "child" as never,
+        worktreeId: "wt-1",
+        worktreePath: "/tmp/wt",
+        threadKind: "managed-subagent",
+        visibility: "nested",
+        parentThreadId: "parent" as never,
+        parentSubagentId: "subagent-1" as never,
+      }),
+    ];
+    const result = select(threads, { worktreeId: "wt-1", worktreePath: "/tmp/wt" });
+    expect(result.map((item) => item.key.split(":").at(-1))).toEqual(["parent"]);
   });
 
   it("includes draft threads adapted via draftThreadToSidebarSummary", () => {

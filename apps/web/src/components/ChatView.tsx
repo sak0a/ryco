@@ -1436,6 +1436,45 @@ export default function ChatView(props: ChatViewProps) {
     onTerminalPanelOpen,
     onAgentPanelOpen,
   });
+  const canLaunchManagedSubagents = Boolean(
+    activeThread && isServerThread && activeThread.threadKind !== "managed-subagent",
+  );
+  const onLaunchManagedSubagents = useCallback(
+    async (input: { prompt: string; count: number }) => {
+      if (!activeThread || !canLaunchManagedSubagents) {
+        return;
+      }
+      const api = readEnvironmentApi(activeThread.environmentId);
+      if (!api) {
+        throw new Error("No server connection is available for this thread.");
+      }
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.managed-subagents.launch",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          prompt: input.prompt,
+          title: "Managed subagent",
+          modelSelection: activeThread.modelSelection,
+          count: input.count,
+          createdAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not launch subagent",
+            description:
+              error instanceof Error
+                ? error.message
+                : "An error occurred while launching the managed subagent.",
+          }),
+        );
+        throw error;
+      }
+    },
+    [activeThread, canLaunchManagedSubagents],
+  );
   const envLocked = Boolean(
     activeThread &&
     (activeThread.messages.length > 0 ||
@@ -2773,6 +2812,8 @@ export default function ChatView(props: ChatViewProps) {
                   onOpenFiles={onOpenFilesPanel}
                   onOpenReview={onOpenReviewPanel}
                   onOpenSubagent={onOpenSubagentPanel}
+                  onLaunchManagedSubagents={onLaunchManagedSubagents}
+                  canLaunchManagedSubagents={canLaunchManagedSubagents}
                   onPostPushDiscoveryComplete={clearPostPushWatch}
                 />
               </FloatingOverviewMotionFrame>
@@ -2976,6 +3017,8 @@ export default function ChatView(props: ChatViewProps) {
               onOpenFiles={onOpenFilesPanel}
               onOpenReview={onOpenReviewPanel}
               onOpenSubagent={onOpenSubagentPanel}
+              onLaunchManagedSubagents={onLaunchManagedSubagents}
+              canLaunchManagedSubagents={canLaunchManagedSubagents}
               onPostPushDiscoveryComplete={clearPostPushWatch}
             />
           </OverviewSidebarMotionFrame>
@@ -3024,6 +3067,8 @@ export default function ChatView(props: ChatViewProps) {
             onOpenFiles={onOpenFilesPanel}
             onOpenReview={onOpenReviewPanel}
             onOpenSubagent={onOpenSubagentPanel}
+            onLaunchManagedSubagents={onLaunchManagedSubagents}
+            canLaunchManagedSubagents={canLaunchManagedSubagents}
             onPostPushDiscoveryComplete={clearPostPushWatch}
           />
         </RightPanelSheet>

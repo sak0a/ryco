@@ -9,7 +9,10 @@ import {
 } from "react";
 import type { EnvironmentId, SourceControlChangeRequestMergeability } from "@ryco/contracts";
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "./ui/popover";
 import { ScrollArea } from "./ui/scroll-area";
+import { Textarea } from "./ui/textarea";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import ChatMarkdown from "./ChatMarkdown";
 import {
@@ -27,6 +30,7 @@ import {
   LaptopIcon,
   LoaderCircleIcon,
   LoaderIcon,
+  PlusIcon,
   XCircleIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
@@ -43,6 +47,11 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { readEnvironmentApi } from "~/environmentApi";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import {
+  clampManagedSubagentCount,
+  MAX_MANAGED_SUBAGENT_COUNT,
+  MIN_MANAGED_SUBAGENT_COUNT,
+} from "../managedSubagents";
 import type { ThreadSubagentView } from "../threadWorkspaceViewModel";
 import {
   resolveSidebarStatusTextClassName,
@@ -124,6 +133,8 @@ interface PlanSidebarProps {
   onOpenFiles?: () => void;
   onOpenReview?: () => void;
   onOpenSubagent?: (subagent: ThreadSubagentView) => void;
+  onLaunchManagedSubagents?: (input: { prompt: string; count: number }) => void | Promise<void>;
+  canLaunchManagedSubagents?: boolean;
 }
 
 function subagentStatusBucket(
@@ -350,14 +361,21 @@ const PlanSidebar = memo(function PlanSidebar({
   onOpenFiles,
   onOpenReview,
   onOpenSubagent,
+  onLaunchManagedSubagents,
+  canLaunchManagedSubagents = true,
 }: PlanSidebarProps) {
   const [proposedPlanExpanded, setProposedPlanExpanded] = useState(false);
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
+  const [subagentLauncherOpen, setSubagentLauncherOpen] = useState(false);
+  const [subagentPrompt, setSubagentPrompt] = useState("");
+  const [subagentCount, setSubagentCount] = useState(1);
+  const [subagentLaunchPending, setSubagentLaunchPending] = useState(false);
   const { copyToClipboard, isCopied } = useCopyToClipboard();
 
   const planMarkdown = activeProposedPlan?.planMarkdown ?? null;
   const displayedPlanMarkdown = planMarkdown ? stripDisplayedPlanMarkdown(planMarkdown) : null;
   const planTitle = planMarkdown ? proposedPlanTitle(planMarkdown) : null;
+  const canLaunchSubagents = canLaunchManagedSubagents && onLaunchManagedSubagents !== undefined;
 
   const handleCopyPlan = useCallback(() => {
     if (!planMarkdown) return;
@@ -369,6 +387,23 @@ const PlanSidebar = memo(function PlanSidebar({
     const filename = buildProposedPlanMarkdownFilename(planMarkdown);
     downloadPlanAsTextFile(filename, normalizePlanMarkdownForExport(planMarkdown));
   }, [planMarkdown]);
+
+  const handleLaunchSubagents = useCallback(async () => {
+    const prompt = subagentPrompt.trim();
+    if (!prompt || !onLaunchManagedSubagents || subagentLaunchPending) {
+      return;
+    }
+    const count = clampManagedSubagentCount(subagentCount);
+    setSubagentLaunchPending(true);
+    try {
+      await onLaunchManagedSubagents({ prompt, count });
+      setSubagentPrompt("");
+      setSubagentCount(1);
+      setSubagentLauncherOpen(false);
+    } finally {
+      setSubagentLaunchPending(false);
+    }
+  }, [onLaunchManagedSubagents, subagentCount, subagentLaunchPending, subagentPrompt]);
 
   const handleSaveToWorkspace = useCallback(() => {
     const api = readEnvironmentApi(environmentId);
@@ -793,6 +828,7 @@ const PlanSidebar = memo(function PlanSidebar({
           {!activePlan &&
           !planMarkdown &&
           subagents.length === 0 &&
+          !onLaunchManagedSubagents &&
           overviewItems.length === 0 &&
           !pullRequest &&
           !sourceControlActions &&
@@ -806,11 +842,86 @@ const PlanSidebar = memo(function PlanSidebar({
           ) : null}
 
           {/* Subagents */}
-          {subagents.length > 0 ? (
+          {subagents.length > 0 || onLaunchManagedSubagents ? (
             <div className="space-y-1.5">
-              <p className="mb-2 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
-                Subagents
-              </p>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                  Subagents
+                </p>
+                {onLaunchManagedSubagents ? (
+                  <Popover open={subagentLauncherOpen} onOpenChange={setSubagentLauncherOpen}>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <PopoverTrigger
+                            render={
+                              <Button
+                                aria-label="Launch managed subagent"
+                                className="size-7"
+                                disabled={!canLaunchSubagents || subagentLaunchPending}
+                                size="icon-sm"
+                                variant="ghost"
+                              >
+                                <PlusIcon className="size-3.5" />
+                              </Button>
+                            }
+                          />
+                        }
+                      />
+                      <TooltipPopup>Launch managed subagent</TooltipPopup>
+                    </Tooltip>
+                    <PopoverPopup align="end" className="w-80 p-0" side="bottom">
+                      <form
+                        className="space-y-3"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void handleLaunchSubagents();
+                        }}
+                      >
+                        <PopoverTitle className="text-sm">Managed subagent</PopoverTitle>
+                        <Textarea
+                          aria-label="Subagent prompt"
+                          disabled={!canLaunchSubagents || subagentLaunchPending}
+                          onChange={(event) => setSubagentPrompt(event.currentTarget.value)}
+                          placeholder="Inspect the failing retry path"
+                          size="sm"
+                          value={subagentPrompt}
+                        />
+                        <div className="flex items-center gap-2">
+                          <Input
+                            aria-label="Subagent count"
+                            className="w-20"
+                            disabled={!canLaunchSubagents || subagentLaunchPending}
+                            max={MAX_MANAGED_SUBAGENT_COUNT}
+                            min={MIN_MANAGED_SUBAGENT_COUNT}
+                            nativeInput
+                            onChange={(event) =>
+                              setSubagentCount(
+                                clampManagedSubagentCount(Number(event.currentTarget.value)),
+                              )
+                            }
+                            size="sm"
+                            type="number"
+                            value={subagentCount}
+                          />
+                          <Button
+                            className="min-w-24"
+                            disabled={
+                              !canLaunchSubagents ||
+                              subagentLaunchPending ||
+                              subagentPrompt.trim().length === 0
+                            }
+                            size="sm"
+                            type="submit"
+                          >
+                            {subagentLaunchPending ? "Launching" : "Launch"}
+                          </Button>
+                        </div>
+                      </form>
+                    </PopoverPopup>
+                  </Popover>
+                ) : null}
+              </div>
               {subagents.map((subagent) => {
                 const bucket = subagentStatusBucket(subagent.status);
                 return (

@@ -4,6 +4,7 @@ import { sortThreads, type ThreadSortInput } from "./lib/threadSort";
 import { selectEnvironmentState, type AppState, type EnvironmentState } from "./store";
 import { type Project, type SidebarThreadSummary, type Thread, type ThreadShell } from "./types";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
+import { isNormalThreadVisibility } from "./threadVisibility";
 
 export function createProjectSelectorByRef(
   ref: ScopedProjectRef | null | undefined,
@@ -77,9 +78,12 @@ const toFallbackThreadCandidate = (
   shell: ThreadShell | undefined,
 ): FallbackThreadCandidate | null => {
   if (summary) {
-    return summary;
+    return isNormalThreadVisibility(summary) ? summary : null;
   }
   if (!shell) {
+    return null;
+  }
+  if (!isNormalThreadVisibility(shell)) {
     return null;
   }
   return {

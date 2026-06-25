@@ -1,13 +1,23 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { scopedThreadKey, scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime";
-import { type ScopedThreadRef, type ThreadId } from "@ryco/contracts";
+import {
+  ProviderInstanceId,
+  type ModelSelection,
+  type ScopedThreadRef,
+  type ServerProvider,
+  type ThreadId,
+} from "@ryco/contracts";
+import type { UnifiedSettings } from "@ryco/contracts/settings";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@ryco/shared/projectScripts";
+import { createModelSelection } from "@ryco/shared/model";
 import {
   BotIcon,
   FileTextIcon,
   FolderIcon,
   GlobeIcon,
   GitCompareIcon,
+  LoaderCircleIcon,
+  MinusIcon,
   MessageSquarePlusIcon,
   MessageSquareTextIcon,
   PlusIcon,
@@ -38,9 +48,16 @@ import {
 } from "../threadWorkspaceViewModel";
 import { buildTabs, type WorkspaceTab } from "../threadWorkspaceTabs";
 import { readEnvironmentApi } from "../environmentApi";
+import { useSavedEnvironmentRuntimeStore } from "../environments/runtime";
 import { shortcutLabelForCommand } from "../keybindings";
 import type { TerminalContextSelection } from "../lib/terminalContext";
-import { useServerKeybindings } from "../rpc/serverState";
+import { newCommandId } from "../lib/utils";
+import {
+  getCustomModelOptionsByInstance,
+  resolveAppModelSelectionForInstance,
+} from "../modelSelection";
+import { deriveProviderInstanceEntries, sortProviderInstanceEntries } from "../providerInstances";
+import { useServerKeybindings, useServerProviders } from "../rpc/serverState";
 import { useStore } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
@@ -48,18 +65,30 @@ import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { useComposerHandleContext } from "../composerHandleContext";
 import { cn, randomUUID } from "~/lib/utils";
+import { useSettings } from "../hooks/useSettings";
+import {
+  clampManagedSubagentCount,
+  MAX_MANAGED_SUBAGENT_COUNT,
+  MIN_MANAGED_SUBAGENT_COUNT,
+} from "../managedSubagents";
+import type { Thread } from "../types";
 import {
   resolveSidebarStatusTextClassName,
   resolveSidebarStatusTextStyle,
 } from "./sidebar/sidebarStatusText";
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
 import { ScrollArea } from "./ui/scroll-area";
+import { Textarea } from "./ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import ChatMarkdown from "./ChatMarkdown";
 import type { DiffPanelMode } from "./DiffPanelShell";
 import DiffPanel from "./DiffPanel";
 import PreviewPanel from "./PreviewPanel";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
+import { getComposerProviderState } from "./chat/composerProviderState";
+import { ProviderModelPicker } from "./chat/ProviderModelPicker";
 
 function statusBucket(status: ThreadSubagentStatus): "idle" | "in_progress" | "review" | "done" {
   if (status === "running") return "in_progress";
@@ -515,8 +544,298 @@ function LauncherCard(props: {
   );
 }
 
+function resolveManagedSubagentDefaultSelection(input: {
+  thread: Thread | null | undefined;
+  settings: UnifiedSettings;
+  providers: ReadonlyArray<ServerProvider>;
+}) {
+  const entries = sortProviderInstanceEntries(deriveProviderInstanceEntries(input.providers));
+  const preferredInstanceId = input.thread?.modelSelection.instanceId;
+  const preferredEntry =
+    entries.find(
+      (entry) => entry.instanceId === preferredInstanceId && entry.enabled && entry.isAvailable,
+    ) ??
+    entries.find((entry) => entry.enabled && entry.isAvailable) ??
+    entries[0] ??
+    null;
+  const instanceId =
+    preferredEntry?.instanceId ?? preferredInstanceId ?? ProviderInstanceId.make("codex");
+  const selectedModel =
+    preferredEntry && input.thread?.modelSelection.instanceId === preferredEntry.instanceId
+      ? input.thread.modelSelection.model
+      : null;
+  const model = preferredEntry
+    ? (resolveAppModelSelectionForInstance(
+        preferredEntry.instanceId,
+        input.settings,
+        input.providers,
+        selectedModel,
+      ) ??
+      preferredEntry.models[0]?.slug ??
+      input.thread?.modelSelection.model ??
+      "")
+    : (input.thread?.modelSelection.model ?? "");
+
+  return {
+    instanceId,
+    model,
+  };
+}
+
+function ManagedSubagentLauncher(props: { thread: Thread | null | undefined }) {
+  const keybindings = useServerKeybindings();
+  const primaryProviders = useServerProviders();
+  const environmentProviders = useSavedEnvironmentRuntimeStore((state) =>
+    props.thread ? (state.byId[props.thread.environmentId]?.serverConfig?.providers ?? null) : null,
+  );
+  const providers = environmentProviders ?? primaryProviders;
+  const settings = useSettings();
+  const modelOptionsByInstance = useMemo(
+    () => getCustomModelOptionsByInstance(settings, providers),
+    [providers, settings],
+  );
+  const instanceEntries = useMemo(
+    () => sortProviderInstanceEntries(deriveProviderInstanceEntries(providers)),
+    [providers],
+  );
+  const defaultSelection = useMemo(
+    () =>
+      resolveManagedSubagentDefaultSelection({
+        thread: props.thread,
+        settings,
+        providers,
+      }),
+    [props.thread, providers, settings],
+  );
+  const [selectedInstanceId, setSelectedInstanceId] = useState(defaultSelection.instanceId);
+  const [selectedModel, setSelectedModel] = useState(defaultSelection.model);
+  const [prompt, setPrompt] = useState("");
+  const [count, setCount] = useState(1);
+  const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [launchAcknowledged, setLaunchAcknowledged] = useState(false);
+
+  useEffect(() => {
+    setSelectedInstanceId(defaultSelection.instanceId);
+    setSelectedModel(defaultSelection.model);
+  }, [defaultSelection.instanceId, defaultSelection.model, props.thread?.id]);
+
+  useEffect(() => {
+    const entry = instanceEntries.find((candidate) => candidate.instanceId === selectedInstanceId);
+    const options = modelOptionsByInstance.get(selectedInstanceId) ?? [];
+    if (
+      entry &&
+      (options.length === 0 || options.some((option) => option.slug === selectedModel))
+    ) {
+      return;
+    }
+    setSelectedInstanceId(defaultSelection.instanceId);
+    setSelectedModel(defaultSelection.model);
+  }, [
+    defaultSelection.instanceId,
+    defaultSelection.model,
+    instanceEntries,
+    modelOptionsByInstance,
+    selectedInstanceId,
+    selectedModel,
+  ]);
+
+  const selectedEntry = useMemo(
+    () => instanceEntries.find((entry) => entry.instanceId === selectedInstanceId) ?? null,
+    [instanceEntries, selectedInstanceId],
+  );
+  const canPickModel = instanceEntries.length > 0 && selectedEntry !== null;
+  const trimmedPrompt = prompt.trim();
+  const launchDisabled = launching || !props.thread || trimmedPrompt.length === 0;
+
+  const modelSelection = useMemo<ModelSelection | null>(() => {
+    if (!props.thread) {
+      return null;
+    }
+    if (!selectedEntry || !selectedModel) {
+      return props.thread.modelSelection;
+    }
+    const keepExistingOptions =
+      props.thread.modelSelection.instanceId === selectedInstanceId &&
+      props.thread.modelSelection.model === selectedModel;
+    const providerState = getComposerProviderState({
+      provider: selectedEntry.driverKind,
+      model: selectedModel,
+      models: selectedEntry.models,
+      prompt: trimmedPrompt,
+      modelOptions: keepExistingOptions ? props.thread.modelSelection.options : undefined,
+    });
+    return createModelSelection(
+      selectedInstanceId,
+      selectedModel,
+      providerState.modelOptionsForDispatch,
+    );
+  }, [props.thread, selectedEntry, selectedInstanceId, selectedModel, trimmedPrompt]);
+
+  const handleInstanceModelChange = useCallback((instanceId: ProviderInstanceId, model: string) => {
+    setSelectedInstanceId(instanceId);
+    setSelectedModel(model);
+    setLaunchAcknowledged(false);
+    setLaunchError(null);
+  }, []);
+
+  const updateCount = useCallback((nextCount: number) => {
+    setCount(clampManagedSubagentCount(nextCount));
+    setLaunchAcknowledged(false);
+    setLaunchError(null);
+  }, []);
+
+  const handleLaunch = useCallback(async () => {
+    if (!props.thread || !modelSelection || trimmedPrompt.length === 0) {
+      return;
+    }
+    const api = readEnvironmentApi(props.thread.environmentId);
+    if (!api) {
+      setLaunchError("Environment is unavailable.");
+      setLaunchAcknowledged(false);
+      return;
+    }
+
+    setLaunching(true);
+    setLaunchError(null);
+    setLaunchAcknowledged(false);
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.managed-subagents.launch",
+        commandId: newCommandId(),
+        threadId: props.thread.id,
+        prompt: trimmedPrompt,
+        modelSelection,
+        count,
+        createdAt: new Date().toISOString(),
+      });
+      setPrompt("");
+      setLaunchAcknowledged(true);
+    } catch (error) {
+      setLaunchError(error instanceof Error ? error.message : "Failed to launch subagents.");
+    } finally {
+      setLaunching(false);
+    }
+  }, [count, modelSelection, props.thread, trimmedPrompt]);
+
+  return (
+    <form
+      className="rounded-lg border border-border/50 bg-card/35 p-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void handleLaunch();
+      }}
+    >
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background/50 text-muted-foreground">
+              <BotIcon className="size-4" />
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-foreground">Run subagents</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">Managed read-only workers</p>
+            </div>
+          </div>
+        </div>
+        <span className="shrink-0 rounded-md border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+          Read-only
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3">
+        <div className="grid gap-1.5">
+          <Label htmlFor="managed-subagent-prompt" className="text-xs">
+            Prompt
+          </Label>
+          <Textarea
+            id="managed-subagent-prompt"
+            size="sm"
+            value={prompt}
+            placeholder="Investigate a focused question and report findings."
+            onChange={(event) => {
+              setPrompt(event.currentTarget.value);
+              setLaunchAcknowledged(false);
+              setLaunchError(null);
+            }}
+          />
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          <div className="grid min-w-0 gap-1.5">
+            <Label className="text-xs">Provider and model</Label>
+            <ProviderModelPicker
+              compact
+              activeInstanceId={selectedInstanceId}
+              model={selectedModel}
+              lockedProvider={null}
+              instanceEntries={instanceEntries}
+              keybindings={keybindings}
+              modelOptionsByInstance={modelOptionsByInstance}
+              terminalOpen={false}
+              triggerSize="sm"
+              triggerVariant="outline"
+              triggerClassName="max-w-full justify-start"
+              disabled={!canPickModel || launching}
+              onInstanceModelChange={handleInstanceModelChange}
+            />
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label className="text-xs">Count</Label>
+            <div className="flex items-center gap-1">
+              <Button
+                size="icon-xs"
+                variant="outline"
+                aria-label="Decrease subagent count"
+                disabled={launching || count <= MIN_MANAGED_SUBAGENT_COUNT}
+                onClick={() => updateCount(count - 1)}
+              >
+                <MinusIcon className="size-3.5" />
+              </Button>
+              <Input
+                className="w-12 rounded-md"
+                size="sm"
+                nativeInput
+                type="number"
+                min={MIN_MANAGED_SUBAGENT_COUNT}
+                max={MAX_MANAGED_SUBAGENT_COUNT}
+                value={count}
+                disabled={launching}
+                aria-label="Subagent count"
+                onChange={(event) => updateCount(Number(event.currentTarget.value))}
+              />
+              <Button
+                size="icon-xs"
+                variant="outline"
+                aria-label="Increase subagent count"
+                disabled={launching || count >= MAX_MANAGED_SUBAGENT_COUNT}
+                onClick={() => updateCount(count + 1)}
+              >
+                <PlusIcon className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {launchError ? (
+          <p className="text-xs text-destructive">{launchError}</p>
+        ) : launchAcknowledged ? (
+          <p className="text-xs text-muted-foreground">Launch requested.</p>
+        ) : null}
+
+        <Button size="sm" className="w-full" disabled={launchDisabled} type="submit">
+          {launching ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : <BotIcon />}
+          Launch
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 function WorkspaceLauncher(props: {
   tabs: ReadonlyArray<WorkspaceTab>;
+  activeThread: Thread | null | undefined;
   onSelectTab: (tab: WorkspaceTab) => void;
 }) {
   const keybindings = useServerKeybindings();
@@ -548,6 +867,7 @@ function WorkspaceLauncher(props: {
             shortcutLabel={filesShortcutLabel}
             onClick={() => props.onSelectTab(filesTab)}
           />
+          <ManagedSubagentLauncher thread={props.activeThread} />
           <LauncherCard
             label="Side chat"
             description="Start a side conversation"
@@ -860,7 +1180,7 @@ export default function ThreadWorkspacePanel(props: {
         ) : activeMode === "agent" ? (
           <AgentThreadPanel subagent={activeAgent} agentKey={agentKey} />
         ) : (
-          <WorkspaceLauncher tabs={tabs} onSelectTab={selectTab} />
+          <WorkspaceLauncher tabs={tabs} activeThread={activeThread} onSelectTab={selectTab} />
         )}
       </div>
     </div>

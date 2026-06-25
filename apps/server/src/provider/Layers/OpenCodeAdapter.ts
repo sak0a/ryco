@@ -2,19 +2,29 @@ import {
   DEFAULT_AGENT_TOKEN_MODE,
   EventId,
   type OpenCodeSettings,
+  ProviderItemId,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  RuntimeSubagentId,
+  type RuntimeSubagentStatus,
   RuntimeItemId,
   RuntimeRequestId,
+  type SubagentRef,
   ThreadId,
   type ToolLifecycleItemType,
   TurnId,
   type UserInputQuestion,
 } from "@ryco/contracts";
 import { Cause, Effect, Exit, Queue, Random, Ref, Scope, Stream } from "effect";
-import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
+import type {
+  OpencodeClient,
+  Part,
+  PermissionRequest,
+  QuestionRequest,
+  Session,
+} from "@opencode-ai/sdk/v2";
 import { getModelSelectionStringOptionValue } from "@ryco/shared/model";
 import { formatSourceControlContextsForAgent } from "@ryco/shared/sourceControlContextFormatter";
 
@@ -70,6 +80,12 @@ interface OpenCodeSessionContext {
   readonly partById: Map<string, Part>;
   readonly emittedTextByPartId: Map<string, string>;
   readonly completedAssistantPartIds: Set<string>;
+  readonly childSessionIds: Set<string>;
+  readonly subagentBySessionId: Map<string, SubagentRef>;
+  readonly subagentBySubtaskPartId: Map<string, SubagentRef>;
+  readonly unboundSubtaskPartIds: Array<string>;
+  readonly startedSubagentIds: Set<string>;
+  readonly completedSubagentIds: Set<string>;
   readonly turns: Array<OpenCodeTurnSnapshot>;
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
@@ -100,6 +116,92 @@ export interface OpenCodeAdapterLiveOptions {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function nonEmptyString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function scopedOpenCodeId(sessionId: string, id: string): string {
+  return `${sessionId}:${id}`;
+}
+
+function openCodeSubagentId(kind: "session" | "subtask", id: string): RuntimeSubagentId {
+  return RuntimeSubagentId.make(`opencode:${kind}:${id}`);
+}
+
+function subagentKey(subagentId: RuntimeSubagentId): string {
+  return String(subagentId);
+}
+
+function statusFromOpenCodeSubagentState(
+  status: "starting" | "running" | "completed" | "failed" | "stopped",
+): RuntimeSubagentStatus {
+  return status;
+}
+
+function subagentCompletionStatus(
+  status: "completed" | "failed" | "stopped",
+): Extract<RuntimeSubagentStatus, "completed" | "failed" | "stopped"> {
+  return status;
+}
+
+function metadataWithEntries(
+  entries: ReadonlyArray<readonly [string, unknown]>,
+): Record<string, unknown> | undefined {
+  const metadata = Object.fromEntries(
+    entries.filter(([, value]) => value !== undefined && value !== null && value !== ""),
+  );
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function makeSubtaskSubagentRef(part: Extract<Part, { type: "subtask" }>): SubagentRef {
+  const description = nonEmptyString(part.description) ?? nonEmptyString(part.prompt);
+  const label =
+    nonEmptyString(part.agent) ??
+    nonEmptyString(part.command) ??
+    (description ? "OpenCode subtask" : undefined);
+  return {
+    subagentId: openCodeSubagentId("subtask", part.id),
+    origin: "native",
+    capability: "summary",
+    ...(label ? { label } : {}),
+    ...(description ? { description } : {}),
+    parentProviderItemId: ProviderItemId.make(part.id),
+    metadata: metadataWithEntries([
+      ["source", "opencode.subtask"],
+      ["prompt", nonEmptyString(part.prompt)],
+      ["agent", nonEmptyString(part.agent)],
+      ["command", nonEmptyString(part.command)],
+      ["model", part.model],
+    ]),
+  };
+}
+
+function mergeOpenCodeChildSessionRef(
+  existing: SubagentRef | undefined,
+  session: Session,
+  parentSessionId: string,
+): SubagentRef {
+  const label = nonEmptyString(session.title) ?? existing?.label ?? "OpenCode subagent";
+  return {
+    subagentId: existing?.subagentId ?? openCodeSubagentId("session", session.id),
+    origin: "native",
+    capability: "transcript",
+    label,
+    ...(existing?.description ? { description: existing.description } : {}),
+    providerSessionId: session.id,
+    providerThreadId: session.id,
+    ...(existing?.parentProviderItemId && { parentProviderItemId: existing.parentProviderItemId }),
+    metadata: {
+      ...existing?.metadata,
+      source: "opencode.session",
+      parentSessionId,
+      slug: session.slug,
+      directory: session.directory,
+    },
+  };
 }
 
 /**
@@ -359,9 +461,9 @@ function isoFromEpochMs(value: number | undefined): string | undefined {
 
 function messageRoleForPart(
   context: OpenCodeSessionContext,
-  part: Pick<Part, "messageID" | "type">,
+  part: Pick<Part, "messageID" | "sessionID" | "type">,
 ): "assistant" | "user" | undefined {
-  const known = context.messageRoleById.get(part.messageID);
+  const known = context.messageRoleById.get(scopedOpenCodeId(part.sessionID, part.messageID));
   if (known) {
     return known;
   }
@@ -529,6 +631,199 @@ export function makeOpenCodeAdapter(
       },
     ) => writeNativeEvent(threadId, event).pipe(Effect.catchCause(() => Effect.void));
 
+    const emitOpenCodeSubagentStarted = Effect.fn("emitOpenCodeSubagentStarted")(function* (
+      context: OpenCodeSessionContext,
+      subagent: SubagentRef,
+      raw: unknown,
+    ) {
+      const key = subagentKey(subagent.subagentId);
+      if (context.startedSubagentIds.has(key)) {
+        return;
+      }
+      context.startedSubagentIds.add(key);
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: context.session.threadId,
+          turnId: context.activeTurnId,
+          raw,
+        })),
+        type: "subagent.started",
+        payload: {
+          subagent,
+        },
+      });
+    });
+
+    const emitOpenCodeSubagentUpdated = Effect.fn("emitOpenCodeSubagentUpdated")(function* (
+      context: OpenCodeSessionContext,
+      input: {
+        readonly subagent: SubagentRef;
+        readonly status?: RuntimeSubagentStatus;
+        readonly summary?: string | undefined;
+        readonly detail?: string | undefined;
+        readonly raw: unknown;
+      },
+    ) {
+      yield* emitOpenCodeSubagentStarted(context, input.subagent, input.raw);
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: context.session.threadId,
+          turnId: context.activeTurnId,
+          raw: input.raw,
+        })),
+        type: "subagent.updated",
+        payload: {
+          subagent: input.subagent,
+          ...(input.status ? { status: input.status } : {}),
+          ...(input.summary ? { summary: input.summary } : {}),
+          ...(input.detail ? { detail: input.detail } : {}),
+        },
+      });
+    });
+
+    const emitOpenCodeSubagentCompleted = Effect.fn("emitOpenCodeSubagentCompleted")(function* (
+      context: OpenCodeSessionContext,
+      input: {
+        readonly subagent: SubagentRef;
+        readonly status: Extract<RuntimeSubagentStatus, "completed" | "failed" | "stopped">;
+        readonly summary?: string | undefined;
+        readonly raw: unknown;
+      },
+    ) {
+      const key = subagentKey(input.subagent.subagentId);
+      if (context.completedSubagentIds.has(key)) {
+        return;
+      }
+      yield* emitOpenCodeSubagentStarted(context, input.subagent, input.raw);
+      context.completedSubagentIds.add(key);
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: context.session.threadId,
+          turnId: context.activeTurnId,
+          raw: input.raw,
+        })),
+        type: "subagent.completed",
+        payload: {
+          subagent: input.subagent,
+          status: input.status,
+          ...(input.summary ? { summary: input.summary } : {}),
+        },
+      });
+    });
+
+    const bindOpenCodeSubtaskPart = Effect.fn("bindOpenCodeSubtaskPart")(function* (
+      context: OpenCodeSessionContext,
+      part: Extract<Part, { type: "subtask" }>,
+      raw: unknown,
+    ) {
+      const partKey = scopedOpenCodeId(part.sessionID, part.id);
+      const existing = context.subagentBySubtaskPartId.get(partKey);
+      const subagent = existing ?? makeSubtaskSubagentRef(part);
+      context.subagentBySubtaskPartId.set(partKey, subagent);
+      if (!existing && !context.unboundSubtaskPartIds.includes(partKey)) {
+        context.unboundSubtaskPartIds.push(partKey);
+      }
+      yield* emitOpenCodeSubagentUpdated(context, {
+        subagent,
+        status: statusFromOpenCodeSubagentState("starting"),
+        summary: nonEmptyString(part.description) ?? nonEmptyString(part.prompt),
+        detail: nonEmptyString(part.prompt),
+        raw,
+      });
+      return subagent;
+    });
+
+    const takeUnboundOpenCodeSubtask = (
+      context: OpenCodeSessionContext,
+    ): SubagentRef | undefined => {
+      const partKey = context.unboundSubtaskPartIds.shift();
+      if (!partKey) {
+        return undefined;
+      }
+      return context.subagentBySubtaskPartId.get(partKey);
+    };
+
+    const registerOpenCodeChildSession = Effect.fn("registerOpenCodeChildSession")(function* (
+      context: OpenCodeSessionContext,
+      session: Session,
+      raw: unknown,
+    ) {
+      if (session.parentID !== context.openCodeSessionId) {
+        return undefined;
+      }
+
+      const existing =
+        context.subagentBySessionId.get(session.id) ?? takeUnboundOpenCodeSubtask(context);
+      const subagent = mergeOpenCodeChildSessionRef(existing, session, context.openCodeSessionId);
+      const known = context.childSessionIds.has(session.id);
+      context.childSessionIds.add(session.id);
+      context.subagentBySessionId.set(session.id, subagent);
+
+      if (known) {
+        yield* emitOpenCodeSubagentUpdated(context, {
+          subagent,
+          status: statusFromOpenCodeSubagentState("running"),
+          raw,
+        });
+        return subagent;
+      }
+
+      const wasStartedFromSubtask = context.startedSubagentIds.has(
+        subagentKey(subagent.subagentId),
+      );
+      yield* emitOpenCodeSubagentStarted(context, subagent, raw);
+      if (wasStartedFromSubtask) {
+        yield* emitOpenCodeSubagentUpdated(context, {
+          subagent,
+          status: statusFromOpenCodeSubagentState("running"),
+          raw,
+        });
+      }
+      return subagent;
+    });
+
+    const hydrateOpenCodeChildSessions = Effect.fn("hydrateOpenCodeChildSessions")(function* (
+      context: OpenCodeSessionContext,
+    ) {
+      const children = yield* runOpenCodeSdk("session.children", () =>
+        context.client.session.children({ sessionID: context.openCodeSessionId }),
+      ).pipe(
+        Effect.map((response): Array<Session> => {
+          const value = response as unknown;
+          if (Array.isArray(value)) {
+            return value as Array<Session>;
+          }
+          const data = (value as { readonly data?: unknown }).data;
+          return Array.isArray(data) ? (data as Array<Session>) : [];
+        }),
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
+            const error = Cause.squash(cause);
+            yield* emit({
+              ...(yield* buildEventBase({
+                threadId: context.session.threadId,
+              })),
+              type: "runtime.warning",
+              payload: {
+                message: "OpenCode child session hydration failed.",
+                detail: OpenCodeRuntimeError.is(error)
+                  ? error.detail
+                  : openCodeRuntimeErrorDetail(error),
+              },
+            });
+            return [] as Array<Session>;
+          }),
+        ),
+      );
+
+      for (const child of children) {
+        yield* registerOpenCodeChildSession(context, child, {
+          method: "session.children",
+          child,
+        });
+      }
+    });
+
     const emitUnexpectedExit = Effect.fn("emitUnexpectedExit")(function* (
       context: OpenCodeSessionContext,
       message: string,
@@ -589,59 +884,89 @@ export function makeOpenCodeAdapter(
       if (text === undefined) {
         return;
       }
-      const previousText = context.emittedTextByPartId.get(part.id);
+      const partKey = scopedOpenCodeId(part.sessionID, part.id);
+      const previousText = context.emittedTextByPartId.get(partKey);
       const { latestText, deltaToEmit } = mergeOpenCodeAssistantText(previousText, text);
-      context.emittedTextByPartId.set(part.id, latestText);
+      context.emittedTextByPartId.set(partKey, latestText);
       if (latestText !== text) {
         context.partById.set(
-          part.id,
+          partKey,
           (part.type === "text" || part.type === "reasoning"
             ? { ...part, text: latestText }
             : part) satisfies Part,
         );
       }
       if (deltaToEmit.length > 0) {
-        yield* emit({
-          ...(yield* buildEventBase({
-            threadId: context.session.threadId,
-            turnId,
-            itemId: part.id,
-            createdAt:
-              part.type === "text" || part.type === "reasoning"
-                ? isoFromEpochMs(part.time?.start)
-                : undefined,
-            raw,
-          })),
-          type: "content.delta",
-          payload: {
-            streamKind: resolveTextStreamKind(part),
-            delta: deltaToEmit,
-          },
-        });
+        const subagent = context.subagentBySessionId.get(part.sessionID);
+        if (subagent) {
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+              itemId: part.id,
+              createdAt:
+                part.type === "text" || part.type === "reasoning"
+                  ? isoFromEpochMs(part.time?.start)
+                  : undefined,
+              raw,
+            })),
+            type: "subagent.message.delta",
+            payload: {
+              subagentId: subagent.subagentId,
+              delta: deltaToEmit,
+              streamKind: resolveTextStreamKind(part),
+              role: "assistant",
+              providerSessionId: part.sessionID,
+              providerThreadId: part.sessionID,
+              providerMessageId: part.messageID,
+            },
+          });
+        } else {
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+              itemId: part.id,
+              createdAt:
+                part.type === "text" || part.type === "reasoning"
+                  ? isoFromEpochMs(part.time?.start)
+                  : undefined,
+              raw,
+            })),
+            type: "content.delta",
+            payload: {
+              streamKind: resolveTextStreamKind(part),
+              delta: deltaToEmit,
+            },
+          });
+        }
       }
 
       if (
         part.type === "text" &&
         part.time?.end !== undefined &&
-        !context.completedAssistantPartIds.has(part.id)
+        !context.completedAssistantPartIds.has(partKey)
       ) {
-        context.completedAssistantPartIds.add(part.id);
-        yield* emit({
-          ...(yield* buildEventBase({
-            threadId: context.session.threadId,
-            turnId,
-            itemId: part.id,
-            createdAt: isoFromEpochMs(part.time.end),
-            raw,
-          })),
-          type: "item.completed",
-          payload: {
-            itemType: "assistant_message",
-            status: "completed",
-            title: "Assistant message",
-            ...(latestText.length > 0 ? { detail: latestText } : {}),
-          },
-        });
+        context.completedAssistantPartIds.add(partKey);
+        const subagent = context.subagentBySessionId.get(part.sessionID);
+        if (!subagent) {
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+              itemId: part.id,
+              createdAt: isoFromEpochMs(part.time.end),
+              raw,
+            })),
+            type: "item.completed",
+            payload: {
+              itemType: "assistant_message",
+              status: "completed",
+              title: "Assistant message",
+              ...(latestText.length > 0 ? { detail: latestText } : {}),
+            },
+          });
+        }
       }
     });
 
@@ -651,7 +976,14 @@ export function makeOpenCodeAdapter(
     ) {
       const payloadSessionId =
         "properties" in event ? (event.properties as { sessionID?: unknown }).sessionID : undefined;
-      if (payloadSessionId !== context.openCodeSessionId) {
+      const eventSessionId = typeof payloadSessionId === "string" ? payloadSessionId : undefined;
+      const isRootSessionEvent = eventSessionId === context.openCodeSessionId;
+      const isKnownChildSessionEvent =
+        eventSessionId !== undefined && context.childSessionIds.has(eventSessionId);
+      const isChildSessionCreatedEvent =
+        event.type === "session.created" &&
+        event.properties.info.parentID === context.openCodeSessionId;
+      if (!isRootSessionEvent && !isKnownChildSessionEvent && !isChildSessionCreatedEvent) {
         return;
       }
 
@@ -661,7 +993,7 @@ export function makeOpenCodeAdapter(
         event: {
           provider: PROVIDER,
           threadId: context.session.threadId,
-          providerThreadId: context.openCodeSessionId,
+          providerThreadId: eventSessionId ?? context.openCodeSessionId,
           type: event.type,
           ...(turnId ? { turnId } : {}),
           payload: event,
@@ -669,11 +1001,22 @@ export function makeOpenCodeAdapter(
       });
 
       switch (event.type) {
+        case "session.created": {
+          yield* registerOpenCodeChildSession(context, event.properties.info, event);
+          break;
+        }
+
         case "message.updated": {
-          context.messageRoleById.set(event.properties.info.id, event.properties.info.role);
+          context.messageRoleById.set(
+            scopedOpenCodeId(event.properties.sessionID, event.properties.info.id),
+            event.properties.info.role,
+          );
           if (event.properties.info.role === "assistant") {
             for (const part of context.partById.values()) {
-              if (part.messageID !== event.properties.info.id) {
+              if (
+                part.sessionID !== event.properties.sessionID ||
+                part.messageID !== event.properties.info.id
+              ) {
                 continue;
               }
               yield* emitAssistantTextDelta(context, part, turnId, event);
@@ -683,12 +1026,15 @@ export function makeOpenCodeAdapter(
         }
 
         case "message.removed": {
-          context.messageRoleById.delete(event.properties.messageID);
+          context.messageRoleById.delete(
+            scopedOpenCodeId(event.properties.sessionID, event.properties.messageID),
+          );
           break;
         }
 
         case "message.part.delta": {
-          const existingPart = context.partById.get(event.properties.partID);
+          const partKey = scopedOpenCodeId(event.properties.sessionID, event.properties.partID);
+          const existingPart = context.partById.get(partKey);
           if (!existingPart) {
             break;
           }
@@ -702,43 +1048,67 @@ export function makeOpenCodeAdapter(
             break;
           }
           const previousText =
-            context.emittedTextByPartId.get(event.properties.partID) ??
-            textFromPart(existingPart) ??
-            "";
+            context.emittedTextByPartId.get(partKey) ?? textFromPart(existingPart) ?? "";
           const { nextText, deltaToEmit } = appendOpenCodeAssistantTextDelta(previousText, delta);
           if (deltaToEmit.length === 0) {
             break;
           }
-          context.emittedTextByPartId.set(event.properties.partID, nextText);
+          context.emittedTextByPartId.set(partKey, nextText);
           if (existingPart.type === "text" || existingPart.type === "reasoning") {
-            context.partById.set(event.properties.partID, {
+            context.partById.set(partKey, {
               ...existingPart,
               text: nextText,
             });
           }
-          yield* emit({
-            ...(yield* buildEventBase({
-              threadId: context.session.threadId,
-              turnId,
-              itemId: event.properties.partID,
-              raw: event,
-            })),
-            type: "content.delta",
-            payload: {
-              streamKind,
-              delta: deltaToEmit,
-            },
-          });
+          const subagent = context.subagentBySessionId.get(event.properties.sessionID);
+          if (subagent) {
+            yield* emit({
+              ...(yield* buildEventBase({
+                threadId: context.session.threadId,
+                turnId,
+                itemId: event.properties.partID,
+                raw: event,
+              })),
+              type: "subagent.message.delta",
+              payload: {
+                subagentId: subagent.subagentId,
+                delta: deltaToEmit,
+                streamKind,
+                role: "assistant",
+                providerSessionId: event.properties.sessionID,
+                providerThreadId: event.properties.sessionID,
+                providerMessageId: event.properties.messageID,
+              },
+            });
+          } else {
+            yield* emit({
+              ...(yield* buildEventBase({
+                threadId: context.session.threadId,
+                turnId,
+                itemId: event.properties.partID,
+                raw: event,
+              })),
+              type: "content.delta",
+              payload: {
+                streamKind,
+                delta: deltaToEmit,
+              },
+            });
+          }
           break;
         }
 
         case "message.part.updated": {
           const part = event.properties.part;
-          context.partById.set(part.id, part);
+          context.partById.set(scopedOpenCodeId(part.sessionID, part.id), part);
           const messageRole = messageRoleForPart(context, part);
 
           if (messageRole === "assistant") {
             yield* emitAssistantTextDelta(context, part, turnId, event);
+          }
+
+          if (part.type === "subtask" && part.sessionID === context.openCodeSessionId) {
+            yield* bindOpenCodeSubtaskPart(context, part, event);
           }
 
           if (part.type === "tool") {
@@ -746,6 +1116,17 @@ export function makeOpenCodeAdapter(
             const title =
               part.state.status === "running" ? (part.state.title ?? part.tool) : part.tool;
             const detail = detailFromToolPart(part);
+            const childSubagent = context.subagentBySessionId.get(part.sessionID);
+            if (childSubagent) {
+              yield* emitOpenCodeSubagentUpdated(context, {
+                subagent: childSubagent,
+                status: statusFromOpenCodeSubagentState("running"),
+                summary: title,
+                detail,
+                raw: event,
+              });
+              break;
+            }
             const payload = {
               itemType,
               ...(part.state.status === "error"
@@ -877,6 +1258,27 @@ export function makeOpenCodeAdapter(
         }
 
         case "session.status": {
+          const childSubagent = context.subagentBySessionId.get(event.properties.sessionID);
+          if (childSubagent) {
+            if (event.properties.status.type === "idle") {
+              yield* emitOpenCodeSubagentCompleted(context, {
+                subagent: childSubagent,
+                status: subagentCompletionStatus("completed"),
+                raw: event,
+              });
+              break;
+            }
+            yield* emitOpenCodeSubagentUpdated(context, {
+              subagent: childSubagent,
+              status: statusFromOpenCodeSubagentState("running"),
+              ...(event.properties.status.type === "retry"
+                ? { detail: event.properties.status.message }
+                : {}),
+              raw: event,
+            });
+            break;
+          }
+
           if (event.properties.status.type === "busy") {
             updateProviderSession(context, {
               status: "running",
@@ -918,8 +1320,33 @@ export function makeOpenCodeAdapter(
           break;
         }
 
+        case "session.idle": {
+          const childSubagent = context.subagentBySessionId.get(event.properties.sessionID);
+          if (childSubagent) {
+            yield* emitOpenCodeSubagentCompleted(context, {
+              subagent: childSubagent,
+              status: subagentCompletionStatus("completed"),
+              raw: event,
+            });
+          }
+          break;
+        }
+
         case "session.error": {
           const message = sessionErrorMessage(event.properties.error);
+          const childSubagent =
+            event.properties.sessionID !== undefined
+              ? context.subagentBySessionId.get(event.properties.sessionID)
+              : undefined;
+          if (childSubagent) {
+            yield* emitOpenCodeSubagentCompleted(context, {
+              subagent: childSubagent,
+              status: subagentCompletionStatus("failed"),
+              summary: message,
+              raw: event,
+            });
+            break;
+          }
           const activeTurnId = context.activeTurnId;
           context.activeTurnId = undefined;
           updateProviderSession(
@@ -1126,6 +1553,12 @@ export function makeOpenCodeAdapter(
           emittedTextByPartId: new Map(),
           messageRoleById: new Map(),
           completedAssistantPartIds: new Set(),
+          childSessionIds: new Set(),
+          subagentBySessionId: new Map(),
+          subagentBySubtaskPartId: new Map(),
+          unboundSubtaskPartIds: [],
+          startedSubagentIds: new Set(),
+          completedSubagentIds: new Set(),
           turns: [],
           activeTurnId: undefined,
           activeAgent: undefined,
@@ -1134,7 +1567,6 @@ export function makeOpenCodeAdapter(
           sessionScope: started.sessionScope,
         };
         sessions.set(input.threadId, context);
-        yield* startEventPump(context);
 
         yield* emit({
           ...(yield* buildEventBase({ threadId: input.threadId })),
@@ -1150,6 +1582,8 @@ export function makeOpenCodeAdapter(
             providerThreadId: started.openCodeSession.id,
           },
         });
+        yield* startEventPump(context);
+        yield* hydrateOpenCodeChildSessions(context).pipe(Effect.forkIn(context.sessionScope));
 
         return session;
       },

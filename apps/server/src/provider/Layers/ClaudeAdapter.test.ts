@@ -734,7 +734,8 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 10).pipe(
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.take(10),
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -846,7 +847,9 @@ describe("ClaudeAdapterLive", () => {
         uuid: "result-1",
       } as unknown as SDKMessage);
 
-      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const runtimeEvents = Array.from(
+        yield* Fiber.join(runtimeEventsFiber).pipe(Effect.timeout("1 second")),
+      );
       assert.deepEqual(
         runtimeEvents.map((event) => event.type),
         [
@@ -1090,7 +1093,8 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 10).pipe(
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.take(10),
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -1160,7 +1164,9 @@ describe("ClaudeAdapterLive", () => {
         uuid: "result-todo-plan",
       } as unknown as SDKMessage);
 
-      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const runtimeEvents = Array.from(
+        yield* Fiber.join(runtimeEventsFiber).pipe(Effect.timeout("1 second")),
+      );
       const planUpdated = runtimeEvents.find((event) => event.type === "turn.plan.updated");
       assert.equal(planUpdated?.type, "turn.plan.updated");
       if (planUpdated?.type === "turn.plan.updated") {
@@ -1568,6 +1574,95 @@ describe("ClaudeAdapterLive", () => {
         );
         assert.equal(progressEvent.payload.description, "Running background teammate");
       }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("projects Claude agent task lifecycle into subagent summary events", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.type === "subagent.started" ||
+            event.type === "subagent.updated" ||
+            event.type === "subagent.completed" ||
+            event.type === "task.started" ||
+            event.type === "task.progress" ||
+            event.type === "task.completed",
+        ),
+        Stream.take(6),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      harness.query.emit({
+        type: "system",
+        subtype: "task_started",
+        task_id: "task-agent-1",
+        task_type: "agent",
+        description: "Review retry handling",
+        session_id: "sdk-session-agent-task",
+        uuid: "task-agent-started",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "task-agent-1",
+        description: "Review retry handling",
+        summary: "Reviewer is checking retry paths.",
+        last_tool_name: "Task",
+        session_id: "sdk-session-agent-task",
+        uuid: "task-agent-progress",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "system",
+        subtype: "task_notification",
+        task_id: "task-agent-1",
+        status: "completed",
+        summary: "Retry paths reviewed.",
+        session_id: "sdk-session-agent-task",
+        uuid: "task-agent-completed",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(
+        yield* Fiber.join(runtimeEventsFiber).pipe(Effect.timeout("1 second")),
+      );
+      const subagentStarted = runtimeEvents.find((event) => event.type === "subagent.started");
+      const subagentUpdated = runtimeEvents.find((event) => event.type === "subagent.updated");
+      const subagentCompleted = runtimeEvents.find((event) => event.type === "subagent.completed");
+
+      assert.equal(subagentStarted?.type, "subagent.started");
+      if (subagentStarted?.type === "subagent.started") {
+        assert.equal(subagentStarted.payload.subagent.subagentId, "claude-task:task-agent-1");
+        assert.equal(subagentStarted.payload.subagent.capability, "summary");
+        assert.equal(subagentStarted.payload.subagent.providerTaskId, "task-agent-1");
+      }
+      assert.equal(subagentUpdated?.type, "subagent.updated");
+      if (subagentUpdated?.type === "subagent.updated") {
+        assert.equal(subagentUpdated.payload.status, "running");
+        assert.equal(subagentUpdated.payload.summary, "Reviewer is checking retry paths.");
+      }
+      assert.equal(subagentCompleted?.type, "subagent.completed");
+      if (subagentCompleted?.type === "subagent.completed") {
+        assert.equal(subagentCompleted.payload.status, "completed");
+        assert.equal(subagentCompleted.payload.summary, "Retry paths reviewed.");
+      }
+      assert.ok(runtimeEvents.some((event) => event.type === "task.started"));
+      assert.ok(runtimeEvents.some((event) => event.type === "task.progress"));
+      assert.ok(runtimeEvents.some((event) => event.type === "task.completed"));
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

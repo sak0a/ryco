@@ -41,7 +41,10 @@ import {
   DEFAULT_AGENT_TOKEN_MODE,
   RuntimeItemId,
   RuntimeRequestId,
+  RuntimeSubagentId,
   RuntimeTaskId,
+  type RuntimeSubagentStatus,
+  type SubagentRef,
   ThreadId,
   TurnId,
   type UserInputQuestion,
@@ -180,6 +183,9 @@ interface ClaudeSessionContext {
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
+  readonly subagentByTaskId: Map<string, SubagentRef>;
+  readonly startedSubagentIds: Set<string>;
+  readonly completedSubagentIds: Set<string>;
   stopped: boolean;
 }
 
@@ -428,6 +434,84 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     ...(turnCountValue !== undefined && Number.isInteger(turnCountValue) && turnCountValue >= 0
       ? { turnCount: turnCountValue }
       : {}),
+  };
+}
+
+function trimmedClaudeString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function claudeTaskField(message: SDKMessage, field: string): string | undefined {
+  return trimmedClaudeString((message as Record<string, unknown>)[field]);
+}
+
+function hasClaudeSubagentNameSignal(value: string | undefined): boolean {
+  return value !== undefined && /\b(?:sub[-\s]?agent|agent|subtask|task)\b/i.test(value);
+}
+
+function hasClaudeSubagentDescriptionSignal(value: string | undefined): boolean {
+  return (
+    value !== undefined &&
+    /\b(?:sub[-\s]?agent|agent|teammate|worker|delegate[sd]?|reviewer)\b/i.test(value)
+  );
+}
+
+function isClaudeSubagentTaskMessage(message: SDKMessage): boolean {
+  return (
+    hasClaudeSubagentNameSignal(claudeTaskField(message, "task_type")) ||
+    hasClaudeSubagentNameSignal(claudeTaskField(message, "last_tool_name")) ||
+    hasClaudeSubagentDescriptionSignal(claudeTaskField(message, "description")) ||
+    hasClaudeSubagentDescriptionSignal(claudeTaskField(message, "summary"))
+  );
+}
+
+function claudeTaskSubagentStatus(
+  status: "starting" | "running" | "completed" | "failed" | "stopped",
+): RuntimeSubagentStatus {
+  return status;
+}
+
+function claudeTaskCompletionStatus(
+  status: "completed" | "failed" | "stopped",
+): Extract<RuntimeSubagentStatus, "completed" | "failed" | "stopped"> {
+  return status;
+}
+
+function claudeTaskMetadata(message: SDKMessage): Record<string, unknown> | undefined {
+  const metadata = Object.fromEntries(
+    [
+      ["source", "claude.task"],
+      ["taskType", claudeTaskField(message, "task_type")],
+      ["lastToolName", claudeTaskField(message, "last_tool_name")],
+    ].filter(([, value]) => value !== undefined),
+  );
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function makeClaudeTaskSubagentRef(
+  existing: SubagentRef | undefined,
+  message: SDKMessage & { readonly task_id: string },
+): SubagentRef {
+  const taskType = claudeTaskField(message, "task_type");
+  const lastToolName = claudeTaskField(message, "last_tool_name");
+  const description = claudeTaskField(message, "description") ?? existing?.description;
+  const label = taskType ?? lastToolName ?? existing?.label ?? "Claude task";
+  const taskMetadata = claudeTaskMetadata(message);
+  const metadata: Record<string, unknown> = {};
+  if (existing?.metadata) {
+    Object.assign(metadata, existing.metadata);
+  }
+  if (taskMetadata) {
+    Object.assign(metadata, taskMetadata);
+  }
+  return {
+    subagentId: existing?.subagentId ?? RuntimeSubagentId.make(`claude-task:${message.task_id}`),
+    origin: "native",
+    capability: "summary",
+    label,
+    ...(description && { description }),
+    providerTaskId: RuntimeTaskId.make(message.task_id),
+    ...(Object.keys(metadata).length > 0 && { metadata }),
   };
 }
 
@@ -1046,6 +1130,114 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       Effect.andThen(runtimeEventQueueMetrics.recordEnqueued()),
       Effect.asVoid,
     );
+
+  const emitClaudeSubagentStarted = Effect.fn("emitClaudeSubagentStarted")(function* (
+    context: ClaudeSessionContext,
+    subagent: SubagentRef,
+    raw: SDKMessage,
+  ) {
+    const key = String(subagent.subagentId);
+    if (context.startedSubagentIds.has(key)) {
+      return;
+    }
+    context.startedSubagentIds.add(key);
+    const stamp = yield* makeEventStamp();
+    yield* offerRuntimeEvent({
+      type: "subagent.started",
+      eventId: stamp.eventId,
+      provider: PROVIDER,
+      createdAt: stamp.createdAt,
+      threadId: context.session.threadId,
+      ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+      payload: {
+        subagent,
+      },
+      providerRefs: nativeProviderRefs(context),
+      raw: {
+        source: "claude.sdk.message",
+        method: sdkNativeMethod(raw),
+        messageType: `${raw.type}:${sdkMessageSubtype(raw) ?? ""}`,
+        payload: raw,
+      },
+    });
+  });
+
+  const emitClaudeSubagentUpdated = Effect.fn("emitClaudeSubagentUpdated")(function* (
+    context: ClaudeSessionContext,
+    input: {
+      readonly subagent: SubagentRef;
+      readonly status?: RuntimeSubagentStatus;
+      readonly summary?: string | undefined;
+      readonly detail?: string | undefined;
+      readonly usage?: unknown;
+      readonly raw: SDKMessage;
+    },
+  ) {
+    yield* emitClaudeSubagentStarted(context, input.subagent, input.raw);
+    const stamp = yield* makeEventStamp();
+    yield* offerRuntimeEvent({
+      type: "subagent.updated",
+      eventId: stamp.eventId,
+      provider: PROVIDER,
+      createdAt: stamp.createdAt,
+      threadId: context.session.threadId,
+      ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+      payload: {
+        subagent: input.subagent,
+        ...(input.status ? { status: input.status } : {}),
+        ...(input.summary ? { summary: input.summary } : {}),
+        ...(input.detail ? { detail: input.detail } : {}),
+        ...(input.usage !== undefined ? { usage: input.usage } : {}),
+      },
+      providerRefs: nativeProviderRefs(context),
+      raw: {
+        source: "claude.sdk.message",
+        method: sdkNativeMethod(input.raw),
+        messageType: `${input.raw.type}:${sdkMessageSubtype(input.raw) ?? ""}`,
+        payload: input.raw,
+      },
+    });
+  });
+
+  const emitClaudeSubagentCompleted = Effect.fn("emitClaudeSubagentCompleted")(function* (
+    context: ClaudeSessionContext,
+    input: {
+      readonly subagent: SubagentRef;
+      readonly status: Extract<RuntimeSubagentStatus, "completed" | "failed" | "stopped">;
+      readonly summary?: string | undefined;
+      readonly usage?: unknown;
+      readonly raw: SDKMessage;
+    },
+  ) {
+    const key = String(input.subagent.subagentId);
+    if (context.completedSubagentIds.has(key)) {
+      return;
+    }
+    yield* emitClaudeSubagentStarted(context, input.subagent, input.raw);
+    context.completedSubagentIds.add(key);
+    const stamp = yield* makeEventStamp();
+    yield* offerRuntimeEvent({
+      type: "subagent.completed",
+      eventId: stamp.eventId,
+      provider: PROVIDER,
+      createdAt: stamp.createdAt,
+      threadId: context.session.threadId,
+      ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+      payload: {
+        subagent: input.subagent,
+        status: input.status,
+        ...(input.summary ? { summary: input.summary } : {}),
+        ...(input.usage !== undefined ? { usage: input.usage } : {}),
+      },
+      providerRefs: nativeProviderRefs(context),
+      raw: {
+        source: "claude.sdk.message",
+        method: sdkNativeMethod(input.raw),
+        messageType: `${input.raw.type}:${sdkMessageSubtype(input.raw) ?? ""}`,
+        payload: input.raw,
+      },
+    });
+  });
 
   const logNativeSdkMessage = Effect.fn("logNativeSdkMessage")(function* (
     context: ClaudeSessionContext,
@@ -2178,6 +2370,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             ...(message.task_type ? { taskType: message.task_type } : {}),
           },
         });
+        if (isClaudeSubagentTaskMessage(message)) {
+          const subagent = makeClaudeTaskSubagentRef(
+            context.subagentByTaskId.get(message.task_id),
+            message,
+          );
+          context.subagentByTaskId.set(message.task_id, subagent);
+          yield* emitClaudeSubagentStarted(context, subagent, message);
+        }
         return;
       case "task_progress":
         if (message.usage) {
@@ -2210,6 +2410,21 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             ...(message.last_tool_name ? { lastToolName: message.last_tool_name } : {}),
           },
         });
+        if (isClaudeSubagentTaskMessage(message) || context.subagentByTaskId.has(message.task_id)) {
+          const subagent = makeClaudeTaskSubagentRef(
+            context.subagentByTaskId.get(message.task_id),
+            message,
+          );
+          context.subagentByTaskId.set(message.task_id, subagent);
+          yield* emitClaudeSubagentUpdated(context, {
+            subagent,
+            status: claudeTaskSubagentStatus("running"),
+            ...(message.summary ? { summary: message.summary } : {}),
+            detail: message.description,
+            ...(message.usage ? { usage: message.usage } : {}),
+            raw: message,
+          });
+        }
         return;
       case "task_notification":
         if (message.usage) {
@@ -2241,6 +2456,20 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             ...(message.usage ? { usage: message.usage } : {}),
           },
         });
+        if (isClaudeSubagentTaskMessage(message) || context.subagentByTaskId.has(message.task_id)) {
+          const subagent = makeClaudeTaskSubagentRef(
+            context.subagentByTaskId.get(message.task_id),
+            message,
+          );
+          context.subagentByTaskId.set(message.task_id, subagent);
+          yield* emitClaudeSubagentCompleted(context, {
+            subagent,
+            status: claudeTaskCompletionStatus(message.status),
+            ...(message.summary ? { summary: message.summary } : {}),
+            ...(message.usage ? { usage: message.usage } : {}),
+            raw: message,
+          });
+        }
         return;
       case "files_persisted":
         yield* offerRuntimeEvent({
@@ -3038,6 +3267,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastKnownTokenUsage: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
+        subagentByTaskId: new Map(),
+        startedSubagentIds: new Set(),
+        completedSubagentIds: new Set(),
         stopped: false,
       };
       yield* Ref.set(contextRef, context);

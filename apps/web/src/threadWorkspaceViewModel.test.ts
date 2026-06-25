@@ -147,6 +147,160 @@ describe("deriveThreadSubagents", () => {
     });
   });
 
+  it("groups canonical subagent lifecycle activities and attaches message deltas", () => {
+    const activities = [
+      makeActivity({
+        id: "subagent-start",
+        kind: "subagent.started",
+        createdAt: "2026-06-04T10:00:00.000Z",
+        payload: {
+          itemType: "subagent",
+          subagent: {
+            subagentId: "managed-1",
+            origin: "managed",
+            capability: "managed",
+            label: "Cache Inspector",
+            description: "Inspect the cache eviction path.",
+            providerThreadId: "provider-child-1",
+            providerSessionId: "session-child-1",
+            childThreadId: "thread-child-1",
+          },
+          status: "running",
+        },
+      }),
+      makeActivity({
+        id: "subagent-progress",
+        kind: "subagent.updated",
+        createdAt: "2026-06-04T10:00:03.000Z",
+        payload: {
+          itemType: "subagent",
+          subagent: {
+            subagentId: "managed-1",
+            origin: "managed",
+            capability: "managed",
+          },
+          status: "running",
+          summary: "Reading cache invalidation code.",
+          lastToolName: "read",
+        },
+      }),
+      makeActivity({
+        id: "subagent-message",
+        kind: "subagent.message.delta",
+        createdAt: "2026-06-04T10:00:04.000Z",
+        payload: {
+          subagentId: "managed-1",
+          providerThreadId: "provider-child-1",
+          providerItemId: "message-1",
+          text: "The eviction path skips stale keys.",
+        },
+      }),
+      makeActivity({
+        id: "subagent-complete",
+        kind: "subagent.completed",
+        createdAt: "2026-06-04T10:00:05.000Z",
+        payload: {
+          itemType: "subagent",
+          subagent: {
+            subagentId: "managed-1",
+            origin: "managed",
+            capability: "managed",
+          },
+          status: "completed",
+          summary: "Found stale-key eviction risk.",
+        },
+      }),
+    ];
+
+    expect(deriveThreadSubagents(activities)[0]).toMatchObject({
+      key: "subagent:managed-1",
+      name: "Cache Inspector",
+      status: "finished",
+      origin: "managed",
+      capability: "managed",
+      tool: "read",
+      detail: "Found stale-key eviction risk.",
+      providerThreadIds: ["provider-child-1"],
+      providerSessionIds: ["session-child-1"],
+      childThreadIds: ["thread-child-1"],
+      messages: [
+        {
+          id: "message-1",
+          text: "The eviction path skips stale keys.",
+          providerThreadId: "provider-child-1",
+        },
+      ],
+    });
+  });
+
+  it("uses canonical provider-neutral subagent metadata and messages", () => {
+    const activities = [
+      makeActivity({
+        id: "subagent-started",
+        kind: "subagent.started",
+        createdAt: "2026-06-04T10:00:00.000Z",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "running",
+          subagent: {
+            subagentId: "opencode:session:child-1",
+            origin: "native",
+            capability: "transcript",
+            label: "OpenCode reviewer",
+            providerThreadId: "child-1",
+            providerSessionId: "child-1",
+          },
+        },
+      }),
+      makeActivity({
+        id: "subagent-message",
+        kind: "agent.message",
+        createdAt: "2026-06-04T10:00:04.000Z",
+        payload: {
+          itemType: "assistant_message",
+          subagentId: "opencode:session:child-1",
+          providerThreadId: "child-1",
+          providerItemId: "message-1",
+          text: "The retry flow drops partial stream state.",
+        },
+      }),
+      makeActivity({
+        id: "subagent-completed",
+        kind: "subagent.completed",
+        createdAt: "2026-06-04T10:00:05.000Z",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "completed",
+          subagent: {
+            subagentId: "opencode:session:child-1",
+            origin: "native",
+            capability: "transcript",
+            label: "OpenCode reviewer",
+            providerThreadId: "child-1",
+            providerSessionId: "child-1",
+          },
+        },
+      }),
+    ];
+
+    expect(deriveThreadSubagents(activities)[0]).toMatchObject({
+      key: "subagent:opencode:session:child-1",
+      name: "OpenCode Reviewer",
+      status: "finished",
+      origin: "native",
+      capability: "transcript",
+      providerThreadIds: ["child-1"],
+      providerSessionIds: ["child-1"],
+      messages: [
+        {
+          id: "message-1",
+          text: "The retry flow drops partial stream state.",
+          providerThreadId: "child-1",
+        },
+      ],
+    });
+  });
+
   it("does not attach unrelated agent messages to a subagent", () => {
     const activities = [
       makeActivity({

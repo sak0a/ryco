@@ -12,7 +12,12 @@ import {
   type TurnId,
 } from "@ryco/contracts";
 
-import type { AcpPermissionRequest, AcpPlanUpdate, AcpToolCallState } from "./AcpRuntimeModel.ts";
+import {
+  isAcpSubagentToolCall,
+  type AcpPermissionRequest,
+  type AcpPlanUpdate,
+  type AcpToolCallState,
+} from "./AcpRuntimeModel.ts";
 
 type AcpAdapterRawSource = Extract<
   RuntimeEventRawSource,
@@ -44,7 +49,11 @@ function canonicalRequestTypeFromAcpKind(kind: string | "unknown"): AcpCanonical
   }
 }
 
-function canonicalItemTypeFromAcpToolKind(kind: string | undefined): ToolLifecycleItemType {
+function canonicalItemTypeFromAcpToolCall(toolCall: AcpToolCallState): ToolLifecycleItemType {
+  if (isAcpSubagentToolCall(toolCall)) {
+    return "collab_agent_tool_call";
+  }
+  const kind = toolCall.kind;
   switch (kind) {
     case "execute":
       return "command_execution";
@@ -177,7 +186,7 @@ export function makeAcpToolCallEvent(input: {
     turnId: input.turnId,
     itemId: RuntimeItemId.make(input.toolCall.toolCallId),
     payload: {
-      itemType: canonicalItemTypeFromAcpToolKind(input.toolCall.kind),
+      itemType: canonicalItemTypeFromAcpToolCall(input.toolCall),
       ...(runtimeStatus ? { status: runtimeStatus } : {}),
       ...(input.toolCall.title ? { title: input.toolCall.title } : {}),
       ...(input.toolCall.detail ? { detail: input.toolCall.detail } : {}),
