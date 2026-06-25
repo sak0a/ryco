@@ -97,6 +97,9 @@ function findManagedSubagentLaunchTurnId(input: {
   const childThreadId = String(input.childThreadId);
   for (let index = input.parentThread.activities.length - 1; index >= 0; index -= 1) {
     const activity = input.parentThread.activities[index];
+    if (!activity) {
+      continue;
+    }
     if (activity.kind !== "subagent.started") {
       continue;
     }
