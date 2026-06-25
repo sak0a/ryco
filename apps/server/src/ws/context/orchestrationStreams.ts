@@ -12,10 +12,65 @@ import {
 import type { OrchestrationEngineShape } from "../../orchestration/Services/OrchestrationEngine.ts";
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import type { RepositoryIdentityResolverShape } from "../../project/Services/RepositoryIdentityResolver.ts";
-import { makeWsReplayMetrics } from "../../wsReplayMetrics.ts";
-import { ORCHESTRATION_REPLAY_PAGE_MAX_LIMIT } from "./constants.ts";
+import {
+  type WsReplayMetrics,
+  type WsReplayStreamKind,
+  makeWsReplayMetrics,
+} from "../../wsReplayMetrics.ts";
+import {
+  ORCHESTRATION_LIVE_QUEUE_MAX_EVENTS,
+  ORCHESTRATION_REPLAY_PAGE_MAX_LIMIT,
+} from "./constants.ts";
 import { isThreadDetailEvent } from "./orchestrationEvents.ts";
 import { randomShortId } from "./branchNaming.ts";
+
+const makeLiveQueueOverflowError = (input: {
+  readonly stream: WsReplayStreamKind;
+  readonly sequence: number;
+  readonly capacity: number;
+}) =>
+  new OrchestrationGetSnapshotError({
+    message: `Orchestration ${input.stream} live event queue overflowed; reconnect to resynchronize`,
+    cause: new Error(
+      `orchestration ${input.stream} live queue overflow at sequence ${input.sequence} with capacity ${input.capacity}`,
+    ),
+  });
+
+export const offerOrchestrationLiveEventOrFail = (input: {
+  readonly stream: WsReplayStreamKind;
+  readonly event: OrchestrationEvent;
+  readonly liveQueue: Queue.Queue<OrchestrationEvent, OrchestrationGetSnapshotError>;
+  readonly overflowedRef: Ref.Ref<boolean>;
+  readonly replayMetrics: WsReplayMetrics;
+  readonly capacity?: number;
+}) =>
+  Effect.gen(function* () {
+    const capacity = input.capacity ?? ORCHESTRATION_LIVE_QUEUE_MAX_EVENTS;
+    if (Queue.offerUnsafe(input.liveQueue, input.event)) {
+      yield* input.replayMetrics.recordLiveEnqueued(input.event.sequence);
+      return;
+    }
+
+    const shouldFail = yield* Ref.modify(input.overflowedRef, (overflowed) => [!overflowed, true]);
+    if (!shouldFail) {
+      return;
+    }
+
+    yield* input.replayMetrics.recordLiveOverflow(input.event.sequence, capacity);
+    yield* Effect.logWarning("orchestration live stream queue overflow; forcing resync", {
+      stream: input.stream,
+      sequence: input.event.sequence,
+      capacity,
+    });
+    yield* Queue.fail(
+      input.liveQueue,
+      makeLiveQueueOverflowError({
+        stream: input.stream,
+        sequence: input.event.sequence,
+        capacity,
+      }),
+    );
+  });
 
 export const makeOrchestrationStreamHelpers = (deps: {
   readonly orchestrationEngine: OrchestrationEngineShape;
@@ -261,8 +316,11 @@ export const makeOrchestrationStreamHelpers = (deps: {
         const loadedSnapshot = yield* snapshot;
         const snapshotSequence = loadedSnapshot.snapshotSequence;
         const liveSubscription = yield* orchestrationEngine.subscribeDomainEvents;
-        const liveQueue = yield* Queue.unbounded<OrchestrationEvent>();
+        const liveQueue = yield* Queue.bounded<OrchestrationEvent, OrchestrationGetSnapshotError>(
+          ORCHESTRATION_LIVE_QUEUE_MAX_EVENTS,
+        );
         const lastSequenceRef = yield* Ref.make(snapshotSequence);
+        const overflowedRef = yield* Ref.make(false);
         const replayBoundary = yield* makeReplayBoundaryTracker(snapshotSequence);
         const replayMetrics = yield* makeWsReplayMetrics({
           stream: "shell",
@@ -274,8 +332,13 @@ export const makeOrchestrationStreamHelpers = (deps: {
           Stream.runForEach((event) =>
             Effect.gen(function* () {
               yield* replayBoundary.recordLiveSequence(event.sequence);
-              yield* Queue.offer(liveQueue, event);
-              yield* replayMetrics.recordLiveEnqueued(event.sequence);
+              yield* offerOrchestrationLiveEventOrFail({
+                stream: "shell",
+                event,
+                liveQueue,
+                overflowedRef,
+                replayMetrics,
+              });
             }),
           ),
           Effect.ensuring(Queue.shutdown(liveQueue)),
@@ -316,8 +379,11 @@ export const makeOrchestrationStreamHelpers = (deps: {
         const loadedSnapshot = yield* snapshot;
         const snapshotSequence = loadedSnapshot.snapshotSequence;
         const liveSubscription = yield* orchestrationEngine.subscribeDomainEvents;
-        const liveQueue = yield* Queue.unbounded<OrchestrationEvent>();
+        const liveQueue = yield* Queue.bounded<OrchestrationEvent, OrchestrationGetSnapshotError>(
+          ORCHESTRATION_LIVE_QUEUE_MAX_EVENTS,
+        );
         const lastSequenceRef = yield* Ref.make(snapshotSequence);
+        const overflowedRef = yield* Ref.make(false);
         const replayBoundary = yield* makeReplayBoundaryTracker(snapshotSequence);
         const replayMetrics = yield* makeWsReplayMetrics({
           stream: "thread",
@@ -343,8 +409,13 @@ export const makeOrchestrationStreamHelpers = (deps: {
           Stream.runForEach((event) =>
             Effect.gen(function* () {
               yield* replayBoundary.recordLiveSequence(event.sequence);
-              yield* Queue.offer(liveQueue, event);
-              yield* replayMetrics.recordLiveEnqueued(event.sequence);
+              yield* offerOrchestrationLiveEventOrFail({
+                stream: "thread",
+                event,
+                liveQueue,
+                overflowedRef,
+                replayMetrics,
+              });
             }),
           ),
           Effect.ensuring(Queue.shutdown(liveQueue)),

@@ -124,6 +124,13 @@ export interface TerminalManagerShape {
    * runtime environment values are intentionally omitted.
    */
   readonly listDiagnostics: Effect.Effect<ReadonlyArray<DiagnosticsTerminalProcess>>;
+
+  /**
+   * Read terminal session snapshots, including retained history. Used by
+   * reconnecting event streams to catch clients up to the current terminal
+   * state before live events continue.
+   */
+  readonly listSessions: Effect.Effect<ReadonlyArray<TerminalSessionSnapshot>>;
 }
 
 /**

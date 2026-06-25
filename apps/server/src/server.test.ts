@@ -63,6 +63,7 @@ import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { Diagnostics, type DiagnosticsShape } from "./diagnostics/Services/Diagnostics.ts";
 import { makeRoutesLayer } from "./server.ts";
 import * as WsTestClient from "./test/WsTestClient.ts";
+import { ORCHESTRATION_LEGACY_REPLAY_MAX_EVENTS } from "./ws/context/constants.ts";
 import { resolveStaticCacheControl } from "./http.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import {
@@ -2295,7 +2296,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("allows paired client sessions to dispatch orchestration commands", () =>
+  it.effect("rejects paired client sessions dispatching orchestration commands", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const workspaceDir = yield* fs.makeTempDirectoryScoped({
@@ -2312,7 +2313,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         readonly credential: string;
       };
       const wsUrl = yield* getWsServerUrl("/ws", { credential: created.credential });
-      const response = yield* Effect.scoped(
+      const result = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
           client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
             type: "project.create",
@@ -2323,9 +2324,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             createdAt: new Date().toISOString(),
           }),
         ),
-      );
+      ).pipe(Effect.result);
 
-      assert.isAtLeast(response.sequence, 0);
+      assertTrue(result._tag === "Failure");
+      assertInclude(
+        String(result.failure),
+        "Only owner sessions can call orchestration.dispatchCommand.",
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -4663,12 +4668,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const replayResult = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.replayEvents]({
+          client[ORCHESTRATION_WS_METHODS.replayEventsPage]({
             fromSequenceExclusive: 0,
+            limit: 1,
           }),
         ),
       );
-      assert.deepEqual(replayResult, []);
+      assert.deepEqual(replayResult.events, []);
+      assert.equal(replayResult.nextSequence, 0);
+      assert.equal(replayResult.hasMore, false);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -4947,6 +4955,36 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("caps legacy websocket rpc orchestration replay to one bounded page", () =>
+    Effect.gen(function* () {
+      let observedLimit: number | undefined;
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            readEvents: (fromSequenceExclusive, limit) => {
+              assert.equal(fromSequenceExclusive, 7);
+              observedLimit = limit;
+              return Stream.empty;
+            },
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const replayResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.replayEvents]({
+            fromSequenceExclusive: 7,
+          }),
+        ),
+      );
+
+      assert.deepEqual(replayResult, []);
+      assert.equal(observedLimit, ORCHESTRATION_LEGACY_REPLAY_MAX_EVENTS);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc orchestration paginated replay", () =>
     Effect.gen(function* () {
       const now = "2026-04-05T00:00:00.000Z";
@@ -5021,28 +5059,37 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       yield* buildAppUnderTest({
         layers: {
           orchestrationEngine: {
-            readEvents: (_fromSequenceExclusive) =>
-              Stream.make({
-                sequence: 1,
-                eventId: EventId.make("event-1"),
-                aggregateKind: "project",
-                aggregateId: defaultProjectId,
-                occurredAt: "2026-04-05T00:00:00.000Z",
-                commandId: null,
-                causationEventId: null,
-                correlationId: null,
-                metadata: {},
-                type: "project.created",
-                payload: {
-                  projectId: defaultProjectId,
-                  title: "Default Project",
-                  workspaceRoot: "/tmp/default-project",
-                  defaultModelSelection,
-                  scripts: [],
-                  createdAt: "2026-04-05T00:00:00.000Z",
-                  updatedAt: "2026-04-05T00:00:00.000Z",
-                },
-              } satisfies Extract<OrchestrationEvent, { type: "project.created" }>),
+            readEventsPage: (fromSequenceExclusive, limit) => {
+              assert.equal(fromSequenceExclusive, 0);
+              assert.equal(limit, 1);
+              return Effect.succeed({
+                events: [
+                  {
+                    sequence: 1,
+                    eventId: EventId.make("event-1"),
+                    aggregateKind: "project",
+                    aggregateId: defaultProjectId,
+                    occurredAt: "2026-04-05T00:00:00.000Z",
+                    commandId: null,
+                    causationEventId: null,
+                    correlationId: null,
+                    metadata: {},
+                    type: "project.created",
+                    payload: {
+                      projectId: defaultProjectId,
+                      title: "Default Project",
+                      workspaceRoot: "/tmp/default-project",
+                      defaultModelSelection,
+                      scripts: [],
+                      createdAt: "2026-04-05T00:00:00.000Z",
+                      updatedAt: "2026-04-05T00:00:00.000Z",
+                    },
+                  } satisfies Extract<OrchestrationEvent, { type: "project.created" }>,
+                ],
+                nextSequence: 1,
+                hasMore: false,
+              });
+            },
           },
           repositoryIdentityResolver: {
             resolve: () => Effect.succeed(repositoryIdentity),
@@ -5053,13 +5100,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const wsUrl = yield* getWsServerUrl("/ws");
       const replayResult = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.replayEvents]({
+          client[ORCHESTRATION_WS_METHODS.replayEventsPage]({
             fromSequenceExclusive: 0,
+            limit: 1,
           }),
         ),
       );
 
-      const replayedEvent = replayResult[0];
+      const replayedEvent = replayResult.events[0];
       assert.equal(replayedEvent?.type, "project.created");
       assert.deepEqual(
         replayedEvent && replayedEvent.type === "project.created"

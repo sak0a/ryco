@@ -182,28 +182,31 @@ export const makeSourceControlHandlers = (ctx: WsRpcContext) => {
     [WS_METHODS.sourceControlListChangeRequests]: ({ cwd, state, limit, query }) =>
       observeRpcEffect(
         WS_METHODS.sourceControlListChangeRequests,
-        sourceControlRegistry.resolve({ cwd }).pipe(
-          Effect.flatMap((provider) => {
-            const trimmedQuery = query?.trim() ?? "";
-            if (trimmedQuery.length > 0) {
-              return provider.searchChangeRequests({
+        ownerEffect(
+          WS_METHODS.sourceControlListChangeRequests,
+          sourceControlRegistry.resolve({ cwd }).pipe(
+            Effect.flatMap((provider) => {
+              const trimmedQuery = query?.trim() ?? "";
+              if (trimmedQuery.length > 0) {
+                return provider.searchChangeRequests({
+                  cwd,
+                  query: trimmedQuery,
+                  ...(limit !== undefined ? { limit } : {}),
+                });
+              }
+              return provider.listChangeRequests({
                 cwd,
-                query: trimmedQuery,
+                headSelector: "",
+                state,
                 ...(limit !== undefined ? { limit } : {}),
               });
-            }
-            return provider.listChangeRequests({
-              cwd,
-              headSelector: "",
-              state,
-              ...(limit !== undefined ? { limit } : {}),
-            });
-          }),
-          Effect.tap(() =>
-            refreshLinkedWorktreeSourceControlStates({
-              cwd,
-              reason: "sourceControl.listChangeRequests",
             }),
+            Effect.tap(() =>
+              refreshLinkedWorktreeSourceControlStates({
+                cwd,
+                reason: "sourceControl.listChangeRequests",
+              }),
+            ),
           ),
         ),
         {

@@ -17,15 +17,14 @@ import {
   isServerPerfProfileEnabled,
   recordServerPerfPayload,
 } from "../observability/PerfInstrumentation.ts";
+import { defineWsHandlers, type WsRpcContext } from "./context.ts";
 import {
-  defineWsHandlers,
+  ORCHESTRATION_LEGACY_REPLAY_MAX_EVENTS,
   ORCHESTRATION_REPLAY_PAGE_MAX_LIMIT,
-  type WsRpcContext,
-} from "./context.ts";
+} from "./context/constants.ts";
 
 export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
   const {
-    withAccess,
     ownerEffect,
     projectionSnapshotQuery,
     dispatchNormalizedCommand,
@@ -43,8 +42,7 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
     [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
       observeRpcEffect(
         ORCHESTRATION_WS_METHODS.dispatchCommand,
-        withAccess(
-          "authenticated",
+        ownerEffect(
           ORCHESTRATION_WS_METHODS.dispatchCommand,
           Effect.gen(function* () {
             const normalizedCommand = yield* normalizeDispatchCommand(command);
@@ -147,6 +145,7 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
               maximum: Number.MAX_SAFE_INTEGER,
               minimum: 0,
             }),
+            ORCHESTRATION_LEGACY_REPLAY_MAX_EVENTS,
           ),
         ).pipe(
           Effect.map((events) => Array.from(events)),

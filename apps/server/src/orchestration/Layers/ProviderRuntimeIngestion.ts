@@ -36,8 +36,16 @@ import {
 import { ServerSettingsService } from "../../serverSettings.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
-const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
-  CommandId.make(`provider:${event.eventId}:${tag}:${crypto.randomUUID()}`);
+const providerCommandId = (
+  event: ProviderRuntimeEvent,
+  tag: string,
+  discriminator?: string,
+): CommandId =>
+  CommandId.make(
+    discriminator === undefined
+      ? `provider:${event.eventId}:${tag}`
+      : `provider:${event.eventId}:${tag}:${discriminator}`,
+  );
 const liveAssistantDeltaBufferKey = (threadId: ThreadId, messageId: MessageId) =>
   `${threadId}:${messageId}`;
 
@@ -319,6 +327,10 @@ function normalizeRuntimeTurnState(
     default:
       return "completed";
   }
+}
+
+function isTerminalProjectionTurnState(state: string): boolean {
+  return state === "completed" || state === "error" || state === "interrupted";
 }
 
 function orchestrationSessionStatusFromRuntimeState(
@@ -988,7 +1000,7 @@ const make = Effect.gen(function* () {
       yield* orchestrationEngine
         .dispatch({
           type: "thread.message.assistant.delta",
-          commandId: providerCommandId(buffer.event, input.commandTag),
+          commandId: providerCommandId(buffer.event, input.commandTag, String(buffer.messageId)),
           threadId: buffer.threadId,
           messageId: buffer.messageId,
           delta: buffer.text,
@@ -1142,9 +1154,10 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const sessionSequence = (input.event as ProviderRuntimeEvent & { sessionSequence?: number })
         .sessionSequence;
+      const commandKey = `${input.providerThreadId}:${input.providerItemId}`;
       yield* orchestrationEngine.dispatch({
         type: "thread.activity.append",
-        commandId: providerCommandId(input.event, "subagent-message-upsert"),
+        commandId: providerCommandId(input.event, "subagent-message-upsert", commandKey),
         threadId: input.threadId,
         activity: {
           id: subagentMessageActivityId({
@@ -1333,7 +1346,7 @@ const make = Effect.gen(function* () {
 
       yield* orchestrationEngine.dispatch({
         type: "thread.message.assistant.delta",
-        commandId: providerCommandId(input.event, input.commandTag),
+        commandId: providerCommandId(input.event, input.commandTag, String(input.messageId)),
         threadId: input.threadId,
         messageId: input.messageId,
         delta: bufferedText,
@@ -1400,7 +1413,11 @@ const make = Effect.gen(function* () {
       if (hasRenderableText) {
         yield* orchestrationEngine.dispatch({
           type: "thread.message.assistant.delta",
-          commandId: providerCommandId(input.event, input.finalDeltaCommandTag),
+          commandId: providerCommandId(
+            input.event,
+            input.finalDeltaCommandTag,
+            String(input.messageId),
+          ),
           threadId: input.threadId,
           messageId: input.messageId,
           delta: text,
@@ -1412,7 +1429,7 @@ const make = Effect.gen(function* () {
       if (input.hasProjectedMessage || hasRenderableText) {
         yield* orchestrationEngine.dispatch({
           type: "thread.message.assistant.complete",
-          commandId: providerCommandId(input.event, input.commandTag),
+          commandId: providerCommandId(input.event, input.commandTag, String(input.messageId)),
           threadId: input.threadId,
           messageId: input.messageId,
           ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -1488,7 +1505,7 @@ const make = Effect.gen(function* () {
       const existingPlan = findProposedPlanById(input.threadProposedPlans, input.planId);
       yield* orchestrationEngine.dispatch({
         type: "thread.proposed-plan.upsert",
-        commandId: providerCommandId(input.event, "proposed-plan-upsert"),
+        commandId: providerCommandId(input.event, "proposed-plan-upsert", input.planId),
         threadId: input.threadId,
         proposedPlan: {
           id: input.planId,
@@ -1634,6 +1651,7 @@ const make = Effect.gen(function* () {
 
   const markSourceProposedPlanImplemented = Effect.fn("markSourceProposedPlanImplemented")(
     function* (
+      event: ProviderRuntimeEvent,
       sourceThreadId: ThreadId,
       sourcePlanId: OrchestrationProposedPlanId,
       implementationThreadId: ThreadId,
@@ -1647,8 +1665,10 @@ const make = Effect.gen(function* () {
 
       yield* orchestrationEngine.dispatch({
         type: "thread.proposed-plan.upsert",
-        commandId: CommandId.make(
-          `provider:source-proposed-plan-implemented:${implementationThreadId}:${crypto.randomUUID()}`,
+        commandId: providerCommandId(
+          event,
+          "source-proposed-plan-implemented",
+          `${sourceThreadId}:${sourcePlanId}:${implementationThreadId}`,
         ),
         threadId: sourceThread.id,
         proposedPlan: {
@@ -1684,6 +1704,18 @@ const make = Effect.gen(function* () {
       const conflictsWithActiveTurn =
         activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
       const missingTurnForActiveTurn = activeTurnId !== null && eventTurnId === undefined;
+      const existingEventTurn =
+        event.type === "turn.started" && eventTurnId !== undefined
+          ? yield* projectionTurnRepository.getByTurnId({
+              threadId: thread.id,
+              turnId: eventTurnId,
+            })
+          : Option.none();
+      const eventTurnAlreadyTerminal =
+        Option.isSome(existingEventTurn) &&
+        isTerminalProjectionTurnState(existingEventTurn.value.state);
+      const eventTurnAlreadyProjectedWithoutActiveSession =
+        activeTurnId === null && Option.isSome(existingEventTurn);
 
       if (!isAssistantTextDeltaEvent(event)) {
         yield* flushLiveAssistantDeltaBuffersSafely({
@@ -1709,8 +1741,13 @@ const make = Effect.gen(function* () {
           case "thread.started":
             return true;
           case "turn.started":
-            return !conflictsWithActiveTurn;
+            return (
+              !conflictsWithActiveTurn &&
+              !eventTurnAlreadyTerminal &&
+              !eventTurnAlreadyProjectedWithoutActiveSession
+            );
           case "turn.completed":
+          case "turn.aborted":
             if (conflictsWithActiveTurn || missingTurnForActiveTurn) {
               return false;
             }
@@ -1735,12 +1772,15 @@ const make = Effect.gen(function* () {
         event.type === "session.exited" ||
         event.type === "thread.started" ||
         event.type === "turn.started" ||
-        event.type === "turn.completed"
+        event.type === "turn.completed" ||
+        event.type === "turn.aborted"
       ) {
         const nextActiveTurnId =
           event.type === "turn.started"
             ? (eventTurnId ?? null)
-            : event.type === "turn.completed" || event.type === "session.exited"
+            : event.type === "turn.completed" ||
+                event.type === "turn.aborted" ||
+                event.type === "session.exited"
               ? null
               : activeTurnId;
         const status = (() => {
@@ -1755,6 +1795,8 @@ const make = Effect.gen(function* () {
               return normalizeRuntimeTurnState(event.payload.state) === "failed"
                 ? "error"
                 : "ready";
+            case "turn.aborted":
+              return "ready";
             case "session.started":
             case "thread.started":
               // Provider thread/session start notifications can arrive during an
@@ -1775,6 +1817,7 @@ const make = Effect.gen(function* () {
         if (shouldApplyThreadLifecycle) {
           if (event.type === "turn.started" && acceptedTurnStartedSourcePlan !== null) {
             yield* markSourceProposedPlanImplemented(
+              event,
               acceptedTurnStartedSourcePlan.sourceThreadId,
               acceptedTurnStartedSourcePlan.sourcePlanId,
               thread.id,
@@ -1812,6 +1855,16 @@ const make = Effect.gen(function* () {
             },
             createdAt: now,
           });
+
+          if (event.type === "turn.aborted" && eventTurnId !== undefined) {
+            yield* orchestrationEngine.dispatch({
+              type: "thread.turn.interrupt",
+              commandId: providerCommandId(event, "thread-turn-interrupt", String(eventTurnId)),
+              threadId: thread.id,
+              turnId: eventTurnId,
+              createdAt: now,
+            });
+          }
         }
       }
 
@@ -1866,7 +1919,11 @@ const make = Effect.gen(function* () {
           if (spillChunk.length > 0) {
             yield* orchestrationEngine.dispatch({
               type: "thread.message.assistant.delta",
-              commandId: providerCommandId(event, "assistant-delta-buffer-spill"),
+              commandId: providerCommandId(
+                event,
+                "assistant-delta-buffer-spill",
+                String(assistantMessageId),
+              ),
               threadId: thread.id,
               messageId: assistantMessageId,
               delta: spillChunk,
@@ -2070,7 +2127,7 @@ const make = Effect.gen(function* () {
         });
       }
 
-      if (event.type === "turn.completed") {
+      if (event.type === "turn.completed" || event.type === "turn.aborted") {
         const detailedThread = yield* getLoadedThreadDetail();
         const messages = detailedThread?.messages ?? [];
         const proposedPlans = detailedThread?.proposedPlans ?? [];
@@ -2178,7 +2235,7 @@ const make = Effect.gen(function* () {
             );
             yield* orchestrationEngine.dispatch({
               type: "thread.turn.diff.complete",
-              commandId: providerCommandId(event, "thread-turn-diff-complete"),
+              commandId: providerCommandId(event, "thread-turn-diff-complete", String(turnId)),
               threadId: thread.id,
               turnId,
               completedAt: now,
@@ -2197,7 +2254,7 @@ const make = Effect.gen(function* () {
       yield* Effect.forEach(activities, (activity) =>
         orchestrationEngine.dispatch({
           type: "thread.activity.append",
-          commandId: providerCommandId(event, "thread-activity-append"),
+          commandId: providerCommandId(event, "thread-activity-append", String(activity.id)),
           threadId: thread.id,
           activity,
           createdAt: activity.createdAt,

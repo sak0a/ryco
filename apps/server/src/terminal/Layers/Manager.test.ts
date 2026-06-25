@@ -11,6 +11,7 @@ import {
 import {
   Duration,
   Effect,
+  Deferred,
   Encoding,
   Exit,
   Fiber,
@@ -200,6 +201,8 @@ interface CreateManagerOptions {
   subprocessPollIntervalMs?: number;
   processKillGraceMs?: number;
   maxRetainedInactiveSessions?: number;
+  maxPendingProcessEvents?: number;
+  maxPendingProcessOutputBytes?: number;
   ptyAdapter?: FakePtyAdapter;
 }
 
@@ -243,6 +246,12 @@ const createManager = (
           : {}),
         ...(options.maxRetainedInactiveSessions !== undefined
           ? { maxRetainedInactiveSessions: options.maxRetainedInactiveSessions }
+          : {}),
+        ...(options.maxPendingProcessEvents !== undefined
+          ? { maxPendingProcessEvents: options.maxPendingProcessEvents }
+          : {}),
+        ...(options.maxPendingProcessOutputBytes !== undefined
+          ? { maxPendingProcessOutputBytes: options.maxPendingProcessOutputBytes }
           : {}),
       });
       const eventsRef = yield* Ref.make<ReadonlyArray<TerminalEvent>>([]);
@@ -1086,6 +1095,91 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
         expect.objectContaining({ type: "output", data: "second\n" }),
         expect.objectContaining({ type: "exited", exitCode: 0, exitSignal: 0 }),
       ]);
+    }),
+  );
+
+  it.effect("lists active session snapshots for reconnect replay", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      yield* manager.open(openInput());
+      const process = ptyAdapter.processes[0];
+      expect(process).toBeDefined();
+      if (!process) return;
+
+      process.emitData("visible history\n");
+      yield* waitFor(
+        Effect.map(manager.listSessions, (snapshots) =>
+          snapshots.some(
+            (snapshot) =>
+              snapshot.threadId === "thread-1" &&
+              snapshot.terminalId === DEFAULT_TERMINAL_ID &&
+              snapshot.status === "running" &&
+              snapshot.history.includes("visible history\n"),
+          ),
+        ),
+        "1200 millis",
+      );
+    }),
+  );
+
+  it.effect("bounds pending output bytes while preserving terminal exit delivery", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter, getEvents } = yield* createManager(5, {
+        ptyAdapter: new FakePtyAdapter("async"),
+        maxPendingProcessEvents: 10,
+        maxPendingProcessOutputBytes: 12,
+      });
+
+      yield* manager.open(openInput());
+      const process = ptyAdapter.processes[0];
+      expect(process).toBeDefined();
+      if (!process) return;
+
+      const unblockOutput = yield* Deferred.make<void>();
+      let shouldBlockOutput = true;
+      const scope = yield* Effect.scope;
+      const unsubscribe = yield* manager.subscribe((event) =>
+        event.type === "output" && shouldBlockOutput ? Deferred.await(unblockOutput) : Effect.void,
+      );
+      yield* Scope.addFinalizer(scope, Effect.sync(unsubscribe));
+
+      process.emitData("first\n");
+      yield* waitFor(
+        Effect.map(getEvents, (events) =>
+          events.some((event) => event.type === "output" && event.data === "first\n"),
+        ),
+        "1200 millis",
+      );
+
+      process.emitData("bbbbbbbbbb");
+      process.emitData("cccccccccc");
+      process.emitData("dddddddddd");
+      process.emitExit({ exitCode: 0, signal: 0 });
+
+      shouldBlockOutput = false;
+      yield* Deferred.succeed(unblockOutput, undefined);
+
+      yield* waitFor(
+        Effect.map(getEvents, (events) =>
+          events.some((event) => event.type === "exited" && event.exitCode === 0),
+        ),
+        "1200 millis",
+      );
+
+      const relevant = (yield* getEvents).filter(
+        (event) => event.type === "output" || event.type === "exited",
+      );
+      const outputText = relevant
+        .filter(
+          (event): event is Extract<TerminalEvent, { type: "output" }> => event.type === "output",
+        )
+        .map((event) => event.data)
+        .join("");
+
+      expect(outputText).toBe("first\nccdddddddddd");
+      expect(relevant.at(-1)).toEqual(
+        expect.objectContaining({ type: "exited", exitCode: 0, exitSignal: 0 }),
+      );
     }),
   );
 

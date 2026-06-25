@@ -64,12 +64,31 @@ export const makeTerminalHandlers = (ctx: WsRpcContext) => {
           WS_METHODS.subscribeTerminalEvents,
           Stream.callback<TerminalEvent>((queue) =>
             Effect.acquireRelease(
-              terminalManager.subscribe((event) =>
-                Effect.gen(function* () {
-                  recordServerPerfPayload("server.ws.terminal.events", event);
-                  yield* Queue.offer(queue, event);
-                }),
-              ),
+              Effect.gen(function* () {
+                const unsubscribe = yield* terminalManager.subscribe((event) =>
+                  Effect.gen(function* () {
+                    recordServerPerfPayload("server.ws.terminal.events", event);
+                    yield* Queue.offer(queue, event);
+                  }),
+                );
+                const snapshots = yield* terminalManager.listSessions;
+                yield* Effect.forEach(
+                  snapshots.filter((snapshot) => snapshot.status === "running"),
+                  (snapshot) => {
+                    const event: TerminalEvent = {
+                      type: "started",
+                      threadId: snapshot.threadId,
+                      terminalId: snapshot.terminalId,
+                      createdAt: new Date().toISOString(),
+                      snapshot,
+                    };
+                    recordServerPerfPayload("server.ws.terminal.events", event);
+                    return Queue.offer(queue, event);
+                  },
+                  { discard: true },
+                );
+                return unsubscribe;
+              }),
               (unsubscribe) => Effect.sync(unsubscribe),
             ),
           ),

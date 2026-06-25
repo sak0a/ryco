@@ -1393,6 +1393,7 @@ async function ensureSavedEnvironmentConnection(
           bearerToken = issued.bearerToken;
           roleHint = issued.role;
         } else {
+          await removeSavedEnvironmentBearerToken(record.environmentId).catch(() => undefined);
           useSavedEnvironmentRuntimeStore.getState().patch(record.environmentId, {
             authState: "requires-auth",
             role: null,
