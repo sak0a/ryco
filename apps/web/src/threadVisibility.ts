@@ -1,6 +1,9 @@
-import type { SidebarThreadSummary, ThreadShell } from "./types";
+import type { ThreadKind, ThreadVisibility } from "@ryco/contracts";
 
-type ThreadVisibilityInput = Pick<SidebarThreadSummary | ThreadShell, "threadKind" | "visibility">;
+interface ThreadVisibilityInput {
+  readonly threadKind?: ThreadKind | undefined;
+  readonly visibility?: ThreadVisibility | undefined;
+}
 
 export function isNormalThreadVisibility(thread: ThreadVisibilityInput): boolean {
   return thread.visibility !== "nested" && thread.threadKind !== "managed-subagent";

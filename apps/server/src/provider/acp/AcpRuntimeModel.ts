@@ -256,10 +256,7 @@ function normalizeToolKind(kind: unknown): string | undefined {
 }
 
 function containsSubagentKeyword(value: string | undefined): boolean {
-  return (
-    value !== undefined &&
-    /\b(sub[-\s]?agent|subtask|delegate|delegation)\b/i.test(value)
-  );
+  return value !== undefined && /\b(sub[-\s]?agent|subtask|delegate|delegation)\b/i.test(value);
 }
 
 function hasExplicitSubagentType(data: Record<string, unknown> | undefined): boolean {
