@@ -49,13 +49,16 @@ function getTestWindow(): Window & typeof globalThis {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.resetModules();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("clientPersistenceStorage", () => {
-  it("stores browser secrets inline with the saved environment record", async () => {
+  it("stores browser secrets inline with an explicit browser-local expiry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-09T00:00:00.000Z"));
     const testWindow = getTestWindow();
     const {
       SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY,
@@ -79,8 +82,141 @@ describe("clientPersistenceStorage", () => {
         {
           ...savedRegistryRecord,
           bearerToken: "bearer-token",
+          bearerTokenSavedAt: "2026-04-09T00:00:00.000Z",
+          bearerTokenExpiresAt: "2026-04-16T00:00:00.000Z",
         },
       ],
+    });
+  });
+
+  it("migrates legacy browser secrets to the explicit expiry format on read", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-09T00:00:00.000Z"));
+    const testWindow = getTestWindow();
+    const {
+      SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY,
+      readBrowserSavedEnvironmentSecret,
+      writeBrowserSavedEnvironmentRegistry,
+    } = await import("./clientPersistenceStorage");
+
+    writeBrowserSavedEnvironmentRegistry([savedRegistryRecord]);
+    testWindow.localStorage.setItem(
+      SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        records: [
+          {
+            ...savedRegistryRecord,
+            bearerToken: "legacy-bearer-token",
+          },
+        ],
+      }),
+    );
+
+    expect(readBrowserSavedEnvironmentSecret(testEnvironmentId)).toBe("legacy-bearer-token");
+    expect(
+      JSON.parse(testWindow.localStorage.getItem(SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY)!),
+    ).toEqual({
+      version: 1,
+      records: [
+        {
+          ...savedRegistryRecord,
+          bearerToken: "legacy-bearer-token",
+          bearerTokenSavedAt: "2026-04-09T00:00:00.000Z",
+          bearerTokenExpiresAt: "2026-04-16T00:00:00.000Z",
+        },
+      ],
+    });
+  });
+
+  it("removes expired browser secrets when they are read or metadata is rewritten", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-17T00:00:00.000Z"));
+    const testWindow = getTestWindow();
+    const {
+      SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY,
+      readBrowserSavedEnvironmentSecret,
+      writeBrowserSavedEnvironmentRegistry,
+    } = await import("./clientPersistenceStorage");
+
+    testWindow.localStorage.setItem(
+      SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        records: [
+          {
+            ...savedRegistryRecord,
+            bearerToken: "expired-bearer-token",
+            bearerTokenSavedAt: "2026-04-09T00:00:00.000Z",
+            bearerTokenExpiresAt: "2026-04-16T00:00:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    expect(readBrowserSavedEnvironmentSecret(testEnvironmentId)).toBeNull();
+    expect(
+      JSON.parse(testWindow.localStorage.getItem(SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY)!),
+    ).toEqual({
+      version: 1,
+      records: [savedRegistryRecord],
+    });
+
+    testWindow.localStorage.setItem(
+      SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        records: [
+          {
+            ...savedRegistryRecord,
+            bearerToken: "expired-bearer-token",
+            bearerTokenSavedAt: "2026-04-09T00:00:00.000Z",
+            bearerTokenExpiresAt: "2026-04-16T00:00:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    writeBrowserSavedEnvironmentRegistry([
+      {
+        ...savedRegistryRecord,
+        label: "Renamed remote environment",
+      },
+    ]);
+
+    expect(
+      JSON.parse(testWindow.localStorage.getItem(SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY)!),
+    ).toEqual({
+      version: 1,
+      records: [
+        {
+          ...savedRegistryRecord,
+          label: "Renamed remote environment",
+        },
+      ],
+    });
+  });
+
+  it("removes browser secret metadata explicitly", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-09T00:00:00.000Z"));
+    const testWindow = getTestWindow();
+    const {
+      SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY,
+      removeBrowserSavedEnvironmentSecret,
+      writeBrowserSavedEnvironmentRegistry,
+      writeBrowserSavedEnvironmentSecret,
+    } = await import("./clientPersistenceStorage");
+
+    writeBrowserSavedEnvironmentRegistry([savedRegistryRecord]);
+    expect(writeBrowserSavedEnvironmentSecret(testEnvironmentId, "bearer-token")).toBe(true);
+    removeBrowserSavedEnvironmentSecret(testEnvironmentId);
+
+    expect(
+      JSON.parse(testWindow.localStorage.getItem(SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY)!),
+    ).toEqual({
+      version: 1,
+      records: [savedRegistryRecord],
     });
   });
 });

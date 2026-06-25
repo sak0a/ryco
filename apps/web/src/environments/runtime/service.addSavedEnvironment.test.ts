@@ -703,6 +703,40 @@ describe("addSavedEnvironment", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("clears stale browser credentials when a non-ssh saved environment has no readable token", async () => {
+    mockSavedRecords = [
+      {
+        environmentId: EnvironmentId.make("environment-1"),
+        label: "Remote environment",
+        httpBaseUrl: "https://remote.example.com/",
+        wsBaseUrl: "wss://remote.example.com/",
+        createdAt: "2026-04-14T00:00:00.000Z",
+        lastConnectedAt: null,
+      },
+    ];
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue(null);
+
+    const { reconnectSavedEnvironment, resetEnvironmentServiceForTests } =
+      await import("./service");
+
+    await expect(reconnectSavedEnvironment(EnvironmentId.make("environment-1"))).rejects.toThrow(
+      "Saved environment is missing its saved credential.",
+    );
+
+    expect(mockRemoveSavedEnvironmentBearerToken).toHaveBeenCalledWith(
+      EnvironmentId.make("environment-1"),
+    );
+    expect(mockPatchRuntime).toHaveBeenCalledWith(
+      EnvironmentId.make("environment-1"),
+      expect.objectContaining({
+        authState: "requires-auth",
+        connectionState: "disconnected",
+      }),
+    );
+
+    await resetEnvironmentServiceForTests();
+  });
+
   it("cancels a pending saved environment connection when disconnected", async () => {
     mockSavedRecords = [
       {

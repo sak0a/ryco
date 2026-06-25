@@ -5,6 +5,7 @@ import {
   MessageId,
   ProjectId,
   ThreadId,
+  TurnId,
   ProviderInstanceId,
 } from "@ryco/contracts";
 import { createModelSelection } from "@ryco/shared/model";
@@ -195,6 +196,111 @@ describe("decider project scripts", () => {
       ]),
       runtimeMode: "approval-required",
     });
+  });
+
+  it("rejects thread.turn.start while the thread has an active running turn", async () => {
+    const now = new Date().toISOString();
+    const initial = createEmptyReadModel(now);
+    const withProject = await Effect.runPromise(
+      projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-active-turn"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-active-turn"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.make("cmd-project-create-active-turn"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-project-create-active-turn"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-active-turn"),
+          title: "Project",
+          workspaceRoot: "/tmp/project-active-turn",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    const withThread = await Effect.runPromise(
+      projectEvent(withProject, {
+        sequence: 2,
+        eventId: asEventId("evt-thread-create-active-turn"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-active-turn"),
+        type: "thread.created",
+        occurredAt: now,
+        commandId: CommandId.make("cmd-thread-create-active-turn"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-thread-create-active-turn"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-active-turn"),
+          projectId: asProjectId("project-active-turn"),
+          title: "Thread",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    const readModel = await Effect.runPromise(
+      projectEvent(withThread, {
+        sequence: 3,
+        eventId: asEventId("evt-session-running-active-turn"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-active-turn"),
+        type: "thread.session-set",
+        occurredAt: now,
+        commandId: CommandId.make("cmd-session-running-active-turn"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-session-running-active-turn"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-active-turn"),
+          session: {
+            threadId: ThreadId.make("thread-active-turn"),
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: TurnId.make("turn-active"),
+            lastError: null,
+            updatedAt: now,
+          },
+        },
+      }),
+    );
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-turn-start-overlap"),
+            threadId: ThreadId.make("thread-active-turn"),
+            message: {
+              messageId: asMessageId("message-overlap"),
+              role: "user",
+              text: "overlap",
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: now,
+          },
+          readModel,
+        }),
+      ),
+    ).rejects.toThrow("already has active turn 'turn-active'");
   });
 
   it("emits thread.runtime-mode-set from thread.runtime-mode.set", async () => {

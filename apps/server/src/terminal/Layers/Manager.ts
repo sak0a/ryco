@@ -58,6 +58,8 @@ const DEFAULT_PERSIST_DEBOUNCE_MS = 40;
 const DEFAULT_SUBPROCESS_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PROCESS_KILL_GRACE_MS = 1_000;
 const DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS = 128;
+const DEFAULT_MAX_PENDING_PROCESS_EVENTS = 2_048;
+const DEFAULT_MAX_PENDING_PROCESS_OUTPUT_BYTES = 2 * 1024 * 1024;
 const DEFAULT_OPEN_COLS = 120;
 const DEFAULT_OPEN_ROWS = 30;
 const TERMINAL_ENV_BLOCKLIST = new Set(["PORT", "ELECTRON_RENDERER_PORT", "ELECTRON_RUN_AS_NODE"]);
@@ -111,6 +113,7 @@ interface TerminalSessionState {
   pendingHistoryControlSequence: string;
   pendingProcessEvents: Array<PendingProcessEvent>;
   pendingProcessEventIndex: number;
+  pendingProcessOutputBytes: number;
   processEventDrainRunning: boolean;
   exitCode: number | null;
   exitSignal: number | null;
@@ -129,7 +132,9 @@ interface PersistHistoryRequest {
   immediate: boolean;
 }
 
-type PendingProcessEvent = { type: "output"; data: string } | { type: "exit"; event: PtyExitEvent };
+type PendingProcessEvent =
+  | { type: "output"; data: string; byteLength: number }
+  | { type: "exit"; event: PtyExitEvent };
 
 type DrainProcessEventAction =
   | { type: "idle" }
@@ -191,22 +196,154 @@ function cleanupProcessHandles(session: TerminalSessionState): void {
   session.unsubscribeExit = null;
 }
 
+function clearPendingProcessEvents(session: TerminalSessionState): void {
+  session.pendingProcessEvents = [];
+  session.pendingProcessEventIndex = 0;
+  session.pendingProcessOutputBytes = 0;
+  session.processEventDrainRunning = false;
+}
+
 function enqueueProcessEvent(
   session: TerminalSessionState,
   expectedPid: number,
   event: PendingProcessEvent,
+  limits: {
+    readonly maxPendingProcessEvents: number;
+    readonly maxPendingProcessOutputBytes: number;
+  },
 ): boolean {
   if (!session.process || session.status !== "running" || session.pid !== expectedPid) {
     return false;
   }
 
+  if (
+    event.type === "output" &&
+    session.pendingProcessEvents.some((pendingEvent) => pendingEvent.type === "exit")
+  ) {
+    return false;
+  }
+
+  compactPendingProcessEvents(session);
   session.pendingProcessEvents.push(event);
+  if (event.type === "output") {
+    session.pendingProcessOutputBytes += event.byteLength;
+  }
+  enforcePendingProcessEventLimits(session, limits);
   if (session.processEventDrainRunning) {
     return false;
   }
 
   session.processEventDrainRunning = true;
   return true;
+}
+
+function compactPendingProcessEvents(session: TerminalSessionState): void {
+  if (session.pendingProcessEventIndex <= 0) {
+    return;
+  }
+
+  session.pendingProcessEvents = session.pendingProcessEvents.slice(
+    session.pendingProcessEventIndex,
+  );
+  session.pendingProcessEventIndex = 0;
+}
+
+function coalesceOldestPendingOutputPair(session: TerminalSessionState): boolean {
+  for (let index = 0; index < session.pendingProcessEvents.length - 1; index += 1) {
+    const current = session.pendingProcessEvents[index];
+    const next = session.pendingProcessEvents[index + 1];
+    if (current?.type !== "output" || next?.type !== "output") {
+      continue;
+    }
+
+    session.pendingProcessEvents.splice(index, 2, {
+      type: "output",
+      data: `${current.data}${next.data}`,
+      byteLength: current.byteLength + next.byteLength,
+    });
+    return true;
+  }
+  return false;
+}
+
+function trimOutputDataToApproxBytes(
+  data: string,
+  maxBytes: number,
+): { data: string; byteLength: number } {
+  if (maxBytes <= 0 || data.length === 0) {
+    return { data: "", byteLength: 0 };
+  }
+
+  let nextData = data;
+  let byteLength = approximateTextBytes(nextData);
+  while (byteLength > maxBytes && nextData.length > 0) {
+    const excessBytes = byteLength - maxBytes;
+    const sliceStart = Math.min(nextData.length, Math.max(1, excessBytes));
+    nextData = nextData.slice(sliceStart);
+    byteLength = approximateTextBytes(nextData);
+  }
+  return { data: nextData, byteLength };
+}
+
+function trimPendingOutputBytesToLimit(
+  session: TerminalSessionState,
+  maxPendingProcessOutputBytes: number,
+): void {
+  if (session.pendingProcessOutputBytes <= maxPendingProcessOutputBytes) {
+    return;
+  }
+
+  for (let index = 0; index < session.pendingProcessEvents.length; index += 1) {
+    if (session.pendingProcessOutputBytes <= maxPendingProcessOutputBytes) {
+      return;
+    }
+
+    const event = session.pendingProcessEvents[index];
+    if (event?.type !== "output") {
+      continue;
+    }
+
+    const targetEventBytes = Math.max(
+      0,
+      event.byteLength - (session.pendingProcessOutputBytes - maxPendingProcessOutputBytes),
+    );
+    if (targetEventBytes <= 0) {
+      session.pendingProcessEvents.splice(index, 1);
+      session.pendingProcessOutputBytes = Math.max(
+        0,
+        session.pendingProcessOutputBytes - event.byteLength,
+      );
+      index -= 1;
+      continue;
+    }
+
+    const trimmed = trimOutputDataToApproxBytes(event.data, targetEventBytes);
+    session.pendingProcessEvents[index] = {
+      type: "output",
+      data: trimmed.data,
+      byteLength: trimmed.byteLength,
+    };
+    session.pendingProcessOutputBytes = Math.max(
+      0,
+      session.pendingProcessOutputBytes - (event.byteLength - trimmed.byteLength),
+    );
+  }
+}
+
+function enforcePendingProcessEventLimits(
+  session: TerminalSessionState,
+  limits: {
+    readonly maxPendingProcessEvents: number;
+    readonly maxPendingProcessOutputBytes: number;
+  },
+): void {
+  while (
+    session.pendingProcessEvents.length > limits.maxPendingProcessEvents &&
+    coalesceOldestPendingOutputPair(session)
+  ) {
+    // Keep event count bounded without losing bytes when adjacent output can be merged.
+  }
+  trimPendingOutputBytesToLimit(session, limits.maxPendingProcessOutputBytes);
 }
 
 function defaultShellResolver(
@@ -723,6 +860,8 @@ interface TerminalManagerOptions {
   subprocessPollIntervalMs?: number;
   processKillGraceMs?: number;
   maxRetainedInactiveSessions?: number;
+  maxPendingProcessEvents?: number;
+  maxPendingProcessOutputBytes?: number;
 }
 
 const makeTerminalManager = Effect.fn("makeTerminalManager")(function* () {
@@ -751,6 +890,18 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     const processKillGraceMs = options.processKillGraceMs ?? DEFAULT_PROCESS_KILL_GRACE_MS;
     const maxRetainedInactiveSessions =
       options.maxRetainedInactiveSessions ?? DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS;
+    const maxPendingProcessEvents = Math.max(
+      1,
+      options.maxPendingProcessEvents ?? DEFAULT_MAX_PENDING_PROCESS_EVENTS,
+    );
+    const maxPendingProcessOutputBytes = Math.max(
+      1,
+      options.maxPendingProcessOutputBytes ?? DEFAULT_MAX_PENDING_PROCESS_OUTPUT_BYTES,
+    );
+    const pendingProcessEventLimits = {
+      maxPendingProcessEvents,
+      maxPendingProcessOutputBytes,
+    } as const;
 
     yield* fileSystem.makeDirectory(logsDir, { recursive: true }).pipe(Effect.orDie);
 
@@ -1215,17 +1366,13 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       while (true) {
         const action: DrainProcessEventAction = yield* Effect.sync(() => {
           if (session.pid !== expectedPid || !session.process || session.status !== "running") {
-            session.pendingProcessEvents = [];
-            session.pendingProcessEventIndex = 0;
-            session.processEventDrainRunning = false;
+            clearPendingProcessEvents(session);
             return { type: "idle" } as const;
           }
 
           const nextEvent = session.pendingProcessEvents[session.pendingProcessEventIndex];
           if (!nextEvent) {
-            session.pendingProcessEvents = [];
-            session.pendingProcessEventIndex = 0;
-            session.processEventDrainRunning = false;
+            clearPendingProcessEvents(session);
             return { type: "idle" } as const;
           }
 
@@ -1236,6 +1383,10 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           }
 
           if (nextEvent.type === "output") {
+            session.pendingProcessOutputBytes = Math.max(
+              0,
+              session.pendingProcessOutputBytes - nextEvent.byteLength,
+            );
             const sanitized = sanitizeTerminalHistoryChunk(
               session.pendingHistoryControlSequence,
               nextEvent.data,
@@ -1265,9 +1416,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           session.hasRunningSubprocess = false;
           session.status = "exited";
           session.pendingHistoryControlSequence = "";
-          session.pendingProcessEvents = [];
-          session.pendingProcessEventIndex = 0;
-          session.processEventDrainRunning = false;
+          clearPendingProcessEvents(session);
           session.exitCode = Number.isInteger(nextEvent.event.exitCode)
             ? nextEvent.event.exitCode
             : null;
@@ -1332,9 +1481,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         session.hasRunningSubprocess = false;
         session.status = "exited";
         session.pendingHistoryControlSequence = "";
-        session.pendingProcessEvents = [];
-        session.pendingProcessEventIndex = 0;
-        session.processEventDrainRunning = false;
+        clearPendingProcessEvents(session);
         session.updatedAt = new Date().toISOString();
         return [undefined, state] as const;
       });
@@ -1423,9 +1570,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         session.exitCode = null;
         session.exitSignal = null;
         session.hasRunningSubprocess = false;
-        session.pendingProcessEvents = [];
-        session.pendingProcessEventIndex = 0;
-        session.processEventDrainRunning = false;
+        clearPendingProcessEvents(session);
         session.updatedAt = new Date().toISOString();
         return [undefined, state] as const;
       });
@@ -1445,13 +1590,31 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
               const processPid = ptyProcess.pid;
               const unsubscribeData = ptyProcess.onData((data) => {
-                if (!enqueueProcessEvent(session, processPid, { type: "output", data })) {
+                if (
+                  !enqueueProcessEvent(
+                    session,
+                    processPid,
+                    {
+                      type: "output",
+                      data,
+                      byteLength: approximateTextBytes(data),
+                    },
+                    pendingProcessEventLimits,
+                  )
+                ) {
                   return;
                 }
                 runFork(drainProcessEvents(session, processPid));
               });
               const unsubscribeExit = ptyProcess.onExit((event) => {
-                if (!enqueueProcessEvent(session, processPid, { type: "exit", event })) {
+                if (
+                  !enqueueProcessEvent(
+                    session,
+                    processPid,
+                    { type: "exit", event },
+                    pendingProcessEventLimits,
+                  )
+                ) {
                   return;
                 }
                 runFork(drainProcessEvents(session, processPid));
@@ -1498,9 +1661,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           session.unsubscribeData = null;
           session.unsubscribeExit = null;
           session.hasRunningSubprocess = false;
-          session.pendingProcessEvents = [];
-          session.pendingProcessEventIndex = 0;
-          session.processEventDrainRunning = false;
+          clearPendingProcessEvents(session);
           session.updatedAt = new Date().toISOString();
           return [undefined, state] as const;
         });
@@ -1684,6 +1845,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               pendingHistoryControlSequence: "",
               pendingProcessEvents: [],
               pendingProcessEventIndex: 0,
+              pendingProcessOutputBytes: 0,
               processEventDrainRunning: false,
               exitCode: null,
               exitSignal: null,
@@ -1735,9 +1897,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             liveSession.runtimeEnv = nextRuntimeEnv;
             liveSession.history = "";
             liveSession.pendingHistoryControlSequence = "";
-            liveSession.pendingProcessEvents = [];
-            liveSession.pendingProcessEventIndex = 0;
-            liveSession.processEventDrainRunning = false;
+            clearPendingProcessEvents(liveSession);
             yield* persistHistory(
               liveSession.threadId,
               liveSession.terminalId,
@@ -1748,9 +1908,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             liveSession.worktreePath = input.worktreePath ?? null;
             liveSession.history = "";
             liveSession.pendingHistoryControlSequence = "";
-            liveSession.pendingProcessEvents = [];
-            liveSession.pendingProcessEventIndex = 0;
-            liveSession.processEventDrainRunning = false;
+            clearPendingProcessEvents(liveSession);
             yield* persistHistory(
               liveSession.threadId,
               liveSession.terminalId,
@@ -1824,9 +1982,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           const session = yield* requireSession(input.threadId, terminalId);
           session.history = "";
           session.pendingHistoryControlSequence = "";
-          session.pendingProcessEvents = [];
-          session.pendingProcessEventIndex = 0;
-          session.processEventDrainRunning = false;
+          clearPendingProcessEvents(session);
           session.updatedAt = new Date().toISOString();
           yield* persistHistory(input.threadId, terminalId, session.history);
           yield* publishEvent({
@@ -1863,6 +2019,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               pendingHistoryControlSequence: "",
               pendingProcessEvents: [],
               pendingProcessEventIndex: 0,
+              pendingProcessOutputBytes: 0,
               processEventDrainRunning: false,
               exitCode: null,
               exitSignal: null,
@@ -1895,9 +2052,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
           session.history = "";
           session.pendingHistoryControlSequence = "";
-          session.pendingProcessEvents = [];
-          session.pendingProcessEventIndex = 0;
-          session.processEventDrainRunning = false;
+          clearPendingProcessEvents(session);
           yield* persistHistory(input.threadId, terminalId, session.history);
           yield* startSession(
             session,
@@ -1938,6 +2093,16 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         }),
       );
 
+    const listSessions: TerminalManagerShape["listSessions"] = SynchronizedRef.get(
+      managerStateRef,
+    ).pipe(
+      Effect.map((state) =>
+        [...state.sessions.values()]
+          .map(snapshot)
+          .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+      ),
+    );
+
     return {
       open,
       write,
@@ -1952,6 +2117,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
         ),
       ),
+      listSessions,
       subscribe: (listener) =>
         Effect.sync(() => {
           terminalEventListeners.add(listener);

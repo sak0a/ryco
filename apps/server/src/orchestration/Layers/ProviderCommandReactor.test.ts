@@ -1550,6 +1550,44 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  it("does not echo provider-originated turn interrupts back to the provider", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-provider-interrupt"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-provider-interrupt"),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.interrupt",
+        commandId: CommandId.make(
+          "provider:evt-turn-aborted:thread-turn-interrupt:turn-provider-interrupt",
+        ),
+        threadId: ThreadId.make("thread-1"),
+        turnId: asTurnId("turn-provider-interrupt"),
+        createdAt: now,
+      }),
+    );
+
+    await harness.drain();
+    expect(harness.interruptTurn).not.toHaveBeenCalled();
+  });
+
   it("starts a fresh session when only projected session state exists", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

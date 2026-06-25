@@ -25,6 +25,15 @@ export const wsOrchestrationLiveBufferHighWater = Metric.gauge(
   },
 );
 
+export const wsOrchestrationLiveBufferOverflowsTotal = Metric.counter(
+  "t3_ws_orchestration_live_buffer_overflows_total",
+  {
+    description:
+      "Total live orchestration event buffer overflows that forced replayable WebSocket subscription resync.",
+    incremental: true,
+  },
+);
+
 export const wsOrchestrationReplayLag = Metric.gauge("t3_ws_orchestration_replay_lag", {
   description:
     "Sequence lag between the latest live event observed and the latest replay/live event drained by a replayable WebSocket subscription.",
@@ -34,6 +43,7 @@ export interface WsReplayMetrics {
   readonly recordReplayEvent: (sequence: number) => Effect.Effect<void>;
   readonly recordLiveEnqueued: (sequence: number) => Effect.Effect<void>;
   readonly recordLiveDequeued: (sequence: number) => Effect.Effect<void>;
+  readonly recordLiveOverflow: (sequence: number, capacity: number) => Effect.Effect<void>;
   readonly reset: Effect.Effect<void>;
 }
 
@@ -124,6 +134,24 @@ export const makeWsReplayMetrics = (input: {
           const highWater = yield* Ref.get(liveBufferHighWater);
           yield* recordLiveBuffer(depth, highWater);
           yield* markDrained(sequence);
+        }),
+      recordLiveOverflow: (sequence, capacity) =>
+        Effect.gen(function* () {
+          const normalizedSequence = normalizeSequence(sequence);
+          const normalizedCapacity = Math.max(0, Math.floor(capacity));
+          yield* Ref.update(latestLiveSequence, (current) => Math.max(current, normalizedSequence));
+          yield* Ref.set(liveBufferDepth, normalizedCapacity);
+          const highWater = yield* Ref.updateAndGet(liveBufferHighWater, (current) =>
+            Math.max(current, normalizedCapacity),
+          );
+          yield* Effect.all(
+            [
+              recordLiveBuffer(normalizedCapacity, highWater),
+              updateGauge(wsOrchestrationLiveBufferOverflowsTotal, attributes, 1),
+              recordLag,
+            ],
+            { discard: true },
+          );
         }),
       reset: Effect.all(
         [

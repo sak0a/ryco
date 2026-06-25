@@ -15,9 +15,53 @@ export interface UseChatSessionTabsPrefetchResult {
   handleTabPrefetchLeave: (key: string) => void;
 }
 
+export const MAX_SPECULATIVE_SIBLING_TAB_PREFETCH = 6;
+
+export function selectSpeculativeSiblingTabPrefetchKeys(
+  activeWorktreeSessionTabs: ReadonlyArray<ChatSessionTabsItem>,
+  activeSessionTabKey: string | null,
+  limit = MAX_SPECULATIVE_SIBLING_TAB_PREFETCH,
+): ReadonlyArray<string> {
+  if (limit <= 0 || activeWorktreeSessionTabs.length === 0) {
+    return [];
+  }
+
+  const cappedLimit = Math.floor(limit);
+  const activeIndex =
+    activeSessionTabKey === null
+      ? -1
+      : activeWorktreeSessionTabs.findIndex((tab) => tab.key === activeSessionTabKey);
+  if (activeIndex < 0) {
+    return activeWorktreeSessionTabs
+      .map((tab) => tab.key)
+      .filter((key) => key !== activeSessionTabKey)
+      .slice(0, cappedLimit);
+  }
+
+  const keys: string[] = [];
+  for (let offset = 1; keys.length < cappedLimit; offset += 1) {
+    const left = activeWorktreeSessionTabs[activeIndex - offset];
+    const right = activeWorktreeSessionTabs[activeIndex + offset];
+    if (!left && !right) {
+      break;
+    }
+    if (left) {
+      keys.push(left.key);
+      if (keys.length >= cappedLimit) {
+        break;
+      }
+    }
+    if (right) {
+      keys.push(right.key);
+    }
+  }
+
+  return keys;
+}
+
 /**
  * Warms WS subscriptions for sibling session tabs (on hover and speculatively
- * for every tab in the active worktree) and records the first-paint perf mark
+ * for nearby tabs in the active worktree) and records the first-paint perf mark
  * when the active tab changes.
  */
 export function useChatSessionTabsPrefetch(
@@ -50,7 +94,7 @@ export function useChatSessionTabsPrefetch(
     [],
   );
 
-  // Speculatively warm WS subscriptions for every sibling tab in the
+  // Speculatively warm WS subscriptions for nearby sibling tabs in the
   // active worktree. Subscriptions are reference-counted by
   // retainThreadDetailSubscription, so the active route's own retain
   // is not duplicated and idle ones are evicted by the existing cap.
@@ -58,9 +102,11 @@ export function useChatSessionTabsPrefetch(
   useEffect(() => {
     if (activeWorktreeSessionTabs.length === 0) return;
     const releases: Array<() => void> = [];
-    for (const tab of activeWorktreeSessionTabs) {
-      if (tab.key === activeSessionTabKey) continue;
-      const ref = parseScopedThreadKey(tab.key);
+    for (const key of selectSpeculativeSiblingTabPrefetchKeys(
+      activeWorktreeSessionTabs,
+      activeSessionTabKey,
+    )) {
+      const ref = parseScopedThreadKey(key);
       if (!ref) continue;
       releases.push(retainThreadDetailSubscription(ref.environmentId, ref.threadId));
     }

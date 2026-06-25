@@ -2246,8 +2246,8 @@ export function ConnectionsSettings() {
       </div>
       <div>
         <span className="mt-1 block text-[11px] text-muted-foreground">
-          Paste a full pairing URL here to fill both fields automatically. Remote bearer tokens are
-          stored for this browser profile.
+          Paste a full pairing URL here to fill both fields automatically. The pairing code is not
+          kept; the browser stores a bearer token for 7 days.
         </span>
       </div>
     </div>

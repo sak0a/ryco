@@ -77,6 +77,9 @@ const turnStartKeyForEvent = (event: ProviderIntentEvent): string =>
 const serverCommandId = (tag: string): CommandId =>
   CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
 
+const isProviderOriginatedCommandId = (commandId: CommandId | null): boolean =>
+  commandId !== null && String(commandId).startsWith("provider:");
+
 const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
@@ -700,6 +703,17 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
+    if (thread.session?.status === "running" && thread.session.activeTurnId !== null) {
+      yield* appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: "provider.turn.start.failed",
+        summary: "Provider turn start rejected",
+        detail: `Thread already has active turn '${thread.session.activeTurnId}'. Queuing overlapping turns is not supported; wait for the active turn to finish before starting another.`,
+        turnId: null,
+        createdAt: event.payload.createdAt,
+      });
+      return;
+    }
 
     const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
     if (!message || message.role !== "user") {
@@ -808,6 +822,10 @@ const make = Effect.gen(function* () {
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,
   ) {
+    if (isProviderOriginatedCommandId(event.commandId)) {
+      return;
+    }
+
     const thread = yield* resolveThread(event.payload.threadId);
     if (!thread) {
       return;

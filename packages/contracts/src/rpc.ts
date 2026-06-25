@@ -653,7 +653,7 @@ export const WsSourceControlListChangeRequestsRpc = Rpc.make(
       query: Schema.optional(Schema.String),
     }),
     success: Schema.Array(ChangeRequest),
-    error: SourceControlProviderError,
+    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
   },
 );
 
