@@ -27,6 +27,7 @@ import {
   SessionCredentialService,
 } from "../Services/SessionCredentialService.ts";
 import { AuthControlPlaneLive, AuthCoreLive } from "./AuthControlPlane.ts";
+import { deriveAuthClientMetadata } from "../utils.ts";
 
 type BootstrapExchangeResult = {
   readonly response: AuthBootstrapResult;
@@ -136,6 +137,11 @@ function isAcceptedWebSocketOrigin(input: {
     isLoopbackHost(origin.hostname) &&
     isLoopbackHost(requestHostname)
   );
+}
+
+function isLoopbackRequest(request: HttpServerRequest.HttpServerRequest): boolean {
+  const ipAddress = deriveAuthClientMetadata({ request }).ipAddress;
+  return ipAddress !== undefined && isLoopbackHost(ipAddress);
 }
 
 export function toBootstrapExchangeAuthError(cause: BootstrapCredentialError): AuthError {
@@ -473,6 +479,7 @@ export const makeServerAuth = Effect.gen(function* () {
       if (Option.isSome(requestUrl)) {
         const websocketToken = requestUrl.value.searchParams.get(WEBSOCKET_TOKEN_QUERY_PARAM);
         if (websocketToken && websocketToken.trim().length > 0) {
+          const isLoopback = isLoopbackRequest(request);
           return yield* sessions.verifyWebSocketToken(websocketToken).pipe(
             Effect.map((session) => ({
               sessionId: session.sessionId,
@@ -480,6 +487,7 @@ export const makeServerAuth = Effect.gen(function* () {
               method: session.method,
               role: session.role,
               ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
+              isLoopback,
             })),
             Effect.mapError(
               (cause) =>

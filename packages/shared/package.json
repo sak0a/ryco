@@ -92,6 +92,10 @@
       "types": "./src/keybindings.ts",
       "import": "./src/keybindings.ts"
     },
+    "./browser": {
+      "types": "./src/browser.ts",
+      "import": "./src/browser.ts"
+    },
     "./sourceControlContextFormatter": {
       "types": "./src/sourceControlContextFormatter.ts",
       "import": "./src/sourceControlContextFormatter.ts"

@@ -67,6 +67,23 @@ export interface WsRpcClient {
     readonly close: RpcUnaryMethod<typeof WS_METHODS.terminalClose>;
     readonly onEvent: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
   };
+  readonly browser: {
+    readonly getStatus: RpcUnaryNoArgMethod<typeof WS_METHODS.browserGetStatus>;
+    readonly listProfiles: RpcUnaryNoArgMethod<typeof WS_METHODS.browserListProfiles>;
+    readonly openSession: RpcUnaryMethod<typeof WS_METHODS.browserOpenSession>;
+    readonly closeSession: RpcUnaryMethod<typeof WS_METHODS.browserCloseSession>;
+    readonly getSnapshot: RpcUnaryMethod<typeof WS_METHODS.browserGetSnapshot>;
+    readonly navigate: RpcUnaryMethod<typeof WS_METHODS.browserNavigate>;
+    readonly back: RpcUnaryMethod<typeof WS_METHODS.browserBack>;
+    readonly forward: RpcUnaryMethod<typeof WS_METHODS.browserForward>;
+    readonly reload: RpcUnaryMethod<typeof WS_METHODS.browserReload>;
+    readonly stop: RpcUnaryMethod<typeof WS_METHODS.browserStop>;
+    readonly input: RpcUnaryMethod<typeof WS_METHODS.browserInput>;
+    readonly inspectStorage: RpcUnaryMethod<typeof WS_METHODS.browserInspectStorage>;
+    readonly clearStorage: RpcUnaryMethod<typeof WS_METHODS.browserClearStorage>;
+    readonly deleteCookie: RpcUnaryMethod<typeof WS_METHODS.browserDeleteCookie>;
+    readonly onEvent: RpcStreamMethod<typeof WS_METHODS.subscribeBrowserEvents>;
+  };
   readonly projects: {
     readonly listEntries: RpcUnaryMethod<typeof WS_METHODS.projectsListEntries>;
     readonly readFile: RpcUnaryMethod<typeof WS_METHODS.projectsReadFile>;
@@ -272,6 +289,33 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.subscribe((client) => client[WS_METHODS.subscribeTerminalEvents]({}), listener, {
           ...options,
           tag: WS_METHODS.subscribeTerminalEvents,
+        }),
+    },
+    browser: {
+      getStatus: () => transport.request((client) => client[WS_METHODS.browserGetStatus]({})),
+      listProfiles: () => transport.request((client) => client[WS_METHODS.browserListProfiles]({})),
+      openSession: (input) =>
+        transport.request((client) => client[WS_METHODS.browserOpenSession](input)),
+      closeSession: (input) =>
+        transport.request((client) => client[WS_METHODS.browserCloseSession](input)),
+      getSnapshot: (input) =>
+        transport.request((client) => client[WS_METHODS.browserGetSnapshot](input)),
+      navigate: (input) => transport.request((client) => client[WS_METHODS.browserNavigate](input)),
+      back: (input) => transport.request((client) => client[WS_METHODS.browserBack](input)),
+      forward: (input) => transport.request((client) => client[WS_METHODS.browserForward](input)),
+      reload: (input) => transport.request((client) => client[WS_METHODS.browserReload](input)),
+      stop: (input) => transport.request((client) => client[WS_METHODS.browserStop](input)),
+      input: (input) => transport.request((client) => client[WS_METHODS.browserInput](input)),
+      inspectStorage: (input) =>
+        transport.request((client) => client[WS_METHODS.browserInspectStorage](input)),
+      clearStorage: (input) =>
+        transport.request((client) => client[WS_METHODS.browserClearStorage](input)),
+      deleteCookie: (input) =>
+        transport.request((client) => client[WS_METHODS.browserDeleteCookie](input)),
+      onEvent: (listener, options) =>
+        transport.subscribe((client) => client[WS_METHODS.subscribeBrowserEvents]({}), listener, {
+          ...options,
+          tag: WS_METHODS.subscribeBrowserEvents,
         }),
     },
     projects: {

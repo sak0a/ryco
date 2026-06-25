@@ -1,3 +1,24 @@
+import { Schema } from "effect";
+
+import {
+  BrowserSessionId,
+  BrowserTabId,
+  type BrowserCookieDeleteInput,
+  type BrowserCookieDeleteResult,
+  type BrowserControlInput,
+  type BrowserEvent,
+  type BrowserInputCommandInput,
+  type BrowserListProfilesResult,
+  type BrowserNavigateInput,
+  type BrowserOpenSessionInput,
+  type BrowserSessionInput,
+  type BrowserSessionSnapshot,
+  type BrowserStorageClearInput,
+  type BrowserStorageClearResult,
+  type BrowserStorageInspectInput,
+  type BrowserStorageInspectionResult,
+  type BrowserStatusSnapshot,
+} from "./browser.ts";
 import type {
   GitArchiveWorktreeInput,
   GitCreateWorktreeForProjectInput,
@@ -245,6 +266,38 @@ export interface PickFolderOptions {
   initialPath?: string | null;
 }
 
+export const DesktopBrowserSurfaceBounds = Schema.Struct({
+  x: Schema.Number,
+  y: Schema.Number,
+  width: Schema.Number,
+  height: Schema.Number,
+  deviceScaleFactor: Schema.optional(Schema.Number),
+});
+export type DesktopBrowserSurfaceBounds = typeof DesktopBrowserSurfaceBounds.Type;
+
+export const DesktopBrowserSurfaceAttachInput = Schema.Struct({
+  sessionId: BrowserSessionId,
+  tabId: BrowserTabId,
+  bounds: DesktopBrowserSurfaceBounds,
+});
+export type DesktopBrowserSurfaceAttachInput = typeof DesktopBrowserSurfaceAttachInput.Type;
+
+export const DesktopBrowserSurfaceUpdateInput = Schema.Struct({
+  sessionId: BrowserSessionId,
+  tabId: BrowserTabId,
+  bounds: DesktopBrowserSurfaceBounds,
+});
+export type DesktopBrowserSurfaceUpdateInput = typeof DesktopBrowserSurfaceUpdateInput.Type;
+
+export const DesktopBrowserSurfaceDetachInput = Schema.Struct({
+  sessionId: BrowserSessionId,
+  tabId: BrowserTabId,
+});
+export type DesktopBrowserSurfaceDetachInput = typeof DesktopBrowserSurfaceDetachInput.Type;
+
+export const DesktopBrowserSurfaceFocusInput = DesktopBrowserSurfaceDetachInput;
+export type DesktopBrowserSurfaceFocusInput = typeof DesktopBrowserSurfaceFocusInput.Type;
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
@@ -291,6 +344,12 @@ export interface DesktopBridge {
     position?: { x: number; y: number },
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
+  browser?: {
+    attachSurface: (input: DesktopBrowserSurfaceAttachInput) => Promise<boolean>;
+    updateSurfaceBounds: (input: DesktopBrowserSurfaceUpdateInput) => Promise<boolean>;
+    detachSurface: (input: DesktopBrowserSurfaceDetachInput) => Promise<void>;
+    focusSurface: (input: DesktopBrowserSurfaceFocusInput) => Promise<boolean>;
+  };
   onMenuAction: (listener: (action: string) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
@@ -489,5 +548,22 @@ export interface EnvironmentApi {
         onResubscribe?: () => void;
       },
     ) => () => void;
+  };
+  browser?: {
+    getStatus: () => Promise<BrowserStatusSnapshot>;
+    listProfiles: () => Promise<BrowserListProfilesResult>;
+    openSession: (input: BrowserOpenSessionInput) => Promise<BrowserSessionSnapshot>;
+    closeSession: (input: BrowserSessionInput) => Promise<BrowserSessionSnapshot>;
+    getSnapshot: (input: BrowserSessionInput) => Promise<BrowserSessionSnapshot>;
+    navigate: (input: BrowserNavigateInput) => Promise<BrowserSessionSnapshot>;
+    back: (input: BrowserControlInput) => Promise<BrowserSessionSnapshot>;
+    forward: (input: BrowserControlInput) => Promise<BrowserSessionSnapshot>;
+    reload: (input: BrowserControlInput) => Promise<BrowserSessionSnapshot>;
+    stop: (input: BrowserControlInput) => Promise<BrowserSessionSnapshot>;
+    input: (input: BrowserInputCommandInput) => Promise<BrowserSessionSnapshot>;
+    inspectStorage: (input: BrowserStorageInspectInput) => Promise<BrowserStorageInspectionResult>;
+    clearStorage: (input: BrowserStorageClearInput) => Promise<BrowserStorageClearResult>;
+    deleteCookie: (input: BrowserCookieDeleteInput) => Promise<BrowserCookieDeleteResult>;
+    onEvent: (callback: (event: BrowserEvent) => void) => () => void;
   };
 }

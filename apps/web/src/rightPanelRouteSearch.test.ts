@@ -56,6 +56,13 @@ describe("parseRightPanelRouteSearch", () => {
     });
   });
 
+  it("parses workspace browser tabs without legacy panel state", () => {
+    expect(parseRightPanelRouteSearch({ workspaceTab: "browser", diff: "1" })).toEqual({
+      workspaceOpen: "1",
+      workspaceTab: "browser",
+    });
+  });
+
   it("keeps launcher-only workspace search open without selecting a panel mode", () => {
     expect(parseRightPanelRouteSearch({ workspaceOpen: "1" })).toEqual({
       workspaceOpen: "1",
@@ -86,6 +93,7 @@ describe("getRightPanelMode", () => {
     expect(getRightPanelMode({ diff: "1" })).toBe("review");
     expect(getRightPanelMode({ preview: "1" })).toBe("files");
     expect(getRightPanelMode({ workspaceTab: "terminal" })).toBe("terminal");
+    expect(getRightPanelMode({ workspaceTab: "browser" })).toBe("browser");
     expect(getRightPanelMode({ workspaceTab: "agent", workspaceAgentKey: "subagent:1" })).toBe(
       "agent",
     );
@@ -100,6 +108,7 @@ describe("isRightPanelOpen", () => {
     expect(isRightPanelOpen({ diff: "1" })).toBe(true);
     expect(isRightPanelOpen({ preview: "1" })).toBe(true);
     expect(isRightPanelOpen({ workspaceTab: "terminal" })).toBe(true);
+    expect(isRightPanelOpen({ workspaceTab: "browser" })).toBe(true);
     expect(isRightPanelOpen({})).toBe(false);
   });
 });

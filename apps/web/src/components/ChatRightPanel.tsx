@@ -138,9 +138,11 @@ export const LazyRightPanel = (props: {
                   ? "Loading file preview..."
                   : props.panelMode === "terminal"
                     ? "Loading terminal..."
-                    : props.panelMode === "agent"
-                      ? "Loading subagent thread..."
-                      : "Loading workspace..."
+                    : props.panelMode === "browser"
+                      ? "Loading browser..."
+                      : props.panelMode === "agent"
+                        ? "Loading subagent thread..."
+                        : "Loading workspace..."
             }
           />
         }

@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 
 import { AtlassianSaveProjectLinkInput } from "./atlassian.ts";
+import { BrowserCookieDeleteInput, BrowserStorageClearInput } from "./browser.ts";
 import { WS_METHODS } from "./rpc.ts";
 import { WorkItemGetInput } from "./workItems.ts";
 
@@ -29,6 +30,9 @@ describe("WS_METHODS Atlassian and work item names", () => {
     expect(WS_METHODS.workItemsUpdate).toBe("workItems.update");
     expect(WS_METHODS.workItemsEditComment).toBe("workItems.editComment");
     expect(WS_METHODS.workItemsTransition).toBe("workItems.transition");
+    expect(WS_METHODS.browserInspectStorage).toBe("browser.inspectStorage");
+    expect(WS_METHODS.browserClearStorage).toBe("browser.clearStorage");
+    expect(WS_METHODS.browserDeleteCookie).toBe("browser.deleteCookie");
   });
 
   it("rejects payloads missing required fields", () => {
@@ -39,5 +43,41 @@ describe("WS_METHODS Atlassian and work item names", () => {
         jiraConnectionId: null,
       }),
     ).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(BrowserCookieDeleteInput)({
+        sessionId: "browser-session:1",
+        name: "",
+      }),
+    ).toThrow();
+  });
+
+  it("decodes browser storage management payloads", () => {
+    expect(
+      Schema.decodeUnknownSync(BrowserStorageClearInput)({
+        sessionId: "browser-session:1",
+        tabId: "browser-tab:1",
+        scope: "current_origin",
+        dataTypes: ["cookies", "localStorage"],
+      }),
+    ).toMatchObject({
+      sessionId: "browser-session:1",
+      tabId: "browser-tab:1",
+      scope: "current_origin",
+      dataTypes: ["cookies", "localStorage"],
+    });
+    expect(
+      Schema.decodeUnknownSync(BrowserCookieDeleteInput)({
+        sessionId: "browser-session:1",
+        name: "sid",
+        domain: ".example.test",
+        path: "/",
+        secure: true,
+      }),
+    ).toMatchObject({
+      name: "sid",
+      domain: ".example.test",
+      path: "/",
+      secure: true,
+    });
   });
 });

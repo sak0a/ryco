@@ -29,6 +29,8 @@ const RuntimeEventRawSource = Schema.Union([
   Schema.Literal("codex.sdk.thread-event"),
   Schema.Literal("opencode.sdk.event"),
   Schema.Literal("acp.jsonrpc"),
+  Schema.Literal("ryco.browser.host"),
+  Schema.Literal("ryco.browser.tool"),
   Schema.TemplateLiteral(["acp.", Schema.String, ".extension"]),
 ]);
 export type RuntimeEventRawSource = typeof RuntimeEventRawSource.Type;
@@ -108,6 +110,7 @@ export const TOOL_LIFECYCLE_ITEM_TYPES = [
   "file_change",
   "mcp_tool_call",
   "dynamic_tool_call",
+  "browser_tool_call",
   "collab_agent_tool_call",
   "web_search",
   "image_view",
@@ -142,6 +145,11 @@ export const CanonicalRequestType = Schema.Literals([
   "exec_command_approval",
   "tool_user_input",
   "dynamic_tool_call",
+  "browser_origin_approval",
+  "browser_permission_approval",
+  "browser_download_approval",
+  "browser_upload_approval",
+  "browser_developer_mode_approval",
   "auth_tokens_refresh",
   "unknown",
 ]);
