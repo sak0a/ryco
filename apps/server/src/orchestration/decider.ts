@@ -4,7 +4,11 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
 } from "@ryco/contracts";
-import { DEFAULT_AGENT_TOKEN_MODE } from "@ryco/contracts";
+import {
+  DEFAULT_AGENT_TOKEN_MODE,
+  DEFAULT_THREAD_KIND,
+  DEFAULT_THREAD_VISIBILITY,
+} from "@ryco/contracts";
 import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
@@ -270,6 +274,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           tokenMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          threadKind: command.threadKind ?? DEFAULT_THREAD_KIND,
+          visibility: command.visibility ?? DEFAULT_THREAD_VISIBILITY,
+          parentThreadId: command.parentThreadId ?? null,
+          parentSubagentId: command.parentSubagentId ?? null,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -441,6 +449,33 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           tokenMode: command.tokenMode,
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.managed-subagents.launch": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.managed-subagents-launch-requested",
+        payload: {
+          threadId: command.threadId,
+          prompt: command.prompt,
+          ...(command.title !== undefined ? { title: command.title } : {}),
+          ...(command.modelSelection !== undefined
+            ? { modelSelection: command.modelSelection }
+            : {}),
+          count: command.count,
+          createdAt: command.createdAt,
         },
       };
     }

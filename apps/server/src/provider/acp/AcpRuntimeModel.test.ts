@@ -182,6 +182,66 @@ describe("AcpRuntimeModel", () => {
     ]);
   });
 
+  it("annotates agent-like ACP tool calls with conservative subagent summaries", () => {
+    const created = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "tool-agent-1",
+        title: "Task",
+        kind: "other",
+        status: "pending",
+        rawInput: {
+          description: "Review the retry flow",
+          prompt: "Inspect retries and report back",
+        },
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    const updated = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "tool-agent-1",
+        status: "completed",
+        rawOutput: {
+          summary: "Retry flow reviewed",
+        },
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    const createdEvent = created.events[0];
+    const updatedEvent = updated.events[0];
+    expect(createdEvent?._tag).toBe("ToolCallUpdated");
+    expect(updatedEvent?._tag).toBe("ToolCallUpdated");
+
+    if (createdEvent?._tag === "ToolCallUpdated" && updatedEvent?._tag === "ToolCallUpdated") {
+      expect(createdEvent.toolCall.subagent).toMatchObject({
+        status: "starting",
+        summary: "Task",
+        detail: "Review the retry flow",
+        subagent: {
+          subagentId: "tool-agent-1",
+          origin: "inferred",
+          capability: "summary",
+          label: "Task",
+          description: "Review the retry flow",
+        },
+      });
+
+      expect(
+        mergeToolCallState(createdEvent.toolCall, updatedEvent.toolCall).subagent,
+      ).toMatchObject({
+        status: "completed",
+        subagent: {
+          subagentId: "tool-agent-1",
+          origin: "inferred",
+          capability: "summary",
+        },
+      });
+    }
+  });
+
   it("projects typed ACP plan and content updates", () => {
     const planResult = parseSessionUpdateEvent({
       sessionId: "session-1",

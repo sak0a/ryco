@@ -71,15 +71,24 @@ export function createThreadSelectorAcrossEnvironments(
 
 type FallbackThreadCandidate = Pick<SidebarThreadSummary, "id"> & ThreadSortInput;
 
+function isNormalFallbackThread(
+  thread: Pick<SidebarThreadSummary, "threadKind" | "visibility"> | ThreadShell,
+): boolean {
+  return thread.visibility !== "nested" && thread.threadKind !== "managed-subagent";
+}
+
 const toFallbackThreadCandidate = (
   threadId: ThreadId,
   summary: SidebarThreadSummary | undefined,
   shell: ThreadShell | undefined,
 ): FallbackThreadCandidate | null => {
   if (summary) {
-    return summary;
+    return isNormalFallbackThread(summary) ? summary : null;
   }
   if (!shell) {
+    return null;
+  }
+  if (!isNormalFallbackThread(shell)) {
     return null;
   }
   return {

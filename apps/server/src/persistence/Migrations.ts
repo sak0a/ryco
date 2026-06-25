@@ -54,6 +54,7 @@ import Migration0037 from "./Migrations/037_WorktreeSourceControlState.ts";
 import Migration0038 from "./Migrations/038_WorktreeWorkItems.ts";
 import Migration0039 from "./Migrations/039_WorktreeWorkItemStateNames.ts";
 import Migration0040 from "./Migrations/040_ProjectionThreadsProjectUpdatedAtIndex.ts";
+import Migration0041 from "./Migrations/041_ProjectionThreadsSubagentNesting.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -106,6 +107,7 @@ export const migrationEntries = [
   [38, "WorktreeWorkItems", Migration0038],
   [39, "WorktreeWorkItemStateNames", Migration0039],
   [40, "ProjectionThreadsProjectUpdatedAtIndex", Migration0040],
+  [41, "ProjectionThreadsSubagentNesting", Migration0041],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
@@ -219,6 +221,56 @@ export const repairProjectionTokenModeColumns = Effect.fn("repairProjectionToken
   },
 );
 
+export const repairProjectionThreadSubagentNestingColumns = Effect.fn(
+  "repairProjectionThreadSubagentNestingColumns",
+)(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const projectionThreadTables = yield* sql<{ readonly name: string }>`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name = 'projection_threads'
+  `;
+  if (projectionThreadTables.length === 0) {
+    return;
+  }
+
+  const columns = yield* sql<{ readonly name: string }>`
+    PRAGMA table_info(projection_threads)
+  `;
+  const columnNames = new Set(columns.map((column) => column.name));
+
+  if (!columnNames.has("thread_kind")) {
+    yield* sql`
+      ALTER TABLE projection_threads
+      ADD COLUMN thread_kind TEXT NOT NULL DEFAULT 'normal'
+    `;
+    yield* Effect.log("Repaired projection_threads.thread_kind column");
+  }
+
+  if (!columnNames.has("visibility")) {
+    yield* sql`
+      ALTER TABLE projection_threads
+      ADD COLUMN visibility TEXT NOT NULL DEFAULT 'normal'
+    `;
+    yield* Effect.log("Repaired projection_threads.visibility column");
+  }
+
+  if (!columnNames.has("parent_thread_id")) {
+    yield* sql`
+      ALTER TABLE projection_threads
+      ADD COLUMN parent_thread_id TEXT
+    `;
+    yield* Effect.log("Repaired projection_threads.parent_thread_id column");
+  }
+
+  if (!columnNames.has("parent_subagent_id")) {
+    yield* sql`
+      ALTER TABLE projection_threads
+      ADD COLUMN parent_subagent_id TEXT
+    `;
+    yield* Effect.log("Repaired projection_threads.parent_subagent_id column");
+  }
+});
+
 /**
  * Run all pending migrations.
  *
@@ -246,6 +298,9 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   }
   if (toMigrationInclusive === undefined || toMigrationInclusive >= 35) {
     yield* repairProjectionTokenModeColumns();
+  }
+  if (toMigrationInclusive === undefined || toMigrationInclusive >= 41) {
+    yield* repairProjectionThreadSubagentNestingColumns();
   }
   yield* Effect.log("Migrations ran successfully").pipe(
     Effect.annotateLogs({ migrations: executedMigrations.map(([id, name]) => `${id}_${name}`) }),

@@ -7,7 +7,10 @@ import type {
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
   ProjectScript as ContractProjectScript,
+  RuntimeSubagentId,
   ThreadId,
+  ThreadKind,
+  ThreadVisibility,
   ProjectId,
   TurnId,
   MessageId,
@@ -124,6 +127,10 @@ export interface Thread {
   branch: string | null;
   worktreePath: string | null;
   worktreeId?: string | null | undefined;
+  threadKind?: ThreadKind;
+  visibility?: ThreadVisibility;
+  parentThreadId?: ThreadId | null;
+  parentSubagentId?: RuntimeSubagentId | null;
   manualStatusBucket?: StatusBucket | null | undefined;
   manualPosition?: number | undefined;
   turnDiffSummaries: TurnDiffSummary[];
@@ -147,6 +154,10 @@ export interface ThreadShell {
   branch: string | null;
   worktreePath: string | null;
   worktreeId?: string | null | undefined;
+  threadKind?: ThreadKind;
+  visibility?: ThreadVisibility;
+  parentThreadId?: ThreadId | null;
+  parentSubagentId?: RuntimeSubagentId | null;
   manualStatusBucket?: StatusBucket | null | undefined;
   manualPosition?: number | undefined;
 }
@@ -171,6 +182,10 @@ export interface SidebarThreadSummary {
   branch: string | null;
   worktreePath: string | null;
   worktreeId?: string | null | undefined;
+  threadKind?: ThreadKind;
+  visibility?: ThreadVisibility;
+  parentThreadId?: ThreadId | null;
+  parentSubagentId?: RuntimeSubagentId | null;
   manualStatusBucket?: StatusBucket | null | undefined;
   manualPosition?: number | undefined;
   latestUserMessageAt: string | null;

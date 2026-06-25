@@ -90,8 +90,13 @@ export type UseSidebarTreeInput = Omit<ComposeSidebarTreeInput, "nowMs"> & {
   nowMs?: number | undefined;
 };
 
+function isNormalSidebarTreeThread(thread: SidebarTreeThread): boolean {
+  return thread.visibility !== "nested" && thread.threadKind !== "managed-subagent";
+}
+
 export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree {
-  const threadsByProjectId = groupBy(input.threads, (thread) => thread.projectId);
+  const visibleThreads = input.threads.filter(isNormalSidebarTreeThread);
+  const threadsByProjectId = groupBy(visibleThreads, (thread) => thread.projectId);
   const explicitWorktreesByProjectId = groupBy(input.worktrees ?? [], (worktree) =>
     String(worktree.projectId),
   );

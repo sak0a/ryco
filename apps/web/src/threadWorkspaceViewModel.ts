@@ -15,9 +15,13 @@ export interface ThreadSubagentView {
   key: string;
   name: string;
   status: ThreadSubagentStatus;
+  origin?: string | null;
+  capability?: string | null;
   tool: string | null;
   detail: string | null;
   providerThreadIds: string[];
+  providerSessionIds?: string[];
+  childThreadIds?: string[];
   startedAt: string;
   updatedAt: string;
   entries: WorkLogEntry[];
@@ -28,14 +32,22 @@ interface MutableThreadSubagentView {
   key: string;
   name: string | null;
   status: ThreadSubagentStatus;
+  origin: string | null;
+  capability: string | null;
   tool: string | null;
   detail: string | null;
   providerThreadIds: Set<string>;
+  providerSessionIds: Set<string>;
+  childThreadIds: Set<string>;
   startedAt: string;
   updatedAt: string;
   entries: WorkLogEntry[];
   messages: ThreadSubagentMessageView[];
 }
+
+type InternalThreadSubagentMessageView = ThreadSubagentMessageView & {
+  subagentKey: string | null;
+};
 
 const GENERIC_SUBAGENT_TITLES = new Set([
   "agent",
@@ -107,6 +119,22 @@ function collabItemFromPayload(
   return item?.type === "collabAgentToolCall" ? item : null;
 }
 
+function canonicalSubagentFromPayload(
+  payload: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  return asRecord(payload?.subagent);
+}
+
+function metadataFromSubagent(
+  subagent: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  return asRecord(subagent?.metadata);
+}
+
+function canonicalSubagentKey(subagentId: string): string {
+  return `subagent:${subagentId}`;
+}
+
 function extractToolCallId(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
   const state = asRecord(data?.state);
@@ -125,7 +153,22 @@ function extractToolCallId(payload: Record<string, unknown> | null): string | nu
   );
 }
 
+function extractCanonicalSubagentId(payload: Record<string, unknown> | null): string | null {
+  const subagent = canonicalSubagentFromPayload(payload);
+  return asTrimmedString(subagent?.subagentId) ?? asTrimmedString(payload?.subagentId);
+}
+
 function extractProviderThreadIds(payload: Record<string, unknown> | null): string[] {
+  const subagent = canonicalSubagentFromPayload(payload);
+  const canonicalIds = [
+    asTrimmedString(subagent?.providerThreadId),
+    ...asStringArray(subagent?.providerThreadIds),
+    asTrimmedString(payload?.providerThreadId),
+  ].filter((id): id is string => id !== null);
+  if (canonicalIds.length > 0) {
+    return [...new Set(canonicalIds)];
+  }
+
   const item = collabItemFromPayload(payload);
   if (!item) {
     return [];
@@ -133,8 +176,38 @@ function extractProviderThreadIds(payload: Record<string, unknown> | null): stri
   return asStringArray(item.receiverThreadIds);
 }
 
+function extractProviderSessionIds(payload: Record<string, unknown> | null): string[] {
+  const subagent = canonicalSubagentFromPayload(payload);
+  return [
+    asTrimmedString(subagent?.providerSessionId),
+    ...asStringArray(subagent?.providerSessionIds),
+    asTrimmedString(payload?.providerSessionId),
+  ].filter((id): id is string => id !== null);
+}
+
+function extractChildThreadIds(payload: Record<string, unknown> | null): string[] {
+  const subagent = canonicalSubagentFromPayload(payload);
+  return [
+    asTrimmedString(subagent?.childThreadId),
+    ...asStringArray(subagent?.childThreadIds),
+    asTrimmedString(payload?.childThreadId),
+  ].filter((id): id is string => id !== null);
+}
+
 function extractSubagentTool(payload: Record<string, unknown> | null): string | null {
-  return asTrimmedString(collabItemFromPayload(payload)?.tool);
+  return (
+    asTrimmedString(payload?.lastToolName) ??
+    asTrimmedString(canonicalSubagentFromPayload(payload)?.providerTaskId) ??
+    asTrimmedString(collabItemFromPayload(payload)?.tool)
+  );
+}
+
+function extractSubagentOrigin(payload: Record<string, unknown> | null): string | null {
+  return asTrimmedString(canonicalSubagentFromPayload(payload)?.origin);
+}
+
+function extractSubagentCapability(payload: Record<string, unknown> | null): string | null {
+  return asTrimmedString(canonicalSubagentFromPayload(payload)?.capability);
 }
 
 function detailPrefix(value: string | null): string | null {
@@ -160,7 +233,18 @@ function extractSubagentName(
   const input = inputFromPayload(payload);
   const data = asRecord(payload?.data);
   const state = asRecord(data?.state);
+  const subagent = canonicalSubagentFromPayload(payload);
+  const metadata = metadataFromSubagent(subagent);
   const candidates = [
+    subagent?.label,
+    subagent?.displayName,
+    subagent?.role,
+    subagent?.name,
+    metadata?.label,
+    metadata?.displayName,
+    metadata?.role,
+    metadata?.name,
+    metadata?.title,
     input?.subagent_type,
     input?.agent_type,
     input?.agent_role,
@@ -226,9 +310,17 @@ function extractSubagentDetail(
 ): string | null {
   const input = inputFromPayload(payload);
   const item = collabItemFromPayload(payload);
+  const subagent = canonicalSubagentFromPayload(payload);
+  const metadata = metadataFromSubagent(subagent);
   return (
     asTrimmedString(item?.prompt) ??
     firstCollabAgentStateMessage(item) ??
+    asTrimmedString(payload?.summary) ??
+    asTrimmedString(payload?.detail) ??
+    asTrimmedString(subagent?.description) ??
+    asTrimmedString(subagent?.detail) ??
+    asTrimmedString(metadata?.description) ??
+    asTrimmedString(metadata?.detail) ??
     asTrimmedString(input?.description) ??
     asTrimmedString(input?.prompt) ??
     asTrimmedString(input?.task) ??
@@ -238,7 +330,7 @@ function extractSubagentDetail(
 }
 
 function isSubagentPayload(payload: Record<string, unknown> | null): boolean {
-  return payload?.itemType === "collab_agent_tool_call";
+  return payload?.itemType === "collab_agent_tool_call" || payload?.itemType === "subagent";
 }
 
 function statusFromCollabAgentStatus(status: string | null): ThreadSubagentStatus | null {
@@ -304,10 +396,13 @@ function statusFromActivity(
   activity: OrchestrationThreadActivity,
   payload: Record<string, unknown> | null,
 ): ThreadSubagentStatus {
+  if (payload?.status === "starting" || payload?.status === "running") {
+    return "running";
+  }
   if (payload?.status === "failed") {
     return "failed";
   }
-  if (payload?.status === "completed") {
+  if (payload?.status === "completed" || payload?.status === "stopped") {
     return "finished";
   }
   if (payload?.status === "inProgress") {
@@ -334,11 +429,15 @@ function statusFromWorkEntry(entry: WorkLogEntry): ThreadSubagentStatus {
 }
 
 function subagentKey(input: {
+  canonicalSubagentId?: string | null;
   toolCallId: string | null;
   name: string | null;
   detail: string | null;
   fallbackId: string;
 }): string {
+  if (input.canonicalSubagentId) {
+    return canonicalSubagentKey(input.canonicalSubagentId);
+  }
   if (input.toolCallId) {
     return `subagent:${normalizeForKey(input.toolCallId)}`;
   }
@@ -386,10 +485,17 @@ function mergeProviderThreadIds(target: Set<string>, ids: ReadonlyArray<string>)
   }
 }
 
+function mergeStringSet(target: Set<string>, values: ReadonlyArray<string>): void {
+  for (const value of values) {
+    target.add(value);
+  }
+}
+
 function toWorkEntrySubagentKey(entry: WorkLogEntry): string {
   const detail = entry.detail ?? entry.output ?? null;
   const name = extractSubagentName(null, detail ?? entry.toolTitle ?? entry.label);
   return subagentKey({
+    canonicalSubagentId: null,
     toolCallId: null,
     name,
     detail: detail ?? entry.label,
@@ -414,20 +520,34 @@ function findSubagentByProviderThreadId(
 
 function messageFromActivity(
   activity: OrchestrationThreadActivity,
-): ThreadSubagentMessageView | null {
-  if (activity.kind !== "agent.message") {
+): InternalThreadSubagentMessageView | null {
+  if (activity.kind !== "agent.message" && !activity.kind.startsWith("subagent.message")) {
     return null;
   }
   const payload = payloadFromActivity(activity);
-  const text = asTrimmedString(payload?.text);
+  const subagent = canonicalSubagentFromPayload(payload);
+  const providerRefs = asRecord(payload?.providerRefs);
+  const subagentId = extractCanonicalSubagentId(payload);
+  const text =
+    asTrimmedString(payload?.text) ??
+    asTrimmedString(payload?.delta) ??
+    asTrimmedString(payload?.summary);
   if (!text) {
     return null;
   }
   return {
-    id: asTrimmedString(payload?.providerItemId) ?? activity.id,
+    id:
+      asTrimmedString(payload?.providerItemId) ??
+      asTrimmedString(providerRefs?.providerItemId) ??
+      activity.id,
     text,
     createdAt: activity.createdAt,
-    providerThreadId: asTrimmedString(payload?.providerThreadId),
+    providerThreadId:
+      asTrimmedString(payload?.providerThreadId) ??
+      asTrimmedString(subagent?.providerThreadId) ??
+      asTrimmedString(payload?.providerSessionId) ??
+      asTrimmedString(subagent?.providerSessionId),
+    subagentKey: subagentId ? canonicalSubagentKey(subagentId) : null,
   };
 }
 
@@ -460,9 +580,15 @@ export function deriveThreadSubagents(
 
     const detail = extractSubagentDetail(payload, asTrimmedString(activity.summary));
     const name = extractSubagentName(payload, detail);
+    const canonicalSubagentId = extractCanonicalSubagentId(payload);
     const providerThreadIds = extractProviderThreadIds(payload);
+    const providerSessionIds = extractProviderSessionIds(payload);
+    const childThreadIds = extractChildThreadIds(payload);
+    const origin = extractSubagentOrigin(payload);
+    const capability = extractSubagentCapability(payload);
     const tool = extractSubagentTool(payload);
     const key = subagentKey({
+      canonicalSubagentId,
       toolCallId: extractToolCallId(payload),
       name,
       detail,
@@ -474,8 +600,12 @@ export function deriveThreadSubagents(
     if (existing) {
       existing.name = existing.name ?? name;
       existing.detail = detail ?? existing.detail;
+      existing.origin = existing.origin ?? origin;
+      existing.capability = existing.capability ?? capability;
       existing.tool = existing.tool ?? tool;
       mergeProviderThreadIds(existing.providerThreadIds, providerThreadIds);
+      mergeStringSet(existing.providerSessionIds, providerSessionIds);
+      mergeStringSet(existing.childThreadIds, childThreadIds);
       existing.status = applyStatus(existing.status, status);
       existing.updatedAt = activity.createdAt;
       continue;
@@ -485,9 +615,13 @@ export function deriveThreadSubagents(
       key,
       name,
       status,
+      origin,
+      capability,
       tool,
       detail,
       providerThreadIds: new Set(providerThreadIds),
+      providerSessionIds: new Set(providerSessionIds),
+      childThreadIds: new Set(childThreadIds),
       startedAt: activity.createdAt,
       updatedAt: activity.createdAt,
       entries: [],
@@ -500,11 +634,14 @@ export function deriveThreadSubagents(
     if (!message) {
       continue;
     }
-    const subagent = findSubagentByProviderThreadId(subagents, message.providerThreadId);
+    const subagent = message.subagentKey
+      ? (subagents.get(message.subagentKey) ?? null)
+      : findSubagentByProviderThreadId(subagents, message.providerThreadId);
     if (!subagent) {
       continue;
     }
-    subagent.messages.push(message);
+    const { subagentKey: _subagentKey, ...messageView } = message;
+    subagent.messages.push(messageView);
     subagent.updatedAt = activity.createdAt;
   }
 
@@ -530,9 +667,13 @@ export function deriveThreadSubagents(
       key,
       name,
       status,
+      origin: null,
+      capability: null,
       tool: null,
       detail,
       providerThreadIds: new Set(),
+      providerSessionIds: new Set(),
+      childThreadIds: new Set(),
       startedAt: entry.createdAt,
       updatedAt: entry.createdAt,
       entries: [entry],
@@ -552,9 +693,13 @@ export function deriveThreadSubagents(
         key: subagent.key,
         name,
         status: subagent.status,
+        origin: subagent.origin,
+        capability: subagent.capability,
         tool: subagent.tool,
         detail: subagent.detail,
         providerThreadIds: [...subagent.providerThreadIds],
+        providerSessionIds: [...subagent.providerSessionIds],
+        childThreadIds: [...subagent.childThreadIds],
         startedAt: subagent.startedAt,
         updatedAt: subagent.updatedAt,
         entries: subagent.entries,

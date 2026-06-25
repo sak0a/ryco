@@ -32,6 +32,10 @@ export function draftThreadToSidebarSummary(draft: DraftThreadState): SidebarThr
     latestTurn: null,
     branch: draft.branch,
     worktreePath: draft.worktreePath,
+    threadKind: "normal",
+    visibility: "normal",
+    parentThreadId: null,
+    parentSubagentId: null,
     manualStatusBucket: null,
     latestUserMessageAt: null,
     hasPendingApprovals: false,
@@ -54,6 +58,9 @@ interface CachedItem {
 // "no worktreePath, no worktreeId" as the main worktree (groups threads
 // with worktreePath === null together).
 function threadBelongsToFilter(thread: SidebarThreadSummary, filter: SessionTabsFilter): boolean {
+  if (thread.visibility === "nested" || thread.threadKind === "managed-subagent") {
+    return false;
+  }
   if (thread.worktreeId !== undefined && thread.worktreeId !== null && filter.worktreeId) {
     if (thread.worktreeId === filter.worktreeId) return true;
   }

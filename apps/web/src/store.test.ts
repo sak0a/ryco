@@ -89,6 +89,10 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     latestTurn: null,
     branch: null,
     worktreePath: null,
+    threadKind: "normal",
+    visibility: "normal",
+    parentThreadId: null,
+    parentSubagentId: null,
     ...overrides,
   };
 }
@@ -134,6 +138,10 @@ function makeState(thread: Thread): AppState {
         updatedAt: thread.updatedAt,
         branch: thread.branch,
         worktreePath: thread.worktreePath,
+        threadKind: thread.threadKind ?? "normal",
+        visibility: thread.visibility ?? "normal",
+        parentThreadId: thread.parentThreadId ?? null,
+        parentSubagentId: thread.parentSubagentId ?? null,
       },
     },
     threadSessionById: {
@@ -1451,6 +1459,10 @@ describe("shell push coalescing", () => {
         interactionMode: "default",
         branch: null,
         worktreePath: null,
+        threadKind: "normal",
+        visibility: "normal",
+        parentThreadId: null,
+        parentSubagentId: null,
         latestTurn: {
           turnId,
           state: params.turnState,

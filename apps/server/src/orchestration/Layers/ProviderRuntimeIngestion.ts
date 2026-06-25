@@ -205,6 +205,14 @@ function rawPayloadThreadId(event: ProviderRuntimeEvent): string | undefined {
 
 function collabReceiverThreadIdsFromRuntimeEvent(event: ProviderRuntimeEvent): string[] {
   if (
+    event.type === "subagent.started" ||
+    event.type === "subagent.updated" ||
+    event.type === "subagent.completed"
+  ) {
+    return event.payload.subagent.providerThreadId ? [event.payload.subagent.providerThreadId] : [];
+  }
+
+  if (
     event.type !== "item.started" &&
     event.type !== "item.updated" &&
     event.type !== "item.completed"
@@ -589,6 +597,73 @@ function runtimeEventToActivities(
           payload: {
             taskId: event.payload.taskId,
             status: event.payload.status,
+            ...(event.payload.summary ? { detail: truncateDetail(event.payload.summary) } : {}),
+            ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "subagent.started": {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "tool",
+          kind: "subagent.started",
+          summary: `${event.payload.subagent.label ?? "Subagent"} started`,
+          payload: {
+            itemType: "collab_agent_tool_call",
+            status: "running",
+            subagent: event.payload.subagent,
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "subagent.updated": {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "tool",
+          kind: "subagent.updated",
+          summary: event.payload.summary ?? `${event.payload.subagent.label ?? "Subagent"} updated`,
+          payload: {
+            itemType: "collab_agent_tool_call",
+            ...(event.payload.status ? { status: event.payload.status } : {}),
+            subagent: event.payload.subagent,
+            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...(event.payload.summary ? { summary: truncateDetail(event.payload.summary) } : {}),
+            ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "subagent.completed": {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: event.payload.status === "failed" ? "error" : "tool",
+          kind: "subagent.completed",
+          summary:
+            event.payload.status === "failed"
+              ? `${event.payload.subagent.label ?? "Subagent"} failed`
+              : event.payload.status === "stopped"
+                ? `${event.payload.subagent.label ?? "Subagent"} stopped`
+                : `${event.payload.subagent.label ?? "Subagent"} completed`,
+          payload: {
+            itemType: "collab_agent_tool_call",
+            status: event.payload.status,
+            subagent: event.payload.subagent,
             ...(event.payload.summary ? { detail: truncateDetail(event.payload.summary) } : {}),
             ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
           },
@@ -1057,6 +1132,7 @@ const make = Effect.gen(function* () {
   const upsertSubagentMessageActivity = (input: {
     event: ProviderRuntimeEvent;
     threadId: ThreadId;
+    subagentId?: string | undefined;
     providerThreadId: string;
     providerItemId: string;
     text: string;
@@ -1086,6 +1162,7 @@ const make = Effect.gen(function* () {
             streaming: input.streaming,
             providerThreadId: input.providerThreadId,
             providerItemId: input.providerItemId,
+            ...(input.subagentId ? { subagentId: input.subagentId } : {}),
             ...(input.event.providerRefs ? { providerRefs: input.event.providerRefs } : {}),
           },
           turnId: toTurnId(input.event.turnId) ?? null,
@@ -1098,6 +1175,7 @@ const make = Effect.gen(function* () {
   const appendSubagentMessageDelta = (input: {
     event: ProviderRuntimeEvent;
     threadId: ThreadId;
+    subagentId?: string | undefined;
     providerThreadId: string;
     providerItemId: string;
     delta: string;
@@ -1123,6 +1201,7 @@ const make = Effect.gen(function* () {
   const completeSubagentMessage = (input: {
     event: ProviderRuntimeEvent;
     threadId: ThreadId;
+    subagentId?: string | undefined;
     providerThreadId: string;
     providerItemId: string;
     fallbackText?: string | undefined;
@@ -1719,10 +1798,23 @@ const make = Effect.gen(function* () {
       }
 
       const assistantDelta = isAssistantTextDeltaEvent(event) ? event.payload.delta : undefined;
+      const subagentDelta =
+        event.type === "subagent.message.delta" ? event.payload.delta : undefined;
       const proposedPlanDelta =
         event.type === "turn.proposed.delta" ? event.payload.delta : undefined;
 
-      if (
+      if (event.type === "subagent.message.delta" && subagentDelta && subagentDelta.length > 0) {
+        const subagentPayload = event.payload;
+        yield* appendSubagentMessageDelta({
+          event,
+          threadId: thread.id,
+          subagentId: String(subagentPayload.subagentId),
+          providerThreadId: subagentPayload.providerThreadId ?? String(subagentPayload.subagentId),
+          providerItemId: subagentPayload.providerMessageId ?? String(subagentPayload.subagentId),
+          delta: subagentDelta,
+          createdAt: now,
+        });
+      } else if (
         assistantDelta &&
         assistantDelta.length > 0 &&
         isSubagentProviderThread &&
@@ -1918,6 +2010,19 @@ const make = Effect.gen(function* () {
           ...(subagentMessageCompletion.fallbackText !== undefined
             ? { fallbackText: subagentMessageCompletion.fallbackText }
             : {}),
+          createdAt: now,
+        });
+      }
+
+      if (event.type === "subagent.completed") {
+        yield* completeSubagentMessage({
+          event,
+          threadId: thread.id,
+          subagentId: String(event.payload.subagent.subagentId),
+          providerThreadId:
+            event.payload.subagent.providerThreadId ?? String(event.payload.subagent.subagentId),
+          providerItemId: String(event.payload.subagent.subagentId),
+          ...(event.payload.summary !== undefined ? { fallbackText: event.payload.summary } : {}),
           createdAt: now,
         });
       }

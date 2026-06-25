@@ -1,6 +1,12 @@
 import type * as EffectAcpSchema from "effect-acp/schema";
 import { deriveToolActivityPresentation } from "@ryco/shared/toolActivity";
-import type { ToolLifecycleItemType } from "@ryco/contracts";
+import {
+  ProviderItemId,
+  RuntimeSubagentId,
+  type RuntimeSubagentStatus,
+  type SubagentRef,
+  type ToolLifecycleItemType,
+} from "@ryco/contracts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -24,7 +30,15 @@ export interface AcpToolCallState {
   readonly status?: "pending" | "inProgress" | "completed" | "failed";
   readonly command?: string;
   readonly detail?: string;
+  readonly subagent?: AcpSubagentSummaryState;
   readonly data: Record<string, unknown>;
+}
+
+export interface AcpSubagentSummaryState {
+  readonly subagent: SubagentRef;
+  readonly status?: RuntimeSubagentStatus;
+  readonly summary?: string;
+  readonly detail?: string;
 }
 
 export interface AcpPlanUpdate {
@@ -241,7 +255,49 @@ function normalizeToolKind(kind: unknown): string | undefined {
   return typeof kind === "string" && kind.trim().length > 0 ? kind.trim() : undefined;
 }
 
-function canonicalItemTypeFromAcpToolKind(kind: string | undefined): ToolLifecycleItemType {
+function containsSubagentKeyword(value: string | undefined): boolean {
+  return (
+    value !== undefined &&
+    /\b(sub[-\s]?agent|agent|subtask|task|delegate|delegation|worker)\b/i.test(value)
+  );
+}
+
+export function isAcpSubagentToolCall(input: {
+  readonly kind?: string | undefined;
+  readonly title?: string | undefined;
+  readonly command?: string | undefined;
+  readonly detail?: string | undefined;
+  readonly data?: Record<string, unknown> | undefined;
+}): boolean {
+  if (
+    containsSubagentKeyword(input.kind) ||
+    containsSubagentKeyword(input.title) ||
+    containsSubagentKeyword(input.command) ||
+    containsSubagentKeyword(input.detail)
+  ) {
+    return true;
+  }
+  const rawInput = isRecord(input.data?.rawInput) ? input.data.rawInput : undefined;
+  return (
+    containsSubagentKeyword(typeof rawInput?.tool === "string" ? rawInput.tool : undefined) ||
+    containsSubagentKeyword(typeof rawInput?.name === "string" ? rawInput.name : undefined) ||
+    containsSubagentKeyword(
+      typeof rawInput?.subagent_type === "string" ? rawInput.subagent_type : undefined,
+    )
+  );
+}
+
+function canonicalItemTypeFromAcpTool(input: {
+  readonly kind: string | undefined;
+  readonly title?: string | undefined;
+  readonly command?: string | undefined;
+  readonly detail?: string | undefined;
+  readonly data?: Record<string, unknown> | undefined;
+}): ToolLifecycleItemType {
+  if (isAcpSubagentToolCall(input)) {
+    return "collab_agent_tool_call";
+  }
+  const kind = input.kind;
   switch (kind) {
     case "execute":
       return "command_execution";
@@ -255,6 +311,79 @@ function canonicalItemTypeFromAcpToolKind(kind: string | undefined): ToolLifecyc
     default:
       return "dynamic_tool_call";
   }
+}
+
+function acpSubagentStatusFromToolStatus(
+  status: AcpToolCallState["status"],
+): RuntimeSubagentStatus | undefined {
+  switch (status) {
+    case "pending":
+      return "starting";
+    case "inProgress":
+      return "running";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    default:
+      return undefined;
+  }
+}
+
+function rawInputStringField(
+  data: Record<string, unknown> | undefined,
+  field: string,
+): string | undefined {
+  const rawInput = isRecord(data?.rawInput) ? data.rawInput : undefined;
+  if (!rawInput) {
+    return undefined;
+  }
+  const value = rawInput[field];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function makeAcpSubagentSummaryState(input: {
+  readonly toolCallId: string;
+  readonly kind?: string | undefined;
+  readonly title?: string | undefined;
+  readonly status?: AcpToolCallState["status"];
+  readonly command?: string | undefined;
+  readonly detail?: string | undefined;
+  readonly data?: Record<string, unknown> | undefined;
+}): AcpSubagentSummaryState | undefined {
+  if (!isAcpSubagentToolCall(input)) {
+    return undefined;
+  }
+
+  const label = input.title ?? rawInputStringField(input.data, "name") ?? "ACP subagent";
+  const detail =
+    input.detail ??
+    rawInputStringField(input.data, "description") ??
+    rawInputStringField(input.data, "prompt") ??
+    input.command;
+  const metadata = Object.fromEntries(
+    [
+      ["source", "acp.tool_call"],
+      ["kind", input.kind],
+      ["command", input.command],
+    ].filter(([, value]) => value !== undefined),
+  );
+  const status = acpSubagentStatusFromToolStatus(input.status);
+
+  return {
+    subagent: {
+      subagentId: RuntimeSubagentId.make(input.toolCallId),
+      origin: "inferred",
+      capability: "summary",
+      label,
+      ...(detail ? { description: detail } : {}),
+      parentProviderItemId: ProviderItemId.make(input.toolCallId),
+      metadata,
+    },
+    ...(status ? { status } : {}),
+    summary: label,
+    ...(detail ? { detail } : {}),
+  };
 }
 
 function makeToolCallState(
@@ -312,7 +441,13 @@ function makeToolCallState(
     textContent !== undefined;
   const presentation = hasPresentationSeed
     ? deriveToolActivityPresentation({
-        itemType: canonicalItemTypeFromAcpToolKind(kind),
+        itemType: canonicalItemTypeFromAcpTool({
+          kind,
+          title,
+          command,
+          detail: fallbackDetail,
+          data,
+        }),
         title,
         detail: fallbackDetail,
         data,
@@ -320,6 +455,15 @@ function makeToolCallState(
       })
     : undefined;
   const status = normalizeToolCallStatus(input.status, options?.fallbackStatus);
+  const subagent = makeAcpSubagentSummaryState({
+    toolCallId,
+    ...(kind ? { kind } : {}),
+    ...(presentation?.summary ? { title: presentation.summary } : {}),
+    ...(status ? { status } : {}),
+    ...(command ? { command } : {}),
+    ...(presentation?.detail ? { detail: presentation.detail } : {}),
+    data,
+  });
   return {
     toolCallId,
     ...(kind ? { kind } : {}),
@@ -327,6 +471,7 @@ function makeToolCallState(
     ...(status ? { status } : {}),
     ...(command ? { command } : {}),
     ...(presentation?.detail ? { detail: presentation.detail } : {}),
+    ...(subagent ? { subagent } : {}),
     data,
   };
 }
@@ -362,6 +507,19 @@ export function mergeToolCallState(
   const status = next.status ?? previous?.status;
   const command = next.command ?? previous?.command;
   const detail = next.detail ?? previous?.detail;
+  const data = {
+    ...previous?.data,
+    ...next.data,
+  };
+  const subagent = makeAcpSubagentSummaryState({
+    toolCallId: next.toolCallId,
+    ...(kind ? { kind } : {}),
+    ...(title ? { title } : {}),
+    ...(status ? { status } : {}),
+    ...(command ? { command } : {}),
+    ...(detail ? { detail } : {}),
+    data,
+  });
   return {
     toolCallId: next.toolCallId,
     ...(kind ? { kind } : {}),
@@ -369,10 +527,8 @@ export function mergeToolCallState(
     ...(status ? { status } : {}),
     ...(command ? { command } : {}),
     ...(detail ? { detail } : {}),
-    data: {
-      ...previous?.data,
-      ...next.data,
-    },
+    ...(subagent ? { subagent } : {}),
+    data,
   };
 }
 

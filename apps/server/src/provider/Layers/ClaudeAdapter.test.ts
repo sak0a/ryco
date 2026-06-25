@@ -1574,6 +1574,83 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("projects Claude agent task lifecycle into subagent summary events", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 10).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      harness.query.emit({
+        type: "system",
+        subtype: "task_started",
+        task_id: "task-agent-1",
+        task_type: "agent",
+        description: "Review retry handling",
+        session_id: "sdk-session-agent-task",
+        uuid: "task-agent-started",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "task-agent-1",
+        description: "Review retry handling",
+        summary: "Reviewer is checking retry paths.",
+        last_tool_name: "Task",
+        session_id: "sdk-session-agent-task",
+        uuid: "task-agent-progress",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "system",
+        subtype: "task_notification",
+        task_id: "task-agent-1",
+        status: "completed",
+        summary: "Retry paths reviewed.",
+        session_id: "sdk-session-agent-task",
+        uuid: "task-agent-completed",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const subagentStarted = runtimeEvents.find((event) => event.type === "subagent.started");
+      const subagentUpdated = runtimeEvents.find((event) => event.type === "subagent.updated");
+      const subagentCompleted = runtimeEvents.find((event) => event.type === "subagent.completed");
+
+      assert.equal(subagentStarted?.type, "subagent.started");
+      if (subagentStarted?.type === "subagent.started") {
+        assert.equal(subagentStarted.payload.subagent.subagentId, "claude-task:task-agent-1");
+        assert.equal(subagentStarted.payload.subagent.capability, "summary");
+        assert.equal(subagentStarted.payload.subagent.providerTaskId, "task-agent-1");
+      }
+      assert.equal(subagentUpdated?.type, "subagent.updated");
+      if (subagentUpdated?.type === "subagent.updated") {
+        assert.equal(subagentUpdated.payload.status, "running");
+        assert.equal(subagentUpdated.payload.summary, "Reviewer is checking retry paths.");
+      }
+      assert.equal(subagentCompleted?.type, "subagent.completed");
+      if (subagentCompleted?.type === "subagent.completed") {
+        assert.equal(subagentCompleted.payload.status, "completed");
+        assert.equal(subagentCompleted.payload.summary, "Retry paths reviewed.");
+      }
+      assert.ok(runtimeEvents.some((event) => event.type === "task.started"));
+      assert.ok(runtimeEvents.some((event) => event.type === "task.progress"));
+      assert.ok(runtimeEvents.some((event) => event.type === "task.completed"));
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("emits thread token usage updates from Claude task progress", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

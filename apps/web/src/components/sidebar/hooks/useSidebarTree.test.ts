@@ -335,7 +335,11 @@ function makeThread(overrides: Partial<SidebarTreeThread> = {}): SidebarTreeThre
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
     manualStatusBucket: null,
+    parentSubagentId: null,
+    parentThreadId: null,
     statusPill: null,
+    threadKind: "normal",
+    visibility: "normal",
     worktreeId: null,
     ...overrides,
   };
