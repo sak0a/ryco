@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { DraftId } from "../../../composerDraftStore";
+import { isNormalThreadVisibility } from "../../../threadVisibility";
 import type { Project, SidebarThreadSummary } from "../../../types";
 import {
   aggregateWorktreeStatus,
@@ -90,13 +91,10 @@ export type UseSidebarTreeInput = Omit<ComposeSidebarTreeInput, "nowMs"> & {
   nowMs?: number | undefined;
 };
 
-function isNormalSidebarTreeThread(thread: SidebarTreeThread): boolean {
-  return thread.visibility !== "nested" && thread.threadKind !== "managed-subagent";
-}
-
 export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree {
-  const visibleThreads = input.threads.filter(isNormalSidebarTreeThread);
+  const visibleThreads = input.threads.filter(isNormalThreadVisibility);
   const threadsByProjectId = groupBy(visibleThreads, (thread) => thread.projectId);
+  const allThreadsByProjectId = groupBy(input.threads, (thread) => thread.projectId);
   const explicitWorktreesByProjectId = groupBy(input.worktrees ?? [], (worktree) =>
     String(worktree.projectId),
   );
@@ -120,7 +118,7 @@ export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree 
 
       const projectWorktrees = ensureProjectWorktrees({
         project,
-        threads: projectThreads,
+        threads: allThreadsByProjectId.get(project.id) ?? [],
         worktrees: explicitWorktreesByProjectId.get(project.id) ?? [],
       });
       const mergedProjectWorktrees = mergeEquivalentWorktrees(projectWorktrees);

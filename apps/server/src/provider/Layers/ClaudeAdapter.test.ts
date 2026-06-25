@@ -734,7 +734,8 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 10).pipe(
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.take(10),
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -846,7 +847,9 @@ describe("ClaudeAdapterLive", () => {
         uuid: "result-1",
       } as unknown as SDKMessage);
 
-      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const runtimeEvents = Array.from(
+        yield* Fiber.join(runtimeEventsFiber).pipe(Effect.timeout("1 second")),
+      );
       assert.deepEqual(
         runtimeEvents.map((event) => event.type),
         [
@@ -1090,7 +1093,8 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 10).pipe(
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.take(10),
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -1160,7 +1164,9 @@ describe("ClaudeAdapterLive", () => {
         uuid: "result-todo-plan",
       } as unknown as SDKMessage);
 
-      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const runtimeEvents = Array.from(
+        yield* Fiber.join(runtimeEventsFiber).pipe(Effect.timeout("1 second")),
+      );
       const planUpdated = runtimeEvents.find((event) => event.type === "turn.plan.updated");
       assert.equal(planUpdated?.type, "turn.plan.updated");
       if (planUpdated?.type === "turn.plan.updated") {
@@ -1579,7 +1585,17 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 10).pipe(
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.type === "subagent.started" ||
+            event.type === "subagent.updated" ||
+            event.type === "subagent.completed" ||
+            event.type === "task.started" ||
+            event.type === "task.progress" ||
+            event.type === "task.completed",
+        ),
+        Stream.take(6),
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -1621,7 +1637,9 @@ describe("ClaudeAdapterLive", () => {
         uuid: "task-agent-completed",
       } as unknown as SDKMessage);
 
-      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const runtimeEvents = Array.from(
+        yield* Fiber.join(runtimeEventsFiber).pipe(Effect.timeout("1 second")),
+      );
       const subagentStarted = runtimeEvents.find((event) => event.type === "subagent.started");
       const subagentUpdated = runtimeEvents.find((event) => event.type === "subagent.updated");
       const subagentCompleted = runtimeEvents.find((event) => event.type === "subagent.completed");

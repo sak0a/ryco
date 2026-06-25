@@ -188,6 +188,29 @@ describe("composeSidebarTree", () => {
     ]);
   });
 
+  it("synthesizes worktrees from hidden nested threads without showing those sessions", () => {
+    const tree = composeSidebarTree({
+      isGitRepoByProjectId: new Map([[ProjectId.make("project-1"), true]]),
+      nowMs: Date.parse("2026-05-08T00:00:00.000Z"),
+      projects: [makeProject()],
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-subagent"),
+          branch: "feature/subagent",
+          threadKind: "managed-subagent",
+          visibility: "nested",
+          worktreePath: "/repo/.ryco/worktrees/feature-subagent",
+        }),
+      ],
+      worktrees: [],
+    });
+
+    const worktree = tree.projects[0]?.worktrees[0];
+    expect(worktree?.worktree.origin).toBe("branch");
+    expect(worktree?.worktree.branch).toBe("feature/subagent");
+    expect(worktree?.sessions).toEqual([]);
+  });
+
   it("merges duplicate base worktree rows for the same project", () => {
     const tree = composeSidebarTree({
       isGitRepoByProjectId: new Map([[ProjectId.make("project-1"), true]]),

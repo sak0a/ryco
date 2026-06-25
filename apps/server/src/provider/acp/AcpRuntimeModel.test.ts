@@ -182,7 +182,7 @@ describe("AcpRuntimeModel", () => {
     ]);
   });
 
-  it("annotates agent-like ACP tool calls with conservative subagent summaries", () => {
+  it("annotates ACP tool calls with explicit subagent summaries", () => {
     const created = parseSessionUpdateEvent({
       sessionId: "session-1",
       update: {
@@ -194,6 +194,7 @@ describe("AcpRuntimeModel", () => {
         rawInput: {
           description: "Review the retry flow",
           prompt: "Inspect retries and report back",
+          subagent_type: "code-reviewer",
         },
       },
     } satisfies EffectAcpSchema.SessionNotification);
@@ -239,6 +240,29 @@ describe("AcpRuntimeModel", () => {
           capability: "summary",
         },
       });
+    }
+  });
+
+  it("does not infer subagents from generic task wording", () => {
+    const result = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "tool-task-1",
+        title: "Run a task",
+        kind: "other",
+        status: "pending",
+        rawInput: {
+          description: "Agent status check",
+          prompt: "Check the pending task queue",
+        },
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    const event = result.events[0];
+    expect(event?._tag).toBe("ToolCallUpdated");
+    if (event?._tag === "ToolCallUpdated") {
+      expect(event.toolCall.subagent).toBeUndefined();
     }
   });
 

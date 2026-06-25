@@ -82,9 +82,40 @@ function subagentActivity(input: {
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+}
+
+function findManagedSubagentLaunchTurnId(input: {
+  readonly parentThread: OrchestrationThread;
+  readonly parentSubagentId: RuntimeSubagentId;
+  readonly childThreadId: ThreadId;
+}): TurnId | null {
+  const parentSubagentId = String(input.parentSubagentId);
+  const childThreadId = String(input.childThreadId);
+  for (let index = input.parentThread.activities.length - 1; index >= 0; index -= 1) {
+    const activity = input.parentThread.activities[index];
+    if (activity.kind !== "subagent.started") {
+      continue;
+    }
+    const subagent = asRecord(asRecord(activity.payload)?.subagent);
+    if (!subagent) {
+      continue;
+    }
+    if (
+      String(subagent.subagentId) === parentSubagentId ||
+      String(subagent.childThreadId) === childThreadId
+    ) {
+      return activity.turnId;
+    }
+  }
+  return null;
+}
+
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const launchTurnIdByChildThreadId = new Map<string, TurnId | null>();
   const completedChildThreads = new Set<string>();
   const declinedApprovalRequests = new Set<string>();
 
@@ -116,10 +147,11 @@ const make = Effect.gen(function* () {
       const subagentId = RuntimeSubagentId.make(`managed:${crypto.randomUUID()}`);
       const childThreadId = ThreadId.make(`managed-subagent:${crypto.randomUUID()}`);
       const labelBase = event.payload.title ?? parentThread.title;
-      const label =
-        count === 1 || event.payload.title === undefined ? labelBase : `${labelBase} ${index + 1}`;
+      const label = count === 1 ? labelBase : `${labelBase} ${index + 1}`;
       const createdAt = event.payload.createdAt;
       const modelSelection = event.payload.modelSelection ?? parentThread.modelSelection;
+      const parentTurnId = parentThread.latestTurn?.turnId ?? null;
+      launchTurnIdByChildThreadId.set(String(childThreadId), parentTurnId);
 
       yield* orchestrationEngine.dispatch({
         type: "thread.create",
@@ -158,7 +190,7 @@ const make = Effect.gen(function* () {
           summary: `${label} started`,
           tone: "tool",
           createdAt,
-          parentTurnId: parentThread.latestTurn?.turnId ?? null,
+          parentTurnId,
           subagentId,
           childThreadId,
           label,
@@ -199,9 +231,6 @@ const make = Effect.gen(function* () {
       return;
     }
     const status = event.payload.session.status;
-    if (childThread.latestTurn === null || childThread.latestTurn.state === "running") {
-      return;
-    }
     if (
       event.payload.session.activeTurnId !== null ||
       (status !== "ready" && status !== "error" && status !== "stopped")
@@ -222,6 +251,14 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    const parentTurnId =
+      findManagedSubagentLaunchTurnId({
+        parentThread,
+        parentSubagentId,
+        childThreadId: childThread.id,
+      }) ??
+      launchTurnIdByChildThreadId.get(String(childThread.id)) ??
+      null;
     const completedStatus =
       status === "error" ? "failed" : status === "stopped" ? "stopped" : "completed";
     yield* appendParentActivity({
@@ -237,7 +274,7 @@ const make = Effect.gen(function* () {
               : `${childThread.title} completed`,
         tone: completedStatus === "failed" ? "error" : "tool",
         createdAt: event.occurredAt,
-        parentTurnId: parentThread.latestTurn?.turnId ?? null,
+        parentTurnId,
         subagentId: parentSubagentId,
         childThreadId: childThread.id,
         label: childThread.title,

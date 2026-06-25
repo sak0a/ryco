@@ -1230,6 +1230,24 @@ const make = Effect.gen(function* () {
       });
     });
 
+  const bufferedSubagentProviderItemIds = (input: {
+    threadId: ThreadId;
+    providerThreadId: string;
+  }): ReadonlyArray<string> => {
+    const prefix = subagentMessageBufferKey({
+      threadId: input.threadId,
+      providerThreadId: input.providerThreadId,
+      providerItemId: "",
+    });
+    const providerItemIds = new Set<string>();
+    for (const key of subagentMessageTextByKey.keys()) {
+      if (key.startsWith(prefix)) {
+        providerItemIds.add(key.slice(prefix.length));
+      }
+    }
+    return [...providerItemIds];
+  };
+
   const clearSubagentMessageBuffersForThread = (threadId: ThreadId) =>
     Effect.sync(() => {
       const prefix = `${threadId}:`;
@@ -2015,16 +2033,28 @@ const make = Effect.gen(function* () {
       }
 
       if (event.type === "subagent.completed") {
-        yield* completeSubagentMessage({
-          event,
+        const subagentId = String(event.payload.subagent.subagentId);
+        const providerThreadId = event.payload.subagent.providerThreadId ?? subagentId;
+        const providerItemIds = bufferedSubagentProviderItemIds({
           threadId: thread.id,
-          subagentId: String(event.payload.subagent.subagentId),
-          providerThreadId:
-            event.payload.subagent.providerThreadId ?? String(event.payload.subagent.subagentId),
-          providerItemId: String(event.payload.subagent.subagentId),
-          ...(event.payload.summary !== undefined ? { fallbackText: event.payload.summary } : {}),
-          createdAt: now,
+          providerThreadId,
         });
+        yield* Effect.forEach(
+          providerItemIds.length > 0 ? providerItemIds : [subagentId],
+          (providerItemId) =>
+            completeSubagentMessage({
+              event,
+              threadId: thread.id,
+              subagentId,
+              providerThreadId,
+              providerItemId,
+              ...(event.payload.summary !== undefined
+                ? { fallbackText: event.payload.summary }
+                : {}),
+              createdAt: now,
+            }),
+          { concurrency: 1, discard: true },
+        );
       }
 
       if (proposedPlanCompletion) {

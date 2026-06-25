@@ -47,6 +47,7 @@ import {
 import { resolveEnvironmentHttpUrl } from "./environments/runtime";
 import { sanitizeThreadErrorMessage } from "./rpc/transportError";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
+import { isNormalThreadVisibility } from "./threadVisibility";
 import {
   isWebPerfProfileEnabled,
   readWebPerfNow,
@@ -2411,15 +2412,11 @@ export function selectThreadShellsAcrossEnvironments(state: AppState): ThreadShe
   );
 }
 
-function isNormalThreadListSummary(thread: SidebarThreadSummary): boolean {
-  return thread.visibility !== "nested" && thread.threadKind !== "managed-subagent";
-}
-
 export function selectSidebarThreadsAcrossEnvironments(state: AppState): SidebarThreadSummary[] {
   return getEnvironmentEntries(state).flatMap(([environmentId, environmentState]) =>
     environmentState.threadIds.flatMap((threadId) => {
       const thread = environmentState.sidebarThreadSummaryById[threadId];
-      return thread && thread.environmentId === environmentId && isNormalThreadListSummary(thread)
+      return thread && thread.environmentId === environmentId && isNormalThreadVisibility(thread)
         ? [thread]
         : [];
     }),
@@ -2473,7 +2470,7 @@ export function selectSidebarThreadsForProjectRef(
   const threadIds = environmentState.threadIdsByProjectId[ref.projectId] ?? EMPTY_THREAD_IDS;
   return threadIds.flatMap((threadId) => {
     const thread = environmentState.sidebarThreadSummaryById[threadId];
-    return thread && isNormalThreadListSummary(thread) ? [thread] : [];
+    return thread && isNormalThreadVisibility(thread) ? [thread] : [];
   });
 }
 

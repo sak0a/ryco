@@ -66,6 +66,11 @@ import { DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { useComposerHandleContext } from "../composerHandleContext";
 import { cn, randomUUID } from "~/lib/utils";
 import { useSettings } from "../hooks/useSettings";
+import {
+  clampManagedSubagentCount,
+  MAX_MANAGED_SUBAGENT_COUNT,
+  MIN_MANAGED_SUBAGENT_COUNT,
+} from "../managedSubagents";
 import type { Thread } from "../types";
 import {
   resolveSidebarStatusTextClassName,
@@ -539,13 +544,6 @@ function LauncherCard(props: {
   );
 }
 
-function clampManagedSubagentCount(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 1;
-  }
-  return Math.min(4, Math.max(1, Math.trunc(value)));
-}
-
 function resolveManagedSubagentDefaultSelection(input: {
   thread: Thread | null | undefined;
   settings: UnifiedSettings;
@@ -790,7 +788,7 @@ function ManagedSubagentLauncher(props: { thread: Thread | null | undefined }) {
                 size="icon-xs"
                 variant="outline"
                 aria-label="Decrease subagent count"
-                disabled={launching || count <= 1}
+                disabled={launching || count <= MIN_MANAGED_SUBAGENT_COUNT}
                 onClick={() => updateCount(count - 1)}
               >
                 <MinusIcon className="size-3.5" />
@@ -800,8 +798,8 @@ function ManagedSubagentLauncher(props: { thread: Thread | null | undefined }) {
                 size="sm"
                 nativeInput
                 type="number"
-                min={1}
-                max={4}
+                min={MIN_MANAGED_SUBAGENT_COUNT}
+                max={MAX_MANAGED_SUBAGENT_COUNT}
                 value={count}
                 disabled={launching}
                 aria-label="Subagent count"
@@ -811,7 +809,7 @@ function ManagedSubagentLauncher(props: { thread: Thread | null | undefined }) {
                 size="icon-xs"
                 variant="outline"
                 aria-label="Increase subagent count"
-                disabled={launching || count >= 4}
+                disabled={launching || count >= MAX_MANAGED_SUBAGENT_COUNT}
                 onClick={() => updateCount(count + 1)}
               >
                 <PlusIcon className="size-3.5" />

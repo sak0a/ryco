@@ -4,6 +4,7 @@ import { sortThreads, type ThreadSortInput } from "./lib/threadSort";
 import { selectEnvironmentState, type AppState, type EnvironmentState } from "./store";
 import { type Project, type SidebarThreadSummary, type Thread, type ThreadShell } from "./types";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
+import { isNormalThreadVisibility } from "./threadVisibility";
 
 export function createProjectSelectorByRef(
   ref: ScopedProjectRef | null | undefined,
@@ -71,24 +72,18 @@ export function createThreadSelectorAcrossEnvironments(
 
 type FallbackThreadCandidate = Pick<SidebarThreadSummary, "id"> & ThreadSortInput;
 
-function isNormalFallbackThread(
-  thread: Pick<SidebarThreadSummary, "threadKind" | "visibility"> | ThreadShell,
-): boolean {
-  return thread.visibility !== "nested" && thread.threadKind !== "managed-subagent";
-}
-
 const toFallbackThreadCandidate = (
   threadId: ThreadId,
   summary: SidebarThreadSummary | undefined,
   shell: ThreadShell | undefined,
 ): FallbackThreadCandidate | null => {
   if (summary) {
-    return isNormalFallbackThread(summary) ? summary : null;
+    return isNormalThreadVisibility(summary) ? summary : null;
   }
   if (!shell) {
     return null;
   }
-  if (!isNormalFallbackThread(shell)) {
+  if (!isNormalThreadVisibility(shell)) {
     return null;
   }
   return {

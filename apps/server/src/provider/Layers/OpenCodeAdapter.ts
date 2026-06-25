@@ -1582,8 +1582,8 @@ export function makeOpenCodeAdapter(
             providerThreadId: started.openCodeSession.id,
           },
         });
-        yield* hydrateOpenCodeChildSessions(context);
         yield* startEventPump(context);
+        yield* hydrateOpenCodeChildSessions(context).pipe(Effect.forkIn(context.sessionScope));
 
         return session;
       },

@@ -6,6 +6,7 @@ import {
   resolveThreadStatusPill,
   type SidebarStatusBucket,
 } from "./components/Sidebar.logic";
+import { isNormalThreadVisibility } from "./threadVisibility";
 import { DEFAULT_AGENT_TOKEN_MODE, type SidebarThreadSummary } from "./types";
 
 export interface SessionTabsFilter {
@@ -58,7 +59,7 @@ interface CachedItem {
 // "no worktreePath, no worktreeId" as the main worktree (groups threads
 // with worktreePath === null together).
 function threadBelongsToFilter(thread: SidebarThreadSummary, filter: SessionTabsFilter): boolean {
-  if (thread.visibility === "nested" || thread.threadKind === "managed-subagent") {
+  if (!isNormalThreadVisibility(thread)) {
     return false;
   }
   if (thread.worktreeId !== undefined && thread.worktreeId !== null && filter.worktreeId) {

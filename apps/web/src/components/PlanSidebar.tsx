@@ -47,6 +47,11 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { readEnvironmentApi } from "~/environmentApi";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import {
+  clampManagedSubagentCount,
+  MAX_MANAGED_SUBAGENT_COUNT,
+  MIN_MANAGED_SUBAGENT_COUNT,
+} from "../managedSubagents";
 import type { ThreadSubagentView } from "../threadWorkspaceViewModel";
 import {
   resolveSidebarStatusTextClassName,
@@ -388,7 +393,7 @@ const PlanSidebar = memo(function PlanSidebar({
     if (!prompt || !onLaunchManagedSubagents || subagentLaunchPending) {
       return;
     }
-    const count = Math.min(Math.max(Math.trunc(subagentCount), 1), 4);
+    const count = clampManagedSubagentCount(subagentCount);
     setSubagentLaunchPending(true);
     try {
       await onLaunchManagedSubagents({ prompt, count });
@@ -887,11 +892,13 @@ const PlanSidebar = memo(function PlanSidebar({
                             aria-label="Subagent count"
                             className="w-20"
                             disabled={!canLaunchSubagents || subagentLaunchPending}
-                            max={4}
-                            min={1}
+                            max={MAX_MANAGED_SUBAGENT_COUNT}
+                            min={MIN_MANAGED_SUBAGENT_COUNT}
                             nativeInput
                             onChange={(event) =>
-                              setSubagentCount(Number(event.currentTarget.value) || 1)
+                              setSubagentCount(
+                                clampManagedSubagentCount(Number(event.currentTarget.value)),
+                              )
                             }
                             size="sm"
                             type="number"

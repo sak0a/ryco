@@ -258,8 +258,14 @@ function normalizeToolKind(kind: unknown): string | undefined {
 function containsSubagentKeyword(value: string | undefined): boolean {
   return (
     value !== undefined &&
-    /\b(sub[-\s]?agent|agent|subtask|task|delegate|delegation|worker)\b/i.test(value)
+    /\b(sub[-\s]?agent|subtask|delegate|delegation)\b/i.test(value)
   );
+}
+
+function hasExplicitSubagentType(data: Record<string, unknown> | undefined): boolean {
+  const rawInput = isRecord(data?.rawInput) ? data.rawInput : undefined;
+  const subagentType = rawInput?.subagent_type;
+  return typeof subagentType === "string" && subagentType.trim().length > 0;
 }
 
 export function isAcpSubagentToolCall(input: {
@@ -277,13 +283,14 @@ export function isAcpSubagentToolCall(input: {
   ) {
     return true;
   }
+  if (hasExplicitSubagentType(input.data)) {
+    return true;
+  }
+
   const rawInput = isRecord(input.data?.rawInput) ? input.data.rawInput : undefined;
   return (
     containsSubagentKeyword(typeof rawInput?.tool === "string" ? rawInput.tool : undefined) ||
-    containsSubagentKeyword(typeof rawInput?.name === "string" ? rawInput.name : undefined) ||
-    containsSubagentKeyword(
-      typeof rawInput?.subagent_type === "string" ? rawInput.subagent_type : undefined,
-    )
+    containsSubagentKeyword(typeof rawInput?.name === "string" ? rawInput.name : undefined)
   );
 }
 
