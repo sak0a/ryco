@@ -90,7 +90,6 @@ describe("ThreadWorkspacePanel", () => {
       detail: "Inspect the retry flow.",
       providerThreadIds: ["child-thread-1"],
       providerSessionIds: [],
-      childThreadIds: [],
       startedAt: "2026-06-04T10:00:00.000Z",
       updatedAt: "2026-06-04T10:00:00.000Z",
       entries: [],

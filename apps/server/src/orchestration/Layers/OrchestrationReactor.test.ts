@@ -2,7 +2,6 @@ import { Effect, Exit, Layer, ManagedRuntime, Scope } from "effect";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
-import { ManagedSubagentReactor } from "../Services/ManagedSubagentReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
@@ -19,7 +18,7 @@ describe("OrchestrationReactor", () => {
     runtime = null;
   });
 
-  it("starts provider ingestion, provider command, checkpoint, thread deletion, and managed subagent reactors", async () => {
+  it("starts provider ingestion, provider command, checkpoint, and thread deletion reactors", async () => {
     const started: string[] = [];
 
     runtime = ManagedRuntime.make(
@@ -60,15 +59,6 @@ describe("OrchestrationReactor", () => {
             drain: Effect.void,
           }),
         ),
-        Layer.provideMerge(
-          Layer.succeed(ManagedSubagentReactor, {
-            start: () => {
-              started.push("managed-subagent-reactor");
-              return Effect.void;
-            },
-            drain: Effect.void,
-          }),
-        ),
       ),
     );
 
@@ -76,14 +66,13 @@ describe("OrchestrationReactor", () => {
     const scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
 
-    expect(started).toHaveLength(5);
+    expect(started).toHaveLength(4);
     expect(new Set(started)).toEqual(
       new Set([
         "provider-runtime-ingestion",
         "provider-command-reactor",
         "checkpoint-reactor",
         "thread-deletion-reactor",
-        "managed-subagent-reactor",
       ]),
     );
 

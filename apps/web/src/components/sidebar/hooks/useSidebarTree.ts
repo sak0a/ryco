@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import type { DraftId } from "../../../composerDraftStore";
-import { isNormalThreadVisibility } from "../../../threadVisibility";
 import type { Project, SidebarThreadSummary } from "../../../types";
 import {
   aggregateWorktreeStatus,
@@ -92,8 +91,7 @@ export type UseSidebarTreeInput = Omit<ComposeSidebarTreeInput, "nowMs"> & {
 };
 
 export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree {
-  const visibleThreads = input.threads.filter(isNormalThreadVisibility);
-  const threadsByProjectId = groupBy(visibleThreads, (thread) => thread.projectId);
+  const threadsByProjectId = groupBy(input.threads, (thread) => thread.projectId);
   const allThreadsByProjectId = groupBy(input.threads, (thread) => thread.projectId);
   const explicitWorktreesByProjectId = groupBy(input.worktrees ?? [], (worktree) =>
     String(worktree.projectId),

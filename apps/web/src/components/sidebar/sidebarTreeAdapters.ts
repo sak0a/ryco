@@ -223,16 +223,12 @@ function adaptDraftThreadForSidebarTree(input: {
     latestTurn: null,
     latestUserMessageAt: null,
     manualStatusBucket: null,
-    parentSubagentId: null,
-    parentThreadId: null,
     projectId: input.logicalProjectId,
     session: null,
     sourceProjectId: input.draftThread.projectId,
     statusPill: null,
-    threadKind: "normal",
     title: "Empty Session",
     updatedAt: input.draftThread.createdAt,
-    visibility: "normal",
     worktreePath: input.draftThread.worktreePath,
   };
 }

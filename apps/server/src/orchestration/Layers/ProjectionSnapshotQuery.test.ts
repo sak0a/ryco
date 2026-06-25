@@ -296,10 +296,6 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           branch: null,
           worktreePath: null,
           worktreeId: null,
-          threadKind: "normal",
-          visibility: "normal",
-          parentThreadId: null,
-          parentSubagentId: null,
           manualStatusBucket: null,
           manualPosition: 0,
           latestTurn: {
@@ -419,10 +415,6 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           branch: null,
           worktreePath: null,
           worktreeId: null,
-          threadKind: "normal",
-          visibility: "normal",
-          parentThreadId: null,
-          parentSubagentId: null,
           manualStatusBucket: null,
           manualPosition: 0,
           latestTurn: {

@@ -174,8 +174,6 @@ export interface ChatOverviewPanelProps {
   onOpenFiles: () => void;
   onOpenReview: () => void;
   onOpenSubagent: (subagent: ThreadSubagentView) => void;
-  onLaunchManagedSubagents: (input: { prompt: string; count: number }) => void | Promise<void>;
-  canLaunchManagedSubagents: boolean;
 }
 
 export function usePostPushWorkflowWatch() {
@@ -342,8 +340,6 @@ export function ChatOverviewPanel(
     onOpenFiles,
     onOpenReview,
     onOpenSubagent,
-    onLaunchManagedSubagents,
-    canLaunchManagedSubagents,
     onPostPushDiscoveryComplete,
   } = props;
 
@@ -644,8 +640,6 @@ export function ChatOverviewPanel(
       onOpenFiles={onOpenFiles}
       onOpenReview={onOpenReview}
       onOpenSubagent={onOpenSubagent}
-      onLaunchManagedSubagents={onLaunchManagedSubagents}
-      canLaunchManagedSubagents={canLaunchManagedSubagents}
     />
   );
 }

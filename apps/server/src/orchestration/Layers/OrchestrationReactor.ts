@@ -8,14 +8,12 @@ import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
-import { ManagedSubagentReactor } from "../Services/ManagedSubagentReactor.ts";
 
 export const makeOrchestrationReactor = Effect.gen(function* () {
   const providerRuntimeIngestion = yield* ProviderRuntimeIngestionService;
   const providerCommandReactor = yield* ProviderCommandReactor;
   const checkpointReactor = yield* CheckpointReactor;
   const threadDeletionReactor = yield* ThreadDeletionReactor;
-  const managedSubagentReactor = yield* ManagedSubagentReactor;
 
   const start: OrchestrationReactorShape["start"] = Effect.fn("start")(function* () {
     yield* Effect.all(
@@ -24,7 +22,6 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
         providerCommandReactor.start(),
         checkpointReactor.start(),
         threadDeletionReactor.start(),
-        managedSubagentReactor.start(),
       ],
       { concurrency: "unbounded", discard: true },
     );

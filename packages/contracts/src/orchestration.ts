@@ -12,7 +12,6 @@ import {
   PositiveInt,
   ProjectId,
   ProviderItemId,
-  RuntimeSubagentId,
   ThreadId,
   TrimmedNonEmptyString,
   TurnId,
@@ -134,12 +133,6 @@ export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "defau
 export const AgentTokenMode = Schema.Literals(["off", "balanced", "aggressive"]);
 export type AgentTokenMode = typeof AgentTokenMode.Type;
 export const DEFAULT_AGENT_TOKEN_MODE: AgentTokenMode = "balanced";
-export const ThreadKind = Schema.Literals(["normal", "managed-subagent"]);
-export type ThreadKind = typeof ThreadKind.Type;
-export const DEFAULT_THREAD_KIND: ThreadKind = "normal";
-export const ThreadVisibility = Schema.Literals(["normal", "nested"]);
-export type ThreadVisibility = typeof ThreadVisibility.Type;
-export const DEFAULT_THREAD_VISIBILITY: ThreadVisibility = "normal";
 export const ProviderRequestKind = Schema.Literals(["command", "file-read", "file-change"]);
 export type ProviderRequestKind = typeof ProviderRequestKind.Type;
 export const AssistantDeliveryMode = Schema.Literals(["buffered", "streaming"]);
@@ -383,18 +376,6 @@ export const OrchestrationThread = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   worktreeId: Schema.optional(Schema.NullOr(WorktreeId)),
-  threadKind: Schema.optional(ThreadKind).pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_KIND)),
-  ),
-  visibility: Schema.optional(ThreadVisibility).pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_VISIBILITY)),
-  ),
-  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-  parentSubagentId: Schema.optional(Schema.NullOr(RuntimeSubagentId)).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
   manualStatusBucket: Schema.optional(Schema.NullOr(StatusBucket)),
   manualPosition: Schema.optional(Schema.Number),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
@@ -459,18 +440,6 @@ export const OrchestrationThreadShell = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   worktreeId: Schema.optional(Schema.NullOr(WorktreeId)),
-  threadKind: Schema.optional(ThreadKind).pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_KIND)),
-  ),
-  visibility: Schema.optional(ThreadVisibility).pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_VISIBILITY)),
-  ),
-  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-  parentSubagentId: Schema.optional(Schema.NullOr(RuntimeSubagentId)).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
   manualStatusBucket: Schema.optional(Schema.NullOr(StatusBucket)),
   manualPosition: Schema.optional(Schema.Number),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
@@ -604,31 +573,6 @@ const ThreadCreateCommand = Schema.Struct({
   tokenMode: Schema.optionalKey(AgentTokenMode),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
-  threadKind: Schema.optional(ThreadKind).pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_KIND)),
-  ),
-  visibility: Schema.optional(ThreadVisibility).pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_VISIBILITY)),
-  ),
-  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-  parentSubagentId: Schema.optional(Schema.NullOr(RuntimeSubagentId)).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-  createdAt: IsoDateTime,
-});
-
-const ThreadManagedSubagentsLaunchCommand = Schema.Struct({
-  type: Schema.Literal("thread.managed-subagents.launch"),
-  commandId: CommandId,
-  threadId: ThreadId,
-  prompt: TrimmedNonEmptyString,
-  title: Schema.optional(TrimmedNonEmptyString),
-  modelSelection: Schema.optional(ModelSelection),
-  count: PositiveInt.check(Schema.isLessThanOrEqualTo(4)).pipe(
-    Schema.withDecodingDefault(Effect.succeed(1)),
-  ),
   createdAt: IsoDateTime,
 });
 
@@ -693,18 +637,6 @@ const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   tokenMode: Schema.optionalKey(AgentTokenMode),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
-  threadKind: Schema.optional(ThreadKind).pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_KIND)),
-  ),
-  visibility: Schema.optional(ThreadVisibility).pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_VISIBILITY)),
-  ),
-  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-  parentSubagentId: Schema.optional(Schema.NullOr(RuntimeSubagentId)).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
   createdAt: IsoDateTime,
 });
 
@@ -917,7 +849,6 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTokenModeSetCommand,
-  ThreadManagedSubagentsLaunchCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -951,7 +882,6 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTokenModeSetCommand,
-  ThreadManagedSubagentsLaunchCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -1066,7 +996,6 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.token-mode-set",
-  "thread.managed-subagents-launch-requested",
   "thread.message-sent",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
@@ -1147,18 +1076,6 @@ export const ThreadCreatedPayload = Schema.Struct({
   tokenMode: Schema.optionalKey(AgentTokenMode),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
-  threadKind: Schema.optional(ThreadKind).pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_KIND)),
-  ),
-  visibility: Schema.optional(ThreadVisibility).pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_VISIBILITY)),
-  ),
-  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-  parentSubagentId: Schema.optional(Schema.NullOr(RuntimeSubagentId)).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1206,17 +1123,6 @@ export const ThreadTokenModeSetPayload = Schema.Struct({
   threadId: ThreadId,
   tokenMode: Schema.optionalKey(AgentTokenMode),
   updatedAt: IsoDateTime,
-});
-
-export const ThreadManagedSubagentsLaunchRequestedPayload = Schema.Struct({
-  threadId: ThreadId,
-  prompt: TrimmedNonEmptyString,
-  title: Schema.optional(TrimmedNonEmptyString),
-  modelSelection: Schema.optional(ModelSelection),
-  count: PositiveInt.check(Schema.isLessThanOrEqualTo(4)).pipe(
-    Schema.withDecodingDefault(Effect.succeed(1)),
-  ),
-  createdAt: IsoDateTime,
 });
 
 export const ThreadMessageSentPayload = Schema.Struct({
@@ -1470,11 +1376,6 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.token-mode-set"),
     payload: ThreadTokenModeSetPayload,
-  }),
-  Schema.Struct({
-    ...EventBaseFields,
-    type: Schema.Literal("thread.managed-subagents-launch-requested"),
-    payload: ThreadManagedSubagentsLaunchRequestedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

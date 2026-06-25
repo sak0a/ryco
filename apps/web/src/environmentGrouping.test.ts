@@ -69,10 +69,6 @@ function makeSidebarThreadSummary(
     latestTurn: null,
     branch: null,
     worktreePath: null,
-    threadKind: "normal",
-    visibility: "normal",
-    parentThreadId: null,
-    parentSubagentId: null,
     latestUserMessageAt: null,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
@@ -477,25 +473,6 @@ describe("environment grouping", () => {
       expect(ids).toContain(threadRO1);
     });
 
-    it("hides nested managed subagent threads", () => {
-      const state = makeFixtureState();
-      const childThreadId = ThreadId.make("thread-managed-child");
-      state.environmentStateById[primaryEnvId]!.threadIds.push(childThreadId);
-      state.environmentStateById[primaryEnvId]!.sidebarThreadSummaryById[childThreadId] =
-        makeSidebarThreadSummary({
-          id: childThreadId,
-          environmentId: primaryEnvId,
-          projectId: sharedProjectPrimaryId,
-          title: "Managed child",
-          threadKind: "managed-subagent",
-          visibility: "nested",
-          parentThreadId: threadP1,
-          parentSubagentId: "subagent-managed-child" as never,
-        });
-
-      const threads = selectSidebarThreadsAcrossEnvironments(state);
-      expect(threads.map((thread) => thread.id)).not.toContain(childThreadId);
-    });
   });
 
   describe("selectSidebarThreadsForProjectRef", () => {

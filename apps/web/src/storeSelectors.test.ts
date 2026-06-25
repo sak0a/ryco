@@ -70,10 +70,6 @@ const makeSummary = (
   latestTurn: null,
   branch: null,
   worktreePath: null,
-  threadKind: "normal",
-  visibility: "normal",
-  parentThreadId: null,
-  parentSubagentId: null,
   latestUserMessageAt: null,
   hasPendingApprovals: false,
   hasPendingUserInput: false,
@@ -99,10 +95,6 @@ const makeShell = (id: ThreadId, overrides: Partial<ThreadShell> = {}): ThreadSh
   archivedAt: null,
   branch: null,
   worktreePath: null,
-  threadKind: "normal",
-  visibility: "normal",
-  parentThreadId: null,
-  parentSubagentId: null,
   ...overrides,
 });
 
@@ -161,26 +153,4 @@ describe("createEnvironmentFallbackThreadRefSelector", () => {
     expect(selector(state)).toEqual({ environmentId, threadId: threadA });
   });
 
-  it("does not use nested managed subagent summaries or shells as fallbacks", () => {
-    const state = makeState(
-      makeEnvironmentState({
-        threadIds: [threadA, threadB],
-        sidebarThreadSummaryById: {
-          [threadA]: makeSummary(threadA, {
-            latestUserMessageAt: "2026-06-12T12:00:00.000Z",
-            threadKind: "managed-subagent",
-            visibility: "nested",
-            parentThreadId: threadB,
-            parentSubagentId: "subagent-a" as never,
-          }),
-        },
-        threadShellById: {
-          [threadB]: makeShell(threadB),
-        },
-      }),
-    );
-    const selector = createEnvironmentFallbackThreadRefSelector(environmentId, "updated_at");
-
-    expect(selector(state)).toEqual({ environmentId, threadId: threadB });
-  });
 });

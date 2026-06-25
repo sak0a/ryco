@@ -494,10 +494,10 @@ const TaskCompletedPayload = Schema.Struct({
 });
 export type TaskCompletedPayload = typeof TaskCompletedPayload.Type;
 
-export const RuntimeSubagentOrigin = Schema.Literals(["native", "managed", "inferred"]);
+export const RuntimeSubagentOrigin = Schema.Literals(["native", "inferred"]);
 export type RuntimeSubagentOrigin = typeof RuntimeSubagentOrigin.Type;
 
-export const RuntimeSubagentCapability = Schema.Literals(["transcript", "summary", "managed"]);
+export const RuntimeSubagentCapability = Schema.Literals(["transcript", "summary"]);
 export type RuntimeSubagentCapability = typeof RuntimeSubagentCapability.Type;
 
 export const RuntimeSubagentStatus = Schema.Literals([
@@ -519,7 +519,6 @@ export const SubagentRef = Schema.Struct({
   providerThreadId: Schema.optional(TrimmedNonEmptyStringSchema),
   providerTaskId: Schema.optional(RuntimeTaskId),
   parentProviderItemId: Schema.optional(ProviderItemId),
-  childThreadId: Schema.optional(ThreadId),
   metadata: Schema.optional(UnknownRecordSchema),
 });
 export type SubagentRef = typeof SubagentRef.Type;

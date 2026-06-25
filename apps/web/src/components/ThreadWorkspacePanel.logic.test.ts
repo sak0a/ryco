@@ -14,7 +14,6 @@ function makeSubagent(overrides: Pick<ThreadSubagentView, "key" | "name">): Thre
     detail: null,
     providerThreadIds: [],
     providerSessionIds: [],
-    childThreadIds: [],
     startedAt: "2026-06-04T10:00:00.000Z",
     updatedAt: "2026-06-04T10:00:00.000Z",
     entries: [],

@@ -7,8 +7,6 @@ import type {
 } from "@ryco/contracts";
 import {
   DEFAULT_AGENT_TOKEN_MODE,
-  DEFAULT_THREAD_KIND,
-  DEFAULT_THREAD_VISIBILITY,
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestrationSession,
@@ -325,10 +323,6 @@ export function projectEvent(
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             worktreeId: null,
-            threadKind: payload.threadKind ?? DEFAULT_THREAD_KIND,
-            visibility: payload.visibility ?? DEFAULT_THREAD_VISIBILITY,
-            parentThreadId: payload.parentThreadId ?? null,
-            parentSubagentId: payload.parentSubagentId ?? null,
             manualStatusBucket: null,
             manualPosition: 0,
             latestTurn: null,

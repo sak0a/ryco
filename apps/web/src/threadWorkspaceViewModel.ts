@@ -21,7 +21,6 @@ export interface ThreadSubagentView {
   detail: string | null;
   providerThreadIds: string[];
   providerSessionIds?: string[];
-  childThreadIds?: string[];
   startedAt: string;
   updatedAt: string;
   entries: WorkLogEntry[];
@@ -38,7 +37,6 @@ interface MutableThreadSubagentView {
   detail: string | null;
   providerThreadIds: Set<string>;
   providerSessionIds: Set<string>;
-  childThreadIds: Set<string>;
   startedAt: string;
   updatedAt: string;
   entries: WorkLogEntry[];
@@ -182,15 +180,6 @@ function extractProviderSessionIds(payload: Record<string, unknown> | null): str
     asTrimmedString(subagent?.providerSessionId),
     ...asStringArray(subagent?.providerSessionIds),
     asTrimmedString(payload?.providerSessionId),
-  ].filter((id): id is string => id !== null);
-}
-
-function extractChildThreadIds(payload: Record<string, unknown> | null): string[] {
-  const subagent = canonicalSubagentFromPayload(payload);
-  return [
-    asTrimmedString(subagent?.childThreadId),
-    ...asStringArray(subagent?.childThreadIds),
-    asTrimmedString(payload?.childThreadId),
   ].filter((id): id is string => id !== null);
 }
 
@@ -583,7 +572,6 @@ export function deriveThreadSubagents(
     const canonicalSubagentId = extractCanonicalSubagentId(payload);
     const providerThreadIds = extractProviderThreadIds(payload);
     const providerSessionIds = extractProviderSessionIds(payload);
-    const childThreadIds = extractChildThreadIds(payload);
     const origin = extractSubagentOrigin(payload);
     const capability = extractSubagentCapability(payload);
     const tool = extractSubagentTool(payload);
@@ -605,7 +593,6 @@ export function deriveThreadSubagents(
       existing.tool = existing.tool ?? tool;
       mergeProviderThreadIds(existing.providerThreadIds, providerThreadIds);
       mergeStringSet(existing.providerSessionIds, providerSessionIds);
-      mergeStringSet(existing.childThreadIds, childThreadIds);
       existing.status = applyStatus(existing.status, status);
       existing.updatedAt = activity.createdAt;
       continue;
@@ -621,7 +608,6 @@ export function deriveThreadSubagents(
       detail,
       providerThreadIds: new Set(providerThreadIds),
       providerSessionIds: new Set(providerSessionIds),
-      childThreadIds: new Set(childThreadIds),
       startedAt: activity.createdAt,
       updatedAt: activity.createdAt,
       entries: [],
@@ -673,7 +659,6 @@ export function deriveThreadSubagents(
       detail,
       providerThreadIds: new Set(),
       providerSessionIds: new Set(),
-      childThreadIds: new Set(),
       startedAt: entry.createdAt,
       updatedAt: entry.createdAt,
       entries: [entry],
@@ -699,7 +684,6 @@ export function deriveThreadSubagents(
         detail: subagent.detail,
         providerThreadIds: [...subagent.providerThreadIds],
         providerSessionIds: [...subagent.providerSessionIds],
-        childThreadIds: [...subagent.childThreadIds],
         startedAt: subagent.startedAt,
         updatedAt: subagent.updatedAt,
         entries: subagent.entries,

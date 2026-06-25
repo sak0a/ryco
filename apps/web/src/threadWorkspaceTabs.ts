@@ -52,7 +52,6 @@ export function buildTabs(input: {
       detail: null,
       providerThreadIds: [],
       providerSessionIds: [],
-      childThreadIds: [],
       startedAt: "",
       updatedAt: "",
       entries: [],
