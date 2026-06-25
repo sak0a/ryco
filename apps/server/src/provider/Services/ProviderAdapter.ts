@@ -23,6 +23,8 @@ import type {
 import type { Effect } from "effect";
 import type { Stream } from "effect";
 
+import type { ProviderBrowserToolSupport } from "../tools/BrowserRuntimeTool.ts";
+
 export type ProviderSessionModelSwitchMode = "in-session" | "unsupported";
 
 export interface ProviderAdapterCapabilities {
@@ -30,6 +32,9 @@ export interface ProviderAdapterCapabilities {
    * Declares whether changing the model on an existing session is supported.
    */
   readonly sessionModelSwitch: ProviderSessionModelSwitchMode;
+  readonly runtimeTools?: {
+    readonly browser: ProviderBrowserToolSupport;
+  };
 }
 
 export interface ProviderThreadTurnSnapshot {

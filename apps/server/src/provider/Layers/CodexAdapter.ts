@@ -48,6 +48,7 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
+import { resolveProviderBrowserToolSupport } from "../tools/BrowserRuntimeTool.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
@@ -1810,6 +1811,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      runtimeTools: {
+        browser: resolveProviderBrowserToolSupport(PROVIDER),
+      },
     },
     startSession,
     sendTurn,

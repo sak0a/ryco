@@ -30,6 +30,7 @@ import {
   ProviderAdapterValidationError,
 } from "../Errors.ts";
 import { type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
+import { resolveProviderBrowserToolSupport } from "../tools/BrowserRuntimeTool.ts";
 import {
   buildOpenCodePermissionRules,
   OpenCodeRuntime,
@@ -1433,6 +1434,9 @@ export function makeOpenCodeAdapter(
       provider: PROVIDER,
       capabilities: {
         sessionModelSwitch: "in-session",
+        runtimeTools: {
+          browser: resolveProviderBrowserToolSupport(PROVIDER),
+        },
       },
       startSession,
       sendTurn,

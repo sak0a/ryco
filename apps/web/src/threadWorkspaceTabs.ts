@@ -7,7 +7,7 @@ import {
 
 export type WorkspaceTab =
   | {
-      key: "files" | "review" | "terminal";
+      key: "files" | "review" | "terminal" | "browser";
       label: string;
       mode: Exclude<RightPanelMode, "agent">;
     }
@@ -35,6 +35,9 @@ export function buildTabs(input: {
   }
   if (openedModes.has("terminal")) {
     tabs.push({ key: "terminal", label: "Terminal", mode: "terminal" });
+  }
+  if (openedModes.has("browser")) {
+    tabs.push({ key: "browser", label: "Browser", mode: "browser" });
   }
 
   const visibleAgentKeys = [

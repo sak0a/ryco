@@ -15,7 +15,7 @@ import {
 } from "./http.ts";
 import { ProjectAvatarStoreLive } from "./project/Layers/ProjectAvatarStore.ts";
 import { fixPath } from "./os-jank.ts";
-import { websocketRpcRouteLayer } from "./ws.ts";
+import { browserHostRpcRouteLayer, websocketRpcRouteLayer } from "./ws.ts";
 import { OpenLive } from "./open.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
@@ -79,6 +79,7 @@ import {
   authWebSocketTokenRouteLayer,
 } from "./auth/http.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
+import { BrowserHostAuthLive } from "./auth/Layers/BrowserHostAuth.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
 import * as AtlassianConnectionService from "./atlassian/AtlassianConnectionService.ts";
 import * as JiraWorkItemService from "./atlassian/JiraWorkItemService.ts";
@@ -98,6 +99,10 @@ import {
 } from "./orchestration/http.ts";
 import { NetService } from "@ryco/shared/Net";
 import { disableTailscaleServe, ensureTailscaleServe } from "@ryco/tailscale";
+import { BrowserArtifactStoreLive } from "./browser/BrowserArtifactStore.ts";
+import { BrowserHostRegistryLive } from "./browser/BrowserHostRegistry.ts";
+import { BrowserPolicyLive } from "./browser/BrowserPolicy.ts";
+import { BrowserServiceLive } from "./browser/BrowserService.ts";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -239,6 +244,12 @@ const CheckpointingLayerLive = Layer.empty.pipe(
 
 const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
 
+const BrowserLayerLive = BrowserServiceLive.pipe(
+  Layer.provideMerge(BrowserHostRegistryLive),
+  Layer.provideMerge(BrowserPolicyLive),
+  Layer.provideMerge(BrowserArtifactStoreLive),
+);
+
 const WorkspaceEntriesLayerLive = WorkspaceEntriesLive.pipe(
   Layer.provide(WorkspacePathsLive),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
@@ -284,6 +295,7 @@ const RuntimeCoreBaseDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(TerminalLayerLive),
+  Layer.provideMerge(BrowserLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(ProjectionWorktreeRepositoryLive),
   Layer.provideMerge(KeybindingsLive),
@@ -317,6 +329,7 @@ const RuntimeCoreDependenciesLive = RuntimeCoreBaseDependenciesLive.pipe(
   Layer.provideMerge(ServerEnvironmentLive),
   Layer.provideMerge(AdvertisedEndpointRegistryLive),
   Layer.provideMerge(AuthLayerLive),
+  Layer.provideMerge(BrowserHostAuthLive),
   Layer.provideMerge(AtlassianLayerLive),
 );
 
@@ -362,6 +375,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   legacyServerEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
+  browserHostRpcRouteLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));
 
 export const makeServerLayer = Layer.unwrap(

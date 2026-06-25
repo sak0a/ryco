@@ -129,6 +129,11 @@ import * as SourceControlRepositoryService from "./sourceControl/SourceControlRe
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
+import { BrowserHostAuthLive } from "./auth/Layers/BrowserHostAuth.ts";
+import { BrowserArtifactStoreLive } from "./browser/BrowserArtifactStore.ts";
+import { BrowserHostRegistryLive } from "./browser/BrowserHostRegistry.ts";
+import { BrowserPolicyLive } from "./browser/BrowserPolicy.ts";
+import { BrowserServiceLive } from "./browser/BrowserService.ts";
 import {
   AtlassianConnectionService,
   type AtlassianConnectionServiceShape,
@@ -466,6 +471,7 @@ const buildAppUnderTest = (options?: {
       noBrowser: true,
       startupPresentation: "browser",
       desktopBootstrapToken: defaultDesktopBootstrapToken,
+      desktopBrowserHostToken: undefined,
       autoBootstrapProjectFromCwd: false,
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
@@ -600,6 +606,11 @@ const buildAppUnderTest = (options?: {
           ...options.layers.vcsStatusBroadcaster,
         })
       : VcsStatusBroadcaster.layer.pipe(Layer.provide(gitWorkflowLayer));
+    const browserLayer = BrowserServiceLive.pipe(
+      Layer.provideMerge(BrowserHostRegistryLive),
+      Layer.provideMerge(BrowserPolicyLive),
+      Layer.provideMerge(BrowserArtifactStoreLive),
+    );
 
     const servedRoutesLayer = HttpRouter.serve(makeRoutesLayer, {
       disableListenLog: true,
@@ -843,6 +854,8 @@ const buildAppUnderTest = (options?: {
       Layer.provideMerge(makeAuthTestLayer()),
       Layer.provideMerge(LocalDiagnosticsMetricsLive),
       Layer.provideMerge(AdvertisedEndpointRegistryLive),
+      Layer.provideMerge(browserLayer),
+      Layer.provideMerge(BrowserHostAuthLive),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(layerConfig),

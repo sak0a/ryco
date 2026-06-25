@@ -4,6 +4,24 @@ import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { OpenError, OpenInEditorInput } from "./editor.ts";
 import { AuthAccessStreamEvent, AuthRpcError } from "./auth.ts";
+import {
+  BrowserControlInput,
+  BrowserCookieDeleteInput,
+  BrowserCookieDeleteResult,
+  BrowserEvent,
+  BrowserInputCommandInput,
+  BrowserListProfilesResult,
+  BrowserNavigateInput,
+  BrowserOpenSessionInput,
+  BrowserServiceError,
+  BrowserSessionInput,
+  BrowserSessionSnapshot,
+  BrowserStorageClearInput,
+  BrowserStorageClearResult,
+  BrowserStorageInspectInput,
+  BrowserStorageInspectionResult,
+  BrowserStatusSnapshot,
+} from "./browser.ts";
 import { DiagnosticsError, DiagnosticsSnapshot } from "./diagnostics.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import {
@@ -242,6 +260,23 @@ export const WS_METHODS = {
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
 
+  // Browser methods
+  browserGetStatus: "browser.getStatus",
+  browserListProfiles: "browser.listProfiles",
+  browserOpenSession: "browser.openSession",
+  browserCloseSession: "browser.closeSession",
+  browserGetSnapshot: "browser.getSnapshot",
+  browserNavigate: "browser.navigate",
+  browserBack: "browser.back",
+  browserForward: "browser.forward",
+  browserReload: "browser.reload",
+  browserStop: "browser.stop",
+  browserInput: "browser.input",
+  browserInspectStorage: "browser.inspectStorage",
+  browserClearStorage: "browser.clearStorage",
+  browserDeleteCookie: "browser.deleteCookie",
+  subscribeBrowserEvents: "subscribeBrowserEvents",
+
   // Server meta
   serverGetConfig: "server.getConfig",
   serverGetAdvertisedEndpoints: "server.getAdvertisedEndpoints",
@@ -439,6 +474,97 @@ export type ProjectsInitializeGitInput = typeof ProjectsInitializeGitInput.Type;
 
 export const EmptyRpcResult = Schema.Struct({});
 export type EmptyRpcResult = typeof EmptyRpcResult.Type;
+
+export const WsBrowserGetStatusRpc = Rpc.make(WS_METHODS.browserGetStatus, {
+  payload: Schema.Struct({}),
+  success: BrowserStatusSnapshot,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserListProfilesRpc = Rpc.make(WS_METHODS.browserListProfiles, {
+  payload: Schema.Struct({}),
+  success: BrowserListProfilesResult,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserOpenSessionRpc = Rpc.make(WS_METHODS.browserOpenSession, {
+  payload: BrowserOpenSessionInput,
+  success: BrowserSessionSnapshot,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserCloseSessionRpc = Rpc.make(WS_METHODS.browserCloseSession, {
+  payload: BrowserSessionInput,
+  success: BrowserSessionSnapshot,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserGetSnapshotRpc = Rpc.make(WS_METHODS.browserGetSnapshot, {
+  payload: BrowserSessionInput,
+  success: BrowserSessionSnapshot,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserNavigateRpc = Rpc.make(WS_METHODS.browserNavigate, {
+  payload: BrowserNavigateInput,
+  success: BrowserSessionSnapshot,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserBackRpc = Rpc.make(WS_METHODS.browserBack, {
+  payload: BrowserControlInput,
+  success: BrowserSessionSnapshot,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserForwardRpc = Rpc.make(WS_METHODS.browserForward, {
+  payload: BrowserControlInput,
+  success: BrowserSessionSnapshot,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserReloadRpc = Rpc.make(WS_METHODS.browserReload, {
+  payload: BrowserControlInput,
+  success: BrowserSessionSnapshot,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserStopRpc = Rpc.make(WS_METHODS.browserStop, {
+  payload: BrowserControlInput,
+  success: BrowserSessionSnapshot,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserInputRpc = Rpc.make(WS_METHODS.browserInput, {
+  payload: BrowserInputCommandInput,
+  success: BrowserSessionSnapshot,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserInspectStorageRpc = Rpc.make(WS_METHODS.browserInspectStorage, {
+  payload: BrowserStorageInspectInput,
+  success: BrowserStorageInspectionResult,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserClearStorageRpc = Rpc.make(WS_METHODS.browserClearStorage, {
+  payload: BrowserStorageClearInput,
+  success: BrowserStorageClearResult,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserDeleteCookieRpc = Rpc.make(WS_METHODS.browserDeleteCookie, {
+  payload: BrowserCookieDeleteInput,
+  success: BrowserCookieDeleteResult,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsSubscribeBrowserEventsRpc = Rpc.make(WS_METHODS.subscribeBrowserEvents, {
+  payload: Schema.Struct({}),
+  success: BrowserEvent,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+  stream: true,
+});
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
   payload: ServerUpsertKeybindingInput,
@@ -1194,6 +1320,21 @@ export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess,
 });
 
 export const WsRpcGroup = RpcGroup.make(
+  WsBrowserGetStatusRpc,
+  WsBrowserListProfilesRpc,
+  WsBrowserOpenSessionRpc,
+  WsBrowserCloseSessionRpc,
+  WsBrowserGetSnapshotRpc,
+  WsBrowserNavigateRpc,
+  WsBrowserBackRpc,
+  WsBrowserForwardRpc,
+  WsBrowserReloadRpc,
+  WsBrowserStopRpc,
+  WsBrowserInputRpc,
+  WsBrowserInspectStorageRpc,
+  WsBrowserClearStorageRpc,
+  WsBrowserDeleteCookieRpc,
+  WsSubscribeBrowserEventsRpc,
   WsServerGetConfigRpc,
   WsServerGetAdvertisedEndpointsRpc,
   WsServerGetDiagnosticsMetricsRpc,

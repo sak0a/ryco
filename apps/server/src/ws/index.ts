@@ -9,6 +9,7 @@ import { makeTerminalHandlers } from "./terminalRpc.ts";
 import { makeProjectHandlers } from "./projectRpc.ts";
 import { makeSourceControlHandlers } from "./sourceControlRpc.ts";
 import { makeProviderHandlers } from "./providerRpc.ts";
+import { makeBrowserHandlers } from "./browserRpc.ts";
 
 export const makeWsRpcLayer = (session: AuthenticatedSession) =>
   WsRpcGroup.toLayer(
@@ -21,6 +22,7 @@ export const makeWsRpcLayer = (session: AuthenticatedSession) =>
         ...makeProjectHandlers(ctx),
         ...makeGitHandlers(ctx),
         ...makeTerminalHandlers(ctx),
+        ...makeBrowserHandlers(ctx),
       });
     }),
   );

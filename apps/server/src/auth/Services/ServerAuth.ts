@@ -23,6 +23,7 @@ export interface AuthenticatedSession {
   readonly method: ServerAuthSessionMethod;
   readonly role: SessionRole;
   readonly expiresAt?: DateTime.DateTime;
+  readonly isLoopback?: boolean;
 }
 
 export class AuthError extends Data.TaggedError("AuthError")<{

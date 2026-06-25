@@ -52,6 +52,7 @@ import { AtlassianConnectionService } from "../atlassian/AtlassianConnectionServ
 import { JiraWorkItemService } from "../atlassian/JiraWorkItemService.ts";
 import { AdvertisedEndpointRegistry } from "../remote/Services/AdvertisedEndpointRegistry.ts";
 import { LocalDiagnosticsMetrics } from "../observability/Services/LocalDiagnosticsMetrics.ts";
+import { BrowserService } from "../browser/BrowserService.ts";
 
 import { SOURCE_CONTROL_LINKED_REFRESH_DEBOUNCE_MS } from "./context/constants.ts";
 import { toGitManagerError } from "./context/gitErrors.ts";
@@ -117,6 +118,7 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
     const diagnostics = yield* Diagnostics;
     const localDiagnosticsMetrics = yield* LocalDiagnosticsMetrics;
     const advertisedEndpointRegistry = yield* AdvertisedEndpointRegistry;
+    const browserService = yield* BrowserService;
     const serverCommandId = (tag: string) => CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
     const linkedSourceControlRefreshAtByProject = new Map<string, number>();
 
@@ -131,6 +133,9 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
 
     const ownerEffect = <A, E, R>(method: string, effect: Effect.Effect<A, E, R>) =>
       withAccess("owner", method, effect);
+
+    const localDesktopOwnerEffect = <A, E, R>(method: string, effect: Effect.Effect<A, E, R>) =>
+      withAccess("local-desktop-owner", method, effect);
 
     const refreshLinkedWorktreeSourceControlStates = (input: {
       readonly cwd: string;
@@ -220,6 +225,9 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
 
     const ownerStream = <A, E, R>(method: string, stream: Stream.Stream<A, E, R>) =>
       Stream.unwrap(authorize("owner", method).pipe(Effect.as(stream)));
+
+    const localDesktopOwnerStream = <A, E, R>(method: string, stream: Stream.Stream<A, E, R>) =>
+      Stream.unwrap(authorize("local-desktop-owner", method).pipe(Effect.as(stream)));
 
     const loadAuthAccessSnapshot = () =>
       Effect.all({
@@ -637,9 +645,12 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
       projectionWorktrees,
       atlassian,
       workItems,
+      browserService,
       withAccess,
       ownerEffect,
+      localDesktopOwnerEffect,
       ownerStream,
+      localDesktopOwnerStream,
       ownerStreamEffect,
       serverCommandId,
       refreshGitStatus,

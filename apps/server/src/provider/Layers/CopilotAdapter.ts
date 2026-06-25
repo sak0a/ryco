@@ -34,6 +34,7 @@ import {
   selectionTargetsCopilotInstance,
 } from "./CopilotAdapter.types.ts";
 import { mapEvent, type MapEventDeps } from "./CopilotAdapter.mapEvent.ts";
+import { resolveProviderBrowserToolSupport } from "../tools/BrowserRuntimeTool.ts";
 import {
   type SessionOpsDeps,
   makeHasSession,
@@ -227,11 +228,8 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
     systemMessage: {
       mode: "append",
       content:
-        "You have access to a Chromium browser in this environment. " +
-        "Use it when the task requires live web interaction, navigation, UI verification, login flows, repros, scraping, or screenshots. " +
-        "Prefer codebase inspection first when the task is local-only. " +
-        "Summarize what was verified, including URL and important observations. " +
-        "Avoid unnecessary browser use when terminal or file tools are sufficient.",
+        "Ryco built-in browser tools are not available to GitHub Copilot in this build. " +
+        "Do not claim browser navigation, screenshots, login flows, or live UI verification unless another tool explicitly provides that capability.",
     },
     onPermissionRequest: (request) =>
       new Promise<PermissionRequestResult>((resolve) => {
@@ -420,6 +418,9 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
     provider: COPILOT_DRIVER_KIND,
     capabilities: {
       sessionModelSwitch: "in-session",
+      runtimeTools: {
+        browser: resolveProviderBrowserToolSupport(COPILOT_DRIVER_KIND),
+      },
     },
     startSession: makeStartSession(sessionDeps),
     sendTurn: makeSendTurn(sessionDeps),

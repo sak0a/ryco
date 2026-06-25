@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import { WsRpcGroup } from "@ryco/contracts";
+import { BrowserHostRpcGroup, WsRpcGroup } from "@ryco/contracts";
 import { HttpRouter, HttpServerRequest } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
@@ -22,6 +22,8 @@ import * as VcsProcess from "./vcs/VcsProcess.ts";
 import { respondToAuthError } from "./auth/http.ts";
 import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
 import { makeWsRpcLayer } from "./ws/index.ts";
+import { BrowserHostAuth } from "./auth/Services/BrowserHostAuth.ts";
+import { makeBrowserHostRpcLayer } from "./browserHost/browserHostRpc.ts";
 
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.succeed(
@@ -77,6 +79,33 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           () => rpcWebSocketHttpEffect,
           () => sessions.markDisconnected(session.sessionId),
         );
+      }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+    ),
+  ),
+);
+
+export const browserHostRpcRouteLayer = Layer.unwrap(
+  Effect.succeed(
+    HttpRouter.add(
+      "GET",
+      "/browser-host/ws",
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const browserHostAuth = yield* BrowserHostAuth;
+        yield* browserHostAuth.authenticateWebSocketUpgrade(request);
+        const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(BrowserHostRpcGroup, {
+          spanPrefix: "browser-host.rpc",
+          spanAttributes: {
+            "rpc.transport": "websocket",
+            "rpc.system": "effect-rpc",
+            "rpc.aggregate": "browserHost",
+          },
+        }).pipe(
+          Effect.provide(
+            makeBrowserHostRpcLayer().pipe(Layer.provideMerge(RpcSerialization.layerJson)),
+          ),
+        );
+        return yield* rpcWebSocketHttpEffect;
       }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
     ),
   ),

@@ -102,6 +102,7 @@ const makeDiagnosticsConfig = (tempDir: string): ServerConfigShape => {
     noBrowser: true,
     startupPresentation: "headless",
     desktopBootstrapToken: undefined,
+    desktopBrowserHostToken: undefined,
     autoBootstrapProjectFromCwd: false,
     logWebSocketEvents: false,
     tailscaleServeEnabled: false,

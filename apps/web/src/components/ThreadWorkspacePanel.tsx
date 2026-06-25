@@ -24,6 +24,7 @@ import {
 } from "../rightPanelRouteSearch";
 import {
   buildOpenAgentSearch,
+  buildOpenBrowserSearch,
   buildOpenFilesSearch,
   buildOpenReviewSearch,
   buildOpenTerminalSearch,
@@ -60,6 +61,7 @@ import type { DiffPanelMode } from "./DiffPanelShell";
 import DiffPanel from "./DiffPanel";
 import PreviewPanel from "./PreviewPanel";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
+import BrowserPanel from "./BrowserPanel";
 
 function statusBucket(status: ThreadSubagentStatus): "idle" | "in_progress" | "review" | "done" {
   if (status === "running") return "in_progress";
@@ -100,6 +102,9 @@ function TabIcon(props: { tab: WorkspaceTab; active: boolean }) {
   }
   if (props.tab.key === "terminal") {
     return <TerminalIcon className={className} />;
+  }
+  if (props.tab.key === "browser") {
+    return <GlobeIcon className={className} />;
   }
   return <FileTextIcon className={className} />;
 }
@@ -523,6 +528,7 @@ function WorkspaceLauncher(props: {
   const filesTab: WorkspaceTab = { key: "files", label: "Files", mode: "files" };
   const reviewTab: WorkspaceTab = { key: "review", label: "Review", mode: "review" };
   const terminalTab: WorkspaceTab = { key: "terminal", label: "Terminal", mode: "terminal" };
+  const browserTab: WorkspaceTab = { key: "browser", label: "Browser", mode: "browser" };
   const filesShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "workspace.files"),
     [keybindings],
@@ -554,7 +560,12 @@ function WorkspaceLauncher(props: {
             icon={MessageSquarePlusIcon}
             disabled
           />
-          <LauncherCard label="Browser" description="Open a website" icon={GlobeIcon} disabled />
+          <LauncherCard
+            label="Browser"
+            description="Open a website"
+            icon={GlobeIcon}
+            onClick={() => props.onSelectTab(browserTab)}
+          />
           <LauncherCard
             label="Review"
             description="View code changes"
@@ -632,7 +643,12 @@ export default function ThreadWorkspacePanel(props: {
   const activeAgent = useMemo(() => findThreadSubagent(subagents, agentKey), [agentKey, subagents]);
   const activeMode = getRightPanelMode(search) ?? props.panelMode;
   const openedPanelModes = useMemo(() => {
-    if (activeMode === "files" || activeMode === "review" || activeMode === "terminal") {
+    if (
+      activeMode === "files" ||
+      activeMode === "review" ||
+      activeMode === "terminal" ||
+      activeMode === "browser"
+    ) {
       return props.openedPanelModes.includes(activeMode)
         ? props.openedPanelModes
         : [...props.openedPanelModes, activeMode];
@@ -687,6 +703,10 @@ export default function ThreadWorkspacePanel(props: {
       }
       if (tab.mode === "terminal") {
         navigateSearch((previous) => buildOpenTerminalSearch(previous));
+        return;
+      }
+      if (tab.mode === "browser") {
+        navigateSearch((previous) => buildOpenBrowserSearch(previous));
         return;
       }
       if (tab.mode === "agent") {
@@ -857,6 +877,8 @@ export default function ThreadWorkspacePanel(props: {
           <PreviewPanel mode={props.mode} />
         ) : activeMode === "terminal" ? (
           <WorkspaceTerminalPanel />
+        ) : activeMode === "browser" ? (
+          <BrowserPanel />
         ) : activeMode === "agent" ? (
           <AgentThreadPanel subagent={activeAgent} agentKey={agentKey} />
         ) : (

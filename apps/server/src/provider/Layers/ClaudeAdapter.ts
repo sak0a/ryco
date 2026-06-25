@@ -91,6 +91,7 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
+import { resolveProviderBrowserToolSupport } from "../tools/BrowserRuntimeTool.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = ProviderDriverKind.make("claudeAgent");
@@ -3316,6 +3317,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      runtimeTools: {
+        browser: resolveProviderBrowserToolSupport(PROVIDER),
+      },
     },
     startSession,
     sendTurn,

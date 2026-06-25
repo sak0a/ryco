@@ -41,6 +41,10 @@ const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
+const BROWSER_ATTACH_SURFACE_CHANNEL = "desktop:browser:attach-surface";
+const BROWSER_UPDATE_SURFACE_BOUNDS_CHANNEL = "desktop:browser:update-surface-bounds";
+const BROWSER_DETACH_SURFACE_CHANNEL = "desktop:browser:detach-surface";
+const BROWSER_FOCUS_SURFACE_CHANNEL = "desktop:browser:focus-surface";
 const SSH_PASSWORD_PROMPT_CANCELLED_RESULT = "ssh-password-prompt-cancelled";
 
 function unwrapEnsureSshEnvironmentResult(result: unknown) {
@@ -124,6 +128,13 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   setTheme: (theme) => ipcRenderer.invoke(SET_THEME_CHANNEL, theme),
   showContextMenu: (items, position) => ipcRenderer.invoke(CONTEXT_MENU_CHANNEL, items, position),
   openExternal: (url: string) => ipcRenderer.invoke(OPEN_EXTERNAL_CHANNEL, url),
+  browser: {
+    attachSurface: (input) => ipcRenderer.invoke(BROWSER_ATTACH_SURFACE_CHANNEL, input),
+    updateSurfaceBounds: (input) =>
+      ipcRenderer.invoke(BROWSER_UPDATE_SURFACE_BOUNDS_CHANNEL, input),
+    detachSurface: (input) => ipcRenderer.invoke(BROWSER_DETACH_SURFACE_CHANNEL, input),
+    focusSurface: (input) => ipcRenderer.invoke(BROWSER_FOCUS_SURFACE_CHANNEL, input),
+  },
   onMenuAction: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, action: unknown) => {
       if (typeof action !== "string") return;

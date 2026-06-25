@@ -16,6 +16,7 @@ import { createThreadSelectorAcrossEnvironments } from "../../storeSelectors";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import {
   buildOpenAgentSearch,
+  buildOpenBrowserSearch,
   buildOpenFilesSearch,
   buildOpenReviewSearch,
   buildOpenTerminalSearch,
@@ -71,6 +72,7 @@ export function DraftChatThreadRouteView({
     hasOpenedDiff: diffOpen,
     hasOpenedPreview: previewOpen,
     hasOpenedTerminal: rightPanelMode === "terminal",
+    hasOpenedBrowser: rightPanelMode === "browser",
     openedAgentKeys: activeAgentKey ? [activeAgentKey] : [],
   }));
   const hasOpenedDiff =
@@ -81,6 +83,10 @@ export function DraftChatThreadRouteView({
     rightPanelMountState.draftId === draftId
       ? rightPanelMountState.hasOpenedTerminal
       : rightPanelMode === "terminal";
+  const hasOpenedBrowser =
+    rightPanelMountState.draftId === draftId
+      ? rightPanelMountState.hasOpenedBrowser
+      : rightPanelMode === "browser";
   const openedAgentKeys = useMemo(() => {
     const keys =
       rightPanelMountState.draftId === draftId
@@ -104,8 +110,11 @@ export function DraftChatThreadRouteView({
     if (hasOpenedTerminal || rightPanelMode === "terminal") {
       modes.push("terminal");
     }
+    if (hasOpenedBrowser || rightPanelMode === "browser") {
+      modes.push("browser");
+    }
     return modes;
-  }, [hasOpenedDiff, hasOpenedPreview, hasOpenedTerminal, rightPanelMode]);
+  }, [hasOpenedBrowser, hasOpenedDiff, hasOpenedPreview, hasOpenedTerminal, rightPanelMode]);
   const markRightPanelOpened = useCallback(
     (panelMode: RightPanelMode) => {
       setLastOpenedRightPanelMode(panelMode);
@@ -122,6 +131,10 @@ export function DraftChatThreadRouteView({
             (previous.draftId === draftId
               ? previous.hasOpenedTerminal
               : rightPanelMode === "terminal") || panelMode === "terminal",
+          hasOpenedBrowser:
+            (previous.draftId === draftId
+              ? previous.hasOpenedBrowser
+              : rightPanelMode === "browser") || panelMode === "browser",
           openedAgentKeys:
             previous.draftId === draftId ? previous.openedAgentKeys : openedAgentKeys,
         };
@@ -130,6 +143,7 @@ export function DraftChatThreadRouteView({
           previous.hasOpenedDiff === nextState.hasOpenedDiff &&
           previous.hasOpenedPreview === nextState.hasOpenedPreview &&
           previous.hasOpenedTerminal === nextState.hasOpenedTerminal &&
+          previous.hasOpenedBrowser === nextState.hasOpenedBrowser &&
           previous.openedAgentKeys === nextState.openedAgentKeys
         ) {
           return previous;
@@ -161,6 +175,9 @@ export function DraftChatThreadRouteView({
       if (lastOpenedRightPanelMode === "terminal" && hasOpenedTerminal) {
         return buildOpenTerminalSearch(previous);
       }
+      if (lastOpenedRightPanelMode === "browser" && hasOpenedBrowser) {
+        return buildOpenBrowserSearch(previous);
+      }
       if (hasOpenedPreview) {
         return buildOpenFilesSearch(previous);
       }
@@ -169,6 +186,9 @@ export function DraftChatThreadRouteView({
       }
       if (hasOpenedTerminal) {
         return buildOpenTerminalSearch(previous);
+      }
+      if (hasOpenedBrowser) {
+        return buildOpenBrowserSearch(previous);
       }
       if (lastAgentKey) {
         return buildOpenAgentSearch(previous, lastAgentKey);
@@ -182,6 +202,7 @@ export function DraftChatThreadRouteView({
     });
   }, [
     draftId,
+    hasOpenedBrowser,
     hasOpenedDiff,
     hasOpenedPreview,
     hasOpenedTerminal,
@@ -207,6 +228,8 @@ export function DraftChatThreadRouteView({
             previous.draftId === draftId ? previous.hasOpenedPreview : hasOpenedPreview,
           hasOpenedTerminal:
             previous.draftId === draftId ? previous.hasOpenedTerminal : hasOpenedTerminal,
+          hasOpenedBrowser:
+            previous.draftId === draftId ? previous.hasOpenedBrowser : hasOpenedBrowser,
           openedAgentKeys: nextOpenedAgentKeys,
         }));
 
@@ -228,6 +251,9 @@ export function DraftChatThreadRouteView({
               if (hasOpenedTerminal) {
                 return buildOpenTerminalSearch(previous);
               }
+              if (hasOpenedBrowser) {
+                return buildOpenBrowserSearch(previous);
+              }
               return buildOpenWorkspaceSearch(previous);
             },
           });
@@ -241,12 +267,15 @@ export function DraftChatThreadRouteView({
         input.mode === "files" ? false : hasOpenedPreview || rightPanelMode === "files";
       const nextHasOpenedTerminal =
         input.mode === "terminal" ? false : hasOpenedTerminal || rightPanelMode === "terminal";
+      const nextHasOpenedBrowser =
+        input.mode === "browser" ? false : hasOpenedBrowser || rightPanelMode === "browser";
       setRightPanelMountState((previous) => {
         const nextState = {
           draftId,
           hasOpenedDiff: nextHasOpenedDiff,
           hasOpenedPreview: nextHasOpenedPreview,
           hasOpenedTerminal: nextHasOpenedTerminal,
+          hasOpenedBrowser: nextHasOpenedBrowser,
           openedAgentKeys:
             previous.draftId === draftId ? previous.openedAgentKeys : openedAgentKeys,
         };
@@ -255,6 +284,7 @@ export function DraftChatThreadRouteView({
           previous.hasOpenedDiff === nextState.hasOpenedDiff &&
           previous.hasOpenedPreview === nextState.hasOpenedPreview &&
           previous.hasOpenedTerminal === nextState.hasOpenedTerminal &&
+          previous.hasOpenedBrowser === nextState.hasOpenedBrowser &&
           previous.openedAgentKeys === nextState.openedAgentKeys
         ) {
           return previous;
@@ -276,6 +306,9 @@ export function DraftChatThreadRouteView({
         if (input.mode !== "terminal" && nextHasOpenedTerminal) {
           return buildOpenTerminalSearch(previous);
         }
+        if (input.mode !== "browser" && nextHasOpenedBrowser) {
+          return buildOpenBrowserSearch(previous);
+        }
         return buildOpenWorkspaceSearch(previous);
       };
       void navigate({
@@ -287,6 +320,7 @@ export function DraftChatThreadRouteView({
     [
       activeAgentKey,
       draftId,
+      hasOpenedBrowser,
       hasOpenedDiff,
       hasOpenedPreview,
       hasOpenedTerminal,
@@ -317,6 +351,7 @@ export function DraftChatThreadRouteView({
               hasOpenedDiff,
               hasOpenedPreview,
               hasOpenedTerminal,
+              hasOpenedBrowser,
               openedAgentKeys: baseAgentKeys,
             };
       }
@@ -326,6 +361,8 @@ export function DraftChatThreadRouteView({
         hasOpenedPreview: previous.draftId === draftId ? previous.hasOpenedPreview : previewOpen,
         hasOpenedTerminal:
           previous.draftId === draftId ? previous.hasOpenedTerminal : rightPanelMode === "terminal",
+        hasOpenedBrowser:
+          previous.draftId === draftId ? previous.hasOpenedBrowser : rightPanelMode === "browser",
         openedAgentKeys: [...baseAgentKeys, activeAgentKey],
       };
     });
@@ -333,6 +370,7 @@ export function DraftChatThreadRouteView({
     activeAgentKey,
     diffOpen,
     draftId,
+    hasOpenedBrowser,
     hasOpenedDiff,
     hasOpenedPreview,
     hasOpenedTerminal,
@@ -382,6 +420,8 @@ export function DraftChatThreadRouteView({
     hasOpenedPreview ||
     rightPanelMode === "terminal" ||
     hasOpenedTerminal ||
+    rightPanelMode === "browser" ||
+    hasOpenedBrowser ||
     rightPanelMode === "agent" ||
     openedAgentKeys.length > 0;
   const mountedRightPanelMode: RightPanelMode | null = rightPanelOpen

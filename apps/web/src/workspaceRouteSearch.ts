@@ -3,7 +3,7 @@ import { type TurnId } from "@ryco/contracts";
 import { stripDiffSearchParams } from "./diffRouteSearch";
 import { stripPreviewSearchParams } from "./previewRouteSearch";
 
-export type WorkspacePanelTab = "review" | "files" | "terminal" | "agent";
+export type WorkspacePanelTab = "review" | "files" | "terminal" | "browser" | "agent";
 
 export interface WorkspaceRouteSearch {
   workspaceOpen?: "1" | undefined;
@@ -20,7 +20,13 @@ function normalizeSearchString(value: unknown): string | undefined {
 }
 
 function normalizeWorkspaceTab(value: unknown): WorkspacePanelTab | undefined {
-  if (value === "review" || value === "files" || value === "terminal" || value === "agent") {
+  if (
+    value === "review" ||
+    value === "files" ||
+    value === "terminal" ||
+    value === "browser" ||
+    value === "agent"
+  ) {
     return value;
   }
   return undefined;
@@ -211,6 +217,47 @@ export function buildOpenTerminalSearch<T extends Record<string, unknown>>(
     ...stripWorkspacePanelSearchParams(params),
     workspaceOpen: "1",
     workspaceTab: "terminal",
+    workspaceAgentKey: undefined,
+    diff: undefined,
+    diffTurnId: undefined,
+    diffFilePath: undefined,
+    preview: undefined,
+  } as Omit<
+    T,
+    | "diff"
+    | "diffTurnId"
+    | "diffFilePath"
+    | "preview"
+    | "workspaceOpen"
+    | "workspaceTab"
+    | "workspaceAgentKey"
+  > &
+    WorkspaceRouteSearch & {
+      diff?: undefined;
+      preview?: undefined;
+    };
+}
+
+export function buildOpenBrowserSearch<T extends Record<string, unknown>>(
+  params: T,
+): Omit<
+  T,
+  | "diff"
+  | "diffTurnId"
+  | "diffFilePath"
+  | "preview"
+  | "workspaceOpen"
+  | "workspaceTab"
+  | "workspaceAgentKey"
+> &
+  WorkspaceRouteSearch & {
+    diff?: undefined;
+    preview?: undefined;
+  } {
+  return {
+    ...stripWorkspacePanelSearchParams(params),
+    workspaceOpen: "1",
+    workspaceTab: "browser",
     workspaceAgentKey: undefined,
     diff: undefined,
     diffTurnId: undefined,

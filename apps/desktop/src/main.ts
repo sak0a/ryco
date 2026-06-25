@@ -102,6 +102,8 @@ import {
   shouldUseUnsignedMacUpdateInstaller,
   type MacCodeSignatureKind,
 } from "./unsignedMacUpdateInstaller.ts";
+import { BrowserHost } from "./browser/BrowserHost.ts";
+import { BrowserSurfaceManager } from "./browser/BrowserSurfaceManager.ts";
 
 const desktopStartupTiming = createStartupTiming();
 desktopStartupTiming.mark("desktop.launch");
@@ -134,6 +136,10 @@ const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
+const BROWSER_ATTACH_SURFACE_CHANNEL = "desktop:browser:attach-surface";
+const BROWSER_UPDATE_SURFACE_BOUNDS_CHANNEL = "desktop:browser:update-surface-bounds";
+const BROWSER_DETACH_SURFACE_CHANNEL = "desktop:browser:detach-surface";
+const BROWSER_FOCUS_SURFACE_CHANNEL = "desktop:browser:focus-surface";
 const BASE_DIR = readEnv("RYCO_HOME")?.trim() || Path.join(OS.homedir(), ".ryco");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
@@ -261,6 +267,7 @@ let backendProcess: ChildProcess.ChildProcess | null = null;
 let backendPort = 0;
 let backendBindHost = DESKTOP_LOOPBACK_HOST;
 let backendBootstrapToken = "";
+let backendBrowserHostToken = "";
 let backendHttpUrl = "";
 let backendWsUrl = "";
 let backendEndpointUrl: string | null = null;
@@ -283,6 +290,8 @@ let restoreStdIoCapture: (() => void) | null = null;
 let backendObservabilitySettings = readPersistedBackendObservabilitySettings();
 let desktopSettings = readDesktopSettings(DESKTOP_SETTINGS_PATH, app.getVersion());
 let desktopServerExposureMode: DesktopServerExposureMode = desktopSettings.serverExposureMode;
+const browserHost = new BrowserHost(APP_RUN_ID);
+const browserSurfaceManager = new BrowserSurfaceManager(browserHost.kernel);
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
 const expectedBackendExitChildren = new WeakSet<ChildProcess.ChildProcess>();
@@ -727,6 +736,7 @@ function ensureDevelopmentInitialWindowOpen(): void {
     .then((source) => {
       markDesktopStartupPhase("desktop.backend.listening", `source=${source}`);
       writeDesktopLogHeader(`bootstrap development resources ready backendSource=${source}`);
+      startDesktopBrowserHost("development-ready");
     })
     .catch((error) => {
       if (isBackendReadinessAborted(error)) {
@@ -796,6 +806,7 @@ function ensureInitialBackendWindowOpen(): void {
     .then((source) => {
       markDesktopStartupPhase("desktop.backend.listening", `source=${source}`);
       writeDesktopLogHeader(`bootstrap backend ready source=${source}`);
+      startDesktopBrowserHost("packaged-ready");
       const window = ensurePackagedBootstrapWindowOpen("backend-ready");
       if (window) {
         loadPackagedBackendAppWindow(window, "backend-ready");
@@ -833,6 +844,31 @@ function writeDesktopStreamChunk(
   if (buffer.length === 0 || buffer[buffer.length - 1] !== 0x0a) {
     desktopLogSink.write("\n");
   }
+}
+
+function startDesktopBrowserHost(reason: string): void {
+  if (!backendWsUrl || !backendBrowserHostToken) {
+    return;
+  }
+  void browserHost
+    .start({
+      wsBaseUrl: backendWsUrl,
+      token: backendBrowserHostToken,
+    })
+    .then(() => {
+      writeDesktopLogHeader(`browser host connected reason=${reason}`);
+    })
+    .catch((error) => {
+      console.warn("[desktop-browser-host] failed to connect", error);
+      writeDesktopLogHeader(
+        `browser host failed reason=${reason} message=${formatErrorMessage(error)}`,
+      );
+    });
+}
+
+function stopDesktopBrowserHost(reason: string): void {
+  void browserHost.stop().catch(() => undefined);
+  writeDesktopLogHeader(`browser host stopped reason=${reason}`);
 }
 
 function installStdIoCapture(): void {
@@ -1976,6 +2012,7 @@ function startBackend(): void {
         host: backendBindHost,
         ...(isDevelopment ? { devUrl: resolveDesktopDevServerUrl() } : {}),
         desktopBootstrapToken: backendBootstrapToken,
+        desktopBrowserHostToken: backendBrowserHostToken,
         tailscaleServeEnabled: desktopSettings.tailscaleServeEnabled,
         tailscaleServePort: desktopSettings.tailscaleServePort,
         ...(backendObservabilitySettings.otlpTracesUrl
@@ -2020,6 +2057,7 @@ function startBackend(): void {
     if (backendProcess === child) {
       backendProcess = null;
     }
+    stopDesktopBrowserHost("backend-error");
     closeBackendSession(`pid=${child.pid ?? "unknown"} error=${error.message}`);
     if (wasExpected) {
       return;
@@ -2040,6 +2078,7 @@ function startBackend(): void {
     if (backendProcess === child) {
       backendProcess = null;
     }
+    stopDesktopBrowserHost("backend-exit");
     closeBackendSession(
       `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
     );
@@ -2053,6 +2092,7 @@ function startBackend(): void {
 
 function stopBackend(): void {
   cancelBackendReadinessWait();
+  stopDesktopBrowserHost("stop-backend");
   backendListeningDetector = null;
   if (restartTimer) {
     clearTimeout(restartTimer);
@@ -2076,6 +2116,7 @@ function stopBackend(): void {
 
 async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
   cancelBackendReadinessWait();
+  stopDesktopBrowserHost("stop-backend-wait");
   if (restartTimer) {
     clearTimeout(restartTimer);
     restartTimer = null;
@@ -2224,6 +2265,26 @@ function registerIpcHandlers(): void {
   );
 
   desktopSshEnvironmentBridge.registerIpcHandlers(ipcMain);
+
+  ipcMain.removeHandler(BROWSER_ATTACH_SURFACE_CHANNEL);
+  ipcMain.handle(BROWSER_ATTACH_SURFACE_CHANNEL, (event, input) =>
+    browserSurfaceManager.attach(event, input),
+  );
+
+  ipcMain.removeHandler(BROWSER_UPDATE_SURFACE_BOUNDS_CHANNEL);
+  ipcMain.handle(BROWSER_UPDATE_SURFACE_BOUNDS_CHANNEL, (event, input) =>
+    browserSurfaceManager.update(event, input),
+  );
+
+  ipcMain.removeHandler(BROWSER_DETACH_SURFACE_CHANNEL);
+  ipcMain.handle(BROWSER_DETACH_SURFACE_CHANNEL, (event, input) => {
+    browserSurfaceManager.detach(event, input);
+  });
+
+  ipcMain.removeHandler(BROWSER_FOCUS_SURFACE_CHANNEL);
+  ipcMain.handle(BROWSER_FOCUS_SURFACE_CHANNEL, (event, input) =>
+    browserSurfaceManager.focus(event, input),
+  );
 
   ipcMain.removeHandler(GET_SERVER_EXPOSURE_STATE_CHANNEL);
   ipcMain.handle(GET_SERVER_EXPOSURE_STATE_CHANNEL, async () => getDesktopServerExposureState());
@@ -2682,6 +2743,7 @@ function createWindow(): BrowserWindow {
   }
 
   window.on("closed", () => {
+    browserSurfaceManager.detachAllForWindow(window);
     desktopSshEnvironmentBridge.cancelPendingPasswordPrompts(
       "SSH authentication was cancelled because the app window closed.",
     );
@@ -2720,6 +2782,7 @@ async function bootstrap(): Promise<void> {
       : `using configured backend port port=${backendPort}`,
   );
   backendBootstrapToken = Crypto.randomBytes(24).toString("hex");
+  backendBrowserHostToken = Crypto.randomBytes(32).toString("hex");
   if (desktopSettings.serverExposureMode !== DEFAULT_DESKTOP_SETTINGS.serverExposureMode) {
     writeDesktopLogHeader(
       `bootstrap restoring persisted server exposure mode mode=${desktopSettings.serverExposureMode}`,
@@ -2769,6 +2832,7 @@ app.on("before-quit", () => {
   clearUpdatePollTimer();
   cancelBackendReadinessWait();
   stopBackend();
+  stopDesktopBrowserHost("before-quit");
   void desktopSshEnvironmentBridge.dispose().catch(() => undefined);
   restoreStdIoCapture?.();
 });
