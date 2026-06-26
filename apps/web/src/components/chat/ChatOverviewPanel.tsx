@@ -624,12 +624,22 @@ export function ChatOverviewPanel(
     ],
   );
 
+  const handleRefreshPullRequest = useCallback(() => {
+    invalidateOverviewSourceControl(gitCwd);
+  }, [gitCwd]);
+
+  const isRefreshingPullRequest =
+    overviewPullRequestDetail.isFetching ||
+    (overviewWorkflowRunsSupported && overviewWorkflowRuns.isFetching);
+
   return (
     <PlanSidebar
       activePlan={activePlan}
       activeProposedPlan={sidebarProposedPlan}
       overviewItems={overviewItems}
       pullRequest={overviewPullRequest}
+      onRefreshPullRequest={handleRefreshPullRequest}
+      isRefreshingPullRequest={isRefreshingPullRequest}
       subagents={threadSubagents}
       sourceControlActions={sourceControlActions}
       branchControl={branchControl}

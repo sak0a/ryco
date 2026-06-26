@@ -13,7 +13,10 @@ export interface ThreadSubagentMessageView {
 
 export interface ThreadSubagentView {
   key: string;
+  /** Stable, unique abstract codename used as the subagent's primary identity. */
   name: string;
+  /** Inferred descriptive role (e.g. "Code Reviewer"), shown as a subtitle. */
+  role?: string | null;
   status: ThreadSubagentStatus;
   origin?: string | null;
   capability?: string | null;
@@ -555,6 +558,139 @@ function findSubagentByVisibleIdentity(
   return null;
 }
 
+/**
+ * Distinct, memorable codenames (scientists and philosophers) used to identify
+ * subagents that carry no inferable role. Far nicer than "Subagent 1, 2, 3…":
+ * each agent gets a stable, unique handle that pairs with its colored avatar.
+ */
+const SUBAGENT_CODENAMES = [
+  "Turing",
+  "Dirac",
+  "Hegel",
+  "Arendt",
+  "Boyle",
+  "Locke",
+  "Epicurus",
+  "Curie",
+  "Bohr",
+  "Newton",
+  "Euler",
+  "Gauss",
+  "Hopper",
+  "Lovelace",
+  "Noether",
+  "Pascal",
+  "Tesla",
+  "Darwin",
+  "Kepler",
+  "Faraday",
+  "Planck",
+  "Heisenberg",
+  "Maxwell",
+  "Fermi",
+  "Feynman",
+  "Lagrange",
+  "Riemann",
+  "Babbage",
+  "Shannon",
+  "Ramanujan",
+  "Galileo",
+  "Copernicus",
+  "Pasteur",
+  "Mendel",
+  "Hawking",
+  "Lavoisier",
+  "Fourier",
+  "Pauli",
+  "Kant",
+  "Plato",
+  "Socrates",
+  "Aristotle",
+  "Nietzsche",
+  "Spinoza",
+  "Descartes",
+  "Hume",
+  "Leibniz",
+  "Wittgenstein",
+  "Russell",
+  "Camus",
+  "Sartre",
+  "Voltaire",
+  "Confucius",
+  "Seneca",
+  "Aurelius",
+  "Diogenes",
+] as const;
+
+function hashSubagentSeed(value: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Builds a deterministic preference order over the whole codename pool for a
+ * seed. The permutation depends only on the seed, so two subagents that would
+ * pick the same first codename fall back to different alternates in a stable,
+ * order-independent way.
+ */
+function codenamePreferenceOrder(seed: string): number[] {
+  const order = Array.from({ length: SUBAGENT_CODENAMES.length }, (_, index) => index);
+  // Fisher–Yates shuffle driven by a seed-derived PRNG (no Math.random, so the
+  // permutation is reproducible for a given seed).
+  let state = hashSubagentSeed(seed) || 1;
+  for (let i = order.length - 1; i > 0; i -= 1) {
+    state = (Math.imul(state, 0x01000193) ^ (i + 1)) >>> 0;
+    const j = state % (i + 1);
+    const swap = order[i]!;
+    order[i] = order[j]!;
+    order[j] = swap;
+  }
+  return order;
+}
+
+/**
+ * Assigns a unique codename to every subagent key. Keys are resolved in sorted
+ * order and each takes the first free codename in its own seed-derived
+ * preference order, so the mapping is a pure function of the key set — a given
+ * subagent keeps the same codename (and therefore avatar) regardless of the
+ * order activities arrive or are backfilled.
+ */
+function assignSubagentCodenames(keys: ReadonlyArray<string>): Map<string, string> {
+  const names = new Map<string, string>();
+  const taken = new Set<string>();
+  for (const key of [...keys].toSorted((left, right) => left.localeCompare(right))) {
+    if (names.has(key)) {
+      continue;
+    }
+    const preference = codenamePreferenceOrder(key);
+    let chosen: string | null = null;
+    for (const index of preference) {
+      const candidate = SUBAGENT_CODENAMES[index]!;
+      if (!taken.has(candidate.toLowerCase())) {
+        chosen = candidate;
+        break;
+      }
+    }
+    if (chosen === null) {
+      // More subagents than codenames: append a numeric suffix to the seed's top
+      // choice, still resolved within the fixed key ordering above.
+      const base = SUBAGENT_CODENAMES[preference[0]!]!;
+      let suffix = 2;
+      while (taken.has(`${base} ${suffix}`.toLowerCase())) {
+        suffix += 1;
+      }
+      chosen = `${base} ${suffix}`;
+    }
+    taken.add(chosen.toLowerCase());
+    names.set(key, chosen);
+  }
+  return names;
+}
+
 export function deriveThreadSubagents(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): ThreadSubagentView[] {
@@ -666,32 +802,34 @@ export function deriveThreadSubagents(
     });
   }
 
-  let fallbackIndex = 1;
-  return [...subagents.values()]
-    .toSorted((left, right) => left.startedAt.localeCompare(right.startedAt))
-    .map((subagent) => {
-      const name = subagent.name ?? `Subagent ${fallbackIndex}`;
-      if (!subagent.name) {
-        fallbackIndex += 1;
-      }
-      return {
-        key: subagent.key,
-        name,
-        status: subagent.status,
-        origin: subagent.origin,
-        capability: subagent.capability,
-        tool: subagent.tool,
-        detail: subagent.detail,
-        providerThreadIds: [...subagent.providerThreadIds],
-        providerSessionIds: [...subagent.providerSessionIds],
-        startedAt: subagent.startedAt,
-        updatedAt: subagent.updatedAt,
-        entries: subagent.entries,
-        messages: subagent.messages.toSorted((left, right) =>
-          left.createdAt.localeCompare(right.createdAt),
-        ),
-      };
-    });
+  const ordered = [...subagents.values()].toSorted((left, right) =>
+    left.startedAt.localeCompare(right.startedAt),
+  );
+
+  // Every subagent gets a stable, unique abstract codename as its primary
+  // identity; any inferred descriptive label is demoted to `role` (a subtitle).
+  const codenamesByKey = assignSubagentCodenames(ordered.map((subagent) => subagent.key));
+
+  return ordered.map((subagent) => {
+    return {
+      key: subagent.key,
+      name: codenamesByKey.get(subagent.key) ?? subagent.key,
+      role: subagent.name,
+      status: subagent.status,
+      origin: subagent.origin,
+      capability: subagent.capability,
+      tool: subagent.tool,
+      detail: subagent.detail,
+      providerThreadIds: [...subagent.providerThreadIds],
+      providerSessionIds: [...subagent.providerSessionIds],
+      startedAt: subagent.startedAt,
+      updatedAt: subagent.updatedAt,
+      entries: subagent.entries,
+      messages: subagent.messages.toSorted((left, right) =>
+        left.createdAt.localeCompare(right.createdAt),
+      ),
+    };
+  });
 }
 
 export function findThreadSubagent(

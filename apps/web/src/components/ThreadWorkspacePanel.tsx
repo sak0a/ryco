@@ -1,12 +1,8 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { scopedThreadKey, scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime";
-import {
-  type ScopedThreadRef,
-  type ThreadId,
-} from "@ryco/contracts";
+import { type ScopedThreadRef, type ThreadId } from "@ryco/contracts";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@ryco/shared/projectScripts";
 import {
-  BotIcon,
   FileTextIcon,
   FolderIcon,
   GlobeIcon,
@@ -56,6 +52,7 @@ import {
   resolveSidebarStatusTextClassName,
   resolveSidebarStatusTextStyle,
 } from "./sidebar/sidebarStatusText";
+import { SubagentAvatar } from "./sidebar/SubagentAvatar";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -97,7 +94,12 @@ function TabIcon(props: { tab: WorkspaceTab; active: boolean }) {
     props.active ? "text-foreground" : "text-muted-foreground",
   );
   if (props.tab.mode === "agent") {
-    return <BotIcon className={className} />;
+    return (
+      <SubagentAvatar
+        name={props.tab.label}
+        className={cn("size-3.5 shrink-0", !props.active && "opacity-70")}
+      />
+    );
   }
   if (props.tab.key === "review") {
     return <GitCompareIcon className={className} />;
@@ -149,7 +151,7 @@ export function AgentThreadPanel(props: {
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="border-b border-border/60 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
-          <BotIcon className="size-4 shrink-0 text-muted-foreground" />
+          <SubagentAvatar name={props.subagent.name} className="size-4" />
           <p className="min-w-0 flex-1 text-sm font-medium">
             <AgentStatusName agent={props.subagent} />
           </p>
@@ -157,6 +159,9 @@ export function AgentThreadPanel(props: {
             {statusLabel(props.subagent.status)}
           </span>
         </div>
+        {props.subagent.role ? (
+          <p className="mt-1 text-xs font-medium text-muted-foreground/70">{props.subagent.role}</p>
+        ) : null}
         {props.subagent.detail ? (
           <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
             {props.subagent.detail}
@@ -584,7 +589,7 @@ function WorkspaceLauncher(props: {
                   onClick={() => props.onSelectTab(tab)}
                 >
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background/50 text-muted-foreground">
-                    <BotIcon className="size-4" />
+                    <SubagentAvatar name={tab.label} className="size-5" />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span

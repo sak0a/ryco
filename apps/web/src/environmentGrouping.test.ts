@@ -472,7 +472,6 @@ describe("environment grouping", () => {
       expect(ids).toContain(threadL1);
       expect(ids).toContain(threadRO1);
     });
-
   });
 
   describe("selectSidebarThreadsForProjectRef", () => {

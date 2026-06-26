@@ -26,7 +26,7 @@ function makeActivity(overrides: {
 }
 
 describe("deriveThreadSubagents", () => {
-  it("groups subagent lifecycle activities and infers a display name", () => {
+  it("groups subagent lifecycle activities, infers a role, and assigns a codename", () => {
     const activities = [
       makeActivity({
         id: "agent-start",
@@ -52,13 +52,16 @@ describe("deriveThreadSubagents", () => {
       }),
     ];
 
-    expect(deriveThreadSubagents(activities)).toEqual([
-      expect.objectContaining({
-        name: "Hilbert",
-        status: "finished",
-        detail: "Hilbert: inspect the retry flow",
-      }),
-    ]);
+    const subagents = deriveThreadSubagents(activities);
+    expect(subagents).toHaveLength(1);
+    expect(subagents[0]).toMatchObject({
+      role: "Hilbert",
+      status: "finished",
+      detail: "Hilbert: inspect the retry flow",
+    });
+    // The primary name is always an abstract codename, never the inferred role.
+    expect(subagents[0]?.name).toMatch(/^[A-Z][A-Za-z]+( \d+)?$/);
+    expect(subagents[0]?.name).not.toBe("Hilbert");
   });
 
   it("uses structured subagent metadata when available", () => {
@@ -82,7 +85,7 @@ describe("deriveThreadSubagents", () => {
     ];
 
     expect(deriveThreadSubagents(activities)[0]).toMatchObject({
-      name: "Code Reviewer",
+      role: "Code Reviewer",
       status: "running",
       detail: "Find failing checks",
     });
@@ -132,7 +135,7 @@ describe("deriveThreadSubagents", () => {
 
     expect(deriveThreadSubagents(activities)[0]).toMatchObject({
       key: "subagent:collab-1",
-      name: "Researcher",
+      role: "Researcher",
       status: "running",
       tool: "spawnAgent",
       detail: "You are a researcher. Inspect the retry flow.",
@@ -213,7 +216,7 @@ describe("deriveThreadSubagents", () => {
 
     expect(deriveThreadSubagents(activities)[0]).toMatchObject({
       key: "subagent:managed-1",
-      name: "Cache Inspector",
+      role: "Cache Inspector",
       status: "finished",
       origin: "native",
       capability: "transcript",
@@ -283,7 +286,7 @@ describe("deriveThreadSubagents", () => {
 
     expect(deriveThreadSubagents(activities)[0]).toMatchObject({
       key: "subagent:opencode:session:child-1",
-      name: "OpenCode Reviewer",
+      role: "OpenCode Reviewer",
       status: "finished",
       origin: "native",
       capability: "transcript",
@@ -401,6 +404,88 @@ describe("deriveThreadSubagents", () => {
 
     expect(subagent?.entries).toHaveLength(1);
     expect(subagent?.entries[0]?.detail).toBe("Hilbert: inspect the retry flow");
+  });
+
+  it("assigns stable, unique abstract codenames when no role can be inferred", () => {
+    const activities = [
+      makeActivity({
+        id: "agent-a",
+        kind: "tool.started",
+        createdAt: "2026-06-04T10:00:00.000Z",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          detail: "Investigate the failing checks",
+          data: { toolCallId: "call-a" },
+        },
+      }),
+      makeActivity({
+        id: "agent-b",
+        kind: "tool.started",
+        createdAt: "2026-06-04T10:00:01.000Z",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          detail: "Trace the retry path",
+          data: { toolCallId: "call-b" },
+        },
+      }),
+    ];
+
+    const subagents = deriveThreadSubagents(activities);
+    expect(subagents).toHaveLength(2);
+
+    for (const subagent of subagents) {
+      // A memorable codename, never the old "Subagent 1, 2, 3…" counter.
+      expect(subagent.name).toMatch(/^[A-Z][A-Za-z]+$/);
+      expect(subagent.name).not.toMatch(/^Subagent\b/);
+      // No inferable role, so the subtitle stays empty.
+      expect(subagent.role).toBeNull();
+    }
+    expect(subagents[0]?.name).not.toBe(subagents[1]?.name);
+
+    // Codenames are seeded from the stable subagent key, so they do not drift
+    // between renders of the same activity stream.
+    const second = deriveThreadSubagents(activities);
+    expect(second.map((subagent) => subagent.name)).toEqual(
+      subagents.map((subagent) => subagent.name),
+    );
+  });
+
+  it("resolves codename collisions independently of insertion order", () => {
+    // "subagent:c3" and "subagent:c7" prefer the same first codename, forcing a
+    // collision. The resolved names must depend only on the keys, not on which
+    // subagent arrived (or was backfilled) first — otherwise a subagent's label
+    // and avatar could silently change on refresh.
+    const startActivity = (subagentId: string, createdAt: string) =>
+      makeActivity({
+        id: `start-${subagentId}-${createdAt}`,
+        kind: "subagent.started",
+        createdAt,
+        payload: {
+          itemType: "subagent",
+          subagent: { subagentId },
+          status: "running",
+        },
+      });
+
+    const codenamesByKey = (activities: OrchestrationThreadActivity[]) =>
+      Object.fromEntries(
+        deriveThreadSubagents(activities).map((subagent) => [subagent.key, subagent.name]),
+      );
+
+    const c3First = codenamesByKey([
+      startActivity("c3", "2026-06-04T10:00:00.000Z"),
+      startActivity("c7", "2026-06-04T10:00:01.000Z"),
+    ]);
+    const c7First = codenamesByKey([
+      startActivity("c7", "2026-06-04T10:00:00.000Z"),
+      startActivity("c3", "2026-06-04T10:00:01.000Z"),
+    ]);
+
+    expect(c3First).toEqual({ "subagent:c3": "Turing", "subagent:c7": "Shannon" });
+    expect(c7First).toEqual(c3First);
+    expect(c3First["subagent:c3"]).not.toBe(c3First["subagent:c7"]);
   });
 });
 
