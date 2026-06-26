@@ -13,7 +13,6 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import ChatMarkdown from "./ChatMarkdown";
 import {
-  BotIcon,
   CircleCheckIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -27,6 +26,7 @@ import {
   LaptopIcon,
   LoaderCircleIcon,
   LoaderIcon,
+  RotateCwIcon,
   XCircleIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
@@ -48,6 +48,7 @@ import {
   resolveSidebarStatusTextClassName,
   resolveSidebarStatusTextStyle,
 } from "./sidebar/sidebarStatusText";
+import { SubagentAvatar } from "./sidebar/SubagentAvatar";
 import type { PrCheckStatusView } from "./projectExplorer/prCheckStatus";
 import type { OverviewWorkflowCheckRow } from "./overviewPullRequestChecks.logic";
 
@@ -114,6 +115,8 @@ interface PlanSidebarProps {
   activeProposedPlan: LatestProposedPlanState | null;
   overviewItems?: ReadonlyArray<OverviewPanelItem>;
   pullRequest?: OverviewPullRequestState | null;
+  onRefreshPullRequest?: () => void;
+  isRefreshingPullRequest?: boolean;
   subagents?: ReadonlyArray<ThreadSubagentView>;
   sourceControlActions?: ReactNode;
   branchControl?: ReactNode;
@@ -140,6 +143,28 @@ function subagentStatusLabel(status: ThreadSubagentView["status"]): string {
   if (status === "failed") return "Needs review";
   if (status === "finished") return "Finished";
   return "Idle";
+}
+
+function SubagentStatusDot({ status }: { status: ThreadSubagentView["status"] }) {
+  const dotClassName =
+    status === "running"
+      ? "bg-sky-400"
+      : status === "finished"
+        ? "bg-emerald-400"
+        : status === "failed"
+          ? "bg-destructive"
+          : "bg-muted-foreground/30";
+  return (
+    <span
+      className="relative flex size-2 shrink-0 items-center justify-center"
+      title={subagentStatusLabel(status)}
+    >
+      {status === "running" ? (
+        <span className="absolute inline-flex size-2 animate-ping rounded-full bg-sky-400/60" />
+      ) : null}
+      <span className={cn("relative inline-flex size-1.5 rounded-full", dotClassName)} />
+    </span>
+  );
 }
 
 function overviewItemIcon(icon: OverviewPanelItem["icon"]): React.ReactNode {
@@ -340,6 +365,8 @@ const PlanSidebar = memo(function PlanSidebar({
   activeProposedPlan,
   overviewItems = [],
   pullRequest = null,
+  onRefreshPullRequest,
+  isRefreshingPullRequest = false,
   subagents = [],
   sourceControlActions,
   branchControl,
@@ -602,9 +629,26 @@ const PlanSidebar = memo(function PlanSidebar({
 
           {pullRequest ? (
             <div className="space-y-1.5">
-              <p className="px-1 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
-                Pull Request
-              </p>
+              <div className="flex min-w-0 items-center justify-between gap-2 px-1">
+                <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                  Pull Request
+                </p>
+                {onRefreshPullRequest ? (
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    className="-my-1 shrink-0 text-muted-foreground/50 hover:text-foreground/70"
+                    onClick={onRefreshPullRequest}
+                    disabled={isRefreshingPullRequest}
+                    aria-label="Refresh checks"
+                  >
+                    <RotateCwIcon
+                      className={cn("size-3.5", isRefreshingPullRequest && "animate-spin")}
+                    />
+                  </Button>
+                ) : null}
+              </div>
               <div className="rounded-md border border-border/50 bg-background/35 p-2">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/45 text-muted-foreground/65">
@@ -807,24 +851,22 @@ const PlanSidebar = memo(function PlanSidebar({
 
           {/* Subagents */}
           {subagents.length > 0 ? (
-            <div className="space-y-1.5">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
-                  Subagents
-                </p>
-              </div>
+            <div className="space-y-0.5">
+              <p className="mb-1 px-1 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                Subagents
+              </p>
               {subagents.map((subagent) => {
                 const bucket = subagentStatusBucket(subagent.status);
                 return (
                   <button
                     key={subagent.key}
                     type="button"
-                    className="group flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-muted/50"
+                    className="group flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-muted/40"
                     onClick={() => onOpenSubagent?.(subagent)}
+                    aria-label={`${subagent.name} — ${subagentStatusLabel(subagent.status)}`}
+                    title={subagent.detail ?? undefined}
                   >
-                    <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground group-hover:text-foreground">
-                      <BotIcon className="size-3.5" />
-                    </span>
+                    <SubagentAvatar name={subagent.name} className="size-5" />
                     <span className="min-w-0 flex-1">
                       <span
                         className={resolveSidebarStatusTextClassName(
@@ -837,15 +879,13 @@ const PlanSidebar = memo(function PlanSidebar({
                       >
                         {subagent.name}
                       </span>
-                      {subagent.detail ? (
-                        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/50">
-                          {subagent.detail}
+                      {subagent.role ? (
+                        <span className="block truncate text-[11px] text-muted-foreground/50">
+                          {subagent.role}
                         </span>
                       ) : null}
                     </span>
-                    <span className="shrink-0 text-[10px] text-muted-foreground/45">
-                      {subagentStatusLabel(subagent.status)}
-                    </span>
+                    <SubagentStatusDot status={subagent.status} />
                   </button>
                 );
               })}

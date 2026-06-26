@@ -13,7 +13,10 @@ export interface ThreadSubagentMessageView {
 
 export interface ThreadSubagentView {
   key: string;
+  /** Stable, unique abstract codename used as the subagent's primary identity. */
   name: string;
+  /** Inferred descriptive role (e.g. "Code Reviewer"), shown as a subtitle. */
+  role?: string | null;
   status: ThreadSubagentStatus;
   origin?: string | null;
   capability?: string | null;
@@ -555,6 +558,103 @@ function findSubagentByVisibleIdentity(
   return null;
 }
 
+/**
+ * Distinct, memorable codenames (scientists and philosophers) used to identify
+ * subagents that carry no inferable role. Far nicer than "Subagent 1, 2, 3…":
+ * each agent gets a stable, unique handle that pairs with its colored avatar.
+ */
+const SUBAGENT_CODENAMES = [
+  "Turing",
+  "Dirac",
+  "Hegel",
+  "Arendt",
+  "Boyle",
+  "Locke",
+  "Epicurus",
+  "Curie",
+  "Bohr",
+  "Newton",
+  "Euler",
+  "Gauss",
+  "Hopper",
+  "Lovelace",
+  "Noether",
+  "Pascal",
+  "Tesla",
+  "Darwin",
+  "Kepler",
+  "Faraday",
+  "Planck",
+  "Heisenberg",
+  "Maxwell",
+  "Fermi",
+  "Feynman",
+  "Lagrange",
+  "Riemann",
+  "Babbage",
+  "Shannon",
+  "Ramanujan",
+  "Galileo",
+  "Copernicus",
+  "Pasteur",
+  "Mendel",
+  "Hawking",
+  "Lavoisier",
+  "Fourier",
+  "Pauli",
+  "Kant",
+  "Plato",
+  "Socrates",
+  "Aristotle",
+  "Nietzsche",
+  "Spinoza",
+  "Descartes",
+  "Hume",
+  "Leibniz",
+  "Wittgenstein",
+  "Russell",
+  "Camus",
+  "Sartre",
+  "Voltaire",
+  "Confucius",
+  "Seneca",
+  "Aurelius",
+  "Diogenes",
+] as const;
+
+function hashSubagentSeed(value: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Deterministically assigns a codename from a stable seed (the subagent key),
+ * probing forward to keep names unique within a thread. `taken` is mutated with
+ * the chosen name so subsequent assignments do not collide.
+ */
+function pickSubagentCodename(seed: string, taken: Set<string>): string {
+  const start = hashSubagentSeed(seed) % SUBAGENT_CODENAMES.length;
+  for (let offset = 0; offset < SUBAGENT_CODENAMES.length; offset += 1) {
+    const candidate = SUBAGENT_CODENAMES[(start + offset) % SUBAGENT_CODENAMES.length]!;
+    if (!taken.has(candidate.toLowerCase())) {
+      taken.add(candidate.toLowerCase());
+      return candidate;
+    }
+  }
+  const base = SUBAGENT_CODENAMES[start]!;
+  let suffix = 2;
+  while (taken.has(`${base} ${suffix}`.toLowerCase())) {
+    suffix += 1;
+  }
+  const candidate = `${base} ${suffix}`;
+  taken.add(candidate.toLowerCase());
+  return candidate;
+}
+
 export function deriveThreadSubagents(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): ThreadSubagentView[] {
@@ -666,32 +766,34 @@ export function deriveThreadSubagents(
     });
   }
 
-  let fallbackIndex = 1;
-  return [...subagents.values()]
-    .toSorted((left, right) => left.startedAt.localeCompare(right.startedAt))
-    .map((subagent) => {
-      const name = subagent.name ?? `Subagent ${fallbackIndex}`;
-      if (!subagent.name) {
-        fallbackIndex += 1;
-      }
-      return {
-        key: subagent.key,
-        name,
-        status: subagent.status,
-        origin: subagent.origin,
-        capability: subagent.capability,
-        tool: subagent.tool,
-        detail: subagent.detail,
-        providerThreadIds: [...subagent.providerThreadIds],
-        providerSessionIds: [...subagent.providerSessionIds],
-        startedAt: subagent.startedAt,
-        updatedAt: subagent.updatedAt,
-        entries: subagent.entries,
-        messages: subagent.messages.toSorted((left, right) =>
-          left.createdAt.localeCompare(right.createdAt),
-        ),
-      };
-    });
+  const ordered = [...subagents.values()].toSorted((left, right) =>
+    left.startedAt.localeCompare(right.startedAt),
+  );
+
+  // Every subagent gets a stable, unique abstract codename as its primary
+  // identity; any inferred descriptive label is demoted to `role` (a subtitle).
+  const takenNames = new Set<string>();
+  return ordered.map((subagent) => {
+    const name = pickSubagentCodename(subagent.key, takenNames);
+    return {
+      key: subagent.key,
+      name,
+      role: subagent.name,
+      status: subagent.status,
+      origin: subagent.origin,
+      capability: subagent.capability,
+      tool: subagent.tool,
+      detail: subagent.detail,
+      providerThreadIds: [...subagent.providerThreadIds],
+      providerSessionIds: [...subagent.providerSessionIds],
+      startedAt: subagent.startedAt,
+      updatedAt: subagent.updatedAt,
+      entries: subagent.entries,
+      messages: subagent.messages.toSorted((left, right) =>
+        left.createdAt.localeCompare(right.createdAt),
+      ),
+    };
+  });
 }
 
 export function findThreadSubagent(
