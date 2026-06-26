@@ -1603,6 +1603,127 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           ),
       );
 
+      it.effect("includes Claude Fable 5 without fast mode on supported versions", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities(),
+          );
+          const fable = status.models.find((model) => model.slug === "claude-fable-5");
+          if (!fable) {
+            assert.fail("Expected Claude Fable 5 to be present for Claude Code v2.2.0.");
+          }
+          if (!fable.capabilities) {
+            assert.fail("Expected Claude Fable 5 capabilities to be present.");
+          }
+          const effortDescriptor = fable.capabilities.optionDescriptors?.find(
+            (descriptor) => descriptor.type === "select" && descriptor.id === "effort",
+          );
+          assert.deepStrictEqual(
+            effortDescriptor?.type === "select"
+              ? effortDescriptor.options.find((option) => option.isDefault)
+              : undefined,
+            { id: "high", label: "High", isDefault: true },
+          );
+          // Fast mode is Opus-only — Fable must not expose it.
+          assert.strictEqual(
+            fable.capabilities.optionDescriptors?.some(
+              (descriptor) => descriptor.type === "boolean" && descriptor.id === "fastMode",
+            ),
+            false,
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.2.0\n", stderr: "", code: 0 };
+              if (joined === "auth status")
+                return {
+                  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                  stderr: "",
+                  code: 0,
+                };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("hides Claude Fable 5 on Claude Code versions before its minimum", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities(),
+          );
+          assert.strictEqual(
+            status.models.some((model) => model.slug === "claude-fable-5"),
+            false,
+          );
+          // Opus 4.8 is available on the current CLI, so the gate is Fable-specific.
+          assert.strictEqual(
+            status.models.some((model) => model.slug === "claude-opus-4-8"),
+            true,
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.193\n", stderr: "", code: 0 };
+              if (joined === "auth status")
+                return {
+                  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                  stderr: "",
+                  code: 0,
+                };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("omits max effort on Sonnet 4.6 and fast mode on Opus 4.5", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities(),
+          );
+          // Sonnet 4.6 does not support `max` effort on the Claude Code CLI —
+          // requesting it falls back to the default (see ClaudeAdapter.test).
+          const sonnet = status.models.find((model) => model.slug === "claude-sonnet-4-6");
+          const sonnetEffort = sonnet?.capabilities?.optionDescriptors?.find(
+            (descriptor) => descriptor.type === "select" && descriptor.id === "effort",
+          );
+          assert.strictEqual(
+            sonnetEffort?.type === "select"
+              ? sonnetEffort.options.some((option) => option.id === "max")
+              : undefined,
+            false,
+          );
+          // Fast mode is only available on Opus 4.6+, so 4.5 must not expose it.
+          const opus45 = status.models.find((model) => model.slug === "claude-opus-4-5");
+          assert.strictEqual(
+            opus45?.capabilities?.optionDescriptors?.some(
+              (descriptor) => descriptor.type === "boolean" && descriptor.id === "fastMode",
+            ),
+            false,
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.154\n", stderr: "", code: 0 };
+              if (joined === "auth status")
+                return {
+                  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                  stderr: "",
+                  code: 0,
+                };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
       it.effect("hides Claude Opus 4.8 on Claude Code versions before v2.1.154", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(

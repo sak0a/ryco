@@ -47,6 +47,12 @@ const CLAUDE_PRESENTATION = {
 } as const;
 const MINIMUM_CLAUDE_OPUS_4_8_VERSION = "2.1.154";
 const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
+// Forward-looking gate: Claude Fable 5 is wired up but not yet selectable in
+// the Claude Code CLI. Hidden on the current CLI (~2.1.193) and set to surface
+// on the next release so it appears as soon as Fable support could land. UPDATE
+// to the exact minimum version once Anthropic confirms it, so Fable isn't
+// offered on a CLI that can't accept the model.
+const MINIMUM_CLAUDE_FABLE_5_VERSION = "2.1.194";
 
 type ClaudeEffortLevel = "low" | "medium" | "high" | "xhigh" | "max" | "ultracode" | "ultrathink";
 
@@ -133,6 +139,21 @@ const CLAUDE_OPUS_LEGACY_EFFORT_LEVELS = [
 
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
+    slug: "claude-fable-5",
+    name: "Claude Fable 5",
+    shortName: "Fable 5",
+    isCustom: false,
+    capabilities: buildClaudeOpusCapabilities({
+      effortLevels: CLAUDE_OPUS_ADAPTIVE_EFFORT_LEVELS,
+      defaultEffort: "high",
+      // Fast mode is an Opus-tier feature; Fable does not support it.
+      supportsFastMode: false,
+      // Fable's context window is 1M by default and at maximum, so there is no
+      // 200k/1m toggle to expose.
+      supportsContextWindow: false,
+    }),
+  },
+  {
     slug: "claude-opus-4-8",
     name: "Claude Opus 4.8",
     shortName: "Opus 4.8",
@@ -176,7 +197,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     capabilities: buildClaudeOpusCapabilities({
       effortLevels: CLAUDE_OPUS_LEGACY_EFFORT_LEVELS,
       defaultEffort: "high",
-      supportsFastMode: true,
+      // Fast mode is only available on Opus 4.6 and newer; 4.5 predates it.
+      supportsFastMode: false,
       supportsContextWindow: false,
     }),
   },
@@ -240,10 +262,17 @@ function supportsClaudeOpus47(version: string | null | undefined): boolean {
   return supportsMinimumClaudeVersion(version, MINIMUM_CLAUDE_OPUS_4_7_VERSION);
 }
 
+function supportsClaudeFable5(version: string | null | undefined): boolean {
+  return supportsMinimumClaudeVersion(version, MINIMUM_CLAUDE_FABLE_5_VERSION);
+}
+
 function getBuiltInClaudeModelsForVersion(
   version: string | null | undefined,
 ): ReadonlyArray<ServerProviderModel> {
   return BUILT_IN_MODELS.filter((model) => {
+    if (model.slug === "claude-fable-5") {
+      return supportsClaudeFable5(version);
+    }
     if (model.slug === "claude-opus-4-8") {
       return supportsClaudeOpus48(version);
     }
@@ -257,6 +286,9 @@ function getBuiltInClaudeModelsForVersion(
 function formatClaudeUpgradeMessages(version: string | null): ReadonlyArray<string> {
   const versionLabel = version ? `v${version}` : "the installed version";
   const messages: Array<string> = [];
+  // Claude Fable 5 is intentionally omitted here: it is gated on a placeholder
+  // version (see MINIMUM_CLAUDE_FABLE_5_VERSION) and not yet released, so we
+  // don't nudge users to upgrade for it. Add a message once the version is real.
   if (!supportsClaudeOpus47(version)) {
     messages.push(
       `Claude Code ${versionLabel} is too old for Claude Opus 4.7. Upgrade to v${MINIMUM_CLAUDE_OPUS_4_7_VERSION} or newer to access it.`,

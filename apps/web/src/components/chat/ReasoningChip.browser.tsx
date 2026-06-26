@@ -182,4 +182,44 @@ describe("ReasoningChip", () => {
       expect(button?.textContent ?? "").toMatch(/Ultra/i);
     });
   });
+
+  it("renders the Ultracode level instead of falling back to Medium", async () => {
+    // Opus 4.8 exposes an "ultracode" effort. It must render with its own label,
+    // not silently normalize to "Med" (the pre-fix fallback behavior).
+    useUiStateStore.getState().setReasoningIndicatorStyle("text");
+    const opus48Descriptor = {
+      id: "effort",
+      label: "Reasoning",
+      type: "select" as const,
+      options: [
+        { id: "low", label: "Low" },
+        { id: "medium", label: "Medium" },
+        { id: "high", label: "High", isDefault: true },
+        { id: "xhigh", label: "Extra High" },
+        { id: "max", label: "Max" },
+        { id: "ultracode", label: "Ultracode" },
+        { id: "ultrathink", label: "Ultrathink" },
+      ],
+      currentValue: "ultracode",
+      promptInjectedValues: ["ultrathink"],
+    } as const;
+    mounted = await render(
+      <ReasoningChip
+        descriptor={opus48Descriptor}
+        descriptors={[opus48Descriptor]}
+        prompt=""
+        primarySelectDescriptorId="effort"
+        ultrathinkInBodyText={false}
+        ultrathinkPromptControlled={false}
+        onChangeDescriptors={vi.fn()}
+        onPromptChange={vi.fn()}
+      />,
+    );
+    await vi.waitFor(() => {
+      const button = document.querySelector("button");
+      const text = button?.textContent ?? "";
+      expect(text).toContain("UCode");
+      expect(text).not.toContain("Med");
+    });
+  });
 });
