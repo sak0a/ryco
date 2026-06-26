@@ -451,6 +451,42 @@ describe("deriveThreadSubagents", () => {
       subagents.map((subagent) => subagent.name),
     );
   });
+
+  it("resolves codename collisions independently of insertion order", () => {
+    // "subagent:c3" and "subagent:c7" prefer the same first codename, forcing a
+    // collision. The resolved names must depend only on the keys, not on which
+    // subagent arrived (or was backfilled) first — otherwise a subagent's label
+    // and avatar could silently change on refresh.
+    const startActivity = (subagentId: string, createdAt: string) =>
+      makeActivity({
+        id: `start-${subagentId}-${createdAt}`,
+        kind: "subagent.started",
+        createdAt,
+        payload: {
+          itemType: "subagent",
+          subagent: { subagentId },
+          status: "running",
+        },
+      });
+
+    const codenamesByKey = (activities: OrchestrationThreadActivity[]) =>
+      Object.fromEntries(
+        deriveThreadSubagents(activities).map((subagent) => [subagent.key, subagent.name]),
+      );
+
+    const c3First = codenamesByKey([
+      startActivity("c3", "2026-06-04T10:00:00.000Z"),
+      startActivity("c7", "2026-06-04T10:00:01.000Z"),
+    ]);
+    const c7First = codenamesByKey([
+      startActivity("c7", "2026-06-04T10:00:00.000Z"),
+      startActivity("c3", "2026-06-04T10:00:01.000Z"),
+    ]);
+
+    expect(c3First).toEqual({ "subagent:c3": "Turing", "subagent:c7": "Shannon" });
+    expect(c7First).toEqual(c3First);
+    expect(c3First["subagent:c3"]).not.toBe(c3First["subagent:c7"]);
+  });
 });
 
 describe("findThreadSubagent", () => {
