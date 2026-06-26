@@ -1603,52 +1603,50 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           ),
       );
 
-      it.effect(
-        "includes Claude Fable 5 without fast mode on supported versions",
-        () =>
-          Effect.gen(function* () {
-            const status = yield* checkClaudeProviderStatus(
-              defaultClaudeSettings,
-              claudeCapabilities(),
-            );
-            const fable = status.models.find((model) => model.slug === "claude-fable-5");
-            if (!fable) {
-              assert.fail("Expected Claude Fable 5 to be present for Claude Code v2.2.0.");
-            }
-            if (!fable.capabilities) {
-              assert.fail("Expected Claude Fable 5 capabilities to be present.");
-            }
-            const effortDescriptor = fable.capabilities.optionDescriptors?.find(
-              (descriptor) => descriptor.type === "select" && descriptor.id === "effort",
-            );
-            assert.deepStrictEqual(
-              effortDescriptor?.type === "select"
-                ? effortDescriptor.options.find((option) => option.isDefault)
-                : undefined,
-              { id: "high", label: "High", isDefault: true },
-            );
-            // Fast mode is Opus-only — Fable must not expose it.
-            assert.strictEqual(
-              fable.capabilities.optionDescriptors?.some(
-                (descriptor) => descriptor.type === "boolean" && descriptor.id === "fastMode",
-              ),
-              false,
-            );
-          }).pipe(
-            Effect.provide(
-              mockSpawnerLayer((args) => {
-                const joined = args.join(" ");
-                if (joined === "--version") return { stdout: "2.2.0\n", stderr: "", code: 0 };
-                if (joined === "auth status")
-                  return {
-                    stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
-                    stderr: "",
-                    code: 0,
-                  };
-                throw new Error(`Unexpected args: ${joined}`);
-              }),
+      it.effect("includes Claude Fable 5 without fast mode on supported versions", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities(),
+          );
+          const fable = status.models.find((model) => model.slug === "claude-fable-5");
+          if (!fable) {
+            assert.fail("Expected Claude Fable 5 to be present for Claude Code v2.2.0.");
+          }
+          if (!fable.capabilities) {
+            assert.fail("Expected Claude Fable 5 capabilities to be present.");
+          }
+          const effortDescriptor = fable.capabilities.optionDescriptors?.find(
+            (descriptor) => descriptor.type === "select" && descriptor.id === "effort",
+          );
+          assert.deepStrictEqual(
+            effortDescriptor?.type === "select"
+              ? effortDescriptor.options.find((option) => option.isDefault)
+              : undefined,
+            { id: "high", label: "High", isDefault: true },
+          );
+          // Fast mode is Opus-only — Fable must not expose it.
+          assert.strictEqual(
+            fable.capabilities.optionDescriptors?.some(
+              (descriptor) => descriptor.type === "boolean" && descriptor.id === "fastMode",
             ),
+            false,
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.2.0\n", stderr: "", code: 0 };
+              if (joined === "auth status")
+                return {
+                  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                  stderr: "",
+                  code: 0,
+                };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
           ),
+        ),
       );
 
       it.effect("hides Claude Fable 5 on Claude Code versions before its minimum", () =>

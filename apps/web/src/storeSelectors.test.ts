@@ -152,5 +152,4 @@ describe("createEnvironmentFallbackThreadRefSelector", () => {
 
     expect(selector(state)).toEqual({ environmentId, threadId: threadA });
   });
-
 });
