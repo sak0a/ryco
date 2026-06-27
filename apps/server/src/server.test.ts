@@ -82,6 +82,7 @@ import {
   ProjectionSnapshotQuery,
   type ProjectionSnapshotQueryShape,
 } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { StatisticsQuery, type StatisticsQueryShape } from "./statistics/StatisticsQuery.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
 import {
@@ -426,6 +427,7 @@ const buildAppUnderTest = (options?: {
     terminalManager?: Partial<TerminalManagerShape>;
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
+    statisticsQuery?: Partial<StatisticsQueryShape>;
     projectionWorktreeRepository?: Partial<ProjectionWorktreeRepositoryShape>;
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
     browserTraceCollector?: Partial<BrowserTraceCollectorShape>;
@@ -733,26 +735,57 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ProjectionSnapshotQuery)({
-          getCommandReadModel: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
-          getSnapshot: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
-          getShellSnapshot: () =>
-            Effect.succeed({
-              snapshotSequence: 0,
-              projects: [],
-              threads: [],
-              updatedAt: new Date(0).toISOString(),
-            }),
-          getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
-          getProjectShellById: () => Effect.succeed(Option.none()),
-          getThreadShellById: () => Effect.succeed(Option.none()),
-          getThreadDetailById: () => Effect.succeed(Option.none()),
-          getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
-          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-          getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-          getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-          ...options?.layers?.projectionSnapshotQuery,
-        }),
+        Layer.mergeAll(
+          Layer.mock(ProjectionSnapshotQuery)({
+            getCommandReadModel: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
+            getSnapshot: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
+            getShellSnapshot: () =>
+              Effect.succeed({
+                snapshotSequence: 0,
+                projects: [],
+                threads: [],
+                updatedAt: new Date(0).toISOString(),
+              }),
+            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
+            getProjectShellById: () => Effect.succeed(Option.none()),
+            getThreadShellById: () => Effect.succeed(Option.none()),
+            getThreadDetailById: () => Effect.succeed(Option.none()),
+            getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
+            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+            getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+            ...options?.layers?.projectionSnapshotQuery,
+          }),
+          Layer.mock(StatisticsQuery)({
+            getStatistics: () =>
+              Effect.succeed({
+                generatedAt: new Date(0).toISOString(),
+                projects: [],
+                models: [],
+                dailyBuckets: [],
+                worktrees: { created: 0, archived: 0, active: 0, openPrs: 0 },
+                totals: {
+                  inputTokens: 0,
+                  outputTokens: 0,
+                  cachedInputTokens: 0,
+                  reasoningTokens: 0,
+                  totalTokens: 0,
+                  turns: 0,
+                  activeMs: 0,
+                  toolUses: 0,
+                  filesChanged: 0,
+                  additions: 0,
+                  deletions: 0,
+                  commits: 0,
+                  pushes: 0,
+                  threads: 0,
+                  projects: 0,
+                },
+                tokenAttribution: "per-turn-delta",
+              }),
+            ...options?.layers?.statisticsQuery,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ProjectionWorktreeRepository)({

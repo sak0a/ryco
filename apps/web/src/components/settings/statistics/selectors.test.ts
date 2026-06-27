@@ -1,0 +1,122 @@
+import { ProjectId, type StatisticsDailyBucket, type StatisticsSnapshot } from "@ryco/contracts";
+import { describe, expect, it } from "vite-plus/test";
+
+import { buildTimeSeries, filterBuckets, previousTotals } from "./selectors";
+
+const PROJECT = ProjectId.make("project-1");
+
+function makeBucket(
+  date: string,
+  over: Partial<StatisticsDailyBucket> = {},
+): StatisticsDailyBucket {
+  return {
+    date,
+    projectId: PROJECT,
+    model: "gpt-5.4",
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    reasoningTokens: 0,
+    turns: 0,
+    activeMs: 0,
+    toolUses: 0,
+    filesChanged: 0,
+    additions: 0,
+    deletions: 0,
+    commits: 0,
+    pushes: 0,
+    threadsCreated: 0,
+    ...over,
+  };
+}
+
+function makeSnapshot(
+  buckets: ReadonlyArray<StatisticsDailyBucket>,
+  generatedAt = "2026-06-27T12:00:00.000Z",
+): StatisticsSnapshot {
+  return {
+    generatedAt,
+    projects: [],
+    models: [],
+    dailyBuckets: buckets,
+    worktrees: { created: 0, archived: 0, active: 0, openPrs: 0 },
+    // The functions under test read only generatedAt + dailyBuckets; totals is
+    // required by the type but unused here.
+    totals: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningTokens: 0,
+      totalTokens: 0,
+      turns: 0,
+      activeMs: 0,
+      toolUses: 0,
+      filesChanged: 0,
+      additions: 0,
+      deletions: 0,
+      commits: 0,
+      pushes: 0,
+      threads: 0,
+      projects: 0,
+    },
+  };
+}
+
+describe("buildTimeSeries", () => {
+  it("'all' keeps the most recent days, not the oldest (recency regression)", () => {
+    const buckets = [
+      makeBucket("2024-01-01", { inputTokens: 111 }), // far in the past
+      makeBucket("2026-06-27", { inputTokens: 5 }), // today
+    ];
+    const snapshot = makeSnapshot(buckets);
+    const series = buildTimeSeries(snapshot, buckets, "all");
+
+    expect(series.length).toBeLessThanOrEqual(372);
+    const last = series[series.length - 1];
+    expect(last?.date).toBe("2026-06-27");
+    expect(last?.inputTokens).toBe(5); // today's data is present
+    // The >372-day-old bucket is dropped from the (capped) window.
+    expect(series.some((point) => point.date === "2024-01-01")).toBe(false);
+  });
+
+  it("fills gaps across a bounded range", () => {
+    const snapshot = makeSnapshot([makeBucket("2026-06-27", { turns: 3 })]);
+    const series = buildTimeSeries(snapshot, snapshot.dailyBuckets, "7d");
+    expect(series.length).toBe(7);
+    expect(series[0]?.date).toBe("2026-06-21");
+    expect(series.at(-1)?.date).toBe("2026-06-27");
+    expect(series.at(-1)?.turns).toBe(3);
+  });
+});
+
+describe("previousTotals", () => {
+  it("sums exactly the window immediately preceding the active range", () => {
+    const buckets = [
+      makeBucket("2026-06-25", { inputTokens: 100 }), // current 7d window
+      makeBucket("2026-06-18", { inputTokens: 50 }), // previous 7d window
+      makeBucket("2026-06-10", { inputTokens: 999 }), // older, excluded
+    ];
+    const snapshot = makeSnapshot(buckets);
+    const prev = previousTotals(snapshot, { range: "7d", projectId: null, model: null });
+    expect(prev?.inputTokens).toBe(50);
+  });
+
+  it("is null for the 'all' range", () => {
+    const snapshot = makeSnapshot([makeBucket("2026-06-25")]);
+    expect(previousTotals(snapshot, { range: "all", projectId: null, model: null })).toBeNull();
+  });
+});
+
+describe("filterBuckets", () => {
+  it("filters by range and model", () => {
+    const buckets = [
+      makeBucket("2026-06-26", { model: "gpt-5.4", inputTokens: 1 }),
+      makeBucket("2026-06-26", { model: "claude-opus-4-8", inputTokens: 2 }),
+      makeBucket("2026-01-01", { model: "gpt-5.4", inputTokens: 9 }),
+    ];
+    const snapshot = makeSnapshot(buckets);
+    const filtered = filterBuckets(snapshot, { range: "7d", projectId: null, model: "gpt-5.4" });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.inputTokens).toBe(1);
+  });
+});

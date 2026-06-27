@@ -100,6 +100,7 @@ import type {
 } from "./orchestration.ts";
 import type { EnvironmentId } from "./baseSchemas.ts";
 import type { DiagnosticsSnapshot } from "./diagnostics.ts";
+import type { StatisticsSnapshot } from "./statistics.ts";
 import type {
   AuthBearerBootstrapResult,
   AuthSessionState,
@@ -341,6 +342,7 @@ export interface LocalApi {
     getConfig: () => Promise<ServerConfig>;
     getAdvertisedEndpoints: () => Promise<readonly AdvertisedEndpoint[]>;
     getDiagnosticsMetrics: () => Promise<ServerLocalDiagnosticsMetrics>;
+    getStatistics: () => Promise<StatisticsSnapshot>;
     /**
      * Refresh provider snapshots. When `input.instanceId` is supplied only that
      * configured instance is probed; otherwise every configured instance is
