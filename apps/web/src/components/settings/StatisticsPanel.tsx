@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "../ui/button";
+import { chartColor } from "../ui/chart";
 import { formatUsd } from "~/lib/modelPricing";
 import {
   formatDuration,
@@ -283,12 +284,11 @@ export function StatisticsPanel() {
 }
 
 function LegendDot({ colorIndex, label }: { colorIndex: number; label: string }) {
-  const colors = ["oklch(0.62 0.19 264)", "oklch(0.70 0.12 195)"];
   return (
     <span className="inline-flex items-center gap-1.5">
       <span
         className="size-2.5 rounded-[3px]"
-        style={{ backgroundColor: colors[colorIndex] ?? colors[0] }}
+        style={{ backgroundColor: chartColor(colorIndex) }}
       />
       {label}
     </span>

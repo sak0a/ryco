@@ -17,7 +17,10 @@ export function ModelLeaderboard({ models }: { models: ReadonlyArray<ModelAggreg
         const color = chartColor(index);
         const widthPct = Math.max(2, (entry.totalTokens / max) * 100);
         return (
-          <li key={entry.model} className="flex items-center gap-3 px-4 py-3">
+          <li
+            key={`${entry.provider ?? "unknown"}:${entry.model}`}
+            className="flex items-center gap-3 px-4 py-3"
+          >
             <span className="w-4 text-center font-medium text-[11px] text-muted-foreground tabular-nums">
               {index + 1}
             </span>

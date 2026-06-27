@@ -24,9 +24,10 @@ export function useStatistics(): UseStatisticsResult {
 
   useEffect(() => {
     let cancelled = false;
-    if (refreshKey === 0) {
-      setLoading(true);
-    }
+    // Set loading on every run (initial + manual refresh) so `refreshing`
+    // reflects in-flight refreshes. The skeleton is gated on `!snapshot`, so
+    // existing content stays visible during a refresh.
+    setLoading(true);
     void ensureLocalApi()
       .server.getStatistics()
       .then((next) => {

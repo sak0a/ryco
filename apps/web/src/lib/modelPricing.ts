@@ -19,13 +19,27 @@ export interface ModelPrice {
 // Flatten the per-provider alias maps into a single alias→canonical lookup so we
 // can canonicalize a model slug even when the provider isn't known at the call
 // site (the dashboard groups by the thread's stored model slug).
+//
+// Aliases that resolve to DIFFERENT canonical slugs across providers (e.g. "5.4"
+// is gpt-5.4 for Codex but gpt-5 for Copilot) are ambiguous without provider
+// context, so we drop them rather than resolve by arbitrary insertion order —
+// the flattened fallback only covers globally-unambiguous aliases.
 const FLAT_ALIASES: Record<string, string> = (() => {
   const out: Record<string, string> = {};
+  const ambiguous = new Set<string>();
   for (const map of Object.values(MODEL_SLUG_ALIASES_BY_PROVIDER)) {
     if (!map) continue;
     for (const [alias, canonical] of Object.entries(map)) {
-      out[alias] = canonical;
+      const existing = out[alias];
+      if (existing !== undefined && existing !== canonical) {
+        ambiguous.add(alias);
+      } else {
+        out[alias] = canonical;
+      }
     }
+  }
+  for (const alias of ambiguous) {
+    delete out[alias];
   }
   return out;
 })();

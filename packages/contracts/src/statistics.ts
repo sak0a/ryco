@@ -22,9 +22,11 @@ export type StatisticsRange = typeof StatisticsRange.Type;
  * server-side filtering share one shape.
  */
 export const StatisticsFilter = Schema.Struct({
-  projectId: Schema.optional(ProjectId),
-  model: Schema.optional(Schema.String),
-  provider: Schema.optional(Schema.String),
+  // Nullable to match the panel's null-based filter state, so the same shape can
+  // be reused for RPC payloads / persistence without a normalization pass.
+  projectId: Schema.optional(Schema.NullOr(ProjectId)),
+  model: Schema.optional(Schema.NullOr(Schema.String)),
+  provider: Schema.optional(Schema.NullOr(Schema.String)),
   range: Schema.optional(StatisticsRange),
 });
 export type StatisticsFilter = typeof StatisticsFilter.Type;
