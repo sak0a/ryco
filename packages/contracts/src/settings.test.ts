@@ -2,10 +2,28 @@ import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
 
 import { ProviderInstanceId } from "./providerInstance.ts";
-import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./settings.ts";
+import {
+  ClientSettingsSchema,
+  DEFAULT_SERVER_SETTINGS,
+  ServerSettings,
+  ServerSettingsPatch,
+} from "./settings.ts";
 
+const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+describe("ClientSettings word wrap", () => {
+  it("defaults chat word wrap on", () => {
+    expect(decodeClientSettings({}).chatWordWrap).toBe(true);
+  });
+
+  it("keeps chatWordWrap independent from diffWordWrap (not conflated)", () => {
+    const decoded = decodeClientSettings({ chatWordWrap: false, diffWordWrap: true });
+    expect(decoded.chatWordWrap).toBe(false);
+    expect(decoded.diffWordWrap).toBe(true);
+  });
+});
 
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults to an empty record so legacy configs without the key still decode", () => {

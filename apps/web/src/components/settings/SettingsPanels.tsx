@@ -357,6 +357,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
+      ...(settings.chatWordWrap !== DEFAULT_UNIFIED_SETTINGS.chatWordWrap
+        ? ["Code & table wrapping"]
+        : []),
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
         ? ["Diff whitespace changes"]
         : []),
@@ -387,6 +390,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.confirmThreadDelete,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
+      settings.chatWordWrap,
       settings.diffIgnoreWhitespace,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
@@ -409,6 +413,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     updateSettings({
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       diffWordWrap: DEFAULT_UNIFIED_SETTINGS.diffWordWrap,
+      chatWordWrap: DEFAULT_UNIFIED_SETTINGS.chatWordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
@@ -593,6 +598,30 @@ export function GeneralSettingsPanel() {
                 ))}
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Wrap code blocks and tables"
+          description="Wrap long lines in chat code blocks and tables instead of scrolling."
+          resetAction={
+            settings.chatWordWrap !== DEFAULT_UNIFIED_SETTINGS.chatWordWrap ? (
+              <SettingResetButton
+                label="code block and table wrapping"
+                onClick={() =>
+                  updateSettings({
+                    chatWordWrap: DEFAULT_UNIFIED_SETTINGS.chatWordWrap,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.chatWordWrap}
+              onCheckedChange={(checked) => updateSettings({ chatWordWrap: Boolean(checked) })}
+              aria-label="Wrap chat code blocks and tables by default"
+            />
           }
         />
 
