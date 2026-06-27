@@ -155,6 +155,7 @@ function SidebarProvider({
           className,
         )}
         data-slot="sidebar-wrapper"
+        data-state={state}
         style={
           {
             "--sidebar-width": SIDEBAR_WIDTH,

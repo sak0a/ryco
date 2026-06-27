@@ -146,7 +146,7 @@ export const ChatHeader = memo(function ChatHeader(props: ChatHeaderProps) {
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex min-w-0 items-center gap-2 pt-4 pb-2.5">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+        <SidebarTrigger className="size-7 shrink-0 group-data-[state=expanded]/sidebar-wrapper:md:hidden" />
         <ChatHeaderBar
           projectName={props.activeProjectName}
           isGitRepo={props.isGitRepo}
