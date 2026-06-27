@@ -15,20 +15,6 @@
  */
 import { useEffect, useRef, useState } from "react";
 import {
-  LayoutGrid,
-  Boxes,
-  GitBranch,
-  TerminalSquare,
-  Paperclip,
-  FileDiff,
-  Palette,
-  Command,
-  Keyboard,
-  Plug,
-  GitPullRequest,
-  Radio,
-  RefreshCw,
-  Activity,
   Zap,
   ShieldCheck,
   Eye,
@@ -38,8 +24,6 @@ import {
   ArrowUpRight,
   Copy,
   Check,
-  Plus,
-  Minus,
   MessagesSquare,
   MoveRight,
   type LucideIcon,
@@ -49,7 +33,7 @@ import {
   PROVIDERS,
   MODEL_PROVIDERS,
   PLATFORMS,
-  FEATURES,
+  FEATURE_GROUPS,
   STATS,
   PILLARS,
   STEPS,
@@ -62,6 +46,7 @@ import { ScreenshotFrame } from "@/components/shared/ScreenshotFrame";
 import { useGsapContext, prefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/cn";
 import { STEP_ICONS } from "./process-icons";
+import { FEATURE_ICONS } from "./feature-icons";
 
 const ACCENT = "#c6ff3a";
 
@@ -74,23 +59,8 @@ const NAV_OFFSET = "scroll-mt-24";
 const navLink =
   "relative transition-colors duration-300 hover:text-white after:absolute after:inset-x-0 after:-bottom-1 after:h-px after:origin-left after:scale-x-0 after:bg-[#c6ff3a] after:transition-transform after:duration-300 after:ease-out after:content-[''] hover:after:scale-x-100";
 
-const SCRAMBLE_GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ#@%&/\\<>{}[]()*+=01";
-
+/* Pillars are the only section still using lucide glyphs. */
 const ICONS: Record<string, LucideIcon> = {
-  LayoutGrid,
-  Boxes,
-  GitBranch,
-  TerminalSquare,
-  Paperclip,
-  FileDiff,
-  Palette,
-  Command,
-  Keyboard,
-  Plug,
-  GitPullRequest,
-  Radio,
-  RefreshCw,
-  Activity,
   Zap,
   ShieldCheck,
   Eye,
@@ -192,46 +162,6 @@ function useReducedMotion(): boolean {
   const [reduced, setReduced] = useState<boolean>(() => prefersReducedMotion());
   useEffect(() => setReduced(prefersReducedMotion()), []);
   return reduced;
-}
-
-/**
- * Decode/scramble a word into place once, shortly after load (cycles random
- * glyphs, then resolves left→right). No-ops under reduced motion — the element
- * already contains the final text, so it just stays put.
- */
-function useScrambleOnLoad(
-  ref: React.RefObject<HTMLElement | null>,
-  finalText: string,
-  { delay = 1150, stepMs = 36, framesPerChar = 2 } = {},
-) {
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || prefersReducedMotion()) return;
-    const chars = finalText.split("");
-    let frame = 0;
-    let interval: number | undefined;
-    const start = window.setTimeout(() => {
-      interval = window.setInterval(() => {
-        const revealed = Math.floor(frame / framesPerChar);
-        el.textContent = chars
-          .map((c, i) =>
-            i < revealed || !/[a-z]/i.test(c)
-              ? c
-              : SCRAMBLE_GLYPHS[Math.floor(Math.random() * SCRAMBLE_GLYPHS.length)],
-          )
-          .join("");
-        frame += 1;
-        if (revealed >= chars.length) {
-          el.textContent = finalText;
-          if (interval) window.clearInterval(interval);
-        }
-      }, stepMs);
-    }, delay);
-    return () => {
-      window.clearTimeout(start);
-      if (interval) window.clearInterval(interval);
-    };
-  }, [ref, finalText, delay, stepMs, framesPerChar]);
 }
 
 /**
@@ -543,10 +473,21 @@ function FaqRow({
           {q}
         </span>
         <span
-          className="grid size-7 shrink-0 place-items-center rounded-full border text-white/70"
-          style={open ? { color: ACCENT, borderColor: `${ACCENT}66` } : { borderColor: "rgba(255,255,255,0.18)" }}
+          className="relative grid size-7 shrink-0 place-items-center rounded-full border transition-colors duration-300"
+          style={
+            open
+              ? { color: ACCENT, borderColor: `${ACCENT}66` }
+              : { color: "rgba(255,255,255,0.7)", borderColor: "rgba(255,255,255,0.18)" }
+          }
         >
-          {open ? <Minus className="size-4" /> : <Plus className="size-4" />}
+          <span aria-hidden className="absolute h-0.5 w-3 rounded-full bg-current" />
+          <span
+            aria-hidden
+            className={cn(
+              "absolute h-0.5 w-3 rounded-full bg-current transition-transform duration-300 ease-out",
+              open ? "rotate-0" : "rotate-90",
+            )}
+          />
         </span>
       </button>
       <div className="grid transition-all duration-300 ease-out" style={{ gridTemplateRows: open ? "1fr" : "0fr" }}>
@@ -598,7 +539,6 @@ export default function Version4() {
   const heroShotRef = useRef<HTMLDivElement>(null);
   const hzPinRef = useRef<HTMLDivElement>(null);
   const hzTrackRef = useRef<HTMLDivElement>(null);
-  const scrambleRef = useRef<HTMLSpanElement>(null);
 
   const scope = useGsapContext(({ gsap, ScrollTrigger }) => {
     /* Refresh trigger positions as the large screenshots finish decoding. */
@@ -796,7 +736,6 @@ export default function Version4() {
     ScrollTrigger.refresh();
   });
 
-  useScrambleOnLoad(scrambleRef, "agents.");
   useMagnetic(scope);
 
   return (
@@ -858,36 +797,15 @@ export default function Version4() {
       <main id="top">
         {/* --------------------------------- hero -------------------------------- */}
         <section className="relative mx-auto max-w-7xl px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
-          <div className="mx-auto max-w-4xl text-center">
-            <div data-hero-fade className="mb-7 flex justify-center">
-              <span className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-3.5 py-1.5 text-[12px] text-white/65">
-                <span className="relative flex size-1.5">
-                  <span
-                    aria-hidden
-                    className="absolute inline-flex size-full animate-ping rounded-full opacity-60 motion-reduce:hidden"
-                    style={{ background: ACCENT }}
-                  />
-                  <span
-                    className="relative inline-flex size-1.5 rounded-full"
-                    style={{ background: ACCENT, boxShadow: `0 0 10px ${ACCENT}` }}
-                  />
-                </span>
-                {SITE.status} · {SITE.license}
-              </span>
-            </div>
-
-            <h1 className="font-['Space_Grotesk'] text-[clamp(2.7rem,8vw,6.25rem)] font-bold leading-[0.92] tracking-[-0.035em]">
+          <div className="mx-auto max-w-5xl text-center">
+            <h1 className="font-['Space_Grotesk'] text-[clamp(2.9rem,9vw,7rem)] font-bold leading-[0.88] tracking-[-0.04em]">
               <span className="block overflow-hidden pb-[0.06em]">
-                <span data-hero-line className="block">A fast local</span>
-              </span>
-              <span className="block overflow-hidden pb-[0.06em]">
-                <span data-hero-line className="block">workspace for</span>
+                <span data-hero-line className="block">Every coding agent,</span>
               </span>
               <span className="block overflow-hidden pb-[0.06em]">
                 <span data-hero-line className="block">
-                  coding{" "}
                   <span className="relative inline-block" style={{ color: ACCENT }}>
-                    <span ref={scrambleRef}>agents.</span>
+                    side by side.
                     <span
                       data-hero-underline
                       aria-hidden
@@ -896,6 +814,9 @@ export default function Version4() {
                     />
                   </span>
                 </span>
+              </span>
+              <span className="block overflow-hidden pb-[0.06em]">
+                <span data-hero-line className="block">On your machine.</span>
               </span>
             </h1>
 
@@ -1015,7 +936,7 @@ export default function Version4() {
           ) : (
             /* Motion — pinned horizontal gallery that scrolls sideways. */
             <div ref={hzPinRef} className="relative mt-12 flex h-[100svh] items-center overflow-hidden">
-              <div ref={hzTrackRef} className="flex w-max items-stretch gap-6 px-5 will-change-transform sm:gap-8 sm:px-8">
+              <div ref={hzTrackRef} className="flex w-max items-center gap-6 px-5 will-change-transform sm:gap-8 sm:px-8">
                 {/* intro panel */}
                 <div className="flex w-[82vw] shrink-0 flex-col justify-center sm:w-[58vw] lg:w-[34vw] lg:max-w-[460px]">
                   <Eyebrow>The line-up</Eyebrow>
@@ -1229,24 +1150,19 @@ export default function Version4() {
           </div>
 
           <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURES.map((f) => {
-              const Icon = ICONS[f.icon];
+            {FEATURE_GROUPS.map((f) => {
+              const FeatIcon = FEATURE_ICONS[f.id];
               return (
                 <article
                   key={f.id}
                   data-reveal
-                  className="group relative flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.02] p-6 transition-all duration-300 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.035]"
+                  className="group relative flex flex-col gap-5 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02] p-7 transition-all duration-300 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.035]"
                 >
-                  <span
-                    data-draw-icon
-                    className="grid size-11 place-items-center rounded-xl border border-white/12 bg-white/[0.03] text-white/80 transition-colors duration-300 group-hover:border-[#c6ff3a]/30 group-hover:text-[#c6ff3a]"
-                  >
-                    {Icon ? (
-                      <Icon className="size-5 transition-transform duration-300 ease-out group-hover:scale-110" />
-                    ) : null}
-                  </span>
-                  <h3 className="font-['Space_Grotesk'] text-lg font-semibold text-white">{f.title}</h3>
-                  <p className="text-[14px] leading-relaxed text-white/55">{f.blurb}</p>
+                  <FeatIcon className="size-12 text-[#c6ff3a]/85 transition-colors duration-300 group-hover:text-[#c6ff3a]" />
+                  <div>
+                    <h3 className="font-['Space_Grotesk'] text-lg font-semibold text-white">{f.title}</h3>
+                    <p className="mt-2.5 text-[14px] leading-relaxed text-white/55">{f.blurb}</p>
+                  </div>
                 </article>
               );
             })}
@@ -1450,7 +1366,7 @@ export default function Version4() {
       </main>
 
       {/* --------------------------------- footer ------------------------------- */}
-      <footer className="relative border-t border-white/10 pb-36 pt-14">
+      <footer className="relative border-t border-white/10 pb-16 pt-14">
         <div className="mx-auto max-w-7xl px-5 sm:px-8">
           <div className="flex flex-col gap-10 sm:flex-row sm:items-start sm:justify-between">
             <div className="max-w-sm">
@@ -1490,20 +1406,7 @@ export default function Version4() {
             <p>
               {SITE.license} licensed · © {SITE.company}
             </p>
-            <p className="flex items-center gap-2">
-              <span className="relative flex size-1.5">
-                <span
-                  aria-hidden
-                  className="absolute inline-flex size-full animate-ping rounded-full opacity-60 motion-reduce:hidden"
-                  style={{ background: ACCENT }}
-                />
-                <span
-                  className="relative inline-flex size-1.5 rounded-full"
-                  style={{ background: ACCENT, boxShadow: `0 0 8px ${ACCENT}` }}
-                />
-              </span>
-              {SITE.status}
-            </p>
+            <p>A fast local workspace for coding agents.</p>
           </div>
         </div>
       </footer>

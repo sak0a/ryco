@@ -105,6 +105,32 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* v4 toolkit — always-on feature icons. Same base-value contract as above, so
+   the reduced-motion guard freezes them fully drawn. */
+.ryco-feat .pulse,
+.ryco-feat .scan {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.ryco-feat [data-trace] {
+  stroke-dasharray: var(--len, 120);
+  animation: ryco-proc-trace 3.2s ease-in-out infinite alternate;
+}
+.ryco-feat .pulse { animation: ryco-proc-pulse 2.4s ease-in-out infinite; }
+.ryco-feat .blink { animation: ryco-caret-blink 1.1s steps(1) infinite; }
+.ryco-feat .scan { animation: ryco-feat-scan 3s ease-in-out infinite; }
+.ryco-feat .flow {
+  stroke-dasharray: 4 9;
+  animation: ryco-feat-flow 1.4s linear infinite;
+}
+@keyframes ryco-feat-scan {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(15px); }
+}
+@keyframes ryco-feat-flow {
+  to { stroke-dashoffset: -26; }
+}
+
 /* Blinking caret for the kinetic terminal. */
 .ryco-caret {
   display: inline-block;

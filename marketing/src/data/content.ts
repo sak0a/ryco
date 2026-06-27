@@ -246,6 +246,56 @@ export const FEATURES: Feature[] = [
   },
 ];
 
+/**
+ * The 14 features above, grouped into six themed buckets for the v4 toolkit grid
+ * (each rendered with its own always-on animated icon). Still factually grounded
+ * in the real product — every original feature is folded into one of these.
+ */
+export interface FeatureGroup {
+  id: "agents" | "worktrees" | "terminal" | "command" | "themes" | "infra";
+  title: string;
+  blurb: string;
+}
+
+export const FEATURE_GROUPS: FeatureGroup[] = [
+  {
+    id: "agents",
+    title: "Every agent, side by side",
+    blurb:
+      "Codex, Claude, Copilot, OpenCode and Cursor run together — switch per thread, and run named instances like codex_personal and claude_openrouter at once, each with its own config and models.",
+  },
+  {
+    id: "worktrees",
+    title: "Worktrees for every branch",
+    blurb:
+      "Track git worktrees per branch, PR, issue or Jira item, bucketed by status — and attach those issues and PRs as structured context with a # trigger.",
+  },
+  {
+    id: "terminal",
+    title: "Terminals, diffs & your editor",
+    blurb:
+      "Split terminals with clickable file links, search inside large diffs, and click any diff line to open your editor at the exact file and line.",
+  },
+  {
+    id: "command",
+    title: "Everything on ⌘K",
+    blurb:
+      "A command palette with thread and model jumps and slash commands — plus rebindable shortcuts for terminal, diff, new chat and script execution.",
+  },
+  {
+    id: "themes",
+    title: "Make it unmistakably yours",
+    blurb:
+      "A full theme editor with live preview, independent interface and code fonts, text size, corner radius and a pinnable accent colour.",
+  },
+  {
+    id: "infra",
+    title: "Local-first infrastructure",
+    blurb:
+      "MCP servers, five source-control providers, saved remote environments, auto-updates and built-in observability — no cloud round-trips you didn't ask for.",
+  },
+];
+
 export const STATS = [
   { value: "5", label: "coding agents, one workspace" },
   { value: "3", label: "platforms — macOS · Linux · Windows" },
@@ -318,6 +368,22 @@ export const FAQ = [
   {
     q: "Is it open source?",
     a: "Yes, MIT licensed. Ryco is very early — expect bugs and breaking changes. Join the Discord to follow along.",
+  },
+  {
+    q: "Do I have to pay for Ryco?",
+    a: "No — Ryco itself is free and MIT licensed. You bring the agent subscriptions you already pay for; Ryco runs them through their native SDKs or protocols.",
+  },
+  {
+    q: "Can I switch models in the middle of a thread?",
+    a: "Yes. The model picker swaps provider and model per thread, with reasoning effort and interaction mode right there — and usage windows surfaced inline where the provider exposes them.",
+  },
+  {
+    q: "Can I attach issues and PRs as context?",
+    a: "Yes — attach GitHub, GitLab, Forgejo, Bitbucket or Azure DevOps issues and PRs as structured context straight from the composer with a # trigger, before the agent starts.",
+  },
+  {
+    q: "Does it work with my editor and terminal?",
+    a: "Click any diff line to open your editor at the exact file and line, and the multi-terminal drawer has clickable file and path links. MCP servers and OTLP trace export are built in too.",
   },
 ] as const;
 
