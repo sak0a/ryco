@@ -1,7 +1,9 @@
 /**
  * Ryco brand marks.
  * - <RycoWordmark/> is the vector "ryco" wordmark (currentColor, themeable).
- * - <RycoMark/> is the rendered app icon (transparent PNG from /public).
+ * - <RycoMark/> is the app's "R" symbol — the same mark the desktop/app icon
+ *   uses, recolored white-on-transparent so it reads on the dark canvas
+ *   (`/ryco-mark-white.png`). Decorative by default; the paired wordmark labels it.
  */
 import type { SVGProps } from "react";
 
@@ -30,10 +32,18 @@ export function RycoWordmark(props: SVGProps<SVGSVGElement>) {
 
 export function RycoMark({
   className,
-  alt = "Ryco",
+  alt = "",
 }: {
   className?: string;
   alt?: string;
 }) {
-  return <img src="/ryco-logo.png" className={className} alt={alt} draggable={false} />;
+  return (
+    <img
+      src="/ryco-mark-white.png"
+      className={className}
+      alt={alt}
+      aria-hidden={alt === "" ? true : undefined}
+      draggable={false}
+    />
+  );
 }

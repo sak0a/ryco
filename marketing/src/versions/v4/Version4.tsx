@@ -458,14 +458,6 @@ export default function Version4() {
       delay: 1.05,
     });
 
-    /* Global scroll-progress bar. */
-    gsap.to("[data-scroll-progress]", {
-      scaleX: 1,
-      transformOrigin: "left",
-      ease: "none",
-      scrollTrigger: { start: 0, end: "max", scrub: 0.3 },
-    });
-
     /* Section headings — per-line clip-mask reveal. */
     gsap.utils.toArray<HTMLElement>("[data-line-reveal]").forEach((el) => {
       gsap.from(el, {
@@ -573,20 +565,46 @@ export default function Version4() {
       });
     });
 
+    /* Icon stroke draw-on — feature & pillar glyphs trace themselves in as they
+       enter view, then quickly re-trace when you hover the card. lucide marks are
+       stroke-only, so getTotalLength is defined on every child. The whole block
+       no-ops under reduced motion (and nothing is CSS-hidden), so the static
+       layout always ships the icons fully drawn. */
+    gsap.utils.toArray<HTMLElement>("[data-draw-icon]").forEach((wrap) => {
+      const shapes = Array.from(
+        wrap.querySelectorAll<SVGGeometryElement>("path, line, polyline, circle, rect, ellipse, polygon"),
+      ).filter((s) => typeof s.getTotalLength === "function" && s.getTotalLength() > 0);
+      if (!shapes.length) return;
+
+      const trace = (duration: number) =>
+        shapes.forEach((s) => {
+          const len = s.getTotalLength();
+          gsap.set(s, { strokeDasharray: len });
+          gsap.fromTo(
+            s,
+            { strokeDashoffset: len },
+            { strokeDashoffset: 0, duration, ease: "power2.out", overwrite: "auto" },
+          );
+        });
+
+      // start undrawn, then trace on first reveal …
+      shapes.forEach((s) => {
+        const len = s.getTotalLength();
+        gsap.set(s, { strokeDasharray: len, strokeDashoffset: len });
+      });
+      ScrollTrigger.create({ trigger: wrap, start: "top 90%", once: true, onEnter: () => trace(0.85) });
+
+      // … and re-trace on hover of the enclosing card
+      const card = wrap.closest<HTMLElement>("article");
+      card?.addEventListener("mouseenter", () => trace(0.5));
+    });
+
     ScrollTrigger.refresh();
   });
 
   return (
     <div ref={scope} className="relative min-h-screen bg-[#0a0b0d] text-white antialiased">
       <KineticBackground />
-
-      {/* global scroll-progress bar */}
-      <div
-        data-scroll-progress
-        aria-hidden
-        className="fixed left-0 top-0 z-[60] h-0.5 w-full origin-left scale-x-0"
-        style={{ background: ACCENT, boxShadow: `0 0 12px ${ACCENT}` }}
-      />
 
       {/* ---------------------------------- nav --------------------------------- */}
       <header
@@ -595,9 +613,13 @@ export default function Version4() {
         className="fixed inset-x-0 top-0 z-50 border-b border-transparent transition-colors duration-300 data-[scrolled=true]:border-white/10 data-[scrolled=true]:bg-[#0a0b0d]/75 data-[scrolled=true]:backdrop-blur-xl"
       >
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
-          <a href="#top" className={cn("flex items-center gap-2.5 rounded-lg", focusRing)} aria-label="Ryco home">
-            <RycoMark className="size-7 rounded-md" />
-            <RycoWordmark className="h-[18px] text-white" />
+          <a
+            href="#top"
+            className={cn("group/logo flex items-center gap-2.5 rounded-lg", focusRing)}
+            aria-label="Ryco home"
+          >
+            <RycoMark className="size-7 transition-transform duration-300 ease-out group-hover/logo:scale-110" />
+            <RycoWordmark className="h-[18px] text-white/90 transition-colors duration-300 group-hover/logo:text-white" />
           </a>
           <nav aria-label="Primary" className="hidden items-center gap-8 text-sm text-white/60 md:flex">
             <a href="#agents" className="transition hover:text-white">Agents</a>
@@ -641,7 +663,17 @@ export default function Version4() {
           <div className="mx-auto max-w-4xl text-center">
             <div data-hero-fade className="mb-7 flex justify-center">
               <span className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-3.5 py-1.5 text-[12px] text-white/65">
-                <span className="size-1.5 rounded-full" style={{ background: ACCENT, boxShadow: `0 0 10px ${ACCENT}` }} />
+                <span className="relative flex size-1.5">
+                  <span
+                    aria-hidden
+                    className="absolute inline-flex size-full animate-ping rounded-full opacity-60 motion-reduce:hidden"
+                    style={{ background: ACCENT }}
+                  />
+                  <span
+                    className="relative inline-flex size-1.5 rounded-full"
+                    style={{ background: ACCENT, boxShadow: `0 0 10px ${ACCENT}` }}
+                  />
+                </span>
                 {SITE.status} · {SITE.license}
               </span>
             </div>
@@ -1002,10 +1034,15 @@ export default function Version4() {
                 <article
                   key={f.id}
                   data-reveal
-                  className="group relative flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.02] p-6 transition-colors duration-300 hover:border-white/20"
+                  className="group relative flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.02] p-6 transition-all duration-300 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.035]"
                 >
-                  <span className="grid size-11 place-items-center rounded-xl border border-white/12 bg-white/[0.03] text-white/80 transition-colors group-hover:text-[#c6ff3a]">
-                    {Icon ? <Icon className="size-5" /> : null}
+                  <span
+                    data-draw-icon
+                    className="grid size-11 place-items-center rounded-xl border border-white/12 bg-white/[0.03] text-white/80 transition-colors duration-300 group-hover:border-[#c6ff3a]/30 group-hover:text-[#c6ff3a]"
+                  >
+                    {Icon ? (
+                      <Icon className="size-5 transition-transform duration-300 ease-out group-hover:scale-110" />
+                    ) : null}
                   </span>
                   <h3 className="font-['Space_Grotesk'] text-lg font-semibold text-white">{f.title}</h3>
                   <p className="text-[14px] leading-relaxed text-white/55">{f.blurb}</p>
@@ -1024,13 +1061,16 @@ export default function Version4() {
                 <article
                   key={pillar.title}
                   data-reveal
-                  className="rounded-3xl border border-white/10 bg-white/[0.02] p-7 sm:p-8"
+                  className="group rounded-3xl border border-white/10 bg-white/[0.02] p-7 transition-colors duration-300 hover:border-white/20 sm:p-8"
                 >
                   <span
+                    data-draw-icon
                     className="grid size-12 place-items-center rounded-2xl border"
                     style={{ color: ACCENT, borderColor: `${ACCENT}33`, background: `${ACCENT}10` }}
                   >
-                    {Icon ? <Icon className="size-6" /> : null}
+                    {Icon ? (
+                      <Icon className="size-6 transition-transform duration-300 ease-out group-hover:scale-110" />
+                    ) : null}
                   </span>
                   <h3 className="mt-5 font-['Space_Grotesk'] text-xl font-semibold text-white">{pillar.title}</h3>
                   <p className="mt-3 text-sm leading-relaxed text-white/60">{pillar.body}</p>
@@ -1219,7 +1259,7 @@ export default function Version4() {
           <div className="flex flex-col gap-10 sm:flex-row sm:items-start sm:justify-between">
             <div className="max-w-sm">
               <div className="flex items-center gap-2.5">
-                <RycoMark className="size-7 rounded-md" />
+                <RycoMark className="size-7" />
                 <RycoWordmark className="h-[18px] text-white" />
               </div>
               <p className="mt-4 text-sm leading-relaxed text-white/55">{SITE.longDescription}</p>
@@ -1255,7 +1295,17 @@ export default function Version4() {
               {SITE.license} licensed · © {SITE.company}
             </p>
             <p className="flex items-center gap-2">
-              <span className="size-1.5 rounded-full" style={{ background: ACCENT, boxShadow: `0 0 8px ${ACCENT}` }} />
+              <span className="relative flex size-1.5">
+                <span
+                  aria-hidden
+                  className="absolute inline-flex size-full animate-ping rounded-full opacity-60 motion-reduce:hidden"
+                  style={{ background: ACCENT }}
+                />
+                <span
+                  className="relative inline-flex size-1.5 rounded-full"
+                  style={{ background: ACCENT, boxShadow: `0 0 8px ${ACCENT}` }}
+                />
+              </span>
               {SITE.status}
             </p>
           </div>

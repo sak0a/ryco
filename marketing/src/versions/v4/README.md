@@ -50,7 +50,6 @@ Sections, in order: **nav → hero → marquee → agents → model providers �
 
 | Device | Where |
 | ------ | ----- |
-| Top scroll-progress bar | global, `[data-scroll-progress]` |
 | Hero line clip-reveal + fade + accent underline draw | hero |
 | Hero screenshot clip-reveal on load + scroll parallax | `heroShotRef` |
 | Velocity-reactive marquee (speeds up with scroll, decays back) | `[data-marquee]` |
@@ -59,6 +58,8 @@ Sections, in order: **nav → hero → marquee → agents → model providers �
 | **Sticky scrollytelling** — screenshot swaps + step focus + counter | `[data-shot-step]`, `activeShot` |
 | Timeline progress draw | `[data-timeline-progress]` |
 | Numeric stat count-ups | `[data-count]` |
+| Feature & pillar icon stroke draw-on (on reveal) + re-trace on card hover | `[data-draw-icon]` |
+| "Live" status-dot ping pulse (`animate-ping`, `motion-reduce:hidden`) | hero badge · footer |
 | Generic on-scroll reveals | `[data-reveal]` |
 
 ## Reduced motion
