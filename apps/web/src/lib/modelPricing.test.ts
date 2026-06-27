@@ -28,14 +28,40 @@ describe("estimateCostUsd", () => {
       { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 1_000_000 },
       "gpt-5.4",
     );
-    expect(cost).toBeCloseTo(11.25, 5); // 1.25 input + 10 output
+    expect(cost).toBeCloseTo(17.5, 5); // $2.50 input + $15 output
+
+    // Cached input is billed at the cache-read rate (Opus 4.8: $5 / $0.50 / $25).
+    const opus = estimateCostUsd(
+      { inputTokens: 1_000_000, cachedInputTokens: 1_000_000, outputTokens: 1_000_000 },
+      "claude-opus-4-8",
+    );
+    expect(opus).toBeCloseTo(30.5, 5); // 5 + 0.5 + 25
   });
 
-  it("returns null for subscription/unknown models", () => {
-    expect(getModelPrice("composer-2")).toBeNull();
+  it("returns null for genuinely unknown models", () => {
+    expect(getModelPrice("totally-made-up-model")).toBeNull();
     expect(
-      estimateCostUsd({ inputTokens: 10, cachedInputTokens: 0, outputTokens: 10 }, "composer-2"),
+      estimateCostUsd(
+        { inputTokens: 10, cachedInputTokens: 0, outputTokens: 10 },
+        "totally-made-up-model",
+      ),
     ).toBeNull();
+  });
+
+  it("prices models across providers (incl. provider-prefixed slugs)", () => {
+    expect(getModelPrice("composer-2.5")).not.toBeNull();
+    expect(getModelPrice("gemini-3-pro")).not.toBeNull();
+    expect(getModelPrice("google/gemini-2.5-flash")).not.toBeNull();
+    expect(getModelPrice("deepseek/deepseek-chat")).not.toBeNull();
+    expect(getModelPrice("grok-code-fast-1")).not.toBeNull();
+    expect(getModelPrice("moonshotai/kimi-k2.6")).not.toBeNull();
+  });
+
+  it("matches dated / preview router slugs via suffix fallback", () => {
+    expect(getModelPrice("gemini-3-pro-preview")).toEqual(getModelPrice("gemini-3-pro"));
+    expect(getModelPrice("claude-opus-4-8-20260101")).toEqual(getModelPrice("claude-opus-4-8"));
+    // But pricing-relevant suffixes are preserved (mini ≠ base).
+    expect(getModelPrice("gpt-5.4-mini")).not.toEqual(getModelPrice("gpt-5.4"));
   });
 });
 
