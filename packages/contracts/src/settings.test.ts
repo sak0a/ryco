@@ -7,6 +7,22 @@ import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 
+describe("ServerSettings.enableProviderUpdateChecks", () => {
+  it("defaults provider update checks on", () => {
+    expect(DEFAULT_SERVER_SETTINGS.enableProviderUpdateChecks).toBe(true);
+    expect(decodeServerSettings({}).enableProviderUpdateChecks).toBe(true);
+  });
+
+  it("can be disabled and round-trips through the settings patch", () => {
+    expect(
+      decodeServerSettings({ enableProviderUpdateChecks: false }).enableProviderUpdateChecks,
+    ).toBe(false);
+    expect(
+      decodeServerSettingsPatch({ enableProviderUpdateChecks: false }).enableProviderUpdateChecks,
+    ).toBe(false);
+  });
+});
+
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults to an empty record so legacy configs without the key still decode", () => {
     expect(DEFAULT_SERVER_SETTINGS.providerInstances).toEqual({});

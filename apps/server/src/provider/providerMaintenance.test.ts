@@ -3,17 +3,20 @@ import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import os from "node:os";
 import path from "node:path";
-import { ProviderDriverKind } from "@ryco/contracts";
+import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@ryco/contracts";
 import { Effect, Random } from "effect";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import {
   clearLatestProviderVersionCacheForTests,
   createProviderVersionAdvisory,
+  enrichProviderSnapshotWithVersionAdvisory,
   makePackageManagedProviderMaintenanceResolver,
   makeProviderMaintenanceCapabilities,
   makeStaticProviderMaintenanceResolver,
   normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from "./providerMaintenance.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
 
 const driver = (value: string) => ProviderDriverKind.make(value);
 const makeTempDir = Effect.fn("makeTempDir")(function* (name: string) {
@@ -94,6 +97,48 @@ describe("providerMaintenance", () => {
       latestVersion: null,
       message: null,
     });
+  });
+
+  it("skips latest-version resolution when provider update checks are disabled", () => {
+    let httpRequested = false;
+    const trackingHttpClient = HttpClient.make((request) => {
+      httpRequested = true;
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(request, new Response('{"version":"9.9.9"}', { status: 200 })),
+      );
+    });
+    const installedSnapshot: ServerProvider = {
+      instanceId: ProviderInstanceId.make("packageTool"),
+      driver: driver("packageTool"),
+      enabled: true,
+      installed: true,
+      version: "1.0.0",
+      status: "ready",
+      auth: { status: "authenticated" },
+      checkedAt: "2026-04-10T00:00:00.000Z",
+      models: [],
+      slashCommands: [],
+      skills: [],
+    };
+
+    return Effect.gen(function* () {
+      const enriched = yield* enrichProviderSnapshotWithVersionAdvisory(
+        installedSnapshot,
+        packageToolUpdate.resolve(),
+      );
+      // The registry is never contacted, and latest stays unknown even though a
+      // newer version would have been reported had the checker run.
+      expect(httpRequested).toBe(false);
+      expect(enriched.versionAdvisory).toMatchObject({
+        status: "unknown",
+        currentVersion: "1.0.0",
+        latestVersion: null,
+      });
+    }).pipe(
+      Effect.provide(ServerSettingsService.layerTest({ enableProviderUpdateChecks: false })),
+      Effect.provideService(HttpClient.HttpClient, trackingHttpClient),
+      Effect.runPromise,
+    );
   });
 
   it("marks installed providers behind latest when a newer provider version is available", () => {

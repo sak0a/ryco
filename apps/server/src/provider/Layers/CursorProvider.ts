@@ -34,6 +34,7 @@ import {
   enrichProviderSnapshotWithVersionAdvisory,
   type ProviderMaintenanceCapabilities,
 } from "../providerMaintenance.ts";
+import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings.ts";
 import { AcpSessionRuntime } from "../acp/AcpSessionRuntime.ts";
 import { CursorListAvailableModelsResponse } from "../acp/CursorAcpExtension.ts";
 
@@ -1083,6 +1084,7 @@ export const enrichCursorSnapshot = (input: {
   readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
   readonly stampIdentity?: (snapshot: ServerProvider) => ServerProvider;
   readonly httpClient: HttpClient.HttpClient;
+  readonly serverSettings: ServerSettingsShape;
 }): Effect.Effect<void> => {
   const { settings, snapshot, publishSnapshot } = input;
   const stampIdentity = input.stampIdentity ?? ((value) => value);
@@ -1093,6 +1095,7 @@ export const enrichCursorSnapshot = (input: {
 
   return enrichProviderSnapshotWithVersionAdvisory(snapshot, input.maintenanceCapabilities).pipe(
     Effect.provideService(HttpClient.HttpClient, input.httpClient),
+    Effect.provideService(ServerSettingsService, input.serverSettings),
     Effect.flatMap((enrichedSnapshot) =>
       publishSnapshot(stampIdentity(enrichedSnapshot)).pipe(Effect.asVoid),
     ),

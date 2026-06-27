@@ -1,4 +1,5 @@
 import {
+  DEFAULT_SERVER_SETTINGS,
   ProviderDriverKind,
   type ServerProvider,
   type ServerProviderVersionAdvisory,
@@ -7,6 +8,7 @@ import { resolveCommandPath } from "@ryco/shared/shell";
 import { DateTime, Effect, FileSystem, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
+import { ServerSettingsService } from "../serverSettings.ts";
 import { compareCliVersions } from "./cliVersion.ts";
 
 const LATEST_VERSION_CACHE_TTL_MS = 60 * 60 * 1_000;
@@ -448,7 +450,20 @@ export const enrichProviderSnapshotWithVersionAdvisory = Effect.fn(
 )(function* (snapshot: ServerProvider, maintenanceCapabilities?: ProviderMaintenanceCapabilities) {
   const capabilities =
     maintenanceCapabilities ?? makeManualProviderMaintenanceCapabilities(snapshot.driver);
-  if (!snapshot.enabled || !snapshot.installed || !snapshot.version) {
+  // Honor the server-wide opt-out. When disabled we skip latest-version
+  // resolution entirely (no npm registry contact) and emit an "unknown"
+  // advisory, rather than checking and then suppressing the notification.
+  // Fall back to the default (enabled) if settings cannot be read.
+  const serverSettings = yield* ServerSettingsService;
+  const { enableProviderUpdateChecks } = yield* serverSettings.getSettings.pipe(
+    Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
+  );
+  if (
+    !enableProviderUpdateChecks ||
+    !snapshot.enabled ||
+    !snapshot.installed ||
+    !snapshot.version
+  ) {
     return {
       ...snapshot,
       versionAdvisory: createProviderVersionAdvisory({
