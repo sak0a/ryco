@@ -61,6 +61,7 @@ import { RycoWordmark, RycoMark } from "@/assets/RycoLogo";
 import { ScreenshotFrame } from "@/components/shared/ScreenshotFrame";
 import { useGsapContext, prefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/cn";
+import { STEP_ICONS } from "./process-icons";
 
 const ACCENT = "#c6ff3a";
 
@@ -68,6 +69,12 @@ const focusRing =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c6ff3a]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0b0d]";
 
 const NAV_OFFSET = "scroll-mt-24";
+
+/* Underlined nav link — the underline grows from the left on hover. */
+const navLink =
+  "relative transition-colors duration-300 hover:text-white after:absolute after:inset-x-0 after:-bottom-1 after:h-px after:origin-left after:scale-x-0 after:bg-[#c6ff3a] after:transition-transform after:duration-300 after:ease-out after:content-[''] hover:after:scale-x-100";
+
+const SCRAMBLE_GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ#@%&/\\<>{}[]()*+=01";
 
 const ICONS: Record<string, LucideIcon> = {
   LayoutGrid,
@@ -187,7 +194,193 @@ function useReducedMotion(): boolean {
   return reduced;
 }
 
+/**
+ * Decode/scramble a word into place once, shortly after load (cycles random
+ * glyphs, then resolves left→right). No-ops under reduced motion — the element
+ * already contains the final text, so it just stays put.
+ */
+function useScrambleOnLoad(
+  ref: React.RefObject<HTMLElement | null>,
+  finalText: string,
+  { delay = 1150, stepMs = 36, framesPerChar = 2 } = {},
+) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || prefersReducedMotion()) return;
+    const chars = finalText.split("");
+    let frame = 0;
+    let interval: number | undefined;
+    const start = window.setTimeout(() => {
+      interval = window.setInterval(() => {
+        const revealed = Math.floor(frame / framesPerChar);
+        el.textContent = chars
+          .map((c, i) =>
+            i < revealed || !/[a-z]/i.test(c)
+              ? c
+              : SCRAMBLE_GLYPHS[Math.floor(Math.random() * SCRAMBLE_GLYPHS.length)],
+          )
+          .join("");
+        frame += 1;
+        if (revealed >= chars.length) {
+          el.textContent = finalText;
+          if (interval) window.clearInterval(interval);
+        }
+      }, stepMs);
+    }, delay);
+    return () => {
+      window.clearTimeout(start);
+      if (interval) window.clearInterval(interval);
+    };
+  }, [ref, finalText, delay, stepMs, framesPerChar]);
+}
+
+/**
+ * Magnetic pull: `[data-magnetic]` elements inside the scope translate gently
+ * toward the pointer and ease back on leave. Skipped for coarse pointers and
+ * under reduced motion (the elements just stay put).
+ */
+function useMagnetic(scopeRef: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    if (prefersReducedMotion()) return;
+    if (window.matchMedia("(pointer: coarse)").matches) return;
+    const root = scopeRef.current ?? document;
+    const cleanups: Array<() => void> = [];
+    root.querySelectorAll<HTMLElement>("[data-magnetic]").forEach((el) => {
+      const move = (e: PointerEvent) => {
+        const r = el.getBoundingClientRect();
+        const x = e.clientX - (r.left + r.width / 2);
+        const y = e.clientY - (r.top + r.height / 2);
+        el.style.transform = `translate(${x * 0.18}px, ${y * 0.26}px)`;
+      };
+      const leave = () => {
+        el.style.transform = "";
+      };
+      el.addEventListener("pointermove", move);
+      el.addEventListener("pointerleave", leave);
+      cleanups.push(() => {
+        el.removeEventListener("pointermove", move);
+        el.removeEventListener("pointerleave", leave);
+        el.style.transform = "";
+      });
+    });
+    return () => cleanups.forEach((c) => c());
+  }, [scopeRef]);
+}
+
 /* ------------------------------- primitives -------------------------------- */
+
+/* Kinetic terminal — types the real install commands in on scroll, with a
+   blinking caret. Renders fully (and instantly) under reduced motion. */
+type TermTok = { t: string; tone?: "accent" | "muted" };
+
+const TERM_LINES: TermTok[][] = [
+  [{ t: "# try it instantly", tone: "muted" }],
+  [{ t: "$ ", tone: "accent" }, { t: SITE.npx }],
+  [],
+  [{ t: "# or build from source", tone: "muted" }],
+  [{ t: "$ ", tone: "accent" }, { t: `git clone ${SITE.repo.replace("https://", "")}` }],
+  [{ t: "$ ", tone: "accent" }, { t: "bun install" }],
+  [{ t: "$ ", tone: "accent" }, { t: "bun run dev:desktop" }],
+];
+
+const TERM_PLAINTEXT = TERM_LINES.map((l) => l.map((t) => t.t).join("")).join("\n");
+const termLineLen = (i: number) => TERM_LINES[i].reduce((n, tok) => n + tok.t.length, 0);
+
+function renderTermLine(line: TermTok[], count: number) {
+  let n = count;
+  return line.map((tok, i) => {
+    if (n <= 0) return null;
+    const slice = n >= tok.t.length ? tok.t : tok.t.slice(0, n);
+    n -= tok.t.length;
+    return (
+      <span key={i} className={tok.tone === "muted" ? "text-white/40" : "text-white/85"} style={tok.tone === "accent" ? { color: ACCENT } : undefined}>
+        {slice}
+      </span>
+    );
+  });
+}
+
+function KineticTerminal() {
+  const ref = useRef<HTMLDivElement>(null);
+  const posRef = useRef({ line: 0, char: 0 });
+  const doneRef = useRef(false);
+  const [, force] = useState(0);
+  const [started, setStarted] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (prefersReducedMotion()) {
+      const last = TERM_LINES.length - 1;
+      posRef.current = { line: last, char: termLineLen(last) };
+      doneRef.current = true;
+      setStarted(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setStarted(true);
+          io.disconnect();
+        }
+      },
+      { threshold: 0.4 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!started || doneRef.current || prefersReducedMotion()) return;
+    let cancelled = false;
+    let timer = 0;
+    const step = () => {
+      if (cancelled) return;
+      const p = posRef.current;
+      if (p.char < termLineLen(p.line)) {
+        posRef.current = { line: p.line, char: p.char + 1 };
+        timer = window.setTimeout(step, 16 + Math.random() * 34);
+      } else if (p.line + 1 < TERM_LINES.length) {
+        posRef.current = { line: p.line + 1, char: 0 };
+        timer = window.setTimeout(step, 150 + Math.random() * 120);
+      } else {
+        doneRef.current = true;
+      }
+      force((n) => n + 1);
+    };
+    timer = window.setTimeout(step, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [started]);
+
+  const p = posRef.current;
+  return (
+    <div data-reveal className="mt-5 overflow-hidden rounded-3xl border border-white/10 bg-black/40 font-['JetBrains_Mono'] text-[13px]">
+      <div className="flex items-center gap-1.5 border-b border-white/10 px-4 py-2.5 text-white/55">
+        <span className="size-2.5 rounded-full bg-white/20" />
+        <span className="size-2.5 rounded-full bg-white/20" />
+        <span className="size-2.5 rounded-full bg-white/20" />
+        <span className="ml-2">zsh</span>
+      </div>
+      <div ref={ref} aria-hidden className="min-h-[196px] px-5 py-5 leading-relaxed">
+        {TERM_LINES.map((line, i) => {
+          if (started && i > p.line) return null;
+          const isActive = i === p.line;
+          const count = isActive && !doneRef.current ? p.char : Number.POSITIVE_INFINITY;
+          return (
+            <div key={i} className="min-h-[1.5em] whitespace-pre">
+              {line.length === 0 ? " " : renderTermLine(line, count)}
+              {isActive && <span className="ryco-caret ml-px align-middle" style={{ color: ACCENT }} />}
+            </div>
+          );
+        })}
+      </div>
+      <pre className="sr-only">{TERM_PLAINTEXT}</pre>
+    </div>
+  );
+}
 
 function Copyable({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
@@ -405,6 +598,7 @@ export default function Version4() {
   const heroShotRef = useRef<HTMLDivElement>(null);
   const hzPinRef = useRef<HTMLDivElement>(null);
   const hzTrackRef = useRef<HTMLDivElement>(null);
+  const scrambleRef = useRef<HTMLSpanElement>(null);
 
   const scope = useGsapContext(({ gsap, ScrollTrigger }) => {
     /* Refresh trigger positions as the large screenshots finish decoding. */
@@ -602,6 +796,9 @@ export default function Version4() {
     ScrollTrigger.refresh();
   });
 
+  useScrambleOnLoad(scrambleRef, "agents.");
+  useMagnetic(scope);
+
   return (
     <div ref={scope} className="relative min-h-screen bg-[#0a0b0d] text-white antialiased">
       <KineticBackground />
@@ -622,11 +819,11 @@ export default function Version4() {
             <RycoWordmark className="h-[18px] text-white/90 transition-colors duration-300 group-hover/logo:text-white" />
           </a>
           <nav aria-label="Primary" className="hidden items-center gap-8 text-sm text-white/60 md:flex">
-            <a href="#agents" className="transition hover:text-white">Agents</a>
-            <a href="#showcase" className="transition hover:text-white">Workspace</a>
-            <a href="#features" className="transition hover:text-white">Features</a>
-            <a href="#download" className="transition hover:text-white">Download</a>
-            <a href="#faq" className="transition hover:text-white">FAQ</a>
+            <a href="#agents" className={navLink}>Agents</a>
+            <a href="#showcase" className={navLink}>Workspace</a>
+            <a href="#features" className={navLink}>Features</a>
+            <a href="#download" className={navLink}>Download</a>
+            <a href="#faq" className={navLink}>FAQ</a>
           </nav>
           <div className="flex items-center gap-2">
             <a
@@ -645,6 +842,7 @@ export default function Version4() {
               href={SITE.releases}
               target="_blank"
               rel="noreferrer"
+              data-magnetic
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold text-[#0a0b0d] transition hover:brightness-95",
                 focusRing,
@@ -689,7 +887,7 @@ export default function Version4() {
                 <span data-hero-line className="block">
                   coding{" "}
                   <span className="relative inline-block" style={{ color: ACCENT }}>
-                    agents.
+                    <span ref={scrambleRef}>agents.</span>
                     <span
                       data-hero-underline
                       aria-hidden
@@ -710,6 +908,7 @@ export default function Version4() {
                 href={SITE.releases}
                 target="_blank"
                 rel="noreferrer"
+                data-magnetic
                 className={cn(
                   "inline-flex items-center gap-2 rounded-xl px-6 py-3 text-[15px] font-semibold text-[#0a0b0d] transition hover:brightness-95",
                   focusRing,
@@ -722,12 +921,14 @@ export default function Version4() {
                 href={SITE.repo}
                 target="_blank"
                 rel="noreferrer"
+                data-magnetic
                 className={cn(
-                  "inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/[0.03] px-6 py-3 text-[15px] font-medium text-white transition hover:border-white/30 hover:bg-white/[0.06]",
+                  "group/src inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/[0.03] px-6 py-3 text-[15px] font-medium text-white transition hover:border-white/30 hover:bg-white/[0.06]",
                   focusRing,
                 )}
               >
-                <Github className="size-[18px]" /> View source <ArrowRight className="size-4" />
+                <Github className="size-[18px]" /> View source{" "}
+                <ArrowRight className="size-4 transition-transform duration-300 group-hover/src:translate-x-0.5" />
               </a>
             </div>
 
@@ -1102,18 +1303,28 @@ export default function Version4() {
               className="absolute left-[14px] top-2 bottom-2 w-px"
               style={{ background: ACCENT, transformOrigin: "top" }}
             />
-            {STEPS.map((step) => (
-              <li key={step.n} data-reveal className="relative">
-                <span
-                  className="absolute -left-10 grid size-7 place-items-center rounded-full border bg-[#0a0b0d] font-['JetBrains_Mono'] text-[11px] font-semibold"
-                  style={{ color: ACCENT, borderColor: `${ACCENT}55` }}
-                >
-                  {step.n}
-                </span>
-                <h3 className="font-['Space_Grotesk'] text-xl font-semibold text-white">{step.title}</h3>
-                <p className="mt-2 max-w-xl text-white/60">{step.body}</p>
-              </li>
-            ))}
+            {STEPS.map((step, i) => {
+              const StepIcon = STEP_ICONS[i];
+              return (
+                <li key={step.n} data-reveal className="relative flex items-start justify-between gap-6">
+                  <span
+                    className="absolute -left-10 grid size-7 place-items-center rounded-full border bg-[#0a0b0d] font-['JetBrains_Mono'] text-[11px] font-semibold"
+                    style={{ color: ACCENT, borderColor: `${ACCENT}55` }}
+                  >
+                    {step.n}
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="font-['Space_Grotesk'] text-xl font-semibold text-white">{step.title}</h3>
+                    <p className="mt-2 max-w-xl text-white/60">{step.body}</p>
+                  </div>
+                  {StepIcon && (
+                    <span aria-hidden className="hidden shrink-0 self-center sm:block" style={{ color: ACCENT }}>
+                      <StepIcon className="size-16 opacity-80" />
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ol>
         </section>
 
@@ -1165,24 +1376,7 @@ export default function Version4() {
             ))}
           </div>
 
-          <div data-reveal className="mt-5 overflow-hidden rounded-3xl border border-white/10 bg-black/40 font-['JetBrains_Mono'] text-[13px]">
-            <div className="flex items-center gap-1.5 border-b border-white/10 px-4 py-2.5 text-white/55">
-              <span className="size-2.5 rounded-full bg-white/20" />
-              <span className="size-2.5 rounded-full bg-white/20" />
-              <span className="size-2.5 rounded-full bg-white/20" />
-              <span className="ml-2">zsh</span>
-            </div>
-            <pre className="overflow-x-auto px-5 py-5 leading-relaxed text-white/85">
-              <code>
-                <span className="text-white/50"># try it instantly</span>{"\n"}
-                <span style={{ color: ACCENT }}>$</span> {SITE.npx}{"\n\n"}
-                <span className="text-white/50"># or build from source</span>{"\n"}
-                <span style={{ color: ACCENT }}>$</span> git clone {SITE.repo.replace("https://", "")}{"\n"}
-                <span style={{ color: ACCENT }}>$</span> bun install{"\n"}
-                <span style={{ color: ACCENT }}>$</span> bun run dev:desktop
-              </code>
-            </pre>
-          </div>
+          <KineticTerminal />
         </section>
 
         {/* --------------------------------- faq --------------------------------- */}
@@ -1229,6 +1423,7 @@ export default function Version4() {
                 href={SITE.releases}
                 target="_blank"
                 rel="noreferrer"
+                data-magnetic
                 className={cn(
                   "inline-flex items-center gap-2 rounded-xl px-6 py-3 text-[15px] font-semibold text-[#0a0b0d] transition hover:brightness-95",
                   focusRing,
@@ -1241,6 +1436,7 @@ export default function Version4() {
                 href={SITE.discord}
                 target="_blank"
                 rel="noreferrer"
+                data-magnetic
                 className={cn(
                   "inline-flex items-center gap-2 rounded-xl border border-white/15 px-6 py-3 text-[15px] font-medium text-white transition hover:border-white/30 hover:bg-white/[0.05]",
                   focusRing,

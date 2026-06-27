@@ -37,38 +37,54 @@ five other directions (now archived in `.archive/`).
 - **Imagery:** real light screenshots framed in `ScreenshotFrame`, floating on the
   dark canvas (the Linear/Vercel "light shot on dark" look).
 
-## Structure (single component — `Version4.tsx`)
+## Structure (`Version4.tsx` + `process-icons.tsx`)
 
-`constants` (ACCENT, ICONS, MARQUEE_ITEMS, SHOWCASE steps) → `primitives`
+`constants` (ACCENT, ICONS, MARQUEE_ITEMS, SHOWCASE steps) → `hooks`
+(`useReducedMotion`, `useScrambleOnLoad`, `useMagnetic`) → `primitives`
 (`Copyable`, `Eyebrow`, `SectionHeading`, `ProviderCard`, `Stat`, `FaqRow`,
-`KineticBackground`) → `Version4` (one `useGsapContext` motion block + JSX).
+`KineticBackground`, `KineticTerminal`) → `Version4` (one `useGsapContext` motion
+block + JSX). The bespoke How-it-works step icons live in `process-icons.tsx`
+(their CSS loops + the terminal caret are in `src/index.css`).
 
 Sections, in order: **nav → hero → marquee → agents → model providers → showcase
 → features → pillars+stats → how-it-works → download → FAQ → final CTA → footer.**
 
-## Motion devices (all GSAP, via `useGsapContext`)
+## Motion devices (mostly GSAP via `useGsapContext`; a few hand-rolled)
 
 | Device | Where |
 | ------ | ----- |
 | Hero line clip-reveal + fade + accent underline draw | hero |
+| Hero accent word **scramble/decode** on load (`useScrambleOnLoad`) | `scrambleRef` ("agents.") |
 | Hero screenshot clip-reveal on load + scroll parallax | `heroShotRef` |
 | Velocity-reactive marquee (speeds up with scroll, decays back) | `[data-marquee]` |
 | Section heading line-mask reveals | `[data-line-reveal]` |
 | **Pinned horizontal agent gallery** (scrub) + its own progress bar | `hzPinRef`/`hzTrackRef` |
 | **Sticky scrollytelling** — screenshot swaps + step focus + counter | `[data-shot-step]`, `activeShot` |
 | Timeline progress draw | `[data-timeline-progress]` |
+| **Bespoke concept step-icons** (CSS loops: trace / bob / pulse / spin) | `process-icons.tsx`, How-it-works |
+| **Kinetic terminal** — real commands type in on scroll + blinking caret | `KineticTerminal`, download |
 | Numeric stat count-ups | `[data-count]` |
 | Feature & pillar icon stroke draw-on (on reveal) + re-trace on card hover | `[data-draw-icon]` |
+| **Magnetic** CTAs (pointer pull, eased return) | `[data-magnetic]` via `useMagnetic` |
+| Nav-link underline-grow on hover | `navLink` |
 | "Live" status-dot ping pulse (`animate-ping`, `motion-reduce:hidden`) | hero badge · footer |
 | Generic on-scroll reveals | `[data-reveal]` |
+
+> A few devices are intentionally **not** GSAP: the scramble (`setInterval`), the
+> terminal (`IntersectionObserver` + `setTimeout`) and `useMagnetic` (pointer
+> events) are plain client hooks; the process step-icons loop in pure CSS.
 
 ## Reduced motion
 
 `useReducedMotion()` gates the **motion-only layouts** (the pinned horizontal
 gallery and the sticky scrollytelling are *never constructed* — they render clean
 static stacks instead, so there's never a blank pinned frame). All `useGsapContext`
-animation no-ops under `prefers-reduced-motion`; nothing is CSS-hidden up front, so
-the static layout is always complete.
+animation no-ops under `prefers-reduced-motion`. The hand-rolled additions gate too:
+`useScrambleOnLoad`/`useMagnetic` early-return (magnetic also skips coarse pointers),
+the terminal renders **all** lines instantly, and the CSS step-icons rely only on
+default base values (dashoffset 0, opacity 1) so the global reduced-motion guard
+freezes them fully drawn. Nothing is CSS-hidden up front, so the static layout is
+always complete.
 
 ## Content
 

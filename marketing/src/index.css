@@ -65,3 +65,55 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.24);
 }
+
+/* ==========================================================================
+   v4 "Kinetic" — looping concept-SVG step icons + terminal caret.
+   These rely ONLY on default base values (dashoffset 0, opacity 1, no
+   transform) so the prefers-reduced-motion guard above freezes them to a
+   clean, fully-drawn static state. Nothing is hidden up front.
+   ========================================================================== */
+.ryco-proc .node,
+.ryco-proc .arrow,
+.ryco-proc .play,
+.ryco-proc .orbit {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+/* trace: draw the stroke in and back out, seam-free (alternate) */
+.ryco-proc [data-trace] {
+  stroke-dasharray: var(--len, 120);
+  animation: ryco-proc-trace 3.4s ease-in-out infinite alternate;
+}
+.ryco-install .arrow { animation: ryco-proc-bob 2.6s ease-in-out infinite; }
+.ryco-launch .play { animation: ryco-proc-pulse 2.2s ease-in-out infinite; }
+.ryco-worktree .node { animation: ryco-proc-pulse 2.6s ease-in-out infinite; }
+.ryco-ship .orbit { animation: ryco-proc-spin 9s linear infinite; }
+
+@keyframes ryco-proc-trace {
+  from { stroke-dashoffset: var(--len, 120); }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes ryco-proc-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+@keyframes ryco-proc-bob {
+  0%, 100% { transform: translateY(-3px); }
+  50% { transform: translateY(3px); }
+}
+@keyframes ryco-proc-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Blinking caret for the kinetic terminal. */
+.ryco-caret {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  translate: 0 0.18em;
+  background: currentColor;
+  animation: ryco-caret-blink 1.05s steps(1) infinite;
+}
+@keyframes ryco-caret-blink {
+  50% { opacity: 0; }
+}
