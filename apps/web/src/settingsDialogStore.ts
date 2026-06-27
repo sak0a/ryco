@@ -10,6 +10,7 @@ export type SettingsSectionId =
   | "source-control"
   | "connections"
   | "diagnostics"
+  | "statistics"
   | "archived";
 
 interface SettingsDialogStore {

@@ -22,6 +22,7 @@ import { makeCodexMcpService } from "../mcp/CodexMcpService.ts";
 import { Open, resolveAvailableEditors } from "../open.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { StatisticsQuery } from "../statistics/StatisticsQuery.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "../provider/providerMaintenanceRunner.ts";
 import { ServerLifecycleEvents } from "../serverLifecycleEvents.ts";
@@ -83,6 +84,7 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
   Effect.gen(function* () {
     const currentSessionId = session.sessionId;
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+    const statisticsQuery = yield* StatisticsQuery;
     const orchestrationEngine = yield* OrchestrationEngineService;
     const checkpointDiffQuery = yield* CheckpointDiffQuery;
     const keybindings = yield* Keybindings;
@@ -612,6 +614,7 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
     return {
       currentSessionId,
       projectionSnapshotQuery,
+      statisticsQuery,
       orchestrationEngine,
       checkpointDiffQuery,
       keybindings,

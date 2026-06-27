@@ -9,6 +9,7 @@ import { makeTerminalHandlers } from "./terminalRpc.ts";
 import { makeProjectHandlers } from "./projectRpc.ts";
 import { makeSourceControlHandlers } from "./sourceControlRpc.ts";
 import { makeProviderHandlers } from "./providerRpc.ts";
+import { makeStatisticsHandlers } from "./statisticsRpc.ts";
 
 export const makeWsRpcLayer = (session: AuthenticatedSession) =>
   WsRpcGroup.toLayer(
@@ -17,6 +18,7 @@ export const makeWsRpcLayer = (session: AuthenticatedSession) =>
       return WsRpcGroup.of({
         ...makeOrchestrationHandlers(ctx),
         ...makeProviderHandlers(ctx),
+        ...makeStatisticsHandlers(ctx),
         ...makeSourceControlHandlers(ctx),
         ...makeProjectHandlers(ctx),
         ...makeGitHandlers(ctx),

@@ -1,0 +1,320 @@
+import { assert, it } from "@effect/vitest";
+import { Effect, Layer, Schema } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { StatisticsSnapshot } from "@ryco/contracts";
+
+import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import { StatisticsQuery, StatisticsQueryLive } from "./StatisticsQuery.ts";
+
+const encodeSnapshot = Schema.encodeUnknownSync(StatisticsSnapshot);
+
+const statisticsLayer = it.layer(
+  StatisticsQueryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+);
+
+const clean = (sql: SqlClient.SqlClient) =>
+  Effect.gen(function* () {
+    yield* sql`DELETE FROM projection_projects`;
+    yield* sql`DELETE FROM projection_threads`;
+    yield* sql`DELETE FROM projection_thread_sessions`;
+    yield* sql`DELETE FROM projection_thread_activities`;
+    yield* sql`DELETE FROM projection_turns`;
+    yield* sql`DELETE FROM projection_worktrees`;
+  });
+
+const insertProject = (sql: SqlClient.SqlClient, id: string, title: string) =>
+  sql`
+    INSERT INTO projection_projects (
+      project_id, title, workspace_root, default_model_selection_json,
+      scripts_json, created_at, updated_at, deleted_at
+    ) VALUES (
+      ${id}, ${title}, ${`/tmp/${id}`}, '{"provider":"codex","model":"gpt-5.4"}',
+      '[]', '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z', NULL
+    )
+  `;
+
+const insertThread = (
+  sql: SqlClient.SqlClient,
+  id: string,
+  projectId: string,
+  provider: string,
+  model: string,
+  createdAt: string,
+) =>
+  sql`
+    INSERT INTO projection_threads (
+      thread_id, project_id, title, model_selection_json, runtime_mode,
+      interaction_mode, branch, worktree_path, latest_turn_id,
+      latest_user_message_at, pending_approval_count, pending_user_input_count,
+      has_actionable_proposed_plan, created_at, updated_at, deleted_at
+    ) VALUES (
+      ${id}, ${projectId}, ${`Thread ${id}`},
+      ${`{"provider":"${provider}","model":"${model}"}`}, 'full-access',
+      'default', NULL, NULL, NULL, NULL, 0, 0, 0, ${createdAt}, ${createdAt}, NULL
+    )
+  `;
+
+const insertSession = (sql: SqlClient.SqlClient, threadId: string, provider: string) =>
+  sql`
+    INSERT INTO projection_thread_sessions (
+      thread_id, status, provider_name, provider_session_id, provider_thread_id,
+      runtime_mode, active_turn_id, last_error, updated_at
+    ) VALUES (
+      ${threadId}, 'idle', ${provider}, ${`sess-${threadId}`}, ${`pt-${threadId}`},
+      'approval-required', NULL, NULL, '2026-06-10T00:00:00.000Z'
+    )
+  `;
+
+const insertActivity = (
+  sql: SqlClient.SqlClient,
+  id: string,
+  threadId: string,
+  turnId: string,
+  kind: string,
+  payload: string,
+  createdAt: string,
+  sequence: number,
+) =>
+  sql`
+    INSERT INTO projection_thread_activities (
+      activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+      sequence, created_at
+    ) VALUES (
+      ${id}, ${threadId}, ${turnId}, 'info', ${kind}, 'note', ${payload},
+      ${sequence}, ${createdAt}
+    )
+  `;
+
+const insertTurn = (
+  sql: SqlClient.SqlClient,
+  threadId: string,
+  turnId: string,
+  checkpointCount: number,
+  startedAt: string,
+  completedAt: string,
+  filesJson: string,
+) =>
+  sql`
+    INSERT INTO projection_turns (
+      thread_id, turn_id, pending_message_id, assistant_message_id, state,
+      requested_at, started_at, completed_at, checkpoint_turn_count,
+      checkpoint_ref, checkpoint_status, checkpoint_files_json
+    ) VALUES (
+      ${threadId}, ${turnId}, NULL, NULL, 'completed', ${startedAt}, ${startedAt},
+      ${completedAt}, ${checkpointCount}, ${`cp-${turnId}`}, 'ready', ${filesJson}
+    )
+  `;
+
+const insertWorktree = (
+  sql: SqlClient.SqlClient,
+  id: string,
+  projectId: string,
+  origin: string,
+  prNumber: number | null,
+  archivedAt: string | null,
+) =>
+  sql`
+    INSERT INTO projection_worktrees (
+      worktree_id, project_id, branch, origin, pr_number, created_at, updated_at, archived_at
+    ) VALUES (
+      ${id}, ${projectId}, ${`branch-${id}`}, ${origin}, ${prNumber},
+      '2026-06-05T00:00:00.000Z', '2026-06-05T00:00:00.000Z', ${archivedAt}
+    )
+  `;
+
+statisticsLayer("StatisticsQuery", (it) => {
+  it.effect("aggregates per-turn token deltas, file changes, and worktrees", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const statistics = yield* StatisticsQuery;
+      yield* clean(sql);
+
+      yield* insertProject(sql, "project-1", "Project One");
+      yield* insertThread(
+        sql,
+        "thread-1",
+        "project-1",
+        "claudeAgent",
+        "claude-opus-4-8",
+        "2026-06-10T00:00:00.000Z",
+      );
+      yield* insertThread(
+        sql,
+        "thread-2",
+        "project-1",
+        "codex",
+        "gpt-5.4",
+        "2026-06-10T00:00:00.000Z",
+      );
+      yield* insertSession(sql, "thread-1", "claudeAgent");
+      yield* insertSession(sql, "thread-2", "codex");
+
+      // thread-1, turn-1 has two snapshots; only the final `last*` deltas count.
+      yield* insertActivity(
+        sql,
+        "act-1a",
+        "thread-1",
+        "turn-1",
+        "context-window.updated",
+        '{"usedTokens":600,"inputTokens":400,"outputTokens":200,"lastInputTokens":400,"lastOutputTokens":200}',
+        "2026-06-10T00:00:01.000Z",
+        1,
+      );
+      yield* insertActivity(
+        sql,
+        "act-1b",
+        "thread-1",
+        "turn-1",
+        "context-window.updated",
+        '{"usedTokens":1500,"inputTokens":1000,"outputTokens":500,"cachedInputTokens":100,"lastInputTokens":1000,"lastOutputTokens":500,"lastCachedInputTokens":100}',
+        "2026-06-10T00:00:02.000Z",
+        2,
+      );
+      yield* insertActivity(
+        sql,
+        "act-2",
+        "thread-2",
+        "turn-2",
+        "context-window.updated",
+        '{"usedTokens":3000,"inputTokens":2000,"outputTokens":1000,"lastInputTokens":2000,"lastOutputTokens":1000}',
+        "2026-06-10T00:00:03.000Z",
+        1,
+      );
+      yield* insertActivity(
+        sql,
+        "tool-1",
+        "thread-1",
+        "turn-1",
+        "tool.completed",
+        "{}",
+        "2026-06-10T00:00:02.500Z",
+        3,
+      );
+
+      yield* insertTurn(
+        sql,
+        "thread-1",
+        "turn-1",
+        1,
+        "2026-06-10T00:00:00.000Z",
+        "2026-06-10T00:01:00.000Z",
+        '[{"path":"a.ts","kind":"modified","additions":10,"deletions":4}]',
+      );
+      yield* insertTurn(
+        sql,
+        "thread-2",
+        "turn-2",
+        1,
+        "2026-06-10T00:00:00.000Z",
+        "2026-06-10T00:00:30.000Z",
+        '[{"path":"b.ts","kind":"added","additions":20,"deletions":0},{"path":"c.ts","kind":"deleted","additions":0,"deletions":5}]',
+      );
+
+      yield* insertWorktree(sql, "wt-1", "project-1", "branch", null, null);
+      yield* insertWorktree(sql, "wt-2", "project-1", "pr", 42, null);
+      yield* insertWorktree(sql, "wt-3", "project-1", "branch", null, "2026-06-09T00:00:00.000Z");
+
+      const snapshot = yield* statistics.getStatistics();
+
+      // Per-turn deltas, no double counting of thread-1's two snapshots.
+      assert.equal(snapshot.tokenAttribution, "per-turn-delta");
+      assert.equal(snapshot.totals.inputTokens, 3000);
+      assert.equal(snapshot.totals.outputTokens, 1500);
+      assert.equal(snapshot.totals.totalTokens, 4500);
+      assert.equal(snapshot.totals.cachedInputTokens, 100);
+      assert.equal(snapshot.totals.threads, 2);
+      assert.equal(snapshot.totals.toolUses, 1);
+
+      // File/line changes from checkpoint diffs.
+      assert.equal(snapshot.totals.filesChanged, 3);
+      assert.equal(snapshot.totals.additions, 30);
+      assert.equal(snapshot.totals.deletions, 9);
+
+      // Active time = sum of (completed - started): 60s + 30s = 90s.
+      assert.equal(snapshot.totals.activeMs, 90_000);
+
+      // Two turns completed.
+      assert.equal(snapshot.totals.turns, 2);
+
+      // Per-model split, sorted by tokens (gpt-5.4 leads with 3000).
+      const models = snapshot.models.map((entry) => entry.model).toSorted();
+      assert.deepEqual(models, ["claude-opus-4-8", "gpt-5.4"]);
+      const gpt = snapshot.dailyBuckets
+        .filter((bucket) => bucket.model === "gpt-5.4")
+        .reduce((acc, bucket) => acc + bucket.inputTokens, 0);
+      assert.equal(gpt, 2000);
+
+      // Worktree summary.
+      assert.equal(snapshot.worktrees.created, 3);
+      assert.equal(snapshot.worktrees.archived, 1);
+      assert.equal(snapshot.worktrees.active, 2);
+      assert.equal(snapshot.worktrees.openPrs, 1);
+
+      // Commits/pushes are not yet instrumented.
+      assert.equal(snapshot.totals.commits, 0);
+      assert.equal(snapshot.totals.pushes, 0);
+    }),
+  );
+
+  it.effect("falls back to cumulative attribution when per-turn deltas are absent", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const statistics = yield* StatisticsQuery;
+      yield* clean(sql);
+
+      yield* insertProject(sql, "project-1", "Project One");
+      yield* insertThread(
+        sql,
+        "thread-1",
+        "project-1",
+        "codex",
+        "gpt-5.4",
+        "2026-06-10T00:00:00.000Z",
+      );
+      yield* insertSession(sql, "thread-1", "codex");
+      // Cumulative totals only, no `last*` deltas.
+      yield* insertActivity(
+        sql,
+        "act-1",
+        "thread-1",
+        "turn-1",
+        "context-window.updated",
+        '{"usedTokens":1200,"inputTokens":800,"outputTokens":400}',
+        "2026-06-10T00:00:02.000Z",
+        1,
+      );
+
+      const snapshot = yield* statistics.getStatistics();
+      assert.equal(snapshot.tokenAttribution, "thread-cumulative");
+      assert.equal(snapshot.totals.inputTokens, 800);
+      assert.equal(snapshot.totals.outputTokens, 400);
+      assert.equal(snapshot.totals.totalTokens, 1200);
+    }),
+  );
+
+  it.effect("coalesces blank model/provider and stays encodable", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const statistics = yield* StatisticsQuery;
+      yield* clean(sql);
+
+      yield* insertProject(sql, "project-1", "Project One");
+      // model_selection_json with empty model + provider, and no session row.
+      yield* insertThread(sql, "thread-1", "project-1", "", "", "2026-06-10T00:00:00.000Z");
+
+      const snapshot = yield* statistics.getStatistics();
+
+      // Blank model coalesced to "unknown"; blank provider dropped.
+      assert.deepEqual(
+        snapshot.models.map((entry) => entry.model),
+        ["unknown"],
+      );
+      assert.equal(snapshot.models[0]?.provider, undefined);
+      assert.ok(snapshot.dailyBuckets.every((bucket) => bucket.model === "unknown"));
+
+      // Must encode through the RPC success schema without throwing (else orDie
+      // would crash the request).
+      assert.doesNotThrow(() => encodeSnapshot(snapshot));
+    }),
+  );
+});

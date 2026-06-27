@@ -200,6 +200,7 @@ export interface WsRpcClient {
     readonly getDiagnosticsMetrics: RpcUnaryNoArgMethod<
       typeof WS_METHODS.serverGetDiagnosticsMetrics
     >;
+    readonly getStatistics: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetStatistics>;
     /**
      * Refresh provider snapshots. Pass `{ instanceId }` to refresh a single
      * configured instance; pass no argument (or `{}`) to refresh all.
@@ -465,6 +466,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.serverGetAdvertisedEndpoints]({})),
       getDiagnosticsMetrics: () =>
         transport.request((client) => client[WS_METHODS.serverGetDiagnosticsMetrics]({})),
+      getStatistics: () =>
+        transport.request((client) => client[WS_METHODS.serverGetStatistics]({})),
       refreshProviders: (input) =>
         transport.request((client) => client[WS_METHODS.serverRefreshProviders](input ?? {})),
       updateProvider: (input) =>
