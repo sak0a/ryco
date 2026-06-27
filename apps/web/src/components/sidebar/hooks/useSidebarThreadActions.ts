@@ -18,6 +18,7 @@ import type { useNewThreadHandler } from "../../../hooks/useHandleNewThread";
 import type { useThreadActions } from "../../../hooks/useThreadActions";
 import {
   canArchiveSidebarThread,
+  isTrailingDoubleClick,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   shouldConfirmSidebarThreadArchive,
@@ -181,6 +182,13 @@ export function useSidebarThreadActions(params: {
       if (isShiftClick) {
         event.preventDefault();
         rangeSelectTo(threadKey, orderedProjectThreadKeys);
+        return;
+      }
+
+      // Ignore the trailing click of a plain double-click so it doesn't navigate
+      // while a double-click is starting an inline rename. Placed after the
+      // modifier branches so cmd/shift selection still processes every click.
+      if (isTrailingDoubleClick(event.detail)) {
         return;
       }
 
@@ -356,6 +364,12 @@ export function useSidebarThreadActions(params: {
     [archiveThread, sidebarThreadByKeyRef],
   );
 
+  const startThreadRename = useCallback((threadKey: string, title: string) => {
+    setRenamingThreadKey(threadKey);
+    setRenamingTitle(title);
+    renamingCommittedRef.current = false;
+  }, []);
+
   const cancelRename = useCallback(() => {
     setRenamingThreadKey(null);
     renamingInputRef.current = null;
@@ -454,9 +468,7 @@ export function useSidebarThreadActions(params: {
       );
 
       if (clicked === "rename") {
-        setRenamingThreadKey(threadKey);
-        setRenamingTitle(thread.title);
-        renamingCommittedRef.current = false;
+        startThreadRename(threadKey, thread.title);
         return;
       }
 
@@ -515,6 +527,7 @@ export function useSidebarThreadActions(params: {
       projectCwd,
       selectedThreadCount,
       sidebarThreadByKeyRef,
+      startThreadRename,
     ],
   );
 
@@ -531,6 +544,7 @@ export function useSidebarThreadActions(params: {
     handleMultiSelectContextMenu,
     createThreadForProjectMember,
     attemptArchiveThread,
+    startThreadRename,
     cancelRename,
     commitRename,
     handleThreadContextMenu,

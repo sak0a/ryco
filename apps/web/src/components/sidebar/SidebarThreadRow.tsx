@@ -14,6 +14,7 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../../terminal
 import { useThreadSelectionStore } from "../../threadSelectionStore";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useUiStateStore } from "../../uiStateStore";
+import { useIsMobile } from "../../hooks/useMediaQuery";
 import { type DraftId } from "../../composerDraftStore";
 import type { SidebarThreadSummary } from "../../types";
 import {
@@ -46,6 +47,7 @@ export interface SidebarThreadRowProps {
   renamingThreadKey: string | null;
   renamingTitle: string;
   setRenamingTitle: (title: string) => void;
+  startThreadRename: (threadKey: string, title: string) => void;
   renamingInputRef: React.RefObject<HTMLInputElement | null>;
   renamingCommittedRef: React.RefObject<boolean>;
   confirmingArchiveThreadKey: string | null;
@@ -119,6 +121,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
     renamingThreadKey,
     renamingTitle,
     setRenamingTitle,
+    startThreadRename,
     renamingInputRef,
     renamingCommittedRef,
     confirmingArchiveThreadKey,
@@ -141,6 +144,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
   const draftId = thread.draftId ?? null;
+  const isMobile = useIsMobile();
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const hasSelection = useThreadSelectionStore((state) => state.selectedThreadKeys.size > 0);
@@ -216,6 +220,26 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
       handleThreadClick(event, threadRef, orderedProjectThreadKeys);
     },
     [draftId, handleThreadClick, navigateToDraft, orderedProjectThreadKeys, threadRef],
+  );
+  const handleRowDoubleClick = useCallback(
+    (event: React.MouseEvent) => {
+      // Already renaming this row: a double-click on the row chrome (outside the
+      // input) must not restart and discard the in-progress edit.
+      if (renamingThreadKey === threadKey) return;
+      // Drafts are unsaved threads with no rename target; they navigate instead.
+      if (draftId) return;
+      // On mobile the first tap navigates and closes the sidebar sheet, so the
+      // inline rename can't be shown. Renaming there stays on the context menu.
+      if (isMobile) return;
+      // cmd/ctrl/shift double-clicks are multi-select intent, not rename.
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      // Ignore double-clicks bubbling from nested controls (PR status, archive /
+      // close buttons) — only the row body should enter inline rename.
+      if ((event.target as HTMLElement).closest("button, a")) return;
+      event.preventDefault();
+      startThreadRename(threadKey, thread.title);
+    },
+    [draftId, isMobile, renamingThreadKey, startThreadRename, threadKey, thread.title],
   );
   const handleRowKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -307,6 +331,9 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
       void commitRename(threadRef, renamingTitle, thread.title);
     }
   }, [commitRename, renamingCommittedRef, renamingTitle, thread.title, threadRef]);
+  // Keep clicks/double-clicks inside the rename input from bubbling to the row.
+  // Without stopping `dblclick`, double-clicking to select a word would re-fire
+  // the row's rename handler and reset the in-progress edit back to the title.
   const handleRenameInputClick = useCallback((event: React.MouseEvent<HTMLInputElement>) => {
     event.stopPropagation();
   }, []);
@@ -385,6 +412,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
           isSelected,
         })} relative isolate`}
         onClick={handleRowClick}
+        onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleRowKeyDown}
         onContextMenu={handleRowContextMenu}
       >
@@ -415,6 +443,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
               onKeyDown={handleRenameInputKeyDown}
               onBlur={handleRenameInputBlur}
               onClick={handleRenameInputClick}
+              onDoubleClick={handleRenameInputClick}
             />
           ) : (
             <Tooltip>

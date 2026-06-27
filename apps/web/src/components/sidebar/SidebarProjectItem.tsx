@@ -369,6 +369,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
     renamingThreadKey,
     renamingTitle,
     setRenamingTitle,
+    startThreadRename,
     renamingCommittedRef,
     renamingInputRef,
     navigateToThread,
@@ -567,6 +568,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
                 renamingThreadKey={renamingThreadKey}
                 renamingTitle={renamingTitle}
                 setRenamingTitle={setRenamingTitle}
+                startThreadRename={startThreadRename}
                 renamingInputRef={renamingInputRef}
                 renamingCommittedRef={renamingCommittedRef}
                 confirmingArchiveThreadKey={confirmingArchiveThreadKey}
@@ -606,6 +608,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
           renamingThreadKey={renamingThreadKey}
           renamingTitle={renamingTitle}
           setRenamingTitle={setRenamingTitle}
+          startThreadRename={startThreadRename}
           renamingInputRef={renamingInputRef}
           renamingCommittedRef={renamingCommittedRef}
           confirmingArchiveThreadKey={confirmingArchiveThreadKey}
