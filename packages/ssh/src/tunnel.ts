@@ -301,6 +301,24 @@ function probe() {
 
 export const REMOTE_RUNNER_SCRIPT = `#!/bin/sh
 set -eu
+# Best-effort: activate fnm-managed Node for non-interactive remotes. fnm only
+# wires Node onto PATH in interactive shells, so resolve it here before the
+# node/npx/npm lookups below. We evaluate fnm's bash env output (its plain export
+# statements are POSIX-sh safe) and run a one-shot "fnm use". The sh shell value
+# and the use-on-cd hook form are deliberately avoided: the former is not a
+# supported fnm shell, the latter emits bash-only syntax.
+if ! command -v node >/dev/null 2>&1; then
+  for fnm_bin_dir in "\${FNM_DIR:-}" "$HOME/.fnm" "$HOME/.local/share/fnm"; do
+    if [ -n "$fnm_bin_dir" ] && [ -d "$fnm_bin_dir" ]; then
+      PATH="$fnm_bin_dir:$PATH"
+    fi
+  done
+  export PATH
+  if command -v fnm >/dev/null 2>&1; then
+    eval "$(fnm env --shell bash)" >/dev/null 2>&1 || true
+    fnm use --silent-if-unchanged >/dev/null 2>&1 || fnm use default >/dev/null 2>&1 || true
+  fi
+fi
 RYCO_NODE_SCRIPT_PATH=@@RYCO_NODE_SCRIPT_PATH@@
 if [ -n "$RYCO_NODE_SCRIPT_PATH" ]; then
   exec node "$RYCO_NODE_SCRIPT_PATH" "$@"

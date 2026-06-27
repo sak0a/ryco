@@ -90,6 +90,19 @@ describe("ssh tunnel scripts", () => {
     assert.include(script, "could not install 'ryco@latest'");
   });
 
+  it("activates fnm-managed node before resolving the remote ryco runner", () => {
+    const script = buildRemoteRycoRunnerScript();
+
+    // fnm only sets up PATH in interactive shells, so the runner must activate it
+    // explicitly. Use the supported `--shell bash` value (POSIX-sh safe output)
+    // plus a one-shot `fnm use`, never the invalid `--shell sh`/`--use-on-cd`.
+    assert.include(script, 'eval "$(fnm env --shell bash)"');
+    assert.include(script, "fnm use --silent-if-unchanged");
+    assert.include(script, "fnm use default");
+    assert.notInclude(script, "fnm env --shell sh");
+    assert.notInclude(script, "--use-on-cd");
+  });
+
   it("shell-quotes package specs in the remote ryco runner", () => {
     const script = buildRemoteRycoRunnerScript({
       packageSpec: "ryco@nightly; touch /tmp/ryco-owned",
