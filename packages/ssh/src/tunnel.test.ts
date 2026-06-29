@@ -90,6 +90,34 @@ describe("ssh tunnel scripts", () => {
     assert.include(script, "could not install 'ryco@latest'");
   });
 
+  it("activates fnm-managed node before resolving the remote ryco runner", () => {
+    const script = buildRemoteRycoRunnerScript();
+
+    // fnm only sets up PATH in interactive shells, so the runner must activate it
+    // explicitly. Use the supported `--shell bash` value (POSIX-sh safe output)
+    // plus a one-shot `fnm use`, never the invalid `--shell sh`/`--use-on-cd`.
+    assert.include(script, 'eval "$(fnm env --shell bash)"');
+    assert.include(script, "fnm use --silent-if-unchanged");
+    assert.include(script, "fnm use default");
+    assert.notInclude(script, "fnm env --shell sh");
+    assert.notInclude(script, "--use-on-cd");
+
+    // Probe where the fnm binary actually lives for installs that non-interactive
+    // SSH shells routinely drop from PATH (Homebrew, cargo, XDG bin), not just the
+    // curl installer's data dir.
+    assert.include(script, '"$HOME/.local/share/fnm"');
+    assert.include(script, '"$HOME/.cargo/bin"');
+    assert.include(script, "/opt/homebrew/bin");
+    assert.include(script, "/home/linuxbrew/.linuxbrew/bin");
+
+    // Only fall back to fnm if Node is still unresolved after broadening PATH, so
+    // a directly-resolvable Node (e.g. Homebrew node) is never overridden.
+    assert.include(
+      script,
+      "if ! command -v node >/dev/null 2>&1 && command -v fnm >/dev/null 2>&1; then",
+    );
+  });
+
   it("shell-quotes package specs in the remote ryco runner", () => {
     const script = buildRemoteRycoRunnerScript({
       packageSpec: "ryco@nightly; touch /tmp/ryco-owned",
