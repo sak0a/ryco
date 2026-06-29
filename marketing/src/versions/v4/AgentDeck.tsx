@@ -31,55 +31,64 @@ export function AgentDeck() {
     const track = trackRef.current;
     const pin = pinRef.current;
     if (!track || !pin) return;
-    if (!window.matchMedia("(min-width: 1024px)").matches) return; // desktop pin only
 
-    const distance = () => Math.max(0, track.scrollWidth - window.innerWidth);
+    // Desktop pin only — drive it through matchMedia so crossing the breakpoint
+    // (e.g. resize / rotate) builds and reverts the animation instead of leaving
+    // the pin running over the mobile layout.
+    const mm = gsap.matchMedia();
+    mm.add("(min-width: 1024px)", () => {
+      const distance = () => Math.max(0, track.scrollWidth - window.innerWidth);
 
-    /* Per-frame coverflow: tilt/scale/dim each card by its distance from centre. */
-    const coverflow = () => {
-      const r = pin.getBoundingClientRect();
-      if (r.bottom < 0 || r.top > window.innerHeight) return; // offscreen — skip
-      const cx = window.innerWidth / 2;
-      for (const card of tiltRefs.current) {
-        if (!card) continue;
-        const b = card.getBoundingClientRect();
-        const d = gsap.utils.clamp(
-          -1.15,
-          1.15,
-          (b.left + b.width / 2 - cx) / (window.innerWidth * 0.42),
-        );
-        gsap.set(card, {
-          rotationY: -d * MAX_TILT,
-          scale: 1 - Math.min(0.18, Math.abs(d) * 0.18),
-          z: -Math.abs(d) * 220,
-          opacity: 1 - Math.min(0.55, Math.abs(d) * 0.62),
-        });
-      }
-    };
+      /* Per-frame coverflow: tilt/scale/dim each card by its distance from centre. */
+      const coverflow = () => {
+        const r = pin.getBoundingClientRect();
+        if (r.bottom < 0 || r.top > window.innerHeight) return; // offscreen — skip
+        const cx = window.innerWidth / 2;
+        for (const card of tiltRefs.current) {
+          if (!card) continue;
+          const b = card.getBoundingClientRect();
+          const d = gsap.utils.clamp(
+            -1.15,
+            1.15,
+            (b.left + b.width / 2 - cx) / (window.innerWidth * 0.42),
+          );
+          gsap.set(card, {
+            rotationY: -d * MAX_TILT,
+            scale: 1 - Math.min(0.18, Math.abs(d) * 0.18),
+            z: -Math.abs(d) * 220,
+            opacity: 1 - Math.min(0.55, Math.abs(d) * 0.62),
+          });
+        }
+      };
 
-    gsap.to(track, {
-      x: () => -distance(),
-      ease: "none",
-      scrollTrigger: {
-        trigger: pin,
-        start: "top top",
-        end: () => "+=" + distance(),
-        scrub: 0.6,
-        pin: true,
-        anticipatePin: 1,
-        invalidateOnRefresh: true,
-        onUpdate: (self) => {
-          if (progRef.current) gsap.set(progRef.current, { scaleX: self.progress });
+      gsap.to(track, {
+        x: () => -distance(),
+        ease: "none",
+        scrollTrigger: {
+          trigger: pin,
+          start: "top top",
+          end: () => "+=" + distance(),
+          scrub: 0.6,
+          pin: true,
+          anticipatePin: 1,
+          invalidateOnRefresh: true,
+          onUpdate: (self) => {
+            if (progRef.current) gsap.set(progRef.current, { scaleX: self.progress });
+          },
         },
-      },
+      });
+
+      gsap.ticker.add(coverflow);
+      coverflow();
+      ScrollTrigger.refresh();
+
+      // matchMedia runs this cleanup when the query stops matching; the tween,
+      // ScrollTrigger and pin it created are reverted automatically.
+      return () => gsap.ticker.remove(coverflow);
     });
 
-    gsap.ticker.add(coverflow);
-    coverflow();
-    ScrollTrigger.refresh();
-
     // gsap.context (via useGsapContext) calls a returned cleanup on revert.
-    return () => gsap.ticker.remove(coverflow);
+    return () => mm.revert();
   });
 
   const registerTilt = (el: HTMLElement | null, i: number) => {

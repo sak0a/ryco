@@ -66,12 +66,24 @@ export function SiteNav() {
     const sections = LINKS.map((l) => document.getElementById(l.id)).filter(
       (s): s is HTMLElement => !!s,
     );
+    // Cache the latest ratio per section: a callback batch only carries the
+    // sections that changed, so picking the max across the full set (not just
+    // this batch) keeps the highlight on whatever is genuinely most visible.
+    const ratios = new Map<string, number>();
     const io = new IntersectionObserver(
       (entries) => {
-        const vis = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        if (vis?.target.id) setActive(vis.target.id);
+        for (const e of entries) {
+          ratios.set(e.target.id, e.isIntersecting ? e.intersectionRatio : 0);
+        }
+        let topId: string | null = null;
+        let topRatio = 0;
+        for (const [id, ratio] of ratios) {
+          if (ratio > topRatio) {
+            topRatio = ratio;
+            topId = id;
+          }
+        }
+        if (topId) setActive(topId);
       },
       { rootMargin: "-45% 0px -50% 0px", threshold: [0, 0.25, 0.5] },
     );
@@ -216,8 +228,10 @@ export function SiteNav() {
         </div>
       </div>
 
-      {/* mobile menu */}
+      {/* mobile menu — `inert` while closed so the collapsed links stay out of
+          the tab order and the a11y tree, not just visually hidden. */}
       <div
+        inert={!open}
         className={cn(
           "mx-3 mt-2 grid overflow-hidden transition-all duration-300 ease-out md:hidden",
           open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",

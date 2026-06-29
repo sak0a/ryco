@@ -70,7 +70,7 @@ function loadCached(): Release | null {
 
 function fetchLatest(): Promise<Release | null> {
   if (inflight) return inflight;
-  inflight = (async () => {
+  const p = (async () => {
     const cached = loadCached();
     if (cached) return cached;
     try {
@@ -94,7 +94,14 @@ function fetchLatest(): Promise<Release | null> {
       return null;
     }
   })();
-  return inflight;
+  inflight = p;
+  // Release the shared promise once it settles, so a failed fetch doesn't pin
+  // every later caller to the Releases fallback for the rest of the session —
+  // concurrent callers still share this run; later mounts can retry.
+  void p.finally(() => {
+    if (inflight === p) inflight = null;
+  });
+  return p;
 }
 
 function pick(assets: ReleaseAsset[], re: RegExp): string | null {
@@ -105,7 +112,9 @@ function pick(assets: ReleaseAsset[], re: RegExp): string | null {
 function detectOs(): Os {
   const hay = `${navigator.platform || ""} ${navigator.userAgent || ""}`.toLowerCase();
   if (/android|iphone|ipad|ipod/.test(hay)) return null; // desktop app n/a on mobile
-  if (/mac/.test(hay)) return "mac";
+  // iPadOS Safari masquerades as "MacIntel"/"Macintosh"; a touch-capable "Mac"
+  // is really an iPad, so don't hand it a .dmg — fall back to Releases.
+  if (/mac/.test(hay)) return navigator.maxTouchPoints > 1 ? null : "mac";
   if (/win/.test(hay)) return "windows";
   if (/linux|x11|cros/.test(hay)) return "linux";
   return null;

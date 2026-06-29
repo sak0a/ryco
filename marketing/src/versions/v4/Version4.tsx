@@ -287,7 +287,9 @@ function KineticTerminal() {
       </div>
       <div ref={ref} aria-hidden className="min-h-[196px] px-5 py-5 leading-relaxed">
         {TERM_LINES.map((line, i) => {
-          if (started && i > p.line) return null;
+          // Until typing starts, render nothing (every later line would otherwise
+          // print in full, then collapse back once the animation kicks in).
+          if (!started || i > p.line) return null;
           const isActive = i === p.line;
           const count = isActive && !doneRef.current ? p.char : Number.POSITIVE_INFINITY;
           return (
