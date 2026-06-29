@@ -101,6 +101,21 @@ describe("ssh tunnel scripts", () => {
     assert.include(script, "fnm use default");
     assert.notInclude(script, "fnm env --shell sh");
     assert.notInclude(script, "--use-on-cd");
+
+    // Probe where the fnm binary actually lives for installs that non-interactive
+    // SSH shells routinely drop from PATH (Homebrew, cargo, XDG bin), not just the
+    // curl installer's data dir.
+    assert.include(script, '"$HOME/.local/share/fnm"');
+    assert.include(script, '"$HOME/.cargo/bin"');
+    assert.include(script, "/opt/homebrew/bin");
+    assert.include(script, "/home/linuxbrew/.linuxbrew/bin");
+
+    // Only fall back to fnm if Node is still unresolved after broadening PATH, so
+    // a directly-resolvable Node (e.g. Homebrew node) is never overridden.
+    assert.include(
+      script,
+      'if ! command -v node >/dev/null 2>&1 && command -v fnm >/dev/null 2>&1; then',
+    );
   });
 
   it("shell-quotes package specs in the remote ryco runner", () => {
