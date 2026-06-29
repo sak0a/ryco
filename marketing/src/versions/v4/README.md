@@ -34,8 +34,9 @@ five other directions (now archived in `.archive/`).
   lime glow backdrop (`KineticBackground`).
 - **Accent:** electric lime `#c6ff3a`, used sparingly as kinetic punctuation.
 - **Type:** Space Grotesk (display) · Inter (body) · JetBrains Mono (labels/code).
-- **Imagery:** real light screenshots framed in `ScreenshotFrame`, floating on the
-  dark canvas (the Linear/Vercel "light shot on dark" look).
+- **Imagery:** real **dark-mode** product captures framed in `ScreenshotFrame`
+  (chrome-less, ringed) floating on the dark canvas. `ScreenshotFrame` can lock an
+  `aspect` + `fit` so differently-sized captures present at a consistent height.
 
 ## Structure (`Version4.tsx` + `process-icons.tsx` + `feature-icons.tsx`)
 
@@ -47,14 +48,15 @@ five other directions (now archived in `.archive/`).
 Shared v4 pieces live in their own files so the page, nav and deck stay readable:
 `theme.ts` (the `ACCENT` + `focusRing` tokens), `MagneticButton.tsx` (the one
 button primitive — sheen + press), `ProviderCard.tsx` (one provider tile, with a
-`deck` variant), `SiteNav.tsx` (the floating navigation) and `AgentDeck.tsx` (the
-3D agent coverflow). The bespoke How-it-works step icons live in `process-icons.tsx`;
+`deck` variant), `SiteNav.tsx` (the floating navigation), `AgentDeck.tsx` (the
+3D agent coverflow) and `Gallery.tsx` (the "under the hood" 3D scroll fly-in). The bespoke How-it-works step icons live in `process-icons.tsx`;
 the always-on toolkit feature icons in `feature-icons.tsx` (both keyed off
 `content.ts`). Their CSS loops + the terminal caret are in `src/index.css`
 (`.ryco-proc*` / `.ryco-feat*`).
 
 Sections, in order: **nav → hero → marquee → agents → model providers → showcase
-→ features → pillars+stats → how-it-works → download → FAQ → final CTA → footer.**
+→ features → deep dive ("under the hood") → pillars+stats → how-it-works →
+download → FAQ → final CTA → footer.**
 
 ## Motion devices (mostly GSAP via `useGsapContext`; a few hand-rolled)
 
@@ -77,6 +79,7 @@ Sections, in order: **nav → hero → marquee → agents → model providers �
 | **Floating nav** — sliding active indicator (scroll-spy), scroll-progress hairline, animated mobile menu | `SiteNav.tsx` |
 | **Button sheen** — light sweep on hover + press scale | `MagneticButton.tsx` |
 | **3D card tilt + glare** — hero shot, feature & platform cards lean toward the pointer | `[data-tilt]` / `[data-glare]` via `useTilt` |
+| **3D gallery fly-in** — deep-dive captures swing in from alternating sides (rotateY + depth), scrubbed to scroll | `Gallery.tsx` (`[data-fly]`) |
 | Generic on-scroll reveals | `[data-reveal]` |
 
 > A few devices are intentionally **not** GSAP: the terminal (`IntersectionObserver`
@@ -119,9 +122,10 @@ MOTION=off ROUTES=/4 node scripts/shoot.mjs   # settled (reduced-motion) capture
 
 ## TODO
 
-- [ ] **Real, populated hero screenshots** — capture an actual agent thread mid-run
-  (a streaming response + a real diff) instead of the empty-thread `home.png`, plus
-  a populated terminal. Needs a live agent turn against an authed provider.
+- [x] **Real, populated dark-mode captures** — the hero, showcase, agent finale and
+  "under the hood" gallery now use focused dark screenshots (overview, model picker,
+  terminal, diff, files, themes, diagnostics, providers, instances, plugins, CI,
+  project). A streaming agent thread mid-run would still be a nice hero upgrade.
 - [ ] Tune the 3D agent-deck radius/auto-spin on very wide and very short viewports;
   validate the sticky scrollytelling hand-off on real devices.
 - [ ] Consider a proper pinned hero transition (currently a load-entrance + parallax).

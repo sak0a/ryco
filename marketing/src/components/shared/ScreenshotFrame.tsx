@@ -22,6 +22,14 @@ export interface ScreenshotFrameProps {
    */
   focus?: { x: number; y: number; zoom: number };
   zoomed?: boolean;
+  /**
+   * Lock the image area to an aspect ratio (e.g. "16/10"). Lets a row of
+   * differently-sized captures present at a consistent height. Pairs with `fit`:
+   * "contain" mattes the whole shot inside the box, "cover" fills + crops to the
+   * focus point.
+   */
+  aspect?: string;
+  fit?: "cover" | "contain";
 }
 
 export function ScreenshotFrame({
@@ -35,14 +43,44 @@ export function ScreenshotFrame({
   loading = "lazy",
   focus,
   zoomed = false,
+  aspect,
+  fit = "cover",
 }: ScreenshotFrameProps) {
   const dark = theme === "dark";
   const scale = focus && zoomed ? focus.zoom : 1;
+  const objectPosition = focus ? `${focus.x * 100}% ${focus.y * 100}%` : undefined;
+  const transformStyle =
+    focus || aspect
+      ? {
+          transformOrigin: objectPosition ?? "center",
+          transform: `scale(${scale})`,
+          objectPosition,
+          transition: "transform 0.85s cubic-bezier(0.22, 1, 0.36, 1)",
+          willChange: "transform" as const,
+        }
+      : undefined;
+
+  const img = (
+    <img
+      src={src}
+      alt={alt}
+      loading={loading}
+      draggable={false}
+      className={cn(
+        aspect
+          ? cn("absolute inset-0 h-full w-full select-none", fit === "contain" ? "object-contain" : "object-cover")
+          : "block w-full select-none",
+        imgClassName,
+      )}
+      style={transformStyle}
+    />
+  );
+
   return (
     <figure
       className={cn(
         "overflow-hidden rounded-xl border",
-        dark ? "border-white/10 bg-[#0d0d10]" : "border-black/10 bg-white",
+        dark ? "border-white/14 bg-[#0d0d10]" : "border-black/10 bg-white",
         className,
       )}
     >
@@ -69,25 +107,13 @@ export function ScreenshotFrame({
         </div>
       )}
       {/* wrapper clips the zoom so it never bleeds over the chrome bar */}
-      <div className="overflow-hidden">
-        <img
-          src={src}
-          alt={alt}
-          loading={loading}
-          draggable={false}
-          className={cn("block w-full select-none", imgClassName)}
-          style={
-            focus
-              ? {
-                  transformOrigin: `${focus.x * 100}% ${focus.y * 100}%`,
-                  transform: `scale(${scale})`,
-                  transition: "transform 0.85s cubic-bezier(0.22, 1, 0.36, 1)",
-                  willChange: "transform",
-                }
-              : undefined
-          }
-        />
-      </div>
+      {aspect ? (
+        <div className="relative w-full overflow-hidden" style={{ aspectRatio: aspect }}>
+          {img}
+        </div>
+      ) : (
+        <div className="overflow-hidden">{img}</div>
+      )}
     </figure>
   );
 }

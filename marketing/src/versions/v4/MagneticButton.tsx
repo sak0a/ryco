@@ -35,7 +35,7 @@ export function MagneticButton({
       aria-label={ariaLabel}
       className={cn(
         "group/btn relative inline-flex items-center justify-center overflow-hidden font-semibold transition-[filter,background-color,border-color] duration-300",
-        size === "lg" ? "rounded-xl px-6 py-3 text-[15px]" : "rounded-lg px-3.5 py-2 text-sm",
+        size === "lg" ? "rounded-xl px-6 py-3 text-[15px]" : "rounded-full px-3.5 py-2 text-sm",
         primary
           ? "text-[#0a0b0d] hover:brightness-[1.04]"
           : "border border-white/15 bg-white/[0.03] text-white hover:border-white/30 hover:bg-white/[0.06]",

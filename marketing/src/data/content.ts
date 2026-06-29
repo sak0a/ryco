@@ -355,10 +355,6 @@ export const FAQ = [
     a: "Codex, Claude, GitHub Copilot and OpenCode today, with Cursor in early access. Each runs through its native SDK or protocol.",
   },
   {
-    q: "Do I need every provider installed?",
-    a: "No. Install and authenticate at least one. Ryco shows live auth and version status per provider in Settings.",
-  },
-  {
     q: "What platforms are supported?",
     a: "macOS (.dmg, arm64 + x64), Linux (.AppImage / AUR ryco-bin) and Windows (NSIS .exe).",
   },
@@ -367,24 +363,12 @@ export const FAQ = [
     a: "Yes — named provider instances let you run, say, codex_personal and claude_openrouter at once with independent config and models.",
   },
   {
-    q: "Is it open source?",
-    a: "Yes, MIT licensed. Ryco is very early — expect bugs and breaking changes. Join the Discord to follow along.",
-  },
-  {
     q: "Do I have to pay for Ryco?",
     a: "No — Ryco itself is free and MIT licensed. You bring the agent subscriptions you already pay for; Ryco runs them through their native SDKs or protocols.",
   },
   {
-    q: "Can I switch models in the middle of a thread?",
-    a: "Yes. The model picker swaps provider and model per thread, with reasoning effort and interaction mode right there — and usage windows surfaced inline where the provider exposes them.",
-  },
-  {
-    q: "Can I attach issues and PRs as context?",
-    a: "Yes — attach GitHub, GitLab, Forgejo, Bitbucket or Azure DevOps issues and PRs as structured context straight from the composer with a # trigger, before the agent starts.",
-  },
-  {
-    q: "Does it work with my editor and terminal?",
-    a: "Click any diff line to open your editor at the exact file and line, and the multi-terminal drawer has clickable file and path links. MCP servers and OTLP trace export are built in too.",
+    q: "Is it open source?",
+    a: "Yes, MIT licensed. Ryco is very early — expect bugs and breaking changes. Join the Discord to follow along.",
   },
 ] as const;
 

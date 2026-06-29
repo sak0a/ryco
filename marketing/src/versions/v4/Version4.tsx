@@ -50,6 +50,8 @@ import { ProviderCard } from "./ProviderCard";
 import { MagneticButton } from "./MagneticButton";
 import { SiteNav } from "./SiteNav";
 import { AgentDeck } from "./AgentDeck";
+import { Gallery } from "./Gallery";
+import { useDownload } from "./useDownload";
 
 const NAV_OFFSET = "scroll-mt-28";
 
@@ -90,70 +92,50 @@ interface ShowcaseStep {
   heading: string;
   body: string;
   points: string[];
-  /** Region (normalised 0–1) to zoom into so the relevant UI reads large. */
-  focus: { x: number; y: number; zoom: number };
+  /** Native width ÷ height of the capture, so the frame hugs it (no letterbox). */
+  aspect: number;
 }
 
 const SHOWCASE: ShowcaseStep[] = [
   {
-    shot: "/shots/overview.png",
-    title: "Project overview",
-    alt: "Ryco project overview with git worktrees grouped by status.",
-    eyebrow: "Worktrees",
-    heading: "A worktree for every branch, PR and issue.",
-    body: "Create and track git worktrees per branch, pull request, issue or Jira item — bucketed by status: idle, in progress, review and done. Switch context without stashing a thing.",
-    points: ["Status buckets", "Branch selector", "Symlink-aware paths"],
-    focus: { x: 0.5, y: 0.28, zoom: 1.22 },
-  },
-  {
     shot: "/shots/model-picker.png",
     title: "Model picker",
-    alt: "Ryco model picker showing multiple providers and their models.",
+    alt: "Ryco model picker listing Fable, Opus, Sonnet and Haiku models with ⌘ shortcuts.",
     eyebrow: "Models",
     heading: "Switch models mid-thread.",
-    body: "Pick any provider and model from a single picker — Claude, Codex, Copilot and whatever your OpenCode upstreams expose. Reasoning effort and interaction mode are right there too.",
-    points: ["One picker, every provider", "Per-thread memory", "Usage windows inline"],
-    focus: { x: 0.34, y: 0.7, zoom: 1.72 },
+    body: "Open one picker and jump between every model your providers expose — Fable, Opus, Sonnet, Haiku, GPT and more. Reasoning effort, thinking and token budget sit right beside it.",
+    points: ["One picker, every provider", "⌘1–9 to jump", "Effort, thinking & budget"],
+    aspect: 1594 / 850,
   },
   {
     shot: "/shots/terminal.png",
-    title: "Terminal drawer",
-    alt: "Ryco terminal drawer open beneath an agent thread.",
+    title: "Terminal",
+    alt: "Ryco multi-terminal drawer running dev servers across split tabs.",
     eyebrow: "Terminal",
-    heading: "Terminals, diffs and your editor — together.",
-    body: "Split terminals in a drawer with clickable file and path links. Search inside large diffs, then click any line to open your editor at the exact file and line.",
-    points: ["Multi-terminal drawer", "Diff occurrence search", "Diff line → editor"],
-    focus: { x: 0.5, y: 0.82, zoom: 1.35 },
+    heading: "Real terminals, in a drawer.",
+    body: "Split terminal tabs run your dev servers and scripts beside the thread, with clickable file and path links — no window-juggling to see what an agent just ran.",
+    points: ["Split tabs", "Clickable paths", "Runs your scripts"],
+    aspect: 1782 / 1010,
   },
   {
-    shot: "/shots/command-palette.png",
-    title: "⌘K",
-    alt: "Ryco command palette open over an agent thread.",
-    eyebrow: "Command palette",
-    heading: "Everything, a keystroke away.",
-    body: "Jump between threads, projects and models, run commands, attach a GitHub or GitLab issue with #, or fire a slash command — all without leaving the keyboard.",
-    points: ["Thread & model jumps", "Reference issues / PRs", "Slash commands"],
-    focus: { x: 0.5, y: 0.19, zoom: 1.62 },
-  },
-  {
-    shot: "/shots/composer.png",
-    title: "Composer",
-    alt: "Ryco composer attaching a GitHub issue as structured context.",
-    eyebrow: "Composer",
-    heading: "Bring exactly the right context.",
-    body: "Attach GitHub, GitLab, Forgejo, Bitbucket or Azure DevOps issues and PRs as structured context with a # trigger — straight from the composer, before the agent starts.",
-    points: ["# to attach", "Structured context", "Five SCM providers"],
-    focus: { x: 0.5, y: 0.82, zoom: 1.4 },
-  },
-  {
-    shot: "/shots/appearance.png",
-    title: "Settings — Appearance",
-    alt: "Ryco appearance settings with font pickers and theme controls.",
+    shot: "/shots/themes.png",
+    title: "Appearance",
+    alt: "Ryco theme editor with font pickers, text size, corner radius and a custom accent colour.",
     eyebrow: "Appearance",
     heading: "Make it unmistakably yours.",
-    body: "A full theme editor with live preview, independent interface and code fonts, text size, corner radius and a pinnable accent — plus rebindable shortcuts for everything.",
-    points: ["Custom themes", "Font pickers", "Rebindable keys"],
-    focus: { x: 0.56, y: 0.34, zoom: 1.3 },
+    body: "Independent interface and code fonts, text size, corner radius and a pinnable accent — tuned live, with a full custom colour when the presets aren't enough.",
+    points: ["Interface & code fonts", "Size & radius", "Custom accent"],
+    aspect: 1946 / 1590,
+  },
+  {
+    shot: "/shots/diagnostics.png",
+    title: "Diagnostics",
+    alt: "Ryco diagnostics — uptime, memory and CPU, resource-history charts and tracing diagnostics.",
+    eyebrow: "Observability",
+    heading: "See exactly what's happening.",
+    body: "Live uptime, memory and CPU, resource-history charts, and tracing diagnostics with span names and duration buckets — full visibility into every agent, all local.",
+    points: ["Resource history", "Trace spans", "Duration buckets"],
+    aspect: 1946 / 1564,
   },
 ];
 
@@ -449,12 +431,8 @@ function FaqRow({
           {q}
         </span>
         <span
-          className="relative grid size-7 shrink-0 place-items-center rounded-full border transition-colors duration-300"
-          style={
-            open
-              ? { color: ACCENT, borderColor: `${ACCENT}66` }
-              : { color: "rgba(255,255,255,0.7)", borderColor: "rgba(255,255,255,0.18)" }
-          }
+          className="relative grid size-7 shrink-0 place-items-center transition-colors duration-300"
+          style={open ? { color: ACCENT } : { color: "rgba(255,255,255,0.7)" }}
         >
           <span aria-hidden className="absolute h-0.5 w-3 rounded-full bg-current" />
           <span
@@ -510,6 +488,7 @@ export default function Version4() {
   const reduced = useReducedMotion();
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [activeShot, setActiveShot] = useState(0);
+  const dl = useDownload();
 
   const heroShotRef = useRef<HTMLDivElement>(null);
 
@@ -724,14 +703,34 @@ export default function Version4() {
             </p>
 
             <div data-hero-fade className="mt-9 flex flex-wrap items-center justify-center gap-3">
-              <MagneticButton href={SITE.releases} external variant="primary">
-                <Download className="size-[18px]" /> Download for desktop
+              <MagneticButton href={dl.href} external={!dl.isDirect} variant="primary">
+                <Download className="size-[18px]" /> Download {dl.osLabel ? `for ${dl.osLabel}` : "for desktop"}
               </MagneticButton>
               <MagneticButton href={SITE.repo} external variant="ghost">
                 <Github className="size-[18px]" /> View source
                 <ArrowRight className="size-4 transition-transform duration-300 group-hover/btn:translate-x-0.5" />
               </MagneticButton>
             </div>
+
+            {/* detected target + escape hatch (arch detection is best-effort) */}
+            <p data-hero-fade className="mt-4 text-xs text-white/45">
+              {dl.osLabel && (
+                <span className="text-white/55">
+                  {dl.osLabel}
+                  {dl.archLabel ? ` · ${dl.archLabel}` : ""}
+                  {dl.version ? ` · ${dl.version}` : ""}
+                  {" · "}
+                </span>
+              )}
+              <a
+                href={dl.releasesUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={cn("underline-offset-2 transition-colors hover:text-white/80 hover:underline", focusRing)}
+              >
+                {dl.osLabel ? "other builds" : "All builds & platforms"}
+              </a>
+            </p>
 
             <div data-hero-fade className="mt-5 flex justify-center">
               <Copyable text={SITE.npx} />
@@ -760,11 +759,12 @@ export default function Version4() {
           <div ref={heroShotRef} className="relative mx-auto mt-16 max-w-5xl will-change-transform">
             <div data-tilt data-tilt-max="6" className="relative rounded-xl will-change-transform">
               <ScreenshotFrame
-                src="/shots/home.png"
-                alt="The Ryco workspace — project sidebar, an agent thread and the source-control panel side by side."
-                title="ryco — feat/add-new-marketing-site"
+                src="/shots/overview.png"
+                alt="The Ryco project overview — open issues, pull requests, Actions and Jira at a glance."
+                theme="dark"
+                chrome={false}
                 loading="eager"
-                className="shadow-[0_50px_140px_-40px_rgba(0,0,0,0.85)] ring-1 ring-white/10"
+                className="shadow-[0_50px_140px_-40px_rgba(0,0,0,0.9)]"
               />
               <span
                 data-glare
@@ -819,10 +819,9 @@ export default function Version4() {
                 <ScreenshotFrame
                   src="/shots/providers.png"
                   alt="Ryco settings showing all five providers authenticated with live version and subscription status."
-                  title="Settings — Providers"
-                  className="ring-1 ring-white/10"
-                  focus={{ x: 0.56, y: 0.4, zoom: 1.28 }}
-                  zoomed
+                  theme="dark"
+                  chrome={false}
+                  className="shadow-[0_40px_120px_-55px_rgba(0,0,0,0.9)]"
                 />
               </div>
             </div>
@@ -887,8 +886,8 @@ export default function Version4() {
             <Eyebrow>The workspace</Eyebrow>
             <SectionHeading className="mt-5">Built for the way you actually ship.</SectionHeading>
             <p className="mt-5 text-white/60 sm:text-lg">
-              Not a chat box bolted onto a terminal — a real workspace. Worktrees, models, diffs,
-              terminals and your editor, a keystroke apart.
+              Not a chat box bolted onto a terminal — a real workspace. Models, terminals, theming and
+              full observability, a keystroke apart.
             </p>
           </div>
 
@@ -915,10 +914,9 @@ export default function Version4() {
                     <ScreenshotFrame
                       src={s.shot}
                       alt={s.alt}
-                      title={s.title}
-                      className="ring-1 ring-white/10"
-                      focus={s.focus}
-                      zoomed
+                      theme="dark"
+                      chrome={false}
+                      className="shadow-[0_40px_120px_-55px_rgba(0,0,0,0.9)]"
                     />
                   </div>
                 </div>
@@ -930,32 +928,32 @@ export default function Version4() {
               <div className="hidden lg:block">
                 <div className="sticky top-[14vh]">
                   <div className="relative">
-                    {/* invisible sizer keeps the stack height stable */}
-                    <div className="invisible" aria-hidden>
-                      <ScreenshotFrame src={SHOWCASE[0].shot} alt="" title={SHOWCASE[0].title} />
-                    </div>
-                    {SHOWCASE.map((s, i) => (
-                      <div
-                        key={s.shot}
-                        aria-hidden={i !== activeShot}
-                        className={cn(
-                          "absolute inset-0 transition-all duration-700 ease-out",
-                          i === activeShot
-                            ? "scale-100 opacity-100 blur-0"
-                            : "pointer-events-none scale-[0.97] opacity-0 blur-[2px]",
-                        )}
-                      >
-                        <ScreenshotFrame
+                    {/* the frame morphs to the active shot's native aspect, so each
+                        capture fills it edge-to-edge — no letterbox bands */}
+                    <div
+                      className="relative w-full overflow-hidden rounded-xl border border-white/14 bg-[#0d0d10] shadow-[0_50px_140px_-50px_rgba(0,0,0,0.9)]"
+                      style={{
+                        paddingBottom: `${100 / SHOWCASE[activeShot].aspect}%`,
+                        transition: "padding-bottom 0.6s cubic-bezier(0.22, 1, 0.36, 1)",
+                      }}
+                    >
+                      {SHOWCASE.map((s, i) => (
+                        <img
+                          key={s.shot}
                           src={s.shot}
                           alt={s.alt}
-                          title={s.title}
                           loading="eager"
-                          className="ring-1 ring-white/10"
-                          focus={s.focus}
-                          zoomed={i === activeShot}
+                          draggable={false}
+                          aria-hidden={i !== activeShot}
+                          className={cn(
+                            "absolute inset-0 h-full w-full select-none object-cover transition-all duration-700 ease-out",
+                            i === activeShot
+                              ? "scale-100 opacity-100 blur-0"
+                              : "pointer-events-none scale-[1.03] opacity-0 blur-[2px]",
+                          )}
                         />
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                     {/* step counter */}
                     <div className="pointer-events-none absolute -top-7 right-0 font-['JetBrains_Mono'] text-xs tabular-nums text-white/35">
                       <span style={{ color: ACCENT }}>{String(activeShot + 1).padStart(2, "0")}</span>
@@ -994,10 +992,9 @@ export default function Version4() {
                       <ScreenshotFrame
                         src={s.shot}
                         alt={s.alt}
-                        title={s.title}
-                        className="ring-1 ring-white/10"
-                        focus={s.focus}
-                        zoomed
+                        theme="dark"
+                        chrome={false}
+                        className="shadow-[0_40px_120px_-55px_rgba(0,0,0,0.9)]"
                       />
                     </div>
                   </div>
@@ -1047,6 +1044,19 @@ export default function Version4() {
               );
             })}
           </div>
+        </section>
+
+        {/* ------------------------------ deep dive ------------------------------ */}
+        <section className="relative mx-auto max-w-7xl px-5 py-24 sm:px-8">
+          <div data-reveal className="max-w-2xl">
+            <Eyebrow>A closer look</Eyebrow>
+            <SectionHeading className="mt-5">Under the hood.</SectionHeading>
+            <p className="mt-5 text-white/60 sm:text-lg">
+              Files, diffs, named instances, token plugins, CI and project config — the depth that
+              makes Ryco a workspace, not a chat box.
+            </p>
+          </div>
+          <Gallery />
         </section>
 
         {/* --------------------------- pillars + stats --------------------------- */}
@@ -1137,12 +1147,23 @@ export default function Version4() {
           </div>
 
           <div className="mt-12 grid gap-5 sm:grid-cols-3">
-            {PLATFORMS.map((pl) => (
+            {PLATFORMS.map((pl) => {
+              const assetUrl =
+                pl.id === "macos"
+                  ? dl.arch === "x64"
+                    ? dl.urls?.macX64
+                    : dl.urls?.macArm
+                  : pl.id === "windows"
+                    ? dl.urls?.win
+                    : pl.id === "linux"
+                      ? dl.urls?.linux
+                      : null;
+              const direct = !!assetUrl;
+              return (
               <a
                 key={pl.id}
-                href={SITE.releases}
-                target="_blank"
-                rel="noreferrer"
+                href={assetUrl ?? SITE.releases}
+                {...(direct ? {} : { target: "_blank", rel: "noreferrer" })}
                 data-reveal
                 data-tilt
                 data-tilt-max="6"
@@ -1171,8 +1192,22 @@ export default function Version4() {
                   <ArrowUpRight className="size-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                 </span>
               </a>
-            ))}
+              );
+            })}
           </div>
+
+          <p className="mt-6 text-sm text-white/50">
+            {dl.version && <span className="font-['JetBrains_Mono'] text-white/60">{dl.version}</span>}{" "}
+            <a
+              href={dl.releasesUrl}
+              target="_blank"
+              rel="noreferrer"
+              className={cn("underline-offset-2 transition-colors hover:text-white hover:underline", focusRing)}
+            >
+              All builds &amp; checksums on GitHub
+              <ArrowUpRight className="ml-0.5 inline size-3.5 align-[-0.1em]" />
+            </a>
+          </p>
 
           <KineticTerminal />
         </section>
@@ -1217,8 +1252,8 @@ export default function Version4() {
               worktree, and let the agents loose.
             </p>
             <div className="relative mt-9 flex flex-wrap items-center justify-center gap-3">
-              <MagneticButton href={SITE.releases} external variant="primary">
-                <Download className="size-[18px]" /> Download Ryco
+              <MagneticButton href={dl.href} external={!dl.isDirect} variant="primary">
+                <Download className="size-[18px]" /> Download {dl.osLabel ? `for ${dl.osLabel}` : "Ryco"}
               </MagneticButton>
               <MagneticButton href={SITE.discord} external variant="ghost">
                 <MessagesSquare className="size-[18px]" /> Join the Discord

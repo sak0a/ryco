@@ -16,6 +16,7 @@ import { gsap, prefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/cn";
 import { ACCENT, focusRing } from "./theme";
 import { MagneticButton } from "./MagneticButton";
+import { useDownload } from "./useDownload";
 
 const LINKS = [
   { id: "agents", label: "Agents" },
@@ -39,6 +40,7 @@ export function SiteNav() {
   const [active, setActive] = useState<string>("agents");
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
+  const dl = useDownload();
 
   /* Slide the indicator under a link element (snap under reduced motion). */
   const slideTo = (id: string | null) => {
@@ -180,8 +182,22 @@ export function SiteNav() {
           >
             <Github className="size-[18px]" />
           </a>
-          <MagneticButton href={SITE.releases} external size="sm" magnetic className="rounded-full">
-            <Download className="size-4" /> Download
+          <MagneticButton
+            href={dl.href}
+            external={!dl.isDirect}
+            size="sm"
+            magnetic
+            className="rounded-full"
+            ariaLabel={
+              dl.osLabel
+                ? `Download Ryco for ${dl.osLabel}${dl.archLabel ? ` (${dl.archLabel})` : ""}${dl.version ? ` ${dl.version}` : ""}`
+                : "Download Ryco"
+            }
+          >
+            <Download className="size-4" />
+            <span>
+              Download{dl.osLabel && <span className="hidden sm:inline"> for {dl.osLabel}</span>}
+            </span>
           </MagneticButton>
           <button
             type="button"

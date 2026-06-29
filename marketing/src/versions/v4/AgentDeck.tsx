@@ -139,10 +139,9 @@ export function AgentDeck() {
             <ScreenshotFrame
               src="/shots/providers.png"
               alt="Ryco settings showing all five providers authenticated with live version and subscription status."
-              title="Settings — Providers"
-              className="ring-1 ring-white/10"
-              focus={{ x: 0.56, y: 0.4, zoom: 1.28 }}
-              zoomed
+              theme="dark"
+              chrome={false}
+              className="shadow-[0_40px_120px_-50px_rgba(0,0,0,0.9)]"
             />
             <p className="mt-4 text-sm text-white/50">All five, authenticated and live.</p>
           </div>
@@ -179,10 +178,9 @@ export function AgentDeck() {
           <ScreenshotFrame
             src="/shots/providers.png"
             alt="Ryco settings showing all five providers authenticated."
-            title="Settings — Providers"
-            className="ring-1 ring-white/10"
-            focus={{ x: 0.56, y: 0.4, zoom: 1.28 }}
-            zoomed
+            theme="dark"
+            chrome={false}
+            className="shadow-[0_30px_90px_-50px_rgba(0,0,0,0.9)]"
           />
         </div>
       </div>
