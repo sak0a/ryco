@@ -25,6 +25,7 @@ import {
 } from "../ThreadStatusIndicators";
 import {
   canArchiveSidebarThread,
+  isTrailingDoubleClick,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
 } from "../Sidebar.logic";
@@ -212,6 +213,12 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
         const isMac = isMacPlatform(navigator.platform);
         if ((isMac ? event.metaKey : event.ctrlKey) || event.shiftKey) {
           event.preventDefault();
+          return;
+        }
+        // Don't navigate on the trailing click of a double-click, to match the
+        // behavior for non-draft rows where the second click is suppressed by
+        // isTrailingDoubleClick in handleThreadClick.
+        if (isTrailingDoubleClick(event.detail)) {
           return;
         }
         navigateToDraft(draftId, threadRef);
