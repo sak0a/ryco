@@ -39,6 +39,7 @@ export interface SidebarProjectThreadListProps {
   renamingThreadKey: string | null;
   renamingTitle: string;
   setRenamingTitle: (title: string) => void;
+  startThreadRename: (threadKey: string, title: string) => void;
   renamingInputRef: React.RefObject<HTMLInputElement | null>;
   renamingCommittedRef: React.RefObject<boolean>;
   confirmingArchiveThreadKey: string | null;
@@ -111,6 +112,7 @@ export const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     renamingThreadKey,
     renamingTitle,
     setRenamingTitle,
+    startThreadRename,
     renamingInputRef,
     renamingCommittedRef,
     confirmingArchiveThreadKey,
@@ -156,6 +158,7 @@ export const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         renamingThreadKey={renamingThreadKey}
         renamingTitle={renamingTitle}
         setRenamingTitle={setRenamingTitle}
+        startThreadRename={startThreadRename}
         renamingInputRef={renamingInputRef}
         renamingCommittedRef={renamingCommittedRef}
         confirmingArchiveThreadKey={confirmingArchiveThreadKey}
