@@ -39,6 +39,7 @@ import {
   makeStaticProviderMaintenanceResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from "../providerMaintenance.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("cursor");
 const UPDATE = makeStaticProviderMaintenanceResolver(
@@ -57,7 +58,8 @@ export type CursorDriverEnv =
   | HttpClient.HttpClient
   | Path.Path
   | ProviderEventLoggers
-  | ServerConfig;
+  | ServerConfig
+  | ServerSettingsService;
 
 const withInstanceIdentity =
   (input: {
@@ -89,6 +91,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
+      const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
@@ -138,6 +141,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
             publishSnapshot,
             stampIdentity,
             httpClient,
+            serverSettings,
           }),
         refreshInterval: null,
       }).pipe(

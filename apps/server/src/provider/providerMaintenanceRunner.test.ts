@@ -12,6 +12,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ProviderRegistry, type ProviderRegistryShape } from "./Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "./providerMaintenanceRunner.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
 import {
   clearLatestProviderVersionCacheForTests,
   makeProviderMaintenanceCapabilities,
@@ -194,6 +195,7 @@ const makeTestRunner = (registry: ProviderRegistryShape) =>
     Effect.provide(
       ProviderMaintenanceRunner.layer.pipe(
         Layer.provide(Layer.succeed(ProviderRegistry, registry)),
+        Layer.provide(ServerSettingsService.layerTest()),
       ),
     ),
   );
