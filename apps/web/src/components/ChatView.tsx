@@ -1741,8 +1741,14 @@ export default function ChatView(props: ChatViewProps) {
     isAtEndRef.current = true;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
+    // Honor an explicit "open the overview on the next thread" signal, set when
+    // implementing a plan in a freshly created thread (`onImplementPlanInNewThread`).
+    // In wide layouts the overview opens by default anyway, but in sheet/narrow
+    // layouts it starts closed on every thread switch — without consuming this
+    // signal the request to surface the new thread's plan would be silently lost.
+    const openOverviewForNextThread = planSidebarOpenOnNextThreadRef.current;
     planSidebarOpenOnNextThreadRef.current = false;
-    setPlanSidebarOpen(!shouldUsePlanSidebarSheet);
+    setPlanSidebarOpen(openOverviewForNextThread || !shouldUsePlanSidebarSheet);
     planSidebarDismissedForTurnRef.current = null;
   }, [activeThread?.id, shouldUsePlanSidebarSheet]);
 
