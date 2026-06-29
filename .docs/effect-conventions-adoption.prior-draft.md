@@ -21,19 +21,21 @@ Upstream t3code adopted structured Effect conventions across ~200 PRs (2026-06-2
 ## Part 1: Canonical Upstream Spec (Extracted)
 
 ### Imports and Module Namespaces
+
 - **Rule:** Import Effect subpaths as namespaces: `import * as Effect from "effect/Effect"`, `import * as Layer from "effect/Layer"`
 - **Service boundaries:** Import local services as namespaces: `import * as WorkspacePaths from "./WorkspacePaths.ts"` → use `WorkspacePaths.WorkspacePaths`, `WorkspacePaths.make`, `WorkspacePaths.layer`
 - **Avoid:** Named imports like `import { layer as workspacePathsLayer }` that erase the namespace shape
 - **Exception:** Named imports are fine for whole packages (`@t3tools/contracts`) and standalone helpers/types
 
 ### Error Definitions (Core)
+
 - **Use `Schema.TaggedErrorClass`** with structured attributes; derive `message` from those attributes only
 - **Preserve cause chains:** Pass underlying errors as `cause` alongside structural fields. Make `cause` required when every construction wraps a failure, optional only when the same error can legitimately originate without an underlying failure
 - **No tautological details:** Do not copy `cause.message` into a `detail` field and then use it to construct the message. Example—**bad**:
   ```ts
   new PersistenceSqlError({
     operation: "foo",
-    detail: error.message,  // redundant copy
+    detail: error.message, // redundant copy
     cause: error,
   });
   // message: `SQL error in ${this.operation}: ${this.detail}` // repeats cause
@@ -42,7 +44,7 @@ Upstream t3code adopted structured Effect conventions across ~200 PRs (2026-06-2
   ```ts
   new PersistenceSqlError({
     operation: "foo",
-    cause: error,  // keep original
+    cause: error, // keep original
   });
   // message: `SQL error in ${this.operation}` // stable, no copy
   ```
@@ -61,6 +63,7 @@ Upstream t3code adopted structured Effect conventions across ~200 PRs (2026-06-2
 - **Error class taxonomy:** Split semantically distinct failures into separate classes when a discriminator field drives user-facing messages or control flow. Use one class with a multi-value `operation` field only when failures share identical semantics
 
 ### Service Definition
+
 - **Canonical order:** Imports → error/schema declarations → `Context.Service` tag (with inline interface) → `make` → `layer`
 - **Inline interface:** Define the service interface directly in the `Context.Service` declaration; remove standalone `FooShape` types
 - **Refer to service type as `Foo["Service"]`** in tests, MCP, and orchestration
@@ -68,6 +71,7 @@ Upstream t3code adopted structured Effect conventions across ~200 PRs (2026-06-2
 - **Layer export:** Export the canonical layer as `export const layer = Layer...`. Use `Layer.succeed`, `Layer.scoped`, or another appropriate constructor; `Layer.effect` is not required
 
 ### File Layout and Migrations
+
 - **Hoist from split modules:** Combine `domain/Services/Foo.ts` and `domain/Layers/Foo.ts` into `domain/Foo.ts`
 - **Delete old files:** Do not leave re-export shims; mechanically update every consumer (orchestration, MCP, tests, integrations)
 - **Preserve documentation:** Keep useful comments, invariants, and specification docs while moving code
@@ -80,13 +84,14 @@ Upstream t3code adopted structured Effect conventions across ~200 PRs (2026-06-2
 ### Pattern 1: Removing Error Constructor Wrappers (PR #3398)
 
 **Before:**
+
 ```ts
 // Errors.ts
 export function toPersistenceSqlError(operation: string) {
   return (cause: unknown): PersistenceSqlError =>
     new PersistenceSqlError({
       operation,
-      detail: `Failed to execute ${operation}`,  // Tautological copy
+      detail: `Failed to execute ${operation}`, // Tautological copy
       cause,
     });
 }
@@ -95,13 +100,14 @@ export function toPersistenceSqlError(operation: string) {
 ```
 
 **After:**
+
 ```ts
 // Errors.ts
 export class PersistenceSqlError extends Schema.TaggedErrorClass<PersistenceSqlError>()(
   "PersistenceSqlError",
   {
     operation: Schema.String,
-    detail: Schema.optional(Schema.String),  // Now optional
+    detail: Schema.optional(Schema.String), // Now optional
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -122,16 +128,18 @@ export class PersistenceSqlError extends Schema.TaggedErrorClass<PersistenceSqlE
 ### Pattern 2: Enriching Errors with Cause Preservation (PR #3253)
 
 **Before:**
+
 ```ts
 function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
   return (cause: unknown): AuthPairingLinkRepositoryError =>
     Schema.isSchemaError(cause)
-      ? toPersistenceDecodeError(decodeOperation)(cause)  // Curried wrapper
+      ? toPersistenceDecodeError(decodeOperation)(cause) // Curried wrapper
       : toPersistenceSqlError(sqlOperation)(cause);
 }
 ```
 
 **After:**
+
 ```ts
 function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
   return (cause: unknown): AuthPairingLinkRepositoryError =>
@@ -157,25 +165,33 @@ static fromSchemaError(operation: string, cause: Schema.SchemaError): Persistenc
 ### Pattern 3: Preventing Secret Leaks (PR #3242, #3426)
 
 **Before:**
+
 ```ts
 // Dangerous: copies command arguments and stderr into error
-const error = yield* driver.execute({
-  operation: "test",
-  cwd,
-  args: ["status", `--token=${secret}`],  // Exposed later if error occurs
-}).pipe(Effect.flip);
+const error =
+  yield *
+  driver
+    .execute({
+      operation: "test",
+      cwd,
+      args: ["status", `--token=${secret}`], // Exposed later if error occurs
+    })
+    .pipe(Effect.flip);
 ```
 
 **After (test from upstream):**
+
 ```ts
 it.effect("does not retain git arguments or stderr in command failures", () =>
   Effect.gen(function* () {
     const secret = "secret-token-value";
-    const error = yield* driver.execute({
-      operation: "GitVcsDriver.test.redactedFailure",
-      cwd,
-      args: ["status", `--unknown-option=${secret}`],
-    }).pipe(Effect.flip);
+    const error = yield* driver
+      .execute({
+        operation: "GitVcsDriver.test.redactedFailure",
+        cwd,
+        args: ["status", `--unknown-option=${secret}`],
+      })
+      .pipe(Effect.flip);
 
     // Verify: no `args` or `stderr` properties exposed in error
     assert.notProperty(error, "args");
@@ -186,19 +202,16 @@ it.effect("does not retain git arguments or stderr in command failures", () =>
 );
 
 // Error structure:
-export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()(
-  "GitCommandError",
-  {
-    operation: Schema.String,
-    command: Schema.String,
-    argumentCount: Schema.Number,  // Safe: count, not args
-    cwd: Schema.String,
-    detail: Schema.optional(Schema.String),
-    stderrLength: Schema.optional(Schema.Number),  // Safe: length, not content
-    exitCode: Schema.optional(Schema.Number),
-    cause: Schema.optional(Schema.Defect()),
-  },
-) {}
+export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()("GitCommandError", {
+  operation: Schema.String,
+  command: Schema.String,
+  argumentCount: Schema.Number, // Safe: count, not args
+  cwd: Schema.String,
+  detail: Schema.optional(Schema.String),
+  stderrLength: Schema.optional(Schema.Number), // Safe: length, not content
+  exitCode: Schema.optional(Schema.Number),
+  cause: Schema.optional(Schema.Defect()),
+}) {}
 ```
 
 **Key change:** Error fields store only safe metadata (lengths, paths, operation names). Secrets and raw command output remain in `cause` only, not exposed in diagnostics.
@@ -209,43 +222,48 @@ export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()(
 
 ### Current State Snapshot
 
-| Metric | Count | Notes |
-|--------|-------|-------|
-| **Effect.try\*** calls | 84 | Untyped catch risk; many lack `.mapError` |
-| **TaggedErrorClass (Schema)** | 94 | Adoption present but inconsistent |
-| **TaggedError (Data)** | 25 | ssh, packages; mixed with Schema usage |
-| **Plain Error classes** | 4 | Outliers; should consolidate |
-| **Raw `throw new`** | 269 | Main risk; scattered throughout code |
-| **Raw `} catch`** | 226 | Mixing try-catch with Effect code |
-| **Context.Service definitions** | 98 | Good: service pattern is widespread |
-| **Old `Services/` directories** | 13 | Pre-migration structure lingering |
+| Metric                          | Count | Notes                                     |
+| ------------------------------- | ----- | ----------------------------------------- |
+| **Effect.try\*** calls          | 84    | Untyped catch risk; many lack `.mapError` |
+| **TaggedErrorClass (Schema)**   | 94    | Adoption present but inconsistent         |
+| **TaggedError (Data)**          | 25    | ssh, packages; mixed with Schema usage    |
+| **Plain Error classes**         | 4     | Outliers; should consolidate              |
+| **Raw `throw new`**             | 269   | Main risk; scattered throughout code      |
+| **Raw `} catch`**               | 226   | Mixing try-catch with Effect code         |
+| **Context.Service definitions** | 98    | Good: service pattern is widespread       |
+| **Old `Services/` directories** | 13    | Pre-migration structure lingering         |
 
 ### Package-by-Package Analysis
 
 #### **apps/server** (Highest Error Surface)
+
 - **Error wrappers:** 7 error modules, 80+ curried factory functions
 - **State:** Persistence errors use TaggedErrorClass; provider/orchestration errors are partially structured
 - **Gaps:** Many catch blocks lack typed handlers; raw throws in source control, git layers
 - **Priority:** **HIGH** — persistence has tight error contracts; orchestration is critical path
 
 #### **packages/ssh** (Medium-High)
+
 - **Error style:** Mixed — uses `Data.TaggedError` with unstructured `message` field
 - **State:** `SshCommandError` stores full stderr + command (secret leak risk)
 - **Gaps:** No cause chain preservation; no schema validation
 - **Priority:** **MEDIUM** — isolated module; lower risk to users; good refactor candidate
 
 #### **packages/effect-acp** (Medium)
+
 - **Error style:** Schema.TaggedErrorClass with static factories (`fromProtocolError`, `parseError`, etc.)
 - **State:** Well-structured; cause preservation present in most errors
 - **Gaps:** No external spec review; some factory methods could be tightened
 - **Priority:** **MEDIUM** — already aligned; needs light audit for cause/secret handling
 
 #### **packages/effect-codex-app-server** (Low-Medium)
+
 - **Error style:** Untyped errors module
 - **State:** Single error module, not yet reviewed
 - **Priority:** **LOW** — appears simple; defer until bigger modules settle
 
 #### **apps/web, apps/desktop**
+
 - **Error handling:** Not deeply Effect-based; UI error handling is separate concern
 - **State:** Minimal Effect services
 - **Priority:** **DEFERRED** — focus on server/packages first
@@ -257,13 +275,15 @@ export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()(
 ### **Go/No-Go Decision: (B) Adopt a lighter, ryco-specific subset**
 
 **Rationale:**
+
 - t3code's `.macroscope` check-run agent is a cloud-based Anthropic AI agent enforcing rules on PR diffs. ryco's CI (bun + vite-plus in Ryco.app) cannot easily run that binary.
 - Re-implementing the full agent as a lint rule is high effort and would duplicate upstream work.
-- **However:** The *principles* behind t3code's conventions (structured errors, cause preservation, no secret leaks, service shape) are sound and directly applicable to ryco.
+- **However:** The _principles_ behind t3code's conventions (structured errors, cause preservation, no secret leaks, service shape) are sound and directly applicable to ryco.
 
 **Adoption Approach:**
 
 #### Phase 1: Lightweight Lint-Rule Foundation (Effort: **S**)
+
 - Author a simple ESLint plugin or lint rule that catches:
   - Unguarded `Effect.tryPromise` / `Effect.try` without `.mapError` or `.catch`
   - Error classes without `cause` field
@@ -273,7 +293,8 @@ export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()(
 - **Deployment:** Integrate into CI as a `vitest` or `eslint` hook; fail on warnings
 
 #### Phase 2: High-Error-Surface Migrations (Effort: **M** per package, start with 2)
-1. **apps/server/persistence** (Error.ts + Services/*)
+
+1. **apps/server/persistence** (Error.ts + Services/\*)
    - Eliminate tautological `detail` fields
    - Convert curried error wrappers → direct construction + static factories
    - Preserve cause chains uniformly
@@ -291,19 +312,20 @@ export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()(
    - **Estimated effort:** 1–2 dev-days
 
 #### Phase 3: Remaining Packages (Effort: **M–L**)
+
 - **packages/effect-acp:** Light audit; mostly aligned; tighten secret handling
 - **apps/server/orchestration, checkpointing, sourceControl:** Batch migrations once tools settle
 - **apps/web, apps/desktop:** Deferred; UI error handling is separate concern
 
 ### Implementation Timeline
 
-| Phase | Packages | Effort | Owner | Timeline |
-|-------|----------|--------|-------|----------|
-| **1** | Lint rules (all) | S | 1 person | 1–2 days |
-| **2a** | apps/server/persistence | M | 1–2 people | 2–3 days |
-| **2b** | packages/ssh | S | 1 person | 1 day |
-| **2c** | apps/server/provider | M | 1 person | 1–2 days |
-| **3** | Remaining (acp, orchestration, sourceControl) | L | ongoing | 1 week spread |
+| Phase  | Packages                                      | Effort | Owner      | Timeline      |
+| ------ | --------------------------------------------- | ------ | ---------- | ------------- |
+| **1**  | Lint rules (all)                              | S      | 1 person   | 1–2 days      |
+| **2a** | apps/server/persistence                       | M      | 1–2 people | 2–3 days      |
+| **2b** | packages/ssh                                  | S      | 1 person   | 1 day         |
+| **2c** | apps/server/provider                          | M      | 1 person   | 1–2 days      |
+| **3**  | Remaining (acp, orchestration, sourceControl) | L      | ongoing    | 1 week spread |
 
 ---
 
@@ -314,6 +336,7 @@ export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()(
 **Concern:** Ryco's error modules are imported by many services. Broad structural changes could cause merge conflicts with in-flight PRs.
 
 **Mitigation:**
+
 - **Phase in:** Start with isolated packages (ssh) before touching persistence
 - **Parallel branches:** If multiple teams are working, use short-lived feature branches
 - **Communicate:** Announce error refactor windows; batch PRs
@@ -323,6 +346,7 @@ export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()(
 **Concern:** Removing `detail` fields or restructuring cause chains could break upstream consumers or API contracts.
 
 **Mitigation:**
+
 - **Audit call sites:** Before refactoring, check how each error is caught and logged
 - **Preserve user-facing messages:** If a user-visible message changes, update tests to match
 - **Test first:** Expand test coverage for error cases before refactoring
@@ -332,6 +356,7 @@ export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()(
 **Concern:** t3code's check-run agent is not runnable in ryco due to bun + vite-plus differences.
 
 **Mitigation:**
+
 - **Do not port the agent.** Instead:
   - Implement lint rules that cover ~80% of the check-run logic (mechanical patterns)
   - Defer sophisticated analysis (multi-file context, orchestration validation) to code review
@@ -342,6 +367,7 @@ export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()(
 **Concern:** After phased migration, some modules may still use old patterns.
 
 **Mitigation:**
+
 - **Lint enforcement:** Lint rules block new violations, preventing regression
 - **Tracking:** Maintain a `MIGRATION_STATUS.md` file listing which packages are done
 - **Code review:** Flag legacy patterns in PR review; prioritize cleanup over new features
