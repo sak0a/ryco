@@ -32,6 +32,7 @@ import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
+import { useSettings } from "../hooks/useSettings";
 import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "../markdown-links";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
@@ -599,6 +600,7 @@ const RenderedChatMarkdown = memo(function RenderedChatMarkdown({
 }: ChatMarkdownProps) {
   usePerfMark("ChatMarkdown");
   const { resolvedTheme } = useTheme();
+  const chatWordWrap = useSettings((s) => s.chatWordWrap);
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownFileLinkMetaByHref = useMemo(() => {
     const metaByHref = new Map<
@@ -704,7 +706,10 @@ const RenderedChatMarkdown = memo(function RenderedChatMarkdown({
   );
 
   return (
-    <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
+    <div
+      className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80"
+      data-word-wrap={chatWordWrap ? "true" : "false"}
+    >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={markdownComponents}

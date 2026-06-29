@@ -970,6 +970,32 @@ label:has(> select#reasoning-effort) select {
   text-align: left;
 }
 
+/* Persistent chat word-wrap (ClientSettings.chatWordWrap). When on (default),
+   long code-block lines and table cells wrap for readability; when off, content
+   stays on one line and the block/table scrolls horizontally instead. */
+.chat-markdown[data-word-wrap="true"] pre,
+.chat-markdown[data-word-wrap="true"] pre code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown[data-word-wrap="false"] pre {
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.chat-markdown[data-word-wrap="false"] table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.chat-markdown[data-word-wrap="false"] th,
+.chat-markdown[data-word-wrap="false"] td {
+  white-space: nowrap;
+}
+
 @keyframes provider-update-pill-countdown {
   from {
     transform: scaleX(1);
