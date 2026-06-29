@@ -25,7 +25,6 @@ import {
   Copy,
   Check,
   MessagesSquare,
-  MoveRight,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -38,26 +37,21 @@ import {
   PILLARS,
   STEPS,
   FAQ,
-  type Provider,
 } from "@/data/content";
 import { BrandIcon, type BrandKey } from "@/assets/brands";
 import { RycoWordmark, RycoMark } from "@/assets/RycoLogo";
 import { ScreenshotFrame } from "@/components/shared/ScreenshotFrame";
-import { useGsapContext, prefersReducedMotion } from "@/lib/motion";
+import { useGsapContext, useTilt, prefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/cn";
 import { STEP_ICONS } from "./process-icons";
 import { FEATURE_ICONS } from "./feature-icons";
+import { ACCENT, focusRing } from "./theme";
+import { ProviderCard } from "./ProviderCard";
+import { MagneticButton } from "./MagneticButton";
+import { SiteNav } from "./SiteNav";
+import { AgentDeck } from "./AgentDeck";
 
-const ACCENT = "#c6ff3a";
-
-const focusRing =
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c6ff3a]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0b0d]";
-
-const NAV_OFFSET = "scroll-mt-24";
-
-/* Underlined nav link — the underline grows from the left on hover. */
-const navLink =
-  "relative transition-colors duration-300 hover:text-white after:absolute after:inset-x-0 after:-bottom-1 after:h-px after:origin-left after:scale-x-0 after:bg-[#c6ff3a] after:transition-transform after:duration-300 after:ease-out after:content-[''] hover:after:scale-x-100";
+const NAV_OFFSET = "scroll-mt-28";
 
 /* Pillars are the only section still using lucide glyphs. */
 const ICONS: Record<string, LucideIcon> = {
@@ -96,6 +90,8 @@ interface ShowcaseStep {
   heading: string;
   body: string;
   points: string[];
+  /** Region (normalised 0–1) to zoom into so the relevant UI reads large. */
+  focus: { x: number; y: number; zoom: number };
 }
 
 const SHOWCASE: ShowcaseStep[] = [
@@ -107,6 +103,7 @@ const SHOWCASE: ShowcaseStep[] = [
     heading: "A worktree for every branch, PR and issue.",
     body: "Create and track git worktrees per branch, pull request, issue or Jira item — bucketed by status: idle, in progress, review and done. Switch context without stashing a thing.",
     points: ["Status buckets", "Branch selector", "Symlink-aware paths"],
+    focus: { x: 0.5, y: 0.28, zoom: 1.22 },
   },
   {
     shot: "/shots/model-picker.png",
@@ -116,6 +113,7 @@ const SHOWCASE: ShowcaseStep[] = [
     heading: "Switch models mid-thread.",
     body: "Pick any provider and model from a single picker — Claude, Codex, Copilot and whatever your OpenCode upstreams expose. Reasoning effort and interaction mode are right there too.",
     points: ["One picker, every provider", "Per-thread memory", "Usage windows inline"],
+    focus: { x: 0.34, y: 0.7, zoom: 1.72 },
   },
   {
     shot: "/shots/terminal.png",
@@ -125,6 +123,7 @@ const SHOWCASE: ShowcaseStep[] = [
     heading: "Terminals, diffs and your editor — together.",
     body: "Split terminals in a drawer with clickable file and path links. Search inside large diffs, then click any line to open your editor at the exact file and line.",
     points: ["Multi-terminal drawer", "Diff occurrence search", "Diff line → editor"],
+    focus: { x: 0.5, y: 0.82, zoom: 1.35 },
   },
   {
     shot: "/shots/command-palette.png",
@@ -134,6 +133,7 @@ const SHOWCASE: ShowcaseStep[] = [
     heading: "Everything, a keystroke away.",
     body: "Jump between threads, projects and models, run commands, attach a GitHub or GitLab issue with #, or fire a slash command — all without leaving the keyboard.",
     points: ["Thread & model jumps", "Reference issues / PRs", "Slash commands"],
+    focus: { x: 0.5, y: 0.19, zoom: 1.62 },
   },
   {
     shot: "/shots/composer.png",
@@ -143,6 +143,7 @@ const SHOWCASE: ShowcaseStep[] = [
     heading: "Bring exactly the right context.",
     body: "Attach GitHub, GitLab, Forgejo, Bitbucket or Azure DevOps issues and PRs as structured context with a # trigger — straight from the composer, before the agent starts.",
     points: ["# to attach", "Structured context", "Five SCM providers"],
+    focus: { x: 0.5, y: 0.82, zoom: 1.4 },
   },
   {
     shot: "/shots/appearance.png",
@@ -152,6 +153,7 @@ const SHOWCASE: ShowcaseStep[] = [
     heading: "Make it unmistakably yours.",
     body: "A full theme editor with live preview, independent interface and code fonts, text size, corner radius and a pinnable accent — plus rebindable shortcuts for everything.",
     points: ["Custom themes", "Font pickers", "Rebindable keys"],
+    focus: { x: 0.56, y: 0.34, zoom: 1.3 },
   },
 ];
 
@@ -385,60 +387,34 @@ function SectionHeading({
   );
 }
 
-function ProviderCard({ p, index }: { p: Provider; index: number }) {
-  return (
-    <article className="group relative flex h-full flex-col overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] p-7 transition-colors duration-300 hover:border-white/20 sm:p-8">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -right-16 -top-16 size-44 rounded-full opacity-0 blur-3xl transition-opacity duration-500 group-hover:opacity-100"
-        style={{ background: p.accent }}
-      />
-      <div className="relative flex items-center justify-between">
-        <span
-          className="grid size-14 place-items-center rounded-2xl border"
-          style={{
-            color: p.accent,
-            borderColor: `${p.accent}40`,
-            background: `${p.accent}12`,
-          }}
-        >
-          <BrandIcon name={p.brand as BrandKey} className="size-7" />
-        </span>
-        <span className="font-['JetBrains_Mono'] text-sm tabular-nums text-white/25">
-          {String(index + 1).padStart(2, "0")}
-        </span>
-      </div>
-
-      <div className="relative mt-6 flex items-center gap-2.5">
-        <h3 className="font-['Space_Grotesk'] text-2xl font-semibold tracking-[-0.01em] text-white">
-          {p.name}
-        </h3>
-        {p.earlyAccess && (
-          <span
-            className="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-            style={{ color: ACCENT, borderColor: `${ACCENT}55`, background: `${ACCENT}14` }}
-          >
-            Early access
-          </span>
-        )}
-      </div>
-      <p className="relative mt-1 font-['JetBrains_Mono'] text-xs uppercase tracking-wider text-white/55">
-        {p.vendor} · {p.blurb}
-      </p>
-      <p className="relative mt-5 text-[15px] leading-relaxed text-white/65">{p.detail}</p>
-    </article>
-  );
-}
+/* Stat figures are spelled out (Zero · Three · Five) rather than digits. */
+const NUM_WORDS: Record<string, string> = {
+  "0": "Zero",
+  "1": "One",
+  "2": "Two",
+  "3": "Three",
+  "4": "Four",
+  "5": "Five",
+  "6": "Six",
+  "7": "Seven",
+  "8": "Eight",
+  "9": "Nine",
+  "10": "Ten",
+};
 
 function Stat({ value, label }: { value: string; label: string }) {
-  const numeric = /^\d+$/.test(value);
+  const display = /^\d+$/.test(value) ? (NUM_WORDS[value] ?? value) : value;
   return (
     <div data-reveal className="rounded-3xl border border-white/10 bg-white/[0.02] p-6 sm:p-7">
       <div
-        className="font-['Space_Grotesk'] text-5xl font-bold tracking-[-0.02em] sm:text-6xl"
+        className="font-['Space_Grotesk'] text-4xl font-bold tracking-[-0.02em] sm:text-5xl"
         style={{ color: ACCENT }}
       >
-        {numeric ? <span data-count={value}>{value}</span> : value}
+        <span className="block overflow-hidden pb-[0.08em]">
+          <span data-stat-word className="block whitespace-nowrap">
+            {display}
+          </span>
+        </span>
       </div>
       <p className="mt-3 text-sm leading-snug text-white/55">{label}</p>
     </div>
@@ -535,24 +511,12 @@ export default function Version4() {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [activeShot, setActiveShot] = useState(0);
 
-  const headerRef = useRef<HTMLElement>(null);
   const heroShotRef = useRef<HTMLDivElement>(null);
-  const hzPinRef = useRef<HTMLDivElement>(null);
-  const hzTrackRef = useRef<HTMLDivElement>(null);
 
   const scope = useGsapContext(({ gsap, ScrollTrigger }) => {
     /* Refresh trigger positions as the large screenshots finish decoding. */
     gsap.utils.toArray<HTMLImageElement>("img").forEach((img) => {
       if (!img.complete) img.addEventListener("load", () => ScrollTrigger.refresh(), { once: true });
-    });
-
-    /* Sticky header hairline once you leave the hero. */
-    ScrollTrigger.create({
-      start: "top -8",
-      onUpdate: (self) => {
-        const el = headerRef.current;
-        if (el) el.dataset.scrolled = self.scroll() > 8 ? "true" : "false";
-      },
     });
 
     /* Hero — kinetic load entrance. */
@@ -621,30 +585,6 @@ export default function Version4() {
       });
     }
 
-    /* Pinned horizontal agent gallery. */
-    const track = hzTrackRef.current;
-    const pin = hzPinRef.current;
-    if (track && pin) {
-      const distance = () => Math.max(0, track.scrollWidth - window.innerWidth);
-      gsap.to(track, {
-        x: () => -distance(),
-        ease: "none",
-        scrollTrigger: {
-          trigger: pin,
-          start: "top top",
-          end: () => "+=" + distance(),
-          scrub: 0.8,
-          pin: true,
-          anticipatePin: 1,
-          invalidateOnRefresh: true,
-          onUpdate: (self) => {
-            const bar = pin.querySelector<HTMLElement>("[data-hz-progress]");
-            if (bar) gsap.set(bar, { scaleX: self.progress });
-          },
-        },
-      });
-    }
-
     /* Sticky scrollytelling — swap the active screenshot per step. */
     gsap.utils.toArray<HTMLElement>("[data-shot-step]").forEach((el, i) => {
       ScrollTrigger.create({
@@ -672,19 +612,13 @@ export default function Version4() {
       );
     }
 
-    /* Numeric stat count-ups. */
-    gsap.utils.toArray<HTMLElement>("[data-count]").forEach((el) => {
-      const target = Number(el.dataset.count);
-      el.textContent = "0";
-      const obj = { v: 0 };
-      gsap.to(obj, {
-        v: target,
-        duration: 1.2,
-        ease: "power2.out",
-        scrollTrigger: { trigger: el, start: "top 88%", once: true },
-        onUpdate: () => {
-          el.textContent = String(Math.round(obj.v));
-        },
+    /* Spelled-out stat figures rise in behind a clip mask. */
+    gsap.utils.toArray<HTMLElement>("[data-stat-word]").forEach((el) => {
+      gsap.from(el, {
+        yPercent: 115,
+        duration: 0.9,
+        ease: "power4.out",
+        scrollTrigger: { trigger: el, start: "top 90%", once: true },
       });
     });
 
@@ -696,6 +630,19 @@ export default function Version4() {
         duration: 0.8,
         ease: "power3.out",
         scrollTrigger: { trigger: el, start: "top 86%", once: true },
+      });
+    });
+
+    /* Chip clusters pop in with a springy stagger. */
+    gsap.utils.toArray<HTMLElement>("[data-chip-stagger]").forEach((wrap) => {
+      gsap.from(Array.from(wrap.children), {
+        opacity: 0,
+        y: 12,
+        scale: 0.92,
+        duration: 0.5,
+        ease: "back.out(1.6)",
+        stagger: 0.04,
+        scrollTrigger: { trigger: wrap, start: "top 90%", once: true },
       });
     });
 
@@ -737,62 +684,14 @@ export default function Version4() {
   });
 
   useMagnetic(scope);
+  useTilt(scope);
 
   return (
     <div ref={scope} className="relative min-h-screen bg-[#0a0b0d] text-white antialiased">
       <KineticBackground />
 
       {/* ---------------------------------- nav --------------------------------- */}
-      <header
-        ref={headerRef}
-        data-scrolled="false"
-        className="fixed inset-x-0 top-0 z-50 border-b border-transparent transition-colors duration-300 data-[scrolled=true]:border-white/10 data-[scrolled=true]:bg-[#0a0b0d]/75 data-[scrolled=true]:backdrop-blur-xl"
-      >
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
-          <a
-            href="#top"
-            className={cn("group/logo flex items-center gap-2.5 rounded-lg", focusRing)}
-            aria-label="Ryco home"
-          >
-            <RycoMark className="size-7 transition-transform duration-300 ease-out group-hover/logo:scale-110" />
-            <RycoWordmark className="h-[18px] text-white/90 transition-colors duration-300 group-hover/logo:text-white" />
-          </a>
-          <nav aria-label="Primary" className="hidden items-center gap-8 text-sm text-white/60 md:flex">
-            <a href="#agents" className={navLink}>Agents</a>
-            <a href="#showcase" className={navLink}>Workspace</a>
-            <a href="#features" className={navLink}>Features</a>
-            <a href="#download" className={navLink}>Download</a>
-            <a href="#faq" className={navLink}>FAQ</a>
-          </nav>
-          <div className="flex items-center gap-2">
-            <a
-              href={SITE.repo}
-              target="_blank"
-              rel="noreferrer"
-              className={cn(
-                "hidden rounded-lg p-2 text-white/60 transition hover:bg-white/5 hover:text-white sm:inline-flex",
-                focusRing,
-              )}
-              aria-label="Ryco on GitHub"
-            >
-              <Github className="size-[18px]" />
-            </a>
-            <a
-              href={SITE.releases}
-              target="_blank"
-              rel="noreferrer"
-              data-magnetic
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold text-[#0a0b0d] transition hover:brightness-95",
-                focusRing,
-              )}
-              style={{ background: ACCENT }}
-            >
-              <Download className="size-4" /> Download
-            </a>
-          </div>
-        </div>
-      </header>
+      <SiteNav />
 
       <main id="top">
         {/* --------------------------------- hero -------------------------------- */}
@@ -825,32 +724,13 @@ export default function Version4() {
             </p>
 
             <div data-hero-fade className="mt-9 flex flex-wrap items-center justify-center gap-3">
-              <a
-                href={SITE.releases}
-                target="_blank"
-                rel="noreferrer"
-                data-magnetic
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-xl px-6 py-3 text-[15px] font-semibold text-[#0a0b0d] transition hover:brightness-95",
-                  focusRing,
-                )}
-                style={{ background: ACCENT, boxShadow: `0 18px 50px -24px ${ACCENT}` }}
-              >
+              <MagneticButton href={SITE.releases} external variant="primary">
                 <Download className="size-[18px]" /> Download for desktop
-              </a>
-              <a
-                href={SITE.repo}
-                target="_blank"
-                rel="noreferrer"
-                data-magnetic
-                className={cn(
-                  "group/src inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/[0.03] px-6 py-3 text-[15px] font-medium text-white transition hover:border-white/30 hover:bg-white/[0.06]",
-                  focusRing,
-                )}
-              >
-                <Github className="size-[18px]" /> View source{" "}
-                <ArrowRight className="size-4 transition-transform duration-300 group-hover/src:translate-x-0.5" />
-              </a>
+              </MagneticButton>
+              <MagneticButton href={SITE.repo} external variant="ghost">
+                <Github className="size-[18px]" /> View source
+                <ArrowRight className="size-4 transition-transform duration-300 group-hover/btn:translate-x-0.5" />
+              </MagneticButton>
             </div>
 
             <div data-hero-fade className="mt-5 flex justify-center">
@@ -876,15 +756,26 @@ export default function Version4() {
             </div>
           </div>
 
-          {/* hero screenshot */}
+          {/* hero screenshot — parallax (outer) + pointer 3D tilt & glare (inner) */}
           <div ref={heroShotRef} className="relative mx-auto mt-16 max-w-5xl will-change-transform">
-            <ScreenshotFrame
-              src="/shots/home.png"
-              alt="The Ryco workspace — project sidebar, an agent thread and the source-control panel side by side."
-              title="ryco — feat/add-new-marketing-site"
-              loading="eager"
-              className="shadow-[0_50px_140px_-40px_rgba(0,0,0,0.85)] ring-1 ring-white/10"
-            />
+            <div data-tilt data-tilt-max="6" className="relative rounded-xl will-change-transform">
+              <ScreenshotFrame
+                src="/shots/home.png"
+                alt="The Ryco workspace — project sidebar, an agent thread and the source-control panel side by side."
+                title="ryco — feat/add-new-marketing-site"
+                loading="eager"
+                className="shadow-[0_50px_140px_-40px_rgba(0,0,0,0.85)] ring-1 ring-white/10"
+              />
+              <span
+                data-glare
+                aria-hidden
+                className="pointer-events-none absolute inset-0 rounded-xl opacity-0 mix-blend-soft-light"
+                style={{
+                  background:
+                    "radial-gradient(420px circle at var(--gx,50%) var(--gy,50%), rgba(255,255,255,0.55), transparent 60%)",
+                }}
+              />
+            </div>
           </div>
         </section>
 
@@ -930,53 +821,15 @@ export default function Version4() {
                   alt="Ryco settings showing all five providers authenticated with live version and subscription status."
                   title="Settings — Providers"
                   className="ring-1 ring-white/10"
+                  focus={{ x: 0.56, y: 0.4, zoom: 1.28 }}
+                  zoomed
                 />
               </div>
             </div>
           ) : (
-            /* Motion — pinned horizontal gallery that scrolls sideways. */
-            <div ref={hzPinRef} className="relative mt-12 flex h-[100svh] items-center overflow-hidden">
-              <div ref={hzTrackRef} className="flex w-max items-center gap-6 px-5 will-change-transform sm:gap-8 sm:px-8">
-                {/* intro panel */}
-                <div className="flex w-[82vw] shrink-0 flex-col justify-center sm:w-[58vw] lg:w-[34vw] lg:max-w-[460px]">
-                  <Eyebrow>The line-up</Eyebrow>
-                  <p className="mt-5 font-['Space_Grotesk'] text-3xl font-bold leading-tight tracking-[-0.02em] sm:text-4xl">
-                    Scroll across the five.
-                  </p>
-                  <p className="mt-4 text-white/55">
-                    Authenticate once on the command line, then run them all from one surface — with
-                    full visibility into what each one does.
-                  </p>
-                  <p className="mt-6 inline-flex items-center gap-2 font-['JetBrains_Mono'] text-xs uppercase tracking-widest" style={{ color: ACCENT }}>
-                    Scroll <MoveRight className="size-4" />
-                  </p>
-                </div>
-
-                {PROVIDERS.map((p, i) => (
-                  <div key={p.id} className="w-[82vw] shrink-0 sm:w-[58vw] lg:w-[40vw] lg:max-w-[540px]">
-                    <ProviderCard p={p} index={i} />
-                  </div>
-                ))}
-
-                {/* real screenshot finale */}
-                <div className="flex w-[88vw] shrink-0 items-center sm:w-[70vw] lg:w-[58vw] lg:max-w-[860px]">
-                  <div className="w-full">
-                    <ScreenshotFrame
-                      src="/shots/providers.png"
-                      alt="Ryco settings showing all five providers authenticated with live version and subscription status."
-                      title="Settings — Providers"
-                      className="ring-1 ring-white/10"
-                    />
-                    <p className="mt-4 text-sm text-white/50">All five, authenticated and live.</p>
-                  </div>
-                </div>
-              </div>
-              {/* horizontal-scroll progress */}
-              <div aria-hidden className="pointer-events-none absolute inset-x-5 bottom-6 sm:inset-x-8">
-                <div className="h-px w-full overflow-hidden bg-white/10">
-                  <div data-hz-progress className="h-px w-full origin-left scale-x-0" style={{ background: ACCENT }} />
-                </div>
-              </div>
+            /* Motion — a pinned horizontal 3D coverflow of the five agents. */
+            <div className="mt-12">
+              <AgentDeck />
             </div>
           )}
         </section>
@@ -1000,7 +853,7 @@ export default function Version4() {
               <p className="font-['JetBrains_Mono'] text-[11px] uppercase tracking-[0.2em] text-white/55">
                 Model providers
               </p>
-              <div className="mt-4 flex flex-wrap gap-2.5">
+              <div data-chip-stagger className="mt-4 flex flex-wrap gap-2.5">
                 {MODEL_PROVIDERS.map((m) => (
                   <span
                     key={m}
@@ -1013,7 +866,7 @@ export default function Version4() {
               <p className="mt-7 font-['JetBrains_Mono'] text-[11px] uppercase tracking-[0.2em] text-white/55">
                 Named instances
               </p>
-              <div className="mt-4 flex flex-wrap gap-2.5">
+              <div data-chip-stagger className="mt-4 flex flex-wrap gap-2.5">
                 {INSTANCE_EXAMPLES.map((n) => (
                   <span
                     key={n}
@@ -1059,7 +912,14 @@ export default function Version4() {
                     </ul>
                   </div>
                   <div className={cn(i % 2 === 1 && "lg:order-1")}>
-                    <ScreenshotFrame src={s.shot} alt={s.alt} title={s.title} className="ring-1 ring-white/10" />
+                    <ScreenshotFrame
+                      src={s.shot}
+                      alt={s.alt}
+                      title={s.title}
+                      className="ring-1 ring-white/10"
+                      focus={s.focus}
+                      zoomed
+                    />
                   </div>
                 </div>
               ))}
@@ -1091,6 +951,8 @@ export default function Version4() {
                           title={s.title}
                           loading="eager"
                           className="ring-1 ring-white/10"
+                          focus={s.focus}
+                          zoomed={i === activeShot}
                         />
                       </div>
                     ))}
@@ -1129,7 +991,14 @@ export default function Version4() {
 
                     {/* on small screens the screenshot rides inline with the copy */}
                     <div className="mt-7 lg:hidden">
-                      <ScreenshotFrame src={s.shot} alt={s.alt} title={s.title} className="ring-1 ring-white/10" />
+                      <ScreenshotFrame
+                        src={s.shot}
+                        alt={s.alt}
+                        title={s.title}
+                        className="ring-1 ring-white/10"
+                        focus={s.focus}
+                        zoomed
+                      />
                     </div>
                   </div>
                 ))}
@@ -1156,10 +1025,21 @@ export default function Version4() {
                 <article
                   key={f.id}
                   data-reveal
-                  className="group relative flex flex-col gap-5 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02] p-7 transition-all duration-300 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.035]"
+                  data-tilt
+                  data-tilt-max="5"
+                  className="group relative flex flex-col gap-5 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02] p-7 transition-colors duration-300 hover:border-white/20 hover:bg-white/[0.035]"
                 >
-                  <FeatIcon className="size-12 text-[#c6ff3a]/85 transition-colors duration-300 group-hover:text-[#c6ff3a]" />
-                  <div>
+                  <span
+                    data-glare
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 rounded-2xl opacity-0"
+                    style={{
+                      background:
+                        "radial-gradient(260px circle at var(--gx,50%) var(--gy,50%), rgba(198,255,58,0.10), transparent 60%)",
+                    }}
+                  />
+                  <FeatIcon className="relative size-12 text-[#c6ff3a]/85 transition-colors duration-300 group-hover:text-[#c6ff3a]" />
+                  <div className="relative">
                     <h3 className="font-['Space_Grotesk'] text-lg font-semibold text-white">{f.title}</h3>
                     <p className="mt-2.5 text-[14px] leading-relaxed text-white/55">{f.blurb}</p>
                   </div>
@@ -1264,8 +1144,10 @@ export default function Version4() {
                 target="_blank"
                 rel="noreferrer"
                 data-reveal
+                data-tilt
+                data-tilt-max="6"
                 className={cn(
-                  "group flex flex-col gap-5 rounded-3xl border border-white/10 bg-white/[0.02] p-7 transition-all duration-300 hover:-translate-y-1 hover:border-white/25",
+                  "group flex flex-col gap-5 rounded-3xl border border-white/10 bg-white/[0.02] p-7 transition-colors duration-300 hover:border-white/25",
                   focusRing,
                 )}
               >
@@ -1335,31 +1217,12 @@ export default function Version4() {
               worktree, and let the agents loose.
             </p>
             <div className="relative mt-9 flex flex-wrap items-center justify-center gap-3">
-              <a
-                href={SITE.releases}
-                target="_blank"
-                rel="noreferrer"
-                data-magnetic
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-xl px-6 py-3 text-[15px] font-semibold text-[#0a0b0d] transition hover:brightness-95",
-                  focusRing,
-                )}
-                style={{ background: ACCENT }}
-              >
+              <MagneticButton href={SITE.releases} external variant="primary">
                 <Download className="size-[18px]" /> Download Ryco
-              </a>
-              <a
-                href={SITE.discord}
-                target="_blank"
-                rel="noreferrer"
-                data-magnetic
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-xl border border-white/15 px-6 py-3 text-[15px] font-medium text-white transition hover:border-white/30 hover:bg-white/[0.05]",
-                  focusRing,
-                )}
-              >
+              </MagneticButton>
+              <MagneticButton href={SITE.discord} external variant="ghost">
                 <MessagesSquare className="size-[18px]" /> Join the Discord
-              </a>
+              </MagneticButton>
             </div>
           </div>
         </section>
@@ -1406,7 +1269,22 @@ export default function Version4() {
             <p>
               {SITE.license} licensed · © {SITE.company}
             </p>
-            <p>A fast local workspace for coding agents.</p>
+            <p className="hidden md:block">A fast local workspace for coding agents.</p>
+            <p>
+              Built &amp; maintained by{" "}
+              <a
+                href={SITE.maintainer.url}
+                target="_blank"
+                rel="noreferrer"
+                className={cn(
+                  "group/by inline-flex items-center gap-0.5 font-medium text-white/75 transition hover:text-[#c6ff3a]",
+                  focusRing,
+                )}
+              >
+                {SITE.maintainer.name}
+                <ArrowUpRight className="size-3 transition-transform duration-300 group-hover/by:translate-x-0.5 group-hover/by:-translate-y-0.5" />
+              </a>
+            </p>
           </div>
         </div>
       </footer>

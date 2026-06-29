@@ -18,6 +18,7 @@ export const SITE = {
   license: "MIT",
   company: "Ryco Inc.",
   status: "Early access · expect rough edges",
+  maintainer: { name: "sak0a", url: "https://saka.at" },
 } as const;
 
 export interface Provider {

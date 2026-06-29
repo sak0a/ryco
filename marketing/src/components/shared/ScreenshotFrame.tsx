@@ -15,6 +15,13 @@ export interface ScreenshotFrameProps {
   /** Hide the traffic-light chrome for a barer look. */
   chrome?: boolean;
   loading?: "eager" | "lazy";
+  /**
+   * Optional focus region (normalised 0–1) the frame can zoom into so the
+   * interesting part of a busy screenshot reads at small sizes. `zoomed` toggles
+   * between the full shot (false) and the magnified region (true), animated.
+   */
+  focus?: { x: number; y: number; zoom: number };
+  zoomed?: boolean;
 }
 
 export function ScreenshotFrame({
@@ -26,8 +33,11 @@ export function ScreenshotFrame({
   theme = "light",
   chrome = true,
   loading = "lazy",
+  focus,
+  zoomed = false,
 }: ScreenshotFrameProps) {
   const dark = theme === "dark";
+  const scale = focus && zoomed ? focus.zoom : 1;
   return (
     <figure
       className={cn(
@@ -58,13 +68,26 @@ export function ScreenshotFrame({
           )}
         </div>
       )}
-      <img
-        src={src}
-        alt={alt}
-        loading={loading}
-        draggable={false}
-        className={cn("block w-full select-none", imgClassName)}
-      />
+      {/* wrapper clips the zoom so it never bleeds over the chrome bar */}
+      <div className="overflow-hidden">
+        <img
+          src={src}
+          alt={alt}
+          loading={loading}
+          draggable={false}
+          className={cn("block w-full select-none", imgClassName)}
+          style={
+            focus
+              ? {
+                  transformOrigin: `${focus.x * 100}% ${focus.y * 100}%`,
+                  transform: `scale(${scale})`,
+                  transition: "transform 0.85s cubic-bezier(0.22, 1, 0.36, 1)",
+                  willChange: "transform",
+                }
+              : undefined
+          }
+        />
+      </div>
     </figure>
   );
 }

@@ -39,13 +39,19 @@ five other directions (now archived in `.archive/`).
 
 ## Structure (`Version4.tsx` + `process-icons.tsx` + `feature-icons.tsx`)
 
-`constants` (ACCENT, ICONS, MARQUEE_ITEMS, SHOWCASE steps) → `hooks`
-(`useReducedMotion`, `useMagnetic`) → `primitives` (`Copyable`, `Eyebrow`,
-`SectionHeading`, `ProviderCard`, `Stat`, `FaqRow`, `KineticBackground`,
-`KineticTerminal`) → `Version4` (one `useGsapContext` motion block + JSX). The
-bespoke How-it-works step icons live in `process-icons.tsx`; the always-on toolkit
-feature icons in `feature-icons.tsx` (both keyed off `content.ts`). Their CSS loops
-+ the terminal caret are in `src/index.css` (`.ryco-proc*` / `.ryco-feat*`).
+`constants` (ICONS, MARQUEE_ITEMS, SHOWCASE steps) → `hooks`
+(`useReducedMotion`, `useMagnetic`, shared `useTilt`) → `primitives` (`Copyable`,
+`Eyebrow`, `SectionHeading`, `Stat`, `FaqRow`, `KineticBackground`,
+`KineticTerminal`) → `Version4` (one `useGsapContext` motion block + JSX).
+
+Shared v4 pieces live in their own files so the page, nav and deck stay readable:
+`theme.ts` (the `ACCENT` + `focusRing` tokens), `MagneticButton.tsx` (the one
+button primitive — sheen + press), `ProviderCard.tsx` (one provider tile, with a
+`deck` variant), `SiteNav.tsx` (the floating navigation) and `AgentDeck.tsx` (the
+3D agent coverflow). The bespoke How-it-works step icons live in `process-icons.tsx`;
+the always-on toolkit feature icons in `feature-icons.tsx` (both keyed off
+`content.ts`). Their CSS loops + the terminal caret are in `src/index.css`
+(`.ryco-proc*` / `.ryco-feat*`).
 
 Sections, in order: **nav → hero → marquee → agents → model providers → showcase
 → features → pillars+stats → how-it-works → download → FAQ → final CTA → footer.**
@@ -58,7 +64,7 @@ Sections, in order: **nav → hero → marquee → agents → model providers �
 | Hero screenshot clip-reveal on load + scroll parallax | `heroShotRef` |
 | Velocity-reactive marquee (speeds up with scroll, decays back) | `[data-marquee]` |
 | Section heading line-mask reveals | `[data-line-reveal]` |
-| **Pinned horizontal agent gallery** (scrub, `items-center`) + progress bar | `hzPinRef`/`hzTrackRef` |
+| **3D agent coverflow** — pinned horizontal scroll; the five providers tilt/scale/dim by distance from centre as they pan past | `AgentDeck.tsx` |
 | **Sticky scrollytelling** — screenshot swaps + step focus + counter | `[data-shot-step]`, `activeShot` |
 | Timeline progress draw | `[data-timeline-progress]` |
 | **Bespoke concept step-icons** (CSS loops: trace / bob / pulse / spin) | `process-icons.tsx`, How-it-works |
@@ -68,7 +74,9 @@ Sections, in order: **nav → hero → marquee → agents → model providers �
 | Pillar icon stroke draw-on (on reveal) + re-trace on card hover | `[data-draw-icon]` |
 | **FAQ +/− morph** (a bar rotates a quarter-turn) | `FaqRow` |
 | **Magnetic** CTAs (pointer pull, eased return) | `[data-magnetic]` via `useMagnetic` |
-| Nav-link underline-grow on hover | `navLink` |
+| **Floating nav** — sliding active indicator (scroll-spy), scroll-progress hairline, animated mobile menu | `SiteNav.tsx` |
+| **Button sheen** — light sweep on hover + press scale | `MagneticButton.tsx` |
+| **3D card tilt + glare** — hero shot, feature & platform cards lean toward the pointer | `[data-tilt]` / `[data-glare]` via `useTilt` |
 | Generic on-scroll reveals | `[data-reveal]` |
 
 > A few devices are intentionally **not** GSAP: the terminal (`IntersectionObserver`
@@ -77,11 +85,13 @@ Sections, in order: **nav → hero → marquee → agents → model providers �
 
 ## Reduced motion
 
-`useReducedMotion()` gates the **motion-only layouts** (the pinned horizontal
-gallery and the sticky scrollytelling are *never constructed* — they render clean
-static stacks instead, so there's never a blank pinned frame). All `useGsapContext`
-animation no-ops under `prefers-reduced-motion`. The hand-rolled additions gate too:
-`useMagnetic` early-returns (also skipping coarse pointers), the terminal renders
+`useReducedMotion()` gates the **motion-only layouts** (the 3D agent deck and the
+sticky scrollytelling are *never constructed* — agents fall back to a clean static
+grid, showcase to a stacked layout, so there's never a blank frame). All
+`useGsapContext` animation no-ops under `prefers-reduced-motion`. The hand-rolled
+additions gate too: `useTilt` and `useMagnetic` early-return (also skipping coarse
+pointers), the `AgentDeck` engine never starts (touch/narrow get a scroll-snap
+carousel), the `SiteNav` indicator snaps instead of sliding, the terminal renders
 **all** lines instantly, and the CSS process/feature icons + FAQ morph rely only on
 default base values (dashoffset 0, opacity 1, no transform) so the global
 reduced-motion guard freezes them fully drawn. Nothing is CSS-hidden up front, so the
@@ -103,19 +113,19 @@ node scripts/errcheck.mjs           # loads route with motion on, reports consol
 MOTION=off ROUTES=/4 node scripts/shoot.mjs   # settled (reduced-motion) capture
 ```
 
-> Note: the kinetic motion (pinned horizontal scroll, scrollytelling) only shows
+> Note: the kinetic motion (the pinned 3D agent coverflow, scrollytelling) only shows
 > live in a browser — static captures show the reduced-motion fallback. Scroll the
-> page in `bun run dev` to judge it.
+> page in `bun run dev`, through the pinned agent section, to judge it.
 
 ## TODO
 
 - [ ] **Real, populated hero screenshots** — capture an actual agent thread mid-run
   (a streaming response + a real diff) instead of the empty-thread `home.png`, plus
   a populated terminal. Needs a live agent turn against an authed provider.
-- [ ] Tune the pinned horizontal-scroll length/easing on very wide and very short
-  viewports; validate the sticky scrollytelling hand-off on real devices.
+- [ ] Tune the 3D agent-deck radius/auto-spin on very wide and very short viewports;
+  validate the sticky scrollytelling hand-off on real devices.
 - [ ] Consider a proper pinned hero transition (currently a load-entrance + parallax).
-- [ ] Mobile motion pass (horizontal gallery is desktop-pinned; mobile gets the
-  static stack — confirm that's the desired behavior or design a mobile-native motion).
+- [ ] Mobile motion pass (the agent deck is desktop-only; touch gets a scroll-snap
+  carousel — confirm that reads well, or design a touch-native deck interaction).
 - [ ] Optimize screenshot weight (PNGs are ~1 MB each; consider WebP/AVIF + sizes).
 - [ ] Copy: a light wit pass consistent with Ryco's honest "very early" tone.

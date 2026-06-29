@@ -32,6 +32,68 @@ export function useGsapContext(
 }
 
 /**
+ * Pointer-driven 3D tilt. Every `[data-tilt]` element inside the scope leans
+ * toward the cursor on a perspective plane and eases back on leave; an optional
+ * `[data-glare]` child gets a soft highlight that tracks the pointer. Per-element
+ * strength via `data-tilt-max` (degrees). No-ops for coarse pointers and reduced
+ * motion, so touch + accessibility users just get the flat card.
+ */
+export function useTilt(
+  scopeRef: React.RefObject<HTMLElement | null>,
+  selector = "[data-tilt]",
+) {
+  useEffect(() => {
+    if (prefersReducedMotion()) return;
+    if (window.matchMedia("(pointer: coarse)").matches) return;
+    const root = scopeRef.current;
+    if (!root) return;
+
+    const cleanups: Array<() => void> = [];
+    root.querySelectorAll<HTMLElement>(selector).forEach((el) => {
+      const max = Number(el.dataset.tiltMax ?? 8);
+      const glare = el.querySelector<HTMLElement>("[data-glare]");
+      gsap.set(el, { transformPerspective: 900, transformStyle: "preserve-3d" });
+      const rotX = gsap.quickTo(el, "rotationX", { duration: 0.6, ease: "power3" });
+      const rotY = gsap.quickTo(el, "rotationY", { duration: 0.6, ease: "power3" });
+
+      const move = (e: PointerEvent) => {
+        const r = el.getBoundingClientRect();
+        const px = (e.clientX - r.left) / r.width - 0.5; // -0.5 … 0.5
+        const py = (e.clientY - r.top) / r.height - 0.5;
+        rotY(px * max * 2);
+        rotX(-py * max * 2);
+        if (glare) {
+          glare.style.setProperty("--gx", `${(px + 0.5) * 100}%`);
+          glare.style.setProperty("--gy", `${(py + 0.5) * 100}%`);
+        }
+      };
+      const enter = () => {
+        gsap.to(el, { scale: 1.015, duration: 0.5, ease: "power3" });
+        if (glare) gsap.to(glare, { opacity: 1, duration: 0.4 });
+      };
+      const leave = () => {
+        rotX(0);
+        rotY(0);
+        gsap.to(el, { scale: 1, duration: 0.6, ease: "power3" });
+        if (glare) gsap.to(glare, { opacity: 0, duration: 0.5 });
+      };
+
+      el.addEventListener("pointerenter", enter);
+      el.addEventListener("pointermove", move);
+      el.addEventListener("pointerleave", leave);
+      cleanups.push(() => {
+        el.removeEventListener("pointerenter", enter);
+        el.removeEventListener("pointermove", move);
+        el.removeEventListener("pointerleave", leave);
+        gsap.set(el, { clearProps: "transform" });
+      });
+    });
+    return () => cleanups.forEach((c) => c());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeRef, selector]);
+}
+
+/**
  * Reveal children matching `selector` on scroll with a staggered rise.
  */
 export function useScrollReveal(
