@@ -3,6 +3,7 @@
  * All copy is grounded in the real Ryco README / AGENTS.md so the five art
  * directions stay factually consistent while looking nothing alike.
  */
+import type { BrandKey } from "@/assets/brands";
 
 export const SITE = {
   name: "Ryco",
@@ -25,7 +26,7 @@ export interface Provider {
   id: string;
   name: string;
   vendor: string;
-  brand: string; // key into brand icon registry
+  brand: BrandKey; // key into brand icon registry
   accent: string; // hex
   blurb: string;
   detail: string;
@@ -94,7 +95,7 @@ export const MODEL_PROVIDERS = [
 export interface Platform {
   id: "macos" | "linux" | "windows";
   name: string;
-  brand: string;
+  brand: BrandKey;
   format: string;
   arch: string;
   install: string;

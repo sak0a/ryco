@@ -38,7 +38,7 @@ import {
   STEPS,
   FAQ,
 } from "@/data/content";
-import { BrandIcon, type BrandKey } from "@/assets/brands";
+import { BrandIcon } from "@/assets/brands";
 import { RycoWordmark, RycoMark } from "@/assets/RycoLogo";
 import { ScreenshotFrame } from "@/components/shared/ScreenshotFrame";
 import { useGsapContext, useTilt, prefersReducedMotion } from "@/lib/motion";
@@ -798,7 +798,7 @@ export default function Version4() {
                   title={`${p.name} — ${p.vendor}`}
                 >
                   <BrandIcon
-                    name={p.brand as BrandKey}
+                    name={p.brand}
                     className="size-5 opacity-70 transition group-hover/v:opacity-100"
                     style={{ color: p.accent }}
                   />
@@ -1009,7 +1009,7 @@ export default function Version4() {
                           key={s.shot}
                           src={s.shot}
                           alt={s.alt}
-                          loading="eager"
+                          loading={i === activeShot ? "eager" : "lazy"}
                           draggable={false}
                           aria-hidden={i !== activeShot}
                           className={cn(
@@ -1265,7 +1265,7 @@ export default function Version4() {
                 >
                   <div className="flex items-center gap-4">
                     <span className="grid size-12 place-items-center rounded-2xl border border-white/12 bg-white/[0.03] text-white">
-                      <BrandIcon name={pl.brand as BrandKey} className="size-6" />
+                      <BrandIcon name={pl.brand} className="size-6" />
                     </span>
                     <div>
                       <h3 className="font-['Space_Grotesk'] text-lg font-semibold text-white">

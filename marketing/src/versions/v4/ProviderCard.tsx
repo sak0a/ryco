@@ -3,7 +3,7 @@
  * on the 3D agent deck. The `deck` variant trades the translucent fill for an
  * opaque one so cards never bleed through each other while orbiting.
  */
-import { BrandIcon, type BrandKey } from "@/assets/brands";
+import { BrandIcon } from "@/assets/brands";
 import { cn } from "@/lib/cn";
 import type { Provider } from "@/data/content";
 import { ACCENT } from "./theme";
@@ -52,7 +52,7 @@ export function ProviderCard({
             background: `${p.accent}12`,
           }}
         >
-          <BrandIcon name={p.brand as BrandKey} className="size-7" />
+          <BrandIcon name={p.brand} className="size-7" />
         </span>
         <span className="font-['JetBrains_Mono'] text-sm tabular-nums text-white/25">
           {String(index + 1).padStart(2, "0")}

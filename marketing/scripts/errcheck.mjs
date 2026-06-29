@@ -42,6 +42,7 @@ try {
     errs.slice(0, 4).forEach((e) => console.log("     " + e.slice(0, 140)));
   }
   console.log(total === 0 ? "\nALL CLEAN" : `\n${total} TOTAL ERRORS`);
+  if (total > 0) process.exitCode = 1;
   await b.close();
 } finally {
   server.kill("SIGTERM");
