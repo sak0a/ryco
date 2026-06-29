@@ -10,8 +10,7 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 gsap.registerPlugin(ScrollTrigger);
 
 export const prefersReducedMotion = () =>
-  typeof window !== "undefined" &&
-  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /**
  * Run GSAP code inside a scoped context bound to a container ref. The callback
@@ -38,10 +37,7 @@ export function useGsapContext(
  * strength via `data-tilt-max` (degrees). No-ops for coarse pointers and reduced
  * motion, so touch + accessibility users just get the flat card.
  */
-export function useTilt(
-  scopeRef: React.RefObject<HTMLElement | null>,
-  selector = "[data-tilt]",
-) {
+export function useTilt(scopeRef: React.RefObject<HTMLElement | null>, selector = "[data-tilt]") {
   useEffect(() => {
     if (prefersReducedMotion()) return;
     if (window.matchMedia("(pointer: coarse)").matches) return;

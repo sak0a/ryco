@@ -9,7 +9,13 @@ import type { SVGProps } from "react";
 
 export function RycoWordmark(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg viewBox="0 0 3508 2481" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-label="Ryco" {...props}>
+    <svg
+      viewBox="0 0 3508 2481"
+      fill="currentColor"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-label="Ryco"
+      {...props}
+    >
       <g transform="matrix(0.718921,0,0,1,443.224836,208.15748)">
         <g transform="matrix(1.390973,0,0,1,-106.34474,0)">
           <g transform="matrix(1080.539877,0,0,1080.539877,272,1401.377914)">
@@ -30,13 +36,7 @@ export function RycoWordmark(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-export function RycoMark({
-  className,
-  alt = "",
-}: {
-  className?: string;
-  alt?: string;
-}) {
+export function RycoMark({ className, alt = "" }: { className?: string; alt?: string }) {
   return (
     <img
       src="/ryco-mark-white.png"

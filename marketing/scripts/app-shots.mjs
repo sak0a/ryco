@@ -14,14 +14,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const browser = await chromium.launch();
 await mkdir(OUT, { recursive: true });
-const ctx = await browser.newContext({ viewport: { width: 1512, height: 950 }, deviceScaleFactor: 2 });
+const ctx = await browser.newContext({
+  viewport: { width: 1512, height: 950 },
+  deviceScaleFactor: 2,
+});
 const page = await ctx.newPage();
 
 await page.goto(`${BASE}/pair#token=${TOKEN}`, { waitUntil: "networkidle" });
 await sleep(2000);
 // Single load of the app after pairing (repeated reloads drop the session token).
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
-await page.locator('[data-testid="command-palette-trigger"]').first().waitFor({ state: "visible", timeout: 20000 });
+await page
+  .locator('[data-testid="command-palette-trigger"]')
+  .first()
+  .waitFor({ state: "visible", timeout: 20000 });
 await sleep(1500);
 
 let i = 0;
@@ -42,7 +48,10 @@ const esc = async () => {
   await sleep(500);
 };
 const clickRole = (name, opts = {}) =>
-  page.getByRole("button", { name, ...opts }).first().click({ force: true, timeout: 6000 });
+  page
+    .getByRole("button", { name, ...opts })
+    .first()
+    .click({ force: true, timeout: 6000 });
 const clickSel = (sel) => page.locator(sel).first().click({ force: true, timeout: 6000 });
 
 // 1) Home (empty thread).
@@ -93,7 +102,10 @@ await shot("settings");
 
 // 8) Settings → Providers (blur account identities — PII — before the shot).
 await act("providers", async () => {
-  await page.getByText(/^Providers$/i).first().click({ force: true, timeout: 5000 });
+  await page
+    .getByText(/^Providers$/i)
+    .first()
+    .click({ force: true, timeout: 5000 });
   await sleep(900);
   await page.evaluate(() => {
     for (const el of document.querySelectorAll("*")) {
@@ -116,7 +128,10 @@ await shot("settings-providers");
 
 // 9) Settings → Appearance/Themes.
 await act("appearance", async () => {
-  await page.getByText(/Appearance|Themes/i).first().click({ force: true, timeout: 5000 });
+  await page
+    .getByText(/Appearance|Themes/i)
+    .first()
+    .click({ force: true, timeout: 5000 });
   await sleep(900);
 });
 await shot("settings-appearance");

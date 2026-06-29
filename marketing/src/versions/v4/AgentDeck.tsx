@@ -43,7 +43,11 @@ export function AgentDeck() {
       for (const card of tiltRefs.current) {
         if (!card) continue;
         const b = card.getBoundingClientRect();
-        const d = gsap.utils.clamp(-1.15, 1.15, (b.left + b.width / 2 - cx) / (window.innerWidth * 0.42));
+        const d = gsap.utils.clamp(
+          -1.15,
+          1.15,
+          (b.left + b.width / 2 - cx) / (window.innerWidth * 0.42),
+        );
         gsap.set(card, {
           rotationY: -d * MAX_TILT,
           scale: 1 - Math.min(0.18, Math.abs(d) * 0.18),

@@ -1,9 +1,9 @@
 {
   "name": "ryco-marketing",
-  "private": true,
   "version": "1.0.0",
-  "type": "module",
+  "private": true,
   "description": "Marketing site for Ryco — a fast local workspace for coding agents. Five distinct art directions at /1 … /5.",
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

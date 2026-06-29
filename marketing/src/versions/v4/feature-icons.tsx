@@ -64,7 +64,16 @@ function TerminalIcon({ className }: IconProps) {
     <svg viewBox="0 0 100 100" className={`${SVG} ${className ?? ""}`} {...base} aria-hidden>
       <rect x="14" y="22" width="72" height="56" rx="7" />
       <path d="M26 40 L33 46 L26 52" />
-      <rect className="blink" x="40" y="48" width="14" height="5" rx="1.5" fill="currentColor" stroke="none" />
+      <rect
+        className="blink"
+        x="40"
+        y="48"
+        width="14"
+        height="5"
+        rx="1.5"
+        fill="currentColor"
+        stroke="none"
+      />
       <line data-trace style={len(40)} x1="26" y1="64" x2="66" y2="64" />
     </svg>
   );
@@ -76,7 +85,17 @@ function CommandIcon({ className }: IconProps) {
     <svg viewBox="0 0 100 100" className={`${SVG} ${className ?? ""}`} {...base} aria-hidden>
       <rect x="16" y="20" width="68" height="60" rx="8" />
       <line x1="27" y1="34" x2="63" y2="34" />
-      <rect className="scan" x="23" y="43" width="54" height="9" rx="3" fill="currentColor" stroke="none" opacity="0.16" />
+      <rect
+        className="scan"
+        x="23"
+        y="43"
+        width="54"
+        height="9"
+        rx="3"
+        fill="currentColor"
+        stroke="none"
+        opacity="0.16"
+      />
       <line x1="29" y1="47.5" x2="55" y2="47.5" />
       <line x1="29" y1="59.5" x2="61" y2="59.5" />
       <line x1="29" y1="71.5" x2="49" y2="71.5" />
@@ -90,7 +109,15 @@ function ThemesIcon({ className }: IconProps) {
     <svg viewBox="0 0 100 100" className={`${SVG} ${className ?? ""}`} {...base} aria-hidden>
       <circle className="pulse" cx="40" cy="42" r="19" />
       <circle className="pulse" style={delay(".5s")} cx="60" cy="42" r="19" />
-      <circle className="pulse" style={delay("1s")} cx="50" cy="60" r="19" fill="currentColor" fillOpacity="0.12" />
+      <circle
+        className="pulse"
+        style={delay("1s")}
+        cx="50"
+        cy="60"
+        r="19"
+        fill="currentColor"
+        fillOpacity="0.12"
+      />
     </svg>
   );
 }

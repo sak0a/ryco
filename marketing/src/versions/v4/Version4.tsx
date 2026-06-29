@@ -207,7 +207,11 @@ function renderTermLine(line: TermTok[], count: number) {
     const slice = n >= tok.t.length ? tok.t : tok.t.slice(0, n);
     n -= tok.t.length;
     return (
-      <span key={i} className={tok.tone === "muted" ? "text-white/40" : "text-white/85"} style={tok.tone === "accent" ? { color: ACCENT } : undefined}>
+      <span
+        key={i}
+        className={tok.tone === "muted" ? "text-white/40" : "text-white/85"}
+        style={tok.tone === "accent" ? { color: ACCENT } : undefined}
+      >
         {slice}
       </span>
     );
@@ -271,7 +275,10 @@ function KineticTerminal() {
 
   const p = posRef.current;
   return (
-    <div data-reveal className="mt-5 overflow-hidden rounded-3xl border border-white/10 bg-black/40 font-['JetBrains_Mono'] text-[13px]">
+    <div
+      data-reveal
+      className="mt-5 overflow-hidden rounded-3xl border border-white/10 bg-black/40 font-['JetBrains_Mono'] text-[13px]"
+    >
       <div className="flex items-center gap-1.5 border-b border-white/10 px-4 py-2.5 text-white/55">
         <span className="size-2.5 rounded-full bg-white/20" />
         <span className="size-2.5 rounded-full bg-white/20" />
@@ -286,7 +293,9 @@ function KineticTerminal() {
           return (
             <div key={i} className="min-h-[1.5em] whitespace-pre">
               {line.length === 0 ? " " : renderTermLine(line, count)}
-              {isActive && <span className="ryco-caret ml-px align-middle" style={{ color: ACCENT }} />}
+              {isActive && (
+                <span className="ryco-caret ml-px align-middle" style={{ color: ACCENT }} />
+              )}
             </div>
           );
         })}
@@ -322,7 +331,11 @@ function Copyable({ text, className }: { text: string; className?: string }) {
       </span>
       <span className="truncate">{text.replace(/^\$ ?/, "")}</span>
       <span className="ml-1 text-white/50 transition group-hover/c:text-white/80">
-        {copied ? <Check className="size-3.5" style={{ color: ACCENT }} /> : <Copy className="size-3.5" />}
+        {copied ? (
+          <Check className="size-3.5" style={{ color: ACCENT }} />
+        ) : (
+          <Copy className="size-3.5" />
+        )}
       </span>
     </button>
   );
@@ -444,9 +457,14 @@ function FaqRow({
           />
         </span>
       </button>
-      <div className="grid transition-all duration-300 ease-out" style={{ gridTemplateRows: open ? "1fr" : "0fr" }}>
+      <div
+        className="grid transition-all duration-300 ease-out"
+        style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+      >
         <div className="overflow-hidden">
-          <p className="px-5 pb-5 text-sm leading-relaxed text-white/65 sm:px-6 sm:text-[15px]">{a}</p>
+          <p className="px-5 pb-5 text-sm leading-relaxed text-white/65 sm:px-6 sm:text-[15px]">
+            {a}
+          </p>
         </div>
       </div>
     </div>
@@ -456,7 +474,10 @@ function FaqRow({
 /** Fixed, version-agnostic kinetic backdrop: faint grid + a single lime glow. */
 function KineticBackground() {
   return (
-    <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden bg-[#0a0b0d]">
+    <div
+      aria-hidden
+      className="pointer-events-none fixed inset-0 -z-10 overflow-hidden bg-[#0a0b0d]"
+    >
       <div
         className="absolute inset-0 opacity-[0.05]"
         style={{
@@ -495,11 +516,17 @@ export default function Version4() {
   const scope = useGsapContext(({ gsap, ScrollTrigger }) => {
     /* Refresh trigger positions as the large screenshots finish decoding. */
     gsap.utils.toArray<HTMLImageElement>("img").forEach((img) => {
-      if (!img.complete) img.addEventListener("load", () => ScrollTrigger.refresh(), { once: true });
+      if (!img.complete)
+        img.addEventListener("load", () => ScrollTrigger.refresh(), { once: true });
     });
 
     /* Hero — kinetic load entrance. */
-    gsap.from("[data-hero-line]", { yPercent: 118, duration: 1, ease: "power4.out", stagger: 0.09 });
+    gsap.from("[data-hero-line]", {
+      yPercent: 118,
+      duration: 1,
+      ease: "power4.out",
+      stagger: 0.09,
+    });
     gsap.from("[data-hero-fade]", {
       opacity: 0,
       y: 18,
@@ -522,7 +549,12 @@ export default function Version4() {
       gsap.to(heroShotRef.current, {
         yPercent: -6,
         ease: "none",
-        scrollTrigger: { trigger: heroShotRef.current, start: "top bottom", end: "bottom top", scrub: 0.6 },
+        scrollTrigger: {
+          trigger: heroShotRef.current,
+          start: "top bottom",
+          end: "bottom top",
+          scrub: 0.6,
+        },
       });
     }
 
@@ -632,7 +664,9 @@ export default function Version4() {
        layout always ships the icons fully drawn. */
     gsap.utils.toArray<HTMLElement>("[data-draw-icon]").forEach((wrap) => {
       const shapes = Array.from(
-        wrap.querySelectorAll<SVGGeometryElement>("path, line, polyline, circle, rect, ellipse, polygon"),
+        wrap.querySelectorAll<SVGGeometryElement>(
+          "path, line, polyline, circle, rect, ellipse, polygon",
+        ),
       ).filter((s) => typeof s.getTotalLength === "function" && s.getTotalLength() > 0);
       if (!shapes.length) return;
 
@@ -652,7 +686,12 @@ export default function Version4() {
         const len = s.getTotalLength();
         gsap.set(s, { strokeDasharray: len, strokeDashoffset: len });
       });
-      ScrollTrigger.create({ trigger: wrap, start: "top 90%", once: true, onEnter: () => trace(0.85) });
+      ScrollTrigger.create({
+        trigger: wrap,
+        start: "top 90%",
+        once: true,
+        onEnter: () => trace(0.85),
+      });
 
       // … and re-trace on hover of the enclosing card
       const card = wrap.closest<HTMLElement>("article");
@@ -678,7 +717,9 @@ export default function Version4() {
           <div className="mx-auto max-w-5xl text-center">
             <h1 className="font-['Space_Grotesk'] text-[clamp(2.9rem,9vw,7rem)] font-bold leading-[0.88] tracking-[-0.04em]">
               <span className="block overflow-hidden pb-[0.06em]">
-                <span data-hero-line className="block">Every coding agent,</span>
+                <span data-hero-line className="block">
+                  Every coding agent,
+                </span>
               </span>
               <span className="block overflow-hidden pb-[0.06em]">
                 <span data-hero-line className="block">
@@ -694,17 +735,23 @@ export default function Version4() {
                 </span>
               </span>
               <span className="block overflow-hidden pb-[0.06em]">
-                <span data-hero-line className="block">On your machine.</span>
+                <span data-hero-line className="block">
+                  On your machine.
+                </span>
               </span>
             </h1>
 
-            <p data-hero-fade className="mx-auto mt-7 max-w-2xl text-pretty text-base leading-relaxed text-white/65 sm:text-lg">
+            <p
+              data-hero-fade
+              className="mx-auto mt-7 max-w-2xl text-pretty text-base leading-relaxed text-white/65 sm:text-lg"
+            >
               {SITE.oneLiner}
             </p>
 
             <div data-hero-fade className="mt-9 flex flex-wrap items-center justify-center gap-3">
               <MagneticButton href={dl.href} external={!dl.isDirect} variant="primary">
-                <Download className="size-[18px]" /> Download {dl.osLabel ? `for ${dl.osLabel}` : "for desktop"}
+                <Download className="size-[18px]" /> Download{" "}
+                {dl.osLabel ? `for ${dl.osLabel}` : "for desktop"}
               </MagneticButton>
               <MagneticButton href={SITE.repo} external variant="ghost">
                 <Github className="size-[18px]" /> View source
@@ -726,7 +773,10 @@ export default function Version4() {
                 href={dl.releasesUrl}
                 target="_blank"
                 rel="noreferrer"
-                className={cn("underline-offset-2 transition-colors hover:text-white/80 hover:underline", focusRing)}
+                className={cn(
+                  "underline-offset-2 transition-colors hover:text-white/80 hover:underline",
+                  focusRing,
+                )}
               >
                 {dl.osLabel ? "other builds" : "All builds & platforms"}
               </a>
@@ -737,7 +787,10 @@ export default function Version4() {
             </div>
 
             {/* the five agents */}
-            <div data-hero-fade className="mx-auto mt-12 flex max-w-2xl flex-wrap items-center justify-center gap-x-8 gap-y-4">
+            <div
+              data-hero-fade
+              className="mx-auto mt-12 flex max-w-2xl flex-wrap items-center justify-center gap-x-8 gap-y-4"
+            >
               {PROVIDERS.map((p) => (
                 <span
                   key={p.id}
@@ -784,7 +837,10 @@ export default function Version4() {
           <div className="flex overflow-hidden">
             <div data-marquee className="flex w-max shrink-0 items-center gap-8 pr-8">
               {[...MARQUEE_ITEMS, ...MARQUEE_ITEMS].map((item, i) => (
-                <span key={i} className="flex items-center gap-8 font-['Space_Grotesk'] text-2xl font-medium text-white/30 sm:text-3xl">
+                <span
+                  key={i}
+                  className="flex items-center gap-8 font-['Space_Grotesk'] text-2xl font-medium text-white/30 sm:text-3xl"
+                >
                   {item}
                   <span style={{ color: ACCENT }}>/</span>
                 </span>
@@ -801,8 +857,8 @@ export default function Version4() {
               <SectionHeading className="mt-5">Every coding agent, side by side.</SectionHeading>
               <p className="mt-5 text-white/60 sm:text-lg">
                 Codex, Claude, GitHub Copilot, OpenCode and Cursor — each through its native SDK or
-                protocol, using the subscription you already pay for. Switch per thread without losing
-                context.
+                protocol, using the subscription you already pay for. Switch per thread without
+                losing context.
               </p>
             </div>
           </div>
@@ -841,14 +897,22 @@ export default function Version4() {
               <SectionHeading className="mt-5">Same agent, your choice of backend.</SectionHeading>
               <p className="mt-5 max-w-md text-white/60">
                 Named provider instances let you run, say,{" "}
-                <span className="font-['JetBrains_Mono']" style={{ color: ACCENT }}>claude_openrouter</span>{" "}
+                <span className="font-['JetBrains_Mono']" style={{ color: ACCENT }}>
+                  claude_openrouter
+                </span>{" "}
                 and{" "}
-                <span className="font-['JetBrains_Mono']" style={{ color: ACCENT }}>codex_personal</span>{" "}
-                at once — each with independent config, env vars, auth identity, models and accent colour.
+                <span className="font-['JetBrains_Mono']" style={{ color: ACCENT }}>
+                  codex_personal
+                </span>{" "}
+                at once — each with independent config, env vars, auth identity, models and accent
+                colour.
               </p>
             </div>
 
-            <div data-reveal className="rounded-3xl border border-white/10 bg-white/[0.02] p-7 sm:p-8">
+            <div
+              data-reveal
+              className="rounded-3xl border border-white/10 bg-white/[0.02] p-7 sm:p-8"
+            >
               <p className="font-['JetBrains_Mono'] text-[11px] uppercase tracking-[0.2em] text-white/55">
                 Model providers
               </p>
@@ -881,13 +945,16 @@ export default function Version4() {
         </section>
 
         {/* ------------------------------- showcase ------------------------------ */}
-        <section id="showcase" className={cn("relative mx-auto max-w-7xl px-5 py-24 sm:px-8", NAV_OFFSET)}>
+        <section
+          id="showcase"
+          className={cn("relative mx-auto max-w-7xl px-5 py-24 sm:px-8", NAV_OFFSET)}
+        >
           <div data-reveal className="max-w-2xl">
             <Eyebrow>The workspace</Eyebrow>
             <SectionHeading className="mt-5">Built for the way you actually ship.</SectionHeading>
             <p className="mt-5 text-white/60 sm:text-lg">
-              Not a chat box bolted onto a terminal — a real workspace. Models, terminals, theming and
-              full observability, a keystroke apart.
+              Not a chat box bolted onto a terminal — a real workspace. Models, terminals, theming
+              and full observability, a keystroke apart.
             </p>
           </div>
 
@@ -956,7 +1023,9 @@ export default function Version4() {
                     </div>
                     {/* step counter */}
                     <div className="pointer-events-none absolute -top-7 right-0 font-['JetBrains_Mono'] text-xs tabular-nums text-white/35">
-                      <span style={{ color: ACCENT }}>{String(activeShot + 1).padStart(2, "0")}</span>
+                      <span style={{ color: ACCENT }}>
+                        {String(activeShot + 1).padStart(2, "0")}
+                      </span>
                       <span> / {String(SHOWCASE.length).padStart(2, "0")}</span>
                     </div>
                   </div>
@@ -1005,13 +1074,18 @@ export default function Version4() {
         </section>
 
         {/* ------------------------------- features ------------------------------ */}
-        <section id="features" className={cn("relative mx-auto max-w-7xl px-5 py-24 sm:px-8", NAV_OFFSET)}>
+        <section
+          id="features"
+          className={cn("relative mx-auto max-w-7xl px-5 py-24 sm:px-8", NAV_OFFSET)}
+        >
           <div data-reveal className="max-w-2xl">
             <Eyebrow>The toolkit</Eyebrow>
-            <SectionHeading className="mt-5">Everything wired into one local surface.</SectionHeading>
+            <SectionHeading className="mt-5">
+              Everything wired into one local surface.
+            </SectionHeading>
             <p className="mt-5 text-white/60 sm:text-lg">
-              Worktrees, terminals, diffs, MCP, source control and observability — no cloud round-trips
-              you didn't ask for.
+              Worktrees, terminals, diffs, MCP, source control and observability — no cloud
+              round-trips you didn't ask for.
             </p>
           </div>
 
@@ -1037,7 +1111,9 @@ export default function Version4() {
                   />
                   <FeatIcon className="relative size-12 text-[#c6ff3a]/85 transition-colors duration-300 group-hover:text-[#c6ff3a]" />
                   <div className="relative">
-                    <h3 className="font-['Space_Grotesk'] text-lg font-semibold text-white">{f.title}</h3>
+                    <h3 className="font-['Space_Grotesk'] text-lg font-semibold text-white">
+                      {f.title}
+                    </h3>
                     <p className="mt-2.5 text-[14px] leading-relaxed text-white/55">{f.blurb}</p>
                   </div>
                 </article>
@@ -1079,7 +1155,9 @@ export default function Version4() {
                       <Icon className="size-6 transition-transform duration-300 ease-out group-hover:scale-110" />
                     ) : null}
                   </span>
-                  <h3 className="mt-5 font-['Space_Grotesk'] text-xl font-semibold text-white">{pillar.title}</h3>
+                  <h3 className="mt-5 font-['Space_Grotesk'] text-xl font-semibold text-white">
+                    {pillar.title}
+                  </h3>
                   <p className="mt-3 text-sm leading-relaxed text-white/60">{pillar.body}</p>
                 </article>
               );
@@ -1112,7 +1190,11 @@ export default function Version4() {
             {STEPS.map((step, i) => {
               const StepIcon = STEP_ICONS[i];
               return (
-                <li key={step.n} data-reveal className="relative flex items-start justify-between gap-6">
+                <li
+                  key={step.n}
+                  data-reveal
+                  className="relative flex items-start justify-between gap-6"
+                >
                   <span
                     className="absolute -left-10 grid size-7 place-items-center rounded-full border bg-[#0a0b0d] font-['JetBrains_Mono'] text-[11px] font-semibold"
                     style={{ color: ACCENT, borderColor: `${ACCENT}55` }}
@@ -1120,11 +1202,17 @@ export default function Version4() {
                     {step.n}
                   </span>
                   <div className="min-w-0">
-                    <h3 className="font-['Space_Grotesk'] text-xl font-semibold text-white">{step.title}</h3>
+                    <h3 className="font-['Space_Grotesk'] text-xl font-semibold text-white">
+                      {step.title}
+                    </h3>
                     <p className="mt-2 max-w-xl text-white/60">{step.body}</p>
                   </div>
                   {StepIcon && (
-                    <span aria-hidden className="hidden shrink-0 self-center sm:block" style={{ color: ACCENT }}>
+                    <span
+                      aria-hidden
+                      className="hidden shrink-0 self-center sm:block"
+                      style={{ color: ACCENT }}
+                    >
                       <StepIcon className="size-16 opacity-80" />
                     </span>
                   )}
@@ -1135,14 +1223,17 @@ export default function Version4() {
         </section>
 
         {/* ------------------------------- download ------------------------------ */}
-        <section id="download" className={cn("relative mx-auto max-w-7xl px-5 py-24 sm:px-8", NAV_OFFSET)}>
+        <section
+          id="download"
+          className={cn("relative mx-auto max-w-7xl px-5 py-24 sm:px-8", NAV_OFFSET)}
+        >
           <div data-reveal className="max-w-2xl">
             <Eyebrow>Cross-platform · {SITE.license} licensed</Eyebrow>
             <SectionHeading className="mt-5">Download Ryco.</SectionHeading>
             <p className="mt-5 text-white/60 sm:text-lg">
               Native builds for every desktop, or kick the tires instantly with the{" "}
-              <span className="font-['JetBrains_Mono'] text-white/80">{SITE.npx}</span> web CLI. Local-first,
-              no cloud required.
+              <span className="font-['JetBrains_Mono'] text-white/80">{SITE.npx}</span> web CLI.
+              Local-first, no cloud required.
             </p>
           </div>
 
@@ -1160,49 +1251,56 @@ export default function Version4() {
                       : null;
               const direct = !!assetUrl;
               return (
-              <a
-                key={pl.id}
-                href={assetUrl ?? SITE.releases}
-                {...(direct ? {} : { target: "_blank", rel: "noreferrer" })}
-                data-reveal
-                data-tilt
-                data-tilt-max="6"
-                className={cn(
-                  "group flex flex-col gap-5 rounded-3xl border border-white/10 bg-white/[0.02] p-7 transition-colors duration-300 hover:border-white/25",
-                  focusRing,
-                )}
-              >
-                <div className="flex items-center gap-4">
-                  <span className="grid size-12 place-items-center rounded-2xl border border-white/12 bg-white/[0.03] text-white">
-                    <BrandIcon name={pl.brand as BrandKey} className="size-6" />
-                  </span>
-                  <div>
-                    <h3 className="font-['Space_Grotesk'] text-lg font-semibold text-white">{pl.name}</h3>
-                    <p className="font-['JetBrains_Mono'] text-xs text-white/55">
-                      {pl.format} · {pl.arch}
-                    </p>
-                  </div>
-                </div>
-                <p className="text-[14px] leading-relaxed text-white/55">{pl.install}</p>
-                <span
-                  className="mt-auto inline-flex items-center gap-2 text-sm font-semibold transition-colors group-hover:text-[#c6ff3a]"
-                  style={{ color: ACCENT }}
+                <a
+                  key={pl.id}
+                  href={assetUrl ?? SITE.releases}
+                  {...(direct ? {} : { target: "_blank", rel: "noreferrer" })}
+                  data-reveal
+                  data-tilt
+                  data-tilt-max="6"
+                  className={cn(
+                    "group flex flex-col gap-5 rounded-3xl border border-white/10 bg-white/[0.02] p-7 transition-colors duration-300 hover:border-white/25",
+                    focusRing,
+                  )}
                 >
-                  <Download className="size-4" /> Get the {pl.format}
-                  <ArrowUpRight className="size-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-                </span>
-              </a>
+                  <div className="flex items-center gap-4">
+                    <span className="grid size-12 place-items-center rounded-2xl border border-white/12 bg-white/[0.03] text-white">
+                      <BrandIcon name={pl.brand as BrandKey} className="size-6" />
+                    </span>
+                    <div>
+                      <h3 className="font-['Space_Grotesk'] text-lg font-semibold text-white">
+                        {pl.name}
+                      </h3>
+                      <p className="font-['JetBrains_Mono'] text-xs text-white/55">
+                        {pl.format} · {pl.arch}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-[14px] leading-relaxed text-white/55">{pl.install}</p>
+                  <span
+                    className="mt-auto inline-flex items-center gap-2 text-sm font-semibold transition-colors group-hover:text-[#c6ff3a]"
+                    style={{ color: ACCENT }}
+                  >
+                    <Download className="size-4" /> Get the {pl.format}
+                    <ArrowUpRight className="size-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                  </span>
+                </a>
               );
             })}
           </div>
 
           <p className="mt-6 text-sm text-white/50">
-            {dl.version && <span className="font-['JetBrains_Mono'] text-white/60">{dl.version}</span>}{" "}
+            {dl.version && (
+              <span className="font-['JetBrains_Mono'] text-white/60">{dl.version}</span>
+            )}{" "}
             <a
               href={dl.releasesUrl}
               target="_blank"
               rel="noreferrer"
-              className={cn("underline-offset-2 transition-colors hover:text-white hover:underline", focusRing)}
+              className={cn(
+                "underline-offset-2 transition-colors hover:text-white hover:underline",
+                focusRing,
+              )}
             >
               All builds &amp; checksums on GitHub
               <ArrowUpRight className="ml-0.5 inline size-3.5 align-[-0.1em]" />
@@ -1213,7 +1311,10 @@ export default function Version4() {
         </section>
 
         {/* --------------------------------- faq --------------------------------- */}
-        <section id="faq" className={cn("relative mx-auto max-w-3xl px-5 py-24 sm:px-8", NAV_OFFSET)}>
+        <section
+          id="faq"
+          className={cn("relative mx-auto max-w-3xl px-5 py-24 sm:px-8", NAV_OFFSET)}
+        >
           <div data-reveal className="mb-10">
             <Eyebrow>Questions</Eyebrow>
             <SectionHeading className="mt-5">Frequently asked.</SectionHeading>
@@ -1244,8 +1345,8 @@ export default function Version4() {
               style={{ background: `${ACCENT}1a` }}
             />
             <h2 className="relative mx-auto max-w-3xl font-['Space_Grotesk'] text-[clamp(2rem,5vw,3.6rem)] font-bold leading-[1.02] tracking-[-0.025em]">
-              Stop tab-switching.{" "}
-              <span style={{ color: ACCENT }}>Start shipping</span> — with every agent at once.
+              Stop tab-switching. <span style={{ color: ACCENT }}>Start shipping</span> — with every
+              agent at once.
             </h2>
             <p className="relative mx-auto mt-5 max-w-xl text-white/60">
               Local-first, {SITE.license}, and honest about being early. Install a provider, open a
@@ -1253,7 +1354,8 @@ export default function Version4() {
             </p>
             <div className="relative mt-9 flex flex-wrap items-center justify-center gap-3">
               <MagneticButton href={dl.href} external={!dl.isDirect} variant="primary">
-                <Download className="size-[18px]" /> Download {dl.osLabel ? `for ${dl.osLabel}` : "Ryco"}
+                <Download className="size-[18px]" /> Download{" "}
+                {dl.osLabel ? `for ${dl.osLabel}` : "Ryco"}
               </MagneticButton>
               <MagneticButton href={SITE.discord} external variant="ghost">
                 <MessagesSquare className="size-[18px]" /> Join the Discord
@@ -1279,13 +1381,34 @@ export default function Version4() {
                 <span className="font-['JetBrains_Mono'] text-xs uppercase tracking-widest text-white/55">
                   Project
                 </span>
-                <a href={SITE.repo} target="_blank" rel="noreferrer" className={cn("inline-flex items-center gap-1.5 text-white/65 transition hover:text-white", focusRing)}>
+                <a
+                  href={SITE.repo}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={cn(
+                    "inline-flex items-center gap-1.5 text-white/65 transition hover:text-white",
+                    focusRing,
+                  )}
+                >
                   <Github className="size-4" /> GitHub
                 </a>
-                <a href={SITE.releases} target="_blank" rel="noreferrer" className="text-white/65 transition hover:text-white">
+                <a
+                  href={SITE.releases}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-white/65 transition hover:text-white"
+                >
                   Releases
                 </a>
-                <a href={SITE.discord} target="_blank" rel="noreferrer" className={cn("inline-flex items-center gap-1.5 text-white/65 transition hover:text-white", focusRing)}>
+                <a
+                  href={SITE.discord}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={cn(
+                    "inline-flex items-center gap-1.5 text-white/65 transition hover:text-white",
+                    focusRing,
+                  )}
+                >
                   <MessagesSquare className="size-4" /> Discord
                 </a>
               </div>
@@ -1293,9 +1416,15 @@ export default function Version4() {
                 <span className="font-['JetBrains_Mono'] text-xs uppercase tracking-widest text-white/55">
                   Get started
                 </span>
-                <a href="#download" className="text-white/65 transition hover:text-white">Download</a>
-                <a href="#agents" className="text-white/65 transition hover:text-white">Agents</a>
-                <a href="#features" className="text-white/65 transition hover:text-white">Features</a>
+                <a href="#download" className="text-white/65 transition hover:text-white">
+                  Download
+                </a>
+                <a href="#agents" className="text-white/65 transition hover:text-white">
+                  Agents
+                </a>
+                <a href="#features" className="text-white/65 transition hover:text-white">
+                  Features
+                </a>
               </div>
             </nav>
           </div>

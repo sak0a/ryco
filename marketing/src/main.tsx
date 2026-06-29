@@ -12,7 +12,11 @@ function Shell() {
   return (
     <>
       <ScrollRestoration />
-      <Suspense fallback={<div className="grid min-h-screen place-items-center text-sm text-white/40">Loading…</div>}>
+      <Suspense
+        fallback={
+          <div className="grid min-h-screen place-items-center text-sm text-white/40">Loading…</div>
+        }
+      >
         <Outlet />
       </Suspense>
     </>

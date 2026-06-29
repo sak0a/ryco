@@ -31,7 +31,9 @@ const pillBase = "rounded-full border backdrop-blur-xl transition-colors duratio
    stays readable over light screenshots passing beneath — each pill darkens
    whatever is behind it, regardless of the page underneath. */
 const pillTone = (scrolled: boolean) =>
-  scrolled ? "border-white/12 bg-[#0b0c0e]/80 shadow-lg shadow-black/20" : "border-white/10 bg-white/[0.05]";
+  scrolled
+    ? "border-white/12 bg-[#0b0c0e]/80 shadow-lg shadow-black/20"
+    : "border-white/10 bg-white/[0.05]";
 
 export function SiteNav() {
   const navRef = useRef<HTMLElement>(null);

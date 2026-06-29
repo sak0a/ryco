@@ -6,15 +6,15 @@ team can pick a direction. Every version is **led by real product screenshots**
 (captured from the running app) and uses the **authentic provider marks** the app
 itself ships.
 
-| Route | Direction        | Vibe                                   | Animation          |
-| ----- | ---------------- | -------------------------------------- | ------------------ |
-| `/`   | Overview         | Neutral gallery / picker               | —                  |
-| `/1`  | **Precision**    | Linear/Vercel-grade dark product       | GSAP ScrollTrigger |
-| `/2`  | **Datasheet**    | Technical monospace spec-sheet (light) | GSAP, mechanical   |
-| `/3`  | **Editorial**    | Swiss serif magazine (light)           | anime.js v4        |
-| `/4`  | **Kinetic**      | Motion-led scroll storytelling (dark)  | GSAP pin + scrub   |
-| `/5`  | **Brutalist**    | High-contrast typographic (B/W + blue) | anime.js v4        |
-| `/6`  | **Control Plane**| t3.codes-style, screenshot-led (light) | GSAP ScrollTrigger |
+| Route | Direction         | Vibe                                   | Animation          |
+| ----- | ----------------- | -------------------------------------- | ------------------ |
+| `/`   | Overview          | Neutral gallery / picker               | —                  |
+| `/1`  | **Precision**     | Linear/Vercel-grade dark product       | GSAP ScrollTrigger |
+| `/2`  | **Datasheet**     | Technical monospace spec-sheet (light) | GSAP, mechanical   |
+| `/3`  | **Editorial**     | Swiss serif magazine (light)           | anime.js v4        |
+| `/4`  | **Kinetic**       | Motion-led scroll storytelling (dark)  | GSAP pin + scrub   |
+| `/5`  | **Brutalist**     | High-contrast typographic (B/W + blue) | anime.js v4        |
+| `/6`  | **Control Plane** | t3.codes-style, screenshot-led (light) | GSAP ScrollTrigger |
 
 ## Stack
 

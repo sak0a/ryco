@@ -240,8 +240,7 @@ export const FEATURES: Feature[] = [
   {
     id: "observability",
     title: "Observability built in",
-    blurb:
-      "Local trace files, provider event logs and optional OTLP trace / metric export.",
+    blurb: "Local trace files, provider event logs and optional OTLP trace / metric export.",
     icon: "Activity",
     group: "infra",
   },

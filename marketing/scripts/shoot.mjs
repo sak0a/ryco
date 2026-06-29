@@ -12,7 +12,9 @@ import { mkdir } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const BASE = "http://localhost:4173";
-const ROUTES = process.env.ROUTES ? process.env.ROUTES.split(",") : ["/", "/1", "/2", "/3", "/4", "/5", "/6"];
+const ROUTES = process.env.ROUTES
+  ? process.env.ROUTES.split(",")
+  : ["/", "/1", "/2", "/3", "/4", "/5", "/6"];
 const OUT = new URL("../screenshots/", import.meta.url).pathname;
 
 async function waitForServer(url, tries = 60) {

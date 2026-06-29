@@ -68,7 +68,10 @@ export function ScreenshotFrame({
       draggable={false}
       className={cn(
         aspect
-          ? cn("absolute inset-0 h-full w-full select-none", fit === "contain" ? "object-contain" : "object-cover")
+          ? cn(
+              "absolute inset-0 h-full w-full select-none",
+              fit === "contain" ? "object-contain" : "object-cover",
+            )
           : "block w-full select-none",
         imgClassName,
       )}

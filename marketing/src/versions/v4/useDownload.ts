@@ -115,9 +115,13 @@ function detectOs(): Os {
 async function detectMacArch(): Promise<Arch> {
   // 1) UA Client Hints (Chromium) — most reliable when present
   try {
-    const uaData = (navigator as unknown as {
-      userAgentData?: { getHighEntropyValues?: (k: string[]) => Promise<{ architecture?: string }> };
-    }).userAgentData;
+    const uaData = (
+      navigator as unknown as {
+        userAgentData?: {
+          getHighEntropyValues?: (k: string[]) => Promise<{ architecture?: string }>;
+        };
+      }
+    ).userAgentData;
     if (uaData?.getHighEntropyValues) {
       const hv = await uaData.getHighEntropyValues(["architecture"]);
       if (hv.architecture === "arm") return "arm64";
@@ -172,7 +176,8 @@ export function useDownload(): DownloadInfo {
     };
   }, []);
 
-  const osLabel = os === "mac" ? "Mac" : os === "windows" ? "Windows" : os === "linux" ? "Linux" : null;
+  const osLabel =
+    os === "mac" ? "Mac" : os === "windows" ? "Windows" : os === "linux" ? "Linux" : null;
   const archLabel = os === "mac" ? (arch === "x64" ? "Intel" : "Apple Silicon") : null;
 
   let href: string = SITE.releases;
@@ -183,5 +188,15 @@ export function useDownload(): DownloadInfo {
   }
   const isDirect = href !== SITE.releases;
 
-  return { os, osLabel, arch, archLabel, version, href, isDirect, urls, releasesUrl: SITE.releases };
+  return {
+    os,
+    osLabel,
+    arch,
+    archLabel,
+    version,
+    href,
+    isDirect,
+    urls,
+    releasesUrl: SITE.releases,
+  };
 }
