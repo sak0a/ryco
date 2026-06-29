@@ -114,7 +114,7 @@ describe("ssh tunnel scripts", () => {
     // a directly-resolvable Node (e.g. Homebrew node) is never overridden.
     assert.include(
       script,
-      'if ! command -v node >/dev/null 2>&1 && command -v fnm >/dev/null 2>&1; then',
+      "if ! command -v node >/dev/null 2>&1 && command -v fnm >/dev/null 2>&1; then",
     );
   });
 
