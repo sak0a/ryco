@@ -1,14 +1,19 @@
 import "../index.css";
 
 import { EnvironmentId } from "@ryco/contracts";
-import { page } from "vite-plus/test/browser";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
 import PlanSidebar from "./PlanSidebar";
+import { APPEARANCE_PREFERENCES_STORAGE_KEY } from "../themes/appearancePreferences";
 import type { ThreadSubagentView } from "../threadWorkspaceViewModel";
 
-describe("PlanSidebar checks tooltip", () => {
+describe("PlanSidebar overview panel", () => {
+  // PlanSidebar reads `panelLayout` from persisted appearance preferences; keep
+  // these cases on the default (stack) layout regardless of prior tests.
+  beforeEach(() => {
+    localStorage.removeItem(APPEARANCE_PREFERENCES_STORAGE_KEY);
+  });
   it("keeps the sidebar content-sized when overview content is short", async () => {
     const host = document.createElement("div");
     host.style.width = "380px";
@@ -92,6 +97,17 @@ describe("PlanSidebar checks tooltip", () => {
     );
 
     try {
+      // The Subagents section is collapsed by default (matching the lab); expand
+      // it so the long agent list overflows the viewport. Target it by label so
+      // the test doesn't depend on section ordering.
+      const subagentsHeader =
+        Array.from(host.querySelectorAll<HTMLElement>("button[aria-expanded]")).find((button) =>
+          (button.textContent ?? "").includes("Subagents"),
+        ) ?? null;
+      expect(subagentsHeader).not.toBeNull();
+      subagentsHeader!.click();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
       const viewport = document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
 
       expect(viewport).not.toBeNull();
@@ -108,7 +124,12 @@ describe("PlanSidebar checks tooltip", () => {
     }
   });
 
-  it("opens latest check details from an all-passed summary row", async () => {
+  it("renders pull request checks inline in an expanded section", async () => {
+    const host = document.createElement("div");
+    host.style.width = "380px";
+    host.style.height = "640px";
+    document.body.append(host);
+
     const mounted = await render(
       <PlanSidebar
         activePlan={null}
@@ -116,21 +137,8 @@ describe("PlanSidebar checks tooltip", () => {
         pullRequest={{
           number: 124,
           title: "Consolidate chat right panel",
-          checkStatus: {
-            kind: "passed",
-            tone: "success",
-            icon: "check",
-            label: "All checks passed",
-            shortLabel: "passed",
-            description: "All checks passed.",
-            ariaLabel: "All checks passed.",
-            className: "",
-            iconClassName: "",
-            dotClassName: "",
-            isTerminal: true,
-            isRefreshable: false,
-            failedChecks: [],
-          },
+          state: "open",
+          checkStatus: null,
           checksLoading: false,
           hasMergeConflicts: false,
           activeCheckCount: 0,
@@ -156,29 +164,21 @@ describe("PlanSidebar checks tooltip", () => {
         markdownCwd={undefined}
         workspaceRoot={undefined}
       />,
+      { container: host },
     );
 
     try {
-      await page.getByText("All checks passed").hover();
-
-      await vi.waitFor(
-        () => {
-          const tooltip = document.querySelector<HTMLElement>('[data-slot="tooltip-popup"]');
-          expect(tooltip).not.toBeNull();
-          expect(tooltip?.textContent).toContain("Latest checks");
-          expect(tooltip?.textContent).toContain("Branch");
-          expect(tooltip?.textContent).toContain("Skipped");
-          expect(tooltip?.textContent).toContain("Pull Request / Quality");
-          expect(tooltip?.textContent).toContain("Succeeded");
-        },
-        { timeout: 1_000, interval: 16 },
-      );
+      const text = host.textContent ?? "";
+      expect(text).toContain("#124");
+      expect(text).toContain("Branch");
+      expect(text).toContain("Pull Request / Quality");
 
       const viewport = document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
       expect(viewport).not.toBeNull();
       expect(viewport!.className).toContain("[scrollbar-gutter:stable]");
     } finally {
       await mounted.unmount();
+      host.remove();
     }
   });
 });

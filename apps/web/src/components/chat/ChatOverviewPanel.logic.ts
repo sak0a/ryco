@@ -1,7 +1,8 @@
 import type { ChangeRequest } from "@ryco/contracts";
 import type { OverviewPanelItem } from "../PlanSidebar";
 import { OVERVIEW_CHECK_DETAIL_RUN_LIMIT } from "../overviewPullRequestChecks.logic";
-import { buildOverviewChangesItem } from "../overviewChanges.logic";
+import { buildOverviewChangesItem, partitionOverviewChangedFiles } from "../overviewChanges.logic";
+import type { OverviewChangedFile } from "../overview/overviewTypes";
 import type { useGitStatus } from "~/lib/gitStatusState";
 
 export type GitStatusData = NonNullable<ReturnType<typeof useGitStatus>["data"]>;
@@ -75,12 +76,12 @@ export function resolveWorkflowDetailRunIds(input: {
 
 export interface BuildOverviewItemsInput {
   gitStatusData: GitStatusData | null | undefined;
-  overviewPullRequestDetailData: {
-    changedFiles?: number | undefined;
-    additions?: number | undefined;
-    deletions?: number | undefined;
-  } | null;
-  overviewPullRequestDetailIsLoading: boolean;
+  /**
+   * The unified changed-file list (turn summaries ∪ working tree) that also
+   * drives the expanded Changes view, so the collapsed summary and the file
+   * list always agree. See {@link buildOverviewChangedFiles}.
+   */
+  changedFiles: ReadonlyArray<OverviewChangedFile>;
   overviewPullRequestNumber: number | null;
   activeEnvironmentUnavailableState: {
     label: string;
@@ -90,24 +91,15 @@ export interface BuildOverviewItemsInput {
 
 export function buildOverviewItems(input: BuildOverviewItemsInput): OverviewPanelItem[] {
   const items: OverviewPanelItem[] = [];
-  const gitStatus = input.gitStatusData;
-  if (gitStatus) {
-    const prDetail = input.overviewPullRequestDetailData;
+  // Show the Changes item whenever the repo status has loaded or the session
+  // already has tracked changes (turn summaries can populate the list before
+  // `useGitStatus()` resolves).
+  if (input.gitStatusData || input.changedFiles.length > 0) {
+    const { committed, local } = partitionOverviewChangedFiles(input.changedFiles);
     const changesItem = buildOverviewChangesItem({
-      local: {
-        fileCount: gitStatus.workingTree.files.length,
-        insertions: gitStatus.workingTree.insertions,
-        deletions: gitStatus.workingTree.deletions,
-      },
-      pullRequest:
-        input.overviewPullRequestNumber !== null
-          ? {
-              changedFiles: prDetail?.changedFiles,
-              additions: prDetail?.additions,
-              deletions: prDetail?.deletions,
-              isLoading: input.overviewPullRequestDetailIsLoading,
-            }
-          : null,
+      committed,
+      local,
+      pullRequestNumber: input.overviewPullRequestNumber,
     });
     items.push({ ...changesItem, action: "review", icon: "changes" });
   }

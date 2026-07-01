@@ -213,6 +213,19 @@ const VcsStatusChangeRequest = Schema.Struct({
   state: VcsStatusChangeRequestState,
 });
 
+/** A per-file diff summary plus its rolled-up insertion/deletion totals. */
+const VcsStatusDiffTotals = Schema.Struct({
+  files: Schema.Array(
+    Schema.Struct({
+      path: TrimmedNonEmptyStringSchema,
+      insertions: NonNegativeInt,
+      deletions: NonNegativeInt,
+    }),
+  ),
+  insertions: NonNegativeInt,
+  deletions: NonNegativeInt,
+});
+
 const VcsStatusLocalShape = {
   isRepo: Schema.Boolean,
   sourceControlProvider: Schema.optional(SourceControlProviderInfo),
@@ -220,17 +233,15 @@ const VcsStatusLocalShape = {
   isDefaultRef: Schema.Boolean,
   refName: Schema.NullOr(TrimmedNonEmptyStringSchema),
   hasWorkingTreeChanges: Schema.Boolean,
-  workingTree: Schema.Struct({
-    files: Schema.Array(
-      Schema.Struct({
-        path: TrimmedNonEmptyStringSchema,
-        insertions: NonNegativeInt,
-        deletions: NonNegativeInt,
-      }),
-    ),
-    insertions: NonNegativeInt,
-    deletions: NonNegativeInt,
-  }),
+  /** Uncommitted (staged + unstaged) working-tree changes. */
+  workingTree: VcsStatusDiffTotals,
+  /**
+   * Committed changes on this branch relative to its base (merge-base of the
+   * default branch and HEAD, i.e. `git diff base...HEAD` — the same set a PR
+   * shows). Counts committed work whether or not it has been pushed. Omitted on
+   * the default branch (nothing to compare against) and by non-git drivers.
+   */
+  committed: Schema.optional(VcsStatusDiffTotals),
 };
 
 const VcsStatusRemoteShape = {

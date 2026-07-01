@@ -3,6 +3,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
+  deriveRepositoryWebUrl,
+  normalizeGitRemoteToWebUrl,
   resolveEnvironmentOptionLabel,
   resolveBranchSelectionTarget,
   resolveDraftEnvModeAfterBranchChange,
@@ -10,6 +12,71 @@ import {
   resolveBranchToolbarValue,
   shouldIncludeBranchPickerItem,
 } from "./BranchToolbar.logic";
+
+describe("normalizeGitRemoteToWebUrl", () => {
+  it("converts scp-like, ssh, git and https remotes to a browsable url", () => {
+    expect(normalizeGitRemoteToWebUrl("git@github.com:sak0a/ryco.git")).toBe(
+      "https://github.com/sak0a/ryco",
+    );
+    expect(normalizeGitRemoteToWebUrl("ssh://git@gitlab.com/group/proj.git")).toBe(
+      "https://gitlab.com/group/proj",
+    );
+    expect(normalizeGitRemoteToWebUrl("https://bitbucket.org/team/repo.git")).toBe(
+      "https://bitbucket.org/team/repo",
+    );
+    expect(normalizeGitRemoteToWebUrl("https://user:token@git.example.com/o/r")).toBe(
+      "https://git.example.com/o/r",
+    );
+    expect(normalizeGitRemoteToWebUrl("git@self-hosted.example.com:owner/repo")).toBe(
+      "https://self-hosted.example.com/owner/repo",
+    );
+  });
+
+  it("drops SSH ports from the derived web url", () => {
+    expect(normalizeGitRemoteToWebUrl("ssh://git@host.example.com:2222/owner/repo.git")).toBe(
+      "https://host.example.com/owner/repo",
+    );
+  });
+
+  it("rejects local filesystem remotes so callers can fall back", () => {
+    expect(normalizeGitRemoteToWebUrl("C:/mirror/repo.git")).toBeNull();
+    expect(normalizeGitRemoteToWebUrl("c:\\mirror\\repo")).toBeNull();
+    expect(normalizeGitRemoteToWebUrl("\\\\server\\share\\repo")).toBeNull();
+  });
+
+  it("returns null for unparseable or bare remotes", () => {
+    expect(normalizeGitRemoteToWebUrl("")).toBeNull();
+    expect(normalizeGitRemoteToWebUrl("https://github.com/")).toBeNull();
+  });
+});
+
+describe("deriveRepositoryWebUrl", () => {
+  it("prefers the locator remote and falls back to the first parseable remote", () => {
+    expect(
+      deriveRepositoryWebUrl({
+        canonicalKey: "k",
+        locator: {
+          source: "git-remote",
+          remoteName: "origin",
+          remoteUrl: "git@github.com:o/r.git",
+        },
+        remotes: [],
+      }),
+    ).toBe("https://github.com/o/r");
+    expect(
+      deriveRepositoryWebUrl({
+        canonicalKey: "k",
+        locator: { source: "git-remote", remoteName: "origin", remoteUrl: "not-a-url" },
+        remotes: [{ name: "upstream", url: "https://gitlab.com/g/p.git" }],
+      }),
+    ).toBe("https://gitlab.com/g/p");
+  });
+
+  it("returns null when no identity or remote is usable", () => {
+    expect(deriveRepositoryWebUrl(null)).toBeNull();
+    expect(deriveRepositoryWebUrl(undefined)).toBeNull();
+  });
+});
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 const remoteEnvironmentId = EnvironmentId.make("environment-remote");

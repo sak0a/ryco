@@ -9,6 +9,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -23,11 +24,19 @@ import {
   useOverviewWorkflowRuns,
 } from "~/rpc/useOverview";
 import { cn } from "~/lib/utils";
-import PlanSidebar, { type OverviewPanelItem, type OverviewPullRequestState } from "../PlanSidebar";
+import PlanSidebar, {
+  type OverviewChanges,
+  type OverviewPanelItem,
+  type OverviewPullRequestState,
+} from "../PlanSidebar";
 import type { ActivePlanState, LatestProposedPlanState } from "../../session-logic";
 import type { ThreadSubagentView } from "../../threadWorkspaceViewModel";
+import type { TurnDiffSummary } from "../../types";
 import type { DraftId } from "../../composerDraftStore";
 import { BranchToolbarBranchSelector } from "../BranchToolbarBranchSelector";
+import { buildOverviewChangedFiles } from "../overviewChanges.logic";
+import { classifyOverviewError } from "../overview/overviewErrors.logic";
+import { toastManager, stackedThreadToast } from "../ui/toast";
 import GitActionsControl, { type GitActionPostPushEvent } from "../GitActionsControl";
 import {
   createPostPushWorkflowDiscoveryWatch,
@@ -38,7 +47,6 @@ import {
   buildOverviewCheckRollupRows,
   buildOverviewItems,
   buildOverviewWorkflowCheckRows,
-  compactQueryErrorMessage,
   findChangeRequestForBranch,
   getPrCheckStatusForQuery,
   getPrCheckStatusFromChangeRequest,
@@ -166,6 +174,7 @@ export interface ChatOverviewPanelProps {
   activePlan: ActivePlanState | null;
   sidebarProposedPlan: LatestProposedPlanState | null;
   threadSubagents: ReadonlyArray<ThreadSubagentView>;
+  changedFileSummaries?: ReadonlyArray<TurnDiffSummary> | undefined;
   sourceControlActions: ReactNode;
   branchControl: ReactNode;
   markdownCwd: string | undefined;
@@ -270,6 +279,7 @@ export function useOverviewPanelControls(input: OverviewPanelControlsInput): Ove
           {...(routeKind === "draft" && draftId ? { draftId } : {})}
           onPostPush={onPostPush}
           showLabels
+          block
         />
       ) : null,
     [gitCwd, activeThreadRef, routeKind, draftId, onPostPush],
@@ -279,7 +289,8 @@ export function useOverviewPanelControls(input: OverviewPanelControlsInput): Ove
     () =>
       branchControlThread && isGitRepo ? (
         <BranchToolbarBranchSelector
-          className="max-w-[168px] justify-end px-1.5"
+          appearance="pill"
+          className="max-w-[200px]"
           environmentId={branchControlThread.environmentId}
           threadId={branchControlThread.id}
           {...(routeKind === "draft" && draftId ? { draftId } : {})}
@@ -332,6 +343,7 @@ export function ChatOverviewPanel(
     activePlan,
     sidebarProposedPlan,
     threadSubagents,
+    changedFileSummaries,
     sourceControlActions,
     branchControl,
     markdownCwd,
@@ -482,6 +494,21 @@ export function ChatOverviewPanel(
       enabled: overviewWorkflowRunsSupported && overviewPullRequestNumber !== null,
     });
 
+  // Classify the source-control fetch error once (transient vs terminal, short
+  // copy). Memoized on the underlying query errors so it only changes when a
+  // fetch actually fails/recovers — which the toast effect below dedupes on.
+  const checksErrorInfo = useMemo(
+    () =>
+      classifyOverviewError(
+        selectOverviewChecksError({
+          workflowRunsSupported: overviewWorkflowRunsSupported,
+          workflowError: overviewWorkflowRuns.error,
+          detailError: overviewPullRequestDetail.error,
+        }),
+      ),
+    [overviewWorkflowRunsSupported, overviewWorkflowRuns.error, overviewPullRequestDetail.error],
+  );
+
   const overviewPullRequest = useMemo<OverviewPullRequestState | null>(() => {
     if (overviewPullRequestNumber === null) {
       return null;
@@ -552,7 +579,11 @@ export function ChatOverviewPanel(
     const pullRequestUrl = detail?.url ?? gitPr?.url ?? branchPr?.url ?? null;
     const pullRequestState =
       detail?.state ?? activeWorktreePrState ?? gitPr?.state ?? branchPr?.state ?? null;
-    const checksError = compactQueryErrorMessage(checksQueryError);
+    const checksError = checksErrorInfo;
+    const reviewsApproved = detail?.participants
+      ? detail.participants.filter((participant) => participant.approved === true).length
+      : undefined;
+    const reviewsRequested = detail?.reviewers ? detail.reviewers.length : undefined;
 
     return {
       number: overviewPullRequestNumber,
@@ -571,6 +602,8 @@ export function ChatOverviewPanel(
           : typeof branchPr?.commentsCount === "number"
             ? { commentsCount: branchPr.commentsCount }
             : {}),
+      ...(typeof reviewsApproved === "number" ? { reviewsApproved } : {}),
+      ...(typeof reviewsRequested === "number" ? { reviewsRequested } : {}),
       checkStatus,
       checksLoading:
         (overviewWorkflowRunsSupported && overviewWorkflowRuns.isLoading) ||
@@ -591,6 +624,7 @@ export function ChatOverviewPanel(
   }, [
     activeWorktreePrState,
     activeWorktreeTitle,
+    checksErrorInfo,
     gitStatusQuery.data?.pr,
     overviewActiveWorkflowRunId,
     overviewBranchPullRequest,
@@ -606,23 +640,86 @@ export function ChatOverviewPanel(
     overviewWorkflowRuns.isLoading,
   ]);
 
+  // Surface a source-control fetch failure as a single toast per error episode
+  // rather than a persistent banner in the panel. The dedupe signature keys off
+  // the PR + kind + message, so the 30s polling loop won't re-toast the same
+  // failure; it resets when the error clears, so a later recurrence notifies
+  // again. The raw command dump stays out of the UI and only goes to the log.
+  const lastToastedErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!checksErrorInfo) {
+      lastToastedErrorRef.current = null;
+      return;
+    }
+    const signature = `${overviewPullRequestNumber ?? "?"}|${checksErrorInfo.kind}|${checksErrorInfo.message}`;
+    if (lastToastedErrorRef.current === signature) return;
+    lastToastedErrorRef.current = signature;
+    if (checksErrorInfo.raw) {
+      console.debug("[overview] source control fetch failed:", checksErrorInfo.raw);
+    }
+    toastManager.add(
+      stackedThreadToast({
+        type: checksErrorInfo.kind === "terminal" ? "error" : "warning",
+        title:
+          checksErrorInfo.kind === "terminal"
+            ? "Pull request unavailable"
+            : "Couldn't refresh pull request",
+        description: checksErrorInfo.message,
+      }),
+    );
+  }, [checksErrorInfo, overviewPullRequestNumber]);
+
+  // The working tree only lists *uncommitted* files, so once the session's
+  // changes are committed the overview would go blank while the Review panel
+  // still shows everything. Merge the session's turn diff summaries (the same
+  // per-file source the Review view uses — path + kind + additions/deletions)
+  // with the working tree so committed and uncommitted changes both appear.
+  // `kind` also yields the real M/A/D status. Staged / conflict flags are still
+  // unavailable (would need `git status --porcelain=2` through the contract).
+  // This one list feeds both the collapsed summary item and the expanded file
+  // list, so the +/- totals and the buckets can never disagree.
+  const changedFiles = useMemo(
+    () =>
+      buildOverviewChangedFiles(
+        changedFileSummaries ?? [],
+        gitStatusQuery.data?.workingTree.files ?? [],
+        gitStatusQuery.data?.committed?.files ?? [],
+      ),
+    [changedFileSummaries, gitStatusQuery.data],
+  );
+
   const overviewItems = useMemo<OverviewPanelItem[]>(
     () =>
       buildOverviewItems({
         gitStatusData: gitStatusQuery.data,
-        overviewPullRequestDetailData: overviewPullRequestDetail.data ?? null,
-        overviewPullRequestDetailIsLoading: overviewPullRequestDetail.isLoading,
+        changedFiles,
         overviewPullRequestNumber,
         activeEnvironmentUnavailableState,
       }),
     [
       activeEnvironmentUnavailableState,
       gitStatusQuery.data,
-      overviewPullRequestDetail.data,
-      overviewPullRequestDetail.isLoading,
+      changedFiles,
       overviewPullRequestNumber,
     ],
   );
+
+  const overviewChanges = useMemo<OverviewChanges | undefined>(() => {
+    const data = gitStatusQuery.data;
+    // Don't gate on git status: turn diff summaries alone should keep the
+    // Changes section populated while `useGitStatus()` is still loading.
+    if (!data && changedFiles.length === 0) return undefined;
+    const insertions = changedFiles.reduce((total, file) => total + file.insertions, 0);
+    const deletions = changedFiles.reduce((total, file) => total + file.deletions, 0);
+    return {
+      files: changedFiles,
+      insertions,
+      deletions,
+      refName: data?.refName ?? null,
+      aheadCount: data?.aheadCount ?? 0,
+      behindCount: data?.behindCount ?? 0,
+    };
+  }, [gitStatusQuery.data, changedFiles]);
 
   const handleRefreshPullRequest = useCallback(() => {
     invalidateOverviewSourceControl(gitCwd);
@@ -636,6 +733,7 @@ export function ChatOverviewPanel(
     <PlanSidebar
       activePlan={activePlan}
       activeProposedPlan={sidebarProposedPlan}
+      changes={overviewChanges}
       overviewItems={overviewItems}
       pullRequest={overviewPullRequest}
       onRefreshPullRequest={handleRefreshPullRequest}

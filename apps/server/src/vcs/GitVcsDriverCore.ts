@@ -68,6 +68,13 @@ const NON_REPOSITORY_STATUS_DETAILS = Object.freeze<GitVcsDriver.GitStatusDetail
   aheadOfDefaultCount: 0,
 });
 
+type GitDiffTotals = {
+  files: Array<{ path: string; insertions: number; deletions: number }>;
+  insertions: number;
+  deletions: number;
+};
+const emptyDiffTotals = (): GitDiffTotals => ({ files: [], insertions: 0, deletions: 0 });
+
 type TraceTailState = {
   processedChars: number;
   remainder: string;
@@ -1251,6 +1258,42 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
   });
 
+  // Committed changes on this branch vs its base, using three-dot (merge-base)
+  // range semantics so it matches what a PR shows. Independent of push state,
+  // so committed-but-unpushed work is still counted.
+  const readCommittedAgainstBase = Effect.fn("readCommittedAgainstBase")(function* (
+    cwd: string,
+    refName: string,
+  ) {
+    const baseRef = yield* resolveBaseBranchForNoUpstream(cwd, refName).pipe(
+      Effect.catch(() => Effect.succeed(null)),
+    );
+    if (!baseRef) {
+      return emptyDiffTotals();
+    }
+
+    const result = yield* executeGit(
+      "GitVcsDriver.readCommittedAgainstBase.diff",
+      cwd,
+      ["diff", "--numstat", `${baseRef}...HEAD`],
+      { allowNonZeroExit: true },
+    );
+    if (result.exitCode !== 0) {
+      return emptyDiffTotals();
+    }
+
+    let insertions = 0;
+    let deletions = 0;
+    const files = parseNumstatEntries(result.stdout)
+      .map((entry) => {
+        insertions += entry.insertions;
+        deletions += entry.deletions;
+        return { path: entry.path, insertions: entry.insertions, deletions: entry.deletions };
+      })
+      .toSorted((a, b) => a.path.localeCompare(b.path));
+    return { files, insertions, deletions };
+  });
+
   const readBranchRecency = Effect.fn("readBranchRecency")(function* (cwd: string) {
     const branchRecency = yield* executeGit(
       "GitVcsDriver.readBranchRecency",
@@ -1425,6 +1468,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
     files.sort((a, b) => a.path.localeCompare(b.path));
 
+    // On the default branch there is no base to diff against, so committed work
+    // vs base is undefined (all changes there are working-tree only). Any git
+    // failure degrades to empty rather than failing the whole status read.
+    const committed =
+      refName && !isDefaultBranch
+        ? yield* readCommittedAgainstBase(cwd, refName).pipe(
+            Effect.catch(() => Effect.succeed(emptyDiffTotals())),
+          )
+        : undefined;
+
     return {
       isRepo: true,
       hasOriginRemote: hasPrimaryRemote,
@@ -1437,6 +1490,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         insertions,
         deletions,
       },
+      ...(committed ? { committed } : {}),
       hasUpstream: upstreamRef !== null,
       aheadCount,
       behindCount,
@@ -1469,6 +1523,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         refName: details.branch,
         hasWorkingTreeChanges: details.hasWorkingTreeChanges,
         workingTree: details.workingTree,
+        ...(details.committed ? { committed: details.committed } : {}),
         hasUpstream: details.hasUpstream,
         aheadCount: details.aheadCount,
         behindCount: details.behindCount,

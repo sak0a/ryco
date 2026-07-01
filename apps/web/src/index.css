@@ -197,6 +197,25 @@
   }
 }
 
+/* Overview panel: brief highlight when a Hybrid metric tile jumps to its section. */
+.overview-jump-flash {
+  animation: overview-jump-flash 1s ease;
+}
+@keyframes overview-jump-flash {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  30% {
+    background-color: color-mix(in srgb, var(--primary) 8%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .overview-jump-flash {
+    animation: none;
+  }
+}
+
 /* Safe-area inset utilities for surfaces that opt into edge-to-edge rendering.
    Insets resolve to 0 when the browser already constrains the layout viewport
    to the safe area. */

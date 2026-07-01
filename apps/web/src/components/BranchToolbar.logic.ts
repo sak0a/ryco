@@ -1,6 +1,63 @@
-import type { EnvironmentId, VcsRef, ProjectId } from "@ryco/contracts";
+import type { EnvironmentId, RepositoryIdentity, VcsRef, ProjectId } from "@ryco/contracts";
 import { Schema } from "effect";
 import { isGenericLocalEnvironmentLabel, normalizeDisplayLabel } from "../environmentDisplay";
+
+/**
+ * Convert a git remote URL (scp-like `git@host:owner/repo.git`, `ssh://`,
+ * `https://`, `git://`) into a browsable `https://host/owner/repo` URL.
+ * Returns null when it can't be parsed.
+ */
+export function normalizeGitRemoteToWebUrl(remoteUrl: string): string | null {
+  const trimmed = remoteUrl
+    .trim()
+    .replace(/\.git$/i, "")
+    .replace(/\/+$/, "");
+  if (!trimmed) return null;
+
+  // Local filesystem remotes aren't browsable web URLs — bail so callers can
+  // fall back to a hosted remote (e.g. Windows `C:/mirror/repo`, UNC `\\host`).
+  if (/^[a-z]:[\\/]/i.test(trimmed) || trimmed.startsWith("\\\\")) {
+    return null;
+  }
+
+  // scp-like syntax: [user@]host:owner/repo (no scheme, has a colon)
+  if (!trimmed.includes("://")) {
+    const scp = /^(?:[^@/]+@)?([^:/]+):(.+)$/.exec(trimmed);
+    if (scp?.[1] && scp[2]) {
+      return `https://${scp[1]}/${scp[2].replace(/^\/+/, "")}`;
+    }
+    return null;
+  }
+
+  try {
+    const parsed = new URL(
+      trimmed.replace(/^(ssh|git|http):\/\//i, "https://").replace(/^ssh:/i, "https:"),
+    );
+    // Use `hostname` (not `host`) so an SSH port like `:2222` doesn't leak into
+    // the derived https URL.
+    if (!parsed.hostname || parsed.pathname === "/" || parsed.pathname === "") return null;
+    return `https://${parsed.hostname}${parsed.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve a browsable repository URL from a project's repository identity. */
+export function deriveRepositoryWebUrl(
+  identity: RepositoryIdentity | null | undefined,
+): string | null {
+  if (!identity) return null;
+  const candidates = [
+    identity.locator?.remoteUrl,
+    ...(identity.remotes ?? []).map((remote) => remote.url),
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const webUrl = normalizeGitRemoteToWebUrl(candidate);
+    if (webUrl) return webUrl;
+  }
+  return null;
+}
 export {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
