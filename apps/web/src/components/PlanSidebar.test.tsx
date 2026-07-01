@@ -1,12 +1,17 @@
 import { EnvironmentId } from "@ryco/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import PlanSidebar from "./PlanSidebar";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 
 describe("PlanSidebar", () => {
+  // These assertions assume the default (stack) layout; ensure a `panelLayout`
+  // stored by another suite can't leak in through a shared global localStorage.
+  beforeEach(() => {
+    Reflect.deleteProperty(globalThis, "localStorage");
+  });
   it("summarizes changes into committed / uncommitted buckets (no per-file rows)", () => {
     const markup = renderToStaticMarkup(
       <PlanSidebar
