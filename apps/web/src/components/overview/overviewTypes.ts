@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import type { ActivePlanState, LatestProposedPlanState } from "../../session-logic";
 import type { ThreadSubagentView } from "../../threadWorkspaceViewModel";
 import type { OverviewWorkflowCheckRow } from "../overviewPullRequestChecks.logic";
+import type { OverviewErrorInfo } from "./overviewErrors.logic";
 import type { PrCheckStatusView } from "../projectExplorer/prCheckStatus";
 
 export interface OverviewPanelItem {
@@ -38,7 +39,8 @@ export interface OverviewPullRequestState {
   reviewsRequested?: number;
   checkStatus: PrCheckStatusView | null;
   checksLoading: boolean;
-  checksError?: string;
+  /** Classified source-control fetch error (transient vs terminal), if any. */
+  checksError?: OverviewErrorInfo;
   mergeability?: SourceControlChangeRequestMergeability;
   hasMergeConflicts: boolean;
   activeCheckCount: number;

@@ -949,17 +949,26 @@ export function ChecksContent({
 }: {
   pullRequest: NonNullable<OverviewLayoutProps["pullRequest"]>;
 }) {
+  // Terminal errors need an actionable, persistent message; transient ones
+  // (timeout / network blip) get a quiet muted line — the loud notice is a
+  // one-time toast, and the refresh control carries the retry affordance.
+  const error = pullRequest.checksError;
   return (
     <div>
-      {pullRequest.checksError ? (
-        <p className="px-3 py-1.5 text-[11.5px] text-destructive-foreground">
-          {pullRequest.checksError}
+      {error ? (
+        <p
+          className={cn(
+            "px-3 py-1.5 text-[11.5px]",
+            error.kind === "terminal" ? "text-destructive-foreground" : "text-muted-foreground",
+          )}
+        >
+          {error.message}
         </p>
       ) : null}
       {pullRequest.latestRuns.map((run) => (
         <CheckRow key={run.id} run={run} />
       ))}
-      {pullRequest.latestRuns.length === 0 && !pullRequest.checksError ? (
+      {pullRequest.latestRuns.length === 0 && !error ? (
         <p className="px-3 py-1.5 text-[12px] text-muted-foreground">No checks reported.</p>
       ) : null}
     </div>

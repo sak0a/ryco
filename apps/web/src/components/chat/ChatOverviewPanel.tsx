@@ -9,6 +9,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -34,6 +35,8 @@ import type { TurnDiffSummary } from "../../types";
 import type { DraftId } from "../../composerDraftStore";
 import { BranchToolbarBranchSelector } from "../BranchToolbarBranchSelector";
 import { buildOverviewChangedFiles } from "../overviewChanges.logic";
+import { classifyOverviewError } from "../overview/overviewErrors.logic";
+import { toastManager, stackedThreadToast } from "../ui/toast";
 import GitActionsControl, { type GitActionPostPushEvent } from "../GitActionsControl";
 import {
   createPostPushWorkflowDiscoveryWatch,
@@ -44,7 +47,6 @@ import {
   buildOverviewCheckRollupRows,
   buildOverviewItems,
   buildOverviewWorkflowCheckRows,
-  compactQueryErrorMessage,
   findChangeRequestForBranch,
   getPrCheckStatusForQuery,
   getPrCheckStatusFromChangeRequest,
@@ -492,6 +494,21 @@ export function ChatOverviewPanel(
       enabled: overviewWorkflowRunsSupported && overviewPullRequestNumber !== null,
     });
 
+  // Classify the source-control fetch error once (transient vs terminal, short
+  // copy). Memoized on the underlying query errors so it only changes when a
+  // fetch actually fails/recovers — which the toast effect below dedupes on.
+  const checksErrorInfo = useMemo(
+    () =>
+      classifyOverviewError(
+        selectOverviewChecksError({
+          workflowRunsSupported: overviewWorkflowRunsSupported,
+          workflowError: overviewWorkflowRuns.error,
+          detailError: overviewPullRequestDetail.error,
+        }),
+      ),
+    [overviewWorkflowRunsSupported, overviewWorkflowRuns.error, overviewPullRequestDetail.error],
+  );
+
   const overviewPullRequest = useMemo<OverviewPullRequestState | null>(() => {
     if (overviewPullRequestNumber === null) {
       return null;
@@ -562,7 +579,7 @@ export function ChatOverviewPanel(
     const pullRequestUrl = detail?.url ?? gitPr?.url ?? branchPr?.url ?? null;
     const pullRequestState =
       detail?.state ?? activeWorktreePrState ?? gitPr?.state ?? branchPr?.state ?? null;
-    const checksError = compactQueryErrorMessage(checksQueryError);
+    const checksError = checksErrorInfo;
     const reviewsApproved = detail?.participants
       ? detail.participants.filter((participant) => participant.approved === true).length
       : undefined;
@@ -607,6 +624,7 @@ export function ChatOverviewPanel(
   }, [
     activeWorktreePrState,
     activeWorktreeTitle,
+    checksErrorInfo,
     gitStatusQuery.data?.pr,
     overviewActiveWorkflowRunId,
     overviewBranchPullRequest,
@@ -621,6 +639,35 @@ export function ChatOverviewPanel(
     overviewWorkflowRuns.error,
     overviewWorkflowRuns.isLoading,
   ]);
+
+  // Surface a source-control fetch failure as a single toast per error episode
+  // rather than a persistent banner in the panel. The dedupe signature keys off
+  // the PR + kind + message, so the 30s polling loop won't re-toast the same
+  // failure; it resets when the error clears, so a later recurrence notifies
+  // again. The raw command dump stays out of the UI and only goes to the log.
+  const lastToastedErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!checksErrorInfo) {
+      lastToastedErrorRef.current = null;
+      return;
+    }
+    const signature = `${overviewPullRequestNumber ?? "?"}|${checksErrorInfo.kind}|${checksErrorInfo.message}`;
+    if (lastToastedErrorRef.current === signature) return;
+    lastToastedErrorRef.current = signature;
+    if (checksErrorInfo.raw) {
+      console.debug("[overview] source control fetch failed:", checksErrorInfo.raw);
+    }
+    toastManager.add(
+      stackedThreadToast({
+        type: checksErrorInfo.kind === "terminal" ? "error" : "warning",
+        title:
+          checksErrorInfo.kind === "terminal"
+            ? "Pull request unavailable"
+            : "Couldn't refresh pull request",
+        description: checksErrorInfo.message,
+      }),
+    );
+  }, [checksErrorInfo, overviewPullRequestNumber]);
 
   // The working tree only lists *uncommitted* files, so once the session's
   // changes are committed the overview would go blank while the Review panel

@@ -35,6 +35,11 @@ function HeaderTrailing({
   const showRefresh = Boolean(layoutProps.onRefreshPullRequest);
   if (!showConflict && !showRefresh) return null;
 
+  // A lingering source-control fetch error is surfaced loudly once (via toast);
+  // afterwards this quiet dot on the refresh control is the only persistent cue
+  // that the panel data may be stale and a retry is worthwhile.
+  const hasSourceControlError = Boolean(layoutProps.pullRequest?.checksError);
+
   return (
     <div className="flex shrink-0 items-center gap-1.5">
       {showConflict ? (
@@ -43,19 +48,31 @@ function HeaderTrailing({
         </OverviewBadge>
       ) : null}
       {showRefresh ? (
-        <Button
-          type="button"
-          size="icon-xs"
-          variant="ghost"
-          className="shrink-0 text-muted-foreground hover:text-foreground"
-          onClick={layoutProps.onRefreshPullRequest}
-          disabled={layoutProps.isRefreshingPullRequest}
-          aria-label="Refresh source control"
-        >
-          <RotateCwIcon
-            className={cn("size-3.5", layoutProps.isRefreshingPullRequest && "animate-spin")}
-          />
-        </Button>
+        <div className="relative shrink-0">
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            className="text-muted-foreground hover:text-foreground"
+            onClick={layoutProps.onRefreshPullRequest}
+            disabled={layoutProps.isRefreshingPullRequest}
+            aria-label={
+              hasSourceControlError
+                ? "Retry loading source control (last refresh failed)"
+                : "Refresh source control"
+            }
+          >
+            <RotateCwIcon
+              className={cn("size-3.5", layoutProps.isRefreshingPullRequest && "animate-spin")}
+            />
+          </Button>
+          {hasSourceControlError && !layoutProps.isRefreshingPullRequest ? (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute -top-0.5 -right-0.5 size-2 rounded-full bg-warning ring-2 ring-card"
+            />
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
