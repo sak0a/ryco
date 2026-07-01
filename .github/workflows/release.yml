@@ -211,6 +211,9 @@ jobs:
       - name: Build desktop artifact
         shell: bash
         env:
+          # macOS Developer ID signing (secrets.CSC_LINK is the mac .p12). The
+          # Windows self-sign branch below does not read these; it overrides
+          # CSC_LINK / CSC_KEY_PASSWORD in-shell from WINDOWS_CERTIFICATE_BASE64.
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -223,6 +226,8 @@ jobs:
           AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
           AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
           AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
           args=(
             --platform "${{ matrix.platform }}"
@@ -262,8 +267,17 @@ jobs:
               "$AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"; then
               echo "Windows signing enabled (Azure Trusted Signing)."
               args+=(--signed)
+            elif has_all "$WINDOWS_CERTIFICATE_BASE64" "$WINDOWS_CERTIFICATE_PASSWORD"; then
+              # electron-builder accepts a base64-encoded .pfx directly in
+              # CSC_LINK, so no on-disk decode step is needed. It signs the
+              # installer and inner binaries and regenerates the updater
+              # blockmap from the signed artifacts.
+              export CSC_LINK="$WINDOWS_CERTIFICATE_BASE64"
+              export CSC_KEY_PASSWORD="$WINDOWS_CERTIFICATE_PASSWORD"
+              echo "Windows signing enabled (certificate from WINDOWS_CERTIFICATE_BASE64)."
+              args+=(--signed)
             else
-              echo "Windows signing disabled (missing one or more Azure Trusted Signing secrets)."
+              echo "Windows signing disabled (no Azure Trusted Signing or WINDOWS_CERTIFICATE_BASE64 secrets)."
             fi
           else
             echo "Signing disabled for ${{ matrix.platform }}."
