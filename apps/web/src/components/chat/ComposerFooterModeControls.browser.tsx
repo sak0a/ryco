@@ -111,10 +111,8 @@ describe("ComposerFooterModeControls", () => {
       expectExpandableLabelExpanded("Runtime mode: Full access", true);
     });
     await page.getByRole("option", { name: /Supervised/ }).click();
-    await vi.waitFor(() => {
-      expectSelectPopupClosed();
-      expectExpandableLabelExpanded("Runtime mode: Full access", true);
-    });
+    await vi.waitFor(() => expectSelectPopupClosed());
+    expectExpandableLabelExpanded("Runtime mode: Full access", true);
     await wait(POPUP_CLOSE_VERIFICATION_DELAY_MS);
     expectExpandableLabelExpanded("Runtime mode: Full access", false);
 
@@ -123,10 +121,8 @@ describe("ComposerFooterModeControls", () => {
       expectExpandableLabelExpanded("Token mode: Balanced", true);
     });
     await page.getByRole("option", { name: /Balanced/ }).click();
-    await vi.waitFor(() => {
-      expectSelectPopupClosed();
-      expectExpandableLabelExpanded("Token mode: Balanced", true);
-    });
+    await vi.waitFor(() => expectSelectPopupClosed());
+    expectExpandableLabelExpanded("Token mode: Balanced", true);
     await wait(POPUP_CLOSE_VERIFICATION_DELAY_MS);
     expectExpandableLabelExpanded("Token mode: Balanced", false);
   });
