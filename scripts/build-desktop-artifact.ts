@@ -1009,7 +1009,21 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       icon: "icon.ico",
     };
     if (signed) {
-      winConfig.azureSignOptions = yield* AzureTrustedSigningOptionsConfig;
+      // Prefer Azure Trusted Signing when its credentials are present. Otherwise
+      // fall back to a traditional certificate that electron-builder signs with
+      // natively via CSC_LINK/CSC_KEY_PASSWORD (for example a self-signed .pfx).
+      // Signing inside electron-builder keeps the NSIS installer, the inner
+      // executables, and the electron-updater blockmap/latest.yml mutually
+      // consistent, which a post-build signtool step would not.
+      const azureSignOptions = yield* AzureTrustedSigningOptionsConfig.pipe(Config.option);
+      if (Option.isSome(azureSignOptions)) {
+        winConfig.azureSignOptions = azureSignOptions.value;
+        yield* Effect.log("[desktop-artifact] Windows signing: Azure Trusted Signing.");
+      } else {
+        yield* Effect.log(
+          "[desktop-artifact] Windows signing: certificate from CSC_LINK/CSC_KEY_PASSWORD.",
+        );
+      }
     } else {
       winConfig.signAndEditExecutable = false;
     }
