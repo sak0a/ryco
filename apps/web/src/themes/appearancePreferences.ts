@@ -177,10 +177,12 @@ const SURFACE_TRANSPARENCY_STEPS: Record<string, number> = {
   glass: 0.28,
 };
 
+/** Check if localStorage is available in the current environment. */
 function hasStorage(): boolean {
   return typeof localStorage !== "undefined";
 }
 
+/** Load appearance preference overrides from localStorage and validate each one. */
 function parseStoredOverrides(): Partial<AppearancePreferences> {
   if (!hasStorage()) return {};
   const raw = localStorage.getItem(APPEARANCE_PREFERENCES_STORAGE_KEY);
@@ -203,6 +205,7 @@ function parseStoredOverrides(): Partial<AppearancePreferences> {
   }
 }
 
+/** Persist appearance preference overrides to localStorage, clearing storage if no overrides remain. */
 function writeStoredOverrides(overrides: Partial<AppearancePreferences>): void {
   if (!hasStorage()) return;
   if (Object.keys(overrides).length === 0) {
@@ -272,6 +275,7 @@ export function normalizePrimaryColor(value: unknown): string | null {
   return `#${longMatch[1].toLowerCase()}`;
 }
 
+/** Generate CSS variable declarations for all border-radius tokens derived from a base radius. */
 function buildRadiusCssVariables(radius: string): string {
   const tokens = Object.entries(RADIUS_TOKEN_OFFSETS_PX)
     .map(
@@ -281,6 +285,7 @@ function buildRadiusCssVariables(radius: string): string {
   return `--radius: ${radius}; ${tokens}`;
 }
 
+/** Apply per-token radius offset to compute variant border-radius values (sm/md/lg/xl/2xl/3xl/4xl). */
 function resolveRadiusToken(radius: string, offsetPx: number): string {
   if (radius === "0rem") return "0px";
   const baseRem = Number.parseFloat(radius);
@@ -289,11 +294,13 @@ function resolveRadiusToken(radius: string, offsetPx: number): string {
   return formatRemLength(nextPx / 16);
 }
 
+/** Format a number as rem, clamped to 4 decimal places and converted to px if zero. */
 function formatRemLength(rem: number): string {
   if (rem === 0) return "0px";
   return `${Number(rem.toFixed(4))}rem`;
 }
 
+/** Generate CSS variables for surface transparency and glass-effect opacity values. */
 function buildSurfaceTransparencyCssVariables(surfaceTransparency: string): string {
   const transparency = SURFACE_TRANSPARENCY_STEPS[surfaceTransparency] ?? 0;
   const surfaceOpacity = 100 - transparency * 100;
@@ -316,6 +323,7 @@ function buildSurfaceTransparencyCssVariables(surfaceTransparency: string): stri
     .join(" ");
 }
 
+/** Generate CSS rule for custom primary color, including the computed foreground color for contrast. */
 function buildPrimaryColorCssRule(preferences: AppearancePreferences): string {
   if (preferences.primaryColorMode !== "custom") return "";
   const primaryColor = normalizePrimaryColor(preferences.primaryColor);
@@ -324,6 +332,7 @@ function buildPrimaryColorCssRule(preferences: AppearancePreferences): string {
   return ` :root, :root.dark { --primary: ${primaryColor}; --ring: ${primaryColor}; --primary-foreground: ${primaryForeground}; }`;
 }
 
+/** Determine foreground color (light or dark) for the given hex color using WCAG relative luminance. */
 function resolvePrimaryForeground(hex: string): string {
   const normalized = normalizePrimaryColor(hex);
   if (!normalized) return "#ffffff";
@@ -338,10 +347,12 @@ function resolvePrimaryForeground(hex: string): string {
   return luminance > 0.46 ? "#0f172a" : "#ffffff";
 }
 
+/** Format a number as a percentage string with 2 decimal places. */
 function formatPercent(percent: number): string {
   return `${Number(percent.toFixed(2))}%`;
 }
 
+/** Get or create the style element where appearance preferences CSS is injected into the document head. */
 function ensureAppearancePreferencesStyleElement(): HTMLStyleElement {
   const existing = document.getElementById(APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID);
   if (existing instanceof HTMLStyleElement) {
@@ -354,6 +365,7 @@ function ensureAppearancePreferencesStyleElement(): HTMLStyleElement {
   return style;
 }
 
+/** Dispatch a custom event to notify all listeners that appearance preferences have changed. */
 function dispatchAppearancePreferencesChangeEvent(): void {
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
   window.dispatchEvent(new Event(APPEARANCE_PREFERENCES_CHANGE_EVENT));

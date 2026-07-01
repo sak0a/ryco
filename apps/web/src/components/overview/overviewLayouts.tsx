@@ -42,6 +42,7 @@ import type { OverviewLayoutProps } from "./overviewTypes";
 
 type SectionId = "changes" | "plan" | "agents" | "pr" | "env";
 
+/** Check if either the active plan or proposed plan has content to display. */
 function isPlanActive(props: OverviewLayoutProps): boolean {
   return Boolean(
     (props.activePlan && (props.activePlan.steps.length > 0 || props.activePlan.explanation)) ||
@@ -49,14 +50,17 @@ function isPlanActive(props: OverviewLayoutProps): boolean {
   );
 }
 
+/** Animated pulse dot indicating an in-progress operation. */
 function RunningDot() {
   return <span className="ml-px size-2 shrink-0 rounded-full bg-sky-400 animate-pulse" />;
 }
 
+/** Format a count and word pair with proper pluralization. */
 function plural(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
 }
 
+/** Generate a brief status label for PR checks (failed count, running, or passing). */
 function checksHint(summary: OverviewSummary, failedWord: string): string {
   if (summary.checksFailed > 0) return `${summary.checksFailed} ${failedWord}`;
   if (summary.checksRunning > 0) return `${summary.checksRunning} running`;
@@ -76,6 +80,7 @@ function PlanValue({ summary }: { summary: OverviewSummary }) {
  * Section summary badges (accordion / lane heads)
  * ------------------------------------------------------------------ */
 
+/** Display PR check results (pass/fail count) or merge conflict status; undefined if no PR. */
 function pullRequestSummaryBadge(props: OverviewLayoutProps, summary: OverviewSummary): ReactNode {
   if (!props.pullRequest) return undefined;
   if (props.pullRequest.hasMergeConflicts)
@@ -90,6 +95,7 @@ function pullRequestSummaryBadge(props: OverviewLayoutProps, summary: OverviewSu
   return undefined;
 }
 
+/** Display subagent count (running with spinner, or total). */
 function subagentSummaryBadge(summary: OverviewSummary): ReactNode {
   if (summary.agentsRunning > 0) {
     return (
@@ -102,6 +108,7 @@ function subagentSummaryBadge(summary: OverviewSummary): ReactNode {
   return <OverviewBadge tone="neutral">{summary.agentsTotal}</OverviewBadge>;
 }
 
+/** Display plan progress (done/total); undefined if no plan steps. */
 function planSummaryBadge(summary: OverviewSummary): ReactNode {
   if (summary.planTotal === 0) return undefined;
   return (
@@ -111,6 +118,7 @@ function planSummaryBadge(summary: OverviewSummary): ReactNode {
   );
 }
 
+/** Display environment status: warning detail if present, otherwise success indicator. */
 function environmentSummaryBadge(detail: string | undefined): ReactNode {
   if (detail) return <OverviewBadge tone="warning">{detail}</OverviewBadge>;
   return (

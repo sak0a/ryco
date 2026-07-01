@@ -67,6 +67,7 @@ export interface OverviewSummary {
   behindCount: number;
 }
 
+/** Compute aggregated metrics (diff, checks, plan progress, agent status) from layout props for rendering badges and summaries. */
 export function getOverviewSummary(props: OverviewLayoutProps): OverviewSummary {
   let additions = 0;
   let deletions = 0;
@@ -126,6 +127,7 @@ export function getOverviewSummary(props: OverviewLayoutProps): OverviewSummary 
   };
 }
 
+/** Check if the panel has no meaningful content to display. */
 export function isOverviewEmpty(props: OverviewLayoutProps): boolean {
   return (
     !props.activePlan &&
@@ -139,23 +141,27 @@ export function isOverviewEmpty(props: OverviewLayoutProps): boolean {
   );
 }
 
+/** Extract the changes item from the overview items array. */
 export function pickChangesItem(
   overviewItems: ReadonlyArray<OverviewPanelItem> | undefined,
 ): OverviewPanelItem | undefined {
   return overviewItems?.find((item) => item.icon === "changes");
 }
 
+/** Extract the environment item from the overview items array. */
 export function pickEnvironmentItem(
   overviewItems: ReadonlyArray<OverviewPanelItem> | undefined,
 ): OverviewPanelItem | undefined {
   return overviewItems?.find((item) => item.icon === "environment");
 }
 
+/** Calculate plan completion percentage (0–100). */
 export function planPercent(summary: OverviewSummary): number {
   if (summary.planTotal === 0) return 0;
   return Math.round((summary.planDone / summary.planTotal) * 100);
 }
 
+/** Check if the pull request has any review data (approved or requested). */
 export function hasReviews(pullRequest: { reviewsApproved?: number; reviewsRequested?: number }) {
   return (
     typeof pullRequest.reviewsApproved === "number" ||
