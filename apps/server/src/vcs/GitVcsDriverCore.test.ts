@@ -222,6 +222,40 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(status.aheadOfDefaultCount, 1);
       }),
     );
+
+    it.effect("reports committed changes vs base even with a clean working tree", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* git(cwd, ["checkout", "-b", "feature/committed"]);
+        yield* writeTextFile(cwd, "feature.txt", "line1\nline2\n");
+        yield* git(cwd, ["add", "feature.txt"]);
+        yield* git(cwd, ["commit", "-m", "feature commit"]);
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
+
+        // The change is fully committed, so the working tree is clean but the
+        // committed-vs-base diff still reflects it.
+        assert.equal(status.workingTree.files.length, 0);
+        assert.deepEqual(status.committed, {
+          files: [{ path: "feature.txt", insertions: 2, deletions: 0 }],
+          insertions: 2,
+          deletions: 0,
+        });
+      }),
+    );
+
+    it.effect("omits committed-vs-base on the default branch", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
+
+        assert.equal(status.isDefaultBranch, true);
+        assert.equal(status.committed, undefined);
+      }),
+    );
   });
 
   describe("refName operations", () => {

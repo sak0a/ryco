@@ -622,51 +622,52 @@ export function ChatOverviewPanel(
     overviewWorkflowRuns.isLoading,
   ]);
 
+  // The working tree only lists *uncommitted* files, so once the session's
+  // changes are committed the overview would go blank while the Review panel
+  // still shows everything. Merge the session's turn diff summaries (the same
+  // per-file source the Review view uses — path + kind + additions/deletions)
+  // with the working tree so committed and uncommitted changes both appear.
+  // `kind` also yields the real M/A/D status. Staged / conflict flags are still
+  // unavailable (would need `git status --porcelain=2` through the contract).
+  // This one list feeds both the collapsed summary item and the expanded file
+  // list, so the +/- totals and the buckets can never disagree.
+  const changedFiles = useMemo(
+    () =>
+      buildOverviewChangedFiles(
+        changedFileSummaries ?? [],
+        gitStatusQuery.data?.workingTree.files ?? [],
+        gitStatusQuery.data?.committed?.files ?? [],
+      ),
+    [changedFileSummaries, gitStatusQuery.data],
+  );
+
   const overviewItems = useMemo<OverviewPanelItem[]>(
     () =>
       buildOverviewItems({
         gitStatusData: gitStatusQuery.data,
-        overviewPullRequestDetailData: overviewPullRequestDetail.data ?? null,
-        overviewPullRequestDetailIsLoading: overviewPullRequestDetail.isLoading,
+        changedFiles,
         overviewPullRequestNumber,
         activeEnvironmentUnavailableState,
       }),
-    [
-      activeEnvironmentUnavailableState,
-      gitStatusQuery.data,
-      overviewPullRequestDetail.data,
-      overviewPullRequestDetail.isLoading,
-      overviewPullRequestNumber,
-    ],
+    [activeEnvironmentUnavailableState, gitStatusQuery.data, changedFiles, overviewPullRequestNumber],
   );
 
   const overviewChanges = useMemo<OverviewChanges | undefined>(() => {
     const data = gitStatusQuery.data;
-    // The working tree only lists *uncommitted* files, so once the session's
-    // changes are committed the overview would go blank while the Review panel
-    // still shows everything. Merge the session's turn diff summaries (the same
-    // per-file source the Review view uses — path + kind + additions/deletions)
-    // with the working tree so committed and uncommitted changes both appear.
-    // `kind` also yields the real M/A/D status. Staged / conflict flags are still
-    // unavailable (would need `git status --porcelain=2` through the contract).
-    // Don't gate on git status: turn diff summaries alone should keep the Changes
-    // section populated while `useGitStatus()` is still loading.
-    const files = buildOverviewChangedFiles(
-      changedFileSummaries ?? [],
-      data?.workingTree.files ?? [],
-    );
-    if (!data && files.length === 0) return undefined;
-    const insertions = files.reduce((total, file) => total + file.insertions, 0);
-    const deletions = files.reduce((total, file) => total + file.deletions, 0);
+    // Don't gate on git status: turn diff summaries alone should keep the
+    // Changes section populated while `useGitStatus()` is still loading.
+    if (!data && changedFiles.length === 0) return undefined;
+    const insertions = changedFiles.reduce((total, file) => total + file.insertions, 0);
+    const deletions = changedFiles.reduce((total, file) => total + file.deletions, 0);
     return {
-      files,
+      files: changedFiles,
       insertions,
       deletions,
       refName: data?.refName ?? null,
       aheadCount: data?.aheadCount ?? 0,
       behindCount: data?.behindCount ?? 0,
     };
-  }, [gitStatusQuery.data, changedFileSummaries]);
+  }, [gitStatusQuery.data, changedFiles]);
 
   const handleRefreshPullRequest = useCallback(() => {
     invalidateOverviewSourceControl(gitCwd);

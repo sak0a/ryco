@@ -37,18 +37,24 @@ export interface OverviewWorkingTreeFile {
 }
 
 /**
- * Build the overview "Changes" file list from the session's turn diff summaries
- * (the same source the Review panel renders) unioned with any uncommitted
- * working-tree files. Turn summaries capture committed *and* uncommitted agent
- * changes, so the list stays populated after the working tree has been
- * committed (which the working-tree-only view could not show). Working-tree
- * files not touched by the agent (e.g. manual edits) are appended so nothing is
- * dropped. Each file is categorized: a file with pending working-tree changes is
- * "local" (needs committing), otherwise "committed".
+ * Build the overview "Changes" file list from three sources, in precedence
+ * order:
+ *  1. The session's turn diff summaries (the same source the Review panel
+ *     renders) — these carry the M/A/D status letter and this session's
+ *     committed *and* uncommitted agent changes.
+ *  2. Uncommitted working-tree files not already seen (e.g. manual edits).
+ *  3. Committed-vs-base files from git (`git diff base...HEAD`) not already
+ *     seen — commits from earlier sessions or work already pushed to the PR
+ *     that this session's turn summaries don't include. Without this, a clean
+ *     working tree with no session turns would show nothing even though the
+ *     branch/PR has committed changes.
+ * Each file is categorized: a file with pending working-tree changes is "local"
+ * (needs committing), otherwise "committed".
  */
 export function buildOverviewChangedFiles(
   turnDiffSummaries: ReadonlyArray<TurnDiffSummary>,
   workingTreeFiles: ReadonlyArray<OverviewWorkingTreeFile>,
+  committedFiles: ReadonlyArray<OverviewWorkingTreeFile> = [],
 ): OverviewChangedFile[] {
   const localPaths = new Set(workingTreeFiles.map((file) => file.path));
   const byPath = new Map<string, OverviewChangedFile>();
@@ -74,6 +80,15 @@ export function buildOverviewChangedFiles(
       category: "local",
     });
   }
+  for (const file of committedFiles) {
+    if (byPath.has(file.path)) continue;
+    byPath.set(file.path, {
+      path: file.path,
+      insertions: file.insertions,
+      deletions: file.deletions,
+      category: "committed",
+    });
+  }
   return [...byPath.values()];
 }
 
@@ -94,90 +109,97 @@ export interface OverviewChangesItemView {
   breakdown?: ReadonlyArray<OverviewChangeBucket>;
 }
 
-export interface OverviewLocalChangesInput {
+export interface OverviewChangesBucketTotals {
   fileCount: number;
   insertions: number;
   deletions: number;
-}
-
-export interface OverviewPullRequestChangesInput {
-  changedFiles?: number | null | undefined;
-  additions?: number | null | undefined;
-  deletions?: number | null | undefined;
-  isLoading: boolean;
 }
 
 export function formatOverviewFileCount(count: number): string {
   return `${count} ${count === 1 ? "file" : "files"}`;
 }
 
-function optionalCount(value: number | null | undefined): number | null {
-  return typeof value === "number" ? value : null;
+function sumChangedFiles(files: ReadonlyArray<OverviewChangedFile>): OverviewChangesBucketTotals {
+  let insertions = 0;
+  let deletions = 0;
+  for (const file of files) {
+    insertions += file.insertions;
+    deletions += file.deletions;
+  }
+  return { fileCount: files.length, insertions, deletions };
 }
 
-export function buildOverviewChangesItem(input: {
-  local: OverviewLocalChangesInput;
-  pullRequest?: OverviewPullRequestChangesInput | null;
-}): OverviewChangesItemView {
-  const localFileCount = input.local.fileCount;
+/**
+ * Split a changed-file list into committed vs uncommitted (local) totals. Files
+ * with an unknown category are treated as local — matching how the Changes file
+ * list buckets them — so nothing is dropped.
+ */
+export function partitionOverviewChangedFiles(files: ReadonlyArray<OverviewChangedFile>): {
+  committed: OverviewChangesBucketTotals;
+  local: OverviewChangesBucketTotals;
+} {
+  return {
+    committed: sumChangedFiles(files.filter((file) => file.category === "committed")),
+    local: sumChangedFiles(files.filter((file) => file.category !== "committed")),
+  };
+}
 
-  if (!input.pullRequest) {
+/**
+ * Build the collapsed "Changes" summary item from the same committed/local
+ * buckets the expanded file list renders (see {@link buildOverviewChangedFiles}
+ * and {@link partitionOverviewChangedFiles}). Deriving both from one source
+ * keeps the summary line, the +/- totals, and the file list in agreement, and
+ * — because turn summaries capture committed changes — counts committed work
+ * that has not been pushed yet, which a working-tree-only view would miss.
+ */
+export function buildOverviewChangesItem(input: {
+  committed: OverviewChangesBucketTotals;
+  local: OverviewChangesBucketTotals;
+  pullRequestNumber?: number | null | undefined;
+}): OverviewChangesItemView {
+  const { committed, local } = input;
+  const additions = committed.insertions + local.insertions;
+  const deletions = committed.deletions + local.deletions;
+  const hasCommitted = committed.fileCount > 0;
+  const hasLocal = local.fileCount > 0;
+
+  if (!hasCommitted && !hasLocal) {
+    return { label: "Changes", value: "No changes", additions: 0, deletions: 0 };
+  }
+
+  if (hasCommitted && hasLocal) {
+    const committedBucket: OverviewChangeBucket = {
+      label: "Committed",
+      value: formatOverviewFileCount(committed.fileCount),
+      ...(input.pullRequestNumber ? { detail: `PR #${input.pullRequestNumber}` } : {}),
+      additions: committed.insertions,
+      deletions: committed.deletions,
+      muted: false,
+    };
+    const uncommittedBucket: OverviewChangeBucket = {
+      label: "Uncommitted",
+      value: formatOverviewFileCount(local.fileCount),
+      detail: "local",
+      additions: local.insertions,
+      deletions: local.deletions,
+      muted: false,
+    };
     return {
       label: "Changes",
-      value: localFileCount === 0 ? "No local changes" : formatOverviewFileCount(localFileCount),
-      additions: input.local.insertions,
-      deletions: input.local.deletions,
+      value: "Committed + local",
+      additions,
+      deletions,
+      breakdown: [committedBucket, uncommittedBucket],
     };
   }
 
-  const prChangedFileCount = optionalCount(input.pullRequest.changedFiles);
-  const prAdditions = optionalCount(input.pullRequest.additions) ?? 0;
-  const prDeletions = optionalCount(input.pullRequest.deletions) ?? 0;
-  const hasPrStats =
-    prChangedFileCount !== null ||
-    optionalCount(input.pullRequest.additions) !== null ||
-    optionalCount(input.pullRequest.deletions) !== null;
-
-  const committedBucket: OverviewChangeBucket = hasPrStats
-    ? {
-        label: "Committed",
-        value:
-          prChangedFileCount !== null
-            ? formatOverviewFileCount(prChangedFileCount)
-            : "Files unknown",
-        detail: "PR",
-        additions: prAdditions,
-        deletions: prDeletions,
-        muted: prChangedFileCount === 0 && prAdditions === 0 && prDeletions === 0,
-      }
-    : {
-        label: "Committed",
-        value: input.pullRequest.isLoading ? "Loading" : "Unavailable",
-        detail: "PR",
-        muted: true,
-      };
-
+  // Exactly one bucket has changes → a flat file-count summary reads cleaner
+  // than a single-row breakdown.
+  const fileCount = hasCommitted ? committed.fileCount : local.fileCount;
   return {
     label: "Changes",
-    value: "PR + local",
-    additions: input.local.insertions + prAdditions,
-    deletions: input.local.deletions + prDeletions,
-    breakdown: [
-      committedBucket,
-      localFileCount === 0
-        ? {
-            label: "Uncommitted",
-            value: "No local changes",
-            muted: true,
-          }
-        : {
-            label: "Uncommitted",
-            value: formatOverviewFileCount(localFileCount),
-            detail: "local",
-            additions: input.local.insertions,
-            deletions: input.local.deletions,
-            muted: false,
-          },
-    ],
+    value: formatOverviewFileCount(fileCount),
+    additions,
+    deletions,
   };
 }

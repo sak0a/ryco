@@ -52,6 +52,7 @@ export interface GitStatusDetails {
   upstreamRef: string | null;
   hasWorkingTreeChanges: boolean;
   workingTree: VcsStatusResult["workingTree"];
+  committed?: VcsStatusResult["committed"];
   hasUpstream: boolean;
   aheadCount: number;
   behindCount: number;

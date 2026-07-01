@@ -173,8 +173,7 @@ describe("buildOverviewItems", () => {
   it("returns environment item when no git status", () => {
     const items = buildOverviewItems({
       gitStatusData: null,
-      overviewPullRequestDetailData: null,
-      overviewPullRequestDetailIsLoading: false,
+      changedFiles: [],
       overviewPullRequestNumber: null,
       activeEnvironmentUnavailableState: null,
     });
@@ -185,13 +184,34 @@ describe("buildOverviewItems", () => {
   it("shows environment unavailable state", () => {
     const items = buildOverviewItems({
       gitStatusData: null,
-      overviewPullRequestDetailData: null,
-      overviewPullRequestDetailIsLoading: false,
+      changedFiles: [],
       overviewPullRequestNumber: null,
       activeEnvironmentUnavailableState: { label: "Remote", connectionState: "disconnected" },
     });
     expect(items[0]).toEqual(
       expect.objectContaining({ label: "Environment", value: "Remote", detail: "disconnected" }),
+    );
+  });
+
+  it("builds the changes item from the file list even without git status", () => {
+    const items = buildOverviewItems({
+      gitStatusData: null,
+      changedFiles: [
+        { path: "src/a.ts", insertions: 10, deletions: 2, category: "committed" },
+        { path: "src/b.ts", insertions: 3, deletions: 1, category: "local" },
+      ],
+      overviewPullRequestNumber: 7,
+      activeEnvironmentUnavailableState: null,
+    });
+    expect(items[0]).toEqual(
+      expect.objectContaining({
+        label: "Changes",
+        value: "Committed + local",
+        additions: 13,
+        deletions: 3,
+        icon: "changes",
+        action: "review",
+      }),
     );
   });
 });
