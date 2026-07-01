@@ -628,8 +628,11 @@ export function BranchToolbarBranchSelector({
             disabled={(isBranchesSearchPending && refs.length === 0) || isBranchActionPending}
           >
             <span className="min-w-0 max-w-[170px] truncate font-mono">{triggerLabel}</span>
-            {(branchStatusQuery.data?.aheadCount ?? 0) > 0 ||
-            (branchStatusQuery.data?.behindCount ?? 0) > 0 ? (
+            {/* Ahead/behind come from the current checkout, so only show them when
+                the pill label matches that checkout (not an override/optimistic ref). */}
+            {resolvedActiveBranch === currentGitBranch &&
+            ((branchStatusQuery.data?.aheadCount ?? 0) > 0 ||
+              (branchStatusQuery.data?.behindCount ?? 0) > 0) ? (
               <span className="flex shrink-0 items-center gap-1 font-mono text-[11px] font-semibold text-muted-foreground tabular-nums">
                 {(branchStatusQuery.data?.aheadCount ?? 0) > 0 ? (
                   <span className="flex items-center gap-0.5">

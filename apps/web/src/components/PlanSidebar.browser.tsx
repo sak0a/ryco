@@ -1,13 +1,19 @@
 import "../index.css";
 
 import { EnvironmentId } from "@ryco/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
 import PlanSidebar from "./PlanSidebar";
+import { APPEARANCE_PREFERENCES_STORAGE_KEY } from "../themes/appearancePreferences";
 import type { ThreadSubagentView } from "../threadWorkspaceViewModel";
 
 describe("PlanSidebar overview panel", () => {
+  // PlanSidebar reads `panelLayout` from persisted appearance preferences; keep
+  // these cases on the default (stack) layout regardless of prior tests.
+  beforeEach(() => {
+    localStorage.removeItem(APPEARANCE_PREFERENCES_STORAGE_KEY);
+  });
   it("keeps the sidebar content-sized when overview content is short", async () => {
     const host = document.createElement("div");
     host.style.width = "380px";
@@ -92,8 +98,12 @@ describe("PlanSidebar overview panel", () => {
 
     try {
       // The Subagents section is collapsed by default (matching the lab); expand
-      // it so the long agent list overflows the viewport.
-      const subagentsHeader = host.querySelector<HTMLElement>('button[aria-expanded="false"]');
+      // it so the long agent list overflows the viewport. Target it by label so
+      // the test doesn't depend on section ordering.
+      const subagentsHeader =
+        Array.from(host.querySelectorAll<HTMLElement>("button[aria-expanded]")).find((button) =>
+          (button.textContent ?? "").includes("Subagents"),
+        ) ?? null;
       expect(subagentsHeader).not.toBeNull();
       subagentsHeader!.click();
       await new Promise((resolve) => requestAnimationFrame(resolve));

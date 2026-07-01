@@ -14,20 +14,29 @@ export function normalizeGitRemoteToWebUrl(remoteUrl: string): string | null {
     .replace(/\/+$/, "");
   if (!trimmed) return null;
 
+  // Local filesystem remotes aren't browsable web URLs — bail so callers can
+  // fall back to a hosted remote (e.g. Windows `C:/mirror/repo`, UNC `\\host`).
+  if (/^[a-z]:[\\/]/i.test(trimmed) || trimmed.startsWith("\\\\")) {
+    return null;
+  }
+
   // scp-like syntax: [user@]host:owner/repo (no scheme, has a colon)
   if (!trimmed.includes("://")) {
     const scp = /^(?:[^@/]+@)?([^:/]+):(.+)$/.exec(trimmed);
     if (scp?.[1] && scp[2]) {
       return `https://${scp[1]}/${scp[2].replace(/^\/+/, "")}`;
     }
+    return null;
   }
 
   try {
     const parsed = new URL(
       trimmed.replace(/^(ssh|git|http):\/\//i, "https://").replace(/^ssh:/i, "https:"),
     );
-    if (!parsed.host || parsed.pathname === "/" || parsed.pathname === "") return null;
-    return `https://${parsed.host}${parsed.pathname}`;
+    // Use `hostname` (not `host`) so an SSH port like `:2222` doesn't leak into
+    // the derived https URL.
+    if (!parsed.hostname || parsed.pathname === "/" || parsed.pathname === "") return null;
+    return `https://${parsed.hostname}${parsed.pathname}`;
   } catch {
     return null;
   }

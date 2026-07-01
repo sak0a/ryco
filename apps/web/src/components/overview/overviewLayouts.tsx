@@ -388,35 +388,35 @@ function HybridLayout(props: OverviewLayoutProps) {
   const summary = getOverviewSummary(props);
   const sections = buildSections(props, summary, { prShowReviews: false });
 
-  const [openIds, setOpenIds] = useState<ReadonlySet<SectionId>>(
-    () => new Set(sections.filter((section) => section.defaultOpen).map((section) => section.id)),
-  );
+  // Track only sections the user has explicitly toggled; everything else falls
+  // back to its `defaultOpen`. This way a section that mounts after the first
+  // render (e.g. the PR section once it loads) still honors its default state
+  // instead of being pinned closed by a stale controlled value.
+  const [openOverrides, setOpenOverrides] = useState<Partial<Record<SectionId, boolean>>>({});
   const [activeTile, setActiveTile] = useState<SectionId>("changes");
   const [flashId, setFlashId] = useState<SectionId | null>(null);
   const sectionRefs = useRef(new Map<SectionId, HTMLDivElement | null>());
   const flashTimeoutRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(
     () => () => {
       if (flashTimeoutRef.current !== null) window.clearTimeout(flashTimeoutRef.current);
+      if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
     },
     [],
   );
 
-  const toggle = useCallback((id: SectionId) => {
-    setOpenIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const toggle = useCallback((id: SectionId, defaultOpen: boolean) => {
+    setOpenOverrides((prev) => ({ ...prev, [id]: !(prev[id] ?? defaultOpen) }));
   }, []);
 
   const handleJump = useCallback((id: SectionId) => {
     setActiveTile(id);
-    setOpenIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+    setOpenOverrides((prev) => ({ ...prev, [id]: true }));
     setFlashId(null);
-    window.requestAnimationFrame(() => {
+    rafRef.current = window.requestAnimationFrame(() => {
+      rafRef.current = null;
       sectionRefs.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       setFlashId(id);
       if (flashTimeoutRef.current !== null) window.clearTimeout(flashTimeoutRef.current);
@@ -434,8 +434,8 @@ function HybridLayout(props: OverviewLayoutProps) {
             icon={section.icon}
             title={section.title}
             summary={section.summary}
-            open={openIds.has(section.id)}
-            onToggle={() => toggle(section.id)}
+            open={openOverrides[section.id] ?? section.defaultOpen}
+            onToggle={() => toggle(section.id, section.defaultOpen)}
             flash={flashId === section.id}
             rootRef={(node) => sectionRefs.current.set(section.id, node)}
           >
@@ -466,7 +466,7 @@ function StatusBoardLayout(props: OverviewLayoutProps) {
         <SectionLane
           icon={SECTION_ICON.changes}
           title="Changes"
-          subtitle={`${plural(summary.fileCount, "file")} · working tree`}
+          subtitle={plural(summary.fileCount, "file")}
           summary={
             <>
               {summary.hasDiff ? (

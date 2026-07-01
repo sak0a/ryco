@@ -642,7 +642,6 @@ export function ChatOverviewPanel(
 
   const overviewChanges = useMemo<OverviewChanges | undefined>(() => {
     const data = gitStatusQuery.data;
-    if (!data) return undefined;
     // The working tree only lists *uncommitted* files, so once the session's
     // changes are committed the overview would go blank while the Review panel
     // still shows everything. Merge the session's turn diff summaries (the same
@@ -650,16 +649,22 @@ export function ChatOverviewPanel(
     // with the working tree so committed and uncommitted changes both appear.
     // `kind` also yields the real M/A/D status. Staged / conflict flags are still
     // unavailable (would need `git status --porcelain=2` through the contract).
-    const files = buildOverviewChangedFiles(changedFileSummaries ?? [], data.workingTree.files);
+    // Don't gate on git status: turn diff summaries alone should keep the Changes
+    // section populated while `useGitStatus()` is still loading.
+    const files = buildOverviewChangedFiles(
+      changedFileSummaries ?? [],
+      data?.workingTree.files ?? [],
+    );
+    if (!data && files.length === 0) return undefined;
     const insertions = files.reduce((total, file) => total + file.insertions, 0);
     const deletions = files.reduce((total, file) => total + file.deletions, 0);
     return {
       files,
       insertions,
       deletions,
-      refName: data.refName,
-      aheadCount: data.aheadCount,
-      behindCount: data.behindCount,
+      refName: data?.refName ?? null,
+      aheadCount: data?.aheadCount ?? 0,
+      behindCount: data?.behindCount ?? 0,
     };
   }, [gitStatusQuery.data, changedFileSummaries]);
 

@@ -31,31 +31,33 @@ function HeaderTrailing({
   layout: PanelLayout;
   layoutProps: OverviewLayoutProps;
 }) {
-  const hasConflict = Boolean(layoutProps.pullRequest?.hasMergeConflicts);
+  const showConflict = layout === "board" && Boolean(layoutProps.pullRequest?.hasMergeConflicts);
+  const showRefresh = Boolean(layoutProps.onRefreshPullRequest);
+  if (!showConflict && !showRefresh) return null;
 
-  if (layout === "board" && hasConflict) {
-    return (
-      <OverviewBadge tone="error">
-        <TriangleAlertIcon /> conflict
-      </OverviewBadge>
-    );
-  }
-
-  if (!layoutProps.onRefreshPullRequest) return null;
   return (
-    <Button
-      type="button"
-      size="icon-xs"
-      variant="ghost"
-      className="shrink-0 text-muted-foreground hover:text-foreground"
-      onClick={layoutProps.onRefreshPullRequest}
-      disabled={layoutProps.isRefreshingPullRequest}
-      aria-label="Refresh source control"
-    >
-      <RotateCwIcon
-        className={cn("size-3.5", layoutProps.isRefreshingPullRequest && "animate-spin")}
-      />
-    </Button>
+    <div className="flex shrink-0 items-center gap-1.5">
+      {showConflict ? (
+        <OverviewBadge tone="error">
+          <TriangleAlertIcon /> conflict
+        </OverviewBadge>
+      ) : null}
+      {showRefresh ? (
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost"
+          className="shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={layoutProps.onRefreshPullRequest}
+          disabled={layoutProps.isRefreshingPullRequest}
+          aria-label="Refresh source control"
+        >
+          <RotateCwIcon
+            className={cn("size-3.5", layoutProps.isRefreshingPullRequest && "animate-spin")}
+          />
+        </Button>
+      ) : null}
+    </div>
   );
 }
 

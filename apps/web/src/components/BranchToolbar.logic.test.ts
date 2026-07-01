@@ -32,6 +32,18 @@ describe("normalizeGitRemoteToWebUrl", () => {
     );
   });
 
+  it("drops SSH ports from the derived web url", () => {
+    expect(normalizeGitRemoteToWebUrl("ssh://git@host.example.com:2222/owner/repo.git")).toBe(
+      "https://host.example.com/owner/repo",
+    );
+  });
+
+  it("rejects local filesystem remotes so callers can fall back", () => {
+    expect(normalizeGitRemoteToWebUrl("C:/mirror/repo.git")).toBeNull();
+    expect(normalizeGitRemoteToWebUrl("c:\\mirror\\repo")).toBeNull();
+    expect(normalizeGitRemoteToWebUrl("\\\\server\\share\\repo")).toBeNull();
+  });
+
   it("returns null for unparseable or bare remotes", () => {
     expect(normalizeGitRemoteToWebUrl("")).toBeNull();
     expect(normalizeGitRemoteToWebUrl("https://github.com/")).toBeNull();
