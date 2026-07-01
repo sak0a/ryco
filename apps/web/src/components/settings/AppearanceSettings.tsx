@@ -10,6 +10,7 @@ import {
   type LucideIcon,
   Minimize2Icon,
   PaletteIcon,
+  PanelRightIcon,
   PencilIcon,
   PlusIcon,
   RadiusIcon,
@@ -36,6 +37,7 @@ import {
   FONT_FAMILY_MONO_OPTIONS,
   FONT_FAMILY_SANS_OPTIONS,
   FONT_SIZE_OPTIONS,
+  PANEL_LAYOUT_OPTIONS,
   PRIMARY_COLOR_OPTIONS,
   RADIUS_OPTIONS,
   SURFACE_TRANSPARENCY_OPTIONS,
@@ -533,6 +535,34 @@ export function AppearanceSettingsPanel() {
                         TRANSPARENCY_PREVIEW_OPACITY.default,
                     }}
                   />
+                </span>
+              }
+            />
+          }
+        />
+        <SettingsRow
+          title="Panel layout"
+          description="Choose how the overview panel arranges source control, status, plan, subagents, and the pull request."
+          resetAction={
+            hasAppearancePreferenceOverride("panelLayout") ? (
+              <SettingResetButton
+                label="panel layout"
+                onClick={() => handleAppearancePreferenceReset("panelLayout")}
+              />
+            ) : null
+          }
+          control={
+            <AppearancePreferenceSlider
+              ariaLabel="Panel layout"
+              icon={<PanelRightIcon className="size-3.5" />}
+              options={PANEL_LAYOUT_OPTIONS}
+              value={appearancePreferences.panelLayout}
+              onChange={(value) => handleAppearancePreferenceChange("panelLayout", value)}
+              preview={
+                <span className="flex h-9 min-w-14 flex-col justify-center gap-1 rounded-md border border-border/70 bg-background p-1.5 shadow-xs/5">
+                  <span className="h-1 rounded-full bg-primary/45" />
+                  <span className="h-1 w-2/3 rounded-full bg-muted-foreground/30" />
+                  <span className="h-1 rounded-full bg-muted-foreground/30" />
                 </span>
               }
             />

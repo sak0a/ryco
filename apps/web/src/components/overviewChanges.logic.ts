@@ -1,3 +1,82 @@
+import type { TurnDiffSummary } from "../types";
+
+import type { OverviewChangedFile, OverviewFileStatus } from "./overview/overviewTypes";
+
+const TURN_DIFF_KIND_STATUS: Record<string, OverviewFileStatus> = {
+  added: "A",
+  add: "A",
+  a: "A",
+  new: "A",
+  modified: "M",
+  modify: "M",
+  changed: "M",
+  m: "M",
+  deleted: "D",
+  delete: "D",
+  removed: "D",
+  d: "D",
+  renamed: "R",
+  rename: "R",
+  r: "R",
+  copied: "C",
+  c: "C",
+  typechange: "T",
+  type: "T",
+  t: "T",
+};
+
+export function mapTurnDiffKindToStatus(kind: string | undefined): OverviewFileStatus | undefined {
+  if (!kind) return undefined;
+  return TURN_DIFF_KIND_STATUS[kind.toLowerCase()];
+}
+
+export interface OverviewWorkingTreeFile {
+  path: string;
+  insertions: number;
+  deletions: number;
+}
+
+/**
+ * Build the overview "Changes" file list from the session's turn diff summaries
+ * (the same source the Review panel renders) unioned with any uncommitted
+ * working-tree files. Turn summaries capture committed *and* uncommitted agent
+ * changes, so the list stays populated after the working tree has been
+ * committed (which the working-tree-only view could not show). Working-tree
+ * files not touched by the agent (e.g. manual edits) are appended so nothing is
+ * dropped. Each file is categorized: a file with pending working-tree changes is
+ * "local" (needs committing), otherwise "committed".
+ */
+export function buildOverviewChangedFiles(
+  turnDiffSummaries: ReadonlyArray<TurnDiffSummary>,
+  workingTreeFiles: ReadonlyArray<OverviewWorkingTreeFile>,
+): OverviewChangedFile[] {
+  const localPaths = new Set(workingTreeFiles.map((file) => file.path));
+  const byPath = new Map<string, OverviewChangedFile>();
+  for (const summary of turnDiffSummaries) {
+    for (const file of summary.files) {
+      const existing = byPath.get(file.path);
+      const status = mapTurnDiffKindToStatus(file.kind) ?? existing?.status;
+      byPath.set(file.path, {
+        path: file.path,
+        insertions: (existing?.insertions ?? 0) + (file.additions ?? 0),
+        deletions: (existing?.deletions ?? 0) + (file.deletions ?? 0),
+        category: localPaths.has(file.path) ? "local" : "committed",
+        ...(status ? { status } : {}),
+      });
+    }
+  }
+  for (const file of workingTreeFiles) {
+    if (byPath.has(file.path)) continue;
+    byPath.set(file.path, {
+      path: file.path,
+      insertions: file.insertions,
+      deletions: file.deletions,
+      category: "local",
+    });
+  }
+  return [...byPath.values()];
+}
+
 export interface OverviewChangeBucket {
   label: string;
   value: string;

@@ -10,6 +10,7 @@ export const APPEARANCE_PREFERENCE_KEYS = [
   "primaryColorMode",
   "primaryColor",
   "surfaceTransparency",
+  "panelLayout",
 ] as const;
 
 export type AppearancePreferenceKey = (typeof APPEARANCE_PREFERENCE_KEYS)[number];
@@ -118,6 +119,14 @@ export const PRIMARY_COLOR_MODE_OPTIONS = [
   { value: "custom", label: "Custom", description: "Override" },
 ] as const satisfies ReadonlyArray<AppearancePreferenceOption>;
 
+export const PANEL_LAYOUT_OPTIONS = [
+  { value: "stack", label: "Stack", description: "Cards" },
+  { value: "hybrid", label: "Hybrid", description: "Tiles + cards" },
+  { value: "board", label: "Status board", description: "Lanes" },
+] as const satisfies ReadonlyArray<AppearancePreferenceOption>;
+
+export type PanelLayout = (typeof PANEL_LAYOUT_OPTIONS)[number]["value"];
+
 export const PRIMARY_COLOR_OPTIONS = [
   { value: "#4f46e5", label: "Indigo", description: "Default" },
   { value: "#0ea5e9", label: "Sky", description: "Clear" },
@@ -136,6 +145,7 @@ export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
   primaryColorMode: "theme",
   primaryColor: PRIMARY_COLOR_OPTIONS[0].value,
   surfaceTransparency: "default",
+  panelLayout: PANEL_LAYOUT_OPTIONS[0].value,
 };
 
 const RADIUS_TOKEN_OFFSETS_PX = {
@@ -156,6 +166,7 @@ const OPTION_VALUES: Record<AppearancePreferenceKey, ReadonlySet<string>> = {
   primaryColorMode: new Set(PRIMARY_COLOR_MODE_OPTIONS.map((option) => option.value)),
   primaryColor: new Set(PRIMARY_COLOR_OPTIONS.map((option) => option.value)),
   surfaceTransparency: new Set(SURFACE_TRANSPARENCY_OPTIONS.map((option) => option.value)),
+  panelLayout: new Set(PANEL_LAYOUT_OPTIONS.map((option) => option.value)),
 };
 
 const SURFACE_TRANSPARENCY_STEPS: Record<string, number> = {

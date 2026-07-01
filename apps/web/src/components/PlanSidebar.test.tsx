@@ -3,49 +3,54 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import PlanSidebar from "./PlanSidebar";
-import { buildOverviewChangesItem } from "./overviewChanges.logic";
+
+const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 
 describe("PlanSidebar", () => {
-  it("renders committed PR changes separately from uncommitted local changes", () => {
-    const changesItem = buildOverviewChangesItem({
-      local: {
-        fileCount: 2,
-        insertions: 7,
-        deletions: 1,
-      },
-      pullRequest: {
-        changedFiles: 9,
-        additions: 30,
-        deletions: 5,
-        isLoading: false,
-      },
-    });
-
+  it("summarizes changes into committed / uncommitted buckets (no per-file rows)", () => {
     const markup = renderToStaticMarkup(
       <PlanSidebar
         activePlan={null}
         activeProposedPlan={null}
-        overviewItems={[{ ...changesItem, icon: "changes" }]}
-        environmentId={EnvironmentId.make("environment-local")}
+        changes={{
+          files: [
+            {
+              path: "apps/web/src/components/PlanSidebar.tsx",
+              insertions: 30,
+              deletions: 5,
+              category: "committed",
+            },
+            {
+              path: "packages/contracts/src/git.ts",
+              insertions: 7,
+              deletions: 1,
+              category: "local",
+            },
+          ],
+          insertions: 37,
+          deletions: 6,
+          refName: "feat/overview-panel-layouts",
+          aheadCount: 2,
+          behindCount: 0,
+        }}
+        branchControl={<div>branch</div>}
+        environmentId={ENVIRONMENT_ID}
         markdownCwd={undefined}
         workspaceRoot={undefined}
       />,
     );
 
-    expect(markup).toContain("PR + local");
-    expect(markup).not.toContain("Overview");
-    expect(markup).not.toContain("Close overview sidebar");
+    expect(markup).toContain("Changes");
     expect(markup).toContain("Committed");
-    expect(markup).toContain("9 files");
-    expect(markup).toContain("+30");
-    expect(markup).toContain("-5");
     expect(markup).toContain("Uncommitted");
-    expect(markup).toContain("2 files");
+    // Bucket totals, not per-file rows.
+    expect(markup).toContain("+30");
     expect(markup).toContain("+7");
-    expect(markup).toContain("-1");
+    expect(markup).not.toContain("PlanSidebar.tsx");
+    expect(markup).not.toContain("Overview");
   });
 
-  it("renders a focusable latest-checks tooltip trigger", () => {
+  it("renders the pull request with inline checks and a merge-conflict banner", () => {
     const markup = renderToStaticMarkup(
       <PlanSidebar
         activePlan={null}
@@ -53,120 +58,39 @@ describe("PlanSidebar", () => {
         pullRequest={{
           number: 124,
           title: "Consolidate chat right panel",
-          checkStatus: {
-            kind: "passed",
-            tone: "success",
-            icon: "check",
-            label: "All checks passed",
-            shortLabel: "passed",
-            description: "All checks passed.",
-            ariaLabel: "All checks passed.",
-            className: "",
-            iconClassName: "",
-            dotClassName: "",
-            isTerminal: true,
-            isRefreshable: false,
-            failedChecks: [],
-          },
+          state: "open",
+          checkStatus: null,
           checksLoading: false,
-          hasMergeConflicts: false,
+          hasMergeConflicts: true,
           activeCheckCount: 0,
           runs: [],
           latestRuns: [
             {
-              id: "run:1:job:branch",
-              name: "Branch",
-              statusLabel: "Skipped",
-              statusKind: "passed",
-              tone: "success",
-            },
-            {
-              id: "run:1:job:quality",
-              name: "Pull Request / Quality",
+              id: "run:lint",
+              name: "lint",
               statusLabel: "Succeeded",
               statusKind: "passed",
               tone: "success",
             },
+            {
+              id: "run:e2e",
+              name: "e2e (smoke)",
+              statusLabel: "Failed",
+              statusKind: "failed",
+              tone: "failure",
+            },
           ],
         }}
-        environmentId={EnvironmentId.make("environment-local")}
+        environmentId={ENVIRONMENT_ID}
         markdownCwd={undefined}
         workspaceRoot={undefined}
       />,
     );
 
-    expect(markup).toContain('tabindex="0"');
-    expect(markup).toContain("Show latest checks");
-    expect(markup).toContain('data-slot="tooltip-trigger"');
-    expect(markup).toContain("cursor-pointer");
-    expect(markup).toContain("hover:bg-muted/45");
-    expect(markup).toContain("focus-visible:bg-muted/45");
-  });
-
-  it("renders running checks in blue without duplicating active runs inline", () => {
-    const markup = renderToStaticMarkup(
-      <PlanSidebar
-        activePlan={null}
-        activeProposedPlan={null}
-        pullRequest={{
-          number: 124,
-          title: "Consolidate chat right panel",
-          checkStatus: {
-            kind: "running",
-            tone: "running",
-            icon: "loader",
-            label: "Checks running",
-            shortLabel: "running",
-            description: "Checks are currently running.",
-            ariaLabel: "Checks running.",
-            className: "",
-            iconClassName: "",
-            dotClassName: "",
-            isTerminal: true,
-            isRefreshable: false,
-            failedChecks: [],
-          },
-          checksLoading: false,
-          hasMergeConflicts: false,
-          activeCheckCount: 2,
-          runs: [
-            {
-              id: "run:active:build",
-              name: "Active build row",
-              activeDetail: "Installing dependencies",
-              statusLabel: "Running",
-              statusKind: "running",
-              tone: "running",
-            },
-            {
-              id: "run:active:deploy",
-              name: "Active deploy row",
-              statusLabel: "Queued",
-              statusKind: "pending",
-              tone: "pending",
-            },
-          ],
-          latestRuns: [
-            {
-              id: "run:latest:build",
-              name: "Latest build tooltip",
-              statusLabel: "Running",
-              statusKind: "running",
-              tone: "running",
-            },
-          ],
-        }}
-        environmentId={EnvironmentId.make("environment-local")}
-        markdownCwd={undefined}
-        workspaceRoot={undefined}
-      />,
-    );
-
-    expect(markup).toContain("2 running checks");
-    expect(markup).toContain("text-sky-600");
-    expect(markup).toContain("dark:text-sky-300");
-    expect(markup).toContain("Show latest checks");
-    expect(markup).not.toContain("Active build row");
-    expect(markup).not.toContain("Active deploy row");
+    expect(markup).toContain("#124");
+    expect(markup).toContain("Consolidate chat right panel");
+    expect(markup).toContain("lint");
+    expect(markup).toContain("e2e (smoke)");
+    expect(markup).toContain("Merge conflict");
   });
 });

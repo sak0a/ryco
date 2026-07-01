@@ -23,11 +23,17 @@ import {
   useOverviewWorkflowRuns,
 } from "~/rpc/useOverview";
 import { cn } from "~/lib/utils";
-import PlanSidebar, { type OverviewPanelItem, type OverviewPullRequestState } from "../PlanSidebar";
+import PlanSidebar, {
+  type OverviewChanges,
+  type OverviewPanelItem,
+  type OverviewPullRequestState,
+} from "../PlanSidebar";
 import type { ActivePlanState, LatestProposedPlanState } from "../../session-logic";
 import type { ThreadSubagentView } from "../../threadWorkspaceViewModel";
+import type { TurnDiffSummary } from "../../types";
 import type { DraftId } from "../../composerDraftStore";
 import { BranchToolbarBranchSelector } from "../BranchToolbarBranchSelector";
+import { buildOverviewChangedFiles } from "../overviewChanges.logic";
 import GitActionsControl, { type GitActionPostPushEvent } from "../GitActionsControl";
 import {
   createPostPushWorkflowDiscoveryWatch,
@@ -166,6 +172,7 @@ export interface ChatOverviewPanelProps {
   activePlan: ActivePlanState | null;
   sidebarProposedPlan: LatestProposedPlanState | null;
   threadSubagents: ReadonlyArray<ThreadSubagentView>;
+  changedFileSummaries?: ReadonlyArray<TurnDiffSummary> | undefined;
   sourceControlActions: ReactNode;
   branchControl: ReactNode;
   markdownCwd: string | undefined;
@@ -270,6 +277,7 @@ export function useOverviewPanelControls(input: OverviewPanelControlsInput): Ove
           {...(routeKind === "draft" && draftId ? { draftId } : {})}
           onPostPush={onPostPush}
           showLabels
+          block
         />
       ) : null,
     [gitCwd, activeThreadRef, routeKind, draftId, onPostPush],
@@ -279,7 +287,8 @@ export function useOverviewPanelControls(input: OverviewPanelControlsInput): Ove
     () =>
       branchControlThread && isGitRepo ? (
         <BranchToolbarBranchSelector
-          className="max-w-[168px] justify-end px-1.5"
+          appearance="pill"
+          className="max-w-[200px]"
           environmentId={branchControlThread.environmentId}
           threadId={branchControlThread.id}
           {...(routeKind === "draft" && draftId ? { draftId } : {})}
@@ -332,6 +341,7 @@ export function ChatOverviewPanel(
     activePlan,
     sidebarProposedPlan,
     threadSubagents,
+    changedFileSummaries,
     sourceControlActions,
     branchControl,
     markdownCwd,
@@ -553,6 +563,10 @@ export function ChatOverviewPanel(
     const pullRequestState =
       detail?.state ?? activeWorktreePrState ?? gitPr?.state ?? branchPr?.state ?? null;
     const checksError = compactQueryErrorMessage(checksQueryError);
+    const reviewsApproved = detail?.participants
+      ? detail.participants.filter((participant) => participant.approved === true).length
+      : undefined;
+    const reviewsRequested = detail?.reviewers ? detail.reviewers.length : undefined;
 
     return {
       number: overviewPullRequestNumber,
@@ -571,6 +585,8 @@ export function ChatOverviewPanel(
           : typeof branchPr?.commentsCount === "number"
             ? { commentsCount: branchPr.commentsCount }
             : {}),
+      ...(typeof reviewsApproved === "number" ? { reviewsApproved } : {}),
+      ...(typeof reviewsRequested === "number" ? { reviewsRequested } : {}),
       checkStatus,
       checksLoading:
         (overviewWorkflowRunsSupported && overviewWorkflowRuns.isLoading) ||
@@ -624,6 +640,29 @@ export function ChatOverviewPanel(
     ],
   );
 
+  const overviewChanges = useMemo<OverviewChanges | undefined>(() => {
+    const data = gitStatusQuery.data;
+    if (!data) return undefined;
+    // The working tree only lists *uncommitted* files, so once the session's
+    // changes are committed the overview would go blank while the Review panel
+    // still shows everything. Merge the session's turn diff summaries (the same
+    // per-file source the Review view uses — path + kind + additions/deletions)
+    // with the working tree so committed and uncommitted changes both appear.
+    // `kind` also yields the real M/A/D status. Staged / conflict flags are still
+    // unavailable (would need `git status --porcelain=2` through the contract).
+    const files = buildOverviewChangedFiles(changedFileSummaries ?? [], data.workingTree.files);
+    const insertions = files.reduce((total, file) => total + file.insertions, 0);
+    const deletions = files.reduce((total, file) => total + file.deletions, 0);
+    return {
+      files,
+      insertions,
+      deletions,
+      refName: data.refName,
+      aheadCount: data.aheadCount,
+      behindCount: data.behindCount,
+    };
+  }, [gitStatusQuery.data, changedFileSummaries]);
+
   const handleRefreshPullRequest = useCallback(() => {
     invalidateOverviewSourceControl(gitCwd);
   }, [gitCwd]);
@@ -636,6 +675,7 @@ export function ChatOverviewPanel(
     <PlanSidebar
       activePlan={activePlan}
       activeProposedPlan={sidebarProposedPlan}
+      changes={overviewChanges}
       overviewItems={overviewItems}
       pullRequest={overviewPullRequest}
       onRefreshPullRequest={handleRefreshPullRequest}

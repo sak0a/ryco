@@ -2771,6 +2771,7 @@ export default function ChatView(props: ChatViewProps) {
                   activePlan={activePlan}
                   sidebarProposedPlan={sidebarProposedPlan}
                   threadSubagents={threadSubagents}
+                  changedFileSummaries={activeThread?.turnDiffSummaries}
                   sourceControlActions={overviewSourceControlActions}
                   branchControl={overviewBranchControl}
                   markdownCwd={gitCwd ?? undefined}
@@ -2974,6 +2975,7 @@ export default function ChatView(props: ChatViewProps) {
               activePlan={activePlan}
               sidebarProposedPlan={sidebarProposedPlan}
               threadSubagents={threadSubagents}
+              changedFileSummaries={activeThread?.turnDiffSummaries}
               sourceControlActions={overviewSourceControlActions}
               branchControl={overviewBranchControl}
               markdownCwd={gitCwd ?? undefined}
@@ -3022,6 +3024,7 @@ export default function ChatView(props: ChatViewProps) {
             activePlan={activePlan}
             sidebarProposedPlan={sidebarProposedPlan}
             threadSubagents={threadSubagents}
+            changedFileSummaries={activeThread?.turnDiffSummaries}
             sourceControlActions={overviewSourceControlActions}
             branchControl={overviewBranchControl}
             markdownCwd={gitCwd ?? undefined}

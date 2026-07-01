@@ -1,0 +1,3130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ryco · Overview Panel Lab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ============================================================
+   RYCO DESIGN TOKENS  (mirrored from apps/web/src/index.css)
+   ============================================================ */
+      :root {
+        color-scheme: light;
+        --radius: 0.625rem;
+        --font-sans:
+          "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        --font-mono: "SF Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+
+        --background: #ffffff;
+        --app-chrome: #f6f6f7;
+        --foreground: #262626;
+        --card: #ffffff;
+        --card-foreground: #262626;
+        --popover: #ffffff;
+        --primary: oklch(0.488 0.217 264);
+        --primary-foreground: #ffffff;
+        --secondary: rgba(0, 0, 0, 0.04);
+        --secondary-foreground: #262626;
+        --muted: rgba(0, 0, 0, 0.04);
+        --muted-foreground: #686868;
+        --accent: rgba(0, 0, 0, 0.045);
+        --accent-foreground: #262626;
+        --border: rgba(0, 0, 0, 0.08);
+        --border-strong: rgba(0, 0, 0, 0.12);
+        --input: rgba(0, 0, 0, 0.1);
+        --ring: oklch(0.488 0.217 264);
+
+        --destructive: #ef4444;
+        --destructive-foreground: #b91c1c;
+        --success: #10b981;
+        --success-foreground: #047857;
+        --warning: #f59e0b;
+        --warning-foreground: #b45309;
+        --info: #3b82f6;
+        --info-foreground: #1d4ed8;
+        --sky: #0ea5e9;
+
+        --add: #16a34a;
+        --del: #dc2626;
+        --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.05);
+        --shadow-pop: 0 6px 16px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
+        --primary-glow: rgba(60, 60, 214, 0.24);
+      }
+      .dark {
+        color-scheme: dark;
+        --background: #161616;
+        --app-chrome: #101010;
+        --foreground: #f5f5f5;
+        --card: #1c1c1c;
+        --card-foreground: #f5f5f5;
+        --popover: #1e1e1e;
+        --primary: oklch(0.588 0.217 264);
+        --primary-foreground: #ffffff;
+        --secondary: rgba(255, 255, 255, 0.045);
+        --secondary-foreground: #f5f5f5;
+        --muted: rgba(255, 255, 255, 0.04);
+        --muted-foreground: #8a8a8a;
+        --accent: rgba(255, 255, 255, 0.06);
+        --accent-foreground: #f5f5f5;
+        --border: rgba(255, 255, 255, 0.07);
+        --border-strong: rgba(255, 255, 255, 0.12);
+        --input: rgba(255, 255, 255, 0.1);
+        --ring: oklch(0.588 0.217 264);
+
+        --destructive: #f15a5a;
+        --destructive-foreground: #f87171;
+        --success: #10b981;
+        --success-foreground: #34d399;
+        --warning: #f59e0b;
+        --warning-foreground: #fbbf24;
+        --info: #3b82f6;
+        --info-foreground: #60a5fa;
+        --sky: #38bdf8;
+
+        --add: #3fb950;
+        --del: #f85149;
+        --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+        --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
+        --primary-glow: rgba(90, 90, 240, 0.4);
+      }
+
+      /* ============================================================
+   RESET / LAB CANVAS
+   ============================================================ */
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: var(--font-sans);
+        background: var(--app-chrome);
+        color: var(--foreground);
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+      .mono {
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+      }
+      svg {
+        display: block;
+      }
+      .ico {
+        width: 16px;
+        height: 16px;
+        stroke: currentColor;
+        stroke-width: 1.75;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        flex: none;
+      }
+      .ico.sm {
+        width: 14px;
+        height: 14px;
+      }
+      .ico.xs {
+        width: 12px;
+        height: 12px;
+      }
+      .ico.lg {
+        width: 18px;
+        height: 18px;
+      }
+      .spin {
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.45;
+        }
+      }
+
+      /* ---- lab top bar ---- */
+      .labbar {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 22px;
+        background: color-mix(in srgb, var(--app-chrome) 86%, transparent);
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--border);
+      }
+      .labbar .brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .labbar .brand .logo {
+        width: 22px;
+        height: 22px;
+        border-radius: 7px;
+        background: var(--primary);
+        display: grid;
+        place-items: center;
+        color: #fff;
+        font-weight: 700;
+        font-size: 13px;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.25),
+          0 1px 2px var(--primary-glow);
+      }
+      .labbar .sub {
+        color: var(--muted-foreground);
+        font-size: 12.5px;
+      }
+      .labbar .spacer {
+        flex: 1;
+      }
+      .seg-toggle {
+        display: inline-flex;
+        background: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        padding: 2px;
+      }
+      .seg-toggle button {
+        font: inherit;
+        font-size: 12.5px;
+        font-weight: 500;
+        border: 0;
+        background: transparent;
+        color: var(--muted-foreground);
+        padding: 5px 12px;
+        border-radius: 7px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .seg-toggle button.on {
+        background: var(--card);
+        color: var(--foreground);
+        box-shadow: var(--shadow-xs);
+      }
+
+      .intro {
+        max-width: 1200px;
+        margin: 26px auto 6px;
+        padding: 0 22px;
+      }
+      .intro h1 {
+        font-size: 21px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        margin: 0 0 6px;
+      }
+      .intro p {
+        margin: 0;
+        color: var(--muted-foreground);
+        font-size: 13.5px;
+        max-width: 74ch;
+      }
+      .intro .hint {
+        margin-top: 10px;
+        font-size: 12.5px;
+        color: var(--muted-foreground);
+      }
+      .intro .hint kbd {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        background: var(--muted);
+        border: 1px solid var(--border);
+        border-bottom-width: 2px;
+        border-radius: 5px;
+        padding: 1px 5px;
+      }
+
+      /* ---- gallery ---- */
+      .gallery {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 30px 26px;
+        padding: 24px 22px 80px;
+        max-width: 1320px;
+        margin: 0 auto;
+        align-items: flex-start;
+      }
+      .cell {
+        width: 404px;
+        flex: none;
+      }
+      .cap {
+        margin: 0 2px 11px;
+      }
+      .cap .n {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 21px;
+        height: 21px;
+        border-radius: 6px;
+        background: var(--foreground);
+        color: var(--background);
+        font-size: 12px;
+        font-weight: 700;
+        margin-right: 9px;
+        vertical-align: 1px;
+      }
+      .cap .t {
+        font-weight: 600;
+        font-size: 14.5px;
+        letter-spacing: -0.01em;
+      }
+      .cap .d {
+        margin: 5px 0 0;
+        color: var(--muted-foreground);
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+      .cap .tags {
+        margin-top: 8px;
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .cap .tag {
+        font-size: 11px;
+        color: var(--muted-foreground);
+        background: var(--muted);
+        border: 1px solid var(--border);
+        padding: 2px 7px;
+        border-radius: 999px;
+      }
+
+      /* ============================================================
+   PANEL SHELL  (the docked right panel, ~400px)
+   ============================================================ */
+      .panel {
+        width: 404px;
+        height: 712px;
+        background: var(--card);
+        color: var(--card-foreground);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        position: relative;
+      }
+      .p-head {
+        padding: 12px 13px;
+        border-bottom: 1px solid var(--border);
+        flex: none;
+      }
+      .p-body {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+      .p-body::-webkit-scrollbar {
+        width: 9px;
+      }
+      .p-body::-webkit-scrollbar-thumb {
+        background: rgba(128, 128, 128, 0.28);
+        border-radius: 9px;
+        border: 3px solid transparent;
+        background-clip: content-box;
+      }
+      .p-foot {
+        flex: none;
+        border-top: 1px solid var(--border);
+        padding: 10px 12px;
+        background: color-mix(in srgb, var(--card) 90%, var(--app-chrome));
+      }
+
+      /* ---- generic bits ---- */
+      .label {
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
+      }
+      .muted {
+        color: var(--muted-foreground);
+      }
+      .sep {
+        height: 1px;
+        background: var(--border);
+        margin: 0;
+      }
+      .stack {
+        display: flex;
+        flex-direction: column;
+      }
+      .rowflex {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .between {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .grow {
+        flex: 1;
+        min-width: 0;
+      }
+      .truncate {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* ---- buttons ---- */
+      .btn {
+        font: inherit;
+        font-weight: 500;
+        font-size: 13px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        height: 32px;
+        padding: 0 12px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        cursor: pointer;
+        white-space: nowrap;
+        transition:
+          background 0.12s,
+          border-color 0.12s,
+          box-shadow 0.12s,
+          opacity 0.12s;
+      }
+      .btn .ico {
+        opacity: 0.85;
+      }
+      .btn.block {
+        width: 100%;
+      }
+      .btn.sm {
+        height: 28px;
+        font-size: 12.5px;
+        padding: 0 10px;
+        border-radius: 8px;
+        gap: 6px;
+      }
+      .btn.xs {
+        height: 24px;
+        font-size: 12px;
+        padding: 0 8px;
+        border-radius: 7px;
+        gap: 5px;
+      }
+      .btn.primary {
+        background: var(--primary);
+        color: var(--primary-foreground);
+        border-color: var(--primary);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.18),
+          0 1px 2px var(--primary-glow);
+      }
+      .btn.primary:hover {
+        background: color-mix(in srgb, var(--primary) 91%, #000);
+      }
+      .btn.outline {
+        background: var(--popover);
+        color: var(--foreground);
+        border-color: var(--input);
+        box-shadow: var(--shadow-xs);
+      }
+      .btn.outline:hover {
+        background: var(--accent);
+      }
+      .btn.ghost {
+        background: transparent;
+        color: var(--foreground);
+        border-color: transparent;
+      }
+      .btn.ghost:hover {
+        background: var(--accent);
+      }
+      .btn.subtle {
+        background: var(--secondary);
+        color: var(--secondary-foreground);
+        border-color: transparent;
+      }
+      .btn.subtle:hover {
+        background: color-mix(in srgb, var(--secondary) 70%, var(--foreground) 6%);
+      }
+      .btn.danger {
+        background: var(--popover);
+        color: var(--destructive-foreground);
+        border-color: var(--input);
+        box-shadow: var(--shadow-xs);
+      }
+      .btn.danger:hover {
+        background: color-mix(in srgb, var(--destructive) 8%, transparent);
+        border-color: color-mix(in srgb, var(--destructive) 32%, transparent);
+      }
+      .iconbtn {
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        border-radius: 9px;
+        display: inline-grid;
+        place-items: center;
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--muted-foreground);
+        cursor: pointer;
+      }
+      .iconbtn:hover {
+        background: var(--accent);
+        color: var(--foreground);
+      }
+      .iconbtn.sm {
+        width: 26px;
+        height: 26px;
+        border-radius: 7px;
+      }
+
+      /* split button */
+      .split {
+        display: inline-flex;
+        width: 100%;
+      }
+      .split .btn.primary {
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+        flex: 1;
+      }
+      .split .caret {
+        height: 32px;
+        width: 36px;
+        border-radius: 10px;
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+        border: 1px solid var(--primary);
+        border-left-color: rgba(255, 255, 255, 0.22);
+        background: var(--primary);
+        color: #fff;
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.18),
+          0 1px 2px var(--primary-glow);
+      }
+      .split .caret:hover {
+        background: color-mix(in srgb, var(--primary) 91%, #000);
+      }
+
+      /* dropdown menu */
+      .pop {
+        position: relative;
+      }
+      .menu {
+        position: absolute;
+        z-index: 30;
+        min-width: 230px;
+        background: var(--popover);
+        border: 1px solid var(--border-strong);
+        border-radius: 12px;
+        box-shadow: var(--shadow-pop);
+        padding: 5px;
+        display: none;
+      }
+      .menu.open {
+        display: block;
+        animation: pop 0.12s ease;
+      }
+      @keyframes pop {
+        from {
+          opacity: 0;
+          transform: translateY(-4px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      .menu.up {
+        bottom: calc(100% + 6px);
+      }
+      .menu.down {
+        top: calc(100% + 6px);
+      }
+      .menu.right {
+        right: 0;
+      }
+      .menu .mi {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 7px 9px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .menu .mi:hover {
+        background: var(--accent);
+      }
+      .menu .mi .ico {
+        color: var(--muted-foreground);
+      }
+      .menu .mi small {
+        display: block;
+        color: var(--muted-foreground);
+        font-size: 11.5px;
+        font-weight: 400;
+      }
+      .menu .mi strong {
+        font-weight: 500;
+      }
+      .menu .mhead {
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
+        padding: 6px 9px 4px;
+      }
+      .menu .msep {
+        height: 1px;
+        background: var(--border);
+        margin: 5px 2px;
+      }
+
+      /* badges */
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 19px;
+        padding: 0 6px;
+        border-radius: 6px;
+        font-size: 11.5px;
+        font-weight: 500;
+        border: 1px solid transparent;
+        white-space: nowrap;
+        line-height: 1;
+      }
+      .badge .ico {
+        width: 11px;
+        height: 11px;
+        stroke-width: 2;
+      }
+      .badge.success {
+        background: color-mix(in srgb, var(--success) 11%, transparent);
+        color: var(--success-foreground);
+      }
+      .badge.warning {
+        background: color-mix(in srgb, var(--warning) 12%, transparent);
+        color: var(--warning-foreground);
+      }
+      .badge.error {
+        background: color-mix(in srgb, var(--destructive) 11%, transparent);
+        color: var(--destructive-foreground);
+      }
+      .badge.info {
+        background: color-mix(in srgb, var(--info) 11%, transparent);
+        color: var(--info-foreground);
+      }
+      .badge.neutral {
+        background: var(--secondary);
+        color: var(--muted-foreground);
+      }
+      .badge.outline {
+        background: transparent;
+        border-color: var(--border-strong);
+        color: var(--muted-foreground);
+      }
+      .badge.primary {
+        background: color-mix(in srgb, var(--primary) 12%, transparent);
+        color: var(--primary);
+      }
+      .dark .badge.primary {
+        color: var(--info-foreground);
+      }
+
+      /* diff stat */
+      .diff {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        display: inline-flex;
+        gap: 7px;
+        align-items: center;
+      }
+      .diff .a {
+        color: var(--add);
+      }
+      .diff .d {
+        color: var(--del);
+      }
+      .spark {
+        display: inline-flex;
+        height: 6px;
+        border-radius: 3px;
+        overflow: hidden;
+        background: var(--muted);
+        width: 100%;
+        gap: 1px;
+      }
+      .spark i {
+        display: block;
+        height: 100%;
+      }
+      .spark i.a {
+        background: var(--add);
+      }
+      .spark i.d {
+        background: var(--del);
+      }
+
+      /* status dots */
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex: none;
+        position: relative;
+      }
+      .dot.running {
+        background: var(--sky);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--sky) 22%, transparent);
+        animation: pulse 1.4s ease-in-out infinite;
+      }
+      .dot.finished {
+        background: var(--success);
+      }
+      .dot.failed {
+        background: var(--destructive);
+      }
+      .dot.idle {
+        background: var(--muted-foreground);
+        opacity: 0.4;
+      }
+      .dot.pending {
+        background: var(--warning);
+      }
+
+      /* file rows */
+      .frow {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 6px 13px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .frow:hover {
+        background: var(--accent);
+      }
+      .frow .tag {
+        width: 15px;
+        text-align: center;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 700;
+        flex: none;
+      }
+      .frow .tag.M {
+        color: var(--warning-foreground);
+      }
+      .frow .tag.A {
+        color: var(--success-foreground);
+      }
+      .frow .tag.D {
+        color: var(--destructive-foreground);
+      }
+      .frow .path {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+        overflow: hidden;
+      }
+      .frow .path .name {
+        font-weight: 500;
+        flex: none;
+      }
+      .frow .path .dir {
+        color: var(--muted-foreground);
+        font-size: 11px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+      .frow .nums {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 600;
+        display: flex;
+        gap: 6px;
+        flex: none;
+      }
+      .frow .nums .a {
+        color: var(--add);
+      }
+      .frow .nums .d {
+        color: var(--del);
+      }
+      .frow input {
+        accent-color: var(--primary);
+        width: 14px;
+        height: 14px;
+      }
+
+      /* segmented control */
+      .seg {
+        display: inline-flex;
+        background: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 2px;
+        width: 100%;
+      }
+      .seg button {
+        flex: 1;
+        font: inherit;
+        font-size: 12.5px;
+        font-weight: 500;
+        border: 0;
+        background: transparent;
+        color: var(--muted-foreground);
+        height: 28px;
+        border-radius: 8px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        position: relative;
+      }
+      .seg button .ct {
+        font-size: 10px;
+        background: var(--card);
+        color: var(--muted-foreground);
+        border-radius: 5px;
+        padding: 0 4px;
+        min-width: 15px;
+        height: 14px;
+        display: inline-grid;
+        place-items: center;
+        font-weight: 600;
+      }
+      .seg button.is-active {
+        background: var(--card);
+        color: var(--foreground);
+        box-shadow: var(--shadow-xs);
+      }
+      .seg button.is-active .ct {
+        background: var(--primary);
+        color: #fff;
+      }
+
+      [data-pane] {
+        display: none;
+      }
+      [data-pane].is-active {
+        display: block;
+      }
+
+      /* section heading */
+      .shead {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 11px 13px 7px;
+      }
+      .shead .label {
+        flex: 1;
+      }
+
+      /* plan steps */
+      .pstep {
+        display: flex;
+        gap: 10px;
+        padding: 7px 13px;
+        font-size: 13px;
+        align-items: flex-start;
+      }
+      .pstep .mk {
+        width: 17px;
+        height: 17px;
+        border-radius: 50%;
+        flex: none;
+        display: grid;
+        place-items: center;
+        margin-top: 1px;
+        border: 1.5px solid var(--border-strong);
+      }
+      .pstep.done .mk {
+        background: var(--success);
+        border-color: var(--success);
+        color: #fff;
+      }
+      .pstep.active .mk {
+        border-color: var(--primary);
+        color: var(--primary);
+        position: relative;
+      }
+      .pstep.active .mk::after {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--primary);
+        animation: pulse 1.4s infinite;
+      }
+      .pstep.todo .mk {
+      }
+      .pstep.todo .txt {
+        color: var(--muted-foreground);
+      }
+      .pstep.done .txt {
+        color: var(--muted-foreground);
+      }
+      .pstep .txt {
+        flex: 1;
+      }
+      .pline {
+        position: absolute;
+        left: 21px;
+        width: 1.5px;
+        background: var(--border);
+      }
+
+      /* agent rows */
+      .agent {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 13px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .agent:hover {
+        background: var(--accent);
+      }
+      .agent .av {
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+        flex: none;
+        display: grid;
+        place-items: center;
+        font-size: 11px;
+        font-weight: 600;
+        background: var(--secondary);
+        color: var(--foreground);
+        border: 1px solid var(--border);
+      }
+      .agent .nm {
+        font-weight: 500;
+      }
+      .agent .rl {
+        color: var(--muted-foreground);
+        font-size: 11.5px;
+      }
+
+      /* check rows */
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 7px 13px;
+        font-size: 12.5px;
+      }
+      .check .st {
+        display: grid;
+        place-items: center;
+        width: 16px;
+        flex: none;
+      }
+      .check .st.success {
+        color: var(--success-foreground);
+      }
+      .check .st.failed {
+        color: var(--destructive-foreground);
+      }
+      .check .st.running {
+        color: var(--info-foreground);
+      }
+      .check .st.pending {
+        color: var(--muted-foreground);
+      }
+      .check .nm {
+        flex: 1;
+        font-weight: 500;
+      }
+      .check .dt {
+        color: var(--muted-foreground);
+        font-size: 11.5px;
+      }
+
+      /* card-ish container */
+      .box {
+        border: 1px solid var(--border);
+        border-radius: 11px;
+        background: var(--card);
+        overflow: hidden;
+      }
+      .box.inset {
+        background: color-mix(in srgb, var(--card) 60%, var(--app-chrome));
+      }
+
+      /* conflict banner */
+      .banner {
+        display: flex;
+        gap: 9px;
+        padding: 9px 11px;
+        border-radius: 10px;
+        font-size: 12.5px;
+        align-items: flex-start;
+      }
+      .banner.warn {
+        background: color-mix(in srgb, var(--warning) 10%, transparent);
+        color: var(--warning-foreground);
+        border: 1px solid color-mix(in srgb, var(--warning) 26%, transparent);
+      }
+      .banner.err {
+        background: color-mix(in srgb, var(--destructive) 9%, transparent);
+        color: var(--destructive-foreground);
+        border: 1px solid color-mix(in srgb, var(--destructive) 24%, transparent);
+      }
+      .banner .ico {
+        margin-top: 1px;
+        flex: none;
+      }
+      .banner b {
+        font-weight: 600;
+      }
+
+      /* branch selector pill */
+      .branchsel {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 30px;
+        padding: 0 9px;
+        border-radius: 9px;
+        border: 1px solid var(--input);
+        background: var(--popover);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        box-shadow: var(--shadow-xs);
+        max-width: 100%;
+      }
+      .branchsel:hover {
+        background: var(--accent);
+      }
+      .branchsel .ico {
+        color: var(--muted-foreground);
+      }
+      .branchsel .nm {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ab {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted-foreground);
+      }
+      .ab .ico {
+        width: 11px;
+        height: 11px;
+      }
+
+      /* combobox/list inside branch menu */
+      .search {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 7px 9px;
+        border-bottom: 1px solid var(--border);
+        color: var(--muted-foreground);
+      }
+      .search input {
+        border: 0;
+        background: transparent;
+        outline: none;
+        font: inherit;
+        font-size: 13px;
+        color: var(--foreground);
+        flex: 1;
+      }
+      .reflist {
+        max-height: 188px;
+        overflow-y: auto;
+        padding: 4px;
+      }
+      .refitem {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: 7px;
+        cursor: pointer;
+        font-size: 12.5px;
+      }
+      .refitem:hover {
+        background: var(--accent);
+      }
+      .refitem.cur {
+        background: var(--secondary);
+      }
+      .refitem .ico {
+        color: var(--muted-foreground);
+      }
+      .refitem .meta {
+        margin-left: auto;
+        font-size: 11px;
+        color: var(--muted-foreground);
+        font-family: var(--font-mono);
+      }
+
+      /* metric tiles (command center) */
+      .tiles {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 9px;
+        padding: 13px;
+      }
+      .tile {
+        border: 1px solid var(--border);
+        border-radius: 11px;
+        padding: 10px 11px;
+        cursor: pointer;
+        background: var(--card);
+        transition:
+          border-color 0.12s,
+          background 0.12s;
+        position: relative;
+        text-align: left;
+      }
+      .tile:hover {
+        background: var(--accent);
+      }
+      .tile.is-active {
+        border-color: var(--primary);
+        background: color-mix(in srgb, var(--primary) 5%, var(--card));
+        box-shadow: 0 0 0 1px var(--primary) inset;
+      }
+      .tile .tl {
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .tile .big {
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        margin-top: 5px;
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+      }
+      .tile .small {
+        font-size: 11.5px;
+        color: var(--muted-foreground);
+        margin-top: 2px;
+      }
+      .ring {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        flex: none;
+        position: relative;
+      }
+      .ring::after {
+        content: "";
+        position: absolute;
+        inset: 5px;
+        border-radius: 50%;
+        background: var(--card);
+      }
+      .tile:hover .ring::after {
+        background: color-mix(in srgb, var(--card) 88%, var(--foreground));
+      }
+
+      /* timeline */
+      .tl {
+        position: relative;
+        padding: 6px 13px 13px;
+      }
+      .tl::before {
+        content: "";
+        position: absolute;
+        left: 25px;
+        top: 8px;
+        bottom: 14px;
+        width: 1.5px;
+        background: var(--border);
+      }
+      .tli {
+        display: flex;
+        gap: 12px;
+        padding: 8px 0;
+        position: relative;
+      }
+      .tli .ic {
+        width: 25px;
+        height: 25px;
+        border-radius: 50%;
+        flex: none;
+        display: grid;
+        place-items: center;
+        background: var(--card);
+        border: 1.5px solid var(--border-strong);
+        color: var(--muted-foreground);
+        z-index: 1;
+      }
+      .tli .ic.success {
+        border-color: var(--success);
+        color: var(--success-foreground);
+        background: color-mix(in srgb, var(--success) 10%, var(--card));
+      }
+      .tli .ic.failed {
+        border-color: var(--destructive);
+        color: var(--destructive-foreground);
+        background: color-mix(in srgb, var(--destructive) 10%, var(--card));
+      }
+      .tli .ic.running {
+        border-color: var(--sky);
+        color: var(--sky);
+        background: color-mix(in srgb, var(--sky) 12%, var(--card));
+      }
+      .tli .ic.primary {
+        border-color: var(--primary);
+        color: #fff;
+        background: var(--primary);
+      }
+      .tli .bd {
+        flex: 1;
+        min-width: 0;
+        padding-top: 2px;
+      }
+      .tli .t1 {
+        font-size: 13px;
+      }
+      .tli .t1 b {
+        font-weight: 600;
+      }
+      .tli .t2 {
+        font-size: 11.5px;
+        color: var(--muted-foreground);
+        margin-top: 1px;
+      }
+      .tli .when {
+        font-size: 11px;
+        color: var(--muted-foreground);
+        font-family: var(--font-mono);
+        flex: none;
+        padding-top: 3px;
+      }
+      .filterbar {
+        display: flex;
+        gap: 5px;
+        padding: 9px 13px;
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+      }
+      .chip {
+        font-size: 11.5px;
+        padding: 3px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--card);
+        color: var(--muted-foreground);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .chip.on {
+        background: var(--foreground);
+        color: var(--background);
+        border-color: var(--foreground);
+      }
+
+      /* focus hero */
+      .hero {
+        padding: 16px 15px 14px;
+      }
+      .hero .stat-xl {
+        font-size: 30px;
+        font-weight: 600;
+        letter-spacing: -0.03em;
+        line-height: 1;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        font-variant-numeric: tabular-nums;
+      }
+      .hero .stat-xl .u {
+        font-size: 13px;
+        color: var(--muted-foreground);
+        font-weight: 500;
+        letter-spacing: 0;
+      }
+      .colbars {
+        display: flex;
+        align-items: flex-end;
+        gap: 3px;
+        height: 38px;
+        margin: 14px 0 4px;
+      }
+      .colbars i {
+        flex: 1;
+        border-radius: 3px 3px 0 0;
+        background: var(--border-strong);
+        min-height: 3px;
+        position: relative;
+      }
+      .colbars i .ad {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        border-radius: 3px 3px 0 0;
+        background: var(--add);
+      }
+      .quiet {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 11px 15px;
+        font-size: 13px;
+        cursor: pointer;
+        border-top: 1px solid var(--border);
+      }
+      .quiet:hover {
+        background: var(--accent);
+      }
+      .quiet .ico {
+        color: var(--muted-foreground);
+      }
+      .quiet .grow {
+        font-weight: 500;
+      }
+      .quiet .sub {
+        font-size: 11.5px;
+        color: var(--muted-foreground);
+        font-weight: 400;
+      }
+
+      /* rail / master-detail */
+      .railwrap {
+        display: flex;
+        height: 100%;
+      }
+      .rail {
+        width: 52px;
+        flex: none;
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 9px 0;
+        gap: 4px;
+        background: color-mix(in srgb, var(--card) 55%, var(--app-chrome));
+      }
+      .railbtn {
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--muted-foreground);
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+        position: relative;
+      }
+      .railbtn:hover {
+        background: var(--accent);
+        color: var(--foreground);
+      }
+      .railbtn.is-active {
+        background: var(--card);
+        color: var(--primary);
+        border-color: var(--border);
+        box-shadow: var(--shadow-xs);
+      }
+      .railbtn.is-active::before {
+        content: "";
+        position: absolute;
+        left: -9px;
+        top: 9px;
+        bottom: 9px;
+        width: 3px;
+        border-radius: 2px;
+        background: var(--primary);
+      }
+      .railbtn .cnt {
+        position: absolute;
+        top: 3px;
+        right: 3px;
+        min-width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: var(--primary);
+        color: #fff;
+        font-size: 9px;
+        font-weight: 700;
+        display: grid;
+        place-items: center;
+        padding: 0 3px;
+      }
+      .railbtn .cnt.warn {
+        background: var(--warning);
+      }
+      .railbtn .cnt.err {
+        background: var(--destructive);
+      }
+      .railmain {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* accordion */
+      .acc {
+        border-bottom: 1px solid var(--border);
+      }
+      .acc-head {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 10px 13px;
+        cursor: pointer;
+        width: 100%;
+        background: transparent;
+        border: 0;
+        font: inherit;
+        color: inherit;
+        text-align: left;
+      }
+      .acc-head:hover {
+        background: var(--accent);
+      }
+      .acc-head .chev {
+        color: var(--muted-foreground);
+        transition: transform 0.15s;
+      }
+      .acc-head .ttl {
+        flex: 1;
+        font-weight: 600;
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .acc-head .ico.lead {
+        color: var(--muted-foreground);
+      }
+      .acc-body {
+        display: none;
+        padding-bottom: 6px;
+      }
+      .acc.open > .acc-body {
+        display: block;
+      }
+      .acc.open > .acc-head .chev {
+        transform: rotate(90deg);
+      }
+
+      /* misc list row */
+      .kv {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 7px 13px;
+        font-size: 12.5px;
+      }
+      .kv .k {
+        color: var(--muted-foreground);
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .kv .v {
+        font-weight: 500;
+        font-family: var(--font-mono);
+        font-size: 12px;
+      }
+
+      .scrollpad {
+        padding-bottom: 10px;
+      }
+      .headline {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+        font-size: 13.5px;
+        letter-spacing: -0.01em;
+      }
+      .subline {
+        font-size: 11.5px;
+        color: var(--muted-foreground);
+      }
+      .foot-meta {
+        font-size: 11px;
+        color: var(--muted-foreground);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+
+      /* ---- caption flags ---- */
+      .cap-flag {
+        display: inline-flex;
+        align-items: center;
+        height: 16px;
+        padding: 0 6px;
+        border-radius: 5px;
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        vertical-align: 1px;
+      }
+      .cap-flag.refined {
+        background: color-mix(in srgb, var(--primary) 14%, transparent);
+        color: var(--primary);
+      }
+      .dark .cap-flag.refined {
+        color: var(--info-foreground);
+      }
+      .cap-flag.new {
+        background: color-mix(in srgb, var(--success) 14%, transparent);
+        color: var(--success-foreground);
+      }
+
+      /* ---- 4-up mini tiles + ring legend (refined command center / hybrid) ---- */
+      .tiles.four {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 7px;
+        padding: 11px 13px;
+      }
+      .tile.mini {
+        padding: 8px 8px 9px;
+        border-radius: 10px;
+      }
+      .tile.mini .tl {
+        font-size: 9px;
+        gap: 3px;
+      }
+      .tile.mini .tl .ico {
+        width: 11px;
+        height: 11px;
+      }
+      .tile.mini .big {
+        font-size: 15px;
+        margin-top: 4px;
+        gap: 3px;
+      }
+      .tile.mini .small {
+        font-size: 10px;
+        margin-top: 1px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .ringlegend {
+        display: flex;
+        gap: 9px;
+        padding: 2px 13px 11px;
+        font-size: 11px;
+        color: var(--muted-foreground);
+        flex-wrap: wrap;
+      }
+      .ringlegend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .ringlegend i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+      }
+      .ctxbar {
+        display: flex;
+        gap: 8px;
+        padding: 0 13px 11px;
+      }
+      .ctxchip {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 7px 9px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        font-size: 11.5px;
+        background: color-mix(in srgb, var(--card) 60%, var(--app-chrome));
+      }
+      .ctxchip .ico {
+        color: var(--muted-foreground);
+      }
+      .ctxchip b {
+        font-weight: 600;
+      }
+
+      /* ---- sticky metric strip (refined stack) ---- */
+      .mstrip {
+        position: sticky;
+        top: 0;
+        z-index: 6;
+        display: flex;
+        gap: 7px;
+        padding: 11px 13px;
+        background: color-mix(in srgb, var(--card) 92%, transparent);
+        backdrop-filter: blur(8px);
+        border-bottom: 1px solid var(--border);
+      }
+      .mcell {
+        flex: 1;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 7px 9px;
+        background: var(--card);
+      }
+      .mcell .label {
+        font-size: 9.5px;
+      }
+      .mcell .mv {
+        font-size: 13px;
+        font-weight: 600;
+        margin-top: 3px;
+        letter-spacing: -0.01em;
+        display: flex;
+        align-items: baseline;
+        gap: 4px;
+      }
+      .mcell .ms {
+        font-size: 10px;
+        color: var(--muted-foreground);
+        margin-top: 1px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* ---- mini visualisations (status board / split dashboard) ---- */
+      .dots5 {
+        display: inline-flex;
+        gap: 3px;
+        align-items: center;
+      }
+      .dots5 i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--border-strong);
+      }
+      .dots5 i.success {
+        background: var(--success);
+      }
+      .dots5 i.failure {
+        background: var(--destructive);
+      }
+      .dots5 i.running {
+        background: var(--sky);
+        animation: pulse 1.4s ease-in-out infinite;
+      }
+      .dots5 i.pending {
+        background: var(--warning);
+        opacity: 0.55;
+      }
+      .prog {
+        display: inline-block;
+        width: 54px;
+        height: 5px;
+        border-radius: 3px;
+        background: var(--muted);
+        overflow: hidden;
+        vertical-align: middle;
+      }
+      .prog i {
+        display: block;
+        height: 100%;
+        background: var(--primary);
+        border-radius: 3px;
+      }
+      .avstack {
+        display: inline-flex;
+        align-items: center;
+      }
+      .avstack .av2 {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        margin-left: -7px;
+        border: 2px solid var(--card);
+        background: var(--secondary);
+        display: grid;
+        place-items: center;
+        font-size: 9.5px;
+        font-weight: 600;
+        color: var(--foreground);
+      }
+      .avstack .av2:first-child {
+        margin-left: 0;
+      }
+
+      /* ---- status board lanes (#8) ---- */
+      .lane {
+        border-bottom: 1px solid var(--border);
+      }
+      .lane-head {
+        display: grid;
+        grid-template-columns: 24px 1fr auto 16px;
+        align-items: center;
+        gap: 9px;
+        padding: 11px 13px;
+        cursor: pointer;
+        width: 100%;
+        background: transparent;
+        border: 0;
+        font: inherit;
+        color: inherit;
+        text-align: left;
+      }
+      .lane-head:hover {
+        background: var(--accent);
+      }
+      .lane-head .li {
+        width: 24px;
+        height: 24px;
+        border-radius: 7px;
+        display: grid;
+        place-items: center;
+        background: var(--secondary);
+        color: var(--muted-foreground);
+      }
+      .lane-head .lt {
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .lane-head .lt small {
+        display: block;
+        font-weight: 400;
+        font-size: 10.5px;
+        color: var(--muted-foreground);
+      }
+      .lane-head .lm {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        justify-self: end;
+      }
+      .lane-head .chev {
+        color: var(--muted-foreground);
+        transition: transform 0.15s;
+      }
+      .lane.open > .lane-head .chev {
+        transform: rotate(90deg);
+      }
+      .lane-body {
+        display: none;
+        padding-bottom: 6px;
+      }
+      .lane.open > .lane-body {
+        display: block;
+      }
+      .lane.open > .lane-head .li {
+        background: color-mix(in srgb, var(--primary) 12%, transparent);
+        color: var(--primary);
+      }
+      .dark .lane.open > .lane-head .li {
+        color: var(--info-foreground);
+      }
+
+      /* ---- split dashboard (#9) ---- */
+      .dash {
+        flex: none;
+        padding: 10px 11px;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--card) 55%, var(--app-chrome));
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .dashrow {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 9px;
+        border-radius: 9px;
+        cursor: pointer;
+        border: 1px solid transparent;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        width: 100%;
+      }
+      .dashrow:hover {
+        background: var(--accent);
+      }
+      .dashrow.is-active {
+        background: var(--card);
+        border-color: var(--border);
+        box-shadow: var(--shadow-xs);
+      }
+      .dashrow .di {
+        width: 18px;
+        display: grid;
+        place-items: center;
+        color: var(--muted-foreground);
+        flex: none;
+      }
+      .dashrow.is-active .di {
+        color: var(--primary);
+      }
+      .dark .dashrow.is-active .di {
+        color: var(--info-foreground);
+      }
+      .dashrow .dl {
+        font-size: 12.5px;
+        font-weight: 500;
+        flex: none;
+        width: 74px;
+      }
+      .dashrow .dm {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 7px;
+        font-size: 11.5px;
+        color: var(--muted-foreground);
+        min-width: 0;
+      }
+      .detail {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+      .detail::-webkit-scrollbar {
+        width: 9px;
+      }
+      .detail::-webkit-scrollbar-thumb {
+        background: rgba(128, 128, 128, 0.28);
+        border-radius: 9px;
+        border: 3px solid transparent;
+        background-clip: content-box;
+      }
+      .jump-flash {
+        animation: flash 1s ease;
+      }
+      @keyframes flash {
+        0%,
+        100% {
+          background: transparent;
+        }
+        30% {
+          background: color-mix(in srgb, var(--primary) 8%, transparent);
+        }
+      }
+
+      /* ---- live preview switcher (the three chosen layouts) ---- */
+      .preview {
+        max-width: 1200px;
+        margin: 22px auto 4px;
+        padding: 18px 20px 22px;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: color-mix(in srgb, var(--card) 65%, var(--app-chrome));
+      }
+      .preview .ph {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+      .preview .ph h2 {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0;
+        letter-spacing: -0.01em;
+      }
+      .preview .ph p {
+        margin: 0;
+        color: var(--muted-foreground);
+        font-size: 12.5px;
+        max-width: 48ch;
+      }
+      .preview .settinghint {
+        margin-left: auto;
+        font-size: 11.5px;
+        color: var(--muted-foreground);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .preview .settinghint .pill {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        background: var(--secondary);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 1px 6px;
+      }
+      .layout-switch {
+        display: inline-flex;
+        background: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 11px;
+        padding: 3px;
+        gap: 2px;
+      }
+      .layout-switch button {
+        font: inherit;
+        font-size: 12.5px;
+        font-weight: 500;
+        border: 0;
+        background: transparent;
+        color: var(--muted-foreground);
+        padding: 6px 13px;
+        border-radius: 8px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .layout-switch button .num {
+        width: 16px;
+        height: 16px;
+        border-radius: 5px;
+        background: var(--card);
+        display: inline-grid;
+        place-items: center;
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--muted-foreground);
+      }
+      .layout-switch button.on {
+        background: var(--card);
+        color: var(--foreground);
+        box-shadow: var(--shadow-xs);
+      }
+      .layout-switch button.on .num {
+        background: var(--primary);
+        color: #fff;
+      }
+      .preview .stage {
+        display: flex;
+        justify-content: center;
+        margin-top: 16px;
+      }
+      .cell.shortlisted .cap .t::after {
+        content: "✓ shortlisted";
+        margin-left: 9px;
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        color: var(--success-foreground);
+        background: color-mix(in srgb, var(--success) 14%, transparent);
+        padding: 2px 6px;
+        border-radius: 5px;
+        vertical-align: 2px;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ===================== ICON SPRITE ===================== -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <symbol id="i-branch" viewBox="0 0 24 24">
+          <line x1="6" x2="6" y1="3" y2="15" />
+          <circle cx="18" cy="6" r="3" />
+          <circle cx="6" cy="18" r="3" />
+          <path d="M18 9a9 9 0 0 1-9 9" />
+        </symbol>
+        <symbol id="i-commit" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="3" />
+          <line x1="3" x2="9" y1="12" y2="12" />
+          <line x1="15" x2="21" y1="12" y2="12" />
+        </symbol>
+        <symbol id="i-pr" viewBox="0 0 24 24">
+          <circle cx="18" cy="18" r="3" />
+          <circle cx="6" cy="6" r="3" />
+          <path d="M13 6h3a2 2 0 0 1 2 2v7" />
+          <line x1="6" x2="6" y1="9" y2="21" />
+        </symbol>
+        <symbol id="i-merge" viewBox="0 0 24 24">
+          <circle cx="18" cy="18" r="3" />
+          <circle cx="6" cy="6" r="3" />
+          <path d="M6 21V9a9 9 0 0 0 9 9" />
+        </symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+        <symbol id="i-x" viewBox="0 0 24 24">
+          <path d="M18 6 6 18" />
+          <path d="M6 6l12 12" />
+        </symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </symbol>
+        <symbol id="i-loader" viewBox="0 0 24 24">
+          <line x1="12" x2="12" y1="2" y2="6" />
+          <line x1="12" x2="12" y1="18" y2="22" />
+          <line x1="4.93" x2="7.76" y1="4.93" y2="7.76" />
+          <line x1="16.24" x2="19.07" y1="16.24" y2="19.07" />
+          <line x1="2" x2="6" y1="12" y2="12" />
+          <line x1="18" x2="22" y1="12" y2="12" />
+          <line x1="4.93" x2="7.76" y1="19.07" y2="16.24" />
+          <line x1="16.24" x2="19.07" y1="7.76" y2="4.93" />
+        </symbol>
+        <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+        <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
+        <symbol id="i-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6" /></symbol>
+        <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+        <symbol id="i-file" viewBox="0 0 24 24">
+          <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+          <path d="M14 2v5h5" />
+        </symbol>
+        <symbol id="i-folder" viewBox="0 0 24 24">
+          <path
+            d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+          />
+        </symbol>
+        <symbol id="i-bot" viewBox="0 0 24 24">
+          <path d="M12 8V4H8" />
+          <rect width="16" height="12" x="4" y="8" rx="2" />
+          <path d="M2 14h2" />
+          <path d="M20 14h2" />
+          <path d="M15 13v2" />
+          <path d="M9 13v2" />
+        </symbol>
+        <symbol id="i-alert" viewBox="0 0 24 24">
+          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+          <path d="M12 9v4" />
+          <path d="M12 17h.01" />
+        </symbol>
+        <symbol id="i-dots" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="1" />
+          <circle cx="19" cy="12" r="1" />
+          <circle cx="5" cy="12" r="1" />
+        </symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24">
+          <path d="M5 12h14" />
+          <path d="M12 5v14" />
+        </symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24">
+          <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+          <path d="M21 3v5h-5" />
+          <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+          <path d="M3 21v-5h5" />
+        </symbol>
+        <symbol id="i-sparkles" viewBox="0 0 24 24">
+          <path
+            d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z"
+          />
+          <path d="M20 3v4" />
+          <path d="M22 5h-4" />
+        </symbol>
+        <symbol id="i-term" viewBox="0 0 24 24">
+          <path d="m4 17 6-6-6-6" />
+          <path d="M12 19h8" />
+        </symbol>
+        <symbol id="i-eye" viewBox="0 0 24 24">
+          <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+          <circle cx="12" cy="12" r="3" />
+        </symbol>
+        <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3" /></symbol>
+        <symbol id="i-cloud" viewBox="0 0 24 24">
+          <path d="M12 13v8" />
+          <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+          <path d="m8 17 4-4 4 4" />
+        </symbol>
+        <symbol id="i-msg" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></symbol>
+        <symbol id="i-list" viewBox="0 0 24 24">
+          <path d="M8 6h13" />
+          <path d="M8 12h13" />
+          <path d="M8 18h13" />
+          <path d="M3 6h.01" />
+          <path d="M3 12h.01" />
+          <path d="M3 18h.01" />
+        </symbol>
+        <symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /></symbol>
+        <symbol id="i-settings" viewBox="0 0 24 24">
+          <path
+            d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+          />
+          <circle cx="12" cy="12" r="3" />
+        </symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24">
+          <rect width="14" height="14" x="8" y="8" rx="2" />
+          <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+        </symbol>
+      </defs>
+    </svg>
+
+    <!-- ===================== TOP BAR ===================== -->
+    <div class="labbar">
+      <div class="brand">
+        <span class="logo">R</span> Overview Panel <span class="sub">· Lab</span>
+      </div>
+      <div class="spacer"></div>
+      <span class="sub" id="scenario-label">Scenario · uncommitted changes</span>
+      <div class="seg-toggle" id="theme">
+        <button data-theme="light" class="on">Light</button>
+        <button data-theme="dark">Dark</button>
+      </div>
+    </div>
+
+    <div class="intro">
+      <h1>Layouts for the combined overview panel</h1>
+      <p>
+        The same content — branch &amp; source control, working-tree diff, environment, the active
+        plan, running subagents, and the pull request with its workflow checks &amp; merge state —
+        arranged nine ways. Every panel is live: switch tabs, expand sections, open the branch
+        picker and the commit/push/PR split-menu. Mock data is consistent across all of them.
+      </p>
+      <p class="hint" style="margin-bottom: 4px">
+        <span class="cap-flag refined" style="margin-right: 6px">REFINED</span>
+        <b>#2 Stack</b> &amp; <b>#3 Command center</b> tightened. &nbsp;<span
+          class="cap-flag new"
+          style="margin: 0 6px 0 10px"
+          >NEW</span
+        >
+        <b>#7–#9</b> extend that glanceable family — the idea being you ship two and let users pick
+        their preferred layout in settings.
+      </p>
+      <p class="hint">
+        Toggle <kbd>Light</kbd>/<kbd>Dark</kbd> top-right. Each panel is the real docked width (≈404
+        px).
+      </p>
+    </div>
+
+    <div class="preview">
+      <div class="ph">
+        <h2>Live preview — your three switchable layouts</h2>
+        <div class="settinghint">Settings · Appearance · <span class="pill">panelLayout</span></div>
+      </div>
+      <div class="ph" style="margin-top: 13px">
+        <div class="layout-switch" id="layoutSwitch">
+          <button data-layout="2" class="on"><span class="num">2</span> Stack</button>
+          <button data-layout="7"><span class="num">7</span> Hybrid</button>
+          <button data-layout="8"><span class="num">8</span> Status board</button>
+        </div>
+        <p>
+          The actual end-user control — flip between the three and the docked panel swaps in place.
+          This is what ships behind the setting.
+        </p>
+      </div>
+      <div class="stage" id="previewStage"></div>
+    </div>
+
+    <div class="gallery" id="gallery"></div>
+
+    <script>
+      /* ============================================================
+   SHARED MOCK DATA  (shapes mirror VcsStatusResult / OverviewPullRequestState / ActivePlanState / ThreadSubagentView)
+   ============================================================ */
+      const DATA = {
+        repo: "sak0a/ryco",
+        branch: "feat/overview-panel-redesign",
+        base: "main",
+        ahead: 3,
+        behind: 1,
+        env: { label: "Local", node: "22.12.0", clean: true },
+        files: [
+          {
+            path: "apps/web/src/components/PlanSidebar.tsx",
+            st: "M",
+            a: 84,
+            d: 31,
+            conflict: true,
+          },
+          { path: "apps/web/src/components/chat/ChatOverviewPanel.tsx", st: "M", a: 42, d: 12 },
+          { path: "apps/web/src/rightPanelLayout.ts", st: "M", a: 18, d: 4 },
+          { path: "packages/contracts/src/git.ts", st: "M", a: 11, d: 2 },
+          { path: "apps/web/src/components/overview/overview-panel.css", st: "A", a: 6, d: 0 },
+        ],
+        plan: {
+          explanation: "Rework the right-side overview into one state-aware panel.",
+          steps: [
+            { step: "Audit existing PlanSidebar sections", status: "completed" },
+            { step: "Extract a shared OverviewSection primitive", status: "completed" },
+            { step: "Build the segmented header + diff stat", status: "inProgress" },
+            { step: "Wire branch selector to git actions", status: "pending" },
+            { step: "Add PR checks + merge-conflict states", status: "pending" },
+          ],
+        },
+        agents: [
+          {
+            name: "Explore",
+            role: "Panel mapper",
+            status: "finished",
+            tool: "Read sourceControlPresentation.ts",
+            when: "12s",
+          },
+          {
+            name: "ui-designer",
+            role: "Layout pass",
+            status: "running",
+            tool: "Edit PlanSidebar.tsx",
+            when: "now",
+          },
+          {
+            name: "code-reviewer",
+            role: "Diff review",
+            status: "running",
+            tool: "Reading 5 files",
+            when: "now",
+          },
+          {
+            name: "verifier",
+            role: "A11y audit",
+            status: "idle",
+            tool: "Waiting on layout",
+            when: "—",
+          },
+        ],
+        pr: {
+          number: 3204,
+          title: "Redesign combined overview panel",
+          state: "open",
+          comments: 4,
+          base: "main",
+          head: "feat/overview-panel-redesign",
+          reviewers: { approved: 1, requested: 1 },
+          hasMergeConflicts: true,
+          conflictFiles: ["PlanSidebar.tsx"],
+          runs: [
+            { name: "lint", tone: "success", label: "Succeeded", detail: "24s" },
+            { name: "typecheck", tone: "success", label: "Succeeded", detail: "1m 18s" },
+            { name: "test (web)", tone: "running", label: "Running", detail: "step 3/5 · 2m 04s" },
+            { name: "build (desktop)", tone: "pending", label: "Queued", detail: "waiting" },
+            { name: "e2e (smoke)", tone: "failure", label: "Failed", detail: "1 failing" },
+          ],
+        },
+        refs: [
+          { name: "feat/overview-panel-redesign", kind: "branch", meta: "now", cur: true },
+          { name: "main", kind: "branch", meta: "2h" },
+          { name: "feat/ssh-fnm-support", kind: "branch", meta: "1d" },
+          { name: "fix/diff-virtualization", kind: "branch", meta: "2d" },
+          { name: "release/0.8.0", kind: "branch", meta: "3d" },
+          { name: "v0.7.4", kind: "tag", meta: "tag" },
+        ],
+      };
+      const totalA = DATA.files.reduce((s, f) => s + f.a, 0);
+      const totalD = DATA.files.reduce((s, f) => s + f.d, 0);
+      const fileCount = DATA.files.length;
+      const checksPass = DATA.pr.runs.filter((r) => r.tone === "success").length;
+      const checksFail = DATA.pr.runs.filter((r) => r.tone === "failure").length;
+      const checksRun = DATA.pr.runs.filter((r) => r.tone === "running").length;
+
+      /* small helpers */
+      const el = (html) => {
+        const t = document.createElement("template");
+        t.innerHTML = html.trim();
+        return t.content.firstElementChild;
+      };
+      const ic = (id, cls = "") => `<svg class="ico ${cls}"><use href="#i-${id}"/></svg>`;
+      const splitPath = (p) => {
+        const i = p.lastIndexOf("/");
+        return i < 0 ? ["", p] : [p.slice(0, i + 1), p.slice(i + 1)];
+      };
+      const toneIcon = { success: "check", failure: "x", running: "loader", pending: "clock" };
+      const statusLabel = { completed: "done", inProgress: "active", pending: "todo" };
+
+      /* reusable fragments ------------------------------------------------ */
+      function fileRows(withCheck) {
+        return DATA.files
+          .map((f) => {
+            const i = f.path.lastIndexOf("/");
+            const name = f.path.slice(i + 1),
+              dir = f.path.slice(0, i);
+            return `<div class="frow">
+      ${withCheck ? `<input type="checkbox" checked onclick="event.stopPropagation()"/>` : ``}
+      <span class="tag ${f.st}">${f.st}</span>
+      <span class="path"><span class="name">${name}</span><span class="dir mono">${dir}</span></span>
+      ${f.conflict ? `<svg class="ico xs" style="color:var(--warning-foreground)"><use href="#i-alert"/></svg>` : ``}
+      <span class="nums"><span class="a">+${f.a}</span><span class="d">−${f.d}</span></span>
+    </div>`;
+          })
+          .join("");
+      }
+      function planSteps() {
+        return DATA.plan.steps
+          .map((s) => {
+            const cls =
+              s.status === "completed" ? "done" : s.status === "inProgress" ? "active" : "todo";
+            const mark = s.status === "completed" ? ic("check", "xs") : "";
+            return `<div class="pstep ${cls}"><span class="mk">${mark}</span><span class="txt">${s.step}</span></div>`;
+          })
+          .join("");
+      }
+      function agentRows() {
+        return DATA.agents
+          .map((a) => {
+            const initials = a.name
+              .replace(/[^A-Za-z]/g, "")
+              .slice(0, 2)
+              .toUpperCase();
+            return `<div class="agent">
+      <span class="av">${initials}</span>
+      <span class="grow"><div class="rowflex"><span class="nm">${a.name}</span><span class="dot ${a.status}"></span></div>
+      <div class="rl truncate">${a.status === "idle" ? a.tool : a.tool}</div></span>
+      <span class="muted mono" style="font-size:11px">${a.when}</span>
+    </div>`;
+          })
+          .join("");
+      }
+      function checkRows() {
+        return DATA.pr.runs
+          .map((r) => {
+            const spin = r.tone === "running" ? "spin" : "";
+            return `<div class="check">
+      <span class="st ${r.tone}">${ic(toneIcon[r.tone], "sm " + spin)}</span>
+      <span class="nm">${r.name}</span>
+      <span class="dt">${r.detail}</span>
+    </div>`;
+          })
+          .join("");
+      }
+      function branchSelector() {
+        return `<div class="pop">
+    <button class="branchsel" data-dd>
+      ${ic("branch", "sm")}
+      <span class="nm mono">${DATA.branch}</span>
+      <span class="ab">${ic("up")}${DATA.ahead} ${ic("down")}${DATA.behind}</span>
+      ${ic("chev-d", "sm")}
+    </button>
+    <div class="menu down" data-menu style="min-width:280px">
+      <div class="search">${ic("branch", "sm")}<input placeholder="Switch branch, tag or #PR…"/></div>
+      <div class="reflist">
+        ${DATA.refs
+          .map(
+            (r) => `<div class="refitem ${r.cur ? "cur" : ""}">
+          ${ic(r.kind === "tag" ? "commit" : "branch", "sm")}
+          <span class="mono truncate">${r.name}</span>
+          ${r.cur ? ic("check", "sm") : ""}
+          <span class="meta">${r.meta}</span>
+        </div>`,
+          )
+          .join("")}
+      </div>
+      <div class="msep"></div>
+      <div class="mi"><span class="ico">${ic("plus", "sm")}</span><strong>Create branch from ${DATA.branch}…</strong></div>
+    </div>
+  </div>`;
+      }
+      function commitMenu(dir) {
+        return `<div class="menu ${dir} right" data-menu>
+    <div class="mhead">Commit actions</div>
+    <div class="mi"><span class="ico">${ic("commit", "sm")}</span><div><strong>Commit only</strong><small>${fileCount} files staged</small></div></div>
+    <div class="mi"><span class="ico">${ic("cloud", "sm")}</span><div><strong>Commit &amp; Push</strong><small>to origin/${DATA.branch}</small></div></div>
+    <div class="mi"><span class="ico">${ic("pr", "sm")}</span><div><strong>Commit, Push &amp; open PR</strong><small>${DATA.base} ← ${DATA.branch}</small></div></div>
+    <div class="msep"></div>
+    <div class="mi"><span class="ico">${ic("down", "sm")}</span><div><strong>Pull</strong><small>${DATA.behind} behind upstream</small></div></div>
+    <div class="mi"><span class="ico">${ic("refresh", "sm")}</span><div><strong>Sync (pull + push)</strong></div></div>
+  </div>`;
+      }
+      function prConflictBanner() {
+        return `<div class="banner err">${ic("alert", "sm")}<div><b>Merge conflict in ${DATA.pr.conflictFiles.length} file</b> · ${DATA.pr.conflictFiles.join(", ")}. Rebase onto ${DATA.base} to resolve before merge.</div></div>`;
+      }
+
+      /* ============================================================
+   PANEL 1 — SEGMENTED
+   ============================================================ */
+      function panel1() {
+        return `<div class="panel" data-scope>
+    <div class="p-head">
+      <div class="between" style="margin-bottom:9px">
+        ${branchSelector()}
+        <div class="rowflex">
+          <button class="iconbtn sm" title="Refresh">${ic("refresh", "sm")}</button>
+          <button class="iconbtn sm" title="Settings">${ic("settings", "sm")}</button>
+        </div>
+      </div>
+      <div class="seg">
+        <button class="is-active" data-tab="changes">Changes <span class="ct">${fileCount}</span></button>
+        <button data-tab="plan">Plan</button>
+        <button data-tab="agents">Agents <span class="ct">2</span></button>
+        <button data-tab="pr">PR</button>
+      </div>
+    </div>
+    <div class="p-body">
+      <!-- changes -->
+      <div data-pane="changes" class="is-active">
+        <div class="shead"><span class="label">Working tree</span>
+          <span class="diff"><span class="a">+${totalA}</span><span class="d">−${totalD}</span></span></div>
+        <div style="padding:0 13px 8px"><div class="spark"><i class="a" style="flex:${totalA}"></i><i class="d" style="flex:${totalD}"></i></div></div>
+        ${fileRows(true)}
+        <div class="sep" style="margin:8px 0"></div>
+        <div class="kv"><span class="k">${ic("dot", "sm")} Environment</span><span class="v">${DATA.env.label} · node ${DATA.env.node}</span></div>
+      </div>
+      <!-- plan -->
+      <div data-pane="plan">
+        <div class="shead"><span class="label">Active plan</span><span class="badge neutral">3 / 5</span></div>
+        <div style="padding:0 13px 8px;font-size:12.5px" class="muted">${DATA.plan.explanation}</div>
+        <div style="position:relative">${planSteps()}</div>
+      </div>
+      <!-- agents -->
+      <div data-pane="agents">
+        <div class="shead"><span class="label">Subagents</span><span class="badge info">${ic("loader", "xs spin")}2 running</span></div>
+        ${agentRows()}
+      </div>
+      <!-- pr -->
+      <div data-pane="pr">
+        <div style="padding:11px 13px 8px">
+          <div class="headline">${ic("pr", "sm")} #${DATA.pr.number} <span class="badge success">${DATA.pr.state}</span></div>
+          <div class="subline" style="margin-top:3px">${DATA.pr.title}</div>
+        </div>
+        <div style="padding:0 13px 9px">${prConflictBanner()}</div>
+        <div class="shead"><span class="label">Checks</span><span class="badge ${checksFail ? "error" : "success"}">${checksPass}/${DATA.pr.runs.length} passed</span></div>
+        ${checkRows()}
+      </div>
+    </div>
+    <div class="p-foot">
+      <div class="foot-meta">${ic("commit", "xs")} <span class="mono">${fileCount} files</span> staged · <span class="ab">${ic("up")}${DATA.ahead}</span> to push</div>
+      <div class="split">
+        <button class="btn primary">${ic("cloud", "sm")} Commit &amp; Push</button>
+        <div class="pop"><button class="caret" data-dd>${ic("chev-d", "sm")}</button>${commitMenu("up")}</div>
+      </div>
+    </div>
+  </div>`;
+      }
+
+      /* ============================================================
+   PANEL 2 — STACK (accordion, everything glanceable)
+   ============================================================ */
+      function panel2() {
+        return `<div class="panel" data-scope>
+    <div class="p-head">
+      <div class="between">
+        ${branchSelector()}
+        <button class="iconbtn sm" title="Refresh">${ic("refresh", "sm")}</button>
+      </div>
+    </div>
+    <div class="p-body">
+      <!-- sticky metric strip — stays pinned while the cards scroll -->
+      <div class="mstrip">
+        <div class="mcell"><div class="label">Diff</div><div class="mv"><span class="diff" style="font-size:12px"><span class="a">+${totalA}</span><span class="d">−${totalD}</span></span></div><div class="ms">${fileCount} files</div></div>
+        <div class="mcell"><div class="label">Checks</div><div class="mv" style="color:var(--destructive-foreground)">${checksPass}/${DATA.pr.runs.length}</div><div class="ms">1 failing</div></div>
+        <div class="mcell"><div class="label">Plan</div><div class="mv">3<span class="muted" style="font-size:11px">/5</span></div><div class="ms">60% done</div></div>
+        <div class="mcell"><div class="label">Agents</div><div class="mv">2 <span class="dot running" style="margin-left:1px"></span></div><div class="ms">running</div></div>
+      </div>
+      <!-- accordions -->
+      <div class="acc open">
+        <button class="acc-head" data-acc><span class="chev">${ic("chev-r", "sm")}</span><span class="ttl">${ic("commit", "sm lead")} Changes</span><span class="diff"><span class="a">+${totalA}</span><span class="d">−${totalD}</span></span></button>
+        <div class="acc-body">${fileRows(true)}</div>
+      </div>
+      <div class="acc">
+        <button class="acc-head" data-acc><span class="chev">${ic("chev-r", "sm")}</span><span class="ttl">${ic("sparkles", "sm lead")} Plan</span><span class="badge neutral">3 / 5</span></button>
+        <div class="acc-body"><div style="padding:4px 13px 2px;font-size:12.5px" class="muted">${DATA.plan.explanation}</div>${planSteps()}</div>
+      </div>
+      <div class="acc">
+        <button class="acc-head" data-acc><span class="chev">${ic("chev-r", "sm")}</span><span class="ttl">${ic("bot", "sm lead")} Subagents</span><span class="badge info">${ic("loader", "xs spin")}2</span></button>
+        <div class="acc-body">${agentRows()}</div>
+      </div>
+      <div class="acc open">
+        <button class="acc-head" data-acc><span class="chev">${ic("chev-r", "sm")}</span><span class="ttl">${ic("pr", "sm lead")} Pull Request #${DATA.pr.number}</span><span class="badge error">conflict</span></button>
+        <div class="acc-body">
+          <div style="padding:2px 13px 9px"><div class="subline" style="margin-bottom:8px">${DATA.pr.title}</div>${prConflictBanner()}</div>
+          ${checkRows()}
+          <div class="kv"><span class="k">${ic("msg", "sm")} Reviews</span><span class="v" style="font-family:var(--font-sans)">1 approved · 1 requested</span></div>
+        </div>
+      </div>
+      <div class="acc">
+        <button class="acc-head" data-acc><span class="chev">${ic("chev-r", "sm")}</span><span class="ttl">${ic("term", "sm lead")} Environment</span><span class="badge success">${ic("dot", "xs")} ready</span></button>
+        <div class="acc-body">
+          <div class="kv"><span class="k">Target</span><span class="v">${DATA.env.label}</span></div>
+          <div class="kv"><span class="k">Node</span><span class="v">${DATA.env.node}</span></div>
+          <div class="kv"><span class="k">Shell</span><span class="v">clean</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="p-foot">
+      <div class="rowflex" style="gap:8px">
+        <div class="split" style="flex:1">
+          <button class="btn primary">${ic("cloud", "sm")} Commit &amp; Push</button>
+          <div class="pop"><button class="caret" data-dd>${ic("chev-d", "sm")}</button>${commitMenu("up")}</div>
+        </div>
+        <button class="btn outline" style="flex:none" title="Open PR">${ic("eye", "sm")}</button>
+      </div>
+    </div>
+  </div>`;
+      }
+
+      /* ============================================================
+   PANEL 3 — COMMAND CENTER (metric tiles → focused detail)
+   ============================================================ */
+      function panel3() {
+        const ciRing = `conic-gradient(var(--success) 0 ${(360 * checksPass) / 5}deg, var(--destructive) ${(360 * checksPass) / 5}deg ${(360 * (checksPass + checksFail)) / 5}deg, var(--sky) ${(360 * (checksPass + checksFail)) / 5}deg ${(360 * (checksPass + checksFail + checksRun)) / 5}deg, var(--border-strong) ${(360 * (checksPass + checksFail + checksRun)) / 5}deg 360deg)`;
+        return `<div class="panel" data-scope>
+    <div class="p-head between">
+      ${branchSelector()}
+      <span class="muted mono" style="font-size:11px">${DATA.repo}</span>
+    </div>
+    <div class="p-body">
+      <div class="tiles">
+        <button class="tile is-active" data-tab="changes">
+          <div class="tl">${ic("commit", "xs")} Changes</div>
+          <div class="big">${fileCount} <span class="diff" style="font-size:12px"><span class="a">+${totalA}</span><span class="d">−${totalD}</span></span></div>
+          <div class="small">files in working tree</div>
+        </button>
+        <button class="tile" data-tab="pr">
+          <div class="tl">${ic("pr", "xs")} Checks</div>
+          <div class="big"><span class="ring" style="background:${ciRing}"></span> ${checksPass}/5</div>
+          <div class="small" style="color:var(--destructive-foreground)">1 failed · 1 running</div>
+        </button>
+        <button class="tile" data-tab="plan">
+          <div class="tl">${ic("sparkles", "xs")} Plan</div>
+          <div class="big">3<span class="muted" style="font-size:14px">/5</span></div>
+          <div class="small">steps complete</div>
+        </button>
+        <button class="tile" data-tab="agents">
+          <div class="tl">${ic("bot", "xs")} Agents</div>
+          <div class="big">2 <span class="dot running" style="width:9px;height:9px"></span></div>
+          <div class="small">running · 1 idle</div>
+        </button>
+      </div>
+      <div class="ringlegend">
+        <span><i style="background:var(--success)"></i>${checksPass} passed</span>
+        <span><i style="background:var(--destructive)"></i>${checksFail} failed</span>
+        <span><i style="background:var(--sky)"></i>${checksRun} running</span>
+        <span><i style="background:var(--border-strong)"></i>1 queued</span>
+      </div>
+      <div class="ctxbar">
+        <div class="ctxchip">${ic("pr", "sm")}<span>PR <b>#${DATA.pr.number}</b> · open</span><span class="badge error" style="margin-left:auto">conflict</span></div>
+        <div class="ctxchip">${ic("term", "sm")}<span><b>${DATA.env.label}</b> · node ${DATA.env.node}</span></div>
+      </div>
+      <div class="sep"></div>
+      <!-- detail panes -->
+      <div data-pane="changes" class="is-active">
+        <div class="shead"><span class="label">Working tree · ${DATA.branch}</span><span class="ab">${ic("up")}${DATA.ahead} ${ic("down")}${DATA.behind}</span></div>
+        ${fileRows(false)}
+      </div>
+      <div data-pane="pr">
+        <div class="shead"><span class="label">PR #${DATA.pr.number} checks</span><span class="badge error">e2e failed</span></div>
+        ${checkRows()}
+        <div style="padding:8px 13px 4px">${prConflictBanner()}</div>
+      </div>
+      <div data-pane="plan">
+        <div class="shead"><span class="label">Active plan</span></div>
+        <div style="padding:0 13px 6px;font-size:12.5px" class="muted">${DATA.plan.explanation}</div>
+        ${planSteps()}
+      </div>
+      <div data-pane="agents">
+        <div class="shead"><span class="label">Subagents</span></div>
+        ${agentRows()}
+      </div>
+    </div>
+    <div class="p-foot">
+      <div class="rowflex">
+        <button class="btn primary grow">${ic("cloud", "sm")} Commit &amp; Push</button>
+        <div class="pop"><button class="btn outline" data-dd>${ic("dots", "sm")}</button>${commitMenu("up")}</div>
+      </div>
+    </div>
+  </div>`;
+      }
+
+      /* ============================================================
+   PANEL 4 — ACTIVITY TIMELINE (unified session feed)
+   ============================================================ */
+      function panel4() {
+        const items = [
+          {
+            ic: "loader",
+            tone: "running",
+            t1: `<b>test (web)</b> running · step 3/5`,
+            t2: "CI workflow on PR #3204",
+            when: "now",
+          },
+          {
+            ic: "x",
+            tone: "failed",
+            t1: `<b>e2e (smoke)</b> failed`,
+            t2: "1 failing · overviewPanel.spec.ts",
+            when: "1m",
+          },
+          {
+            ic: "bot",
+            tone: "running",
+            t1: `<b>ui-designer</b> editing PlanSidebar.tsx`,
+            t2: "subagent · layout pass",
+            when: "2m",
+          },
+          {
+            ic: "commit",
+            tone: "primary",
+            t1: `<b>wip:</b> segmented header + diff stat`,
+            t2: `5 files · +${totalA} −${totalD}`,
+            when: "4m",
+          },
+          {
+            ic: "check",
+            tone: "success",
+            t1: `<b>Step 2 complete</b> · extract OverviewSection`,
+            t2: "plan progress 2/5",
+            when: "6m",
+          },
+          {
+            ic: "bot",
+            tone: "success",
+            t1: `<b>Explore</b> finished mapping`,
+            t2: "subagent · 25 tool calls",
+            when: "8m",
+          },
+          {
+            ic: "pr",
+            tone: "success",
+            t1: `<b>PR #3204 opened</b>`,
+            t2: `${DATA.base} ← ${DATA.branch}`,
+            when: "14m",
+          },
+        ];
+        return `<div class="panel" data-scope>
+    <div class="p-head">
+      <div class="between" style="margin-bottom:0">
+        ${branchSelector()}
+        <span class="badge error">${ic("alert", "xs")} conflict</span>
+      </div>
+    </div>
+    <div class="filterbar">
+      <span class="chip on" data-tab="all">All</span>
+      <span class="chip" data-tab="ci">${ic("pr", "xs")} CI</span>
+      <span class="chip" data-tab="agents">${ic("bot", "xs")} Agents</span>
+      <span class="chip" data-tab="commits">${ic("commit", "xs")} Commits</span>
+    </div>
+    <div class="p-body">
+      <div class="tl">
+        ${items
+          .map(
+            (i) => `<div class="tli">
+          <span class="ic ${i.tone}">${ic(i.ic, "sm " + (i.ic === "loader" ? "spin" : ""))}</span>
+          <span class="bd"><div class="t1">${i.t1}</div><div class="t2">${i.t2}</div></span>
+          <span class="when">${i.when}</span>
+        </div>`,
+          )
+          .join("")}
+      </div>
+    </div>
+    <div class="p-foot">
+      <div class="foot-meta">${ic("commit", "xs")} ${fileCount} files · <span class="diff" style="font-size:11px"><span class="a">+${totalA}</span><span class="d">−${totalD}</span></span> uncommitted</div>
+      <div class="rowflex">
+        <input placeholder="Commit message…" style="flex:1;height:32px;border:1px solid var(--input);background:var(--popover);border-radius:9px;padding:0 10px;font:inherit;font-size:12.5px;color:var(--foreground);outline:none"/>
+        <div class="split" style="width:auto"><button class="btn primary" style="border-radius:10px">${ic("cloud", "sm")}</button></div>
+      </div>
+    </div>
+  </div>`;
+      }
+
+      /* ============================================================
+   PANEL 5 — FOCUS / PROGRESSIVE (one morphing CTA)
+   ============================================================ */
+      const MORPH = [
+        {
+          label: "Commit 5 files",
+          ic: "commit",
+          hint: "5 files staged · +" + totalA + " −" + totalD,
+          variant: "primary",
+        },
+        {
+          label: "Push to origin",
+          ic: "cloud",
+          hint: DATA.ahead + " commits ahead of origin/" + DATA.branch,
+          variant: "primary",
+        },
+        {
+          label: "Open pull request",
+          ic: "pr",
+          hint: DATA.base + " ← " + DATA.branch,
+          variant: "primary",
+        },
+        {
+          label: "Resolve conflict, then merge",
+          ic: "merge",
+          hint: "1 conflict in PlanSidebar.tsx",
+          variant: "danger",
+        },
+      ];
+      function panel5() {
+        const colHeights = DATA.files.map((f) => f.a + f.d);
+        const maxH = Math.max(...colHeights);
+        return `<div class="panel" data-scope>
+    <div class="p-head between">
+      ${branchSelector()}
+      <button class="iconbtn sm">${ic("dots", "sm")}</button>
+    </div>
+    <div class="p-body">
+      <div class="hero">
+        <div class="label" style="margin-bottom:8px">Uncommitted changes</div>
+        <div class="stat-xl"><span class="a" style="color:var(--add)">+${totalA}</span><span class="d" style="color:var(--del)">−${totalD}</span><span class="u">${fileCount} files</span></div>
+        <div class="colbars">
+          ${DATA.files.map((f) => `<i style="height:${20 + (58 * (f.a + f.d)) / maxH}%" title="${f.path}"><span class="ad" style="height:${(100 * f.a) / (f.a + f.d)}%"></span></i>`).join("")}
+        </div>
+        <div class="muted" style="font-size:11.5px">across ${fileCount} files · ${DATA.ahead} commits ahead, ${DATA.behind} behind <span class="mono">${DATA.base}</span></div>
+      </div>
+      <!-- quiet collapsible rows -->
+      <div class="quiet" data-acc-row>
+        <span class="ico">${ic("sparkles", "sm")}</span>
+        <span class="grow">Plan <span class="sub">· 3 of 5 steps</span></span>
+        <span class="badge neutral">60%</span>
+      </div>
+      <div class="quiet" data-acc-row>
+        <span class="ico">${ic("bot", "sm")}</span>
+        <span class="grow">Subagents <span class="sub">· ui-designer, code-reviewer</span></span>
+        <span class="dot running"></span><span class="dot running"></span>
+      </div>
+      <div class="quiet" data-acc-row>
+        <span class="ico" style="color:var(--destructive-foreground)">${ic("pr", "sm")}</span>
+        <span class="grow">PR #${DATA.pr.number} <span class="sub">· checks ${checksPass}/5</span></span>
+        <span class="badge error">conflict</span>
+      </div>
+      <div class="quiet" data-acc-row>
+        <span class="ico">${ic("term", "sm")}</span>
+        <span class="grow">Environment <span class="sub">· ${DATA.env.label}</span></span>
+        <span class="badge success">${ic("dot", "xs")} ready</span>
+      </div>
+    </div>
+    <div class="p-foot">
+      <div class="foot-meta" id="m5-hint">${MORPH[0].hint}</div>
+      <div class="rowflex">
+        <button class="btn ${MORPH[0].variant} grow" id="m5-btn" data-morph>${ic(MORPH[0].ic, "sm")} <span>${MORPH[0].label}</span></button>
+        <div class="pop"><button class="btn outline" data-dd>${ic("chev-d", "sm")}</button>${commitMenu("up")}</div>
+      </div>
+      <div class="muted" style="font-size:10.5px;text-align:center;margin-top:7px">click the action to advance the flow →</div>
+    </div>
+  </div>`;
+      }
+
+      /* ============================================================
+   PANEL 6 — RAIL / MASTER-DETAIL (activity-bar style)
+   ============================================================ */
+      function panel6() {
+        return `<div class="panel" data-scope>
+    <div class="railwrap">
+      <div class="rail">
+        <button class="railbtn is-active" data-tab="sc" title="Source control">${ic("commit", "lg")}<span class="cnt">${fileCount}</span></button>
+        <button class="railbtn" data-tab="plan" title="Plan">${ic("sparkles", "lg")}</button>
+        <button class="railbtn" data-tab="agents" title="Subagents">${ic("bot", "lg")}<span class="cnt">2</span></button>
+        <button class="railbtn" data-tab="pr" title="Pull request">${ic("pr", "lg")}<span class="cnt err">!</span></button>
+        <button class="railbtn" data-tab="env" title="Environment">${ic("term", "lg")}</button>
+        <div style="flex:1"></div>
+        <button class="railbtn" title="Settings">${ic("settings", "lg")}</button>
+      </div>
+      <div class="railmain" data-scope>
+        <div class="p-head between"><div class="headline" id="r6-title">${ic("commit", "sm")} Source control</div><button class="iconbtn sm">${ic("refresh", "sm")}</button></div>
+        <div class="p-body">
+          <div data-pane="sc" class="is-active">
+            <div style="padding:11px 13px 6px">${branchSelector()}</div>
+            <div class="shead"><span class="label">Changes</span><span class="diff"><span class="a">+${totalA}</span><span class="d">−${totalD}</span></span></div>
+            ${fileRows(true)}
+          </div>
+          <div data-pane="plan">
+            <div class="shead"><span class="label">Active plan</span><span class="badge neutral">3 / 5</span></div>
+            <div style="padding:0 13px 6px;font-size:12.5px" class="muted">${DATA.plan.explanation}</div>
+            ${planSteps()}
+          </div>
+          <div data-pane="agents">
+            <div class="shead"><span class="label">Subagents</span><span class="badge info">2 running</span></div>
+            ${agentRows()}
+          </div>
+          <div data-pane="pr">
+            <div style="padding:11px 13px 8px"><div class="headline">${ic("pr", "sm")} #${DATA.pr.number} <span class="badge success">open</span></div><div class="subline" style="margin-top:3px">${DATA.pr.title}</div></div>
+            <div style="padding:0 13px 9px">${prConflictBanner()}</div>
+            <div class="shead"><span class="label">Checks</span></div>
+            ${checkRows()}
+          </div>
+          <div data-pane="env">
+            <div class="shead"><span class="label">Environment</span><span class="badge success">${ic("dot", "xs")} ready</span></div>
+            <div class="kv"><span class="k">Target</span><span class="v">${DATA.env.label}</span></div>
+            <div class="kv"><span class="k">Node</span><span class="v">${DATA.env.node}</span></div>
+            <div class="kv"><span class="k">Shell</span><span class="v">clean</span></div>
+          </div>
+        </div>
+        <div class="p-foot">
+          <div class="split">
+            <button class="btn primary">${ic("cloud", "sm")} Commit &amp; Push</button>
+            <div class="pop"><button class="caret" data-dd>${ic("chev-d", "sm")}</button>${commitMenu("up")}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+      }
+
+      /* mini-viz helpers (status board / split dashboard) */
+      function checkDots() {
+        return (
+          `<span class="dots5">` +
+          DATA.pr.runs.map((r) => `<i class="${r.tone}"></i>`).join("") +
+          `</span>`
+        );
+      }
+      function progbar(pct) {
+        return `<span class="prog"><i style="width:${pct}%"></i></span>`;
+      }
+      function avStack() {
+        return (
+          `<span class="avstack">` +
+          DATA.agents
+            .slice(0, 3)
+            .map(
+              (a) =>
+                `<span class="av2">${a.name
+                  .replace(/[^A-Za-z]/g, "")
+                  .slice(0, 1)
+                  .toUpperCase()}</span>`,
+            )
+            .join("") +
+          `</span>`
+        );
+      }
+
+      /* ============================================================
+   PANEL 7 — HYBRID  (command-center tiles → jump into the stack)
+   ============================================================ */
+      function panel7() {
+        return `<div class="panel" data-scope>
+    <div class="p-head"><div class="between">${branchSelector()}<button class="iconbtn sm" title="Refresh">${ic("refresh", "sm")}</button></div></div>
+    <div class="p-body">
+      <div class="tiles four">
+        <button class="tile mini is-active" data-jump="changes"><div class="tl">${ic("commit", "xs")} Diff</div><div class="big"><span class="diff" style="font-size:12px"><span class="a">+${totalA}</span><span class="d">−${totalD}</span></span></div><div class="small">${fileCount} files</div></button>
+        <button class="tile mini" data-jump="pr"><div class="tl">${ic("pr", "xs")} Checks</div><div class="big" style="font-size:15px;color:var(--destructive-foreground)">${checksPass}/5</div><div class="small">1 failed</div></button>
+        <button class="tile mini" data-jump="plan"><div class="tl">${ic("sparkles", "xs")} Plan</div><div class="big">3<span class="muted" style="font-size:11px">/5</span></div><div class="small">60%</div></button>
+        <button class="tile mini" data-jump="agents"><div class="tl">${ic("bot", "xs")} Agents</div><div class="big">2 <span class="dot running"></span></div><div class="small">running</div></button>
+      </div>
+      <div class="sep"></div>
+      <div class="acc open" data-sec="changes">
+        <button class="acc-head" data-acc><span class="chev">${ic("chev-r", "sm")}</span><span class="ttl">${ic("commit", "sm lead")} Changes</span><span class="diff"><span class="a">+${totalA}</span><span class="d">−${totalD}</span></span></button>
+        <div class="acc-body">${fileRows(true)}</div>
+      </div>
+      <div class="acc" data-sec="plan">
+        <button class="acc-head" data-acc><span class="chev">${ic("chev-r", "sm")}</span><span class="ttl">${ic("sparkles", "sm lead")} Plan</span><span class="badge neutral">3 / 5</span></button>
+        <div class="acc-body"><div style="padding:4px 13px 2px;font-size:12.5px" class="muted">${DATA.plan.explanation}</div>${planSteps()}</div>
+      </div>
+      <div class="acc" data-sec="agents">
+        <button class="acc-head" data-acc><span class="chev">${ic("chev-r", "sm")}</span><span class="ttl">${ic("bot", "sm lead")} Subagents</span><span class="badge info">${ic("loader", "xs spin")}2</span></button>
+        <div class="acc-body">${agentRows()}</div>
+      </div>
+      <div class="acc open" data-sec="pr">
+        <button class="acc-head" data-acc><span class="chev">${ic("chev-r", "sm")}</span><span class="ttl">${ic("pr", "sm lead")} Pull Request #${DATA.pr.number}</span><span class="badge error">conflict</span></button>
+        <div class="acc-body"><div style="padding:2px 13px 9px"><div class="subline" style="margin-bottom:8px">${DATA.pr.title}</div>${prConflictBanner()}</div>${checkRows()}</div>
+      </div>
+      <div class="acc" data-sec="env">
+        <button class="acc-head" data-acc><span class="chev">${ic("chev-r", "sm")}</span><span class="ttl">${ic("term", "sm lead")} Environment</span><span class="badge success">${ic("dot", "xs")} ready</span></button>
+        <div class="acc-body"><div class="kv"><span class="k">Target</span><span class="v">${DATA.env.label}</span></div><div class="kv"><span class="k">Node</span><span class="v">${DATA.env.node}</span></div></div>
+      </div>
+    </div>
+    <div class="p-foot"><div class="split"><button class="btn primary">${ic("cloud", "sm")} Commit &amp; Push</button><div class="pop"><button class="caret" data-dd>${ic("chev-d", "sm")}</button>${commitMenu("up")}</div></div></div>
+  </div>`;
+      }
+
+      /* ============================================================
+   PANEL 8 — STATUS BOARD  (single-column lanes with inline mini-viz)
+   ============================================================ */
+      function panel8() {
+        return `<div class="panel" data-scope>
+    <div class="p-head"><div class="between">${branchSelector()}<span class="badge error">${ic("alert", "xs")} conflict</span></div></div>
+    <div class="p-body">
+      <div class="lane open">
+        <button class="lane-head" data-acc-lane><span class="li">${ic("commit", "sm")}</span><span class="lt">Changes<small>${fileCount} files · working tree</small></span><span class="lm"><span class="spark" style="width:38px"><i class="a" style="flex:${totalA}"></i><i class="d" style="flex:${totalD}"></i></span><span class="diff" style="font-size:11px"><span class="a">+${totalA}</span><span class="d">−${totalD}</span></span></span><span class="chev">${ic("chev-r", "sm")}</span></button>
+        <div class="lane-body">${fileRows(true)}</div>
+      </div>
+      <div class="lane">
+        <button class="lane-head" data-acc-lane><span class="li">${ic("pr", "sm")}</span><span class="lt">Checks<small>CI on PR #${DATA.pr.number}</small></span><span class="lm">${checkDots()}<span class="muted mono" style="font-size:11px">${checksPass}/5</span></span><span class="chev">${ic("chev-r", "sm")}</span></button>
+        <div class="lane-body">${checkRows()}</div>
+      </div>
+      <div class="lane">
+        <button class="lane-head" data-acc-lane><span class="li">${ic("sparkles", "sm")}</span><span class="lt">Plan<small>extract OverviewSection primitive</small></span><span class="lm">${progbar(60)}<span class="muted mono" style="font-size:11px">3/5</span></span><span class="chev">${ic("chev-r", "sm")}</span></button>
+        <div class="lane-body"><div style="padding:2px 13px 4px;font-size:12.5px" class="muted">${DATA.plan.explanation}</div>${planSteps()}</div>
+      </div>
+      <div class="lane">
+        <button class="lane-head" data-acc-lane><span class="li">${ic("bot", "sm")}</span><span class="lt">Subagents<small>ui-designer, code-reviewer…</small></span><span class="lm">${avStack()}<span class="muted" style="font-size:11px">2 running</span></span><span class="chev">${ic("chev-r", "sm")}</span></button>
+        <div class="lane-body">${agentRows()}</div>
+      </div>
+      <div class="lane open">
+        <button class="lane-head" data-acc-lane><span class="li">${ic("pr", "sm")}</span><span class="lt">Pull Request<small>#${DATA.pr.number} · ${DATA.pr.title}</small></span><span class="lm"><span class="badge success">open</span><span class="badge error">conflict</span></span><span class="chev">${ic("chev-r", "sm")}</span></button>
+        <div class="lane-body"><div style="padding:2px 13px 9px">${prConflictBanner()}</div><div class="kv"><span class="k">${ic("msg", "sm")} Reviews</span><span class="v" style="font-family:var(--font-sans)">1 approved · 1 requested</span></div></div>
+      </div>
+      <div class="lane">
+        <button class="lane-head" data-acc-lane><span class="li">${ic("term", "sm")}</span><span class="lt">Environment<small>${DATA.env.label} · node ${DATA.env.node}</small></span><span class="lm"><span class="badge success">${ic("dot", "xs")} ready</span></span><span class="chev">${ic("chev-r", "sm")}</span></button>
+        <div class="lane-body"><div class="kv"><span class="k">Shell</span><span class="v">clean</span></div></div>
+      </div>
+    </div>
+    <div class="p-foot"><div class="split"><button class="btn primary">${ic("cloud", "sm")} Commit &amp; Push</button><div class="pop"><button class="caret" data-dd>${ic("chev-d", "sm")}</button>${commitMenu("up")}</div></div></div>
+  </div>`;
+      }
+
+      /* ============================================================
+   PANEL 9 — SPLIT DASHBOARD  (always-on summary + persistent detail)
+   ============================================================ */
+      function panel9() {
+        return `<div class="panel" data-scope>
+    <div class="p-head between">${branchSelector()}<span class="muted mono" style="font-size:11px">${DATA.repo}</span></div>
+    <div class="dash">
+      <button class="dashrow is-active" data-tab="changes"><span class="di">${ic("commit", "sm")}</span><span class="dl">Changes</span><span class="dm"><span class="spark" style="width:38px"><i class="a" style="flex:${totalA}"></i><i class="d" style="flex:${totalD}"></i></span><span class="diff" style="font-size:11px"><span class="a">+${totalA}</span><span class="d">−${totalD}</span></span></span></button>
+      <button class="dashrow" data-tab="pr"><span class="di">${ic("pr", "sm")}</span><span class="dl">Checks</span><span class="dm">${checkDots()}<span class="mono">${checksPass}/5</span> · <span style="color:var(--destructive-foreground)">e2e failed</span></span></button>
+      <button class="dashrow" data-tab="plan"><span class="di">${ic("sparkles", "sm")}</span><span class="dl">Plan</span><span class="dm">${progbar(60)}<span class="mono">3/5 steps</span></span></button>
+      <button class="dashrow" data-tab="agents"><span class="di">${ic("bot", "sm")}</span><span class="dl">Agents</span><span class="dm">${avStack()}<span>2 running · 1 idle</span></span></button>
+      <button class="dashrow" data-tab="env"><span class="di">${ic("term", "sm")}</span><span class="dl">Env</span><span class="dm"><span class="badge success">${ic("dot", "xs")} ready</span> ${DATA.env.label}</span></button>
+    </div>
+    <div class="detail">
+      <div data-pane="changes" class="is-active"><div class="shead"><span class="label">Working tree</span><span class="ab">${ic("up")}${DATA.ahead} ${ic("down")}${DATA.behind}</span></div>${fileRows(true)}</div>
+      <div data-pane="pr"><div style="padding:11px 13px 8px"><div class="headline">${ic("pr", "sm")} #${DATA.pr.number} <span class="badge success">open</span></div><div class="subline" style="margin-top:3px">${DATA.pr.title}</div></div><div style="padding:0 13px 9px">${prConflictBanner()}</div>${checkRows()}</div>
+      <div data-pane="plan"><div class="shead"><span class="label">Active plan</span><span class="badge neutral">3 / 5</span></div><div style="padding:0 13px 6px;font-size:12.5px" class="muted">${DATA.plan.explanation}</div>${planSteps()}</div>
+      <div data-pane="agents"><div class="shead"><span class="label">Subagents</span></div>${agentRows()}</div>
+      <div data-pane="env"><div class="shead"><span class="label">Environment</span></div><div class="kv"><span class="k">Target</span><span class="v">${DATA.env.label}</span></div><div class="kv"><span class="k">Node</span><span class="v">${DATA.env.node}</span></div><div class="kv"><span class="k">Shell</span><span class="v">clean</span></div></div>
+    </div>
+    <div class="p-foot"><div class="split"><button class="btn primary">${ic("cloud", "sm")} Commit &amp; Push</button><div class="pop"><button class="caret" data-dd>${ic("chev-d", "sm")}</button>${commitMenu("up")}</div></div></div>
+  </div>`;
+      }
+
+      /* ============================================================
+   RENDER GALLERY
+   ============================================================ */
+      const PANELS = [
+        {
+          n: 1,
+          t: "Segmented",
+          d: "A branch header, then a 4-way segmented switch (Changes · Plan · Agents · PR) over one body. Sticky split-button footer. Closest to today’s tabs, tightened.",
+          tags: ["Familiar", "Compact", "One action bar"],
+          build: panel1,
+        },
+        {
+          n: 2,
+          t: "Stack",
+          flag: "refined",
+          d: "A sticky 4-metric strip (diff · checks · plan · agents) stays pinned while collapsible cards for every section scroll beneath it. Everything visible, nothing behind a tab.",
+          tags: ["Everything visible", "Sticky metrics", "Accordion"],
+          build: panel2,
+        },
+        {
+          n: 3,
+          t: "Command center",
+          flag: "refined",
+          d: "A 2×2 grid of live tiles with a CI ring + legend and a PR/env context bar; selecting a tile reveals its detail below. Glance, then drill.",
+          tags: ["Glanceable", "Dense", "Drill-down"],
+          build: panel3,
+        },
+        {
+          n: 4,
+          t: "Activity timeline",
+          d: "One chronological feed merging commits, plan steps, subagent events and CI results. Commit straight from the footer. The panel as a live session log.",
+          tags: ["Chronological", "Live feed", "Inline commit"],
+          build: panel4,
+        },
+        {
+          n: 5,
+          t: "Focus / progressive",
+          d: "A big diff hero with a per-file bar chart and a single CTA that morphs Commit → Push → Open PR → Merge. Secondary sections stay quiet underneath.",
+          tags: ["Calm", "Opinionated", "Morphing CTA"],
+          build: panel5,
+        },
+        {
+          n: 6,
+          t: "Rail / master-detail",
+          d: "A slim icon rail (VS Code activity-bar style) with badges; each icon swaps the main area to one full-height section. A persistent global action footer.",
+          tags: ["Power-user", "Full-height sections", "Badged rail"],
+          build: panel6,
+        },
+        {
+          n: 7,
+          t: "Hybrid",
+          flag: "new",
+          d: "#3’s dashboard tiles on top — but each tile expands and scrolls to its section in #2’s full stack below. Glance from the tiles, read everything in place. The literal merge of 2 & 3.",
+          tags: ["Tiles + stack", "Jump-to", "Best of 2 & 3"],
+          build: panel7,
+        },
+        {
+          n: 8,
+          t: "Status board",
+          flag: "new",
+          d: "Every section is a full-width lane carrying its own inline mini-visual — spark bar, CI dots, progress bar, agent avatars; expand any lane in place. One rhythm, no tabs.",
+          tags: ["Single column", "Inline mini-viz", "Expandable"],
+          build: panel8,
+        },
+        {
+          n: 9,
+          t: "Split dashboard",
+          flag: "new",
+          d: "A compact always-on dashboard up top you never lose, driving a persistent detail pane below. The summary and the focused section stay on screen together.",
+          tags: ["Always-on summary", "Split view", "Persistent detail"],
+          build: panel9,
+        },
+      ];
+      const gallery = document.getElementById("gallery");
+      PANELS.forEach((p) => {
+        const cell = el(`<div class="cell${[2, 7, 8].includes(p.n) ? " shortlisted" : ""}">
+    <div class="cap">
+      <div><span class="n">${p.n}</span><span class="t">${p.t}</span>${p.flag ? `<span class="cap-flag ${p.flag}" style="margin-left:8px">${p.flag.toUpperCase()}</span>` : ``}</div>
+      <p class="d">${p.d}</p>
+      <div class="tags">${p.tags.map((t) => `<span class="tag">${t}</span>`).join("")}</div>
+    </div>
+  </div>`);
+        cell.appendChild(el(p.build()));
+        gallery.appendChild(cell);
+      });
+
+      /* live preview — render the chosen layout into the stage */
+      const BUILDERS = { 2: panel2, 7: panel7, 8: panel8 };
+      const stage = document.getElementById("previewStage");
+      function renderPreview(n) {
+        stage.innerHTML = "";
+        stage.appendChild(el(BUILDERS[n]()));
+      }
+      renderPreview(2);
+
+      /* ============================================================
+   INTERACTIONS (event delegation)
+   ============================================================ */
+      document.addEventListener("click", (e) => {
+        // theme
+        const th = e.target.closest("[data-theme]");
+        if (th) {
+          const mode = th.dataset.theme;
+          document.documentElement.classList.toggle("dark", mode === "dark");
+          document
+            .querySelectorAll("#theme button")
+            .forEach((b) => b.classList.toggle("on", b === th));
+          return;
+        }
+        // live preview layout switch (the three chosen layouts)
+        const ls = e.target.closest("[data-layout]");
+        if (ls) {
+          document
+            .querySelectorAll("#layoutSwitch button")
+            .forEach((b) => b.classList.toggle("on", b === ls));
+          renderPreview(ls.dataset.layout);
+          return;
+        }
+        // tabs / tiles / rail  (scoped switching)
+        const tab = e.target.closest("[data-tab]");
+        if (tab && tab.closest("[data-scope]")) {
+          const scope = tab.closest("[data-scope]");
+          const key = tab.dataset.tab;
+          scope.querySelectorAll(":scope [data-tab]").forEach((t) => {
+            if (t.closest("[data-scope]") === scope) t.classList.toggle("is-active", t === tab);
+          });
+          scope.querySelectorAll(":scope [data-pane]").forEach((p) => {
+            if (p.closest("[data-scope]") === scope)
+              p.classList.toggle("is-active", p.dataset.pane === key);
+          });
+          // rail title sync
+          const title = scope.querySelector("#r6-title");
+          if (title) {
+            const map = {
+              sc: ["commit", "Source control"],
+              plan: ["sparkles", "Plan"],
+              agents: ["bot", "Subagents"],
+              pr: ["pr", "Pull request"],
+              env: ["term", "Environment"],
+            };
+            const m = map[key];
+            if (m) title.innerHTML = `<svg class="ico sm"><use href="#i-${m[0]}"/></svg> ${m[1]}`;
+          }
+          return;
+        }
+        // accordion
+        const ah = e.target.closest("[data-acc]");
+        if (ah) {
+          ah.closest(".acc").classList.toggle("open");
+          return;
+        }
+        // status-board lane
+        const al = e.target.closest("[data-acc-lane]");
+        if (al) {
+          al.closest(".lane").classList.toggle("open");
+          return;
+        }
+        // hybrid tile → open + scroll to its stacked section
+        const jp = e.target.closest("[data-jump]");
+        if (jp) {
+          const scope = jp.closest(".panel");
+          scope
+            .querySelectorAll("[data-jump]")
+            .forEach((t) => t.classList.toggle("is-active", t === jp));
+          const sec = scope.querySelector('.acc[data-sec="' + jp.dataset.jump + '"]');
+          if (sec) {
+            sec.classList.add("open");
+            const body = sec.querySelector(".acc-body");
+            if (body) {
+              body.classList.remove("jump-flash");
+              void body.offsetWidth;
+              body.classList.add("jump-flash");
+            }
+            sec.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          }
+          return;
+        }
+        // dropdown
+        const dd = e.target.closest("[data-dd]");
+        if (dd) {
+          const menu = dd.parentElement.querySelector("[data-menu]");
+          const willOpen = !menu.classList.contains("open");
+          document.querySelectorAll("[data-menu].open").forEach((m) => m.classList.remove("open"));
+          menu.classList.toggle("open", willOpen);
+          e.stopPropagation();
+          return;
+        }
+        // morph CTA (panel 5)
+        const morph = e.target.closest("[data-morph]");
+        if (morph) {
+          const scope = morph.closest(".panel");
+          scope._mi = ((scope._mi ?? 0) + 1) % MORPH.length;
+          const m = MORPH[scope._mi];
+          morph.className = `btn ${m.variant} grow`;
+          morph.innerHTML = `<svg class="ico sm"><use href="#i-${m.ic}"/></svg> <span>${m.label}</span>`;
+          scope.querySelector("#m5-hint").textContent = m.hint;
+          return;
+        }
+        // close menus on outside click
+        if (!e.target.closest("[data-menu]"))
+          document.querySelectorAll("[data-menu].open").forEach((m) => m.classList.remove("open"));
+      });
+    </script>
+  </body>
+</html>

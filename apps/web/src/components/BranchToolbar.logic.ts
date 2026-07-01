@@ -1,6 +1,54 @@
-import type { EnvironmentId, VcsRef, ProjectId } from "@ryco/contracts";
+import type { EnvironmentId, RepositoryIdentity, VcsRef, ProjectId } from "@ryco/contracts";
 import { Schema } from "effect";
 import { isGenericLocalEnvironmentLabel, normalizeDisplayLabel } from "../environmentDisplay";
+
+/**
+ * Convert a git remote URL (scp-like `git@host:owner/repo.git`, `ssh://`,
+ * `https://`, `git://`) into a browsable `https://host/owner/repo` URL.
+ * Returns null when it can't be parsed.
+ */
+export function normalizeGitRemoteToWebUrl(remoteUrl: string): string | null {
+  const trimmed = remoteUrl
+    .trim()
+    .replace(/\.git$/i, "")
+    .replace(/\/+$/, "");
+  if (!trimmed) return null;
+
+  // scp-like syntax: [user@]host:owner/repo (no scheme, has a colon)
+  if (!trimmed.includes("://")) {
+    const scp = /^(?:[^@/]+@)?([^:/]+):(.+)$/.exec(trimmed);
+    if (scp?.[1] && scp[2]) {
+      return `https://${scp[1]}/${scp[2].replace(/^\/+/, "")}`;
+    }
+  }
+
+  try {
+    const parsed = new URL(
+      trimmed.replace(/^(ssh|git|http):\/\//i, "https://").replace(/^ssh:/i, "https:"),
+    );
+    if (!parsed.host || parsed.pathname === "/" || parsed.pathname === "") return null;
+    return `https://${parsed.host}${parsed.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve a browsable repository URL from a project's repository identity. */
+export function deriveRepositoryWebUrl(
+  identity: RepositoryIdentity | null | undefined,
+): string | null {
+  if (!identity) return null;
+  const candidates = [
+    identity.locator?.remoteUrl,
+    ...(identity.remotes ?? []).map((remote) => remote.url),
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const webUrl = normalizeGitRemoteToWebUrl(candidate);
+    if (webUrl) return webUrl;
+  }
+  return null;
+}
 export {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
