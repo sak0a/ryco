@@ -649,7 +649,12 @@ export function ChatOverviewPanel(
         overviewPullRequestNumber,
         activeEnvironmentUnavailableState,
       }),
-    [activeEnvironmentUnavailableState, gitStatusQuery.data, changedFiles, overviewPullRequestNumber],
+    [
+      activeEnvironmentUnavailableState,
+      gitStatusQuery.data,
+      changedFiles,
+      overviewPullRequestNumber,
+    ],
   );
 
   const overviewChanges = useMemo<OverviewChanges | undefined>(() => {
