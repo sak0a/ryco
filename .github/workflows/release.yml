@@ -208,6 +208,21 @@ jobs:
             convert -version
           fi
 
+      - name: Expose Windows SDK signtool
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) {
+            throw "signtool.exe not found under Windows Kits\10\bin"
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $signtool.Directory.FullName
+          "SIGNTOOL_PATH=$($signtool.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "signtool.exe: $($signtool.FullName)"
+
       - name: Build desktop artifact
         shell: bash
         env:
