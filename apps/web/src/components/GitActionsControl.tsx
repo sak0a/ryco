@@ -1798,6 +1798,11 @@ export default function GitActionsControl({
   const blockHasOpenPr = gitStatusForActions?.pr?.state === "open";
   const blockHasUpstream = gitStatusForActions?.hasUpstream ?? false;
   const blockPrShortLabel = changeRequestTerminology.shortLabel;
+  // Push / PR from the block footer needs a real branch (not detached HEAD) and
+  // somewhere to push to, mirroring buildMenuItems / resolveQuickAction so the
+  // overview footer can't offer actions the compact menu guards.
+  const blockHasBranch = gitStatusForActions?.refName != null;
+  const blockCanPush = blockHasBranch && (blockHasUpstream || hasPrimaryRemote);
 
   if (!gitCwd) return null;
 
@@ -1919,7 +1924,7 @@ export default function GitActionsControl({
                       </div>
                     </MenuItem>
                     <MenuItem
-                      disabled={isGitActionRunning || !blockHasChanges}
+                      disabled={isGitActionRunning || !blockHasChanges || !blockCanPush}
                       onClick={() => void runGitActionWithToast({ action: "commit_push" })}
                     >
                       <CloudUploadIcon className="text-muted-foreground" />
@@ -1931,7 +1936,9 @@ export default function GitActionsControl({
                       </div>
                     </MenuItem>
                     <MenuItem
-                      disabled={isGitActionRunning || !blockHasChanges || blockHasOpenPr}
+                      disabled={
+                        isGitActionRunning || !blockHasChanges || blockHasOpenPr || !blockCanPush
+                      }
                       onClick={() => void runGitActionWithToast({ action: "commit_push_pr" })}
                     >
                       <SourceControlIcon className="text-muted-foreground" />
