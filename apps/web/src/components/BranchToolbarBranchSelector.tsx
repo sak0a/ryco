@@ -17,7 +17,7 @@ import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { readEnvironmentApi } from "../environmentApi";
 import { readLocalApi } from "../localApi";
 import { gitScopeKey, invalidateScopes, prefetchBranches, useGitBranches } from "../rpc/useGit";
-import { refreshGitStatus, useGitStatus } from "../lib/gitStatusState";
+import { useGitStatus } from "../lib/gitStatusState";
 import { newCommandId } from "../lib/utils";
 import { cn } from "../lib/utils";
 import { parsePullRequestReference } from "../pullRequestReference";
@@ -320,13 +320,6 @@ export function BranchToolbarBranchSelector({
     startBranchActionTransition(async () => {
       await action().catch(() => undefined);
       invalidateScopes([gitScopeKey(branchCwd)]);
-      // The overview's Changes / ahead-behind / pull-request data reads from the
-      // git-status atom store, which react-query invalidation doesn't touch. A
-      // checkout that keeps the same cwd never re-subscribes `useGitStatus`, so
-      // force a refresh to repopulate those counts for the newly checked-out ref.
-      if (branchCwd) {
-        void refreshGitStatus({ environmentId, cwd: branchCwd });
-      }
     });
   };
 
