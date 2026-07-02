@@ -1,0 +1,7 @@
+node_modules
+dist
+screenshots
+app-screenshots
+.archive
+.vite
+*.local
