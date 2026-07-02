@@ -1007,13 +1007,6 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     const winConfig: Record<string, unknown> = {
       target: [target],
       icon: "icon.ico",
-      // Force /fd sha256 (and /td sha256) on signtool. The Windows 11 SDK
-      // 10.0.26100 signtool.exe rejects invocations without an explicit
-      // /fd flag, so leaving this at electron-builder's default causes
-      // "SignTool Error: No file digest algorithm specified" on modern
-      // runners. SHA-1 signing is deprecated, so single-signing SHA-256
-      // is both correct and required.
-      signingHashAlgorithms: ["sha256"],
     };
     if (signed) {
       // Prefer Azure Trusted Signing when its credentials are present. Otherwise
@@ -1031,6 +1024,17 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         winConfig.azureSignOptions = azureSignOptions.value;
         yield* Effect.log("[desktop-artifact] Windows signing: Azure Trusted Signing.");
       } else {
+        // Force /fd sha256 (and /td sha256) on signtool. The Windows 11 SDK
+        // 10.0.26100 signtool.exe rejects invocations without an explicit
+        // /fd flag, so leaving this at electron-builder's default causes
+        // "SignTool Error: No file digest algorithm specified" on modern
+        // runners. SHA-1 signing is deprecated, so single-signing SHA-256
+        // is both correct and required. electron-builder 26 moved these
+        // options under win.signtoolOptions (not on win directly) and they
+        // cannot be combined with azureSignOptions.
+        winConfig.signtoolOptions = {
+          signingHashAlgorithms: ["sha256"],
+        };
         yield* Effect.log(
           "[desktop-artifact] Windows signing: certificate from CSC_LINK/CSC_KEY_PASSWORD.",
         );

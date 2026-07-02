@@ -427,6 +427,90 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }),
   );
 
+  it.effect("disables Windows signing when unsigned desktop artifacts are requested", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "win",
+        "nsis",
+        "0.1.1",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+
+      assert.deepStrictEqual(config.win, {
+        target: ["nsis"],
+        icon: "icon.ico",
+        signAndEditExecutable: false,
+      });
+      assert.equal(config.npmRebuild, false);
+    }),
+  );
+
+  it.effect("uses electron-builder 26 signtoolOptions for certificate-based Windows signing", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "win",
+        "nsis",
+        "0.1.1",
+        true,
+        false,
+        undefined,
+        undefined,
+      );
+
+      assert.deepStrictEqual(config.win, {
+        target: ["nsis"],
+        icon: "icon.ico",
+        signtoolOptions: {
+          signingHashAlgorithms: ["sha256"],
+        },
+      });
+    }),
+  );
+
+  it.effect("uses Azure Trusted Signing options without signtoolOptions on Windows", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "win",
+        "nsis",
+        "0.1.1",
+        true,
+        false,
+        undefined,
+        undefined,
+      ).pipe(
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromEnv({
+              env: {
+                AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: "Example Publisher",
+                AZURE_TRUSTED_SIGNING_ENDPOINT: "https://example.eus.codesigning.azure.net/",
+                AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: "ExampleProfile",
+                AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: "ExampleAccount",
+              },
+            }),
+          ),
+        ),
+      );
+
+      assert.deepStrictEqual(config.win, {
+        target: ["nsis"],
+        icon: "icon.ico",
+        azureSignOptions: {
+          publisherName: "Example Publisher",
+          endpoint: "https://example.eus.codesigning.azure.net/",
+          certificateProfileName: "ExampleProfile",
+          codeSigningAccountName: "ExampleAccount",
+          fileDigest: "SHA256",
+          timestampDigest: "SHA256",
+          timestampRfc3161: "http://timestamp.acs.microsoft.com",
+        },
+      });
+    }),
+  );
+
   it("excludes the bundled GitHub Copilot CLI from desktop artifacts", () => {
     assert.deepStrictEqual(DESKTOP_BUILD_FILES, [
       "**/*",
