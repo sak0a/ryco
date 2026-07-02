@@ -1015,7 +1015,11 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // Signing inside electron-builder keeps the NSIS installer, the inner
       // executables, and the electron-updater blockmap/latest.yml mutually
       // consistent, which a post-build signtool step would not.
-      const azureSignOptions = yield* AzureTrustedSigningOptionsConfig.pipe(Config.option);
+      // Effect.option (not Config.option) so that both "env unset" and
+      // "env set but empty" are treated as absent. Config.option only maps
+      // missing-env failures; SchemaError from Config.nonEmptyString still
+      // propagates and would abort the build.
+      const azureSignOptions = yield* Effect.option(AzureTrustedSigningOptionsConfig.asEffect());
       if (Option.isSome(azureSignOptions)) {
         winConfig.azureSignOptions = azureSignOptions.value;
         yield* Effect.log("[desktop-artifact] Windows signing: Azure Trusted Signing.");
