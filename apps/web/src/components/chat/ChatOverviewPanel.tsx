@@ -418,8 +418,22 @@ export function ChatOverviewPanel(
     overviewPullRequestProvider,
   );
 
+  // On the default branch there is no pull request, but CI still runs on pushes.
+  // Fetch workflow runs scoped to the branch so the panel surfaces the latest
+  // push's checks. Requires a remote — there are no runs to show without one.
+  const overviewDefaultBranchChecksEnabled =
+    overviewWorkflowRunsSupported &&
+    overviewPullRequestNumber === null &&
+    gitStatusQuery.data?.isDefaultRef === true &&
+    gitStatusQuery.data?.hasPrimaryRemote === true;
+
+  const overviewChecksBranchName = overviewDefaultBranchChecksEnabled
+    ? (gitStatusQuery.data?.refName ?? null)
+    : null;
+
   const overviewWorkflowRunsEnabled =
-    overviewWorkflowRunsSupported && overviewPullRequestNumber !== null;
+    overviewWorkflowRunsSupported &&
+    (overviewPullRequestNumber !== null || overviewChecksBranchName !== null);
 
   const resolveWorkflowRunsIntervalMs = useCallback(
     (data: SourceControlWorkflowRunListResult | null): number | false => {
@@ -446,6 +460,7 @@ export function ChatOverviewPanel(
     environmentId,
     cwd: gitCwd,
     pullRequestNumber: overviewPullRequestNumber,
+    branch: overviewChecksBranchName,
     commitSha: activePostPushWorkflowWatch?.commitSha ?? null,
     enabled: overviewWorkflowRunsEnabled,
     resolveIntervalMs: resolveWorkflowRunsIntervalMs,
@@ -474,11 +489,13 @@ export function ChatOverviewPanel(
       resolveWorkflowDetailRunIds({
         workflowRunsSupported: overviewWorkflowRunsSupported,
         pullRequestNumber: overviewPullRequestNumber,
+        branchName: overviewChecksBranchName,
         runs: overviewWorkflowRuns.data?.runs,
         activeWorkflowRunId: overviewActiveWorkflowRunId,
       }),
     [
       overviewActiveWorkflowRunId,
+      overviewChecksBranchName,
       overviewPullRequestNumber,
       overviewWorkflowRuns.data?.runs,
       overviewWorkflowRunsSupported,
@@ -491,7 +508,9 @@ export function ChatOverviewPanel(
       cwd: gitCwd,
       runIds: overviewWorkflowDetailRunIds,
       activeRunId: overviewActiveWorkflowRunId,
-      enabled: overviewWorkflowRunsSupported && overviewPullRequestNumber !== null,
+      enabled:
+        overviewWorkflowRunsSupported &&
+        (overviewPullRequestNumber !== null || overviewChecksBranchName !== null),
     });
 
   // Classify the source-control fetch error once (transient vs terminal, short
@@ -510,12 +529,15 @@ export function ChatOverviewPanel(
   );
 
   const overviewPullRequest = useMemo<OverviewPullRequestState | null>(() => {
-    if (overviewPullRequestNumber === null) {
+    const isRealPullRequest = overviewPullRequestNumber !== null;
+    if (!isRealPullRequest && !overviewDefaultBranchChecksEnabled) {
       return null;
     }
-    const gitPr = gitStatusQuery.data?.pr ?? null;
-    const branchPr = overviewBranchPullRequest;
-    const detail = overviewPullRequestDetail.data ?? null;
+    // PR metadata only applies to a real pull request; the default-branch path
+    // carries CI checks alone (no title / reviews / merge state).
+    const gitPr = isRealPullRequest ? (gitStatusQuery.data?.pr ?? null) : null;
+    const branchPr = isRealPullRequest ? overviewBranchPullRequest : null;
+    const detail = isRealPullRequest ? (overviewPullRequestDetail.data ?? null) : null;
     const workflowData = overviewWorkflowRunsSupported ? (overviewWorkflowRuns.data ?? null) : null;
     const checksQueryError = selectOverviewChecksError({
       workflowRunsSupported: overviewWorkflowRunsSupported,
@@ -576,10 +598,39 @@ export function ChatOverviewPanel(
       }
     }
     const runs = latestRuns.filter((run) => isOverviewActiveCheckKind(run.statusKind));
+    const checksError = checksErrorInfo;
+    const checksLoading =
+      (overviewWorkflowRunsSupported && overviewWorkflowRuns.isLoading) ||
+      (isRealPullRequest && overviewPullRequestDetail.isLoading) ||
+      overviewWorkflowRunJobsLoading;
+    const activeCheckCount =
+      runs.length > 0
+        ? runs.length
+        : checkStatus && isOverviewActiveCheckKind(checkStatus.kind)
+          ? 1
+          : 0;
+
+    if (overviewPullRequestNumber === null) {
+      // Default branch (no PR): don't render an empty Checks section, so repos
+      // without CI stay clean. Only surface it once there are runs, an error
+      // worth showing, or a load in flight.
+      if (!checksLoading && latestRuns.length === 0 && !checksError) {
+        return null;
+      }
+      return {
+        checkStatus,
+        checksLoading,
+        ...(checksError ? { checksError } : {}),
+        hasMergeConflicts: false,
+        activeCheckCount,
+        runs,
+        latestRuns,
+      };
+    }
+
     const pullRequestUrl = detail?.url ?? gitPr?.url ?? branchPr?.url ?? null;
     const pullRequestState =
       detail?.state ?? activeWorktreePrState ?? gitPr?.state ?? branchPr?.state ?? null;
-    const checksError = checksErrorInfo;
     const reviewsApproved = detail?.participants
       ? detail.participants.filter((participant) => participant.approved === true).length
       : undefined;
@@ -605,19 +656,11 @@ export function ChatOverviewPanel(
       ...(typeof reviewsApproved === "number" ? { reviewsApproved } : {}),
       ...(typeof reviewsRequested === "number" ? { reviewsRequested } : {}),
       checkStatus,
-      checksLoading:
-        (overviewWorkflowRunsSupported && overviewWorkflowRuns.isLoading) ||
-        overviewPullRequestDetail.isLoading ||
-        overviewWorkflowRunJobsLoading,
+      checksLoading,
       ...(checksError ? { checksError } : {}),
       ...(detail?.mergeability ? { mergeability: detail.mergeability } : {}),
       hasMergeConflicts: detail?.mergeability === "conflicting",
-      activeCheckCount:
-        runs.length > 0
-          ? runs.length
-          : checkStatus && isOverviewActiveCheckKind(checkStatus.kind)
-            ? 1
-            : 0,
+      activeCheckCount,
       runs,
       latestRuns,
     };
@@ -628,6 +671,7 @@ export function ChatOverviewPanel(
     gitStatusQuery.data?.pr,
     overviewActiveWorkflowRunId,
     overviewBranchPullRequest,
+    overviewDefaultBranchChecksEnabled,
     overviewWorkflowJobsByRunId,
     overviewWorkflowRunJobsLoading,
     overviewPullRequestDetail.data,
@@ -657,13 +701,20 @@ export function ChatOverviewPanel(
     if (checksErrorInfo.raw) {
       console.debug("[overview] source control fetch failed:", checksErrorInfo.raw);
     }
+    // On the default branch there is no pull request behind the checks, so keep
+    // the copy about "checks" rather than mislabeling it as a pull request.
+    const isBranchChecks = overviewPullRequestNumber === null;
     toastManager.add(
       stackedThreadToast({
         type: checksErrorInfo.kind === "terminal" ? "error" : "warning",
         title:
           checksErrorInfo.kind === "terminal"
-            ? "Pull request unavailable"
-            : "Couldn't refresh pull request",
+            ? isBranchChecks
+              ? "Checks unavailable"
+              : "Pull request unavailable"
+            : isBranchChecks
+              ? "Couldn't refresh checks"
+              : "Couldn't refresh pull request",
         description: checksErrorInfo.message,
       }),
     );

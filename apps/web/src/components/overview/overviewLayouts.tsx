@@ -203,18 +203,22 @@ function buildSections(
   }
 
   if (props.pullRequest) {
+    const pullRequest = props.pullRequest;
+    const isRealPullRequest = pullRequest.number != null;
     sections.push({
       id: "pr",
-      icon: SECTION_ICON.pr,
-      title: `Pull Request #${props.pullRequest.number}`,
+      icon: isRealPullRequest ? SECTION_ICON.pr : SECTION_ICON.checks,
+      title: isRealPullRequest ? `Pull Request #${pullRequest.number}` : "Checks",
       summary: pullRequestSummaryBadge(props, summary),
       defaultOpen: true,
-      body: (
+      body: isRealPullRequest ? (
         <PullRequestContent
-          pullRequest={props.pullRequest}
+          pullRequest={pullRequest}
           showChecks
           showReviews={options.prShowReviews}
         />
+      ) : (
+        <ChecksContent pullRequest={pullRequest} />
       ),
     });
   }
@@ -506,7 +510,13 @@ function StatusBoardLayout(props: OverviewLayoutProps) {
         <SectionLane
           icon={SECTION_ICON.checks}
           title="Checks"
-          subtitle={`CI on PR #${props.pullRequest.number}`}
+          subtitle={
+            props.pullRequest.number != null
+              ? `CI on PR #${props.pullRequest.number}`
+              : summary.refName
+                ? `CI on ${summary.refName}`
+                : "CI"
+          }
           summary={
             <>
               <CheckDots runs={props.pullRequest.latestRuns} />
@@ -569,11 +579,13 @@ function StatusBoardLayout(props: OverviewLayoutProps) {
         </SectionLane>
       ) : null}
 
-      {props.pullRequest ? (
+      {props.pullRequest && props.pullRequest.number != null ? (
         <SectionLane
           icon={SECTION_ICON.pr}
           title="Pull Request"
-          subtitle={`#${props.pullRequest.number} · ${props.pullRequest.title}`}
+          subtitle={`#${props.pullRequest.number}${
+            props.pullRequest.title ? ` · ${props.pullRequest.title}` : ""
+          }`}
           summary={
             <>
               {props.pullRequest.state ? (

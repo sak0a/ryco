@@ -214,6 +214,8 @@ export interface SourceControlProviderShape {
     readonly context?: SourceControlProviderContext;
     readonly pullRequestNumber?: number;
     readonly commitSha?: string;
+    /** Branch scope when there is no pull request (e.g. the default branch). */
+    readonly branch?: string;
     readonly limit?: number;
   }) => Effect.Effect<SourceControlWorkflowRunListResult, SourceControlProviderError>;
   readonly getWorkflowRunJobs?: (input: {

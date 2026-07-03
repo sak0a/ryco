@@ -33,6 +33,7 @@ import {
   getOverviewChangeRequestListSnapshot,
   getOverviewWorkflowRunJobsAtom,
   getOverviewWorkflowRunJobsKey,
+  getOverviewWorkflowRunsKey,
   getOverviewWorkflowRunsSnapshot,
   invalidateOverviewSourceControl,
   resetOverviewAtomsForTests,
@@ -182,6 +183,7 @@ describe("workflow runs", () => {
       environmentId: ENVIRONMENT,
       cwd: "/repo",
       pullRequestNumber: 12,
+      branch: null,
       commitSha: "deadbeef",
       enabled: true,
     };
@@ -197,6 +199,47 @@ describe("workflow runs", () => {
     });
     expect(getOverviewWorkflowRunsSnapshot(target).data).toEqual(result);
 
+    release();
+  });
+
+  it("fetches runs scoped to a branch when there is no pull request", async () => {
+    const result = { runs: [], headSha: { _tag: "Some", value: "abc" } };
+    listWorkflowRunsSpy.mockResolvedValue(result);
+    const target = {
+      environmentId: ENVIRONMENT,
+      cwd: "/repo",
+      pullRequestNumber: null,
+      branch: "main",
+      commitSha: null,
+      enabled: true,
+    };
+
+    const release = watchOverviewWorkflowRuns(target, () => false);
+    await flush();
+
+    expect(listWorkflowRunsSpy).toHaveBeenCalledWith({
+      cwd: "/repo",
+      branch: "main",
+      limit: 20,
+    });
+    expect(getOverviewWorkflowRunsSnapshot(target).data).toEqual(result);
+
+    release();
+  });
+
+  it("does not fetch when neither a pull request nor a branch is set", () => {
+    const target = {
+      environmentId: ENVIRONMENT,
+      cwd: "/repo",
+      pullRequestNumber: null,
+      branch: null,
+      commitSha: null,
+      enabled: true,
+    };
+
+    expect(getOverviewWorkflowRunsKey(target)).toBeNull();
+    const release = watchOverviewWorkflowRuns(target, () => false);
+    expect(listWorkflowRunsSpy).not.toHaveBeenCalled();
     release();
   });
 });

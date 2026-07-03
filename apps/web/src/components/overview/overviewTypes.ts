@@ -28,8 +28,14 @@ export interface OverviewPanelItem {
 export type OverviewPullRequestCheckRun = OverviewWorkflowCheckRow;
 
 export interface OverviewPullRequestState {
-  number: number;
-  title: string;
+  /**
+   * Pull request number. Absent when the state carries only branch-level CI
+   * checks (e.g. the default branch has no pull request); PR-specific UI keys
+   * off this being present.
+   */
+  number?: number;
+  /** Pull request title. Absent for branch-only checks (see {@link number}). */
+  title?: string;
   url?: string;
   state?: string;
   commentsCount?: number;

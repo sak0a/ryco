@@ -306,6 +306,7 @@ export interface GitHubCliShape {
   readonly listWorkflowRuns: (input: {
     readonly cwd: string;
     readonly headSha?: string;
+    readonly branch?: string;
     readonly limit?: number;
   }) => Effect.Effect<ReadonlyArray<GitHubWorkflowRun>, GitHubCliError>;
 
@@ -542,11 +543,20 @@ function workflowRunLimit(limit: number | undefined): number {
   return Math.min(50, Math.max(1, value));
 }
 
-function workflowRunsEndpoint(input: { readonly headSha?: string; readonly limit?: number }) {
+function workflowRunsEndpoint(input: {
+  readonly headSha?: string;
+  readonly branch?: string;
+  readonly limit?: number;
+}) {
   const params = new URLSearchParams();
   params.set("per_page", String(workflowRunLimit(input.limit)));
   if (input.headSha?.trim()) {
     params.set("head_sha", input.headSha.trim());
+  } else if (input.branch?.trim()) {
+    // `branch` scopes to a ref when we have no specific commit (the default
+    // branch has no pull request head to filter on). Mutually exclusive with
+    // `head_sha` in the GitHub API, so only one is ever set.
+    params.set("branch", input.branch.trim());
   }
   return `repos/{owner}/{repo}/actions/runs?${params.toString()}`;
 }

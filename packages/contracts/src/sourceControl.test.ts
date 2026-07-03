@@ -310,6 +310,21 @@ describe("SourceControlWorkflowRunListInput", () => {
       limit: 10,
     });
   });
+
+  it("accepts branch-scoped workflow run lookups without a pull request", () => {
+    const decode = Schema.decodeUnknownSync(SourceControlWorkflowRunListInput);
+    expect(
+      decode({
+        cwd: "/repo",
+        branch: "main",
+        limit: 20,
+      }),
+    ).toEqual({
+      cwd: "/repo",
+      branch: "main",
+      limit: 20,
+    });
+  });
 });
 
 describe("SourceControlWorkflowRerunInput", () => {

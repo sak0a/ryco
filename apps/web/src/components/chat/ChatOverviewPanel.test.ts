@@ -135,7 +135,7 @@ describe("resolveWorkflowDetailRunIds", () => {
     ).toEqual([]);
   });
 
-  it("returns empty when no pull request", () => {
+  it("returns empty when no pull request and no branch", () => {
     expect(
       resolveWorkflowDetailRunIds({
         workflowRunsSupported: true,
@@ -144,6 +144,18 @@ describe("resolveWorkflowDetailRunIds", () => {
         activeWorkflowRunId: null,
       }),
     ).toEqual([]);
+  });
+
+  it("returns run ids for a default-branch scope without a pull request", () => {
+    expect(
+      resolveWorkflowDetailRunIds({
+        workflowRunsSupported: true,
+        pullRequestNumber: null,
+        branchName: "main",
+        runs: [{ runId: "a" }, { runId: "b" }],
+        activeWorkflowRunId: null,
+      }),
+    ).toEqual(["a", "b"]);
   });
 
   it("returns run ids in order", () => {

@@ -298,6 +298,13 @@ export const SourceControlWorkflowRunListInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   pullRequestNumber: Schema.optional(PositiveInt),
   commitSha: Schema.optional(TrimmedNonEmptyString),
+  /**
+   * Branch to scope runs to when there is no pull request (e.g. the default
+   * branch). Ignored when `pullRequestNumber` or `commitSha` is provided.
+   * Providers narrow the result to the branch's most recent commit so the
+   * panel shows the latest push's checks — the branch analogue of a PR head.
+   */
+  branch: Schema.optional(TrimmedNonEmptyString),
   limit: Schema.optional(PositiveInt),
 });
 export type SourceControlWorkflowRunListInput = typeof SourceControlWorkflowRunListInput.Type;

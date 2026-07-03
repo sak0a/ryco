@@ -225,6 +225,25 @@ function durationMsOption(
   return Option.some(Math.max(0, finished.getTime() - started.getTime()));
 }
 
+/**
+ * Pick the commit oid of the most recent run in a branch-scoped result. GitHub
+ * returns runs newest-first, but we compare start times defensively and fall
+ * back to that ordering when timestamps are absent or tied. Returns null when
+ * no usable oid is present (e.g. the placeholder "unknown").
+ */
+function newestWorkflowRunCommitOid(
+  runs: ReadonlyArray<GitHubCli.GitHubWorkflowRun>,
+): string | null {
+  let newest: GitHubCli.GitHubWorkflowRun | null = null;
+  for (const run of runs) {
+    if (newest === null || (run.startedAt ?? "") > (newest.startedAt ?? "")) {
+      newest = run;
+    }
+  }
+  const oid = newest?.commit.oid.trim();
+  return oid && oid !== "unknown" ? oid : null;
+}
+
 function toWorkflowRun(raw: GitHubCli.GitHubWorkflowRun): SourceControlWorkflowRun {
   return {
     provider: "github",
@@ -674,11 +693,32 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
           headSha = context.headSha;
         }
 
-        const runs = yield* github.listWorkflowRuns({
+        // With neither a pull request nor an explicit commit, fall back to a
+        // branch scope (the default branch has no PR head to filter on). GitHub
+        // returns runs across every commit on the branch, so we narrow to the
+        // newest commit below to mirror the single-commit view a PR head gives.
+        const branch =
+          headSha === null && input.pullRequestNumber === undefined
+            ? input.branch?.trim() || null
+            : null;
+
+        const fetched = yield* github.listWorkflowRuns({
           cwd: input.cwd,
           ...(headSha ? { headSha } : {}),
+          ...(branch ? { branch } : {}),
           ...(input.limit !== undefined ? { limit: input.limit } : {}),
         });
+
+        let runs = fetched;
+        let resolvedHeadSha = headSha;
+        if (branch !== null && fetched.length > 0) {
+          const oid = newestWorkflowRunCommitOid(fetched);
+          if (oid !== null) {
+            resolvedHeadSha = oid;
+            runs = fetched.filter((run) => run.commit.oid === oid);
+          }
+        }
+
         repositoryNameWithOwner =
           repositoryNameWithOwner ??
           runs.find((run) => run.repositoryNameWithOwner !== null)?.repositoryNameWithOwner ??
@@ -691,7 +731,7 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
             input.pullRequestNumber !== undefined
               ? Option.some(input.pullRequestNumber)
               : Option.none(),
-          headSha: optionFromString(headSha),
+          headSha: optionFromString(resolvedHeadSha),
           runs: runs.map(toWorkflowRun),
         } satisfies SourceControlWorkflowRunListResult;
       }).pipe(Effect.mapError((cause) => providerError("listWorkflowRuns", cause))),

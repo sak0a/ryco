@@ -62,10 +62,17 @@ export function resolveOverviewPullRequestNumber(input: {
 export function resolveWorkflowDetailRunIds(input: {
   workflowRunsSupported: boolean;
   pullRequestNumber: number | null;
+  /** Branch scope when there is no pull request (default branch). */
+  branchName?: string | null;
   runs: ReadonlyArray<{ runId: string }> | undefined;
   activeWorkflowRunId: string | null;
 }): string[] {
-  if (!input.workflowRunsSupported || input.pullRequestNumber === null) return [];
+  if (
+    !input.workflowRunsSupported ||
+    (input.pullRequestNumber === null && (input.branchName ?? null) === null)
+  ) {
+    return [];
+  }
   const runs = input.runs ?? [];
   const runIds = runs.slice(0, OVERVIEW_CHECK_DETAIL_RUN_LIMIT).map((run) => run.runId);
   if (input.activeWorkflowRunId && !runIds.includes(input.activeWorkflowRunId)) {

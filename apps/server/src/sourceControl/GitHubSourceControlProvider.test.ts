@@ -1161,6 +1161,50 @@ it.effect("listWorkflowRuns filters directly by commit SHA", () =>
   }),
 );
 
+it.effect("listWorkflowRuns scopes a branch to its newest commit", () =>
+  Effect.gen(function* () {
+    let capturedInput: Parameters<GitHubCli.GitHubCliShape["listWorkflowRuns"]>[0] | null = null;
+    const makeRun = (runId: string, oid: string, startedAt: string, workflowName: string) => ({
+      runId,
+      workflowName,
+      branch: "main",
+      commit: { oid, shortOid: oid.slice(0, 12), messageHeadline: "msg" },
+      actor: "alice",
+      status: "completed",
+      conclusion: "success",
+      startedAt,
+      updatedAt: startedAt,
+      url: `https://github.com/owner/repo/actions/runs/${runId}`,
+      repositoryNameWithOwner: "owner/repo",
+    });
+    const provider = yield* makeProvider({
+      listWorkflowRuns: (input) => {
+        capturedInput = input;
+        // Returned newest-first, spanning two commits on the branch.
+        return Effect.succeed([
+          makeRun("300", "newsha1111111111", "2026-05-21T10:05:00Z", "Lint"),
+          makeRun("301", "newsha1111111111", "2026-05-21T10:00:00Z", "CI"),
+          makeRun("299", "oldsha0000000000", "2026-05-20T10:00:00Z", "CI"),
+        ]);
+      },
+    });
+
+    const listWorkflowRuns = provider.listWorkflowRuns;
+    assert.ok(listWorkflowRuns);
+    const result = yield* listWorkflowRuns({ cwd: "/repo", branch: "main", limit: 20 });
+
+    assert.deepStrictEqual(capturedInput, { cwd: "/repo", branch: "main", limit: 20 });
+    // Only the two runs on the newest commit survive.
+    assert.strictEqual(result.runs.length, 2);
+    assert.strictEqual(Option.getOrNull(result.headSha), "newsha1111111111");
+    assert.strictEqual(Option.isNone(result.pullRequestNumber), true);
+    assert.deepStrictEqual(
+      result.runs.map((run) => run.runId),
+      ["300", "301"],
+    );
+  }),
+);
+
 it.effect("listLabels returns labels from cli", () =>
   Effect.gen(function* () {
     const provider = yield* makeProvider({

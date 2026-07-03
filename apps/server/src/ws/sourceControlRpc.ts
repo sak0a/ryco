@@ -416,7 +416,13 @@ export const makeSourceControlHandlers = (ctx: WsRpcContext) => {
           "rpc.aggregate": "source-control",
         },
       ),
-    [WS_METHODS.sourceControlListWorkflowRuns]: ({ cwd, pullRequestNumber, commitSha, limit }) =>
+    [WS_METHODS.sourceControlListWorkflowRuns]: ({
+      cwd,
+      pullRequestNumber,
+      commitSha,
+      branch,
+      limit,
+    }) =>
       observeRpcEffect(
         WS_METHODS.sourceControlListWorkflowRuns,
         ownerEffect(
@@ -430,6 +436,7 @@ export const makeSourceControlHandlers = (ctx: WsRpcContext) => {
                 cwd,
                 ...(pullRequestNumber !== undefined ? { pullRequestNumber } : {}),
                 ...(commitSha !== undefined ? { commitSha } : {}),
+                ...(branch !== undefined ? { branch } : {}),
                 ...(limit !== undefined ? { limit } : {}),
               });
             },

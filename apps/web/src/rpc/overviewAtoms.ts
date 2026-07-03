@@ -379,18 +379,26 @@ export function getOverviewChangeRequestDetailSnapshot(
 function workflowRunsKey(
   environmentId: EnvironmentId,
   cwd: string,
-  pullRequestNumber: number,
+  pullRequestNumber: number | null,
+  branch: string | null,
   commitSha: string | null,
 ): string {
-  return ["workflows", environmentId, cwd, String(pullRequestNumber), commitSha ?? ""].join(
-    FIELD_SEPARATOR,
-  );
+  return [
+    "workflows",
+    environmentId,
+    cwd,
+    pullRequestNumber === null ? "" : String(pullRequestNumber),
+    branch ?? "",
+    commitSha ?? "",
+  ].join(FIELD_SEPARATOR);
 }
 
 export interface OverviewWorkflowRunsTarget {
   readonly environmentId: EnvironmentId | null;
   readonly cwd: string | null;
   readonly pullRequestNumber: number | null;
+  /** Branch to scope runs to when there is no pull request (default branch). */
+  readonly branch: string | null;
   readonly commitSha: string | null;
   readonly enabled: boolean;
 }
@@ -400,7 +408,7 @@ export function getOverviewWorkflowRunsKey(target: OverviewWorkflowRunsTarget): 
     !target.enabled ||
     target.environmentId === null ||
     target.cwd === null ||
-    target.pullRequestNumber === null
+    (target.pullRequestNumber === null && target.branch === null)
   ) {
     return null;
   }
@@ -408,6 +416,7 @@ export function getOverviewWorkflowRunsKey(target: OverviewWorkflowRunsTarget): 
     target.environmentId,
     target.cwd,
     target.pullRequestNumber,
+    target.branch,
     target.commitSha,
   );
 }
@@ -421,13 +430,14 @@ export function watchOverviewWorkflowRuns(
     key === null ||
     target.environmentId === null ||
     target.cwd === null ||
-    target.pullRequestNumber === null
+    (target.pullRequestNumber === null && target.branch === null)
   ) {
     return NOOP;
   }
   const environmentId = target.environmentId;
   const cwd = target.cwd;
   const pullRequestNumber = target.pullRequestNumber;
+  const branch = target.branch;
   const commitSha = target.commitSha;
   return watchOverviewQuery({
     key,
@@ -436,7 +446,8 @@ export function watchOverviewWorkflowRuns(
     fetch: () =>
       requireEnvironmentConnection(environmentId).client.sourceControl.listWorkflowRuns({
         cwd,
-        pullRequestNumber,
+        ...(pullRequestNumber !== null ? { pullRequestNumber } : {}),
+        ...(pullRequestNumber === null && branch !== null ? { branch } : {}),
         ...(commitSha !== null ? { commitSha } : {}),
         limit: OVERVIEW_WORKFLOW_RUNS_LIMIT,
       }),

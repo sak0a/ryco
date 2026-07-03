@@ -77,15 +77,18 @@ export function useOverviewWorkflowRuns(input: {
   environmentId: EnvironmentId | null;
   cwd: string | null;
   pullRequestNumber: number | null;
+  branch: string | null;
   commitSha: string | null;
   enabled: boolean;
   resolveIntervalMs: (data: SourceControlWorkflowRunListResult | null) => number | false;
 }): OverviewQueryState<SourceControlWorkflowRunListResult> {
-  const { environmentId, cwd, pullRequestNumber, commitSha, enabled, resolveIntervalMs } = input;
+  const { environmentId, cwd, pullRequestNumber, branch, commitSha, enabled, resolveIntervalMs } =
+    input;
   const key = getOverviewWorkflowRunsKey({
     environmentId,
     cwd,
     pullRequestNumber,
+    branch,
     commitSha,
     enabled,
   });
@@ -93,10 +96,10 @@ export function useOverviewWorkflowRuns(input: {
   useEffect(
     () =>
       watchOverviewWorkflowRuns(
-        { environmentId, cwd, pullRequestNumber, commitSha, enabled },
+        { environmentId, cwd, pullRequestNumber, branch, commitSha, enabled },
         resolveIntervalMs,
       ),
-    [environmentId, cwd, pullRequestNumber, commitSha, enabled, resolveIntervalMs],
+    [environmentId, cwd, pullRequestNumber, branch, commitSha, enabled, resolveIntervalMs],
   );
 
   return useAtomValue(
