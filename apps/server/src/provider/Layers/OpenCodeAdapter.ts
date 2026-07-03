@@ -13,7 +13,7 @@ import {
   TurnId,
   type UserInputQuestion,
 } from "@ryco/contracts";
-import { Cause, Effect, Exit, Queue, Random, Ref, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Option, Queue, Random, Ref, Scope, Stream } from "effect";
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
 import { getModelSelectionStringOptionValue } from "@ryco/shared/model";
 import { formatSourceControlContextsForAgent } from "@ryco/shared/sourceControlContextFormatter";
@@ -31,6 +31,11 @@ import {
 } from "../Errors.ts";
 import { type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import { resolveProviderBrowserToolSupport } from "../tools/BrowserRuntimeTool.ts";
+import { ProviderRuntimeToolRegistry } from "../tools/ProviderRuntimeToolRegistry.ts";
+import { BrowserMcpBridge } from "../../browser/BrowserMcpBridge.ts";
+import { cleanupBrowserThreadAfterProviderTurn } from "../../browser/BrowserThreadCleanup.ts";
+import { makeOpenCodeBrowserMcpConfig } from "../../browser/BrowserRuntimeMcpConfig.ts";
+import { RYCO_BROWSER_MCP_SERVER_NAME } from "../tools/BrowserRuntimeToolHelpers.ts";
 import {
   buildOpenCodePermissionRules,
   OpenCodeRuntime,
@@ -166,6 +171,9 @@ const buildEventBase = (input: {
 
 function toToolLifecycleItemType(toolName: string): ToolLifecycleItemType {
   const normalized = toolName.toLowerCase();
+  if (normalized.startsWith("browser_") || normalized.includes("ryco__browser")) {
+    return "browser_tool_call";
+  }
   if (normalized.includes("bash") || normalized.includes("command")) {
     return "command_execution";
   }
@@ -459,6 +467,64 @@ export function makeOpenCodeAdapter(
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("opencode");
     const serverConfig = yield* ServerConfig;
     const openCodeRuntime = yield* OpenCodeRuntime;
+    const providerRuntimeToolRegistry = yield* Effect.serviceOption(ProviderRuntimeToolRegistry);
+    const browserMcpBridge = yield* Effect.serviceOption(BrowserMcpBridge);
+    const stopBrowserBridgeForThread = (threadId: ThreadId) =>
+      Option.match(browserMcpBridge, {
+        onNone: () => Effect.void,
+        onSome: (bridge) => bridge.stop(threadId),
+      });
+
+    const connectOpenCodeBrowserMcp = (
+      context: OpenCodeSessionContext,
+      directory: string,
+    ): Effect.Effect<void, ProviderAdapterProcessError | ProviderAdapterRequestError> =>
+      Effect.gen(function* () {
+        if (serverConfig.mode !== "desktop") return;
+        yield* Option.match(browserMcpBridge, {
+          onNone: () => Effect.void,
+          onSome: (bridge) =>
+            Option.match(providerRuntimeToolRegistry, {
+              onNone: () => Effect.void,
+              onSome: (registry) =>
+                Effect.gen(function* () {
+                  const runtimeContext = yield* Effect.context<never>();
+                  const runPromise = Effect.runPromiseWith(runtimeContext);
+                  const bridgeHandle = yield* bridge
+                    .start({
+                      threadId: context.session.threadId,
+                      runPromise,
+                      executeBrowserTool: (toolInput) =>
+                        registry.executeBrowserTool(toolInput, {
+                          lifecycle: {
+                            provider: PROVIDER,
+                            providerInstanceId: boundInstanceId,
+                            ...(context.activeTurnId ? { turnId: context.activeTurnId } : {}),
+                          },
+                        }),
+                    })
+                    .pipe(
+                      Effect.mapError((cause) => toProcessError(context.session.threadId, cause)),
+                    );
+                  yield* runOpenCodeSdk("mcp.add", () =>
+                    context.client.mcp.add({
+                      name: RYCO_BROWSER_MCP_SERVER_NAME,
+                      config: makeOpenCodeBrowserMcpConfig({
+                        socketPath: bridgeHandle.socketPath,
+                      }),
+                      directory,
+                    }),
+                  ).pipe(Effect.mapError(toRequestError));
+                  yield* runOpenCodeSdk("mcp.connect", () =>
+                    context.client.mcp.connect({
+                      name: RYCO_BROWSER_MCP_SERVER_NAME,
+                      directory,
+                    }),
+                  ).pipe(Effect.mapError(toRequestError), Effect.ignore);
+                }),
+            }),
+        });
+      });
     const nativeEventLogger =
       options?.nativeEventLogger ??
       (options?.nativeEventLogPath !== undefined
@@ -494,7 +560,13 @@ export function makeOpenCodeAdapter(
         // the remaining cleanups.
         yield* Effect.forEach(
           contexts,
-          (context) => Effect.ignoreCause(stopOpenCodeContext(context)),
+          (context) =>
+            Effect.ignoreCause(
+              Effect.gen(function* () {
+                yield* stopBrowserBridgeForThread(context.session.threadId);
+                yield* stopOpenCodeContext(context);
+              }),
+            ),
           { concurrency: "unbounded", discard: true },
         );
         // Close the logger AFTER session teardown so any final lifecycle
@@ -915,6 +987,9 @@ export function makeOpenCodeAdapter(
                 state: "completed",
               },
             });
+            yield* cleanupBrowserThreadAfterProviderTurn(context.session.threadId).pipe(
+              Effect.ignore,
+            );
           }
           break;
         }
@@ -944,6 +1019,9 @@ export function makeOpenCodeAdapter(
                 errorMessage: message,
               },
             });
+            yield* cleanupBrowserThreadAfterProviderTurn(context.session.threadId).pipe(
+              Effect.ignore,
+            );
           }
           yield* emit({
             ...(yield* buildEventBase({
@@ -1037,6 +1115,7 @@ export function makeOpenCodeAdapter(
         const directory = input.cwd ?? serverConfig.cwd;
         const existing = sessions.get(input.threadId);
         if (existing) {
+          yield* stopBrowserBridgeForThread(input.threadId);
           yield* stopOpenCodeContext(existing);
           sessions.delete(input.threadId);
         }
@@ -1137,6 +1216,10 @@ export function makeOpenCodeAdapter(
         sessions.set(input.threadId, context);
         yield* startEventPump(context);
 
+        if (serverConfig.mode === "desktop") {
+          yield* connectOpenCodeBrowserMcp(context, directory);
+        }
+
         yield* emit({
           ...(yield* buildEventBase({ threadId: input.threadId })),
           type: "session.started",
@@ -1224,6 +1307,8 @@ export function makeOpenCodeAdapter(
           ...(variant ? { effort: variant } : {}),
         },
       });
+
+      yield* connectOpenCodeBrowserMcp(context, context.directory).pipe(Effect.ignore);
 
       yield* runOpenCodeSdk("session.promptAsync", () =>
         context.client.session.promptAsync({
@@ -1345,6 +1430,7 @@ export function makeOpenCodeAdapter(
           });
         }
         const stopped = yield* stopOpenCodeContext(context);
+        yield* stopBrowserBridgeForThread(threadId);
         sessions.delete(threadId);
         if (!stopped) {
           return;
@@ -1425,7 +1511,13 @@ export function makeOpenCodeAdapter(
         // interrupt the sibling fibers. Same pattern as the layer finalizer.
         yield* Effect.forEach(
           contexts,
-          (context) => Effect.ignoreCause(stopOpenCodeContext(context)),
+          (context) =>
+            Effect.ignoreCause(
+              Effect.gen(function* () {
+                yield* stopBrowserBridgeForThread(context.session.threadId);
+                yield* stopOpenCodeContext(context);
+              }),
+            ),
           { concurrency: "unbounded", discard: true },
         );
       });

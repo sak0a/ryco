@@ -7,6 +7,8 @@ import type {
   BrowserCommandResult,
   BrowserCommandResultPayload,
   BrowserCookieDeleteResult,
+  BrowserDomBounds,
+  BrowserDomNode,
   BrowserInputAction,
   BrowserProfile,
   BrowserSessionSnapshot,
@@ -25,12 +27,25 @@ import {
   electronStorageTypes,
   sanitizeBrowserStorageEntries,
 } from "./BrowserStorageHelpers.ts";
+import {
+  BROWSER_CONSOLE_BUFFER_LIMIT,
+  BROWSER_DOM_SNAPSHOT_SCRIPT,
+  BROWSER_MAX_SCREENSHOT_BYTES,
+  BROWSER_NETWORK_BUFFER_LIMIT,
+  type BufferedConsoleEntry,
+  type BufferedNetworkEntry,
+  parseConsoleMessage,
+  pushBounded,
+} from "./BrowserObservationHelpers.ts";
 
 type EventSink = (event: BrowserEvent) => Promise<void> | void;
 
 interface HostedSession {
   session: BrowserSessionSnapshot;
   view: WebContentsView;
+  consoleEntries: BufferedConsoleEntry[];
+  networkEntries: BufferedNetworkEntry[];
+  networkRequestStartedAt: Map<string, string>;
 }
 
 function commandFailure(
@@ -97,9 +112,41 @@ function uniqueStrings(values: ReadonlyArray<string | null | undefined>): string
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
+function flattenDomRefBounds(nodes: ReadonlyArray<BrowserDomNode>): Map<string, BrowserDomBounds> {
+  const refs = new Map<string, BrowserDomBounds>();
+  const walk = (node: BrowserDomNode) => {
+    if (node.bounds) {
+      refs.set(node.ref, node.bounds);
+    }
+    node.children?.forEach(walk);
+  };
+  for (const node of nodes) {
+    walk(node);
+  }
+  return refs;
+}
+
+function resolveClickCoordinates(
+  action: Extract<BrowserInputAction, { readonly type: "click" }>,
+  refs: Map<string, BrowserDomBounds> | undefined,
+): { readonly x: number; readonly y: number } {
+  if ("ref" in action) {
+    const bounds = refs?.get(action.ref);
+    if (!bounds) {
+      throw new Error(`Unknown DOM ref '${action.ref}'. Run snapshot_dom first.`);
+    }
+    return {
+      x: Math.round(bounds.x + bounds.width / 2),
+      y: Math.round(bounds.y + bounds.height / 2),
+    };
+  }
+  return { x: action.x, y: action.y };
+}
+
 export class BrowserKernel {
   private readonly profiles = new BrowserProfiles();
   private readonly sessions = new Map<string, HostedSession>();
+  private readonly domRefCache = new Map<string, Map<string, BrowserDomBounds>>();
   private eventSink: EventSink = () => undefined;
 
   setEventSink(eventSink: EventSink): void {
@@ -157,9 +204,11 @@ export class BrowserKernel {
             await this.input(command.sessionId, command.tabId, command.action),
           );
         case "snapshot_dom":
-          return commandSuccess(commandId, await this.snapshot(command.sessionId, command.tabId), {
-            text: await this.readText(command.sessionId, command.tabId),
-          });
+          return commandSuccess(
+            commandId,
+            await this.snapshot(command.sessionId, command.tabId),
+            await this.snapshotDomPayload(command.sessionId, command.tabId),
+          );
         case "inspect_storage":
           return commandSuccess(commandId, await this.snapshot(command.sessionId, command.tabId), {
             storageInspection: await this.inspectStorage(command.sessionId, command.tabId),
@@ -184,12 +233,22 @@ export class BrowserKernel {
             }),
           });
         case "screenshot":
-        case "read_console":
-        case "read_network":
-          return commandFailure(
+          return commandSuccess(
             commandId,
-            "unsupported_capability",
-            `${command.kind} is not implemented by the desktop browser host yet.`,
+            await this.snapshot(command.sessionId, command.tabId),
+            await this.screenshotPayload(command.sessionId, command.tabId),
+          );
+        case "read_console":
+          return commandSuccess(
+            commandId,
+            await this.snapshot(command.sessionId, command.tabId),
+            await this.consolePayload(command.sessionId, command.tabId),
+          );
+        case "read_network":
+          return commandSuccess(
+            commandId,
+            await this.snapshot(command.sessionId, command.tabId),
+            await this.networkPayload(command.sessionId, command.tabId),
           );
       }
     } catch (error) {
@@ -220,7 +279,13 @@ export class BrowserKernel {
       },
     });
     view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    const hosted: HostedSession = { session: { ...session, status: "ready" }, view };
+    const hosted: HostedSession = {
+      session: { ...session, status: "ready" },
+      view,
+      consoleEntries: [],
+      networkEntries: [],
+      networkRequestStartedAt: new Map(),
+    };
     this.sessions.set(session.sessionId, hosted);
     this.installWebContentsListeners(hosted);
     await view.webContents.loadURL(initialUrl ?? "about:blank").catch(() => undefined);
@@ -231,6 +296,11 @@ export class BrowserKernel {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) throw new Error("Browser session not found.");
     this.sessions.delete(sessionId);
+    for (const key of this.domRefCache.keys()) {
+      if (key.startsWith(`${sessionId}:`)) {
+        this.domRefCache.delete(key);
+      }
+    }
     hosted.view.webContents.close({ waitForBeforeUnload: false });
     const closed = {
       ...hosted.session,
@@ -268,17 +338,21 @@ export class BrowserKernel {
     return this.withHosted(sessionId, tabId, async (hosted) => {
       const { webContents } = hosted.view;
       if (action.type === "click") {
+        const { x, y } = resolveClickCoordinates(
+          action,
+          this.domRefCache.get(`${sessionId}:${tabId}`),
+        );
         webContents.sendInputEvent({
           type: "mouseDown",
-          x: action.x,
-          y: action.y,
+          x,
+          y,
           button: "left",
           clickCount: 1,
         });
         webContents.sendInputEvent({
           type: "mouseUp",
-          x: action.x,
-          y: action.y,
+          x,
+          y,
           button: "left",
           clickCount: 1,
         });
@@ -306,14 +380,73 @@ export class BrowserKernel {
     );
   }
 
-  private async readText(sessionId: string, tabId: string): Promise<string> {
+  private async snapshotDomPayload(sessionId: string, tabId: string) {
     return this.withHosted(sessionId, tabId, async (hosted) => {
-      const text = await hosted.view.webContents.executeJavaScript(
-        "document.body ? document.body.innerText.slice(0, 20000) : ''",
-        false,
-      );
-      return typeof text === "string" ? text : "";
+      const { webContents } = hosted.view;
+      const snapshot = await webContents.executeJavaScript(BROWSER_DOM_SNAPSHOT_SCRIPT, true);
+      if (snapshot && typeof snapshot === "object" && Array.isArray(snapshot.tree)) {
+        this.domRefCache.set(
+          `${sessionId}:${tabId}`,
+          flattenDomRefBounds(snapshot.tree as ReadonlyArray<BrowserDomNode>),
+        );
+      }
+      const text = await this.readTextFromWebContents(webContents);
+      return {
+        data: {
+          kind: "dom_snapshot" as const,
+          snapshot,
+          text,
+        },
+      };
     });
+  }
+
+  private async screenshotPayload(sessionId: string, tabId: string) {
+    return this.withHosted(sessionId, tabId, async (hosted) => {
+      const image = await hosted.view.webContents.capturePage();
+      const png = image.toPNG();
+      if (png.byteLength > BROWSER_MAX_SCREENSHOT_BYTES) {
+        throw new Error("Screenshot exceeds the maximum allowed size.");
+      }
+      return {
+        data: {
+          kind: "screenshot" as const,
+          base64: png.toString("base64"),
+        },
+      };
+    });
+  }
+
+  private async consolePayload(sessionId: string, tabId: string) {
+    return this.withHosted(sessionId, tabId, async (hosted) => ({
+      data: {
+        kind: "console" as const,
+        entries: [...hosted.consoleEntries],
+      },
+    }));
+  }
+
+  private async networkPayload(sessionId: string, tabId: string) {
+    return this.withHosted(sessionId, tabId, async (hosted) => ({
+      data: {
+        kind: "network" as const,
+        entries: [...hosted.networkEntries],
+      },
+    }));
+  }
+
+  private async readTextFromWebContents(webContents: WebContents): Promise<string> {
+    const text = await webContents.executeJavaScript(
+      "document.body ? document.body.innerText.slice(0, 20000) : ''",
+      false,
+    );
+    return typeof text === "string" ? text : "";
+  }
+
+  private async readText(sessionId: string, tabId: string): Promise<string> {
+    return this.withHosted(sessionId, tabId, async (hosted) =>
+      this.readTextFromWebContents(hosted.view.webContents),
+    );
   }
 
   private async inspectStorage(
@@ -568,12 +701,52 @@ export class BrowserKernel {
         createdAt: new Date().toISOString(),
       });
     };
-    hosted.view.webContents.on("did-start-loading", update);
-    hosted.view.webContents.on("did-stop-loading", update);
-    hosted.view.webContents.on("page-title-updated", update);
-    hosted.view.webContents.on("did-navigate", update);
-    hosted.view.webContents.on("did-navigate-in-page", update);
-    hosted.view.webContents.on("render-process-gone", (_event, details) => {
+    const { webContents } = hosted.view;
+    const browserSession = webContents.session;
+    webContents.on("did-start-loading", update);
+    webContents.on("did-stop-loading", update);
+    webContents.on("page-title-updated", update);
+    webContents.on("did-navigate", update);
+    webContents.on("did-navigate-in-page", update);
+    webContents.on("console-message", (...args: unknown[]) => {
+      const entry = parseConsoleMessage(args);
+      if (entry) pushBounded(hosted.consoleEntries, entry, BROWSER_CONSOLE_BUFFER_LIMIT);
+    });
+    const requestFilter = { urls: ["<all_urls>"] };
+    browserSession.webRequest.onBeforeRequest(requestFilter, (details) => {
+      hosted.networkRequestStartedAt.set(String(details.id), new Date().toISOString());
+    });
+    const recordNetworkEntry = (details: {
+      readonly id: number;
+      readonly url: string;
+      readonly method: string;
+      readonly statusCode?: number;
+      readonly resourceType?: string;
+    }) => {
+      const requestId = String(details.id);
+      const startedAt = hosted.networkRequestStartedAt.get(requestId) ?? new Date().toISOString();
+      hosted.networkRequestStartedAt.delete(requestId);
+      pushBounded(
+        hosted.networkEntries,
+        {
+          requestId,
+          url: details.url.slice(0, 8_192),
+          method: details.method.slice(0, 32),
+          ...("statusCode" in details && typeof details.statusCode === "number"
+            ? { status: details.statusCode }
+            : {}),
+          ...(details.resourceType
+            ? { resourceType: String(details.resourceType).slice(0, 128) }
+            : {}),
+          startedAt,
+          completedAt: new Date().toISOString(),
+        } satisfies BufferedNetworkEntry,
+        BROWSER_NETWORK_BUFFER_LIMIT,
+      );
+    };
+    browserSession.webRequest.onCompleted(requestFilter, recordNetworkEntry);
+    browserSession.webRequest.onErrorOccurred(requestFilter, recordNetworkEntry);
+    webContents.on("render-process-gone", (_event, details) => {
       const tab = hosted.session.tabs[0];
       if (!tab) return;
       void this.emit({

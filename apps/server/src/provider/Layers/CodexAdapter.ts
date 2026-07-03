@@ -28,7 +28,7 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@ryco/contracts";
-import { Effect, Exit, Fiber, FileSystem, Queue, Schema, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, FileSystem, Option, Queue, Schema, Scope, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
@@ -49,6 +49,7 @@ import {
 } from "../Errors.ts";
 import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { resolveProviderBrowserToolSupport } from "../tools/BrowserRuntimeTool.ts";
+import { ProviderRuntimeToolRegistry } from "../tools/ProviderRuntimeToolRegistry.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
@@ -1398,6 +1399,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     provider: PROVIDER,
     providerInstanceId: boundInstanceId,
   });
+  const providerRuntimeToolRegistry = yield* Effect.serviceOption(ProviderRuntimeToolRegistry);
   const sessions = new Map<ThreadId, CodexAdapterSessionContext>();
 
   const startSession: CodexAdapterShape["startSession"] = (input) =>
@@ -1445,9 +1447,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
         );
         const createRuntime = options?.makeRuntime ?? makeCodexSessionRuntime;
-        const runtime = yield* createRuntime(runtimeInput).pipe(
+        const runtimeWithServices = createRuntime(runtimeInput).pipe(
           Effect.provideService(Scope.Scope, sessionScope),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+        );
+        const runtime = yield* Option.match(providerRuntimeToolRegistry, {
+          onNone: () => runtimeWithServices,
+          onSome: (registry) =>
+            runtimeWithServices.pipe(Effect.provideService(ProviderRuntimeToolRegistry, registry)),
+        }).pipe(
           Effect.mapError(
             (cause) =>
               new ProviderAdapterProcessError({

@@ -24,9 +24,10 @@ import {
 } from "../opencodeRuntime.ts";
 import {
   appendOpenCodeAssistantTextDelta,
-  makeOpenCodeAdapter,
   mergeOpenCodeAssistantText,
+  makeOpenCodeAdapter,
 } from "./OpenCodeAdapter.ts";
+import { browserRuntimeToolTestLayers } from "../tools/BrowserRuntimeToolTestLayers.ts";
 
 // Test-local service tag so the rest of the file can keep using `yield* OpenCodeAdapter`.
 class OpenCodeAdapter extends Context.Service<OpenCodeAdapter, OpenCodeAdapterShape>()(
@@ -210,6 +211,7 @@ const OpenCodeAdapterTestLayer = Layer.effect(
     }),
   ),
   Layer.provideMerge(providerSessionDirectoryTestLayer),
+  Layer.provideMerge(browserRuntimeToolTestLayers),
   Layer.provideMerge(NodeServices.layer),
 );
 

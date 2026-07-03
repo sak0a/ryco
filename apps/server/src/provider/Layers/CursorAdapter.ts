@@ -42,6 +42,9 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { BrowserMcpBridge } from "../../browser/BrowserMcpBridge.ts";
+import { cleanupBrowserThreadAfterProviderTurn } from "../../browser/BrowserThreadCleanup.ts";
+import { makeAcpBrowserMcpServer } from "../../browser/BrowserRuntimeMcpConfig.ts";
 import { ServerConfig } from "../../config.ts";
 import {
   ProviderAdapterProcessError,
@@ -76,6 +79,7 @@ import {
 } from "../acp/CursorAcpExtension.ts";
 import { type CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { resolveProviderBrowserToolSupport } from "../tools/BrowserRuntimeTool.ts";
+import { ProviderRuntimeToolRegistry } from "../tools/ProviderRuntimeToolRegistry.ts";
 import { resolveCursorAcpBaseModelId } from "./CursorProvider.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
@@ -310,6 +314,13 @@ export function makeCursorAdapter(
     const fileSystem = yield* FileSystem.FileSystem;
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const serverConfig = yield* Effect.service(ServerConfig);
+    const providerRuntimeToolRegistry = yield* Effect.serviceOption(ProviderRuntimeToolRegistry);
+    const browserMcpBridge = yield* Effect.serviceOption(BrowserMcpBridge);
+    const stopBrowserBridgeForThread = (threadId: ThreadId) =>
+      Option.match(browserMcpBridge, {
+        onNone: () => Effect.void,
+        onSome: (bridge) => bridge.stop(threadId),
+      });
     const nativeEventLogger =
       options?.nativeEventLogger ??
       (options?.nativeEventLogPath !== undefined
@@ -433,6 +444,7 @@ export function makeCursorAdapter(
           yield* Fiber.interrupt(ctx.notificationFiber);
         }
         yield* Effect.ignore(Scope.close(ctx.scope, Exit.void));
+        yield* stopBrowserBridgeForThread(ctx.threadId);
         sessions.delete(ctx.threadId);
         yield* offerRuntimeEvent({
           type: "session.exited",
@@ -498,12 +510,59 @@ export function makeCursorAdapter(
             ? yield* options.resolveSettings
             : cursorSettings;
 
+          const ctxHolder: { current?: CursorSessionContext } = {};
+          const runtimeContext = yield* Effect.context<never>();
+          const runPromise = Effect.runPromiseWith(runtimeContext);
+          const browserMcpServers: Array<EffectAcpSchema.McpServer> = [];
+          if (serverConfig.mode === "desktop") {
+            yield* Option.match(browserMcpBridge, {
+              onNone: () => Effect.void,
+              onSome: (bridge) =>
+                Option.match(providerRuntimeToolRegistry, {
+                  onNone: () => Effect.void,
+                  onSome: (registry) =>
+                    Effect.gen(function* () {
+                      const bridgeHandle = yield* bridge
+                        .start({
+                          threadId: input.threadId,
+                          runPromise,
+                          executeBrowserTool: (toolInput) =>
+                            registry.executeBrowserTool(toolInput, {
+                              lifecycle: {
+                                provider: PROVIDER,
+                                providerInstanceId: boundInstanceId,
+                                ...(ctxHolder.current?.activeTurnId
+                                  ? { turnId: ctxHolder.current.activeTurnId }
+                                  : {}),
+                              },
+                            }),
+                        })
+                        .pipe(
+                          Effect.mapError(
+                            (cause) =>
+                              new ProviderAdapterProcessError({
+                                provider: PROVIDER,
+                                threadId: input.threadId,
+                                detail: cause.message,
+                                cause,
+                              }),
+                          ),
+                        );
+                      browserMcpServers.push(
+                        makeAcpBrowserMcpServer({ socketPath: bridgeHandle.socketPath }),
+                      );
+                    }),
+                }),
+            });
+          }
+
           const acp = yield* makeCursorAcpRuntime({
             cursorSettings: effectiveCursorSettings,
             ...(options?.environment ? { environment: options.environment } : {}),
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
+            ...(browserMcpServers.length > 0 ? { mcpServers: browserMcpServers } : {}),
             clientInfo: { name: "ryco", version: "0.0.0" },
             ...acpNativeLoggers,
           }).pipe(
@@ -719,6 +778,7 @@ export function makeCursorAdapter(
             activeTurnId: undefined,
             stopped: false,
           };
+          ctxHolder.current = ctx;
 
           const nf = yield* Stream.runDrain(
             Stream.mapEffect(acp.getEvents(), (event) =>
@@ -949,6 +1009,10 @@ export function makeCursorAdapter(
             stopReason: result.stopReason ?? null,
           },
         });
+
+        yield* cleanupBrowserThreadAfterProviderTurn(input.threadId, {
+          stopBridge: false,
+        }).pipe(Effect.ignore);
 
         return {
           threadId: input.threadId,

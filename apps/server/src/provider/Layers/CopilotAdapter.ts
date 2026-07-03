@@ -11,7 +11,7 @@ import {
   type UserInputQuestion,
 } from "@ryco/contracts";
 import type { PermissionRequestResult, SessionConfig, SessionEvent } from "@github/copilot-sdk";
-import { Effect, Queue, Random, Stream } from "effect";
+import { Effect, Option, Queue, Random, Stream } from "effect";
 
 import { ServerConfig } from "../../config.ts";
 import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
@@ -34,7 +34,11 @@ import {
   selectionTargetsCopilotInstance,
 } from "./CopilotAdapter.types.ts";
 import { mapEvent, type MapEventDeps } from "./CopilotAdapter.mapEvent.ts";
+import { cleanupBrowserThreadAfterProviderTurn } from "../../browser/BrowserThreadCleanup.ts";
+import { BrowserArtifactStore } from "../../browser/BrowserArtifactStore.ts";
 import { resolveProviderBrowserToolSupport } from "../tools/BrowserRuntimeTool.ts";
+import { makeCopilotBrowserTools } from "../tools/CopilotBrowserRuntimeTools.ts";
+import { ProviderRuntimeToolRegistry } from "../tools/ProviderRuntimeToolRegistry.ts";
 import {
   type SessionOpsDeps,
   makeHasSession,
@@ -58,6 +62,8 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
   options?: CopilotAdapterLiveOptions,
 ) {
   const serverConfig = yield* ServerConfig;
+  const providerRuntimeToolRegistry = yield* Effect.serviceOption(ProviderRuntimeToolRegistry);
+  const browserArtifactStore = yield* Effect.serviceOption(BrowserArtifactStore);
   const instanceId = options?.instanceId ?? ProviderInstanceId.make("copilot");
   const nativeEventLogger =
     options?.nativeEventLogger ??
@@ -193,6 +199,9 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
     }
 
     if (clearsActiveTurn) {
+      yield* cleanupBrowserThreadAfterProviderTurn(session.threadId, {
+        stopBridge: false,
+      }).pipe(Effect.ignore);
       session.activeTurnId = undefined;
       session.activeMessageId = undefined;
     }
@@ -225,12 +234,36 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       : {}),
     ...(input.cwd ? { workingDirectory: input.cwd } : {}),
     streaming: true,
-    systemMessage: {
-      mode: "append",
-      content:
-        "Ryco built-in browser tools are not available to GitHub Copilot in this build. " +
-        "Do not claim browser navigation, screenshots, login flows, or live UI verification unless another tool explicitly provides that capability.",
-    },
+    tools: Option.match(providerRuntimeToolRegistry, {
+      onNone: () => [],
+      onSome: (registry) =>
+        makeCopilotBrowserTools({
+          threadId: input.threadId,
+          executeBrowserTool: (toolInput, execOptions) => {
+            const activeTurn = activeTurnId();
+            return registry.executeBrowserTool(toolInput, {
+              ...execOptions,
+              lifecycle: activeTurn
+                ? {
+                    provider: COPILOT_DRIVER_KIND,
+                    providerInstanceId: instanceId,
+                    turnId: activeTurn,
+                  }
+                : {
+                    provider: COPILOT_DRIVER_KIND,
+                    providerInstanceId: instanceId,
+                  },
+            });
+          },
+          runPromise: (effect) => Effect.runPromise(effect),
+          ...(Option.isSome(browserArtifactStore)
+            ? {
+                readArtifactData: (artifactId) =>
+                  Effect.runPromise(browserArtifactStore.value.readData(artifactId)),
+              }
+            : {}),
+        }),
+    }),
     onPermissionRequest: (request) =>
       new Promise<PermissionRequestResult>((resolve) => {
         const requestId = randomUUID();

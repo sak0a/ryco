@@ -177,3 +177,48 @@ function stableBrowserKeyHash(input: string): string {
   }
   return hash.toString(36).padStart(7, "0").slice(0, 7);
 }
+
+export interface BrowserSurfaceBoundsInput {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly deviceScaleFactor?: number | undefined;
+}
+
+export interface BrowserSurfaceBoundsRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Reconcile renderer-reported bounds with the native window scale factor for Electron setBounds. */
+export function resolveElectronSurfaceBounds(
+  bounds: BrowserSurfaceBoundsInput,
+  nativeDeviceScaleFactor: number,
+): BrowserSurfaceBoundsRect | null {
+  const reportedScale =
+    bounds.deviceScaleFactor !== undefined && bounds.deviceScaleFactor > 0
+      ? bounds.deviceScaleFactor
+      : 1;
+  const nativeScale = nativeDeviceScaleFactor > 0 ? nativeDeviceScaleFactor : 1;
+  const ratio = nativeScale / reportedScale;
+  const x = Math.round(bounds.x * ratio);
+  const y = Math.round(bounds.y * ratio);
+  const width = Math.max(1, Math.round(bounds.width * ratio));
+  const height = Math.max(1, Math.round(bounds.height * ratio));
+
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return null;
+  }
+
+  return { x, y, width, height };
+}

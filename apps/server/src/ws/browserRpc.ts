@@ -92,6 +92,36 @@ export const makeBrowserHandlers = (ctx: WsRpcContext) => {
         localDesktopOwnerEffect(WS_METHODS.browserDeleteCookie, browser.deleteCookie(input)),
         { "rpc.aggregate": "browser" },
       ),
+    [WS_METHODS.browserSnapshotDom]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.browserSnapshotDom,
+        localDesktopOwnerEffect(WS_METHODS.browserSnapshotDom, browser.snapshotDom(input)),
+        { "rpc.aggregate": "browser" },
+      ),
+    [WS_METHODS.browserScreenshot]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.browserScreenshot,
+        localDesktopOwnerEffect(WS_METHODS.browserScreenshot, browser.screenshot(input)),
+        { "rpc.aggregate": "browser" },
+      ),
+    [WS_METHODS.browserReadConsole]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.browserReadConsole,
+        localDesktopOwnerEffect(WS_METHODS.browserReadConsole, browser.readConsole(input)),
+        { "rpc.aggregate": "browser" },
+      ),
+    [WS_METHODS.browserReadNetwork]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.browserReadNetwork,
+        localDesktopOwnerEffect(WS_METHODS.browserReadNetwork, browser.readNetwork(input)),
+        { "rpc.aggregate": "browser" },
+      ),
+    [WS_METHODS.browserWaitFor]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.browserWaitFor,
+        localDesktopOwnerEffect(WS_METHODS.browserWaitFor, browser.waitFor(input)),
+        { "rpc.aggregate": "browser" },
+      ),
     [WS_METHODS.subscribeBrowserEvents]: (_input) =>
       observeRpcStream(
         WS_METHODS.subscribeBrowserEvents,

@@ -29,6 +29,11 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
+import {
+  CLAUDE_BROWSER_MCP_SERVER_NAME,
+  claudeBrowserMcpToolName,
+} from "../tools/ClaudeBrowserRuntimeTools.ts";
+import { browserRuntimeToolTestLayers } from "../tools/BrowserRuntimeToolTestLayers.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
@@ -140,6 +145,10 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   }
 }
 
+function makeTestProviderRuntimeToolRegistryLayer() {
+  return browserRuntimeToolTestLayers;
+}
+
 function makeHarness(config?: {
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: ClaudeAdapterLiveOptions["nativeEventLogger"];
@@ -190,6 +199,7 @@ function makeHarness(config?: {
       ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(makeTestProviderRuntimeToolRegistryLayer()),
     ),
     query,
     getLastCreateQueryInput: () => createInput,
@@ -1397,6 +1407,7 @@ describe("ClaudeAdapterLive", () => {
       Layer.provideMerge(ServerConfig.layerTest("/tmp/claude-adapter-test", "/tmp")),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(makeTestProviderRuntimeToolRegistryLayer()),
     );
 
     return Effect.gen(function* () {
@@ -1488,6 +1499,7 @@ describe("ClaudeAdapterLive", () => {
       Layer.provideMerge(ServerConfig.layerTest("/tmp/claude-adapter-test", "/tmp")),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(makeTestProviderRuntimeToolRegistryLayer()),
     );
 
     return Effect.gen(function* () {
@@ -2701,6 +2713,49 @@ describe("ClaudeAdapterLive", () => {
       });
 
       const permissionResult = yield* Effect.promise(() => permissionPromise);
+      assert.equal((permissionResult as PermissionResult).behavior, "allow");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("registers Ryco browser MCP tools and auto-allows them through canUseTool", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+
+      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(
+        createInput?.options.mcpServers?.[CLAUDE_BROWSER_MCP_SERVER_NAME] !== undefined,
+        true,
+      );
+
+      const canUseTool = createInput?.options.canUseTool;
+      assert.equal(typeof canUseTool, "function");
+      if (!canUseTool) {
+        return;
+      }
+
+      const permissionResult = yield* Effect.promise(() =>
+        canUseTool(
+          claudeBrowserMcpToolName("browser_open"),
+          { initialUrl: "https://example.com/" },
+          {
+            signal: new AbortController().signal,
+            toolUseID: "tool-browser-open-1",
+          },
+        ),
+      );
+
       assert.equal((permissionResult as PermissionResult).behavior, "allow");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),

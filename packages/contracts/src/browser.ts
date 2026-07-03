@@ -206,12 +206,16 @@ export const BrowserToolAccessDecision = Schema.Struct({
 });
 export type BrowserToolAccessDecision = typeof BrowserToolAccessDecision.Type;
 
+export const BrowserNavigationSource = Schema.Literals(["ui", "agent"]);
+export type BrowserNavigationSource = typeof BrowserNavigationSource.Type;
+
 export const BrowserOpenSessionInput = Schema.Struct({
   threadId: ThreadId,
   projectId: Schema.optional(ProjectId),
   profileMode: Schema.optional(BrowserProfileMode),
   profileName: Schema.optional(TrimmedNonEmptyStringSchema),
   initialUrl: Schema.optional(Schema.String),
+  source: Schema.optional(BrowserNavigationSource),
 });
 export type BrowserOpenSessionInput = typeof BrowserOpenSessionInput.Type;
 
@@ -230,6 +234,7 @@ export const BrowserNavigateInput = Schema.Struct({
   sessionId: BrowserSessionId,
   tabId: Schema.optional(BrowserTabId),
   url: Schema.String.check(Schema.isMaxLength(8_192)),
+  source: Schema.optional(BrowserNavigationSource),
 });
 export type BrowserNavigateInput = typeof BrowserNavigateInput.Type;
 
@@ -244,6 +249,10 @@ export const BrowserInputAction = Schema.Union([
     type: Schema.Literal("click"),
     x: Schema.Number,
     y: Schema.Number,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("click"),
+    ref: TrimmedNonEmptyStringSchema,
   }),
   Schema.Struct({
     type: Schema.Literal("type"),
@@ -370,6 +379,172 @@ export const BrowserListProfilesResult = Schema.Struct({
 });
 export type BrowserListProfilesResult = typeof BrowserListProfilesResult.Type;
 
+export const BrowserArtifactKind = Schema.Literals(["screenshot", "dom_snapshot", "download"]);
+export type BrowserArtifactKind = typeof BrowserArtifactKind.Type;
+
+export const BrowserArtifactRef = Schema.Struct({
+  artifactId: BrowserArtifactId,
+  kind: BrowserArtifactKind,
+  mimeType: TrimmedNonEmptyStringSchema,
+  byteSize: NonNegativeInt,
+  url: Schema.optional(Schema.String),
+  origin: Schema.optional(Schema.String),
+  createdAt: IsoDateTime,
+  expiresAt: IsoDateTime,
+});
+export type BrowserArtifactRef = typeof BrowserArtifactRef.Type;
+
+export const BrowserViewportSize = Schema.Struct({
+  width: PositiveInt,
+  height: PositiveInt,
+});
+export type BrowserViewportSize = typeof BrowserViewportSize.Type;
+
+export const BrowserDomBounds = Schema.Struct({
+  x: Schema.Number,
+  y: Schema.Number,
+  width: Schema.Number,
+  height: Schema.Number,
+});
+export type BrowserDomBounds = typeof BrowserDomBounds.Type;
+
+export interface BrowserDomNode {
+  readonly ref: string;
+  readonly tag: string;
+  readonly role?: string | undefined;
+  readonly name?: string | undefined;
+  readonly bounds?: BrowserDomBounds | undefined;
+  readonly children?: ReadonlyArray<BrowserDomNode> | undefined;
+}
+
+export const BrowserDomNode: Schema.Schema<BrowserDomNode> = Schema.Struct({
+  ref: TrimmedNonEmptyStringSchema,
+  tag: Schema.String.check(Schema.isMaxLength(128)),
+  role: Schema.optional(Schema.String.check(Schema.isMaxLength(128))),
+  name: Schema.optional(Schema.String.check(Schema.isMaxLength(2_048))),
+  bounds: Schema.optional(BrowserDomBounds),
+  children: Schema.optional(
+    Schema.Array(Schema.suspend((): Schema.Schema<BrowserDomNode> => BrowserDomNode)),
+  ),
+});
+
+export const BrowserDomSnapshotData = Schema.Struct({
+  url: Schema.String.check(Schema.isMaxLength(8_192)),
+  title: Schema.String.check(Schema.isMaxLength(2_048)),
+  viewport: BrowserViewportSize,
+  tree: Schema.Array(BrowserDomNode),
+  truncated: Schema.optional(Schema.Boolean),
+  nodeCount: Schema.optional(NonNegativeInt),
+});
+export type BrowserDomSnapshotData = typeof BrowserDomSnapshotData.Type;
+
+export const BrowserDomSnapshotResult = Schema.Struct({
+  session: BrowserSessionSnapshot,
+  snapshot: BrowserDomSnapshotData,
+  text: Schema.optional(Schema.String),
+  artifact: Schema.optional(BrowserArtifactRef),
+});
+export type BrowserDomSnapshotResult = typeof BrowserDomSnapshotResult.Type;
+
+export const BrowserScreenshotResult = Schema.Struct({
+  session: BrowserSessionSnapshot,
+  artifact: BrowserArtifactRef,
+});
+export type BrowserScreenshotResult = typeof BrowserScreenshotResult.Type;
+
+export const BrowserConsoleLevel = Schema.Literals([
+  "debug",
+  "info",
+  "warning",
+  "error",
+  "verbose",
+]);
+export type BrowserConsoleLevel = typeof BrowserConsoleLevel.Type;
+
+export const BrowserConsoleEntry = Schema.Struct({
+  level: BrowserConsoleLevel,
+  message: Schema.String.check(Schema.isMaxLength(16_384)),
+  timestamp: IsoDateTime,
+  source: Schema.optional(Schema.String.check(Schema.isMaxLength(4_096))),
+  line: Schema.optional(NonNegativeInt),
+});
+export type BrowserConsoleEntry = typeof BrowserConsoleEntry.Type;
+
+export const BrowserConsoleResult = Schema.Struct({
+  session: BrowserSessionSnapshot,
+  entries: Schema.Array(BrowserConsoleEntry),
+});
+export type BrowserConsoleResult = typeof BrowserConsoleResult.Type;
+
+export const BrowserNetworkEntry = Schema.Struct({
+  requestId: TrimmedNonEmptyStringSchema,
+  url: Schema.String.check(Schema.isMaxLength(8_192)),
+  method: Schema.String.check(Schema.isMaxLength(32)),
+  status: Schema.optional(NonNegativeInt),
+  resourceType: Schema.optional(Schema.String.check(Schema.isMaxLength(128))),
+  startedAt: IsoDateTime,
+  completedAt: Schema.optional(IsoDateTime),
+});
+export type BrowserNetworkEntry = typeof BrowserNetworkEntry.Type;
+
+export const BrowserNetworkResult = Schema.Struct({
+  session: BrowserSessionSnapshot,
+  entries: Schema.Array(BrowserNetworkEntry),
+});
+export type BrowserNetworkResult = typeof BrowserNetworkResult.Type;
+
+export const BrowserWaitForInput = Schema.Struct({
+  sessionId: BrowserSessionId,
+  tabId: Schema.optional(BrowserTabId),
+  timeoutMs: Schema.optional(PositiveInt),
+  url: Schema.optional(Schema.String.check(Schema.isMaxLength(8_192))),
+  title: Schema.optional(Schema.String.check(Schema.isMaxLength(2_048))),
+  text: Schema.optional(Schema.String.check(Schema.isMaxLength(4_096))),
+  textGone: Schema.optional(Schema.String.check(Schema.isMaxLength(4_096))),
+  loadState: Schema.optional(BrowserLoadState),
+});
+export type BrowserWaitForInput = typeof BrowserWaitForInput.Type;
+
+export const BrowserWaitForResult = Schema.Struct({
+  session: BrowserSessionSnapshot,
+  matched: Schema.Boolean,
+  waitedMs: NonNegativeInt,
+});
+export type BrowserWaitForResult = typeof BrowserWaitForResult.Type;
+
+export const BrowserHostScreenshotData = Schema.Struct({
+  kind: Schema.Literal("screenshot"),
+  base64: Schema.String,
+});
+export type BrowserHostScreenshotData = typeof BrowserHostScreenshotData.Type;
+
+export const BrowserHostDomSnapshotData = Schema.Struct({
+  kind: Schema.Literal("dom_snapshot"),
+  snapshot: BrowserDomSnapshotData,
+  text: Schema.optional(Schema.String),
+});
+export type BrowserHostDomSnapshotData = typeof BrowserHostDomSnapshotData.Type;
+
+export const BrowserHostConsoleData = Schema.Struct({
+  kind: Schema.Literal("console"),
+  entries: Schema.Array(BrowserConsoleEntry),
+});
+export type BrowserHostConsoleData = typeof BrowserHostConsoleData.Type;
+
+export const BrowserHostNetworkData = Schema.Struct({
+  kind: Schema.Literal("network"),
+  entries: Schema.Array(BrowserNetworkEntry),
+});
+export type BrowserHostNetworkData = typeof BrowserHostNetworkData.Type;
+
+export const BrowserHostObservationData = Schema.Union([
+  BrowserHostScreenshotData,
+  BrowserHostDomSnapshotData,
+  BrowserHostConsoleData,
+  BrowserHostNetworkData,
+]);
+export type BrowserHostObservationData = typeof BrowserHostObservationData.Type;
+
 export const BrowserCommandKind = Schema.Literals([
   "open_session",
   "close_session",
@@ -456,21 +631,6 @@ export const BrowserHostCommandEnvelope = Schema.Struct({
   timeoutMs: PositiveInt,
 });
 export type BrowserHostCommandEnvelope = typeof BrowserHostCommandEnvelope.Type;
-
-export const BrowserArtifactKind = Schema.Literals(["screenshot", "dom_snapshot", "download"]);
-export type BrowserArtifactKind = typeof BrowserArtifactKind.Type;
-
-export const BrowserArtifactRef = Schema.Struct({
-  artifactId: BrowserArtifactId,
-  kind: BrowserArtifactKind,
-  mimeType: TrimmedNonEmptyStringSchema,
-  byteSize: NonNegativeInt,
-  url: Schema.optional(Schema.String),
-  origin: Schema.optional(Schema.String),
-  createdAt: IsoDateTime,
-  expiresAt: IsoDateTime,
-});
-export type BrowserArtifactRef = typeof BrowserArtifactRef.Type;
 
 export const BrowserCommandResultPayload = Schema.Struct({
   session: Schema.optional(BrowserSessionSnapshot),

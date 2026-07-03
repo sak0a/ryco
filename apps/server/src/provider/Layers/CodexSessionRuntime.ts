@@ -18,7 +18,19 @@ import {
   TurnId,
 } from "@ryco/contracts";
 import { normalizeModelSlug } from "@ryco/shared/model";
-import { Deferred, Effect, Exit, Layer, Queue, Ref, Scope, Random, Schema, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Queue,
+  Ref,
+  Scope,
+  Random,
+  Schema,
+  Stream,
+} from "effect";
 import * as SchemaIssue from "effect/SchemaIssue";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexClient from "effect-codex-app-server/client";
@@ -33,6 +45,12 @@ import {
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 import { appendProjectCustomSystemPrompt } from "../ProjectCustomSystemPrompt.ts";
+import { cleanupBrowserThreadAfterProviderTurn } from "../../browser/BrowserThreadCleanup.ts";
+import {
+  parseBrowserRuntimeToolCallInput,
+  type BrowserRuntimeToolCallError,
+} from "../tools/BrowserRuntimeTool.ts";
+import { ProviderRuntimeToolRegistry } from "../tools/ProviderRuntimeToolRegistry.ts";
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
@@ -44,6 +62,10 @@ const BENIGN_ERROR_LOG_SNIPPETS = [
   "state db missing rollout path for thread",
   "state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back",
 ];
+// Codex exposes `DynamicToolSpec` in effect-codex-app-server, but generated
+// `V2ThreadStartParams` / `V2TurnStartParams` do not yet include a `dynamicTools`
+// field. Re-run schema generation once upstream wires tool registration into
+// thread/start; until then Ryco only handles inbound `item/tool/call` requests.
 const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "not found",
   "missing thread",
@@ -663,6 +685,31 @@ function toProtocolParseError(
   });
 }
 
+function formatBrowserRuntimeToolCallError(error: BrowserRuntimeToolCallError): string {
+  return error.message;
+}
+
+function toDynamicToolCallResponse(
+  input:
+    | {
+        readonly success: true;
+        readonly result: unknown;
+      }
+    | {
+        readonly success: false;
+        readonly message: string;
+      },
+): EffectCodexSchema.DynamicToolCallResponse {
+  const text =
+    input.success === true
+      ? JSON.stringify(input.result)
+      : JSON.stringify({ error: input.message });
+  return {
+    success: input.success,
+    contentItems: [{ type: "inputText", text }],
+  };
+}
+
 function currentProviderThreadId(session: ProviderSession): string | undefined {
   return readResumeCursorThreadId(session.resumeCursor);
 }
@@ -700,6 +747,7 @@ export const makeCodexSessionRuntime = (
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const runtimeScope = yield* Scope.Scope;
+    const toolRegistry = yield* Effect.serviceOption(ProviderRuntimeToolRegistry);
     const events = yield* Queue.unbounded<ProviderEvent>();
     const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>());
     const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>());
@@ -904,7 +952,13 @@ export const makeCodexSessionRuntime = (
             status: payload.turn.status === "failed" ? "error" : "ready",
             activeTurnId: undefined,
             ...(lastError ? { lastError } : {}),
-          });
+          }).pipe(
+            Effect.andThen(
+              cleanupBrowserThreadAfterProviderTurn(options.threadId, {
+                stopBridge: false,
+              }).pipe(Effect.ignore),
+            ),
+          );
         }),
       ),
     );
@@ -1085,6 +1139,78 @@ export const makeCodexSessionRuntime = (
             ),
           ),
         } satisfies EffectCodexSchema.ToolRequestUserInputResponse;
+      }),
+    );
+
+    yield* client.handleServerRequest("item/tool/call", (payload) =>
+      Effect.gen(function* () {
+        if (!payload.tool.startsWith("browser_")) {
+          return yield* CodexErrors.CodexAppServerRequestError.methodNotFound(
+            `item/tool/call:${payload.tool}`,
+          );
+        }
+
+        const requestId = ApprovalRequestId.make(yield* Random.nextUUIDv4);
+        const turnId = TurnId.make(payload.turnId);
+
+        yield* emitEvent({
+          kind: "request",
+          threadId: options.threadId,
+          method: "item/tool/call",
+          requestId,
+          turnId,
+          payload,
+        });
+
+        const toolInput = yield* parseBrowserRuntimeToolCallInput({
+          toolName: payload.tool,
+          threadId: options.threadId,
+          arguments: payload.arguments,
+        }).pipe(
+          Effect.mapError((error) =>
+            CodexErrors.CodexAppServerRequestError.invalidParams(error.message, {
+              tool: payload.tool,
+              code: error.code,
+            }),
+          ),
+        );
+
+        const result = yield* Option.match(toolRegistry, {
+          onNone: () =>
+            Effect.succeed(
+              toDynamicToolCallResponse({
+                success: false,
+                message: "Browser runtime tools are unavailable.",
+              }),
+            ),
+          onSome: (registry) =>
+            registry
+              .executeBrowserTool(toolInput, {
+                lifecycle: {
+                  provider: PROVIDER,
+                  ...(options.providerInstanceId
+                    ? { providerInstanceId: options.providerInstanceId }
+                    : {}),
+                  turnId,
+                },
+              })
+              .pipe(
+                Effect.match({
+                  onFailure: (error) =>
+                    toDynamicToolCallResponse({
+                      success: false,
+                      message: formatBrowserRuntimeToolCallError(error),
+                    }),
+                  onSuccess: (snapshot) =>
+                    toDynamicToolCallResponse({
+                      success: true,
+                      result: snapshot,
+                    }),
+                }),
+              ),
+        });
+
+        return result satisfies EffectCodexSchema.DynamicToolCallResponse;
       }),
     );
 

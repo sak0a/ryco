@@ -101,8 +101,11 @@ import { NetService } from "@ryco/shared/Net";
 import { disableTailscaleServe, ensureTailscaleServe } from "@ryco/tailscale";
 import { BrowserArtifactStoreLive } from "./browser/BrowserArtifactStore.ts";
 import { BrowserHostRegistryLive } from "./browser/BrowserHostRegistry.ts";
+import { BrowserMcpBridgeLive } from "./browser/BrowserMcpBridge.ts";
 import { BrowserPolicyLive } from "./browser/BrowserPolicy.ts";
 import { BrowserServiceLive } from "./browser/BrowserService.ts";
+import { ProviderRuntimeEventHubLive } from "./provider/tools/ProviderRuntimeEventHub.ts";
+import { ProviderRuntimeToolRegistryLive } from "./provider/tools/ProviderRuntimeToolRegistry.ts";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -181,6 +184,7 @@ const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
 const ProviderLayerLive = ProviderServiceLive.pipe(
   Layer.provide(ProviderAdapterRegistryLive),
   Layer.provideMerge(ProviderSessionDirectoryLayerLive),
+  Layer.provideMerge(ProviderRuntimeEventHubLive),
 );
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
@@ -244,10 +248,24 @@ const CheckpointingLayerLive = Layer.empty.pipe(
 
 const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
 
-const BrowserLayerLive = BrowserServiceLive.pipe(
-  Layer.provideMerge(BrowserHostRegistryLive),
-  Layer.provideMerge(BrowserPolicyLive),
-  Layer.provideMerge(BrowserArtifactStoreLive),
+// The browser services have real dependencies on each other:
+// ProviderRuntimeToolRegistry needs BrowserService, and BrowserService needs
+// BrowserHostRegistry/BrowserPolicy (and optionally BrowserArtifactStore). A flat
+// Layer.mergeAll builds them in parallel WITHOUT satisfying those dependencies, which
+// compiles (the requirements just leak, masked by the `as` cast on `runServer`) but
+// crashes at runtime with "Service not found: BrowserHostRegistry". Wire the
+// dependencies with provideMerge (dependents first, providers last) so every service is
+// still exported while the internal graph is actually connected.
+const BrowserLayerLive = ProviderRuntimeToolRegistryLive.pipe(
+  Layer.provideMerge(BrowserServiceLive),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      BrowserHostRegistryLive,
+      BrowserPolicyLive,
+      BrowserArtifactStoreLive,
+      BrowserMcpBridgeLive,
+    ),
+  ),
 );
 
 const WorkspaceEntriesLayerLive = WorkspaceEntriesLive.pipe(
@@ -485,8 +503,4 @@ export const makeServerLayer = Layer.unwrap(
 );
 
 // Important: Only `ServerConfig` should be provided by the CLI layer!!! Don't let other requirements leak into the launch layer.
-export const runServer = Layer.launch(makeServerLayer) satisfies Effect.Effect<
-  never,
-  any,
-  ServerConfig
->;
+export const runServer = Layer.launch(makeServerLayer) as Effect.Effect<never, any, ServerConfig>;

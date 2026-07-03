@@ -84,7 +84,7 @@ export class BrowserHostConnection {
           surface: true,
           persistentProfiles: true,
           temporaryProfiles: true,
-          screenshots: false,
+          screenshots: true,
           domSnapshot: true,
           input: true,
           downloads: false,

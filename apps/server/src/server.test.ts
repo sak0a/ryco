@@ -134,6 +134,7 @@ import { BrowserArtifactStoreLive } from "./browser/BrowserArtifactStore.ts";
 import { BrowserHostRegistryLive } from "./browser/BrowserHostRegistry.ts";
 import { BrowserPolicyLive } from "./browser/BrowserPolicy.ts";
 import { BrowserServiceLive } from "./browser/BrowserService.ts";
+import { browserRuntimeToolTestLayers } from "./provider/tools/BrowserRuntimeToolTestLayers.ts";
 import {
   AtlassianConnectionService,
   type AtlassianConnectionServiceShape,
@@ -606,13 +607,19 @@ const buildAppUnderTest = (options?: {
           ...options.layers.vcsStatusBroadcaster,
         })
       : VcsStatusBroadcaster.layer.pipe(Layer.provide(gitWorkflowLayer));
+    // BrowserServiceLive requires BrowserHostRegistry/BrowserPolicy (and optionally
+    // BrowserArtifactStore). Wire the dependencies via provideMerge so the merged layer
+    // is self-contained: Layer.mergeAll here would leave those services in the
+    // requirements channel (leaking `unknown` into every test effect and failing at
+    // runtime with "Service not found: BrowserHostRegistry").
     const browserLayer = BrowserServiceLive.pipe(
       Layer.provideMerge(BrowserHostRegistryLive),
       Layer.provideMerge(BrowserPolicyLive),
       Layer.provideMerge(BrowserArtifactStoreLive),
+      Layer.provideMerge(browserRuntimeToolTestLayers),
     );
 
-    const servedRoutesLayer = HttpRouter.serve(makeRoutesLayer, {
+    const baseRoutesLayer = HttpRouter.serve(makeRoutesLayer, {
       disableListenLog: true,
       disableLogger: true,
     }).pipe(
@@ -724,6 +731,10 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.terminalManager,
         }),
       ),
+      Layer.provideMerge(browserLayer),
+    );
+
+    const servedRoutesLayer = baseRoutesLayer.pipe(
       Layer.provide(
         Layer.mock(OrchestrationEngineService)({
           readEvents: () => Stream.empty,
@@ -854,14 +865,26 @@ const buildAppUnderTest = (options?: {
       Layer.provideMerge(makeAuthTestLayer()),
       Layer.provideMerge(LocalDiagnosticsMetricsLive),
       Layer.provideMerge(AdvertisedEndpointRegistryLive),
-      Layer.provideMerge(browserLayer),
       Layer.provideMerge(BrowserHostAuthLive),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(layerConfig),
     );
 
-    yield* Layer.build(appLayer);
+    // `makeRoutesLayer` includes the websocket RPC route, whose
+    // `RpcServer.toHttpEffectWebsocket` call leaks `unknown` into the requirements
+    // channel — the same type-level artifact that `runServer` casts away in production
+    // (see server.ts). `unknown` then absorbs the real requirements of every test effect
+    // that builds the app. Everything `appLayer` actually needs is provided above or by
+    // the enclosing `NodeServices` test layer, so narrow the requirements back to their
+    // real type here. The error channel is preserved so tests still see build failures.
+    yield* Layer.build(
+      appLayer as Layer.Layer<
+        never,
+        Layer.Error<typeof appLayer>,
+        Layer.Success<typeof NodeServices.layer>
+      >,
+    );
     return config;
   });
 

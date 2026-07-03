@@ -2,13 +2,14 @@ import { scopeThreadRef } from "@ryco/client-runtime";
 import type {
   BrowserCookieMetadata,
   BrowserEvent,
+  BrowserProfile,
   BrowserSessionSnapshot,
   BrowserStorageDataType,
   BrowserStorageInspectionResult,
-  BrowserTabSnapshot,
   ProjectId,
   ScopedThreadRef,
 } from "@ryco/contracts";
+import { BrowserSessionId } from "@ryco/contracts";
 import { normalizeBrowserNavigationUrl } from "@ryco/shared/browser";
 import { useParams } from "@tanstack/react-router";
 import {
@@ -21,6 +22,7 @@ import {
   Loader2Icon,
   RefreshCwIcon,
   ShieldAlertIcon,
+  SparklesIcon,
   SquareIcon,
   Trash2Icon,
   XIcon,
@@ -35,12 +37,21 @@ import { useStore } from "../store";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { cn } from "~/lib/utils";
 import {
+  applyBrowserEvent,
   BROWSER_CURRENT_ORIGIN_STORAGE_TYPES,
+  BROWSER_PANEL_PROFILE_MODE,
   BROWSER_PROFILE_CLEAR_TYPES,
+  findThreadBrowserSession,
   formatBrowserCookieExpiry,
+  formatBrowserDownloadUpdate,
+  formatBrowserPermissionRequest,
   formatBrowserStorageBytes,
+  readBrowserSurfaceBounds,
+  resolveBrowserProfileLabel,
+  resolveSelectedTab,
   summarizeBrowserStorageInspection,
 } from "./BrowserPanel.logic";
+import { toastManager } from "./ui/toast";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -50,46 +61,6 @@ import { ScrollArea } from "./ui/scroll-area";
 const UNSUPPORTED_MESSAGE = "Built-in browser is available for the local Ryco desktop backend.";
 
 type BrowserPanelStatus = "loading" | "unsupported" | "ready" | "error";
-
-function resolveSelectedTab(session: BrowserSessionSnapshot | null): BrowserTabSnapshot | null {
-  if (!session) return null;
-  return session.tabs.find((tab) => tab.tabId === session.selectedTabId) ?? session.tabs[0] ?? null;
-}
-
-function applyBrowserEvent(
-  current: BrowserSessionSnapshot | null,
-  event: BrowserEvent,
-): BrowserSessionSnapshot | null {
-  if (!current) return current;
-  if (event.type === "session.updated" && event.session.sessionId === current.sessionId) {
-    return event.session;
-  }
-  if (event.type === "session.closed" && event.sessionId === current.sessionId) {
-    return { ...current, status: "closed", updatedAt: new Date().toISOString() };
-  }
-  if (event.type === "tab.updated" && event.tab.sessionId === current.sessionId) {
-    const tabs = current.tabs.some((tab) => tab.tabId === event.tab.tabId)
-      ? current.tabs.map((tab) => (tab.tabId === event.tab.tabId ? event.tab : tab))
-      : [...current.tabs, event.tab];
-    return {
-      ...current,
-      tabs,
-      selectedTabId: event.tab.selected ? event.tab.tabId : current.selectedTabId,
-      updatedAt: new Date().toISOString(),
-    };
-  }
-  if (event.type === "tab.crashed" && event.sessionId === current.sessionId) {
-    return {
-      ...current,
-      status: "error",
-      tabs: current.tabs.map((tab) =>
-        tab.tabId === event.tabId ? { ...tab, crashed: true, updatedAt: event.createdAt } : tab,
-      ),
-      updatedAt: event.createdAt,
-    };
-  }
-  return current;
-}
 
 function BrowserUnavailableState(props: { title: string; description: string }) {
   return (
@@ -417,10 +388,13 @@ function BrowserStorageInspector(props: {
 }
 
 export default function BrowserPanel() {
-  const { threadRef, projectId } = useBrowserRouteTarget();
+  const { threadRef } = useBrowserRouteTarget();
   const [status, setStatus] = useState<BrowserPanelStatus>("loading");
   const [message, setMessage] = useState<string | null>(null);
   const [session, setSession] = useState<BrowserSessionSnapshot | null>(null);
+  const [profiles, setProfiles] = useState<ReadonlyArray<BrowserProfile>>([]);
+  const [agentSessionActive, setAgentSessionActive] = useState(false);
+  const [permissionNotice, setPermissionNotice] = useState<string | null>(null);
   const [addressValue, setAddressValue] = useState("");
   const [isNavigating, setIsNavigating] = useState(false);
   const [storageOpen, setStorageOpen] = useState(false);
@@ -435,6 +409,11 @@ export default function BrowserPanel() {
   >(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const addressFocusedRef = useRef(false);
+  const sessionOpenedByPanelRef = useRef(false);
+  const panelOwnedSessionIdRef = useRef<string | null>(null);
+  const deviceScaleFactorRef = useRef(
+    typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
+  );
 
   const api = threadRef ? readEnvironmentApi(threadRef.environmentId) : undefined;
   const browserApi = api?.browser;
@@ -445,6 +424,46 @@ export default function BrowserPanel() {
   const nativeBridge = typeof window === "undefined" ? undefined : window.desktopBridge?.browser;
   const environmentId = threadRef?.environmentId ?? null;
   const threadId = threadRef?.threadId ?? null;
+
+  const handleBrowserEvent = useCallback(
+    (event: BrowserEvent) => {
+      if (event.type === "host.disconnected") {
+        setStatus("unsupported");
+        setMessage("The desktop BrowserHost disconnected.");
+      }
+      if (event.type === "permission.requested") {
+        const copy = formatBrowserPermissionRequest(event);
+        setPermissionNotice(copy.description);
+        toastManager.add({
+          type: "info",
+          title: copy.title,
+          description: copy.description,
+          data: threadRef ? { threadRef } : undefined,
+        });
+      }
+      if (event.type === "download.updated") {
+        const copy = formatBrowserDownloadUpdate(event);
+        if (copy) {
+          toastManager.add({
+            type: copy.variant === "error" ? "error" : "info",
+            title: copy.title,
+            description: copy.description,
+            data: threadRef ? { threadRef } : undefined,
+          });
+        }
+      }
+      if (
+        event.type === "session.updated" &&
+        event.session.threadId === threadId &&
+        event.session.status !== "closed" &&
+        !sessionOpenedByPanelRef.current
+      ) {
+        setAgentSessionActive(true);
+      }
+      setSession((current) => (threadId ? applyBrowserEvent(current, event, threadId) : current));
+    },
+    [threadId, threadRef],
+  );
 
   useEffect(() => {
     if (!addressFocusedRef.current) {
@@ -458,6 +477,11 @@ export default function BrowserPanel() {
 
     const openSession = async () => {
       setSession(null);
+      setProfiles([]);
+      setAgentSessionActive(false);
+      setPermissionNotice(null);
+      sessionOpenedByPanelRef.current = false;
+      panelOwnedSessionIdRef.current = null;
       setMessage(null);
       setStorageInspection(null);
       setStorageMessage(null);
@@ -481,11 +505,7 @@ export default function BrowserPanel() {
 
       try {
         unsubscribe = currentBrowserApi.onEvent((event) => {
-          if (event.type === "host.disconnected") {
-            setStatus("unsupported");
-            setMessage("The desktop BrowserHost disconnected.");
-          }
-          setSession((current) => applyBrowserEvent(current, event));
+          handleBrowserEvent(event);
         });
 
         const browserStatus = await currentBrowserApi.getStatus();
@@ -496,13 +516,28 @@ export default function BrowserPanel() {
           return;
         }
 
+        const profileList = await currentBrowserApi.listProfiles().catch(() => ({ profiles: [] }));
+        if (cancelled) return;
+        setProfiles(profileList.profiles);
+
+        const existingSession = findThreadBrowserSession(browserStatus.sessions, threadId);
+        if (existingSession) {
+          setSession(existingSession);
+          setAgentSessionActive(true);
+          setStatus("ready");
+          setMessage(null);
+          return;
+        }
+
         const snapshot = await currentBrowserApi.openSession({
           threadId,
-          ...(projectId ? { projectId } : {}),
-          profileMode: "project",
+          profileMode: BROWSER_PANEL_PROFILE_MODE,
         });
         if (cancelled) return;
+        sessionOpenedByPanelRef.current = true;
+        panelOwnedSessionIdRef.current = snapshot.sessionId;
         setSession(snapshot);
+        setAgentSessionActive(false);
         setStatus("ready");
         setMessage(null);
       } catch (error) {
@@ -517,8 +552,18 @@ export default function BrowserPanel() {
     return () => {
       cancelled = true;
       unsubscribe?.();
+      const ownedSessionId = panelOwnedSessionIdRef.current;
+      const currentBrowserApi =
+        environmentId !== null ? readEnvironmentApi(environmentId)?.browser : undefined;
+      if (sessionOpenedByPanelRef.current && ownedSessionId && currentBrowserApi) {
+        void currentBrowserApi
+          .closeSession({ sessionId: BrowserSessionId.make(ownedSessionId) })
+          .catch(() => undefined);
+      }
+      panelOwnedSessionIdRef.current = null;
+      sessionOpenedByPanelRef.current = false;
     };
-  }, [environmentId, projectId, threadId]);
+  }, [environmentId, handleBrowserEvent, threadId]);
 
   useEffect(() => {
     if (!nativeBridge || !selectedTabId || !sessionId || status !== "ready") {
@@ -535,29 +580,8 @@ export default function BrowserPanel() {
       tabId: selectedTabId,
     };
 
-    const readBounds = () => {
-      const rect = node.getBoundingClientRect();
-      const width = Math.floor(rect.width);
-      const height = Math.floor(rect.height);
-      if (
-        !Number.isFinite(rect.x) ||
-        !Number.isFinite(rect.y) ||
-        !Number.isFinite(width) ||
-        !Number.isFinite(height) ||
-        width <= 0 ||
-        height <= 0
-      ) {
-        return null;
-      }
-
-      return {
-        x: Math.round(rect.x),
-        y: Math.round(rect.y),
-        width,
-        height,
-        deviceScaleFactor: window.devicePixelRatio || 1,
-      };
-    };
+    const readBounds = () =>
+      readBrowserSurfaceBounds(node.getBoundingClientRect(), deviceScaleFactorRef.current);
 
     const syncBounds = () => {
       if (cancelled) return;
@@ -582,13 +606,19 @@ export default function BrowserPanel() {
             syncBounds();
           });
     resizeObserver?.observe(node);
+    const handleViewportChange = () => {
+      deviceScaleFactorRef.current = window.devicePixelRatio || 1;
+      syncBounds();
+    };
     window.addEventListener("resize", syncBounds);
+    window.addEventListener("resize", handleViewportChange);
     const frame = window.requestAnimationFrame(syncBounds);
 
     return () => {
       cancelled = true;
       window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", syncBounds);
+      window.removeEventListener("resize", handleViewportChange);
       resizeObserver?.disconnect();
       void nativeBridge.detachSurface(surfaceTarget).catch(() => undefined);
     };
@@ -751,6 +781,8 @@ export default function BrowserPanel() {
   const loading = status === "loading";
   const crashed = selectedTab?.crashed === true || session?.status === "error";
   const loadState = navigation?.loadState ?? "idle";
+  const profileLabel = resolveBrowserProfileLabel(session, profiles);
+  const showAgentIndicator = agentSessionActive && !loading;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -852,19 +884,36 @@ export default function BrowserPanel() {
         <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/50 px-3 text-xs text-muted-foreground">
           <Badge
             className={cn(
-              "max-w-[60%] justify-start truncate",
+              "max-w-[40%] justify-start truncate",
               crashed && "border-destructive/32 text-destructive-foreground",
             )}
             size="sm"
             variant={crashed ? "error" : "outline"}
           >
-            {crashed ? "Crashed" : session?.profileId ? "Project profile" : "Opening"}
+            {crashed ? "Crashed" : profileLabel}
           </Badge>
+          {showAgentIndicator ? (
+            <Badge
+              className="max-w-[35%] shrink-0 gap-1 truncate border-primary/25 bg-primary/8 text-primary"
+              size="sm"
+              variant="outline"
+            >
+              <SparklesIcon className="size-3 shrink-0" />
+              Agent session
+            </Badge>
+          ) : null}
           <span className="min-w-0 flex-1 truncate">{navigation?.origin ?? navigation?.url}</span>
           {loadState === "loading" || loading ? (
             <Loader2Icon className="size-3.5 shrink-0 animate-spin text-muted-foreground/80" />
           ) : null}
         </div>
+
+        {permissionNotice ? (
+          <Alert className="mx-3 mt-2 shrink-0 rounded-lg py-2" variant="default">
+            <AlertTitle>Permission request</AlertTitle>
+            <AlertDescription>{permissionNotice}</AlertDescription>
+          </Alert>
+        ) : null}
 
         {message && status === "error" ? (
           <Alert className="m-3 shrink-0 rounded-lg" variant="error">

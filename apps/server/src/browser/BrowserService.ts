@@ -1,21 +1,25 @@
 import { sanitizeBrowserProfileKey } from "@ryco/shared/browser";
-import { Context, Effect, Layer, PubSub, Ref, Stream } from "effect";
+import { Context, Effect, Layer, Option, PubSub, Ref, Stream } from "effect";
 
 import {
   BrowserProfileId,
   BrowserServiceError,
   BrowserSessionId,
   BrowserTabId,
+  type BrowserControlInput,
   type BrowserCookieDeleteInput,
   type BrowserCookieDeleteResult,
-  type BrowserControlInput,
+  type BrowserConsoleResult,
+  type BrowserDomSnapshotResult,
   type BrowserEvent,
   type BrowserInputCommandInput,
   type BrowserListProfilesResult,
   type BrowserNavigateInput,
+  type BrowserNetworkResult,
   type BrowserOpenSessionInput,
   type BrowserProfile,
   type BrowserProfileMode,
+  type BrowserScreenshotResult,
   type BrowserSessionInput,
   type BrowserSessionSnapshot,
   type BrowserStorageClearInput,
@@ -24,15 +28,27 @@ import {
   type BrowserStorageInspectionResult,
   type BrowserStatusSnapshot,
   type BrowserTabSnapshot,
+  type BrowserWaitForInput,
+  type BrowserWaitForResult,
+  type ThreadId,
 } from "@ryco/contracts";
 
 import { ServerConfig } from "../config.ts";
+import { BrowserArtifactStore } from "./BrowserArtifactStore.ts";
 import { BrowserHostRegistry } from "./BrowserHostRegistry.ts";
+import {
+  base64ToUint8Array,
+  decodeBrowserHostConsoleData,
+  decodeBrowserHostDomSnapshotData,
+  decodeBrowserHostNetworkData,
+  decodeBrowserHostScreenshotData,
+} from "./BrowserObservationHelpers.ts";
 import { BrowserPolicy } from "./BrowserPolicy.ts";
 
 interface BrowserServiceState {
   readonly profiles: ReadonlyMap<string, BrowserProfile>;
   readonly sessions: ReadonlyMap<string, BrowserSessionSnapshot>;
+  readonly sessionOwners: ReadonlyMap<string, "agent" | "ui">;
 }
 
 export interface BrowserServiceShape {
@@ -74,6 +90,24 @@ export interface BrowserServiceShape {
   readonly deleteCookie: (
     input: BrowserCookieDeleteInput,
   ) => Effect.Effect<BrowserCookieDeleteResult, BrowserServiceError>;
+  readonly snapshotDom: (
+    input: BrowserControlInput,
+  ) => Effect.Effect<BrowserDomSnapshotResult, BrowserServiceError>;
+  readonly screenshot: (
+    input: BrowserControlInput,
+  ) => Effect.Effect<BrowserScreenshotResult, BrowserServiceError>;
+  readonly readConsole: (
+    input: BrowserControlInput,
+  ) => Effect.Effect<BrowserConsoleResult, BrowserServiceError>;
+  readonly readNetwork: (
+    input: BrowserControlInput,
+  ) => Effect.Effect<BrowserNetworkResult, BrowserServiceError>;
+  readonly waitFor: (
+    input: BrowserWaitForInput,
+  ) => Effect.Effect<BrowserWaitForResult, BrowserServiceError>;
+  readonly closeAgentSessionsForThread: (
+    threadId: ThreadId,
+  ) => Effect.Effect<void, BrowserServiceError>;
   readonly events: Stream.Stream<BrowserEvent>;
 }
 
@@ -216,17 +250,54 @@ function mapCommandFailure(code: string, message: string, retryable: boolean): B
   return browserError(serviceCode, message, retryable);
 }
 
+function enforceNavigationAccess(input: {
+  readonly decision: import("@ryco/contracts").BrowserToolAccessDecision;
+  readonly source?: "ui" | "agent";
+}): Effect.Effect<void, BrowserServiceError> {
+  if (input.decision.decision === "deny") {
+    return Effect.fail(
+      browserError(
+        "origin_denied",
+        input.decision.reason ?? "Navigation denied by browser policy.",
+      ),
+    );
+  }
+  if (input.decision.decision === "ask" && input.source === "agent") {
+    return Effect.fail(
+      browserError(
+        "origin_denied",
+        input.decision.reason ??
+          "Origin requires explicit approval before provider-driven browser navigation.",
+        false,
+      ),
+    );
+  }
+  return Effect.void;
+}
+
 export const BrowserServiceLive = Layer.effect(
   BrowserService,
   Effect.gen(function* () {
     const config = yield* ServerConfig;
     const registry = yield* BrowserHostRegistry;
     const policy = yield* BrowserPolicy;
+    const artifactStoreOption = yield* Effect.serviceOption(BrowserArtifactStore);
     const state = yield* Ref.make<BrowserServiceState>({
       profiles: new Map(),
       sessions: new Map(),
+      sessionOwners: new Map(),
     });
     const serviceEvents = yield* PubSub.unbounded<BrowserEvent>();
+
+    const requireArtifactStore = Effect.gen(function* () {
+      const store = Option.getOrUndefined(artifactStoreOption);
+      if (!store) {
+        return yield* Effect.fail(
+          browserError("unsupported_capability", "Browser artifact store is unavailable."),
+        );
+      }
+      return store;
+    });
 
     const publish = (event: BrowserEvent) =>
       PubSub.publish(serviceEvents, event).pipe(Effect.asVoid);
@@ -247,7 +318,8 @@ export const BrowserServiceLive = Layer.effect(
         | BrowserNavigateInput
         | BrowserStorageInspectInput
         | BrowserStorageClearInput
-        | BrowserCookieDeleteInput,
+        | BrowserCookieDeleteInput
+        | BrowserWaitForInput,
     ) =>
       Ref.get(state).pipe(
         Effect.flatMap((current) => {
@@ -358,6 +430,57 @@ export const BrowserServiceLive = Layer.effect(
         }),
       );
 
+    const executeHostDataCommand = (input: {
+      readonly command: Parameters<typeof registry.sendCommand>[0]["command"];
+    }) =>
+      registry.sendCommand({ command: input.command }).pipe(
+        Effect.flatMap((result) => {
+          if (!result.ok) {
+            return Effect.fail(
+              mapCommandFailure(result.error.code, result.error.message, result.error.retryable),
+            );
+          }
+          const session = result.result.session;
+          if (!session) {
+            return Effect.fail(
+              browserError(
+                "unsupported_capability",
+                "Browser host did not return an updated session snapshot.",
+              ),
+            );
+          }
+          return saveSession(session).pipe(Effect.as(result.result));
+        }),
+      );
+
+    const dispatchObservationCommand = (input: {
+      readonly session: BrowserSessionSnapshot;
+      readonly tab: BrowserTabSnapshot;
+      readonly kind: "snapshot_dom" | "screenshot" | "read_console" | "read_network";
+    }) =>
+      executeHostDataCommand({
+        command: {
+          kind: input.kind,
+          sessionId: input.session.sessionId,
+          tabId: input.tab.tabId,
+        },
+      });
+
+    const matchesWaitCondition = (input: {
+      readonly wait: BrowserWaitForInput;
+      readonly session: BrowserSessionSnapshot;
+      readonly tab: BrowserTabSnapshot;
+      readonly visibleText?: string;
+    }) => {
+      const { wait, tab, visibleText } = input;
+      if (wait.url !== undefined && tab.navigation.url !== wait.url) return false;
+      if (wait.title !== undefined && tab.navigation.title !== wait.title) return false;
+      if (wait.loadState !== undefined && tab.navigation.loadState !== wait.loadState) return false;
+      if (wait.text !== undefined && !(visibleText ?? "").includes(wait.text)) return false;
+      if (wait.textGone !== undefined && (visibleText ?? "").includes(wait.textGone)) return false;
+      return true;
+    };
+
     const updateTabNavigation = (input: {
       readonly session: BrowserSessionSnapshot;
       readonly tab: BrowserTabSnapshot;
@@ -427,14 +550,15 @@ export const BrowserServiceLive = Layer.effect(
             );
           }
 
+          const sessionOwner = input.source === "agent" ? "agent" : "ui";
           const initialNavigation = input.initialUrl
             ? yield* policy.decideNavigation({ rawUrl: input.initialUrl })
             : null;
-          if (initialNavigation?.decision.decision === "deny") {
-            return yield* browserError(
-              "origin_denied",
-              initialNavigation.decision.reason ?? "Navigation denied by browser policy.",
-            );
+          if (initialNavigation) {
+            yield* enforceNavigationAccess({
+              decision: initialNavigation.decision,
+              source: input.source ?? "ui",
+            });
           }
 
           const baseSession = makeSession(input, profile);
@@ -454,7 +578,9 @@ export const BrowserServiceLive = Layer.effect(
             profiles.set(profile.profileId, profile);
             const sessions = new Map(latest.sessions);
             sessions.set(session.sessionId, session);
-            return { profiles, sessions };
+            const sessionOwners = new Map(latest.sessionOwners);
+            sessionOwners.set(session.sessionId, sessionOwner);
+            return { profiles, sessions, sessionOwners };
           });
 
           return yield* executeSessionCommand({
@@ -487,12 +613,59 @@ export const BrowserServiceLive = Layer.effect(
             },
             fallbackSession: closedSession,
           });
+          yield* Ref.update(state, (current) => {
+            const sessionOwners = new Map(current.sessionOwners);
+            sessionOwners.delete(session.sessionId);
+            return { ...current, sessionOwners };
+          });
           yield* publish({
             type: "session.closed",
             sessionId: snapshot.sessionId,
             createdAt: nowIso(),
           });
           return snapshot;
+        }),
+      closeAgentSessionsForThread: (threadId) =>
+        Effect.gen(function* () {
+          yield* requireDesktop;
+          const current = yield* Ref.get(state);
+          const agentSessions = [...current.sessions.values()].filter(
+            (session) =>
+              session.threadId === threadId &&
+              session.status !== "closed" &&
+              current.sessionOwners.get(session.sessionId) === "agent",
+          );
+          yield* Effect.forEach(
+            agentSessions,
+            (session) =>
+              Effect.gen(function* () {
+                const closedSession = {
+                  ...session,
+                  status: "closed" as const,
+                  updatedAt: nowIso(),
+                };
+                const snapshot = yield* executeSessionCommand({
+                  command: {
+                    kind: "close_session",
+                    sessionId: session.sessionId,
+                  },
+                  fallbackSession: closedSession,
+                }).pipe(
+                  Effect.catch(() => saveSession(closedSession).pipe(Effect.as(closedSession))),
+                );
+                yield* Ref.update(state, (latest) => {
+                  const sessionOwners = new Map(latest.sessionOwners);
+                  sessionOwners.delete(session.sessionId);
+                  return { ...latest, sessionOwners };
+                });
+                yield* publish({
+                  type: "session.closed",
+                  sessionId: snapshot.sessionId,
+                  createdAt: nowIso(),
+                });
+              }),
+            { concurrency: 1, discard: true },
+          );
         }),
       getSnapshot: loadSession,
       navigate: (input) =>
@@ -501,12 +674,10 @@ export const BrowserServiceLive = Layer.effect(
           const session = yield* loadSession(input);
           const tab = yield* selectedTab(session, input.tabId);
           const decision = yield* policy.decideNavigation({ rawUrl: input.url });
-          if (decision.decision.decision === "deny") {
-            return yield* browserError(
-              "origin_denied",
-              decision.decision.reason ?? "Navigation denied by browser policy.",
-            );
-          }
+          yield* enforceNavigationAccess({
+            decision: decision.decision,
+            source: input.source ?? "ui",
+          });
           const fallbackSession = updateTabNavigation({
             session,
             tab,
@@ -624,6 +795,196 @@ export const BrowserServiceLive = Layer.effect(
               ...(input.secure !== undefined ? { secure: input.secure } : {}),
             },
           });
+        }),
+      snapshotDom: (input) =>
+        Effect.gen(function* () {
+          yield* requireDesktop;
+          const session = yield* loadSession(input);
+          const tab = yield* selectedTab(session, input.tabId);
+          const payload = yield* dispatchObservationCommand({
+            session,
+            tab,
+            kind: "snapshot_dom",
+          });
+          const data = decodeBrowserHostDomSnapshotData(payload.data);
+          if (!data) {
+            return yield* browserError(
+              "unsupported_capability",
+              "Browser host did not return a DOM snapshot payload.",
+            );
+          }
+          const updatedSession = payload.session ?? session;
+          const snapshotJson = JSON.stringify(data.snapshot);
+          if (snapshotJson.length > 65_536) {
+            const artifactStore = yield* requireArtifactStore;
+            const artifact = yield* artifactStore
+              .put({
+                kind: "dom_snapshot",
+                mimeType: "application/json",
+                data: new TextEncoder().encode(snapshotJson),
+                profileId: updatedSession.profileId,
+                sessionId: updatedSession.sessionId,
+                tabId: tab.tabId,
+                url: data.snapshot.url,
+                origin: tab.navigation.origin,
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  browserError(
+                    "unsupported_capability",
+                    error instanceof Error ? error.message : "Failed to store browser artifact.",
+                    true,
+                  ),
+                ),
+              );
+            return {
+              session: updatedSession,
+              snapshot: {
+                url: data.snapshot.url,
+                title: data.snapshot.title,
+                viewport: data.snapshot.viewport,
+                tree: [],
+                truncated: true,
+                nodeCount: data.snapshot.nodeCount,
+              },
+              ...(data.text ? { text: data.text } : {}),
+              artifact,
+            } satisfies BrowserDomSnapshotResult;
+          }
+          return {
+            session: updatedSession,
+            snapshot: data.snapshot,
+            ...(data.text ? { text: data.text } : {}),
+          } satisfies BrowserDomSnapshotResult;
+        }),
+      screenshot: (input) =>
+        Effect.gen(function* () {
+          yield* requireDesktop;
+          const session = yield* loadSession(input);
+          const tab = yield* selectedTab(session, input.tabId);
+          const payload = yield* dispatchObservationCommand({
+            session,
+            tab,
+            kind: "screenshot",
+          });
+          const data = decodeBrowserHostScreenshotData(payload.data);
+          if (!data) {
+            return yield* browserError(
+              "unsupported_capability",
+              "Browser host did not return a screenshot payload.",
+            );
+          }
+          const updatedSession = payload.session ?? session;
+          const bytes = base64ToUint8Array(data.base64);
+          const artifactStore = yield* requireArtifactStore;
+          const artifact = yield* artifactStore
+            .put({
+              kind: "screenshot",
+              mimeType: "image/png",
+              data: bytes,
+              profileId: updatedSession.profileId,
+              sessionId: updatedSession.sessionId,
+              tabId: tab.tabId,
+              url: tab.navigation.url,
+              origin: tab.navigation.origin,
+            })
+            .pipe(
+              Effect.mapError((error) =>
+                browserError(
+                  "unsupported_capability",
+                  error instanceof Error ? error.message : "Failed to store browser screenshot.",
+                  true,
+                ),
+              ),
+            );
+          return {
+            session: updatedSession,
+            artifact,
+          } satisfies BrowserScreenshotResult;
+        }),
+      readConsole: (input) =>
+        Effect.gen(function* () {
+          yield* requireDesktop;
+          const session = yield* loadSession(input);
+          const tab = yield* selectedTab(session, input.tabId);
+          const payload = yield* dispatchObservationCommand({
+            session,
+            tab,
+            kind: "read_console",
+          });
+          const data = decodeBrowserHostConsoleData(payload.data);
+          if (!data) {
+            return yield* browserError(
+              "unsupported_capability",
+              "Browser host did not return a console payload.",
+            );
+          }
+          return {
+            session: payload.session ?? session,
+            entries: data.entries,
+          } satisfies BrowserConsoleResult;
+        }),
+      readNetwork: (input) =>
+        Effect.gen(function* () {
+          yield* requireDesktop;
+          const session = yield* loadSession(input);
+          const tab = yield* selectedTab(session, input.tabId);
+          const payload = yield* dispatchObservationCommand({
+            session,
+            tab,
+            kind: "read_network",
+          });
+          const data = decodeBrowserHostNetworkData(payload.data);
+          if (!data) {
+            return yield* browserError(
+              "unsupported_capability",
+              "Browser host did not return a network payload.",
+            );
+          }
+          return {
+            session: payload.session ?? session,
+            entries: data.entries,
+          } satisfies BrowserNetworkResult;
+        }),
+      waitFor: (input) =>
+        Effect.gen(function* () {
+          yield* requireDesktop;
+          const timeoutMs = input.timeoutMs ?? 30_000;
+          const startedAt = Date.now();
+          const needsVisibleText = input.text !== undefined || input.textGone !== undefined;
+          while (Date.now() - startedAt < timeoutMs) {
+            const session = yield* loadSession(input);
+            const tab = yield* selectedTab(session, input.tabId);
+            const visibleText = needsVisibleText
+              ? yield* dispatchObservationCommand({ session, tab, kind: "snapshot_dom" }).pipe(
+                  Effect.flatMap((payload) => {
+                    const data = decodeBrowserHostDomSnapshotData(payload.data);
+                    return Effect.succeed(data?.text ?? payload.text ?? "");
+                  }),
+                )
+              : undefined;
+            if (
+              matchesWaitCondition({
+                wait: input,
+                session,
+                tab,
+                ...(visibleText !== undefined ? { visibleText } : {}),
+              })
+            ) {
+              return {
+                session,
+                matched: true,
+                waitedMs: Date.now() - startedAt,
+              } satisfies BrowserWaitForResult;
+            }
+            yield* Effect.sleep(250);
+          }
+          const session = yield* loadSession(input);
+          return {
+            session,
+            matched: false,
+            waitedMs: Date.now() - startedAt,
+          } satisfies BrowserWaitForResult;
         }),
       get events() {
         return Stream.merge(registry.eventStream, Stream.fromPubSub(serviceEvents));

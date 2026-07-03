@@ -62,6 +62,7 @@ import {
   Exit,
   FileSystem,
   Fiber,
+  Option,
   Path,
   Queue,
   Random,
@@ -91,7 +92,15 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
+import {
+  CLAUDE_BROWSER_MCP_SERVER_NAME,
+  isClaudeBrowserMcpToolName,
+  makeClaudeBrowserMcpServer,
+} from "../tools/ClaudeBrowserRuntimeTools.ts";
 import { resolveProviderBrowserToolSupport } from "../tools/BrowserRuntimeTool.ts";
+import { ProviderRuntimeToolRegistry } from "../tools/ProviderRuntimeToolRegistry.ts";
+import { cleanupBrowserThreadAfterProviderTurn } from "../../browser/BrowserThreadCleanup.ts";
+import { BrowserArtifactStore } from "../../browser/BrowserArtifactStore.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = ProviderDriverKind.make("claudeAgent");
@@ -1007,6 +1016,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
+  const providerRuntimeToolRegistry = yield* Effect.serviceOption(ProviderRuntimeToolRegistry);
+  const browserArtifactStore = yield* Effect.serviceOption(BrowserArtifactStore);
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, options?.environment).pipe(
     Effect.provideService(Path.Path, path),
   );
@@ -1610,6 +1621,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       ...(status === "failed" && errorMessage ? { lastError: errorMessage } : {}),
     };
     yield* updateResumeCursor(context);
+    yield* cleanupBrowserThreadAfterProviderTurn(context.session.threadId, {
+      stopBridge: false,
+    }).pipe(Effect.ignore);
   });
 
   const handleStreamEvent = Effect.fn("handleStreamEvent")(function* (
@@ -2779,6 +2793,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           } satisfies PermissionResult;
         }
 
+        if (isClaudeBrowserMcpToolName(toolName)) {
+          return {
+            behavior: "allow",
+            updatedInput: toolInput,
+          } satisfies PermissionResult;
+        }
+
         const runtimeMode = input.runtimeMode ?? "full-access";
         if (runtimeMode === "full-access") {
           return {
@@ -2935,6 +2956,35 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         .map((part) => part?.trim())
         .filter((part): part is string => part !== undefined && part.length > 0)
         .join("\n\n");
+      const browserMcpServer = Option.match(providerRuntimeToolRegistry, {
+        onNone: () => undefined,
+        onSome: (registry) =>
+          makeClaudeBrowserMcpServer({
+            threadId,
+            executeBrowserTool: (toolInput, execOptions) =>
+              Effect.gen(function* () {
+                const context = yield* Ref.get(contextRef);
+                return yield* registry.executeBrowserTool(toolInput, {
+                  ...execOptions,
+                  lifecycle: {
+                    provider: PROVIDER,
+                    providerInstanceId: boundInstanceId,
+                    ...(context?.turnState
+                      ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+                      : {}),
+                    ...execOptions?.lifecycle,
+                  },
+                });
+              }),
+            runPromise,
+            ...(Option.isSome(browserArtifactStore)
+              ? {
+                  readArtifactData: (artifactId) =>
+                    runPromise(browserArtifactStore.value.readData(artifactId)),
+                }
+              : {}),
+          }),
+      });
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
@@ -2956,6 +3006,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
+        ...(browserMcpServer
+          ? {
+              mcpServers: {
+                [CLAUDE_BROWSER_MCP_SERVER_NAME]: browserMcpServer,
+              },
+            }
+          : {}),
         env: claudeEnvironment,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),

@@ -13,6 +13,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { ServerConfig } from "../config.ts";
 import { makeTestServerConfig } from "../test/serverConfigFixtures.ts";
+import { BrowserArtifactStoreLayerLive } from "./BrowserArtifactStore.ts";
 import { BrowserHostRegistry, type BrowserHostRegistryShape } from "./BrowserHostRegistry.ts";
 import { BrowserPolicy, type BrowserPolicyShape } from "./BrowserPolicy.ts";
 import { BrowserService, BrowserServiceLive } from "./BrowserService.ts";
@@ -77,6 +78,18 @@ const denyPolicyLayer = Layer.succeed(BrowserPolicy, {
     }),
 } satisfies BrowserPolicyShape);
 
+const askPolicyLayer = Layer.succeed(BrowserPolicy, {
+  decideNavigation: ({ rawUrl }) =>
+    Effect.succeed({
+      url: rawUrl,
+      origin: rawUrl.startsWith("http") ? new URL(rawUrl).origin : null,
+      decision: {
+        decision: "ask" as const,
+        reason: "Origin requires explicit approval for provider-driven browser use.",
+      },
+    }),
+} satisfies BrowserPolicyShape);
+
 function makeServiceLayer(input?: {
   readonly commands?: Array<BrowserHostCommand>;
   readonly resultForCommand?: (
@@ -88,6 +101,7 @@ function makeServiceLayer(input?: {
   return BrowserServiceLive.pipe(
     Layer.provide(makeRegistryLayer(input?.commands, input?.resultForCommand)),
     Layer.provide(input?.policy ?? allowPolicyLayer),
+    Layer.provide(BrowserArtifactStoreLayerLive),
     Layer.provide(
       Layer.succeed(ServerConfig, makeTestServerConfig({ mode: input?.mode ?? "desktop" })),
     ),
@@ -178,6 +192,37 @@ describe("BrowserService", () => {
     expect(result.afterNavigateCommands).toBe(1);
     const failure = findFailure(result.denied);
     expect(failure?.error).toMatchObject({ code: "origin_denied", retryable: false });
+  });
+
+  it("blocks agent-driven navigation to ask-policy origins while allowing manual UI navigation", async () => {
+    const commands: Array<BrowserHostCommand> = [];
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* BrowserService;
+        const session = yield* service.openSession({
+          threadId: ThreadId.make("thread-1"),
+          projectId: ProjectId.make("project-1"),
+        });
+        const agentDenied = yield* Effect.exit(
+          service.navigate({
+            sessionId: session.sessionId,
+            url: "https://example.com/",
+            source: "agent",
+          }),
+        );
+        const uiAllowed = yield* service.navigate({
+          sessionId: session.sessionId,
+          url: "https://example.com/docs",
+          source: "ui",
+        });
+        return { agentDenied, uiAllowed, commandCount: commands.length };
+      }).pipe(Effect.provide(makeServiceLayer({ commands, policy: askPolicyLayer }))),
+    );
+
+    expect(result.commandCount).toBe(2);
+    const failure = findFailure(result.agentDenied);
+    expect(failure?.error).toMatchObject({ code: "origin_denied" });
+    expect(result.uiAllowed.tabs[0]?.navigation.url).toBe("https://example.com/docs");
   });
 
   it("does not open browser sessions with initial URLs denied by policy", async () => {
@@ -369,5 +414,148 @@ describe("BrowserService", () => {
     const failure = findFailure(result.failed);
     expect(failure?.error).toBeInstanceOf(BrowserServiceError);
     expect(failure?.error).toMatchObject({ code: "tab_not_found" });
+  });
+
+  it("dispatches DOM snapshot observation through the browser host", async () => {
+    const commands: Array<BrowserHostCommand> = [];
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* BrowserService;
+        const session = yield* service.openSession({
+          threadId: ThreadId.make("thread-1"),
+          projectId: ProjectId.make("project-1"),
+        });
+        const snapshot = yield* service.snapshotDom({ sessionId: session.sessionId });
+        return { session, snapshot };
+      }).pipe(
+        Effect.provide(
+          makeServiceLayer({
+            commands,
+            resultForCommand: (command) => {
+              if (command.kind !== "snapshot_dom") return undefined;
+              const session = latestReadySession(commands);
+              return {
+                session,
+                data: {
+                  kind: "dom_snapshot",
+                  snapshot: {
+                    url: "https://example.test/",
+                    title: "Example",
+                    viewport: { width: 1280, height: 720 },
+                    tree: [{ ref: "e1", tag: "body", role: "document" }],
+                    nodeCount: 1,
+                  },
+                  text: "Hello",
+                },
+              };
+            },
+          }),
+        ),
+      ),
+    );
+
+    expect(result.snapshot.snapshot.title).toBe("Example");
+    expect(result.snapshot.text).toBe("Hello");
+    expect(commands.map((command) => command.kind)).toEqual(["open_session", "snapshot_dom"]);
+  });
+
+  it("stores screenshot payloads as browser artifacts", async () => {
+    const commands: Array<BrowserHostCommand> = [];
+    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString("base64");
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* BrowserService;
+        const session = yield* service.openSession({
+          threadId: ThreadId.make("thread-1"),
+          projectId: ProjectId.make("project-1"),
+        });
+        const screenshot = yield* service.screenshot({ sessionId: session.sessionId });
+        return screenshot;
+      }).pipe(
+        Effect.provide(
+          makeServiceLayer({
+            commands,
+            resultForCommand: (command) => {
+              if (command.kind !== "screenshot") return undefined;
+              return {
+                session: latestReadySession(commands),
+                data: { kind: "screenshot", base64: png },
+              };
+            },
+          }),
+        ),
+      ),
+    );
+
+    expect(result.artifact.kind).toBe("screenshot");
+    expect(result.artifact.byteSize).toBe(8);
+    expect(commands[1]?.kind).toBe("screenshot");
+  });
+
+  it("returns console and network observations from the browser host", async () => {
+    const commands: Array<BrowserHostCommand> = [];
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* BrowserService;
+        const session = yield* service.openSession({
+          threadId: ThreadId.make("thread-1"),
+          projectId: ProjectId.make("project-1"),
+        });
+        const consoleResult = yield* service.readConsole({ sessionId: session.sessionId });
+        const networkResult = yield* service.readNetwork({ sessionId: session.sessionId });
+        return { consoleResult, networkResult };
+      }).pipe(
+        Effect.provide(
+          makeServiceLayer({
+            commands,
+            resultForCommand: (command) => {
+              const session = latestReadySession(commands);
+              if (command.kind === "read_console") {
+                return {
+                  session,
+                  data: {
+                    kind: "console",
+                    entries: [
+                      {
+                        level: "error",
+                        message: "failed to fetch",
+                        timestamp: now,
+                      },
+                    ],
+                  },
+                };
+              }
+              if (command.kind === "read_network") {
+                return {
+                  session,
+                  data: {
+                    kind: "network",
+                    entries: [
+                      {
+                        requestId: "req-1",
+                        url: "https://example.test/app.js",
+                        method: "GET",
+                        status: 200,
+                        startedAt: now,
+                        completedAt: now,
+                      },
+                    ],
+                  },
+                };
+              }
+              return undefined;
+            },
+          }),
+        ),
+      ),
+    );
+
+    expect(result.consoleResult.entries[0]?.message).toBe("failed to fetch");
+    expect(result.networkResult.entries[0]?.status).toBe(200);
+    expect(commands.map((command) => command.kind)).toEqual([
+      "open_session",
+      "read_console",
+      "read_network",
+    ]);
   });
 });

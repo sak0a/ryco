@@ -1,4 +1,4 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, screen } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
 import {
   DesktopBrowserSurfaceAttachInput as DesktopBrowserSurfaceAttachInputSchema,
@@ -12,6 +12,8 @@ import {
   type DesktopBrowserSurfaceUpdateInput,
 } from "@ryco/contracts";
 import { Schema } from "effect";
+
+import { resolveElectronSurfaceBounds } from "@ryco/shared/browser";
 
 import { BrowserKernel } from "./BrowserKernel.ts";
 
@@ -39,17 +41,38 @@ function validBounds(bounds: DesktopBrowserSurfaceBounds): boolean {
   );
 }
 
+function nativeDeviceScaleFactor(
+  window: BrowserWindow,
+  bounds: DesktopBrowserSurfaceBounds,
+): number {
+  try {
+    return screen.getDisplayMatching(window.getBounds()).scaleFactor || 1;
+  } catch {
+    return bounds.deviceScaleFactor ?? 1;
+  }
+}
+
 function clippedBounds(window: BrowserWindow, bounds: DesktopBrowserSurfaceBounds) {
+  const resolved = resolveElectronSurfaceBounds(bounds, nativeDeviceScaleFactor(window, bounds));
+  if (!resolved) {
+    return {
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+    };
+  }
+
   const content = window.getContentBounds();
-  const x = Math.max(0, Math.min(Math.round(bounds.x), content.width));
-  const y = Math.max(0, Math.min(Math.round(bounds.y), content.height));
+  const x = Math.max(0, Math.min(resolved.x, content.width));
+  const y = Math.max(0, Math.min(resolved.y, content.height));
   const maxWidth = Math.max(0, content.width - x);
   const maxHeight = Math.max(0, content.height - y);
   return {
     x,
     y,
-    width: Math.max(1, Math.min(Math.round(bounds.width), maxWidth)),
-    height: Math.max(1, Math.min(Math.round(bounds.height), maxHeight)),
+    width: Math.max(1, Math.min(resolved.width, maxWidth)),
+    height: Math.max(1, Math.min(resolved.height, maxHeight)),
   };
 }
 

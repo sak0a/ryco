@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { normalizeBrowserNavigationUrl, sanitizeBrowserProfileKey } from "./browser.ts";
+import {
+  normalizeBrowserNavigationUrl,
+  resolveElectronSurfaceBounds,
+  sanitizeBrowserProfileKey,
+} from "./browser.ts";
 
 describe("browser shared helpers", () => {
   it("normalizes ordinary URLs and origin metadata", () => {
@@ -37,5 +41,21 @@ describe("browser shared helpers", () => {
 
     const longKey = sanitizeBrowserProfileKey("x".repeat(500));
     expect(longKey.length).toBeLessThanOrEqual(80);
+  });
+
+  it("reconciles renderer and native scale factors for embedded browser bounds", () => {
+    expect(
+      resolveElectronSurfaceBounds(
+        { x: 100, y: 200, width: 800, height: 600, deviceScaleFactor: 2 },
+        2,
+      ),
+    ).toEqual({ x: 100, y: 200, width: 800, height: 600 });
+
+    expect(
+      resolveElectronSurfaceBounds(
+        { x: 100, y: 200, width: 800, height: 600, deviceScaleFactor: 1 },
+        2,
+      ),
+    ).toEqual({ x: 200, y: 400, width: 1600, height: 1200 });
   });
 });

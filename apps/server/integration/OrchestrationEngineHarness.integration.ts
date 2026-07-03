@@ -40,6 +40,8 @@ import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSes
 import { ServerSettingsService } from "../src/serverSettings.ts";
 import { makeProviderServiceLive } from "../src/provider/Layers/ProviderService.ts";
 import { makeCodexAdapter } from "../src/provider/Layers/CodexAdapter.ts";
+import { browserRuntimeToolTestLayers } from "../src/provider/tools/BrowserRuntimeToolTestLayers.ts";
+import { ProviderRuntimeEventHubLive } from "../src/provider/tools/ProviderRuntimeEventHub.ts";
 import {
   NoOpProviderEventLoggers,
   ProviderEventLoggers,
@@ -285,6 +287,8 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(providerSessionDirectoryLayer),
+      Layer.provideMerge(browserRuntimeToolTestLayers),
+      Layer.provideMerge(ProviderRuntimeEventHubLive),
     );
     const providerEventLoggersLayer = Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers);
     const providerLayer = useRealCodex
@@ -293,12 +297,14 @@ export const makeOrchestrationIntegrationHarness = (
           Layer.provide(realCodexRegistry),
           Layer.provide(AnalyticsService.layerTest),
           Layer.provide(providerEventLoggersLayer),
+          Layer.provide(ProviderRuntimeEventHubLive),
         )
       : makeProviderServiceLive().pipe(
           Layer.provide(providerSessionDirectoryLayer),
           Layer.provide(fakeRegistry!),
           Layer.provide(AnalyticsService.layerTest),
           Layer.provide(providerEventLoggersLayer),
+          Layer.provide(ProviderRuntimeEventHubLive),
         );
 
     const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistry.layer));

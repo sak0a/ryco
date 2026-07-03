@@ -8,11 +8,15 @@ import {
   BrowserControlInput,
   BrowserCookieDeleteInput,
   BrowserCookieDeleteResult,
+  BrowserConsoleResult,
+  BrowserDomSnapshotResult,
   BrowserEvent,
   BrowserInputCommandInput,
   BrowserListProfilesResult,
   BrowserNavigateInput,
+  BrowserNetworkResult,
   BrowserOpenSessionInput,
+  BrowserScreenshotResult,
   BrowserServiceError,
   BrowserSessionInput,
   BrowserSessionSnapshot,
@@ -21,6 +25,8 @@ import {
   BrowserStorageInspectInput,
   BrowserStorageInspectionResult,
   BrowserStatusSnapshot,
+  BrowserWaitForInput,
+  BrowserWaitForResult,
 } from "./browser.ts";
 import { DiagnosticsError, DiagnosticsSnapshot } from "./diagnostics.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
@@ -275,6 +281,11 @@ export const WS_METHODS = {
   browserInspectStorage: "browser.inspectStorage",
   browserClearStorage: "browser.clearStorage",
   browserDeleteCookie: "browser.deleteCookie",
+  browserSnapshotDom: "browser.snapshotDom",
+  browserScreenshot: "browser.screenshot",
+  browserReadConsole: "browser.readConsole",
+  browserReadNetwork: "browser.readNetwork",
+  browserWaitFor: "browser.waitFor",
   subscribeBrowserEvents: "subscribeBrowserEvents",
 
   // Server meta
@@ -556,6 +567,36 @@ export const WsBrowserClearStorageRpc = Rpc.make(WS_METHODS.browserClearStorage,
 export const WsBrowserDeleteCookieRpc = Rpc.make(WS_METHODS.browserDeleteCookie, {
   payload: BrowserCookieDeleteInput,
   success: BrowserCookieDeleteResult,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserSnapshotDomRpc = Rpc.make(WS_METHODS.browserSnapshotDom, {
+  payload: BrowserControlInput,
+  success: BrowserDomSnapshotResult,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserScreenshotRpc = Rpc.make(WS_METHODS.browserScreenshot, {
+  payload: BrowserControlInput,
+  success: BrowserScreenshotResult,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserReadConsoleRpc = Rpc.make(WS_METHODS.browserReadConsole, {
+  payload: BrowserControlInput,
+  success: BrowserConsoleResult,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserReadNetworkRpc = Rpc.make(WS_METHODS.browserReadNetwork, {
+  payload: BrowserControlInput,
+  success: BrowserNetworkResult,
+  error: Schema.Union([BrowserServiceError, AuthRpcError]),
+});
+
+export const WsBrowserWaitForRpc = Rpc.make(WS_METHODS.browserWaitFor, {
+  payload: BrowserWaitForInput,
+  success: BrowserWaitForResult,
   error: Schema.Union([BrowserServiceError, AuthRpcError]),
 });
 
@@ -1334,6 +1375,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsBrowserInspectStorageRpc,
   WsBrowserClearStorageRpc,
   WsBrowserDeleteCookieRpc,
+  WsBrowserSnapshotDomRpc,
+  WsBrowserScreenshotRpc,
+  WsBrowserReadConsoleRpc,
+  WsBrowserReadNetworkRpc,
+  WsBrowserWaitForRpc,
   WsSubscribeBrowserEventsRpc,
   WsServerGetConfigRpc,
   WsServerGetAdvertisedEndpointsRpc,

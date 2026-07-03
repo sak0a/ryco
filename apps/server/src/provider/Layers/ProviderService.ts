@@ -31,7 +31,6 @@ import {
   Layer,
   Metric,
   Option,
-  PubSub,
   Ref,
   Schema,
   SchemaIssue,
@@ -58,6 +57,7 @@ import {
 import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
+import { ProviderRuntimeEventHub } from "../tools/ProviderRuntimeEventHub.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
 import {
   ProviderSessionDirectory,
@@ -233,7 +233,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   const registry = yield* ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory;
-  const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+  const runtimeEventHub = yield* ProviderRuntimeEventHub;
   const maxConcurrentProviderStartsPerInstance = normalizePositiveInt(
     options?.providerStartupAdmission?.maxConcurrentStartsPerInstance,
     DEFAULT_MAX_CONCURRENT_PROVIDER_STARTS_PER_INSTANCE,
@@ -258,7 +258,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ? canonicalEventLogger.write(canonicalEvent, canonicalEvent.threadId)
           : Effect.void,
       ),
-      Effect.flatMap((canonicalEvent) => PubSub.publish(runtimeEventPubSub, canonicalEvent)),
+      Effect.flatMap((canonicalEvent) => runtimeEventHub.publish(canonicalEvent)),
       Effect.asVoid,
     );
 
@@ -1252,7 +1252,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
     // independently receive all runtime events.
     get streamEvents(): ProviderServiceShape["streamEvents"] {
-      return Stream.fromPubSub(runtimeEventPubSub);
+      return runtimeEventHub.stream;
     },
   } satisfies ProviderServiceShape;
 });

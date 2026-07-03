@@ -40,11 +40,13 @@ import {
   type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
 import { makeCodexAdapter } from "./CodexAdapter.ts";
+import { browserRuntimeToolTestLayers } from "../tools/BrowserRuntimeToolTestLayers.ts";
 
-// Test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
 class CodexAdapter extends Context.Service<CodexAdapter, CodexAdapterShape>()(
   "test/CodexAdapter",
 ) {}
+
+const providerRuntimeToolRegistryTestLayer = browserRuntimeToolTestLayers;
 
 const asThreadId = (value: string): ThreadId => ThreadId.make(value);
 const asTurnId = (value: string): TurnId => TurnId.make(value);
@@ -221,6 +223,7 @@ function makeCodexAdapterTestLayer(input: {
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(providerRuntimeToolRegistryTestLayer),
   );
 }
 
@@ -248,6 +251,7 @@ const validationLayer = it.layer(
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(providerRuntimeToolRegistryTestLayer),
   ),
 );
 
@@ -323,6 +327,7 @@ const sessionErrorLayer = it.layer(
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(providerRuntimeToolRegistryTestLayer),
   ),
 );
 
@@ -395,6 +400,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(providerSessionDirectoryTestLayer),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(providerRuntimeToolRegistryTestLayer),
     );
 
     return Effect.gen(function* () {
@@ -593,6 +599,7 @@ const lifecycleLayer = it.layer(
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(providerRuntimeToolRegistryTestLayer),
   ),
 );
 
@@ -1172,6 +1179,7 @@ const scopedLifecycleLayer = it.layer(
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(providerRuntimeToolRegistryTestLayer),
   ),
 );
 
@@ -1216,6 +1224,7 @@ const scopedFailureLayer = it.layer(
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(providerRuntimeToolRegistryTestLayer),
   ),
 );
 
@@ -1266,15 +1275,18 @@ it.effect("flushes managed native logs when the adapter layer shuts down", () =>
         Layer.provideMerge(ServerSettingsService.layerTest()),
         Layer.provideMerge(providerSessionDirectoryTestLayer),
         Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(providerRuntimeToolRegistryTestLayer),
       );
       const context = yield* Layer.buildWithScope(layer, scope);
       const adapter = yield* Effect.service(CodexAdapter).pipe(Effect.provide(context));
 
-      yield* adapter.startSession({
-        provider: ProviderDriverKind.make("codex"),
-        threadId: asThreadId("thread-logger"),
-        runtimeMode: "full-access",
-      });
+      yield* adapter
+        .startSession({
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("thread-logger"),
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.provide(context));
 
       const runtime = runtimeFactory.lastRuntime;
       assert.ok(runtime);

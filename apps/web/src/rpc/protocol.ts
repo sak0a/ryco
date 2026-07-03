@@ -156,7 +156,7 @@ function composeLifecycleHandlers(
 export function createWsRpcProtocolLayer(
   url: WsRpcProtocolSocketUrlProvider,
   handlers?: WsProtocolLifecycleHandlers,
-) {
+): Layer.Layer<unknown> {
   const lifecycle = composeLifecycleHandlers(handlers);
   const resolvedUrl =
     typeof url === "function"
@@ -321,5 +321,5 @@ export function createWsRpcProtocolLayer(
     ),
     requestHooksLayer,
     connectionHooksLayer,
-  );
+  ) as Layer.Layer<unknown>;
 }

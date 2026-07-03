@@ -215,6 +215,7 @@ export const mapEvent = (
         ];
       case "tool.execution_start": {
         const toolName = event.data.toolName ?? "";
+        const isBrowserTool = toolName.startsWith("browser_");
         const isMcpTool = event.data.mcpToolName !== undefined;
         return [
           {
@@ -229,7 +230,11 @@ export const mapEvent = (
             }),
             type: "item.started",
             payload: {
-              itemType: isMcpTool ? "mcp_tool_call" : "dynamic_tool_call",
+              itemType: isBrowserTool
+                ? "browser_tool_call"
+                : isMcpTool
+                  ? "mcp_tool_call"
+                  : "dynamic_tool_call",
               status: "inProgress",
               title: toolName,
               ...(event.data.arguments ? { data: event.data.arguments } : {}),
@@ -238,6 +243,11 @@ export const mapEvent = (
         ];
       }
       case "tool.execution_complete": {
+        const toolName =
+          "toolName" in event.data && typeof event.data.toolName === "string"
+            ? event.data.toolName
+            : "";
+        const isBrowserTool = toolName.startsWith("browser_");
         const isMcpTool = "mcpToolName" in event.data && event.data.mcpToolName !== undefined;
         return [
           {
@@ -252,7 +262,11 @@ export const mapEvent = (
             }),
             type: "item.completed",
             payload: {
-              itemType: isMcpTool ? "mcp_tool_call" : "dynamic_tool_call",
+              itemType: isBrowserTool
+                ? "browser_tool_call"
+                : isMcpTool
+                  ? "mcp_tool_call"
+                  : "dynamic_tool_call",
               status: event.data.success ? "completed" : "failed",
               title: "Tool call",
               ...((event.data.result?.detailedContent ??
