@@ -74,6 +74,72 @@ describe("SidebarWorktreeList", () => {
     expect(onOpenWorktree).not.toHaveBeenCalled();
   });
 
+  it("previews five sessions and reveals the rest behind a text toggle", async () => {
+    await render(
+      <SidebarWorktreeList
+        attachThreadListAutoAnimateRef={() => undefined}
+        projectExpanded
+        resolveThreadGitStatusTarget={() => null}
+        renderThread={(thread) => <div>{thread.title}</div>}
+        treeProject={makeManySessionsTreeProject(7)}
+        visibleThreadKeys={null}
+        onArchiveWorktree={vi.fn()}
+        onCopyWorktreePath={vi.fn()}
+        onDeleteWorktree={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenInEditor={vi.fn()}
+        onOpenWorktree={vi.fn()}
+        onRenameWorktree={vi.fn()}
+        onRestoreWorktree={vi.fn()}
+      />,
+    );
+
+    await page.getByRole("button", { name: "Expand main", exact: true }).click();
+
+    await expect.element(page.getByText("Session 1", { exact: true })).toBeInTheDocument();
+    await expect.element(page.getByText("Session 5", { exact: true })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("Session 6");
+    expect(document.body.textContent).not.toContain("Session 7");
+
+    await page.getByRole("button", { name: "Show 2 more", exact: true }).click();
+
+    await expect.element(page.getByText("Session 7", { exact: true })).toBeInTheDocument();
+    expect(document.body.textContent).toContain("Session 6");
+
+    await page.getByRole("button", { name: "Show less", exact: true }).click();
+
+    await expect.element(page.getByText("Session 5", { exact: true })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("Session 6");
+  });
+
+  it("shows every matching session without a toggle while a thread filter is active", async () => {
+    await render(
+      <SidebarWorktreeList
+        attachThreadListAutoAnimateRef={() => undefined}
+        projectExpanded
+        resolveThreadGitStatusTarget={() => null}
+        renderThread={(thread) => <div>{thread.title}</div>}
+        treeProject={makeManySessionsTreeProject(7)}
+        visibleThreadKeys={new Set(["environment-local:thread-1", "environment-local:thread-6"])}
+        onArchiveWorktree={vi.fn()}
+        onCopyWorktreePath={vi.fn()}
+        onDeleteWorktree={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenInEditor={vi.fn()}
+        onOpenWorktree={vi.fn()}
+        onRenameWorktree={vi.fn()}
+        onRestoreWorktree={vi.fn()}
+      />,
+    );
+
+    await expect.element(page.getByText("Session 1", { exact: true })).toBeInTheDocument();
+    await expect.element(page.getByText("Session 6", { exact: true })).toBeInTheDocument();
+    // No preview toggle is rendered while filtering (the button carries both
+    // `aria-expanded` and a left border; the worktree header lacks the border).
+    expect(document.querySelector('[aria-expanded][class*="border-l"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("Show");
+  });
+
   it("renders state-aware chips for every linked PR/issue lifecycle state", async () => {
     const treeProject = makeVariantsTreeProject();
     await render(
@@ -213,6 +279,46 @@ function makeTreeProject(): SidebarTreeProject {
         },
       },
     ],
+  };
+}
+
+function makeManySessionsTreeProject(count: number): SidebarTreeProject {
+  const sessions = Array.from({ length: count }, (_, index) => makeSessionThread(index + 1));
+  return {
+    archivedSessions: [],
+    archivedWorktrees: [],
+    flatSessions: [],
+    isGitRepo: true,
+    project: makeProject(),
+    worktrees: [
+      {
+        aggregateStatus: "idle",
+        archivedSessions: [],
+        buckets: { done: [], idle: sessions, in_progress: [], review: [] },
+        diffStats: null,
+        sessions,
+        shouldSuggestArchive: false,
+        worktree: {
+          worktreeId: "worktree-main",
+          projectId,
+          branch: "main",
+          worktreePath: null,
+          origin: "main",
+          archivedAt: null,
+          manualPosition: 0,
+          updatedAt: "2026-05-01T00:00:00.000Z",
+        },
+      },
+    ],
+  };
+}
+
+function makeSessionThread(index: number): SidebarTreeThread {
+  return {
+    ...makeThread(),
+    id: ThreadId.make(`thread-${index}`),
+    title: `Session ${index}`,
+    worktreeId: "worktree-main",
   };
 }
 

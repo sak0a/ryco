@@ -51,6 +51,9 @@ const WORKTREE_STATUS_LABELS: Record<SidebarStatusBucket, string> = {
   review: "Review",
 };
 const WORKTREE_TITLE_CLICK_TOGGLE_DELAY_MS = 180;
+// An expanded worktree previews at most this many sessions; the rest hide behind
+// a "Show more" toggle so a worktree with a long session history stays compact.
+const WORKTREE_THREAD_PREVIEW_LIMIT = 5;
 
 export interface SidebarWorktreeListProps {
   attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void;
@@ -259,12 +262,23 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
     [props.visibleThreadKeys, props.worktree.sessions],
   );
   const [collapsed, setCollapsed] = useState(true);
+  const [threadsExpanded, setThreadsExpanded] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameTitle, setRenameTitle] = useState(() => getWorktreeDisplayTitle(props.worktree));
   const pendingTitleClickRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCollapsed = props.visibleThreadKeys ? false : collapsed;
   const showEmptyState = props.projectExpanded && !isCollapsed && visibleThreads.length === 0;
   const showSessions = !isCollapsed;
+  // Don't cap while a thread filter is active — every match should stay visible.
+  const hasOverflowingThreads =
+    props.visibleThreadKeys === null && visibleThreads.length > WORKTREE_THREAD_PREVIEW_LIMIT;
+  const renderedThreads = useMemo(
+    () =>
+      hasOverflowingThreads && !threadsExpanded
+        ? visibleThreads.slice(0, WORKTREE_THREAD_PREVIEW_LIMIT)
+        : visibleThreads,
+    [hasOverflowingThreads, threadsExpanded, visibleThreads],
+  );
   const toggleCollapsed = useCallback(() => setCollapsed((open) => !open), []);
   const clearPendingTitleClick = useCallback(() => {
     if (pendingTitleClickRef.current === null) {
@@ -507,8 +521,22 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
           orderedProjectThreadKeys={props.orderedProjectThreadKeys}
           renderThread={props.renderThread}
           resolveThreadGitStatusTarget={props.resolveThreadGitStatusTarget}
-          visibleThreads={visibleThreads}
+          visibleThreads={renderedThreads}
         />
+      ) : null}
+      {showSessions && hasOverflowingThreads ? (
+        <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
+          <button
+            type="button"
+            aria-expanded={threadsExpanded}
+            className="ml-5 flex h-6 cursor-pointer items-center border-l border-sidebar-border/70 px-4 text-left text-[10px] text-muted-foreground/60 transition-colors hover:text-muted-foreground/90"
+            onClick={() => setThreadsExpanded((expanded) => !expanded)}
+          >
+            {threadsExpanded
+              ? "Show less"
+              : `Show ${visibleThreads.length - WORKTREE_THREAD_PREVIEW_LIMIT} more`}
+          </button>
+        </SidebarMenuSubItem>
       ) : null}
     </>
   );
