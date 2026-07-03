@@ -5,6 +5,7 @@ import {
   CopyIcon,
   Edit3Icon,
   ExternalLinkIcon,
+  HomeIcon,
   MoreHorizontalIcon,
   PlusIcon,
   RotateCcwIcon,
@@ -368,6 +369,15 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                 )}
               />
             </button>
+            {isProjectRoot ? (
+              <span
+                className="inline-flex shrink-0 items-center text-muted-foreground/70"
+                title="Project root worktree"
+                aria-label="Project root worktree"
+              >
+                <HomeIcon className="size-3.5" />
+              </span>
+            ) : null}
             {renaming ? (
               <input
                 value={renameTitle}

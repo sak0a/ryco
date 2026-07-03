@@ -103,6 +103,16 @@ export const makeWorktreeOperations = (deps: {
       ),
     );
 
+  const isProjectRootPath = (candidate: string, projectRoot: string): boolean => {
+    const normalize = (value: string) => {
+      const resolved = path.resolve(value).replace(/[\\/]+$/g, "");
+      return process.platform === "win32" || process.platform === "darwin"
+        ? resolved.toLowerCase()
+        : resolved;
+    };
+    return normalize(candidate) === normalize(projectRoot);
+  };
+
   const dispatchWorktreeCommand = (
     command: OrchestrationCommand,
     operation: string,
@@ -445,23 +455,42 @@ export const makeWorktreeOperations = (deps: {
         }
       }
 
-      const worktreePath =
-        preparedWorktreePath ??
-        (yield* gitWorkflow.createWorktree({
+      let worktreePath: string;
+      if (preparedWorktreePath !== null) {
+        if (isProjectRootPath(preparedWorktreePath, project.workspaceRoot)) {
+          return yield* failGitWorkflow(
+            operation,
+            "Cannot create a worktree at the project root.",
+          );
+        }
+        worktreePath = preparedWorktreePath;
+      } else {
+        const targetPath = resolveWorktreeCheckoutPath({
+          location: input.worktreeLocation,
+          appWorktreesRoot: config.worktreesDir,
+          projectId: input.projectId,
+          workspaceRoot: project.workspaceRoot,
+          projectMetadataDir: project.projectMetadataDir,
+          branchName: branch,
+        });
+        if (isProjectRootPath(targetPath, project.workspaceRoot)) {
+          return yield* failGitWorkflow(
+            operation,
+            "Cannot create a worktree at the project root.",
+          );
+        }
+        worktreePath = (yield* gitWorkflow.createWorktree({
           cwd: project.workspaceRoot,
           refName,
           ...(newRefName !== undefined ? { newRefName } : {}),
-          path: resolveWorktreeCheckoutPath({
-            location: input.worktreeLocation,
-            appWorktreesRoot: config.worktreesDir,
-            projectId: input.projectId,
-            workspaceRoot: project.workspaceRoot,
-            projectMetadataDir: project.projectMetadataDir,
-            branchName: branch,
-          }),
+          path: targetPath,
         })).worktree.path;
-
-      if (preparedWorktreePath === null) {
+        if (isProjectRootPath(worktreePath, project.workspaceRoot)) {
+          return yield* failGitWorkflow(
+            operation,
+            "Refusing to register a worktree that resolved to the project root.",
+          );
+        }
         ownedWorktreePath = worktreePath;
         if (newRefName !== undefined) {
           ownedBranchName = newRefName;
@@ -675,6 +704,15 @@ export const makeWorktreeOperations = (deps: {
         return yield* failGitWorkflow(operation, "Cannot delete the main worktree.");
       }
       const project = yield* loadProjectForGitWorkflow(operation, worktree.projectId);
+      if (
+        worktree.worktreePath !== null &&
+        isProjectRootPath(worktree.worktreePath, project.workspaceRoot)
+      ) {
+        return yield* failGitWorkflow(
+          operation,
+          "Cannot delete a worktree that points at the project root.",
+        );
+      }
       if (input.force) {
         if (worktree.worktreePath !== null) {
           if (existsSync(worktree.worktreePath)) {
