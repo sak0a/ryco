@@ -458,10 +458,7 @@ export const makeWorktreeOperations = (deps: {
       let worktreePath: string;
       if (preparedWorktreePath !== null) {
         if (isProjectRootPath(preparedWorktreePath, project.workspaceRoot)) {
-          return yield* failGitWorkflow(
-            operation,
-            "Cannot create a worktree at the project root.",
-          );
+          return yield* failGitWorkflow(operation, "Cannot create a worktree at the project root.");
         }
         worktreePath = preparedWorktreePath;
       } else {
@@ -474,10 +471,7 @@ export const makeWorktreeOperations = (deps: {
           branchName: branch,
         });
         if (isProjectRootPath(targetPath, project.workspaceRoot)) {
-          return yield* failGitWorkflow(
-            operation,
-            "Cannot create a worktree at the project root.",
-          );
+          return yield* failGitWorkflow(operation, "Cannot create a worktree at the project root.");
         }
         worktreePath = (yield* gitWorkflow.createWorktree({
           cwd: project.workspaceRoot,
