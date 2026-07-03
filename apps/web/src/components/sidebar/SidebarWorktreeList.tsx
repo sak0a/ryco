@@ -5,7 +5,7 @@ import {
   CopyIcon,
   Edit3Icon,
   ExternalLinkIcon,
-  HomeIcon,
+  FolderRootIcon,
   MoreHorizontalIcon,
   PlusIcon,
   RotateCcwIcon,
@@ -375,7 +375,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                 title="Project root worktree"
                 aria-label="Project root worktree"
               >
-                <HomeIcon className="size-3.5" />
+                <FolderRootIcon className="size-3.5" />
               </span>
             ) : null}
             {renaming ? (
