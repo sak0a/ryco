@@ -1,6 +1,11 @@
 import { chartColor } from "~/components/ui/chart";
 import { formatUsd } from "~/lib/modelPricing";
-import { formatModelLabel, formatProviderLabel, formatTokens } from "~/lib/statisticsFormat";
+import {
+  clampCachedInputTokens,
+  formatModelLabel,
+  formatProviderLabel,
+  formatTokens,
+} from "~/lib/statisticsFormat";
 
 import type { ModelAggregate } from "./selectors";
 
@@ -16,7 +21,10 @@ export function ModelLeaderboard({ models }: { models: ReadonlyArray<ModelAggreg
       {models.map((entry, index) => {
         const color = chartColor(index);
         const widthPct = Math.max(2, (entry.totalTokens / max) * 100);
-        const cachedInputTokens = Math.max(0, Math.min(entry.cachedInputTokens, entry.inputTokens));
+        const cachedInputTokens = clampCachedInputTokens(
+          entry.cachedInputTokens,
+          entry.inputTokens,
+        );
         const providerText =
           cachedInputTokens > 0
             ? `${formatProviderLabel(entry.provider)} · ${formatTokens(cachedInputTokens)} cached`

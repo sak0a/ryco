@@ -7,7 +7,7 @@ import {
   formatUsd,
   getModelPrice,
 } from "./modelPricing";
-import { formatModelLabel } from "./statisticsFormat";
+import { clampCachedInputTokens, formatModelLabel } from "./statisticsFormat";
 
 describe("canonicalizeModel", () => {
   it("keeps canonical/default slugs intact despite cross-provider alias collisions", () => {
@@ -170,5 +170,13 @@ describe("formatModelLabel", () => {
     expect(formatModelLabel("claude-opus-4-8")).toBe("Claude Opus 4.8");
     expect(formatModelLabel("claude-haiku-4-5")).toBe("Claude Haiku 4.5");
     expect(formatModelLabel("composer-2")).toBe("Composer 2");
+  });
+});
+
+describe("clampCachedInputTokens", () => {
+  it("keeps cached input as a non-negative subset of input", () => {
+    expect(clampCachedInputTokens(400, 1000)).toBe(400);
+    expect(clampCachedInputTokens(1200, 1000)).toBe(1000);
+    expect(clampCachedInputTokens(-10, 1000)).toBe(0);
   });
 });

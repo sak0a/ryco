@@ -24,6 +24,7 @@ import {
   formatProviderLabel,
   formatTimestamp,
   formatTokens,
+  clampCachedInputTokens,
 } from "~/lib/statisticsFormat";
 import { SettingsPageContainer } from "./settingsLayout";
 import { ActivityHeatmap } from "./statistics/ActivityHeatmap";
@@ -122,7 +123,7 @@ export function StatisticsPanel() {
     0,
     totals.totalTokens - totals.inputTokens - totals.outputTokens,
   );
-  const cachedInputTokens = Math.max(0, Math.min(totals.cachedInputTokens, totals.inputTokens));
+  const cachedInputTokens = clampCachedInputTokens(totals.cachedInputTokens, totals.inputTokens);
   const tokenSubtitleParts = [
     `${formatTokens(totals.inputTokens)} in`,
     ...(cachedInputTokens > 0 ? [`${formatTokens(cachedInputTokens)} cached`] : []),

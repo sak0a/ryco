@@ -15,6 +15,10 @@ export function formatCompact(value: number): string {
 /** Token counts use the same compact formatting. */
 export const formatTokens = formatCompact;
 
+export function clampCachedInputTokens(cached: number, input: number): number {
+  return Math.max(0, Math.min(cached, input));
+}
+
 export function formatInteger(value: number): string {
   return Math.round(value).toLocaleString("en-US");
 }
