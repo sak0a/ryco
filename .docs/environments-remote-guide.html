@@ -1,365 +1,1098 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Ryco — Environments, Remote & Workspaces</title>
-<style>
-  :root {
-    --paper:      #f7f6f3;
-    --paper-2:    #fffefb;
-    --ink:        #17171a;
-    --ink-2:      #3d3d43;
-    --ink-3:      #6c6c74;
-    --line:       #e4e2dc;
-    --line-2:     #d7d4cc;
-    --accent:     #3f3ac0;   /* deep indigo, used sparingly */
-    --accent-2:   #ecebfa;
-    --good:       #1f7a4d;
-    --good-bg:    #e6f4ec;
-    --warn:       #9a6a12;
-    --warn-bg:    #f8efdd;
-    --bad:        #a13030;
-    --bad-bg:     #f6e7e5;
-    --code-bg:    #f1efe9;
-    --shadow:     0 1px 2px rgba(20,20,25,.04), 0 8px 30px -18px rgba(20,20,25,.25);
-    --serif: "Newsreader", Georgia, "Iowan Old Style", "Times New Roman", serif;
-    --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    --mono: "JetBrains Mono", ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
-    --maxw: 780px;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --paper:   #131318;
-      --paper-2: #1a1a20;
-      --ink:     #eceae4;
-      --ink-2:   #c3c1ba;
-      --ink-3:   #8b8a84;
-      --line:    #2a2a32;
-      --line-2:  #363640;
-      --accent:  #a9a4ff;
-      --accent-2:#20202f;
-      --good:    #5fca92;
-      --good-bg: #16241d;
-      --warn:    #e0b466;
-      --warn-bg: #2a2213;
-      --bad:     #ec8d84;
-      --bad-bg:  #291817;
-      --code-bg: #20202a;
-      --shadow:  0 1px 2px rgba(0,0,0,.3), 0 12px 40px -22px rgba(0,0,0,.8);
-    }
-  }
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=JetBrains+Mono:wght@400;500&display=swap');
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ryco — Environments, Remote & Workspaces</title>
+    <style>
+      :root {
+        --paper: #f7f6f3;
+        --paper-2: #fffefb;
+        --ink: #17171a;
+        --ink-2: #3d3d43;
+        --ink-3: #6c6c74;
+        --line: #e4e2dc;
+        --line-2: #d7d4cc;
+        --accent: #3f3ac0; /* deep indigo, used sparingly */
+        --accent-2: #ecebfa;
+        --good: #1f7a4d;
+        --good-bg: #e6f4ec;
+        --warn: #9a6a12;
+        --warn-bg: #f8efdd;
+        --bad: #a13030;
+        --bad-bg: #f6e7e5;
+        --code-bg: #f1efe9;
+        --shadow: 0 1px 2px rgba(20, 20, 25, 0.04), 0 8px 30px -18px rgba(20, 20, 25, 0.25);
+        --serif: "Newsreader", Georgia, "Iowan Old Style", "Times New Roman", serif;
+        --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        --mono:
+          "JetBrains Mono", ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+        --maxw: 780px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #131318;
+          --paper-2: #1a1a20;
+          --ink: #eceae4;
+          --ink-2: #c3c1ba;
+          --ink-3: #8b8a84;
+          --line: #2a2a32;
+          --line-2: #363640;
+          --accent: #a9a4ff;
+          --accent-2: #20202f;
+          --good: #5fca92;
+          --good-bg: #16241d;
+          --warn: #e0b466;
+          --warn-bg: #2a2213;
+          --bad: #ec8d84;
+          --bad-bg: #291817;
+          --code-bg: #20202a;
+          --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 40px -22px rgba(0, 0, 0, 0.8);
+        }
+      }
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=JetBrains+Mono:wght@400;500&display=swap");
 
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    margin: 0; background: var(--paper); color: var(--ink);
-    font-family: var(--sans); font-size: 16px; line-height: 1.65;
-    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
-  }
-  ::selection { background: var(--accent-2); color: var(--ink); }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--sans);
+        font-size: 16px;
+        line-height: 1.65;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+      ::selection {
+        background: var(--accent-2);
+        color: var(--ink);
+      }
 
-  /* ---------- Layout ---------- */
-  .wrap { display: grid; grid-template-columns: 268px minmax(0,1fr); gap: 0; }
-  aside {
-    position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
-    border-right: 1px solid var(--line); padding: 30px 22px 60px; background: var(--paper);
-  }
-  aside .brand { display:flex; align-items:baseline; gap:9px; margin-bottom:4px; }
-  aside .brand b { font-size: 19px; letter-spacing:-.02em; }
-  aside .brand span { color: var(--ink-3); font-size: 12px; }
-  aside .subtitle { color: var(--ink-3); font-size: 12.5px; margin: 0 0 22px; line-height:1.45; }
-  nav a {
-    display: block; color: var(--ink-2); text-decoration: none; font-size: 13.5px;
-    padding: 5px 10px; border-radius: 7px; margin: 1px 0; line-height:1.35;
-    border-left: 2px solid transparent;
-  }
-  nav a:hover { background: var(--paper-2); color: var(--ink); }
-  nav a.active { color: var(--accent); background: var(--accent-2); border-left-color: var(--accent); font-weight: 550; }
-  nav .grp { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-3); margin: 20px 0 6px 10px; font-weight: 600; }
-  nav .grp:first-child { margin-top: 4px; }
+      /* ---------- Layout ---------- */
+      .wrap {
+        display: grid;
+        grid-template-columns: 268px minmax(0, 1fr);
+        gap: 0;
+      }
+      aside {
+        position: sticky;
+        top: 0;
+        align-self: start;
+        height: 100vh;
+        overflow-y: auto;
+        border-right: 1px solid var(--line);
+        padding: 30px 22px 60px;
+        background: var(--paper);
+      }
+      aside .brand {
+        display: flex;
+        align-items: baseline;
+        gap: 9px;
+        margin-bottom: 4px;
+      }
+      aside .brand b {
+        font-size: 19px;
+        letter-spacing: -0.02em;
+      }
+      aside .brand span {
+        color: var(--ink-3);
+        font-size: 12px;
+      }
+      aside .subtitle {
+        color: var(--ink-3);
+        font-size: 12.5px;
+        margin: 0 0 22px;
+        line-height: 1.45;
+      }
+      nav a {
+        display: block;
+        color: var(--ink-2);
+        text-decoration: none;
+        font-size: 13.5px;
+        padding: 5px 10px;
+        border-radius: 7px;
+        margin: 1px 0;
+        line-height: 1.35;
+        border-left: 2px solid transparent;
+      }
+      nav a:hover {
+        background: var(--paper-2);
+        color: var(--ink);
+      }
+      nav a.active {
+        color: var(--accent);
+        background: var(--accent-2);
+        border-left-color: var(--accent);
+        font-weight: 550;
+      }
+      nav .grp {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: var(--ink-3);
+        margin: 20px 0 6px 10px;
+        font-weight: 600;
+      }
+      nav .grp:first-child {
+        margin-top: 4px;
+      }
 
-  main { padding: 0 0 140px; }
-  .col { max-width: var(--maxw); margin: 0 auto; padding: 0 32px; }
+      main {
+        padding: 0 0 140px;
+      }
+      .col {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: 0 32px;
+      }
 
-  /* ---------- Hero ---------- */
-  header.hero { padding: 76px 0 46px; border-bottom: 1px solid var(--line); }
-  .eyebrow { font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
-  h1 { font-family: var(--serif); font-weight: 500; font-size: 46px; line-height: 1.08; letter-spacing: -.02em; margin: 16px 0 18px; }
-  .lede { font-size: 19px; line-height: 1.55; color: var(--ink-2); max-width: 40em; }
-  .lede em { font-style: normal; color: var(--ink); font-weight: 600; box-shadow: inset 0 -.5em 0 var(--accent-2); }
+      /* ---------- Hero ---------- */
+      header.hero {
+        padding: 76px 0 46px;
+        border-bottom: 1px solid var(--line);
+      }
+      .eyebrow {
+        font-size: 12px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--accent);
+        font-weight: 600;
+      }
+      h1 {
+        font-family: var(--serif);
+        font-weight: 500;
+        font-size: 46px;
+        line-height: 1.08;
+        letter-spacing: -0.02em;
+        margin: 16px 0 18px;
+      }
+      .lede {
+        font-size: 19px;
+        line-height: 1.55;
+        color: var(--ink-2);
+        max-width: 40em;
+      }
+      .lede em {
+        font-style: normal;
+        color: var(--ink);
+        font-weight: 600;
+        box-shadow: inset 0 -0.5em 0 var(--accent-2);
+      }
 
-  /* ---------- Typo ---------- */
-  section { padding: 52px 0 8px; border-top: 1px solid var(--line); }
-  section:first-of-type { border-top: none; }
-  h2 { font-family: var(--serif); font-weight: 500; font-size: 30px; letter-spacing: -.015em; line-height: 1.15; margin: 6px 0 8px; scroll-margin-top: 20px; }
-  h2 .n { color: var(--ink-3); font-family: var(--mono); font-size: 15px; font-weight: 500; margin-right: 12px; vertical-align: middle; }
-  h3 { font-size: 18.5px; font-weight: 650; letter-spacing: -.01em; margin: 34px 0 8px; scroll-margin-top: 20px; }
-  h4 { font-size: 15px; font-weight: 650; margin: 22px 0 6px; color: var(--ink); }
-  p { margin: 12px 0; }
-  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
-  a:hover { border-bottom-color: var(--accent); }
-  strong { font-weight: 650; }
-  ul, ol { margin: 12px 0; padding-left: 22px; }
-  li { margin: 6px 0; }
-  code { font-family: var(--mono); font-size: .855em; background: var(--code-bg); padding: .12em .4em; border-radius: 5px; border: 1px solid var(--line); }
-  h2 + p, h3 + p { margin-top: 8px; }
+      /* ---------- Typo ---------- */
+      section {
+        padding: 52px 0 8px;
+        border-top: 1px solid var(--line);
+      }
+      section:first-of-type {
+        border-top: none;
+      }
+      h2 {
+        font-family: var(--serif);
+        font-weight: 500;
+        font-size: 30px;
+        letter-spacing: -0.015em;
+        line-height: 1.15;
+        margin: 6px 0 8px;
+        scroll-margin-top: 20px;
+      }
+      h2 .n {
+        color: var(--ink-3);
+        font-family: var(--mono);
+        font-size: 15px;
+        font-weight: 500;
+        margin-right: 12px;
+        vertical-align: middle;
+      }
+      h3 {
+        font-size: 18.5px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+        margin: 34px 0 8px;
+        scroll-margin-top: 20px;
+      }
+      h4 {
+        font-size: 15px;
+        font-weight: 650;
+        margin: 22px 0 6px;
+        color: var(--ink);
+      }
+      p {
+        margin: 12px 0;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+        border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      }
+      a:hover {
+        border-bottom-color: var(--accent);
+      }
+      strong {
+        font-weight: 650;
+      }
+      ul,
+      ol {
+        margin: 12px 0;
+        padding-left: 22px;
+      }
+      li {
+        margin: 6px 0;
+      }
+      code {
+        font-family: var(--mono);
+        font-size: 0.855em;
+        background: var(--code-bg);
+        padding: 0.12em 0.4em;
+        border-radius: 5px;
+        border: 1px solid var(--line);
+      }
+      h2 + p,
+      h3 + p {
+        margin-top: 8px;
+      }
 
-  /* ---------- Callouts ---------- */
-  .call { border: 1px solid var(--line-2); border-radius: 12px; padding: 16px 18px 16px 46px; margin: 20px 0; position: relative; background: var(--paper-2); box-shadow: var(--shadow); }
-  .call .tag { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; margin-bottom: 4px; }
-  .call p:last-child { margin-bottom: 0; }
-  .call::before { position: absolute; left: 15px; top: 15px; font-family: var(--mono); font-weight: 700; font-size: 15px; width: 20px; text-align: center; }
-  .call.key      { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); background: var(--accent-2); }
-  .call.key .tag, .call.key::before { color: var(--accent); } .call.key::before { content: "◆"; }
-  .call.ans      { border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
-  .call.ans .tag, .call.ans::before { color: var(--good); } .call.ans::before { content: "→"; }
-  .call.warn     { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); background: var(--warn-bg); }
-  .call.warn .tag, .call.warn::before { color: var(--warn); } .call.warn::before { content: "!"; }
-  .call.no       { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); background: var(--bad-bg); }
-  .call.no .tag, .call.no::before { color: var(--bad); } .call.no::before { content: "×"; }
+      /* ---------- Callouts ---------- */
+      .call {
+        border: 1px solid var(--line-2);
+        border-radius: 12px;
+        padding: 16px 18px 16px 46px;
+        margin: 20px 0;
+        position: relative;
+        background: var(--paper-2);
+        box-shadow: var(--shadow);
+      }
+      .call .tag {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+      .call p:last-child {
+        margin-bottom: 0;
+      }
+      .call::before {
+        position: absolute;
+        left: 15px;
+        top: 15px;
+        font-family: var(--mono);
+        font-weight: 700;
+        font-size: 15px;
+        width: 20px;
+        text-align: center;
+      }
+      .call.key {
+        border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+        background: var(--accent-2);
+      }
+      .call.key .tag,
+      .call.key::before {
+        color: var(--accent);
+      }
+      .call.key::before {
+        content: "◆";
+      }
+      .call.ans {
+        border-color: color-mix(in srgb, var(--good) 40%, var(--line));
+      }
+      .call.ans .tag,
+      .call.ans::before {
+        color: var(--good);
+      }
+      .call.ans::before {
+        content: "→";
+      }
+      .call.warn {
+        border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+        background: var(--warn-bg);
+      }
+      .call.warn .tag,
+      .call.warn::before {
+        color: var(--warn);
+      }
+      .call.warn::before {
+        content: "!";
+      }
+      .call.no {
+        border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
+        background: var(--bad-bg);
+      }
+      .call.no .tag,
+      .call.no::before {
+        color: var(--bad);
+      }
+      .call.no::before {
+        content: "×";
+      }
 
-  /* ---------- Code blocks ---------- */
-  pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px; padding: 15px 17px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.6; margin: 16px 0; }
-  pre code { background: none; border: none; padding: 0; font-size: inherit; }
-  .cm { color: var(--ink-3); }
-  .kw { color: var(--accent); }
+      /* ---------- Code blocks ---------- */
+      pre {
+        background: var(--code-bg);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 15px 17px;
+        overflow-x: auto;
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 1.6;
+        margin: 16px 0;
+      }
+      pre code {
+        background: none;
+        border: none;
+        padding: 0;
+        font-size: inherit;
+      }
+      .cm {
+        color: var(--ink-3);
+      }
+      .kw {
+        color: var(--accent);
+      }
 
-  /* ---------- Tables ---------- */
-  .tbl { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 13.5px; display: block; overflow-x: auto; }
-  .tbl table { width: 100%; border-collapse: collapse; }
-  table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 13.6px; }
-  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { font-weight: 650; color: var(--ink); border-bottom: 1.5px solid var(--line-2); font-size: 12.5px; letter-spacing: .01em; }
-  td code { font-size: .82em; white-space: nowrap; }
-  tbody tr:hover { background: color-mix(in srgb, var(--accent-2) 45%, transparent); }
-  .ok { color: var(--good); font-weight: 600; } .nope { color: var(--bad); font-weight: 600; }
+      /* ---------- Tables ---------- */
+      .tbl {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 18px 0;
+        font-size: 13.5px;
+        display: block;
+        overflow-x: auto;
+      }
+      .tbl table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 18px 0;
+        font-size: 13.6px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+      th {
+        font-weight: 650;
+        color: var(--ink);
+        border-bottom: 1.5px solid var(--line-2);
+        font-size: 12.5px;
+        letter-spacing: 0.01em;
+      }
+      td code {
+        font-size: 0.82em;
+        white-space: nowrap;
+      }
+      tbody tr:hover {
+        background: color-mix(in srgb, var(--accent-2) 45%, transparent);
+      }
+      .ok {
+        color: var(--good);
+        font-weight: 600;
+      }
+      .nope {
+        color: var(--bad);
+        font-weight: 600;
+      }
 
-  /* ---------- Details / under the hood ---------- */
-  details { border: 1px solid var(--line); border-radius: 10px; margin: 16px 0; background: var(--paper-2); overflow: hidden; }
-  details summary { cursor: pointer; padding: 11px 15px; font-size: 13px; font-weight: 600; color: var(--ink-2); list-style: none; display: flex; align-items: center; gap: 8px; user-select: none; }
-  details summary::-webkit-details-marker { display: none; }
-  details summary::before { content: "▸"; color: var(--ink-3); font-size: 11px; transition: transform .15s; }
-  details[open] summary::before { transform: rotate(90deg); }
-  details summary:hover { color: var(--ink); }
-  details .body { padding: 2px 16px 14px; border-top: 1px solid var(--line); font-size: 13.5px; }
-  details .body table { font-size: 12.6px; }
-  details .body p:first-child { margin-top: 12px; }
+      /* ---------- Details / under the hood ---------- */
+      details {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        margin: 16px 0;
+        background: var(--paper-2);
+        overflow: hidden;
+      }
+      details summary {
+        cursor: pointer;
+        padding: 11px 15px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--ink-2);
+        list-style: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        user-select: none;
+      }
+      details summary::-webkit-details-marker {
+        display: none;
+      }
+      details summary::before {
+        content: "▸";
+        color: var(--ink-3);
+        font-size: 11px;
+        transition: transform 0.15s;
+      }
+      details[open] summary::before {
+        transform: rotate(90deg);
+      }
+      details summary:hover {
+        color: var(--ink);
+      }
+      details .body {
+        padding: 2px 16px 14px;
+        border-top: 1px solid var(--line);
+        font-size: 13.5px;
+      }
+      details .body table {
+        font-size: 12.6px;
+      }
+      details .body p:first-child {
+        margin-top: 12px;
+      }
 
-  /* ---------- Diagrams ---------- */
-  .fig { margin: 26px 0; }
-  .figcap { font-size: 12.5px; color: var(--ink-3); margin-top: 10px; text-align: center; font-style: italic; }
-  .stack { display: flex; flex-direction: column; gap: 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line-2); box-shadow: var(--shadow); }
-  .layer { padding: 15px 18px; background: var(--paper-2); border-bottom: 1px solid var(--line); }
-  .layer:last-child { border-bottom: none; }
-  .layer .lt { font-weight: 650; font-size: 14.5px; }
-  .layer .ld { font-size: 12.8px; color: var(--ink-3); margin-top: 2px; }
-  .layer.hl { background: var(--accent-2); }
-  .layer.hl .lt { color: var(--accent); }
-  .arrow { text-align: center; color: var(--ink-3); font-size: 12px; padding: 5px 0; font-family: var(--mono); }
-  .arrow small { display:block; font-size:10.5px; }
+      /* ---------- Diagrams ---------- */
+      .fig {
+        margin: 26px 0;
+      }
+      .figcap {
+        font-size: 12.5px;
+        color: var(--ink-3);
+        margin-top: 10px;
+        text-align: center;
+        font-style: italic;
+      }
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid var(--line-2);
+        box-shadow: var(--shadow);
+      }
+      .layer {
+        padding: 15px 18px;
+        background: var(--paper-2);
+        border-bottom: 1px solid var(--line);
+      }
+      .layer:last-child {
+        border-bottom: none;
+      }
+      .layer .lt {
+        font-weight: 650;
+        font-size: 14.5px;
+      }
+      .layer .ld {
+        font-size: 12.8px;
+        color: var(--ink-3);
+        margin-top: 2px;
+      }
+      .layer.hl {
+        background: var(--accent-2);
+      }
+      .layer.hl .lt {
+        color: var(--accent);
+      }
+      .arrow {
+        text-align: center;
+        color: var(--ink-3);
+        font-size: 12px;
+        padding: 5px 0;
+        font-family: var(--mono);
+      }
+      .arrow small {
+        display: block;
+        font-size: 10.5px;
+      }
 
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 20px 0; }
-  .card { border: 1px solid var(--line); border-radius: 11px; padding: 15px 17px; background: var(--paper-2); }
-  .card h4 { margin: 0 0 6px; font-size: 14px; }
-  .card p { margin: 4px 0 0; font-size: 13.2px; color: var(--ink-2); }
-  .card .axis { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); font-weight: 700; }
+      .grid2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin: 20px 0;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        padding: 15px 17px;
+        background: var(--paper-2);
+      }
+      .card h4 {
+        margin: 0 0 6px;
+        font-size: 14px;
+      }
+      .card p {
+        margin: 4px 0 0;
+        font-size: 13.2px;
+        color: var(--ink-2);
+      }
+      .card .axis {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        font-weight: 700;
+      }
 
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 24px 0; }
-  .stat { border: 1px solid var(--line); border-radius: 11px; padding: 14px 15px; background: var(--paper-2); }
-  .stat .v { font-family: var(--serif); font-size: 25px; font-weight: 500; letter-spacing: -.02em; line-height: 1; }
-  .stat .k { font-size: 11.5px; color: var(--ink-3); margin-top: 7px; line-height: 1.35; }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin: 24px 0;
+      }
+      .stat {
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        padding: 14px 15px;
+        background: var(--paper-2);
+      }
+      .stat .v {
+        font-family: var(--serif);
+        font-size: 25px;
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        line-height: 1;
+      }
+      .stat .k {
+        font-size: 11.5px;
+        color: var(--ink-3);
+        margin-top: 7px;
+        line-height: 1.35;
+      }
 
-  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 14px 0; }
-  .chip { font-size: 12px; padding: 3px 10px; border-radius: 20px; border: 1px solid var(--line-2); background: var(--paper-2); color: var(--ink-2); }
-  .chip.on { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); color: var(--good); background: var(--good-bg); }
-  .chip.off { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); color: var(--bad); background: var(--bad-bg); }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin: 14px 0;
+      }
+      .chip {
+        font-size: 12px;
+        padding: 3px 10px;
+        border-radius: 20px;
+        border: 1px solid var(--line-2);
+        background: var(--paper-2);
+        color: var(--ink-2);
+      }
+      .chip.on {
+        border-color: color-mix(in srgb, var(--good) 45%, var(--line));
+        color: var(--good);
+        background: var(--good-bg);
+      }
+      .chip.off {
+        border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
+        color: var(--bad);
+        background: var(--bad-bg);
+      }
 
-  /* sequence */
-  .seq { counter-reset: step; margin: 20px 0; }
-  .seq .s { position: relative; padding: 0 0 18px 44px; border-left: 2px solid var(--line); margin-left: 12px; }
-  .seq .s:last-child { border-left-color: transparent; padding-bottom: 0; }
-  .seq .s::before { counter-increment: step; content: counter(step); position: absolute; left: -13px; top: -2px; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; font-family: var(--mono); }
-  .seq .s b { font-size: 14.5px; }
-  .seq .s p { margin: 3px 0 0; font-size: 13.4px; color: var(--ink-2); }
+      /* sequence */
+      .seq {
+        counter-reset: step;
+        margin: 20px 0;
+      }
+      .seq .s {
+        position: relative;
+        padding: 0 0 18px 44px;
+        border-left: 2px solid var(--line);
+        margin-left: 12px;
+      }
+      .seq .s:last-child {
+        border-left-color: transparent;
+        padding-bottom: 0;
+      }
+      .seq .s::before {
+        counter-increment: step;
+        content: counter(step);
+        position: absolute;
+        left: -13px;
+        top: -2px;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+        display: grid;
+        place-items: center;
+        font-family: var(--mono);
+      }
+      .seq .s b {
+        font-size: 14.5px;
+      }
+      .seq .s p {
+        margin: 3px 0 0;
+        font-size: 13.4px;
+        color: var(--ink-2);
+      }
 
-  hr.soft { border: none; border-top: 1px solid var(--line); margin: 30px 0; }
-  .pathmap { font-family: var(--mono); font-size: 12.6px; line-height: 1.9; background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; overflow-x: auto; }
-  .pathmap .c { color: var(--ink-3); }
-  .footer { color: var(--ink-3); font-size: 12.5px; border-top: 1px solid var(--line); margin-top: 40px; padding-top: 22px; }
-  .totop { position: fixed; right: 22px; bottom: 22px; width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: var(--paper); display: grid; place-items: center; text-decoration: none; opacity: 0; pointer-events: none; transition: opacity .2s; box-shadow: var(--shadow); border: none; font-size: 16px; }
-  .totop.show { opacity: .85; pointer-events: auto; }
-  .totop:hover { opacity: 1; }
+      hr.soft {
+        border: none;
+        border-top: 1px solid var(--line);
+        margin: 30px 0;
+      }
+      .pathmap {
+        font-family: var(--mono);
+        font-size: 12.6px;
+        line-height: 1.9;
+        background: var(--code-bg);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 16px 18px;
+        overflow-x: auto;
+      }
+      .pathmap .c {
+        color: var(--ink-3);
+      }
+      .footer {
+        color: var(--ink-3);
+        font-size: 12.5px;
+        border-top: 1px solid var(--line);
+        margin-top: 40px;
+        padding-top: 22px;
+      }
+      .totop {
+        position: fixed;
+        right: 22px;
+        bottom: 22px;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: var(--ink);
+        color: var(--paper);
+        display: grid;
+        place-items: center;
+        text-decoration: none;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s;
+        box-shadow: var(--shadow);
+        border: none;
+        font-size: 16px;
+      }
+      .totop.show {
+        opacity: 0.85;
+        pointer-events: auto;
+      }
+      .totop:hover {
+        opacity: 1;
+      }
 
-  @media (max-width: 940px) {
-    .wrap { grid-template-columns: 1fr; }
-    aside { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--line); }
-    .stats { grid-template-columns: repeat(2,1fr); }
-    .grid2 { grid-template-columns: 1fr; }
-    h1 { font-size: 36px; }
-  }
-</style>
-</head>
-<body>
-<div class="wrap">
+      @media (max-width: 940px) {
+        .wrap {
+          grid-template-columns: 1fr;
+        }
+        aside {
+          position: static;
+          height: auto;
+          border-right: none;
+          border-bottom: 1px solid var(--line);
+        }
+        .stats {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .grid2 {
+          grid-template-columns: 1fr;
+        }
+        h1 {
+          font-size: 36px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <!-- ================= SIDEBAR ================= -->
+      <aside>
+        <div class="brand"><b>Ryco</b><span>internal guide</span></div>
+        <p class="subtitle">
+          Environments, remote machines, providers, worktrees & staying in sync — how it actually
+          works today.
+        </p>
+        <nav id="toc">
+          <div class="grp">Foundations</div>
+          <a href="#idea">The one big idea</a>
+          <a href="#answers">Direct answers</a>
+          <a href="#glossary">Glossary</a>
+          <a href="#stack">The layered stack</a>
+          <div class="grp">Environments</div>
+          <a href="#env">What an environment is</a>
+          <a href="#granularity">Choosing one · granularity</a>
+          <a href="#toolbar">The branch toolbar</a>
+          <a href="#manage">Add · switch · remove</a>
+          <div class="grp">Reaching a remote PC</div>
+          <a href="#access-launch">Access vs. launch</a>
+          <a href="#network">Network access & endpoints</a>
+          <a href="#tailscale">Tailscale</a>
+          <a href="#pairing">Pairing, auth & sessions</a>
+          <a href="#serve">Headless <code>ryco serve</code></a>
+          <a href="#ssh">Desktop-managed SSH</a>
+          <div class="grp">On the environment</div>
+          <a href="#providers">Providers (& “not installed”)</a>
+          <a href="#datamodel">Projects · worktrees · threads</a>
+          <a href="#copychats">Copying a worktree / chats</a>
+          <div class="grp">Operations</div>
+          <a href="#uptodate">Keeping up to date</a>
+          <a href="#reference">Reference & file map</a>
+          <a href="#limits">Limitations & “coming soon”</a>
+        </nav>
+      </aside>
 
-<!-- ================= SIDEBAR ================= -->
-<aside>
-  <div class="brand"><b>Ryco</b><span>internal guide</span></div>
-  <p class="subtitle">Environments, remote machines, providers, worktrees & staying in sync — how it actually works today.</p>
-  <nav id="toc">
-    <div class="grp">Foundations</div>
-    <a href="#idea">The one big idea</a>
-    <a href="#answers">Direct answers</a>
-    <a href="#glossary">Glossary</a>
-    <a href="#stack">The layered stack</a>
-    <div class="grp">Environments</div>
-    <a href="#env">What an environment is</a>
-    <a href="#granularity">Choosing one · granularity</a>
-    <a href="#toolbar">The branch toolbar</a>
-    <a href="#manage">Add · switch · remove</a>
-    <div class="grp">Reaching a remote PC</div>
-    <a href="#access-launch">Access vs. launch</a>
-    <a href="#network">Network access & endpoints</a>
-    <a href="#tailscale">Tailscale</a>
-    <a href="#pairing">Pairing, auth & sessions</a>
-    <a href="#serve">Headless <code>ryco serve</code></a>
-    <a href="#ssh">Desktop-managed SSH</a>
-    <div class="grp">On the environment</div>
-    <a href="#providers">Providers (& “not installed”)</a>
-    <a href="#datamodel">Projects · worktrees · threads</a>
-    <a href="#copychats">Copying a worktree / chats</a>
-    <div class="grp">Operations</div>
-    <a href="#uptodate">Keeping up to date</a>
-    <a href="#reference">Reference & file map</a>
-    <a href="#limits">Limitations & “coming soon”</a>
-  </nav>
-</aside>
+      <!-- ================= MAIN ================= -->
+      <main>
+        <div class="col">
+          <header class="hero" id="top">
+            <div class="eyebrow">Architecture deep-dive</div>
+            <h1>Environments, remote machines & workspaces in Ryco</h1>
+            <p class="lede">
+              Everything hinges on one sentence: <em>an environment is one running Ryco server</em>.
+              Local or on a remote PC, the client always speaks the same protocol to it — and that
+              single boundary explains providers, worktrees, chats, pairing, Tailscale and updates
+              all at once.
+            </p>
+          </header>
 
-<!-- ================= MAIN ================= -->
-<main>
-<div class="col">
+          <!-- ============ THE ONE BIG IDEA ============ -->
+          <section id="idea">
+            <h2><span class="n">01</span>The one big idea</h2>
+            <p>
+              Ryco has a clean runtime boundary. The client (a desktop Electron renderer, a browser
+              tab on <code>app.ryco.dev</code>, or a phone) talks to a
+              <strong>Ryco server</strong> over HTTP + WebSocket. That server owns everything real:
+            </p>
+            <div class="chips">
+              <span class="chip">provider sessions & auth</span>
+              <span class="chip">projects & threads</span>
+              <span class="chip">git worktrees</span>
+              <span class="chip">terminals</span>
+              <span class="chip">the filesystem</span>
+              <span class="chip">settings</span>
+              <span class="chip">the SQLite database</span>
+            </div>
+            <div class="call key">
+              <div class="tag">Key idea</div>
+              <p>
+                An <strong>environment</strong> (in code: <code>ExecutionEnvironment</code>)
+                <em>is</em> one running Ryco server, identified by a stable
+                <code>environmentId</code>. “Remote” is not a different kind of thing — it’s the
+                <em>same</em> server reached over a network instead of over loopback. The runtime is
+                never split; only the connection path changes.
+              </p>
+            </div>
+            <p>Once you internalize that, the rest falls out:</p>
+            <ul>
+              <li>
+                <strong>Providers belong to the environment.</strong> A remote environment shows
+                <em>the remote machine’s</em> Codex/Claude/etc., with the remote machine’s auth. (<a
+                  href="#providers"
+                  >§15</a
+                >)
+              </li>
+              <li>
+                <strong>Projects, worktrees and chats belong to the environment.</strong> They live
+                in that server’s SQLite DB and on that server’s disk — not on the client, and not
+                inside the git worktree folder. (<a href="#datamodel">§16</a>)
+              </li>
+              <li>
+                <strong>Choosing an environment is a per-thread decision</strong>, made when you
+                compose a new chat — not a global switch and <em>not</em> tied to a worktree. (<a
+                  href="#granularity"
+                  >§6</a
+                >)
+              </li>
+              <li>
+                <strong>Two independent questions</strong> govern reaching a remote server:
+                <em>how do I connect to it</em> (access) and
+                <em>how did it come to exist</em> (launch). Kept deliberately separate. (<a
+                  href="#access-launch"
+                  >§9</a
+                >)
+              </li>
+            </ul>
+          </section>
 
-<header class="hero" id="top">
-  <div class="eyebrow">Architecture deep-dive</div>
-  <h1>Environments, remote machines & workspaces in Ryco</h1>
-  <p class="lede">Everything hinges on one sentence: <em>an environment is one running Ryco server</em>. Local or on a remote PC, the client always speaks the same protocol to it — and that single boundary explains providers, worktrees, chats, pairing, Tailscale and updates all at once.</p>
-</header>
+          <!-- ============ DIRECT ANSWERS ============ -->
+          <section id="answers">
+            <h2><span class="n">02</span>Direct answers to your questions</h2>
+            <p>A cheat sheet — each links to the full explanation.</p>
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 47%">Your question</th>
+                  <th>Short answer</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>How does the environment thing work in general?</td>
+                  <td>
+                    One environment = one Ryco server; the client connects over WS and the server
+                    owns all state. <a href="#idea">§1</a>, <a href="#stack">§4</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td>When/where do I choose a new environment (PC)? Is it always per-worktree?</td>
+                  <td>
+                    <strong>No — it’s per-<em>thread</em>.</strong> You pick “Run on: This device /
+                    Cloud” while a chat is still a draft; it locks after the first message.
+                    Environment and worktree are orthogonal. <a href="#granularity">§6</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td>How do I change an environment?</td>
+                  <td>
+                    For a new chat: the “Run on” dropdown in the branch toolbar. To add/remove
+                    servers: <strong>Settings → Connections</strong>. You can’t move an existing
+                    thread to another environment. <a href="#manage">§8</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    How are providers “provided” if they’re not installed on the remote machine?
+                  </td>
+                  <td>
+                    They aren’t. Ryco never installs or copies credentials. You install &
+                    <code>login</code> the CLI <strong>on the remote machine</strong>; Ryco shows
+                    live status and can one-click <em>update</em> (not install) it there.
+                    <a href="#providers">§15</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    Can I copy an external environment’s worktree to another to keep the chats?
+                  </td>
+                  <td>
+                    <strong>No.</strong> Chats live in the server’s SQLite keyed by
+                    <code>thread_id</code>, not in the worktree folder. Copying the folder carries
+                    zero chat. There is no move/copy/export for threads.
+                    <a href="#copychats">§17</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td>How do I keep things up to date?</td>
+                  <td>
+                    Desktop app auto-updates via GitHub Releases (user-clicks install).
+                    Servers/providers update on their own machine. Client↔server version skew is
+                    advisory-only. <a href="#uptodate">§18</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td>Network access with Tailscale & the headless stuff?</td>
+                  <td>
+                    Toggle “Network access” (binds <code>0.0.0.0</code>, restart), or run
+                    <code>ryco serve</code> headless with a QR/pairing token. Tailscale adds
+                    MagicDNS + HTTPS-Serve endpoints. <a href="#network">§10</a>,
+                    <a href="#tailscale">§11</a>, <a href="#serve">§13</a>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
 
-<!-- ============ THE ONE BIG IDEA ============ -->
-<section id="idea">
-  <h2><span class="n">01</span>The one big idea</h2>
-  <p>Ryco has a clean runtime boundary. The client (a desktop Electron renderer, a browser tab on <code>app.ryco.dev</code>, or a phone) talks to a <strong>Ryco server</strong> over HTTP + WebSocket. That server owns everything real:</p>
-  <div class="chips">
-    <span class="chip">provider sessions & auth</span>
-    <span class="chip">projects & threads</span>
-    <span class="chip">git worktrees</span>
-    <span class="chip">terminals</span>
-    <span class="chip">the filesystem</span>
-    <span class="chip">settings</span>
-    <span class="chip">the SQLite database</span>
-  </div>
-  <div class="call key">
-    <div class="tag">Key idea</div>
-    <p>An <strong>environment</strong> (in code: <code>ExecutionEnvironment</code>) <em>is</em> one running Ryco server, identified by a stable <code>environmentId</code>. “Remote” is not a different kind of thing — it’s the <em>same</em> server reached over a network instead of over loopback. The runtime is never split; only the connection path changes.</p>
-  </div>
-  <p>Once you internalize that, the rest falls out:</p>
-  <ul>
-    <li><strong>Providers belong to the environment.</strong> A remote environment shows <em>the remote machine’s</em> Codex/Claude/etc., with the remote machine’s auth. (<a href="#providers">§15</a>)</li>
-    <li><strong>Projects, worktrees and chats belong to the environment.</strong> They live in that server’s SQLite DB and on that server’s disk — not on the client, and not inside the git worktree folder. (<a href="#datamodel">§16</a>)</li>
-    <li><strong>Choosing an environment is a per-thread decision</strong>, made when you compose a new chat — not a global switch and <em>not</em> tied to a worktree. (<a href="#granularity">§6</a>)</li>
-    <li><strong>Two independent questions</strong> govern reaching a remote server: <em>how do I connect to it</em> (access) and <em>how did it come to exist</em> (launch). Kept deliberately separate. (<a href="#access-launch">§9</a>)</li>
-  </ul>
-</section>
+          <!-- ============ GLOSSARY ============ -->
+          <section id="glossary">
+            <h2><span class="n">03</span>Glossary — the words that matter</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 30%">Term</th>
+                  <th>What it means in the code</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Environment</strong><br /><code>ExecutionEnvironment</code></td>
+                  <td>
+                    One running Ryco server. Owns providers, projects, threads, terminals, git,
+                    filesystem, settings, DB. Stable <code>environmentId</code> (a UUID persisted to
+                    disk). This is the shared primitive across desktop/web/mobile.
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <strong>Known / saved environment</strong><br /><code
+                      >SavedEnvironmentRecord</code
+                    >
+                  </td>
+                  <td>
+                    A <em>client-side</em> saved entry for a server you know how to reach (label +
+                    <code>http/ws</code> base URLs + optional SSH target). Lives in browser
+                    <code>localStorage</code> or the desktop keychain — never on the server.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Advertised endpoint</strong><br /><code>AdvertisedEndpoint</code></td>
+                  <td>
+                    One concrete URL a server/desktop advertises for itself (loopback, LAN,
+                    Tailscale, tunnel…), tagged with reachability & compatibility. A
+                    <em>hint</em> for pairing — the real connection decides if it works.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Project</strong></td>
+                  <td>
+                    A workspace record on one environment: a <code>workspace_root</code> path +
+                    title + threads. Environment-local. Addressed cross-environment as
+                    <code>ScopedProjectRef {environmentId, projectId}</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Worktree</strong></td>
+                  <td>
+                    A git worktree used as an isolated checkout for work on a branch / PR / issue /
+                    Jira item. A row in the DB + a directory on disk. Belongs to a project.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Thread</strong></td>
+                  <td>
+                    A durable chat: messages, activities, checkpoints, session state. Bound to one
+                    project (and optionally one worktree) in one environment. Addressed as
+                    <code>ScopedThreadRef {environmentId, threadId}</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Provider / driver / instance</strong></td>
+                  <td>
+                    A <em>driver</em> is an implementation (<code>codex</code>,
+                    <code>claudeAgent</code>…). An
+                    <em>instance</em> (<code>ProviderInstanceId</code>) is a named,
+                    independently-configured copy of a driver (e.g. <code>codex_work</code>).
+                    Threads route to instances.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Access method</strong></td>
+                  <td>
+                    <em>How</em> the client speaks WS to a server: direct ws/wss, tunnelled
+                    (Tailscale), or a desktop SSH port-forward.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Launch method</strong></td>
+                  <td>
+                    <em>How</em> the server came to exist: already-running, <code>ryco serve</code>,
+                    or a desktop-managed SSH bootstrap.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
 
-<!-- ============ DIRECT ANSWERS ============ -->
-<section id="answers">
-  <h2><span class="n">02</span>Direct answers to your questions</h2>
-  <p>A cheat sheet — each links to the full explanation.</p>
-  <table>
-    <thead><tr><th style="width:47%">Your question</th><th>Short answer</th></tr></thead>
-    <tbody>
-      <tr><td>How does the environment thing work in general?</td><td>One environment = one Ryco server; the client connects over WS and the server owns all state. <a href="#idea">§1</a>, <a href="#stack">§4</a></td></tr>
-      <tr><td>When/where do I choose a new environment (PC)? Is it always per-worktree?</td><td><strong>No — it’s per-<em>thread</em>.</strong> You pick “Run on: This device / Cloud” while a chat is still a draft; it locks after the first message. Environment and worktree are orthogonal. <a href="#granularity">§6</a></td></tr>
-      <tr><td>How do I change an environment?</td><td>For a new chat: the “Run on” dropdown in the branch toolbar. To add/remove servers: <strong>Settings → Connections</strong>. You can’t move an existing thread to another environment. <a href="#manage">§8</a></td></tr>
-      <tr><td>How are providers “provided” if they’re not installed on the remote machine?</td><td>They aren’t. Ryco never installs or copies credentials. You install & <code>login</code> the CLI <strong>on the remote machine</strong>; Ryco shows live status and can one-click <em>update</em> (not install) it there. <a href="#providers">§15</a></td></tr>
-      <tr><td>Can I copy an external environment’s worktree to another to keep the chats?</td><td><strong>No.</strong> Chats live in the server’s SQLite keyed by <code>thread_id</code>, not in the worktree folder. Copying the folder carries zero chat. There is no move/copy/export for threads. <a href="#copychats">§17</a></td></tr>
-      <tr><td>How do I keep things up to date?</td><td>Desktop app auto-updates via GitHub Releases (user-clicks install). Servers/providers update on their own machine. Client↔server version skew is advisory-only. <a href="#uptodate">§18</a></td></tr>
-      <tr><td>Network access with Tailscale & the headless stuff?</td><td>Toggle “Network access” (binds <code>0.0.0.0</code>, restart), or run <code>ryco serve</code> headless with a QR/pairing token. Tailscale adds MagicDNS + HTTPS-Serve endpoints. <a href="#network">§10</a>, <a href="#tailscale">§11</a>, <a href="#serve">§13</a></td></tr>
-    </tbody>
-  </table>
-</section>
+          <!-- ============ STACK ============ -->
+          <section id="stack">
+            <h2><span class="n">04</span>The layered stack</h2>
+            <p>
+              Remoteness is expressed at exactly one layer — the access method in the middle. Above
+              it, the client is identical whether the server is on your laptop or a box in a
+              datacentre. Below it, the server is identical too.
+            </p>
+            <div class="fig">
+              <div class="stack">
+                <div class="layer">
+                  <div class="lt">Client — desktop / browser / phone</div>
+                  <div class="ld">
+                    Known environments · connection manager · per-thread environment routing · RPC
+                    transport
+                  </div>
+                </div>
+                <div class="arrow">
+                  │ resolves one endpoint & mints a short-lived <code>wsToken</code> │
+                </div>
+                <div class="layer hl">
+                  <div class="lt">Access method &nbsp;·&nbsp; the only “remote” layer</div>
+                  <div class="ld">
+                    direct ws/wss &nbsp;·&nbsp; Tailscale endpoint &nbsp;·&nbsp; desktop-managed SSH
+                    port-forward
+                  </div>
+                </div>
+                <div class="arrow">│ ordinary HTTP + WebSocket │</div>
+                <div class="layer">
+                  <div class="lt">Execution environment = one Ryco server</div>
+                  <div class="ld">
+                    identity · auth/sessions · providers · projects · threads · worktrees ·
+                    terminals · git · SQLite
+                  </div>
+                </div>
+                <div class="arrow">
+                  │ provider-specific protocols (stdio JSON-RPC / SDK / ACP / HTTP) │
+                </div>
+                <div class="layer">
+                  <div class="lt">Provider runtimes (on the server’s machine)</div>
+                  <div class="ld">
+                    Codex app-server · Claude Agent SDK · Copilot SDK · OpenCode · Cursor ACP
+                  </div>
+                </div>
+              </div>
+              <div class="figcap">
+                The client-to-server link is always WebSocket. SSH/Tailscale only change how that
+                link is routed — they never become the transport the app speaks.
+              </div>
+            </div>
+            <details>
+              <summary>Under the hood — where these layers live</summary>
+              <div class="body">
+                <table>
+                  <tr>
+                    <td>Client env runtime</td>
+                    <td>
+                      <code>apps/web/src/environments/runtime/</code> (<code>service.ts</code>,
+                      <code>connection.ts</code>, <code>catalog.ts</code>)
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>RPC transport</td>
+                    <td>
+                      <code>apps/web/src/rpc/</code> (<code>wsTransport.ts</code>,
+                      <code>wsRpcClient.ts</code>, <code>protocol.ts</code>)
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Server entry / layer graph</td>
+                    <td>
+                      <code>apps/server/src/server.ts</code>; WS handlers
+                      <code>apps/server/src/ws.ts</code>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Endpoint / scoped-ref helpers</td>
+                    <td>
+                      <code>packages/client-runtime/src/</code> (<code>knownEnvironment.ts</code>,
+                      <code>advertisedEndpoint.ts</code>, <code>scoped.ts</code>)
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Shared contracts/schemas</td>
+                    <td>
+                      <code>packages/contracts/src/</code> (<code>environment.ts</code>,
+                      <code>remoteAccess.ts</code>, <code>auth.ts</code>,
+                      <code>orchestration.ts</code>)
+                    </td>
+                  </tr>
+                </table>
+              </div>
+            </details>
+          </section>
 
-<!-- ============ GLOSSARY ============ -->
-<section id="glossary">
-  <h2><span class="n">03</span>Glossary — the words that matter</h2>
-  <table>
-    <thead><tr><th style="width:30%">Term</th><th>What it means in the code</th></tr></thead>
-    <tbody>
-      <tr><td><strong>Environment</strong><br><code>ExecutionEnvironment</code></td><td>One running Ryco server. Owns providers, projects, threads, terminals, git, filesystem, settings, DB. Stable <code>environmentId</code> (a UUID persisted to disk). This is the shared primitive across desktop/web/mobile.</td></tr>
-      <tr><td><strong>Known / saved environment</strong><br><code>SavedEnvironmentRecord</code></td><td>A <em>client-side</em> saved entry for a server you know how to reach (label + <code>http/ws</code> base URLs + optional SSH target). Lives in browser <code>localStorage</code> or the desktop keychain — never on the server.</td></tr>
-      <tr><td><strong>Advertised endpoint</strong><br><code>AdvertisedEndpoint</code></td><td>One concrete URL a server/desktop advertises for itself (loopback, LAN, Tailscale, tunnel…), tagged with reachability & compatibility. A <em>hint</em> for pairing — the real connection decides if it works.</td></tr>
-      <tr><td><strong>Project</strong></td><td>A workspace record on one environment: a <code>workspace_root</code> path + title + threads. Environment-local. Addressed cross-environment as <code>ScopedProjectRef {environmentId, projectId}</code>.</td></tr>
-      <tr><td><strong>Worktree</strong></td><td>A git worktree used as an isolated checkout for work on a branch / PR / issue / Jira item. A row in the DB + a directory on disk. Belongs to a project.</td></tr>
-      <tr><td><strong>Thread</strong></td><td>A durable chat: messages, activities, checkpoints, session state. Bound to one project (and optionally one worktree) in one environment. Addressed as <code>ScopedThreadRef {environmentId, threadId}</code>.</td></tr>
-      <tr><td><strong>Provider / driver / instance</strong></td><td>A <em>driver</em> is an implementation (<code>codex</code>, <code>claudeAgent</code>…). An <em>instance</em> (<code>ProviderInstanceId</code>) is a named, independently-configured copy of a driver (e.g. <code>codex_work</code>). Threads route to instances.</td></tr>
-      <tr><td><strong>Access method</strong></td><td><em>How</em> the client speaks WS to a server: direct ws/wss, tunnelled (Tailscale), or a desktop SSH port-forward.</td></tr>
-      <tr><td><strong>Launch method</strong></td><td><em>How</em> the server came to exist: already-running, <code>ryco serve</code>, or a desktop-managed SSH bootstrap.</td></tr>
-    </tbody>
-  </table>
-</section>
+          <!-- ============ WHAT AN ENVIRONMENT IS ============ -->
+          <section id="env">
+            <h2>
+              <span class="n">05</span>What an environment is — and where “saved environments” live
+            </h2>
+            <p>
+              The <strong>primary</strong> environment is the local server the app was served from
+              (the desktop shell starts one; the CLI is one). <strong>Saved</strong> environments
+              are remote servers you’ve paired with. They connect <strong>concurrently</strong> —
+              Ryco keeps every saved environment live in the background, not one-at-a-time.
+            </p>
 
-<!-- ============ STACK ============ -->
-<section id="stack">
-  <h2><span class="n">04</span>The layered stack</h2>
-  <p>Remoteness is expressed at exactly one layer — the access method in the middle. Above it, the client is identical whether the server is on your laptop or a box in a datacentre. Below it, the server is identical too.</p>
-  <div class="fig">
-    <div class="stack">
-      <div class="layer">
-        <div class="lt">Client — desktop / browser / phone</div>
-        <div class="ld">Known environments · connection manager · per-thread environment routing · RPC transport</div>
-      </div>
-      <div class="arrow">│  resolves one endpoint & mints a short-lived <code>wsToken</code>  │</div>
-      <div class="layer hl">
-        <div class="lt">Access method &nbsp;·&nbsp; the only “remote” layer</div>
-        <div class="ld">direct ws/wss &nbsp;·&nbsp; Tailscale endpoint &nbsp;·&nbsp; desktop-managed SSH port-forward</div>
-      </div>
-      <div class="arrow">│  ordinary HTTP + WebSocket  │</div>
-      <div class="layer">
-        <div class="lt">Execution environment = one Ryco server</div>
-        <div class="ld">identity · auth/sessions · providers · projects · threads · worktrees · terminals · git · SQLite</div>
-      </div>
-      <div class="arrow">│  provider-specific protocols (stdio JSON-RPC / SDK / ACP / HTTP)  │</div>
-      <div class="layer">
-        <div class="lt">Provider runtimes (on the server’s machine)</div>
-        <div class="ld">Codex app-server · Claude Agent SDK · Copilot SDK · OpenCode · Cursor ACP</div>
-      </div>
-    </div>
-    <div class="figcap">The client-to-server link is always WebSocket. SSH/Tailscale only change how that link is routed — they never become the transport the app speaks.</div>
-  </div>
-  <details>
-    <summary>Under the hood — where these layers live</summary>
-    <div class="body">
-      <table>
-        <tr><td>Client env runtime</td><td><code>apps/web/src/environments/runtime/</code> (<code>service.ts</code>, <code>connection.ts</code>, <code>catalog.ts</code>)</td></tr>
-        <tr><td>RPC transport</td><td><code>apps/web/src/rpc/</code> (<code>wsTransport.ts</code>, <code>wsRpcClient.ts</code>, <code>protocol.ts</code>)</td></tr>
-        <tr><td>Server entry / layer graph</td><td><code>apps/server/src/server.ts</code>; WS handlers <code>apps/server/src/ws.ts</code></td></tr>
-        <tr><td>Endpoint / scoped-ref helpers</td><td><code>packages/client-runtime/src/</code> (<code>knownEnvironment.ts</code>, <code>advertisedEndpoint.ts</code>, <code>scoped.ts</code>)</td></tr>
-        <tr><td>Shared contracts/schemas</td><td><code>packages/contracts/src/</code> (<code>environment.ts</code>, <code>remoteAccess.ts</code>, <code>auth.ts</code>, <code>orchestration.ts</code>)</td></tr>
-      </table>
-    </div>
-  </details>
-</section>
-
-<!-- ============ WHAT AN ENVIRONMENT IS ============ -->
-<section id="env">
-  <h2><span class="n">05</span>What an environment is — and where “saved environments” live</h2>
-  <p>The <strong>primary</strong> environment is the local server the app was served from (the desktop shell starts one; the CLI is one). <strong>Saved</strong> environments are remote servers you’ve paired with. They connect <strong>concurrently</strong> — Ryco keeps every saved environment live in the background, not one-at-a-time.</p>
-
-  <h3>The identity a server hands out</h3>
-  <p>Every server exposes a descriptor at <code>GET /.well-known/ryco/environment</code>:</p>
-  <pre><code>ExecutionEnvironmentDescriptor {
+            <h3>The identity a server hands out</h3>
+            <p>
+              Every server exposes a descriptor at <code>GET /.well-known/ryco/environment</code>:
+            </p>
+            <pre><code>ExecutionEnvironmentDescriptor {
   environmentId,                 <span class="cm">// stable UUID, persisted server-side</span>
   label,
   platform: { os, arch },        <span class="cm">// darwin|linux|windows · arm64|x64</span>
@@ -367,241 +1100,641 @@
   capabilities: { repositoryIdentity }
 }</code></pre>
 
-  <h3>Where saved environments are stored (client-side only)</h3>
-  <div class="tbl"><table>
-    <thead><tr><th>What</th><th>Hosted web app (browser)</th><th>Desktop (Electron)</th></tr></thead>
-    <tbody>
-      <tr><td>Registry of saved servers</td><td><code>localStorage</code> key <code>ryco:saved-environment-registry:v1</code></td><td>Electron main-process store via <code>desktopBridge</code></td></tr>
-      <tr><td>Bearer token (the secret)</td><td>Inside that same <code>localStorage</code> doc, <strong>7-day</strong> sliding TTL, cleartext</td><td>OS keychain, kept out of the registry</td></tr>
-      <tr><td>Client settings</td><td><code>localStorage</code> key <code>ryco:client-settings:v1</code></td><td>desktop bridge</td></tr>
-    </tbody>
-  </table></div>
-  <div class="call warn">
-    <div class="tag">Security note</div>
-    <p>In the pure-browser deployment, a remote environment’s bearer token sits in <code>localStorage</code> in cleartext with a 7-day expiry. The desktop app keeps it in the OS keychain instead. Treat pairing links and tokens like passwords.</p>
-  </div>
-  <p>The server never stores your list of environments — “saved environments” are purely a client concept. The connection state machine per environment is <code>connecting → connected → disconnected → error</code>, with a parallel auth state <code>authenticated / requires-auth / unknown</code>.</p>
-  <details>
-    <summary>Under the hood — connection runtime specifics</summary>
-    <div class="body">
-      <ul>
-        <li>Live connections held in a module-level <code>Map&lt;EnvironmentId, EnvironmentConnection&gt;</code> (<code>service.ts</code>). Each has its own <code>WsRpcClient</code> and subscription set.</li>
-        <li>Saved environments connect with concurrency <strong>2</strong> and a <strong>2.5&nbsp;s</strong> delay after the primary’s first shell snapshot, so the local env boots first.</li>
-        <li>WS auth handshake: HTTP bearer → <code>POST /api/auth/ws-token</code> → append <code>?wsToken=&lt;short-lived&gt;</code> to the socket URL.</li>
-        <li>A <strong>401</strong> clears the stored token and asks you to pair again (for SSH environments it silently re-issues a bearer and retries).</li>
-        <li>Contracts: <code>EnvironmentId</code>, <code>ExecutionEnvironmentDescriptor</code>, <code>ScopedProjectRef</code>, <code>ScopedThreadRef</code> in <code>packages/contracts/src/environment.ts</code>. (There is no <code>AccessEndpoint</code> type — the endpoint contract is <code>AdvertisedEndpoint</code>.)</li>
-      </ul>
-    </div>
-  </details>
-</section>
+            <h3>Where saved environments are stored (client-side only)</h3>
+            <div class="tbl">
+              <table>
+                <thead>
+                  <tr>
+                    <th>What</th>
+                    <th>Hosted web app (browser)</th>
+                    <th>Desktop (Electron)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Registry of saved servers</td>
+                    <td>
+                      <code>localStorage</code> key <code>ryco:saved-environment-registry:v1</code>
+                    </td>
+                    <td>Electron main-process store via <code>desktopBridge</code></td>
+                  </tr>
+                  <tr>
+                    <td>Bearer token (the secret)</td>
+                    <td>
+                      Inside that same <code>localStorage</code> doc, <strong>7-day</strong> sliding
+                      TTL, cleartext
+                    </td>
+                    <td>OS keychain, kept out of the registry</td>
+                  </tr>
+                  <tr>
+                    <td>Client settings</td>
+                    <td><code>localStorage</code> key <code>ryco:client-settings:v1</code></td>
+                    <td>desktop bridge</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="call warn">
+              <div class="tag">Security note</div>
+              <p>
+                In the pure-browser deployment, a remote environment’s bearer token sits in
+                <code>localStorage</code> in cleartext with a 7-day expiry. The desktop app keeps it
+                in the OS keychain instead. Treat pairing links and tokens like passwords.
+              </p>
+            </div>
+            <p>
+              The server never stores your list of environments — “saved environments” are purely a
+              client concept. The connection state machine per environment is
+              <code>connecting → connected → disconnected → error</code>, with a parallel auth state
+              <code>authenticated / requires-auth / unknown</code>.
+            </p>
+            <details>
+              <summary>Under the hood — connection runtime specifics</summary>
+              <div class="body">
+                <ul>
+                  <li>
+                    Live connections held in a module-level
+                    <code>Map&lt;EnvironmentId, EnvironmentConnection&gt;</code>
+                    (<code>service.ts</code>). Each has its own <code>WsRpcClient</code> and
+                    subscription set.
+                  </li>
+                  <li>
+                    Saved environments connect with concurrency <strong>2</strong> and a
+                    <strong>2.5&nbsp;s</strong> delay after the primary’s first shell snapshot, so
+                    the local env boots first.
+                  </li>
+                  <li>
+                    WS auth handshake: HTTP bearer → <code>POST /api/auth/ws-token</code> → append
+                    <code>?wsToken=&lt;short-lived&gt;</code> to the socket URL.
+                  </li>
+                  <li>
+                    A <strong>401</strong> clears the stored token and asks you to pair again (for
+                    SSH environments it silently re-issues a bearer and retries).
+                  </li>
+                  <li>
+                    Contracts: <code>EnvironmentId</code>,
+                    <code>ExecutionEnvironmentDescriptor</code>, <code>ScopedProjectRef</code>,
+                    <code>ScopedThreadRef</code> in
+                    <code>packages/contracts/src/environment.ts</code>. (There is no
+                    <code>AccessEndpoint</code> type — the endpoint contract is
+                    <code>AdvertisedEndpoint</code>.)
+                  </li>
+                </ul>
+              </div>
+            </details>
+          </section>
 
-<!-- ============ GRANULARITY ============ -->
-<section id="granularity">
-  <h2><span class="n">06</span>When & where you choose an environment — the granularity question</h2>
-  <div class="call ans">
-    <div class="tag">Answering your question directly</div>
-    <p>Choosing an environment is <strong>per-thread</strong>. You pick it in the composer <em>while the chat is still a draft</em> (before the first message). It is <strong>not</strong> a global setting, and it is <strong>not</strong> per-worktree.</p>
-  </div>
-  <p>Mechanically:</p>
-  <div class="seq">
-    <div class="s"><b>Every project & thread is environment-scoped.</b><p>State is partitioned by environment, and each project/thread is addressed by a scoped ref: <code>(environmentId, localId)</code>. The key format is literally <code>${environmentId}:${localId}</code>.</p></div>
-    <div class="s"><b>The environment rides in the URL.</b><p>The chat route is <code>/_chat/$environmentId/$threadId</code>. “The environment I’m looking at” = the environment of the thread in the URL.</p></div>
-    <div class="s"><b>You choose it per-draft in the composer.</b><p>The branch toolbar’s <strong>“Run on”</strong> selector re-points the draft at the same logical project’s copy on the chosen environment. The choice is stored on the draft.</p></div>
-    <div class="s"><b>It locks after the first send.</b><p>Once a thread has any message or a live session, <code>envLocked</code> becomes true and the selector degrades to a static label. A committed thread cannot change environments.</p></div>
-    <div class="s"><b>The picker only appears when it’s meaningful.</b><p>It renders only when the <em>same repository</em> exists on more than one connected environment — i.e. you have a local clone and a remote clone of the same repo. Otherwise there’s nothing to choose.</p></div>
-  </div>
-  <div class="call warn">
-    <div class="tag">Easy to misread</div>
-    <p>There is a <code>store.activeEnvironmentId</code>, but it is <em>not</em> a global “current environment” switch — it just tracks the primary/home server (used to know when the home env has finished bootstrapping). The real per-thread environment lives in the scoped refs, the URL, and the composer draft.</p>
-  </div>
-</section>
+          <!-- ============ GRANULARITY ============ -->
+          <section id="granularity">
+            <h2>
+              <span class="n">06</span>When & where you choose an environment — the granularity
+              question
+            </h2>
+            <div class="call ans">
+              <div class="tag">Answering your question directly</div>
+              <p>
+                Choosing an environment is <strong>per-thread</strong>. You pick it in the composer
+                <em>while the chat is still a draft</em> (before the first message). It is
+                <strong>not</strong> a global setting, and it is <strong>not</strong> per-worktree.
+              </p>
+            </div>
+            <p>Mechanically:</p>
+            <div class="seq">
+              <div class="s">
+                <b>Every project & thread is environment-scoped.</b>
+                <p>
+                  State is partitioned by environment, and each project/thread is addressed by a
+                  scoped ref: <code>(environmentId, localId)</code>. The key format is literally
+                  <code>${environmentId}:${localId}</code>.
+                </p>
+              </div>
+              <div class="s">
+                <b>The environment rides in the URL.</b>
+                <p>
+                  The chat route is <code>/_chat/$environmentId/$threadId</code>. “The environment
+                  I’m looking at” = the environment of the thread in the URL.
+                </p>
+              </div>
+              <div class="s">
+                <b>You choose it per-draft in the composer.</b>
+                <p>
+                  The branch toolbar’s <strong>“Run on”</strong> selector re-points the draft at the
+                  same logical project’s copy on the chosen environment. The choice is stored on the
+                  draft.
+                </p>
+              </div>
+              <div class="s">
+                <b>It locks after the first send.</b>
+                <p>
+                  Once a thread has any message or a live session, <code>envLocked</code> becomes
+                  true and the selector degrades to a static label. A committed thread cannot change
+                  environments.
+                </p>
+              </div>
+              <div class="s">
+                <b>The picker only appears when it’s meaningful.</b>
+                <p>
+                  It renders only when the <em>same repository</em> exists on more than one
+                  connected environment — i.e. you have a local clone and a remote clone of the same
+                  repo. Otherwise there’s nothing to choose.
+                </p>
+              </div>
+            </div>
+            <div class="call warn">
+              <div class="tag">Easy to misread</div>
+              <p>
+                There is a <code>store.activeEnvironmentId</code>, but it is <em>not</em> a global
+                “current environment” switch — it just tracks the primary/home server (used to know
+                when the home env has finished bootstrapping). The real per-thread environment lives
+                in the scoped refs, the URL, and the composer draft.
+              </p>
+            </div>
+          </section>
 
-<!-- ============ BRANCH TOOLBAR ============ -->
-<section id="toolbar">
-  <h2><span class="n">07</span>The branch toolbar — two axes people conflate</h2>
-  <p>The README calls it a “local/worktree environment selector,” which blurs together two <strong>independent</strong> choices that happen to share one toolbar. Keeping them apart is the key to the whole mental model.</p>
-  <div class="grid2">
-    <div class="card">
-      <div class="axis">Axis A · which server</div>
-      <h4>“Run on”: This device / Cloud</h4>
-      <p>Picks the <strong>environment</strong> (<code>EnvironmentId</code>) — your local server vs. a remote/paired one. This is the §6 per-thread choice. Icons: monitor = this device, cloud = remote.</p>
-    </div>
-    <div class="card">
-      <div class="axis">Axis B · which checkout</div>
-      <h4>Local vs. worktree</h4>
-      <p>Picks <code>EnvMode = "local" | "worktree"</code> — whether the branch runs in the project’s <strong>main working copy</strong> or in an isolated <strong>git worktree</strong>. Nothing to do with which server.</p>
-    </div>
-  </div>
-  <div class="call key">
-    <div class="tag">So: is environment tied to worktree?</div>
-    <p><strong>No.</strong> “Which server” (Axis A) and “local vs. worktree” (Axis B) are orthogonal per-draft settings. You can run on the local device in a worktree, on a remote device in the main copy, or any combination.</p>
-  </div>
-  <details>
-    <summary>Under the hood — toolbar components</summary>
-    <div class="body">
-      <ul>
-        <li><code>BranchToolbar.tsx</code> composes <code>BranchToolbarEnvironmentSelector</code> (Axis A) + terminal toggle + <code>BranchToolbarBranchSelector</code> (Axis B).</li>
-        <li>Axis A options come from <code>logicalProjectEnvironments</code> — one entry per environment that has the active project’s logical repo. Renders only when there’s more than one.</li>
-        <li>Axis B: <code>EnvMode</code> resolved by <code>resolveEffectiveEnvMode</code>; stored per-draft as <code>DraftSessionState.envMode</code>.</li>
-      </ul>
-    </div>
-  </details>
-</section>
+          <!-- ============ BRANCH TOOLBAR ============ -->
+          <section id="toolbar">
+            <h2><span class="n">07</span>The branch toolbar — two axes people conflate</h2>
+            <p>
+              The README calls it a “local/worktree environment selector,” which blurs together two
+              <strong>independent</strong> choices that happen to share one toolbar. Keeping them
+              apart is the key to the whole mental model.
+            </p>
+            <div class="grid2">
+              <div class="card">
+                <div class="axis">Axis A · which server</div>
+                <h4>“Run on”: This device / Cloud</h4>
+                <p>
+                  Picks the <strong>environment</strong> (<code>EnvironmentId</code>) — your local
+                  server vs. a remote/paired one. This is the §6 per-thread choice. Icons: monitor =
+                  this device, cloud = remote.
+                </p>
+              </div>
+              <div class="card">
+                <div class="axis">Axis B · which checkout</div>
+                <h4>Local vs. worktree</h4>
+                <p>
+                  Picks <code>EnvMode = "local" | "worktree"</code> — whether the branch runs in the
+                  project’s <strong>main working copy</strong> or in an isolated
+                  <strong>git worktree</strong>. Nothing to do with which server.
+                </p>
+              </div>
+            </div>
+            <div class="call key">
+              <div class="tag">So: is environment tied to worktree?</div>
+              <p>
+                <strong>No.</strong> “Which server” (Axis A) and “local vs. worktree” (Axis B) are
+                orthogonal per-draft settings. You can run on the local device in a worktree, on a
+                remote device in the main copy, or any combination.
+              </p>
+            </div>
+            <details>
+              <summary>Under the hood — toolbar components</summary>
+              <div class="body">
+                <ul>
+                  <li>
+                    <code>BranchToolbar.tsx</code> composes
+                    <code>BranchToolbarEnvironmentSelector</code> (Axis A) + terminal toggle +
+                    <code>BranchToolbarBranchSelector</code> (Axis B).
+                  </li>
+                  <li>
+                    Axis A options come from <code>logicalProjectEnvironments</code> — one entry per
+                    environment that has the active project’s logical repo. Renders only when
+                    there’s more than one.
+                  </li>
+                  <li>
+                    Axis B: <code>EnvMode</code> resolved by <code>resolveEffectiveEnvMode</code>;
+                    stored per-draft as <code>DraftSessionState.envMode</code>.
+                  </li>
+                </ul>
+              </div>
+            </details>
+          </section>
 
-<!-- ============ MANAGE ============ -->
-<section id="manage">
-  <h2><span class="n">08</span>Adding, switching & removing environments</h2>
-  <table>
-    <thead><tr><th style="width:22%">Action</th><th>Where</th><th>What happens</th></tr></thead>
-    <tbody>
-      <tr><td><strong>Switch</strong> (for a new chat)</td><td>Composer → branch toolbar → “Run on”</td><td>Re-points the draft to the chosen environment’s copy of the project. Only before the first message.</td></tr>
-      <tr><td><strong>Add</strong> a server</td><td>Settings → Connections → “Add environment”</td><td>Accepts three input shapes — all funnel into <code>addSavedEnvironment</code>: a <strong>pairing URL</strong>, a <strong>host + pairing code</strong>, or a <strong>desktop SSH</strong> target.</td></tr>
-      <tr><td><strong>Connect / disconnect</strong></td><td>Per-environment card in Connections</td><td>Toggles the live connection without forgetting the server.</td></tr>
-      <tr><td><strong>Remove</strong></td><td>Per-environment card</td><td>Disconnects, drops the registry entry, clears runtime state, and deletes the stored bearer secret.</td></tr>
-    </tbody>
-  </table>
-  <p>When you add via a pairing URL, the client resolves the target, fetches the descriptor from <code>/.well-known/ryco/environment</code>, bootstraps a bearer token via <code>POST /api/auth/bootstrap/bearer</code>, persists the record + secret, and connects immediately. The deep-link route <code>/pair</code> is the entry point for hosted pairing links.</p>
-  <div class="call warn">
-    <div class="tag">There is no “move this chat to another environment”</div>
-    <p>You add and remove <em>servers</em>, and you choose an environment for a <em>new</em> thread. But an existing thread is pinned to its environment for life — see <a href="#copychats">§17</a> for why, and what that means for “keeping chats”.</p>
-  </div>
-</section>
+          <!-- ============ MANAGE ============ -->
+          <section id="manage">
+            <h2><span class="n">08</span>Adding, switching & removing environments</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 22%">Action</th>
+                  <th>Where</th>
+                  <th>What happens</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Switch</strong> (for a new chat)</td>
+                  <td>Composer → branch toolbar → “Run on”</td>
+                  <td>
+                    Re-points the draft to the chosen environment’s copy of the project. Only before
+                    the first message.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Add</strong> a server</td>
+                  <td>Settings → Connections → “Add environment”</td>
+                  <td>
+                    Accepts three input shapes — all funnel into <code>addSavedEnvironment</code>: a
+                    <strong>pairing URL</strong>, a <strong>host + pairing code</strong>, or a
+                    <strong>desktop SSH</strong> target.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Connect / disconnect</strong></td>
+                  <td>Per-environment card in Connections</td>
+                  <td>Toggles the live connection without forgetting the server.</td>
+                </tr>
+                <tr>
+                  <td><strong>Remove</strong></td>
+                  <td>Per-environment card</td>
+                  <td>
+                    Disconnects, drops the registry entry, clears runtime state, and deletes the
+                    stored bearer secret.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p>
+              When you add via a pairing URL, the client resolves the target, fetches the descriptor
+              from <code>/.well-known/ryco/environment</code>, bootstraps a bearer token via
+              <code>POST /api/auth/bootstrap/bearer</code>, persists the record + secret, and
+              connects immediately. The deep-link route <code>/pair</code> is the entry point for
+              hosted pairing links.
+            </p>
+            <div class="call warn">
+              <div class="tag">There is no “move this chat to another environment”</div>
+              <p>
+                You add and remove <em>servers</em>, and you choose an environment for a
+                <em>new</em> thread. But an existing thread is pinned to its environment for life —
+                see <a href="#copychats">§17</a> for why, and what that means for “keeping chats”.
+              </p>
+            </div>
+          </section>
 
-<!-- ============ ACCESS VS LAUNCH ============ -->
-<section id="access-launch">
-  <h2><span class="n">09</span>Access vs. launch — the two questions</h2>
-  <p>Reaching a remote environment is two separate concerns. Keeping them apart is why SSH, Tailscale and a plain hosted server all reuse one model instead of each being a special case.</p>
-  <div class="grid2">
-    <div class="card">
-      <div class="axis">Access · “how do I connect?”</div>
-      <h4>How the client speaks WS to the server</h4>
-      <p>1 · Direct ws/wss (LAN IP or public HTTPS)<br>2 · Tunnelled (a Tailscale endpoint)<br>3 · Desktop-managed SSH port-forward → a local <code>ws://127.0.0.1:PORT</code></p>
-    </div>
-    <div class="card">
-      <div class="axis">Launch · “how does it exist?”</div>
-      <h4>How the server came to be running</h4>
-      <p>1 · Pre-existing (someone already ran it)<br>2 · <code>ryco serve</code> headless<br>3 · Desktop bootstraps it over SSH</p>
-    </div>
-  </div>
-  <p>They combine freely: a manually-hosted server reached by direct <code>wss</code>; the <em>same</em> server also reachable via Tailscale; an SSH-<em>launched</em> server reached through a forwarded socket; a local server <em>published</em> to your phone via a tunnel. In every case the <code>ExecutionEnvironment</code> is the same kind of thing — only the launch/access paths differ.</p>
-  <div class="call key">
-    <div class="tag">Why it matters</div>
-    <p>Because access and launch are separate, <strong>Tailscale is just an “endpoint provider” add-on</strong> and <strong>SSH is just a launch+forward helper</strong> — neither becomes a new environment type, and neither changes the protocol the renderer speaks. The final hop is always plain WebSocket.</p>
-  </div>
-</section>
+          <!-- ============ ACCESS VS LAUNCH ============ -->
+          <section id="access-launch">
+            <h2><span class="n">09</span>Access vs. launch — the two questions</h2>
+            <p>
+              Reaching a remote environment is two separate concerns. Keeping them apart is why SSH,
+              Tailscale and a plain hosted server all reuse one model instead of each being a
+              special case.
+            </p>
+            <div class="grid2">
+              <div class="card">
+                <div class="axis">Access · “how do I connect?”</div>
+                <h4>How the client speaks WS to the server</h4>
+                <p>
+                  1 · Direct ws/wss (LAN IP or public HTTPS)<br />2 · Tunnelled (a Tailscale
+                  endpoint)<br />3 · Desktop-managed SSH port-forward → a local
+                  <code>ws://127.0.0.1:PORT</code>
+                </p>
+              </div>
+              <div class="card">
+                <div class="axis">Launch · “how does it exist?”</div>
+                <h4>How the server came to be running</h4>
+                <p>
+                  1 · Pre-existing (someone already ran it)<br />2 ·
+                  <code>ryco serve</code> headless<br />3 · Desktop bootstraps it over SSH
+                </p>
+              </div>
+            </div>
+            <p>
+              They combine freely: a manually-hosted server reached by direct <code>wss</code>; the
+              <em>same</em> server also reachable via Tailscale; an SSH-<em>launched</em> server
+              reached through a forwarded socket; a local server <em>published</em> to your phone
+              via a tunnel. In every case the <code>ExecutionEnvironment</code> is the same kind of
+              thing — only the launch/access paths differ.
+            </p>
+            <div class="call key">
+              <div class="tag">Why it matters</div>
+              <p>
+                Because access and launch are separate,
+                <strong>Tailscale is just an “endpoint provider” add-on</strong> and
+                <strong>SSH is just a launch+forward helper</strong> — neither becomes a new
+                environment type, and neither changes the protocol the renderer speaks. The final
+                hop is always plain WebSocket.
+              </p>
+            </div>
+          </section>
 
-<!-- ============ NETWORK ACCESS ============ -->
-<section id="network">
-  <h2><span class="n">10</span>Network access & advertised endpoints</h2>
-  <p>By default a desktop backend binds to loopback only. To reach it from another device you flip <strong>Settings → Connections → Network access</strong>.</p>
-  <div class="seq">
-    <div class="s"><b>Toggle sets a persisted mode.</b><p><code>serverExposureMode: "local-only" | "network-accessible"</code> (default local-only).</p></div>
-    <div class="s"><b>The app relaunches.</b><p>There is <strong>no hot re-bind</strong>. The desktop app relaunches and re-spawns the backend with <code>host = 0.0.0.0</code> (all interfaces) instead of <code>127.0.0.1</code>. If no usable LAN address exists it refuses with “No reachable network address is available.”</p></div>
-    <div class="s"><b>Endpoints are enumerated.</b><p>The LAN IP is found by walking <code>os.networkInterfaces()</code> for the first non-internal IPv4 (skipping <code>127.*</code> / <code>169.254.*</code>). The result is surfaced as <code>AdvertisedEndpoint</code> records.</p></div>
-    <div class="s"><b>You pair another device.</b><p>“Create Link” generates a pairing link/QR from the chosen default endpoint.</p></div>
-  </div>
+          <!-- ============ NETWORK ACCESS ============ -->
+          <section id="network">
+            <h2><span class="n">10</span>Network access & advertised endpoints</h2>
+            <p>
+              By default a desktop backend binds to loopback only. To reach it from another device
+              you flip <strong>Settings → Connections → Network access</strong>.
+            </p>
+            <div class="seq">
+              <div class="s">
+                <b>Toggle sets a persisted mode.</b>
+                <p>
+                  <code>serverExposureMode: "local-only" | "network-accessible"</code> (default
+                  local-only).
+                </p>
+              </div>
+              <div class="s">
+                <b>The app relaunches.</b>
+                <p>
+                  There is <strong>no hot re-bind</strong>. The desktop app relaunches and re-spawns
+                  the backend with <code>host = 0.0.0.0</code> (all interfaces) instead of
+                  <code>127.0.0.1</code>. If no usable LAN address exists it refuses with “No
+                  reachable network address is available.”
+                </p>
+              </div>
+              <div class="s">
+                <b>Endpoints are enumerated.</b>
+                <p>
+                  The LAN IP is found by walking <code>os.networkInterfaces()</code> for the first
+                  non-internal IPv4 (skipping <code>127.*</code> / <code>169.254.*</code>). The
+                  result is surfaced as <code>AdvertisedEndpoint</code> records.
+                </p>
+              </div>
+              <div class="s">
+                <b>You pair another device.</b>
+                <p>“Create Link” generates a pairing link/QR from the chosen default endpoint.</p>
+              </div>
+            </div>
 
-  <h3>What an advertised endpoint carries</h3>
-  <p>Endpoints come from four hard-coded “providers” — <code>server-core</code>, <code>desktop-core</code>, <code>manual</code>, and the <code>tailscale</code> add-on — and are ranked client-side. Each is tagged:</p>
-  <div class="tbl"><table>
-    <thead><tr><th>Facet</th><th>Values</th></tr></thead>
-    <tbody>
-      <tr><td><code>reachability</code></td><td><code>loopback</code> · <code>lan</code> · <code>private-network</code> · <code>public</code></td></tr>
-      <tr><td><code>provider.kind</code></td><td><code>core</code> · <code>private-network</code> · <code>tunnel</code> · <code>manual</code> &nbsp;(<code>isAddon</code> flags add-ons like Tailscale)</td></tr>
-      <tr><td><code>compatibility.hostedHttpsApp</code></td><td><code>compatible</code> · <code>mixed-content-blocked</code> · <code>requires-configuration</code> · <code>unknown</code></td></tr>
-      <tr><td><code>status</code></td><td><code>available</code> · <code>unavailable</code> · <code>unknown</code></td></tr>
-    </tbody>
-  </table></div>
-  <p>Any <code>http:</code> endpoint is auto-tagged <code>mixed-content-blocked</code> — a browser on an HTTPS page (like <code>app.ryco.dev</code>) can’t open a plain <code>http://</code>/<code>ws://</code> backend. That’s why LAN endpoints pair from the desktop/CLI directly, while HTTPS endpoints work from the hosted app.</p>
+            <h3>What an advertised endpoint carries</h3>
+            <p>
+              Endpoints come from four hard-coded “providers” — <code>server-core</code>,
+              <code>desktop-core</code>, <code>manual</code>, and the <code>tailscale</code> add-on
+              — and are ranked client-side. Each is tagged:
+            </p>
+            <div class="tbl">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Facet</th>
+                    <th>Values</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>reachability</code></td>
+                    <td>
+                      <code>loopback</code> · <code>lan</code> · <code>private-network</code> ·
+                      <code>public</code>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>provider.kind</code></td>
+                    <td>
+                      <code>core</code> · <code>private-network</code> · <code>tunnel</code> ·
+                      <code>manual</code> &nbsp;(<code>isAddon</code> flags add-ons like Tailscale)
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>compatibility.hostedHttpsApp</code></td>
+                    <td>
+                      <code>compatible</code> · <code>mixed-content-blocked</code> ·
+                      <code>requires-configuration</code> · <code>unknown</code>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>status</code></td>
+                    <td>
+                      <code>available</code> · <code>unavailable</code> · <code>unknown</code>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Any <code>http:</code> endpoint is auto-tagged <code>mixed-content-blocked</code> — a
+              browser on an HTTPS page (like <code>app.ryco.dev</code>) can’t open a plain
+              <code>http://</code>/<code>ws://</code> backend. That’s why LAN endpoints pair from
+              the desktop/CLI directly, while HTTPS endpoints work from the hosted app.
+            </p>
 
-  <h3>Default endpoint & why it survives IP changes</h3>
-  <p>The UI shows one default endpoint (it drives the QR + primary copy action) and hides the rest behind a <code>+N</code> expander. Your override is persisted by a <strong>stable endpoint kind</strong>, never the raw URL:</p>
-  <pre><code>desktop-lan / server-network  →  "desktop-core:lan:http"
+            <h3>Default endpoint & why it survives IP changes</h3>
+            <p>
+              The UI shows one default endpoint (it drives the QR + primary copy action) and hides
+              the rest behind a <code>+N</code> expander. Your override is persisted by a
+              <strong>stable endpoint kind</strong>, never the raw URL:
+            </p>
+            <pre><code>desktop-lan / server-network  →  "desktop-core:lan:http"
 tailscale-ip                  →  "tailscale:ip:http"
 tailscale-magicdns            →  "tailscale:magicdns:https"</code></pre>
-  <p>So choosing “the LAN endpoint” keeps working after your <code>192.168.x.y</code> changes when you switch networks — the stored key is the <em>kind</em>, not the address.</p>
-</section>
+            <p>
+              So choosing “the LAN endpoint” keeps working after your
+              <code>192.168.x.y</code> changes when you switch networks — the stored key is the
+              <em>kind</em>, not the address.
+            </p>
+          </section>
 
-<!-- ============ TAILSCALE ============ -->
-<section id="tailscale">
-  <h2><span class="n">11</span>Tailscale</h2>
-  <p>Tailscale is the first (and currently only) endpoint-provider add-on. It contributes private-network endpoints for the same environment and pairing model — it is not a separate remote path.</p>
+          <!-- ============ TAILSCALE ============ -->
+          <section id="tailscale">
+            <h2><span class="n">11</span>Tailscale</h2>
+            <p>
+              Tailscale is the first (and currently only) endpoint-provider add-on. It contributes
+              private-network endpoints for the same environment and pairing model — it is not a
+              separate remote path.
+            </p>
 
-  <h3>What it discovers</h3>
-  <p>The <code>packages/tailscale</code> wrapper shells out to exactly one status command and parses it:</p>
-  <pre><code>tailscale status --json     <span class="cm">// reads Self.DNSName + Self.TailscaleIPs</span></code></pre>
-  <ul>
-    <li><strong>Tailnet IP</strong> — validated against the CGNAT range <code>100.64.0.0/10</code> (that’s the <code>100.x.y.z</code> address).</li>
-    <li><strong>MagicDNS name</strong> — <code>Self.DNSName</code> with the trailing dot stripped.</li>
-    <li><strong>HTTPS MagicDNS URL</strong> — <code>https://machine.tailnet.ts.net/</code> (a <code>:port</code> is only appended when it isn’t 443).</li>
-  </ul>
-  <p>The desktop caches the MagicDNS name for 60&nbsp;s; the status call times out at 1.5&nbsp;s.</p>
+            <h3>What it discovers</h3>
+            <p>
+              The <code>packages/tailscale</code> wrapper shells out to exactly one status command
+              and parses it:
+            </p>
+            <pre><code>tailscale status --json     <span class="cm">// reads Self.DNSName + Self.TailscaleIPs</span></code></pre>
+            <ul>
+              <li>
+                <strong>Tailnet IP</strong> — validated against the CGNAT range
+                <code>100.64.0.0/10</code> (that’s the <code>100.x.y.z</code> address).
+              </li>
+              <li>
+                <strong>MagicDNS name</strong> — <code>Self.DNSName</code> with the trailing dot
+                stripped.
+              </li>
+              <li>
+                <strong>HTTPS MagicDNS URL</strong> —
+                <code>https://machine.tailnet.ts.net/</code> (a <code>:port</code> is only appended
+                when it isn’t 443).
+              </li>
+            </ul>
+            <p>
+              The desktop caches the MagicDNS name for 60&nbsp;s; the status call times out at
+              1.5&nbsp;s.
+            </p>
 
-  <h3>Tailscale Serve (HTTPS)</h3>
-  <p>With <code>--tailscale-serve</code> the server sets up a scoped resource that runs:</p>
-  <pre><code>tailscale serve --bg --https=443 http://127.0.0.1:&lt;localPort&gt;   <span class="cm">// setup</span>
+            <h3>Tailscale Serve (HTTPS)</h3>
+            <p>
+              With <code>--tailscale-serve</code> the server sets up a scoped resource that runs:
+            </p>
+            <pre><code>tailscale serve --bg --https=443 http://127.0.0.1:&lt;localPort&gt;   <span class="cm">// setup</span>
 tailscale serve --https=443 off                                <span class="cm">// teardown on shutdown</span></code></pre>
-  <p>Tailscale terminates HTTPS on the tailnet and reverse-proxies to the local backend, advertising the clean <code>https://machine.tailnet.ts.net/</code>. Use <code>--tailscale-serve-port 8443</code> for a non-default port. If the serve command fails, it’s logged and swallowed — the server still starts.</p>
+            <p>
+              Tailscale terminates HTTPS on the tailnet and reverse-proxies to the local backend,
+              advertising the clean <code>https://machine.tailnet.ts.net/</code>. Use
+              <code>--tailscale-serve-port 8443</code> for a non-default port. If the serve command
+              fails, it’s logged and swallowed — the server still starts.
+            </p>
 
-  <h3>Why the HTTPS row starts disabled (the “Setup” button)</h3>
-  <p>The Tailscale HTTPS endpoint is shown but disabled until Ryco <em>proves</em> it reaches this backend: it does an HTTP <code>GET</code> of <code>&lt;magicdns-url&gt;/.well-known/ryco/environment</code> (2.5&nbsp;s timeout) and only marks it <code>available</code> on a 2xx. Clicking <strong>Setup</strong> enables Serve (a relaunch, same as the CLI flag), after which the probe passes and the endpoint becomes usable — and hosted-app compatible.</p>
-  <div class="call warn">
-    <div class="tag">Good to know</div>
-    <p>For <code>https://app.ryco.dev</code>, prefer an HTTPS Tailnet endpoint. A plain <code>http://100.x.y.z:3773</code> works from a desktop client or an HTTP browser page, but not from the hosted HTTPS app (mixed-content). The commands <code>tailscale ip -4</code> / <code>tailscale cert</code> appear only in the README examples — the code path gets everything from <code>tailscale status --json</code> and lets <code>tailscale serve</code> handle certs.</p>
-  </div>
-</section>
+            <h3>Why the HTTPS row starts disabled (the “Setup” button)</h3>
+            <p>
+              The Tailscale HTTPS endpoint is shown but disabled until Ryco <em>proves</em> it
+              reaches this backend: it does an HTTP <code>GET</code> of
+              <code>&lt;magicdns-url&gt;/.well-known/ryco/environment</code> (2.5&nbsp;s timeout)
+              and only marks it <code>available</code> on a 2xx. Clicking
+              <strong>Setup</strong> enables Serve (a relaunch, same as the CLI flag), after which
+              the probe passes and the endpoint becomes usable — and hosted-app compatible.
+            </p>
+            <div class="call warn">
+              <div class="tag">Good to know</div>
+              <p>
+                For <code>https://app.ryco.dev</code>, prefer an HTTPS Tailnet endpoint. A plain
+                <code>http://100.x.y.z:3773</code> works from a desktop client or an HTTP browser
+                page, but not from the hosted HTTPS app (mixed-content). The commands
+                <code>tailscale ip -4</code> / <code>tailscale cert</code> appear only in the README
+                examples — the code path gets everything from
+                <code>tailscale status --json</code> and lets <code>tailscale serve</code> handle
+                certs.
+              </p>
+            </div>
+          </section>
 
-<!-- ============ PAIRING / AUTH ============ -->
-<section id="pairing">
-  <h2><span class="n">12</span>Pairing, auth & sessions</h2>
-  <p>The remote device doesn’t need a long-lived secret up front. It exchanges a one-time token for a session, then rides on the session.</p>
+          <!-- ============ PAIRING / AUTH ============ -->
+          <section id="pairing">
+            <h2><span class="n">12</span>Pairing, auth & sessions</h2>
+            <p>
+              The remote device doesn’t need a long-lived secret up front. It exchanges a one-time
+              token for a session, then rides on the session.
+            </p>
 
-  <div class="seq">
-    <div class="s"><b>A one-time token is issued.</b><p><code>ryco serve</code> mints a one-time <strong>owner</strong> token: 12 characters, Crockford alphabet, <strong>5-minute</strong> TTL. (The <code>ryco auth pairing create</code> CLI issues <em>client</em>-role tokens.)</p></div>
-    <div class="s"><b>The device exchanges it.</b><p><code>POST /api/auth/bootstrap</code> → sets an HttpOnly session cookie, or <code>POST /api/auth/bootstrap/bearer</code> → returns a bearer <code>sessionToken</code> in JSON (used by non-cookie clients: SSH bridge, headless). Consumption is single-use, enforced by an atomic SQL update.</p></div>
-    <div class="s"><b>A session is created.</b><p>The session token is self-describing — <code>base64url(claims).hmac</code> signed with a server key — with a <strong>30-day</strong> TTL. The token itself isn’t stored; only a DB row (for revocation) and the signing key are.</p></div>
-    <div class="s"><b>Each WS upgrade uses a throwaway token.</b><p>The long-lived cookie/bearer is exchanged via <code>POST /api/auth/ws-token</code> for a <strong>5-minute</strong> WebSocket token appended as <code>?wsToken=</code> on the upgrade URL. The upgrade also checks the request origin.</p></div>
-  </div>
+            <div class="seq">
+              <div class="s">
+                <b>A one-time token is issued.</b>
+                <p>
+                  <code>ryco serve</code> mints a one-time <strong>owner</strong> token: 12
+                  characters, Crockford alphabet, <strong>5-minute</strong> TTL. (The
+                  <code>ryco auth pairing create</code> CLI issues <em>client</em>-role tokens.)
+                </p>
+              </div>
+              <div class="s">
+                <b>The device exchanges it.</b>
+                <p>
+                  <code>POST /api/auth/bootstrap</code> → sets an HttpOnly session cookie, or
+                  <code>POST /api/auth/bootstrap/bearer</code> → returns a bearer
+                  <code>sessionToken</code> in JSON (used by non-cookie clients: SSH bridge,
+                  headless). Consumption is single-use, enforced by an atomic SQL update.
+                </p>
+              </div>
+              <div class="s">
+                <b>A session is created.</b>
+                <p>
+                  The session token is self-describing — <code>base64url(claims).hmac</code> signed
+                  with a server key — with a <strong>30-day</strong> TTL. The token itself isn’t
+                  stored; only a DB row (for revocation) and the signing key are.
+                </p>
+              </div>
+              <div class="s">
+                <b>Each WS upgrade uses a throwaway token.</b>
+                <p>
+                  The long-lived cookie/bearer is exchanged via
+                  <code>POST /api/auth/ws-token</code> for a <strong>5-minute</strong> WebSocket
+                  token appended as <code>?wsToken=</code> on the upgrade URL. The upgrade also
+                  checks the request origin.
+                </p>
+              </div>
+            </div>
 
-  <h3>Managing access — the <code>ryco auth</code> CLI</h3>
-  <div class="tbl"><table>
-    <thead><tr><th>Command</th><th>Does</th></tr></thead>
-    <tbody>
-      <tr><td><code>ryco auth pairing create</code></td><td>Issue a one-time <em>client</em> pairing token (<code>--ttl --label --base-url --json</code>)</td></tr>
-      <tr><td><code>ryco auth pairing list / revoke &lt;id&gt;</code></td><td>List active pairing links / revoke one</td></tr>
-      <tr><td><code>ryco auth session issue</code></td><td>Mint a bearer session (<code>--role owner|client --ttl --token-only</code>)</td></tr>
-      <tr><td><code>ryco auth session list / revoke &lt;id&gt;</code></td><td>Inspect / revoke active sessions</td></tr>
-    </tbody>
-  </table></div>
-  <p>Revocation always works even though session tokens are self-describing: <code>verify</code> re-checks the DB row and rejects anything revoked. Roles are enforced per-RPC — owner-only methods (network-access management, pairing management) fail for client sessions.</p>
+            <h3>Managing access — the <code>ryco auth</code> CLI</h3>
+            <div class="tbl">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Command</th>
+                    <th>Does</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>ryco auth pairing create</code></td>
+                    <td>
+                      Issue a one-time <em>client</em> pairing token (<code
+                        >--ttl --label --base-url --json</code
+                      >)
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>ryco auth pairing list / revoke &lt;id&gt;</code></td>
+                    <td>List active pairing links / revoke one</td>
+                  </tr>
+                  <tr>
+                    <td><code>ryco auth session issue</code></td>
+                    <td>
+                      Mint a bearer session (<code>--role owner|client --ttl --token-only</code>)
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>ryco auth session list / revoke &lt;id&gt;</code></td>
+                    <td>Inspect / revoke active sessions</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Revocation always works even though session tokens are self-describing:
+              <code>verify</code> re-checks the DB row and rejects anything revoked. Roles are
+              enforced per-RPC — owner-only methods (network-access management, pairing management)
+              fail for client sessions.
+            </p>
 
-  <h3>Hosted web pairing & the URL hash</h3>
-  <p>A hosted link looks like:</p>
-  <pre><code>https://app.ryco.dev/pair?host=https://backend.example.com:3773#token=PAIRCODE</code></pre>
-  <p>The <code>host</code> is a query param; the <strong>token is in the URL hash</strong>. That’s deliberate — URL fragments are never sent in HTTP requests, so the pairing token never reaches the hosted app’s server (no logs, no <code>Referer</code>). The browser then connects <em>directly</em> to the backend; the hosted app never proxies traffic. Hosted pairing only works against HTTPS/WSS backends.</p>
-  <details>
-    <summary>Under the hood — auth internals</summary>
-    <div class="body">
-      <ul>
-        <li>Two services: <code>AuthControlPlane</code> (local, behind the <code>ryco auth</code> CLI) and <code>ServerAuth</code> (request-facing HTTP/WS).</li>
-        <li>Tables: <code>auth_pairing_links</code> (credential stored plaintext — single-use + TTL mitigate) and <code>auth_sessions</code> (+ client metadata, <code>last_connected_at</code>).</li>
-        <li>Signing key: file secret at <code>&lt;stateDir&gt;/secrets/server-signing-key.bin</code>, dir <code>0700</code> / file <code>0600</code>.</li>
-        <li>WS enforcement has three layers: origin check + <code>wsToken</code> on upgrade → 5-min WS token issue/verify → per-RPC role gating.</li>
-        <li><code>unsafe-no-auth</code> exists as an explicit escape hatch, not a normal mode.</li>
-      </ul>
-    </div>
-  </details>
-</section>
+            <h3>Hosted web pairing & the URL hash</h3>
+            <p>A hosted link looks like:</p>
+            <pre><code>https://app.ryco.dev/pair?host=https://backend.example.com:3773#token=PAIRCODE</code></pre>
+            <p>
+              The <code>host</code> is a query param; the <strong>token is in the URL hash</strong>.
+              That’s deliberate — URL fragments are never sent in HTTP requests, so the pairing
+              token never reaches the hosted app’s server (no logs, no <code>Referer</code>). The
+              browser then connects <em>directly</em> to the backend; the hosted app never proxies
+              traffic. Hosted pairing only works against HTTPS/WSS backends.
+            </p>
+            <details>
+              <summary>Under the hood — auth internals</summary>
+              <div class="body">
+                <ul>
+                  <li>
+                    Two services: <code>AuthControlPlane</code> (local, behind the
+                    <code>ryco auth</code> CLI) and <code>ServerAuth</code> (request-facing
+                    HTTP/WS).
+                  </li>
+                  <li>
+                    Tables: <code>auth_pairing_links</code> (credential stored plaintext —
+                    single-use + TTL mitigate) and <code>auth_sessions</code> (+ client metadata,
+                    <code>last_connected_at</code>).
+                  </li>
+                  <li>
+                    Signing key: file secret at
+                    <code>&lt;stateDir&gt;/secrets/server-signing-key.bin</code>, dir
+                    <code>0700</code> / file <code>0600</code>.
+                  </li>
+                  <li>
+                    WS enforcement has three layers: origin check + <code>wsToken</code> on upgrade
+                    → 5-min WS token issue/verify → per-RPC role gating.
+                  </li>
+                  <li>
+                    <code>unsafe-no-auth</code> exists as an explicit escape hatch, not a normal
+                    mode.
+                  </li>
+                </ul>
+              </div>
+            </details>
+          </section>
 
-<!-- ============ HEADLESS SERVE ============ -->
-<section id="serve">
-  <h2><span class="n">13</span>Headless <code>ryco serve</code></h2>
-  <p>Run a server with no GUI — e.g. on a box you reach over SSH:</p>
-  <pre><code><span class="kw">npx</span> ryco serve --host "$(tailscale ip -4)"
+          <!-- ============ HEADLESS SERVE ============ -->
+          <section id="serve">
+            <h2><span class="n">13</span>Headless <code>ryco serve</code></h2>
+            <p>Run a server with no GUI — e.g. on a box you reach over SSH:</p>
+            <pre><code><span class="kw">npx</span> ryco serve --host "$(tailscale ip -4)"
 <span class="kw">npx</span> ryco serve --tailscale-serve                 <span class="cm"># opt in to HTTPS MagicDNS (port 443)</span>
 <span class="kw">npx</span> ryco serve --tailscale-serve --tailscale-serve-port 8443</code></pre>
-  <p>It starts the server without opening a browser and prints a connection string, an owner pairing token, a pairing URL, and a terminal QR code:</p>
-  <pre><code>Ryco server is ready.
+            <p>
+              It starts the server without opening a browser and prints a connection string, an
+              owner pairing token, a pairing URL, and a terminal QR code:
+            </p>
+            <pre><code>Ryco server is ready.
 Connection string: http://&lt;host&gt;:3773
 Token: &lt;PAIRCODE&gt;
 Pairing URL: http://&lt;host&gt;:3773/pair#token=&lt;PAIRCODE&gt;
@@ -609,275 +1742,775 @@ Pairing URL: http://&lt;host&gt;:3773/pair#token=&lt;PAIRCODE&gt;
   ▄▄▄▄▄▄▄  ▄▄ ▄ ▄▄▄▄▄▄▄        <span class="cm"># QR of the pairing URL (half-block glyphs)</span>
   █ ▀▀▀ █  ▄▀▄  █ ▀▀▀ █
   ...</code></pre>
-  <p>From another device you then: scan the QR, enter the full pairing URL in the desktop app, enter host + token separately, or (for HTTPS backends) open the hosted pairing URL. Shared flags include <code>--host</code>, <code>--port</code> (default <strong>3773</strong>), a <code>cwd</code> positional, plus the Tailscale flags; every flag has an <code>RYCO_*</code> env equivalent.</p>
-  <div class="call warn">
-    <div class="tag">Current limitation</div>
-    <p>The GUIs don’t yet support <em>adding projects</em> on remote environments. On the server machine, use <code>ryco project …</code> for now. Full GUI remote project management is “coming soon.”</p>
-  </div>
-</section>
+            <p>
+              From another device you then: scan the QR, enter the full pairing URL in the desktop
+              app, enter host + token separately, or (for HTTPS backends) open the hosted pairing
+              URL. Shared flags include <code>--host</code>, <code>--port</code> (default
+              <strong>3773</strong>), a <code>cwd</code> positional, plus the Tailscale flags; every
+              flag has an <code>RYCO_*</code> env equivalent.
+            </p>
+            <div class="call warn">
+              <div class="tag">Current limitation</div>
+              <p>
+                The GUIs don’t yet support <em>adding projects</em> on remote environments. On the
+                server machine, use <code>ryco project …</code> for now. Full GUI remote project
+                management is “coming soon.”
+              </p>
+            </div>
+          </section>
 
-<!-- ============ SSH ============ -->
-<section id="ssh">
-  <h2><span class="n">14</span>Desktop-managed SSH launch</h2>
-  <p>When you want the desktop app to start (or reuse) Ryco on another machine over SSH: <strong>Settings → Connections → Add environment → SSH</strong>, enter e.g. <code>user@host</code>, confirm. The desktop main process owns this because it needs to spawn SSH, handle password prompts, and clean up forwards.</p>
-  <div class="seq">
-    <div class="s"><b>Resolve the target.</b><p><code>ssh -G &lt;alias&gt;</code> parses hostname/user/port (falls back to alias-as-hostname).</p></div>
-    <div class="s"><b>Reuse a live tunnel if healthy.</b><p>An existing forward is probed for 2&nbsp;s; reused if healthy, rebuilt if stale.</p></div>
-    <div class="s"><b>Launch or reuse the remote server.</b><p>Pipes a POSIX script over SSH. It keeps per-target state in <code>~/.ryco/ssh-launch/&lt;key&gt;/</code>, resolves Node (activating <strong>fnm</strong> for non-interactive shells), then runs <code>node &lt;script&gt;</code> / <code>ryco</code> / <code>npx --yes ryco@latest</code>. A pre-existing default server is reused as <em>external</em>; otherwise it starts a <em>managed</em> one: <code>serve --host 127.0.0.1 --port &lt;picked&gt; --base-dir ~/.ryco</code> (port scans from 3773).</p></div>
-    <div class="s"><b>Open a local port-forward.</b><p><code>ssh -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -N -L &lt;localPort&gt;:127.0.0.1:&lt;remotePort&gt;</code>. The renderer then connects to <code>ws://127.0.0.1:&lt;localPort&gt;</code> — an ordinary WebSocket, like any other environment.</p></div>
-    <div class="s"><b>Pair over the forward.</b><p>Issues a token on the remote (<code>auth pairing create --json</code>), exchanges it for a bearer over loopback, fetches the descriptor, and saves the environment.</p></div>
-  </div>
-  <h4>Password prompts & reconnect</h4>
-  <p>SSH auth uses an askpass helper fed by the secret you type in the renderer (a modal with a 3-minute timeout); up to 2 retries. No credentials are stored beyond the session. On reconnect, Ryco <strong>restores the SSH bridge first</strong> (re-runs the launch/forward, refreshing the local URLs) and only then reconnects the WebSocket.</p>
-  <p>What’s saved for an SSH environment is just the target — <code>desktopSsh { alias, hostname, username, port }</code> — plus the loopback base URLs, label and timestamps. The transient remote port and pairing token are <em>not</em> persisted; they’re re-derived on each reconnect.</p>
-</section>
+          <!-- ============ SSH ============ -->
+          <section id="ssh">
+            <h2><span class="n">14</span>Desktop-managed SSH launch</h2>
+            <p>
+              When you want the desktop app to start (or reuse) Ryco on another machine over SSH:
+              <strong>Settings → Connections → Add environment → SSH</strong>, enter e.g.
+              <code>user@host</code>, confirm. The desktop main process owns this because it needs
+              to spawn SSH, handle password prompts, and clean up forwards.
+            </p>
+            <div class="seq">
+              <div class="s">
+                <b>Resolve the target.</b>
+                <p>
+                  <code>ssh -G &lt;alias&gt;</code> parses hostname/user/port (falls back to
+                  alias-as-hostname).
+                </p>
+              </div>
+              <div class="s">
+                <b>Reuse a live tunnel if healthy.</b>
+                <p>
+                  An existing forward is probed for 2&nbsp;s; reused if healthy, rebuilt if stale.
+                </p>
+              </div>
+              <div class="s">
+                <b>Launch or reuse the remote server.</b>
+                <p>
+                  Pipes a POSIX script over SSH. It keeps per-target state in
+                  <code>~/.ryco/ssh-launch/&lt;key&gt;/</code>, resolves Node (activating
+                  <strong>fnm</strong> for non-interactive shells), then runs
+                  <code>node &lt;script&gt;</code> / <code>ryco</code> /
+                  <code>npx --yes ryco@latest</code>. A pre-existing default server is reused as
+                  <em>external</em>; otherwise it starts a <em>managed</em> one:
+                  <code>serve --host 127.0.0.1 --port &lt;picked&gt; --base-dir ~/.ryco</code> (port
+                  scans from 3773).
+                </p>
+              </div>
+              <div class="s">
+                <b>Open a local port-forward.</b>
+                <p>
+                  <code
+                    >ssh -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -N -L
+                    &lt;localPort&gt;:127.0.0.1:&lt;remotePort&gt;</code
+                  >. The renderer then connects to <code>ws://127.0.0.1:&lt;localPort&gt;</code> —
+                  an ordinary WebSocket, like any other environment.
+                </p>
+              </div>
+              <div class="s">
+                <b>Pair over the forward.</b>
+                <p>
+                  Issues a token on the remote (<code>auth pairing create --json</code>), exchanges
+                  it for a bearer over loopback, fetches the descriptor, and saves the environment.
+                </p>
+              </div>
+            </div>
+            <h4>Password prompts & reconnect</h4>
+            <p>
+              SSH auth uses an askpass helper fed by the secret you type in the renderer (a modal
+              with a 3-minute timeout); up to 2 retries. No credentials are stored beyond the
+              session. On reconnect, Ryco <strong>restores the SSH bridge first</strong> (re-runs
+              the launch/forward, refreshing the local URLs) and only then reconnects the WebSocket.
+            </p>
+            <p>
+              What’s saved for an SSH environment is just the target —
+              <code>desktopSsh { alias, hostname, username, port }</code> — plus the loopback base
+              URLs, label and timestamps. The transient remote port and pairing token are
+              <em>not</em> persisted; they’re re-derived on each reconnect.
+            </p>
+          </section>
 
-<!-- ============ PROVIDERS ============ -->
-<section id="providers">
-  <h2><span class="n">15</span>Providers on an environment — and “not installed on the remote machine”</h2>
-  <p>Providers (Codex, Claude, Copilot, OpenCode, Cursor) run on the <strong>server’s</strong> machine. This is the crux of your question.</p>
-  <div class="call ans">
-    <div class="tag">Answering your question directly</div>
-    <p>If a provider isn’t installed on the remote machine, Ryco does <strong>not</strong> provide it and does <strong>not</strong> ship credentials across. When you connect to a remote environment, the providers/versions/auth you see are the <em>remote machine’s</em>. To use one there you must <strong>install and <code>login</code> its CLI on that machine</strong> (over SSH/terminal). Syncing provider auth across machines is an explicit non-goal.</p>
-  </div>
+          <!-- ============ PROVIDERS ============ -->
+          <section id="providers">
+            <h2>
+              <span class="n">15</span>Providers on an environment — and “not installed on the
+              remote machine”
+            </h2>
+            <p>
+              Providers (Codex, Claude, Copilot, OpenCode, Cursor) run on the
+              <strong>server’s</strong> machine. This is the crux of your question.
+            </p>
+            <div class="call ans">
+              <div class="tag">Answering your question directly</div>
+              <p>
+                If a provider isn’t installed on the remote machine, Ryco does
+                <strong>not</strong> provide it and does <strong>not</strong> ship credentials
+                across. When you connect to a remote environment, the providers/versions/auth you
+                see are the <em>remote machine’s</em>. To use one there you must
+                <strong>install and <code>login</code> its CLI on that machine</strong> (over
+                SSH/terminal). Syncing provider auth across machines is an explicit non-goal.
+              </p>
+            </div>
 
-  <h3>How Ryco detects availability</h3>
-  <p>Each provider is probed by literally running its CLI/SDK on the host. The result flows to <strong>Settings → Providers</strong> as a live status snapshot (<code>installed</code>, <code>version</code>, <code>status</code>, <code>auth</code>, models…):</p>
-  <div class="tbl"><table>
-    <thead><tr><th>Provider</th><th>Probe</th><th>If missing / unauthenticated → message</th></tr></thead>
-    <tbody>
-      <tr><td>Codex</td><td>spawn <code>codex app-server</code>, <code>initialize</code> + <code>account/read</code></td><td>“Codex CLI (<code>codex</code>) is not installed or not on PATH.” · “Run <code>codex login</code>…”</td></tr>
-      <tr><td>Claude</td><td><code>claude --version</code> + an Agent-SDK capability probe</td><td>“Claude Agent CLI (<code>claude</code>) is not installed or not on PATH.”</td></tr>
-      <tr><td>Copilot</td><td><code>@github/copilot-sdk</code> <code>getStatus/getAuthStatus</code></td><td>“GitHub Copilot CLI (<code>copilot</code>) is not installed or not on PATH.”</td></tr>
-      <tr><td>OpenCode</td><td><code>opencode --version</code> (min 1.14.19), then connect</td><td>“OpenCode CLI (<code>opencode</code>) is not installed or not on PATH.”</td></tr>
-      <tr><td>Cursor</td><td><code>agent about</code> (version + auth in one call)</td><td>“Cursor Agent CLI (<code>agent</code>) is not installed or not on PATH.” · “Run <code>agent login</code>…”</td></tr>
-    </tbody>
-  </table></div>
-  <p>A missing provider stays a <em>live</em> instance but reports <code>installed: false</code> with the exact remediation message — a red row you can read, not a silent failure. (A driver the build doesn’t even know about shows up as a separate <code>unavailable</code> shell.) Ryco has no in-app login for coding-agent providers; it reflects the CLI’s own credential store on that host.</p>
+            <h3>How Ryco detects availability</h3>
+            <p>
+              Each provider is probed by literally running its CLI/SDK on the host. The result flows
+              to <strong>Settings → Providers</strong> as a live status snapshot
+              (<code>installed</code>, <code>version</code>, <code>status</code>, <code>auth</code>,
+              models…):
+            </p>
+            <div class="tbl">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Provider</th>
+                    <th>Probe</th>
+                    <th>If missing / unauthenticated → message</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Codex</td>
+                    <td>
+                      spawn <code>codex app-server</code>, <code>initialize</code> +
+                      <code>account/read</code>
+                    </td>
+                    <td>
+                      “Codex CLI (<code>codex</code>) is not installed or not on PATH.” · “Run
+                      <code>codex login</code>…”
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Claude</td>
+                    <td><code>claude --version</code> + an Agent-SDK capability probe</td>
+                    <td>
+                      “Claude Agent CLI (<code>claude</code>) is not installed or not on PATH.”
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Copilot</td>
+                    <td><code>@github/copilot-sdk</code> <code>getStatus/getAuthStatus</code></td>
+                    <td>
+                      “GitHub Copilot CLI (<code>copilot</code>) is not installed or not on PATH.”
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>OpenCode</td>
+                    <td><code>opencode --version</code> (min 1.14.19), then connect</td>
+                    <td>“OpenCode CLI (<code>opencode</code>) is not installed or not on PATH.”</td>
+                  </tr>
+                  <tr>
+                    <td>Cursor</td>
+                    <td><code>agent about</code> (version + auth in one call)</td>
+                    <td>
+                      “Cursor Agent CLI (<code>agent</code>) is not installed or not on PATH.” ·
+                      “Run <code>agent login</code>…”
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              A missing provider stays a <em>live</em> instance but reports
+              <code>installed: false</code> with the exact remediation message — a red row you can
+              read, not a silent failure. (A driver the build doesn’t even know about shows up as a
+              separate <code>unavailable</code> shell.) Ryco has no in-app login for coding-agent
+              providers; it reflects the CLI’s own credential store on that host.
+            </p>
 
-  <h3>Provider <em>instances</em> — running the same driver twice</h3>
-  <p>Routing is instance-based. A <strong>driver</strong> is the implementation; an <strong>instance</strong> (<code>ProviderInstanceId</code> like <code>codex_work</code>) is a named copy with its own config. <code>ServerSettings.providerInstances</code> stores per instance:</p>
-  <div class="chips">
-    <span class="chip">driver</span><span class="chip">displayName</span><span class="chip">accentColor</span><span class="chip">enabled</span><span class="chip">environment (env vars)</span><span class="chip">driver-specific config</span>
-  </div>
-  <p>Instances hot-reload when settings change. This is how you run <code>codex_personal</code> + <code>codex_work</code> with independent auth, models and colors.</p>
+            <h3>Provider <em>instances</em> — running the same driver twice</h3>
+            <p>
+              Routing is instance-based. A <strong>driver</strong> is the implementation; an
+              <strong>instance</strong> (<code>ProviderInstanceId</code> like
+              <code>codex_work</code>) is a named copy with its own config.
+              <code>ServerSettings.providerInstances</code> stores per instance:
+            </p>
+            <div class="chips">
+              <span class="chip">driver</span><span class="chip">displayName</span
+              ><span class="chip">accentColor</span><span class="chip">enabled</span
+              ><span class="chip">environment (env vars)</span
+              ><span class="chip">driver-specific config</span>
+            </div>
+            <p>
+              Instances hot-reload when settings change. This is how you run
+              <code>codex_personal</code> + <code>codex_work</code> with independent auth, models
+              and colors.
+            </p>
 
-  <h3>Finding binaries on a remote/GUI machine</h3>
-  <p>Each instance’s <code>binaryPath</code> defaults to the bare command (<code>codex</code>, <code>claude</code>…) resolved against <code>PATH</code>, but accepts an absolute path — the per-instance “point at a custom binary” knob. Crucially, a <code>fixPath</code> step at server boot rehydrates <code>PATH</code> from your <em>login shell</em>, so a desktop- or SSH-launched server still finds tools under Homebrew, nvm, <code>~/.local/bin</code>, etc. Per-instance env vars carry auth identity (<code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>…), and there are dedicated home-isolation knobs (<code>CODEX_HOME</code>/shadow home, a custom Claude <code>HOME</code>, OpenCode <code>serverUrl</code>).</p>
+            <h3>Finding binaries on a remote/GUI machine</h3>
+            <p>
+              Each instance’s <code>binaryPath</code> defaults to the bare command
+              (<code>codex</code>, <code>claude</code>…) resolved against <code>PATH</code>, but
+              accepts an absolute path — the per-instance “point at a custom binary” knob.
+              Crucially, a <code>fixPath</code> step at server boot rehydrates
+              <code>PATH</code> from your <em>login shell</em>, so a desktop- or SSH-launched server
+              still finds tools under Homebrew, nvm, <code>~/.local/bin</code>, etc. Per-instance
+              env vars carry auth identity (<code>ANTHROPIC_API_KEY</code>,
+              <code>OPENAI_API_KEY</code>…), and there are dedicated home-isolation knobs
+              (<code>CODEX_HOME</code>/shadow home, a custom Claude <code>HOME</code>, OpenCode
+              <code>serverUrl</code>).
+            </p>
 
-  <div class="call key">
-    <div class="tag">Ryco can update (not install) a provider remotely</div>
-    <p><code>server.updateProvider</code> infers how the CLI was installed (npm / bun / pnpm / brew / native) and runs the upgrade <strong>on the server machine</strong>, streaming progress back. Latest-version advisories come from the npm registry (1-hour cache). But first-time install and <code>login</code> remain yours to do on that host.</p>
-  </div>
-</section>
+            <div class="call key">
+              <div class="tag">Ryco can update (not install) a provider remotely</div>
+              <p>
+                <code>server.updateProvider</code> infers how the CLI was installed (npm / bun /
+                pnpm / brew / native) and runs the upgrade <strong>on the server machine</strong>,
+                streaming progress back. Latest-version advisories come from the npm registry
+                (1-hour cache). But first-time install and <code>login</code> remain yours to do on
+                that host.
+              </p>
+            </div>
+          </section>
 
-<!-- ============ DATA MODEL ============ -->
-<section id="datamodel">
-  <h2><span class="n">16</span>The local data model — projects, worktrees, threads, persistence</h2>
-  <p>Everything below lives on the environment’s machine: rows in one SQLite file and directories on disk. It is event-sourced — an append-only <code>orchestration_events</code> log is the source of truth, and <code>projection_*</code> tables are read models rebuilt from it.</p>
+          <!-- ============ DATA MODEL ============ -->
+          <section id="datamodel">
+            <h2>
+              <span class="n">16</span>The local data model — projects, worktrees, threads,
+              persistence
+            </h2>
+            <p>
+              Everything below lives on the environment’s machine: rows in one SQLite file and
+              directories on disk. It is event-sourced — an append-only
+              <code>orchestration_events</code> log is the source of truth, and
+              <code>projection_*</code> tables are read models rebuilt from it.
+            </p>
 
-  <div class="fig">
-    <div class="stack">
-      <div class="layer"><div class="lt">Environment = one server</div><div class="ld">one <code>state.sqlite</code> · one <code>environment-id</code></div></div>
-      <div class="arrow">│ owns many │</div>
-      <div class="layer"><div class="lt">Project</div><div class="ld"><code>workspace_root</code> path + title · row in <code>projection_projects</code></div></div>
-      <div class="arrow">│ has many │</div>
-      <div class="layer"><div class="lt">Worktree</div><div class="ld">git checkout for a branch/PR/issue · row in <code>projection_worktrees</code> + a directory on disk</div></div>
-      <div class="arrow">│ hosts │</div>
-      <div class="layer hl"><div class="lt">Thread (the chat)</div><div class="ld">messages · activities · checkpoints — rows keyed by <code>thread_id</code>, <strong>in the DB, not in the worktree folder</strong></div></div>
+            <div class="fig">
+              <div class="stack">
+                <div class="layer">
+                  <div class="lt">Environment = one server</div>
+                  <div class="ld">
+                    one <code>state.sqlite</code> · one <code>environment-id</code>
+                  </div>
+                </div>
+                <div class="arrow">│ owns many │</div>
+                <div class="layer">
+                  <div class="lt">Project</div>
+                  <div class="ld">
+                    <code>workspace_root</code> path + title · row in
+                    <code>projection_projects</code>
+                  </div>
+                </div>
+                <div class="arrow">│ has many │</div>
+                <div class="layer">
+                  <div class="lt">Worktree</div>
+                  <div class="ld">
+                    git checkout for a branch/PR/issue · row in <code>projection_worktrees</code> +
+                    a directory on disk
+                  </div>
+                </div>
+                <div class="arrow">│ hosts │</div>
+                <div class="layer hl">
+                  <div class="lt">Thread (the chat)</div>
+                  <div class="ld">
+                    messages · activities · checkpoints — rows keyed by <code>thread_id</code>,
+                    <strong>in the DB, not in the worktree folder</strong>
+                  </div>
+                </div>
+              </div>
+              <div class="figcap">
+                A thread merely <em>references</em> a worktree (by <code>worktree_id</code> or a
+                legacy <code>worktree_path</code> string). The chat content is never stored inside
+                the checkout.
+              </div>
+            </div>
+
+            <h3>Where it all lives on disk</h3>
+            <div class="pathmap">
+              ~/.ryco/ <span class="c"># baseDir — override via RYCO_HOME or --base-dir</span> ├─
+              userdata/ <span class="c"># stateDir</span> │ ├─ state.sqlite
+              <span class="c"># THE database: projects, worktrees, threads, events, auth…</span> │
+              ├─ environment-id <span class="c"># the server's stable UUID</span> │ ├─ attachments/…
+              <span class="c"># turn attachments</span> │ └─ secrets/server-signing-key.bin
+              <span class="c"># session HMAC key (0600)</span> ├─
+              worktrees/&lt;projectId&gt;/&lt;branch&gt;__&lt;word&gt;/
+              <span class="c"># app-managed git worktree checkouts</span> └─ ssh-launch/&lt;key&gt;/
+              <span class="c"># per-target remote-launch state (pid/port/log)</span>
+            </div>
+
+            <h3>The tables that matter</h3>
+            <div class="tbl">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Table</th>
+                    <th>Holds</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>orchestration_events</code></td>
+                    <td>
+                      Append-only event log — the source of truth (<code
+                        >stream_id = thread_id</code
+                      >
+                      for thread events)
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>projection_projects</code></td>
+                    <td>
+                      <code>workspace_root</code>, title, default model, metadata dir, scripts…
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>projection_worktrees</code></td>
+                    <td>
+                      <code
+                        >worktree_id, project_id, branch, worktree_path,
+                        origin(main/branch/pr/issue/manual)</code
+                      >, PR/issue/Jira fields
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>projection_threads</code></td>
+                    <td>
+                      <code
+                        >thread_id, project_id, worktree_id, worktree_path, branch, runtime_mode,
+                        interaction_mode, manual_status_bucket</code
+                      >
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>projection_thread_messages</code> / <code>_activities</code></td>
+                    <td>
+                      The actual conversation + tool timeline, keyed by <code>thread_id</code>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>auth_pairing_links</code> / <code>auth_sessions</code></td>
+                    <td>Pairing tokens & sessions (<a href="#pairing">§12</a>)</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Status buckets (<code>idle / in_progress / review / done</code>) are a per-<em
+                >thread</em
+              >
+              field (<code>manual_status_bucket</code>), not a worktree property.
+              <code>RepositoryIdentity</code> — derived from the git remote URL — is used only for
+              <em>grouping</em> local and remote clones of the same repo in the sidebar; it never
+              routes anything. Symlinked roots (Dropbox ↔ CloudStorage) canonicalize to the same
+              identity via <code>git rev-parse --show-toplevel</code>. “Local project folders” are
+              purely client-side UI state, not in the DB.
+            </p>
+          </section>
+
+          <!-- ============ COPY CHATS ============ -->
+          <section id="copychats">
+            <h2><span class="n">17</span>Copying a worktree to “keep the chats”</h2>
+            <div class="call no">
+              <div class="tag">The direct answer</div>
+              <p>
+                <strong
+                  >You cannot copy a worktree directory to another environment and keep its
+                  chats.</strong
+                >
+                Copying the folder carries the git checkout and nothing else. There is no thread
+                copy / move / transfer / export / import feature anywhere in Ryco — an exhaustive
+                search turns up zero.
+              </p>
+            </div>
+            <p>Why, concretely:</p>
+            <ul>
+              <li>
+                <strong>Chats aren’t in the folder.</strong> Messages/activities/events are rows in
+                the server’s <code>state.sqlite</code>, keyed by <code>thread_id</code>. The
+                worktree directory is a plain git checkout under <code>~/.ryco/worktrees/…</code> —
+                it contains none of them.
+              </li>
+              <li>
+                <strong>A thread only points at a worktree</strong> via a
+                <code>worktree_id</code> FK (or a legacy <code>worktree_path</code> string). Copying
+                the directory creates no DB rows and rewrites no pointers, so the destination’s
+                database has nothing referencing it.
+              </li>
+              <li>
+                <strong>Environments are a hard wall.</strong> Each server has its own
+                <code>state.sqlite</code> and <code>environment-id</code>; threads are addressed as
+                <code>(environmentId, threadId)</code>. Environment B’s DB simply has no rows for
+                environment A’s threads, and there’s no ingestion path to add them.
+              </li>
+            </ul>
+            <div class="call warn">
+              <div class="tag">What you’d actually have to do</div>
+              <p>
+                To carry chats to another machine you’d have to copy the whole
+                <code>state.sqlite</code> (or replay its event log) and reconcile the
+                <code>workspace_root</code> paths — there is no supported, first-class flow for that
+                today.
+              </p>
+            </div>
+            <h4>Lifecycle facts worth knowing</h4>
+            <ul>
+              <li>
+                Chats are pinned to a stable <code>thread_id</code>, not to a path — so
+                renaming/moving the checkout doesn’t lose them.
+              </li>
+              <li><strong>Archiving</strong> a worktree leaves its threads fully intact.</li>
+              <li>
+                <strong>Deleting</strong> a worktree <em>cascade-deletes</em> its attached threads
+                (soft-delete; the underlying events remain). So a hard delete intentionally removes
+                those chats.
+              </li>
+              <li>
+                A real <code>thread.attach-to-worktree</code> command exists, but it only runs as an
+                internal step of worktree create/import — there’s no user-facing “reassign this
+                chat” button, and nothing crosses environments.
+              </li>
+            </ul>
+          </section>
+
+          <!-- ============ UP TO DATE ============ -->
+          <section id="uptodate">
+            <h2><span class="n">18</span>Keeping up to date</h2>
+            <p>
+              “Up to date” means four different things in Ryco. Here’s each, and who’s responsible.
+            </p>
+
+            <h3>Desktop app auto-update</h3>
+            <p>
+              Via <code>electron-updater</code> against <strong>GitHub Releases</strong>, on two
+              channels (<code>latest</code> / <code>nightly</code>). Downloads and installs are
+              <strong>always user-triggered</strong> — never silent
+              (<code>autoDownload=false</code>, <code>autoInstallOnAppQuit=false</code>). It checks
+              15&nbsp;s after start and every 4&nbsp;h, and drives the sidebar pill:
+              <em>Update available → Downloading (x%) → Restart to update</em>. Only packaged
+              production builds (Linux: AppImage) update.
+            </p>
+
+            <h3>Client ↔ server version skew</h3>
+            <div class="call warn">
+              <div class="tag">Advisory only — no negotiation</div>
+              <p>
+                The WS upgrade is <strong>auth-only</strong>; nothing rejects or downgrades on
+                version. The client compares its version to the server’s
+                <code>serverVersion</code> and, if they differ, shows a dismissible banner (“Try
+                syncing the client and server to the same Ryco version”). If the two schemas stay
+                wire-compatible everything works; if a payload shape is incompatible you get a
+                decode error, not a graceful fallback.
+              </p>
+            </div>
+
+            <h3>Updating a remote / headless server</h3>
+            <p>
+              There is no server self-update. A plain <code>npx ryco serve</code> pulls the latest
+              published version only on relaunch. An SSH-launched <strong>managed</strong> server is
+              <em>reused</em> while healthy — a version bump alone won’t restart it, so a long-lived
+              managed server keeps its old version until you stop it (then the next connect
+              relaunches via <code>ryco@latest</code>). A pre-existing
+              <strong>external</strong> server is never managed or restarted by Ryco.
+            </p>
+
+            <h3>Reconnect, liveness & freshness (automatic)</h3>
+            <ul>
+              <li>
+                <strong>Heartbeat</strong> ping/pong; <code>isHeartbeatFresh</code> uses a 15&nbsp;s
+                window.
+              </li>
+              <li>
+                <strong>Exponential backoff</strong> 1&nbsp;s → 64&nbsp;s over 7 retries (8
+                attempts), at both the socket and subscription layers.
+              </li>
+              <li>
+                <strong>Browser-resume reconnect</strong> on tab focus/visibility for any stale
+                connection.
+              </li>
+              <li>
+                <strong>SSH bridge restored first</strong>, then the WebSocket, on reconnect of an
+                SSH environment.
+              </li>
+              <li>
+                <strong>Bootstrap gate:</strong> after every (re)connect the environment isn’t
+                “ready” until a fresh <em>shell snapshot</em> arrives; all subscription streams
+                (shell, thread, config, lifecycle, VCS, terminal, auth) re-emit their snapshots so
+                the UI re-syncs.
+              </li>
+              <li>
+                <strong>All saved environments</strong> are kept connected and fresh in the
+                background (concurrency 2), not just the active one; removed ones are torn down.
+              </li>
+            </ul>
+
+            <h3>Provider CLIs</h3>
+            <p>
+              Ryco surfaces an npm-registry “behind latest” advisory (1-hour cache) and offers
+              one-click <code>server.updateProvider</code> where the provider supports it — running
+              on whichever machine hosts that server. Providers without an update capability, and
+              all first-time installs/logins, are the user’s responsibility on that host.
+            </p>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>Concern</th>
+                  <th>Automatic</th>
+                  <th>Your responsibility</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Desktop app</td>
+                  <td>check, notify, 1-click download/install</td>
+                  <td>click install; prod builds only</td>
+                </tr>
+                <tr>
+                  <td>Version skew</td>
+                  <td>advisory banner</td>
+                  <td>align versions (no gate exists)</td>
+                </tr>
+                <tr>
+                  <td>Remote server</td>
+                  <td>cold SSH launch pulls <code>ryco@latest</code></td>
+                  <td>restart reused/managed servers to upgrade</td>
+                </tr>
+                <tr>
+                  <td>Reconnect / freshness</td>
+                  <td>fully automatic</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td>Provider CLIs</td>
+                  <td>advisory + 1-click update (on the host)</td>
+                  <td>install & login on each machine</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <!-- ============ REFERENCE ============ -->
+          <section id="reference">
+            <h2><span class="n">19</span>Reference — numbers, paths & file map</h2>
+            <h3>Numbers you’ll want</h3>
+            <div class="stats">
+              <div class="stat">
+                <div class="v">3773</div>
+                <div class="k">default server port</div>
+              </div>
+              <div class="stat">
+                <div class="v">5 min</div>
+                <div class="k">pairing token & WS-token TTL</div>
+              </div>
+              <div class="stat">
+                <div class="v">30 days</div>
+                <div class="k">session token TTL</div>
+              </div>
+              <div class="stat">
+                <div class="v">7 days</div>
+                <div class="k">browser bearer TTL</div>
+              </div>
+              <div class="stat">
+                <div class="v">1→64 s</div>
+                <div class="k">reconnect backoff (8 tries)</div>
+              </div>
+              <div class="stat">
+                <div class="v">4 h</div>
+                <div class="k">app update poll</div>
+              </div>
+              <div class="stat">
+                <div class="v">2</div>
+                <div class="k">saved-env connect concurrency</div>
+              </div>
+              <div class="stat">
+                <div class="v">443</div>
+                <div class="k">Tailscale Serve HTTPS port</div>
+              </div>
+            </div>
+
+            <h3>Providers at a glance</h3>
+            <div class="chips">
+              <span class="chip on">codex</span><span class="chip on">claudeAgent</span
+              ><span class="chip on">copilot</span><span class="chip on">opencode</span
+              ><span class="chip off">cursor (default off)</span>
+            </div>
+
+            <h3>Where things live in the repo</h3>
+            <div class="tbl">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Concern</th>
+                    <th>Location</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Client environment/connection runtime</td>
+                    <td><code>apps/web/src/environments/runtime/</code></td>
+                  </tr>
+                  <tr>
+                    <td>Branch toolbar (the two axes)</td>
+                    <td><code>apps/web/src/components/BranchToolbar*.tsx</code></td>
+                  </tr>
+                  <tr>
+                    <td>Connections settings (add/remove/pair)</td>
+                    <td><code>apps/web/src/components/settings/ConnectionsSettings.tsx</code></td>
+                  </tr>
+                  <tr>
+                    <td>Endpoint / scoped-ref helpers</td>
+                    <td><code>packages/client-runtime/src/</code></td>
+                  </tr>
+                  <tr>
+                    <td>Remote/env/endpoint/auth schemas</td>
+                    <td><code>packages/contracts/src/{environment,remoteAccess,auth}.ts</code></td>
+                  </tr>
+                  <tr>
+                    <td>CLI (<code>serve</code>, <code>auth</code>), startup access, QR</td>
+                    <td><code>apps/server/src/{cli.ts,startupAccess.ts}</code></td>
+                  </tr>
+                  <tr>
+                    <td>Auth services & HTTP routes</td>
+                    <td><code>apps/server/src/auth/</code></td>
+                  </tr>
+                  <tr>
+                    <td>Advertised-endpoint registry</td>
+                    <td><code>apps/server/src/remote/</code></td>
+                  </tr>
+                  <tr>
+                    <td>Tailscale wrapper</td>
+                    <td><code>packages/tailscale/src/tailscale.ts</code></td>
+                  </tr>
+                  <tr>
+                    <td>SSH launch/forward</td>
+                    <td>
+                      <code>packages/ssh/src/{tunnel,command,auth,config}.ts</code> ·
+                      <code>apps/desktop/src/sshEnvironment.ts</code>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Desktop network toggle / endpoints</td>
+                    <td>
+                      <code
+                        >apps/desktop/src/{serverExposure,desktopSettings,tailscaleEndpointProvider}.ts</code
+                      >, <code>main.ts</code>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Provider drivers & registry</td>
+                    <td>
+                      <code>apps/server/src/provider/</code> (<code>builtInDrivers.ts</code>,
+                      <code>Drivers/</code>, <code>Layers/</code>)
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Persistence (SQLite, migrations)</td>
+                    <td><code>apps/server/src/persistence/</code></td>
+                  </tr>
+                  <tr>
+                    <td>Auto-update (Electron)</td>
+                    <td>
+                      <code
+                        >apps/desktop/src/{main.ts,updateState.ts,updateMachine.ts,updateChannels.ts}</code
+                      >
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Prose docs</td>
+                    <td>
+                      <code>REMOTE.md</code> · <code>.docs/remote-architecture.md</code> ·
+                      <code>.docs/architecture.md</code> · <code>.docs/encyclopedia.md</code>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- ============ LIMITS ============ -->
+          <section id="limits">
+            <h2><span class="n">20</span>Limitations & “coming soon”</h2>
+            <ul>
+              <li>
+                <strong>No GUI remote project management yet.</strong> Add projects on a remote
+                environment with <code>ryco project …</code> on the server; full GUI support is
+                planned.
+              </li>
+              <li>
+                <strong>No thread move/copy/transfer</strong> across worktrees, projects, or
+                environments (<a href="#copychats">§14</a>).
+              </li>
+              <li>
+                <strong>No client↔server version negotiation.</strong> Skew is advisory;
+                incompatible payloads fail to decode.
+              </li>
+              <li>
+                <strong>Endpoint “providers” are a data convention, not a plugin registry.</strong>
+                <code>tunnel</code> is in the schema but not implemented; Tailscale is currently
+                desktop-only as an endpoint provider.
+              </li>
+              <li>
+                <strong>No live re-bind.</strong> Toggling network access or Tailscale Serve always
+                relaunches the desktop app.
+              </li>
+              <li>
+                <strong>Managed remote servers don’t auto-upgrade on reuse</strong> — restart them
+                to pick up a new version.
+              </li>
+              <li>
+                <strong>Pairing credentials are stored plaintext</strong> in
+                <code>auth_pairing_links</code> (single-use + short TTL mitigate); session tokens
+                aren’t stored (HMAC + DB revocation).
+              </li>
+            </ul>
+
+            <div class="footer">
+              <p>
+                Generated from a source read of the Ryco monorepo — <code>apps/server</code>,
+                <code>apps/web</code>, <code>apps/desktop</code>, and
+                <code>packages/{contracts,client-runtime,ssh,tailscale}</code> — cross-checked
+                against <code>REMOTE.md</code> and the <code>.docs/</code> architecture notes.
+                Reflects the code as of this session; verify file references before relying on them,
+                as the repo moves fast.
+              </p>
+            </div>
+          </section>
+        </div>
+      </main>
     </div>
-    <div class="figcap">A thread merely <em>references</em> a worktree (by <code>worktree_id</code> or a legacy <code>worktree_path</code> string). The chat content is never stored inside the checkout.</div>
-  </div>
 
-  <h3>Where it all lives on disk</h3>
-  <div class="pathmap">
-~/.ryco/                              <span class="c"># baseDir — override via RYCO_HOME or --base-dir</span>
-├─ userdata/                          <span class="c"># stateDir</span>
-│  ├─ state.sqlite                    <span class="c"># THE database: projects, worktrees, threads, events, auth…</span>
-│  ├─ environment-id                  <span class="c"># the server's stable UUID</span>
-│  ├─ attachments/…                   <span class="c"># turn attachments</span>
-│  └─ secrets/server-signing-key.bin  <span class="c"># session HMAC key (0600)</span>
-├─ worktrees/&lt;projectId&gt;/&lt;branch&gt;__&lt;word&gt;/   <span class="c"># app-managed git worktree checkouts</span>
-└─ ssh-launch/&lt;key&gt;/                   <span class="c"># per-target remote-launch state (pid/port/log)</span>
-  </div>
+    <a href="#top" class="totop" id="totop" aria-label="Back to top">↑</a>
 
-  <h3>The tables that matter</h3>
-  <div class="tbl"><table>
-    <thead><tr><th>Table</th><th>Holds</th></tr></thead>
-    <tbody>
-      <tr><td><code>orchestration_events</code></td><td>Append-only event log — the source of truth (<code>stream_id = thread_id</code> for thread events)</td></tr>
-      <tr><td><code>projection_projects</code></td><td><code>workspace_root</code>, title, default model, metadata dir, scripts…</td></tr>
-      <tr><td><code>projection_worktrees</code></td><td><code>worktree_id, project_id, branch, worktree_path, origin(main/branch/pr/issue/manual)</code>, PR/issue/Jira fields</td></tr>
-      <tr><td><code>projection_threads</code></td><td><code>thread_id, project_id, worktree_id, worktree_path, branch, runtime_mode, interaction_mode, manual_status_bucket</code></td></tr>
-      <tr><td><code>projection_thread_messages</code> / <code>_activities</code></td><td>The actual conversation + tool timeline, keyed by <code>thread_id</code></td></tr>
-      <tr><td><code>auth_pairing_links</code> / <code>auth_sessions</code></td><td>Pairing tokens & sessions (<a href="#pairing">§12</a>)</td></tr>
-    </tbody>
-  </table></div>
-  <p>Status buckets (<code>idle / in_progress / review / done</code>) are a per-<em>thread</em> field (<code>manual_status_bucket</code>), not a worktree property. <code>RepositoryIdentity</code> — derived from the git remote URL — is used only for <em>grouping</em> local and remote clones of the same repo in the sidebar; it never routes anything. Symlinked roots (Dropbox ↔ CloudStorage) canonicalize to the same identity via <code>git rev-parse --show-toplevel</code>. “Local project folders” are purely client-side UI state, not in the DB.</p>
-</section>
+    <script>
+      // Scroll-spy: highlight the active TOC entry
+      const links = Array.from(document.querySelectorAll("#toc a"));
+      const map = new Map(links.map((a) => [a.getAttribute("href").slice(1), a]));
+      const seen = new Set();
+      const obs = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((e) => {
+            if (e.isIntersecting) seen.add(e.target.id);
+            else seen.delete(e.target.id);
+          });
+          // pick the topmost visible section
+          let best = null,
+            bestTop = Infinity;
+          seen.forEach((id) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const t = el.getBoundingClientRect().top;
+            if (t < bestTop) {
+              bestTop = t;
+              best = id;
+            }
+          });
+          if (best && map.has(best)) {
+            links.forEach((a) => a.classList.remove("active"));
+            map.get(best).classList.add("active");
+          }
+        },
+        { rootMargin: "-8% 0px -80% 0px", threshold: 0 },
+      );
+      document.querySelectorAll("section[id]").forEach((s) => obs.observe(s));
 
-<!-- ============ COPY CHATS ============ -->
-<section id="copychats">
-  <h2><span class="n">17</span>Copying a worktree to “keep the chats”</h2>
-  <div class="call no">
-    <div class="tag">The direct answer</div>
-    <p><strong>You cannot copy a worktree directory to another environment and keep its chats.</strong> Copying the folder carries the git checkout and nothing else. There is no thread copy / move / transfer / export / import feature anywhere in Ryco — an exhaustive search turns up zero.</p>
-  </div>
-  <p>Why, concretely:</p>
-  <ul>
-    <li><strong>Chats aren’t in the folder.</strong> Messages/activities/events are rows in the server’s <code>state.sqlite</code>, keyed by <code>thread_id</code>. The worktree directory is a plain git checkout under <code>~/.ryco/worktrees/…</code> — it contains none of them.</li>
-    <li><strong>A thread only points at a worktree</strong> via a <code>worktree_id</code> FK (or a legacy <code>worktree_path</code> string). Copying the directory creates no DB rows and rewrites no pointers, so the destination’s database has nothing referencing it.</li>
-    <li><strong>Environments are a hard wall.</strong> Each server has its own <code>state.sqlite</code> and <code>environment-id</code>; threads are addressed as <code>(environmentId, threadId)</code>. Environment B’s DB simply has no rows for environment A’s threads, and there’s no ingestion path to add them.</li>
-  </ul>
-  <div class="call warn">
-    <div class="tag">What you’d actually have to do</div>
-    <p>To carry chats to another machine you’d have to copy the whole <code>state.sqlite</code> (or replay its event log) and reconcile the <code>workspace_root</code> paths — there is no supported, first-class flow for that today.</p>
-  </div>
-  <h4>Lifecycle facts worth knowing</h4>
-  <ul>
-    <li>Chats are pinned to a stable <code>thread_id</code>, not to a path — so renaming/moving the checkout doesn’t lose them.</li>
-    <li><strong>Archiving</strong> a worktree leaves its threads fully intact.</li>
-    <li><strong>Deleting</strong> a worktree <em>cascade-deletes</em> its attached threads (soft-delete; the underlying events remain). So a hard delete intentionally removes those chats.</li>
-    <li>A real <code>thread.attach-to-worktree</code> command exists, but it only runs as an internal step of worktree create/import — there’s no user-facing “reassign this chat” button, and nothing crosses environments.</li>
-  </ul>
-</section>
-
-<!-- ============ UP TO DATE ============ -->
-<section id="uptodate">
-  <h2><span class="n">18</span>Keeping up to date</h2>
-  <p>“Up to date” means four different things in Ryco. Here’s each, and who’s responsible.</p>
-
-  <h3>Desktop app auto-update</h3>
-  <p>Via <code>electron-updater</code> against <strong>GitHub Releases</strong>, on two channels (<code>latest</code> / <code>nightly</code>). Downloads and installs are <strong>always user-triggered</strong> — never silent (<code>autoDownload=false</code>, <code>autoInstallOnAppQuit=false</code>). It checks 15&nbsp;s after start and every 4&nbsp;h, and drives the sidebar pill: <em>Update available → Downloading (x%) → Restart to update</em>. Only packaged production builds (Linux: AppImage) update.</p>
-
-  <h3>Client ↔ server version skew</h3>
-  <div class="call warn">
-    <div class="tag">Advisory only — no negotiation</div>
-    <p>The WS upgrade is <strong>auth-only</strong>; nothing rejects or downgrades on version. The client compares its version to the server’s <code>serverVersion</code> and, if they differ, shows a dismissible banner (“Try syncing the client and server to the same Ryco version”). If the two schemas stay wire-compatible everything works; if a payload shape is incompatible you get a decode error, not a graceful fallback.</p>
-  </div>
-
-  <h3>Updating a remote / headless server</h3>
-  <p>There is no server self-update. A plain <code>npx ryco serve</code> pulls the latest published version only on relaunch. An SSH-launched <strong>managed</strong> server is <em>reused</em> while healthy — a version bump alone won’t restart it, so a long-lived managed server keeps its old version until you stop it (then the next connect relaunches via <code>ryco@latest</code>). A pre-existing <strong>external</strong> server is never managed or restarted by Ryco.</p>
-
-  <h3>Reconnect, liveness & freshness (automatic)</h3>
-  <ul>
-    <li><strong>Heartbeat</strong> ping/pong; <code>isHeartbeatFresh</code> uses a 15&nbsp;s window.</li>
-    <li><strong>Exponential backoff</strong> 1&nbsp;s → 64&nbsp;s over 7 retries (8 attempts), at both the socket and subscription layers.</li>
-    <li><strong>Browser-resume reconnect</strong> on tab focus/visibility for any stale connection.</li>
-    <li><strong>SSH bridge restored first</strong>, then the WebSocket, on reconnect of an SSH environment.</li>
-    <li><strong>Bootstrap gate:</strong> after every (re)connect the environment isn’t “ready” until a fresh <em>shell snapshot</em> arrives; all subscription streams (shell, thread, config, lifecycle, VCS, terminal, auth) re-emit their snapshots so the UI re-syncs.</li>
-    <li><strong>All saved environments</strong> are kept connected and fresh in the background (concurrency 2), not just the active one; removed ones are torn down.</li>
-  </ul>
-
-  <h3>Provider CLIs</h3>
-  <p>Ryco surfaces an npm-registry “behind latest” advisory (1-hour cache) and offers one-click <code>server.updateProvider</code> where the provider supports it — running on whichever machine hosts that server. Providers without an update capability, and all first-time installs/logins, are the user’s responsibility on that host.</p>
-
-  <table>
-    <thead><tr><th>Concern</th><th>Automatic</th><th>Your responsibility</th></tr></thead>
-    <tbody>
-      <tr><td>Desktop app</td><td>check, notify, 1-click download/install</td><td>click install; prod builds only</td></tr>
-      <tr><td>Version skew</td><td>advisory banner</td><td>align versions (no gate exists)</td></tr>
-      <tr><td>Remote server</td><td>cold SSH launch pulls <code>ryco@latest</code></td><td>restart reused/managed servers to upgrade</td></tr>
-      <tr><td>Reconnect / freshness</td><td>fully automatic</td><td>—</td></tr>
-      <tr><td>Provider CLIs</td><td>advisory + 1-click update (on the host)</td><td>install & login on each machine</td></tr>
-    </tbody>
-  </table>
-</section>
-
-<!-- ============ REFERENCE ============ -->
-<section id="reference">
-  <h2><span class="n">19</span>Reference — numbers, paths & file map</h2>
-  <h3>Numbers you’ll want</h3>
-  <div class="stats">
-    <div class="stat"><div class="v">3773</div><div class="k">default server port</div></div>
-    <div class="stat"><div class="v">5 min</div><div class="k">pairing token & WS-token TTL</div></div>
-    <div class="stat"><div class="v">30 days</div><div class="k">session token TTL</div></div>
-    <div class="stat"><div class="v">7 days</div><div class="k">browser bearer TTL</div></div>
-    <div class="stat"><div class="v">1→64 s</div><div class="k">reconnect backoff (8 tries)</div></div>
-    <div class="stat"><div class="v">4 h</div><div class="k">app update poll</div></div>
-    <div class="stat"><div class="v">2</div><div class="k">saved-env connect concurrency</div></div>
-    <div class="stat"><div class="v">443</div><div class="k">Tailscale Serve HTTPS port</div></div>
-  </div>
-
-  <h3>Providers at a glance</h3>
-  <div class="chips">
-    <span class="chip on">codex</span><span class="chip on">claudeAgent</span><span class="chip on">copilot</span><span class="chip on">opencode</span><span class="chip off">cursor (default off)</span>
-  </div>
-
-  <h3>Where things live in the repo</h3>
-  <div class="tbl"><table>
-    <thead><tr><th>Concern</th><th>Location</th></tr></thead>
-    <tbody>
-      <tr><td>Client environment/connection runtime</td><td><code>apps/web/src/environments/runtime/</code></td></tr>
-      <tr><td>Branch toolbar (the two axes)</td><td><code>apps/web/src/components/BranchToolbar*.tsx</code></td></tr>
-      <tr><td>Connections settings (add/remove/pair)</td><td><code>apps/web/src/components/settings/ConnectionsSettings.tsx</code></td></tr>
-      <tr><td>Endpoint / scoped-ref helpers</td><td><code>packages/client-runtime/src/</code></td></tr>
-      <tr><td>Remote/env/endpoint/auth schemas</td><td><code>packages/contracts/src/{environment,remoteAccess,auth}.ts</code></td></tr>
-      <tr><td>CLI (<code>serve</code>, <code>auth</code>), startup access, QR</td><td><code>apps/server/src/{cli.ts,startupAccess.ts}</code></td></tr>
-      <tr><td>Auth services & HTTP routes</td><td><code>apps/server/src/auth/</code></td></tr>
-      <tr><td>Advertised-endpoint registry</td><td><code>apps/server/src/remote/</code></td></tr>
-      <tr><td>Tailscale wrapper</td><td><code>packages/tailscale/src/tailscale.ts</code></td></tr>
-      <tr><td>SSH launch/forward</td><td><code>packages/ssh/src/{tunnel,command,auth,config}.ts</code> · <code>apps/desktop/src/sshEnvironment.ts</code></td></tr>
-      <tr><td>Desktop network toggle / endpoints</td><td><code>apps/desktop/src/{serverExposure,desktopSettings,tailscaleEndpointProvider}.ts</code>, <code>main.ts</code></td></tr>
-      <tr><td>Provider drivers & registry</td><td><code>apps/server/src/provider/</code> (<code>builtInDrivers.ts</code>, <code>Drivers/</code>, <code>Layers/</code>)</td></tr>
-      <tr><td>Persistence (SQLite, migrations)</td><td><code>apps/server/src/persistence/</code></td></tr>
-      <tr><td>Auto-update (Electron)</td><td><code>apps/desktop/src/{main.ts,updateState.ts,updateMachine.ts,updateChannels.ts}</code></td></tr>
-      <tr><td>Prose docs</td><td><code>REMOTE.md</code> · <code>.docs/remote-architecture.md</code> · <code>.docs/architecture.md</code> · <code>.docs/encyclopedia.md</code></td></tr>
-    </tbody>
-  </table></div>
-</section>
-
-<!-- ============ LIMITS ============ -->
-<section id="limits">
-  <h2><span class="n">20</span>Limitations & “coming soon”</h2>
-  <ul>
-    <li><strong>No GUI remote project management yet.</strong> Add projects on a remote environment with <code>ryco project …</code> on the server; full GUI support is planned.</li>
-    <li><strong>No thread move/copy/transfer</strong> across worktrees, projects, or environments (<a href="#copychats">§14</a>).</li>
-    <li><strong>No client↔server version negotiation.</strong> Skew is advisory; incompatible payloads fail to decode.</li>
-    <li><strong>Endpoint “providers” are a data convention, not a plugin registry.</strong> <code>tunnel</code> is in the schema but not implemented; Tailscale is currently desktop-only as an endpoint provider.</li>
-    <li><strong>No live re-bind.</strong> Toggling network access or Tailscale Serve always relaunches the desktop app.</li>
-    <li><strong>Managed remote servers don’t auto-upgrade on reuse</strong> — restart them to pick up a new version.</li>
-    <li><strong>Pairing credentials are stored plaintext</strong> in <code>auth_pairing_links</code> (single-use + short TTL mitigate); session tokens aren’t stored (HMAC + DB revocation).</li>
-  </ul>
-
-  <div class="footer">
-    <p>Generated from a source read of the Ryco monorepo — <code>apps/server</code>, <code>apps/web</code>, <code>apps/desktop</code>, and <code>packages/{contracts,client-runtime,ssh,tailscale}</code> — cross-checked against <code>REMOTE.md</code> and the <code>.docs/</code> architecture notes. Reflects the code as of this session; verify file references before relying on them, as the repo moves fast.</p>
-  </div>
-</section>
-
-</div>
-</main>
-</div>
-
-<a href="#top" class="totop" id="totop" aria-label="Back to top">↑</a>
-
-<script>
-  // Scroll-spy: highlight the active TOC entry
-  const links = Array.from(document.querySelectorAll('#toc a'));
-  const map = new Map(links.map(a => [a.getAttribute('href').slice(1), a]));
-  const seen = new Set();
-  const obs = new IntersectionObserver((entries) => {
-    entries.forEach(e => { if (e.isIntersecting) seen.add(e.target.id); else seen.delete(e.target.id); });
-    // pick the topmost visible section
-    let best = null, bestTop = Infinity;
-    seen.forEach(id => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      const t = el.getBoundingClientRect().top;
-      if (t < bestTop) { bestTop = t; best = id; }
-    });
-    if (best && map.has(best)) {
-      links.forEach(a => a.classList.remove('active'));
-      map.get(best).classList.add('active');
-    }
-  }, { rootMargin: '-8% 0px -80% 0px', threshold: 0 });
-  document.querySelectorAll('section[id]').forEach(s => obs.observe(s));
-
-  // Back-to-top visibility
-  const totop = document.getElementById('totop');
-  addEventListener('scroll', () => {
-    totop.classList.toggle('show', scrollY > 700);
-  }, { passive: true });
-</script>
-</body>
+      // Back-to-top visibility
+      const totop = document.getElementById("totop");
+      addEventListener(
+        "scroll",
+        () => {
+          totop.classList.toggle("show", scrollY > 700);
+        },
+        { passive: true },
+      );
+    </script>
+  </body>
 </html>
