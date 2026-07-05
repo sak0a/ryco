@@ -66,7 +66,7 @@ describe("buildDiagnosticsBundle", () => {
 
   const input: DiagnosticsBundleInput = {
     generatedAt: "2026-06-14T00:00:00.000Z",
-    app: { version: "0.1.5", stage: "Alpha", isElectron: true, userAgent: "test-agent" },
+    app: { version: "0.1.5", stage: "Beta", isElectron: true, userAgent: "test-agent" },
     environments: [
       {
         environmentId: "env-1" as EnvironmentId,
