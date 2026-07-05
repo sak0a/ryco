@@ -636,7 +636,7 @@ code {
   }
 
   .sidebar-status-text--in-progress {
-    --sidebar-status-text-duration: 2.6s;
+    --sidebar-status-text-duration: 2s;
     --sidebar-status-text-base-color: var(--muted-foreground);
     --sidebar-status-text-shimmer-color: var(--color-sky-500);
   }
@@ -713,12 +713,12 @@ code {
   @keyframes sidebar-status-text-shimmer {
     from {
       background-position:
-        100% center,
+        120% center,
         center;
     }
     to {
       background-position:
-        0% center,
+        -20% center,
         center;
     }
   }
