@@ -1,14 +1,23 @@
-# Batch 03 — Agent Modes (Orchestration Prompt)
+# Batch 03 — Agent Modes
 
-Copy everything below the line into an **Opus 4.8** lead session.
+Copy everything below the line into your agent session in the **batch worktree**.
 
 ---
 
-## Role
+## Setup
 
-You are the **lead orchestrator** for Ryco batch **Agent Modes**: features **10 (Ask mode)** and **15 (Per-project default provider/model)**.
+| Item | Value |
+|------|-------|
+| **Branch** | `feat/batch-agent-modes` |
+| **Worktree** | One dedicated worktree for this batch |
+| **PR** | Single PR containing both features |
+| **Agent** | One Cursor agent session (no subagents) |
 
-Read [AGENTS.md](../../AGENTS.md). Validation:
+Read [AGENTS.md](../../AGENTS.md).
+
+## Your task
+
+Implement features **10** then **15** on this branch. Feature 15 depends on feature 10 (schema + provider mapping).
 
 ```bash
 bun fmt && bun lint && bun typecheck && bun run test
@@ -16,82 +25,40 @@ bun fmt && bun lint && bun typecheck && bun run test
 
 Do not commit unless explicitly asked.
 
-## Batch summary
+## Implementation order
 
-| ID | Feature | Model | Subagent? | Order |
-|----|---------|-------|-----------|-------|
-| 10 | Ask mode | **Opus 4.8** (lead) | Yes (UI + tests) | PR 1 |
-| 15 | Project default provider/model | Composer 2.5 | Yes (after 10) | PR 2 |
+| Step | ID | Feature | Feature file |
+|------|-----|---------|--------------|
+| 1 | 10 | Ask mode | [features/10-ask-mode.md](../features/10-ask-mode.md) |
+| 2 | 15 | Per-project default provider/model | [features/15-project-default-provider.md](../features/15-project-default-provider.md) |
 
-**Critical:** Feature 10 must land contracts + server adapters before spawning UI subagent for 15 (if 15 touches same settings schema, coordinate schema in PR 1).
-
-## Phase 1 — Ask mode (Opus lead, solo core)
-
-**Lead agent: Opus 4.8**
-
-Prompt: [features/10-ask-mode.md](../features/10-ask-mode.md)
-
-### Scope (sequential within PR 1)
-
-1. **Contracts:** Extend `ProviderInteractionMode` in `packages/contracts/src/orchestration.ts` → `"default" | "plan" | "ask"`
-2. **Server:** Map ask mode in each adapter under `apps/server/src/provider/Layers/*Adapter.ts`
-3. **Tests:** Adapter tests proving write-blocking where supported
-
-### Phase 1 subagents (after step 1 merged locally)
-
-Spawn **2 subagents** in parallel:
-
-| Subagent | Model | Task | Allowed paths |
-|----------|-------|------|---------------|
-| UI | Composer 2.5 | Composer toggle for ask mode | `ComposerFooter*.tsx`, `ChatComposer.tsx`, draft store |
-| Tests | GPT 5.5 | Per-driver adapter unit tests | `*Adapter.test.ts` |
-
-**Subagent preamble:**
-
-```text
-Ryco ask-mode subagent. ProviderInteractionMode now includes "ask".
-Implement ONLY your slice. Do not change contracts unless lead approves.
-Before finishing: bun fmt && bun lint && bun typecheck && bun run test
-Do not commit.
-```
-
-## Phase 2 — Project defaults (Composer subagent)
-
-**After PR 1 merges**
-
-| Agent | Model | Prompt |
-|-------|-------|--------|
-| Subagent or lead | Composer 2.5 | [features/15-project-default-provider.md](../features/15-project-default-provider.md) |
-
-Add `defaultProviderInstanceId` + optional `defaultModel` to project settings. New threads inherit; composer resolves defaults.
-
-## Inline prompts
+## Feature summaries
 
 ### 10 — Ask mode
 
-- Extend `ProviderInteractionMode` with `"ask"`
-- Composer UI toggle (reuse plan/default pattern)
-- Claude: read-only permission mode
-- Codex/Cursor/Copilot/OpenCode: map to driver equivalent or show unsupported
-- Persist on thread + composer draft
-- Adapter tests for write blocking
+1. Extend `ProviderInteractionMode` in `packages/contracts` → `"default" | "plan" | "ask"`
+2. Map ask mode in each adapter under `apps/server/src/provider/Layers/*Adapter.ts`
+3. Composer toggle UI (reuse plan/default pattern)
+4. Claude: read-only permission mode; other drivers: map or show unsupported
+5. Persist on thread + composer draft
+6. Adapter tests proving write-blocking where supported
 
 ### 15 — Project defaults
 
-- Project settings: default provider instance + model
-- New thread inherits; existing threads unchanged
+- Project settings: `defaultProviderInstanceId`, optional `defaultModel`
+- New threads inherit; existing threads unchanged
 - Server persistence + schema migration
+- UI in `ProjectSettingsDialog.tsx`
 
-## Acceptance (batch)
+## Batch acceptance
 
 - [ ] Ask mode toggles in composer for supported providers
 - [ ] Send in ask mode blocks edits (adapter test evidence)
 - [ ] Unsupported drivers show clear UI state
 - [ ] Project default applies to new threads only
 - [ ] Full test suite green
+- [ ] Manual smoke: toggle ask → send; set project default → new thread uses it
 
-## Manual smoke
+## PR title suggestion
 
-1. Toggle ask mode → send → verify no file writes in tool events
-2. Set project default provider → new thread uses it
-3. Existing thread keeps its provider when project default changes
+`feat: ask mode and per-project default provider/model`

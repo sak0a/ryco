@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Git / workflow |
-| **Recommended model** | Opus 4.8 |
-| **Subagent?** | Solo recommended |
-| **Dependencies** | None |
-| **PR size** | Large |
+| **Order in batch** | 4 of 4 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

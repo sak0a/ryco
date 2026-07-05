@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Ops / trust |
-| **Recommended model** | Opus 4.8 |
-| **Subagent?** | No — after 22 |
-| **Dependencies** | After feature 22 |
-| **PR size** | Medium–large |
+| **Order in batch** | 4 of 6 |
+| **Depends on (same batch)** | 22 |
 
 ## Prompt
 

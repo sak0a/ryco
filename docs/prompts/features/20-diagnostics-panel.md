@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Ops / trust |
-| **Recommended model** | Composer 2.5 |
-| **Subagent?** | Yes — parallel with 21 |
-| **Dependencies** | None |
-| **PR size** | Medium |
+| **Order in batch** | 2 of 6 |
+| **Depends on (same batch)** | 21 (metrics RPC) |
 
 ## Prompt
 

@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Ops / trust |
-| **Recommended model** | Opus 4.8 |
-| **Subagent?** | Optional — server vs client split |
-| **Dependencies** | None |
-| **PR size** | Large |
+| **Order in batch** | 5 of 6 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

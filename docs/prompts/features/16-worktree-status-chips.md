@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Git / workflow |
-| **Recommended model** | Composer 2.5 |
-| **Subagent?** | Yes — parallel with 17 |
-| **Dependencies** | None |
-| **PR size** | Medium |
+| **Order in batch** | 1 of 4 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

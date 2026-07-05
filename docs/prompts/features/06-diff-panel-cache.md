@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Perf / refactor |
-| **Recommended model** | Composer 2.5 |
-| **Subagent?** | Yes — safe parallel with 05, 09 |
-| **Dependencies** | None |
-| **PR size** | Small–medium |
+| **Order in batch** | 2 of 6 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

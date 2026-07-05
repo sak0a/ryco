@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Agent modes |
-| **Recommended model** | Composer 2.5 (subagent after 10 contracts) |
-| **Subagent?** | Yes — after feature 10 schema work |
-| **Dependencies** | Can follow 10 in same sprint |
-| **PR size** | Medium |
+| **Order in batch** | 2 of 2 |
+| **Depends on (same batch)** | 10 |
 
 ## Prompt
 

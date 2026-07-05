@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Differentiation |
-| **Recommended model** | Composer 2.5 |
-| **Subagent?** | Yes — parallel with 26–30 |
-| **Dependencies** | Statistics system exists |
-| **PR size** | Medium |
+| **Order in batch** | 3 of 5 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

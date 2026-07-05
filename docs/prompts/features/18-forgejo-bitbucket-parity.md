@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Git / workflow |
-| **Recommended model** | GPT 5.5 (one provider per PR) |
-| **Subagent?** | Yes — one subagent per provider |
-| **Dependencies** | None |
-| **PR size** | Medium (split by provider) |
+| **Order in batch** | 3 of 4 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 
@@ -27,7 +25,7 @@ Close feature gaps between GitHub and Forgejo/Bitbucket source-control providers
 
 ### Requirements
 
-- **One provider per PR** — do Forgejo OR Bitbucket in this session, not both
+- Close gaps for **Forgejo and Bitbucket** in the same batch (same PR as the rest of batch 05)
 - Reuse shared abstractions in `SourceControlProvider.ts` — no duplicate logic
 - Tests mirroring `GitHubSourceControlProvider.test.ts` patterns
 

@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Daily UX |
-| **Recommended model** | Composer 2.5 (Opus 4.8 if server-owned queue) |
-| **Subagent?** | No — conflicts with undo send / send pipeline |
-| **Dependencies** | None |
-| **PR size** | Medium–large |
+| **Order in batch** | 5 of 5 |
+| **Depends on (same batch)** | 13 (undo send) |
 
 ## Prompt
 

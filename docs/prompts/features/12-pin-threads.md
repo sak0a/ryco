@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Search & nav |
-| **Recommended model** | Composer 2.5 |
-| **Subagent?** | Yes — parallel with 11 |
-| **Dependencies** | None |
-| **PR size** | Small–medium |
+| **Order in batch** | 2 of 2 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

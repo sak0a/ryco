@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Perf / refactor |
-| **Recommended model** | Opus 4.8 (or Composer 2.5 + Opus review) |
-| **Subagent?** | No — sequential after 04 |
-| **Dependencies** | After 04 ChatView split |
-| **PR size** | Large |
+| **Order in batch** | 5 of 6 |
+| **Depends on (same batch)** | 04 |
 
 ## Prompt
 

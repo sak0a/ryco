@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Ops / trust |
-| **Recommended model** | Composer 2.5 |
-| **Subagent?** | Solo |
-| **Dependencies** | None |
-| **PR size** | Small (docs/CI) |
+| **Order in batch** | 6 of 6 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

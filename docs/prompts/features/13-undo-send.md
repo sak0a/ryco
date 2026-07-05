@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Daily UX |
-| **Recommended model** | GPT 5.5 |
-| **Subagent?** | No — conflicts with 02 queue |
-| **Dependencies** | None (don't parallel with 02) |
-| **PR size** | Small–medium |
+| **Order in batch** | 3 of 5 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

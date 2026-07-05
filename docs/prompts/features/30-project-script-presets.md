@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Differentiation |
-| **Recommended model** | Composer 2.5 |
-| **Subagent?** | Yes — parallel with 26–30 |
-| **Dependencies** | None |
-| **PR size** | Small–medium |
+| **Order in batch** | 5 of 5 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

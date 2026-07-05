@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Perf / refactor |
-| **Recommended model** | Opus 4.8 |
-| **Subagent?** | No — streaming correctness is subtle |
-| **Dependencies** | After 04 recommended |
-| **PR size** | Medium |
+| **Order in batch** | 6 of 6 |
+| **Depends on (same batch)** | 04 |
 
 ## Prompt
 

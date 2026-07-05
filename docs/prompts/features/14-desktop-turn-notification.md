@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Daily UX |
-| **Recommended model** | Composer 2.5 |
-| **Subagent?** | Optional — parallel with 01, 03 |
-| **Dependencies** | None |
-| **PR size** | Small–medium |
+| **Order in batch** | 4 of 5 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

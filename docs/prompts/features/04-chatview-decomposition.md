@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Perf / refactor |
-| **Recommended model** | Composer 2.5 |
-| **Subagent?** | No — sequential with 08 |
-| **Dependencies** | None (do before 08 AtomRpc) |
-| **PR size** | Large (behavior-preserving) |
+| **Order in batch** | 4 of 6 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

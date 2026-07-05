@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Agent modes |
-| **Recommended model** | Opus 4.8 (lead) |
-| **Subagent?** | Yes — UI subagent after contracts land |
-| **Dependencies** | Contract change first |
-| **PR size** | Large |
+| **Order in batch** | 1 of 2 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

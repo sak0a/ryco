@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Perf / refactor |
-| **Recommended model** | GPT 5.5 |
-| **Subagent?** | Yes — safe parallel with 05, 06 |
-| **Dependencies** | None |
-| **PR size** | Small |
+| **Order in batch** | 3 of 6 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

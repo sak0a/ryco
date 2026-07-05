@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Search & nav |
-| **Recommended model** | GPT 5.5 (server) + Composer 2.5 (UI) |
-| **Subagent?** | Yes — server then UI sequentially |
-| **Dependencies** | Server RPC before palette UI |
-| **PR size** | Medium–large |
+| **Order in batch** | 1 of 2 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 

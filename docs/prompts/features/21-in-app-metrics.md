@@ -3,10 +3,8 @@
 | Field | Value |
 |-------|-------|
 | **Batch** | Ops / trust |
-| **Recommended model** | GPT 5.5 |
-| **Subagent?** | Yes — parallel with 20 |
-| **Dependencies** | None |
-| **PR size** | Small–medium |
+| **Order in batch** | 1 of 6 |
+| **Depends on (same batch)** | — |
 
 ## Prompt
 
