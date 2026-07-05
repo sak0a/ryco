@@ -8,6 +8,7 @@ export interface StatFilter {
   readonly range: StatRange;
   readonly projectId: string | null;
   readonly model: string | null;
+  readonly provider: string | null;
 }
 
 export interface MetricTotals {
@@ -46,12 +47,31 @@ export function emptyTotals(): MetricTotals {
   };
 }
 
+function snapshotTotals(totals: MetricTotals): MetricTotals {
+  return {
+    inputTokens: totals.inputTokens,
+    outputTokens: totals.outputTokens,
+    cachedInputTokens: totals.cachedInputTokens,
+    reasoningTokens: totals.reasoningTokens,
+    totalTokens: totals.totalTokens,
+    turns: totals.turns,
+    activeMs: totals.activeMs,
+    toolUses: totals.toolUses,
+    filesChanged: totals.filesChanged,
+    additions: totals.additions,
+    deletions: totals.deletions,
+    commits: totals.commits,
+    pushes: totals.pushes,
+    threadsCreated: totals.threadsCreated,
+  };
+}
+
 function accumulate(target: MetricTotals, bucket: StatisticsDailyBucket): void {
   target.inputTokens += bucket.inputTokens;
   target.outputTokens += bucket.outputTokens;
   target.cachedInputTokens += bucket.cachedInputTokens;
   target.reasoningTokens += bucket.reasoningTokens;
-  target.totalTokens += bucket.inputTokens + bucket.outputTokens;
+  target.totalTokens += bucket.totalTokens;
   target.turns += bucket.turns;
   target.activeMs += bucket.activeMs;
   target.toolUses += bucket.toolUses;
@@ -106,7 +126,8 @@ export function filterBuckets(
     (bucket) =>
       (cutoff === null || bucket.date >= cutoff) &&
       (filter.projectId === null || bucket.projectId === filter.projectId) &&
-      (filter.model === null || bucket.model === filter.model),
+      (filter.model === null || bucket.model === filter.model) &&
+      (filter.provider === null || bucket.provider === filter.provider),
   );
 }
 
@@ -129,7 +150,8 @@ export function previousTotals(
       bucket.date >= previousStart &&
       bucket.date <= previousEnd &&
       (filter.projectId === null || bucket.projectId === filter.projectId) &&
-      (filter.model === null || bucket.model === filter.model)
+      (filter.model === null || bucket.model === filter.model) &&
+      (filter.provider === null || bucket.provider === filter.provider)
     ) {
       accumulate(totals, bucket);
     }
@@ -145,31 +167,37 @@ export interface ModelAggregate extends MetricTotals {
 
 export function aggregateByModel(
   buckets: ReadonlyArray<StatisticsDailyBucket>,
-  modelProvider: ReadonlyMap<string, string | undefined>,
 ): Array<ModelAggregate> {
   const byModel = new Map<string, MetricTotals>();
+  const modelRefByKey = new Map<string, { model: string; provider: string | undefined }>();
   for (const bucket of buckets) {
-    let totals = byModel.get(bucket.model);
+    const key = `${bucket.provider ?? ""}\u0000${bucket.model}`;
+    let totals = byModel.get(key);
     if (!totals) {
       totals = emptyTotals();
-      byModel.set(bucket.model, totals);
+      byModel.set(key, totals);
+      modelRefByKey.set(key, { model: bucket.model, provider: bucket.provider });
     }
     accumulate(totals, bucket);
   }
   return [...byModel.entries()]
-    .map(([model, totals]) => ({
-      ...totals,
-      model,
-      provider: modelProvider.get(model),
-      costUsd: estimateCostUsd(
-        {
-          inputTokens: totals.inputTokens,
-          cachedInputTokens: totals.cachedInputTokens,
-          outputTokens: totals.outputTokens,
-        },
-        model,
-      ),
-    }))
+    .map(([key, totals]) => {
+      const ref = modelRefByKey.get(key) ?? { model: "unknown", provider: undefined };
+      return Object.assign(snapshotTotals(totals), {
+        model: ref.model,
+        provider: ref.provider,
+        costUsd: estimateCostUsd(
+          {
+            inputTokens: totals.inputTokens,
+            cachedInputTokens: totals.cachedInputTokens,
+            outputTokens: totals.outputTokens,
+            totalTokens: totals.totalTokens,
+          },
+          ref.model,
+          ref.provider,
+        ),
+      });
+    })
     .toSorted((a, b) => b.totalTokens - a.totalTokens);
 }
 
@@ -183,8 +211,7 @@ export function aggregateByProvider(
 ): Array<ProviderAggregate> {
   const byProvider = new Map<string | undefined, number>();
   for (const bucket of buckets) {
-    const tokens = bucket.inputTokens + bucket.outputTokens;
-    byProvider.set(bucket.provider, (byProvider.get(bucket.provider) ?? 0) + tokens);
+    byProvider.set(bucket.provider, (byProvider.get(bucket.provider) ?? 0) + bucket.totalTokens);
   }
   return [...byProvider.entries()]
     .map(([provider, totalTokens]) => ({ provider, totalTokens }))
@@ -211,11 +238,12 @@ export function aggregateByProject(
     accumulate(totals, bucket);
   }
   return [...byProject.entries()]
-    .map(([projectId, totals]) => ({
-      ...totals,
-      projectId,
-      title: projectTitle.get(projectId) ?? projectId,
-    }))
+    .map(([projectId, totals]) =>
+      Object.assign(snapshotTotals(totals), {
+        projectId,
+        title: projectTitle.get(projectId) ?? projectId,
+      }),
+    )
     .toSorted((a, b) => b.totalTokens - a.totalTokens);
 }
 
@@ -224,6 +252,7 @@ export interface DayPoint {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cachedInputTokens: number;
+  readonly uncategorizedTokens: number;
   readonly totalTokens: number;
   readonly turns: number;
   readonly activeMs: number;
@@ -267,12 +296,17 @@ export function buildTimeSeries(
   let guard = 0;
   while (cursor <= end && guard < MAX_DAYS) {
     const totals = byDate.get(cursor) ?? emptyTotals();
+    const uncategorizedTokens = Math.max(
+      0,
+      totals.totalTokens - totals.inputTokens - totals.outputTokens,
+    );
     points.push({
       date: cursor,
       inputTokens: totals.inputTokens,
       outputTokens: totals.outputTokens,
       cachedInputTokens: totals.cachedInputTokens,
-      totalTokens: totals.inputTokens + totals.outputTokens,
+      uncategorizedTokens,
+      totalTokens: totals.totalTokens,
       turns: totals.turns,
       activeMs: totals.activeMs,
       additions: totals.additions,
@@ -282,16 +316,6 @@ export function buildTimeSeries(
     guard += 1;
   }
   return points;
-}
-
-export function buildModelProviderMap(
-  snapshot: StatisticsSnapshot,
-): Map<string, string | undefined> {
-  const map = new Map<string, string | undefined>();
-  for (const entry of snapshot.models) {
-    map.set(entry.model, entry.provider);
-  }
-  return map;
 }
 
 export function buildProjectTitleMap(snapshot: StatisticsSnapshot): Map<string, string> {
@@ -305,10 +329,12 @@ export function buildProjectTitleMap(snapshot: StatisticsSnapshot): Map<string, 
 export function aggregateCostForModels(models: ReadonlyArray<ModelAggregate>) {
   return estimateAggregateCost(
     models.map((entry) => ({
+      provider: entry.provider,
       model: entry.model,
       inputTokens: entry.inputTokens,
       cachedInputTokens: entry.cachedInputTokens,
       outputTokens: entry.outputTokens,
+      totalTokens: entry.totalTokens,
     })),
   );
 }

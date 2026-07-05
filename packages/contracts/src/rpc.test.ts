@@ -58,6 +58,7 @@ describe("Statistics contract", () => {
         outputTokens: 50,
         cachedInputTokens: 0,
         reasoningTokens: 0,
+        totalTokens: 150,
         turns: 2,
         activeMs: 1000,
         toolUses: 1,

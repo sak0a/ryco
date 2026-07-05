@@ -49,7 +49,7 @@ const FLAT_ALIASES: Record<string, string> = (() => {
  * `cachedInputTokens` represents. For Anthropic that is 0.1× the base input
  * rate; for OpenAI it is the published cached-input rate.
  *
- * Verified June 2026 against official pricing pages:
+ * Verified July 2026 against official pricing pages:
  *  - Anthropic  https://platform.claude.com/docs/en/about-claude/pricing
  *  - OpenAI     https://developers.openai.com/api/docs/pricing
  *  - Google     https://ai.google.dev/gemini-api/docs/pricing
@@ -57,7 +57,8 @@ const FLAT_ALIASES: Record<string, string> = (() => {
  *  - xAI        https://docs.x.ai/developers/models
  *  - Cursor     https://cursor.com/docs/models-and-pricing
  *
- * Tiered models (Gemini/Claude/GPT) use the base (<200k context) rate. Entries
+ * Tiered models (Gemini/GPT) use the standard short-context rate when the
+ * dashboard lacks enough per-request detail to choose another tier. Entries
  * marked "approx" are best-effort for models with less stable public pricing.
  * Update here when providers change rates.
  */
@@ -78,6 +79,7 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
   "claude-opus-4-7": { inputPer1M: 5, cachedInputPer1M: 0.5, outputPer1M: 25 },
   "claude-opus-4-6": { inputPer1M: 5, cachedInputPer1M: 0.5, outputPer1M: 25 },
   "claude-opus-4-5": { inputPer1M: 5, cachedInputPer1M: 0.5, outputPer1M: 25 },
+  "claude-sonnet-5": { inputPer1M: 2, cachedInputPer1M: 0.2, outputPer1M: 10 }, // intro through 2026-08-31
   "claude-sonnet-4-6": { inputPer1M: 3, cachedInputPer1M: 0.3, outputPer1M: 15 },
   "claude-sonnet-4-5": { inputPer1M: 3, cachedInputPer1M: 0.3, outputPer1M: 15 },
   "claude-haiku-4-5": { inputPer1M: 1, cachedInputPer1M: 0.1, outputPer1M: 5 },
@@ -99,6 +101,7 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
   "deepseek-v4-pro": { inputPer1M: 0.435, cachedInputPer1M: 0.003625, outputPer1M: 0.87 },
   // ── xAI Grok (cache rate for 4.x estimated at 0.25× input) ──
   "grok-4.3": { inputPer1M: 1.25, cachedInputPer1M: 0.3125, outputPer1M: 2.5 },
+  "grok-build-0.1": { inputPer1M: 1, cachedInputPer1M: 0.25, outputPer1M: 2 }, // cache approx
   "grok-4": { inputPer1M: 3, cachedInputPer1M: 0.75, outputPer1M: 15 },
   "grok-4-fast": { inputPer1M: 0.2, cachedInputPer1M: 0.05, outputPer1M: 0.5 },
   "grok-code-fast-1": { inputPer1M: 0.2, cachedInputPer1M: 0.02, outputPer1M: 1.5 },
@@ -129,17 +132,29 @@ const CANONICAL_SLUGS: ReadonlySet<string> = new Set<string>([
   ),
 ]);
 
-export function canonicalizeModel(model: string): string {
+function aliasesForProvider(provider: string | undefined): Record<string, string> | undefined {
+  if (!provider) {
+    return undefined;
+  }
+  return (MODEL_SLUG_ALIASES_BY_PROVIDER as Partial<Record<string, Record<string, string>>>)[
+    provider
+  ];
+}
+
+export function canonicalizeModel(model: string, provider?: string | undefined): string {
   const trimmed = model.trim();
   // Strip a provider prefix like "openai/gpt-5" → "gpt-5".
   const stripped = trimmed.includes("/") ? trimmed.slice(trimmed.lastIndexOf("/") + 1) : trimmed;
+  const providerAliases = aliasesForProvider(provider);
+  const providerCanonical = providerAliases?.[trimmed] ?? providerAliases?.[stripped];
+  if (providerCanonical) return providerCanonical;
   if (CANONICAL_SLUGS.has(trimmed)) return trimmed;
   if (CANONICAL_SLUGS.has(stripped)) return stripped;
   return FLAT_ALIASES[trimmed] ?? FLAT_ALIASES[stripped] ?? stripped;
 }
 
-export function getModelPrice(model: string): ModelPrice | null {
-  const canonical = canonicalizeModel(model);
+export function getModelPrice(model: string, provider?: string | undefined): ModelPrice | null {
+  const canonical = canonicalizeModel(model, provider);
   const direct = MODEL_PRICES[canonical];
   if (direct) {
     return direct;
@@ -161,21 +176,34 @@ export interface TokenTotals {
   readonly inputTokens: number;
   readonly cachedInputTokens: number;
   readonly outputTokens: number;
+  readonly totalTokens?: number;
 }
 
 /**
- * Estimate spend for one model's token totals. Input, cached-input and output
- * are treated as separate buckets (matching how providers report them).
+ * Estimate spend for one model's token totals. `cachedInputTokens` is treated
+ * as the discounted subset of `inputTokens`, matching Codex and the normalized
+ * provider usage snapshots.
  * Returns `null` when the model has no known per-token price.
  */
-export function estimateCostUsd(tokens: TokenTotals, model: string): number | null {
-  const price = getModelPrice(model);
+export function estimateCostUsd(
+  tokens: TokenTotals,
+  model: string,
+  provider?: string | undefined,
+): number | null {
+  const price = getModelPrice(model, provider);
   if (!price) {
     return null;
   }
+  const hasBreakdown =
+    tokens.inputTokens > 0 || tokens.cachedInputTokens > 0 || tokens.outputTokens > 0;
+  if (!hasBreakdown && (tokens.totalTokens ?? 0) > 0) {
+    return null;
+  }
+  const cachedInputTokens = Math.max(0, Math.min(tokens.cachedInputTokens, tokens.inputTokens));
+  const uncachedInputTokens = Math.max(0, tokens.inputTokens - cachedInputTokens);
   return (
-    (tokens.inputTokens * price.inputPer1M +
-      tokens.cachedInputTokens * price.cachedInputPer1M +
+    (uncachedInputTokens * price.inputPer1M +
+      cachedInputTokens * price.cachedInputPer1M +
       tokens.outputTokens * price.outputPer1M) /
     1_000_000
   );
@@ -190,14 +218,21 @@ export interface AggregateCost {
 
 /** Sum estimated spend across many per-model token totals. */
 export function estimateAggregateCost(
-  rows: ReadonlyArray<TokenTotals & { readonly model: string }>,
+  rows: ReadonlyArray<
+    TokenTotals & { readonly model: string; readonly provider?: string | undefined }
+  >,
 ): AggregateCost {
   let usd = 0;
   let hasUnpriced = false;
   for (const row of rows) {
-    const cost = estimateCostUsd(row, row.model);
+    const cost = estimateCostUsd(row, row.model, row.provider);
     if (cost === null) {
-      if (row.inputTokens > 0 || row.outputTokens > 0 || row.cachedInputTokens > 0) {
+      if (
+        row.inputTokens > 0 ||
+        row.outputTokens > 0 ||
+        row.cachedInputTokens > 0 ||
+        (row.totalTokens ?? 0) > 0
+      ) {
         hasUnpriced = true;
       }
       continue;

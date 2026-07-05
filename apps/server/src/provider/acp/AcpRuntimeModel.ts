@@ -5,6 +5,7 @@ import {
   RuntimeSubagentId,
   type RuntimeSubagentStatus,
   type SubagentRef,
+  type ThreadTokenUsageSnapshot,
   type ToolLifecycleItemType,
 } from "@ryco/contracts";
 
@@ -82,6 +83,11 @@ export type AcpParsedSessionEvent =
       readonly _tag: "ContentDelta";
       readonly itemId?: string;
       readonly text: string;
+      readonly rawPayload: unknown;
+    }
+  | {
+      readonly _tag: "UsageUpdated";
+      readonly usage: ThreadTokenUsageSnapshot;
       readonly rawPayload: unknown;
     };
 
@@ -629,6 +635,20 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
         events.push({
           _tag: "ContentDelta",
           text: upd.content.text,
+          rawPayload: params,
+        });
+      }
+      break;
+    }
+    case "usage_update": {
+      if (upd.used > 0) {
+        events.push({
+          _tag: "UsageUpdated",
+          usage: {
+            usedTokens: upd.used,
+            lastUsedTokens: upd.used,
+            ...(upd.size > 0 ? { maxTokens: upd.size } : {}),
+          },
           rawPayload: params,
         });
       }

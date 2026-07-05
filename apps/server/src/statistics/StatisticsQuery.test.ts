@@ -292,6 +292,43 @@ statisticsLayer("StatisticsQuery", (it) => {
     }),
   );
 
+  it.effect("counts total-only cumulative usage without inventing token breakdowns", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const statistics = yield* StatisticsQuery;
+      yield* clean(sql);
+
+      yield* insertProject(sql, "project-1", "Project One");
+      yield* insertThread(
+        sql,
+        "thread-1",
+        "project-1",
+        "cursor",
+        "composer-2",
+        "2026-06-10T00:00:00.000Z",
+      );
+      yield* insertSession(sql, "thread-1", "cursor");
+      yield* insertActivity(
+        sql,
+        "act-1",
+        "thread-1",
+        "turn-1",
+        "context-window.updated",
+        '{"usedTokens":5000,"lastUsedTokens":5000}',
+        "2026-06-10T00:00:02.000Z",
+        1,
+      );
+
+      const snapshot = yield* statistics.getStatistics();
+
+      assert.equal(snapshot.tokenAttribution, "thread-cumulative");
+      assert.equal(snapshot.totals.totalTokens, 5000);
+      assert.equal(snapshot.totals.inputTokens, 0);
+      assert.equal(snapshot.totals.outputTokens, 0);
+      assert.equal(snapshot.dailyBuckets[0]?.totalTokens, 5000);
+    }),
+  );
+
   it.effect("coalesces blank model/provider and stays encodable", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -315,6 +352,130 @@ statisticsLayer("StatisticsQuery", (it) => {
       // Must encode through the RPC success schema without throwing (else orDie
       // would crash the request).
       assert.doesNotThrow(() => encodeSnapshot(snapshot));
+    }),
+  );
+
+  it.effect("falls back to cumulative per-turn when mixed data (old + new deltas)", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const statistics = yield* StatisticsQuery;
+      yield* clean(sql);
+
+      yield* insertProject(sql, "project-1", "Project One");
+      // Old thread: cumulative totals only, no deltas.
+      yield* insertThread(
+        sql,
+        "thread-old",
+        "project-1",
+        "legacy",
+        "old-model",
+        "2026-06-10T00:00:00.000Z",
+      );
+      // New thread: has per-turn deltas.
+      yield* insertThread(
+        sql,
+        "thread-new",
+        "project-1",
+        "anthropic",
+        "claude-opus-4-8",
+        "2026-06-20T00:00:00.000Z",
+      );
+      yield* insertSession(sql, "thread-old", "legacy");
+      yield* insertSession(sql, "thread-new", "anthropic");
+
+      // Old turn: cumulative only.
+      yield* insertActivity(
+        sql,
+        "act-old",
+        "thread-old",
+        "turn-1",
+        "context-window.updated",
+        '{"inputTokens":800,"outputTokens":200,"usedTokens":1000}',
+        "2026-06-10T00:00:01.000Z",
+        1,
+      );
+
+      // New turn: has deltas (per-turn mode).
+      yield* insertActivity(
+        sql,
+        "act-new",
+        "thread-new",
+        "turn-1",
+        "context-window.updated",
+        '{"inputTokens":2000,"outputTokens":500,"lastInputTokens":1000,"lastOutputTokens":250,"usedTokens":2500}',
+        "2026-06-20T00:00:01.000Z",
+        1,
+      );
+
+      const snapshot = yield* statistics.getStatistics();
+
+      // Both threads should be counted correctly:
+      // - Old thread uses cumulative (800 + 200 = 1000)
+      // - New thread uses delta (1000 + 250 = 1250)
+      // - Total should be 1000 + 1250 = 2250
+      assert.equal(snapshot.totals.inputTokens, 1800); // 800 (old) + 1000 (new)
+      assert.equal(snapshot.totals.outputTokens, 450); // 200 (old) + 250 (new)
+      assert.equal(snapshot.totals.totalTokens, 2250);
+      assert.equal(snapshot.tokenAttribution, "mixed");
+    }),
+  );
+
+  it.effect("counts cumulative history before exact deltas within the same thread", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const statistics = yield* StatisticsQuery;
+      yield* clean(sql);
+
+      yield* insertProject(sql, "project-1", "Project One");
+      yield* insertThread(
+        sql,
+        "thread-1",
+        "project-1",
+        "codex",
+        "gpt-5.4",
+        "2026-06-10T00:00:00.000Z",
+      );
+      yield* insertSession(sql, "thread-1", "codex");
+
+      yield* insertActivity(
+        sql,
+        "act-old",
+        "thread-1",
+        "turn-1",
+        "context-window.updated",
+        '{"inputTokens":800,"outputTokens":200,"usedTokens":1000}',
+        "2026-06-10T00:00:01.000Z",
+        1,
+      );
+      yield* insertActivity(
+        sql,
+        "act-new",
+        "thread-1",
+        "turn-2",
+        "context-window.updated",
+        '{"inputTokens":1200,"outputTokens":300,"lastInputTokens":400,"lastOutputTokens":100,"lastUsedTokens":500}',
+        "2026-06-11T00:00:01.000Z",
+        2,
+      );
+
+      const snapshot = yield* statistics.getStatistics();
+
+      assert.equal(snapshot.tokenAttribution, "mixed");
+      assert.equal(snapshot.totals.inputTokens, 1200);
+      assert.equal(snapshot.totals.outputTokens, 300);
+      assert.equal(snapshot.totals.totalTokens, 1500);
+      assert.deepEqual(
+        snapshot.dailyBuckets.map((bucket) => ({
+          date: bucket.date,
+          inputTokens: bucket.inputTokens,
+          outputTokens: bucket.outputTokens,
+          totalTokens: bucket.totalTokens,
+        })),
+        [
+          { date: "2026-06-10", inputTokens: 800, outputTokens: 200, totalTokens: 1000 },
+          { date: "2026-06-11", inputTokens: 400, outputTokens: 100, totalTokens: 500 },
+        ],
+      );
     }),
   );
 });

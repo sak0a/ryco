@@ -1911,6 +1911,7 @@ describe("ClaudeAdapterLive", () => {
             usedTokens: 24542,
             lastUsedTokens: 24542,
             inputTokens: 23863,
+            cachedInputTokens: 21144,
             outputTokens: 679,
             maxTokens: 200000,
           },

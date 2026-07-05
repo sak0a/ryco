@@ -134,11 +134,12 @@ function toProviderItemId(value: string | undefined): ProviderItemId | undefined
 export function normalizeUsage(
   event: Extract<SessionEvent, { type: "assistant.usage" }>,
 ): ThreadTokenUsageSnapshot {
-  const inputTokens = event.data.inputTokens ?? 0;
+  const directInputTokens = event.data.inputTokens ?? 0;
   const outputTokens = event.data.outputTokens ?? 0;
   const cachedInputTokens = event.data.cacheReadTokens ?? 0;
   const reasoningOutputTokens = event.data.reasoningTokens ?? 0;
-  const usedTokens = inputTokens + outputTokens + cachedInputTokens;
+  const inputTokens = directInputTokens + cachedInputTokens;
+  const usedTokens = inputTokens + outputTokens;
 
   return {
     usedTokens,

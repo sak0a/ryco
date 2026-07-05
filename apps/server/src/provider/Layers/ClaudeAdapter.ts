@@ -343,18 +343,21 @@ function normalizeClaudeTokenUsage(
   }
 
   const usage = value as Record<string, unknown>;
-  const inputTokens =
-    (typeof usage.input_tokens === "number" && Number.isFinite(usage.input_tokens)
+  const directInputTokens =
+    typeof usage.input_tokens === "number" && Number.isFinite(usage.input_tokens)
       ? usage.input_tokens
-      : 0) +
-    (typeof usage.cache_creation_input_tokens === "number" &&
+      : 0;
+  const cacheCreationInputTokens =
+    typeof usage.cache_creation_input_tokens === "number" &&
     Number.isFinite(usage.cache_creation_input_tokens)
       ? usage.cache_creation_input_tokens
-      : 0) +
-    (typeof usage.cache_read_input_tokens === "number" &&
+      : 0;
+  const cachedInputTokens =
+    typeof usage.cache_read_input_tokens === "number" &&
     Number.isFinite(usage.cache_read_input_tokens)
       ? usage.cache_read_input_tokens
-      : 0);
+      : 0;
+  const inputTokens = directInputTokens + cacheCreationInputTokens + cachedInputTokens;
   const outputTokens =
     typeof usage.output_tokens === "number" && Number.isFinite(usage.output_tokens)
       ? usage.output_tokens
@@ -380,6 +383,7 @@ function normalizeClaudeTokenUsage(
     lastUsedTokens: usedTokens,
     ...(totalProcessedTokens > usedTokens ? { totalProcessedTokens } : {}),
     ...(inputTokens > 0 ? { inputTokens } : {}),
+    ...(cachedInputTokens > 0 ? { cachedInputTokens } : {}),
     ...(outputTokens > 0 ? { outputTokens } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     ...(typeof usage.tool_uses === "number" && Number.isFinite(usage.tool_uses)
