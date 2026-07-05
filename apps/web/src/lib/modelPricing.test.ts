@@ -56,6 +56,33 @@ describe("estimateCostUsd", () => {
     expect(mixedInput).toBeCloseTo(1.6, 5); // 600k * $2.50 + 400k * $0.25
   });
 
+  it("prices GPT-5.5 at current standard short-context rates", () => {
+    expect(
+      estimateCostUsd(
+        { inputTokens: 20_000_000, cachedInputTokens: 0, outputTokens: 0 },
+        "gpt-5.5",
+      ),
+    ).toBeCloseTo(100, 5);
+    expect(
+      estimateCostUsd(
+        { inputTokens: 20_000_000, cachedInputTokens: 20_000_000, outputTokens: 0 },
+        "gpt-5.5",
+      ),
+    ).toBeCloseTo(10, 5);
+    expect(
+      estimateCostUsd(
+        { inputTokens: 20_000_000, cachedInputTokens: 18_000_000, outputTokens: 0 },
+        "gpt-5.5",
+      ),
+    ).toBeCloseTo(19, 5);
+    expect(
+      estimateCostUsd(
+        { inputTokens: 0, cachedInputTokens: 0, outputTokens: 20_000_000 },
+        "gpt-5.5",
+      ),
+    ).toBeCloseTo(600, 5);
+  });
+
   it("prices legacy cached input that was stored separately from input", () => {
     const cost = estimateCostUsd(
       {

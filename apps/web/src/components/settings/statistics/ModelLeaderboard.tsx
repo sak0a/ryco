@@ -16,6 +16,11 @@ export function ModelLeaderboard({ models }: { models: ReadonlyArray<ModelAggreg
       {models.map((entry, index) => {
         const color = chartColor(index);
         const widthPct = Math.max(2, (entry.totalTokens / max) * 100);
+        const cachedInputTokens = Math.max(0, Math.min(entry.cachedInputTokens, entry.inputTokens));
+        const providerText =
+          cachedInputTokens > 0
+            ? `${formatProviderLabel(entry.provider)} · ${formatTokens(cachedInputTokens)} cached`
+            : formatProviderLabel(entry.provider);
         return (
           <li
             key={`${entry.provider ?? "unknown"}:${entry.model}`}
@@ -40,7 +45,7 @@ export function ModelLeaderboard({ models }: { models: ReadonlyArray<ModelAggreg
                 />
               </div>
               <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
-                <span className="truncate">{formatProviderLabel(entry.provider)}</span>
+                <span className="truncate">{providerText}</span>
                 <span className="shrink-0 tabular-nums">
                   {entry.costUsd === null ? "—" : `~${formatUsd(entry.costUsd)}`}
                 </span>

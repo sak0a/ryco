@@ -122,10 +122,14 @@ export function StatisticsPanel() {
     0,
     totals.totalTokens - totals.inputTokens - totals.outputTokens,
   );
-  const tokenSubtitle =
-    uncategorizedTokens > 0
-      ? `${formatTokens(totals.inputTokens)} in · ${formatTokens(totals.outputTokens)} out · ${formatTokens(uncategorizedTokens)} other`
-      : `${formatTokens(totals.inputTokens)} in · ${formatTokens(totals.outputTokens)} out`;
+  const cachedInputTokens = Math.max(0, Math.min(totals.cachedInputTokens, totals.inputTokens));
+  const tokenSubtitleParts = [
+    `${formatTokens(totals.inputTokens)} in`,
+    ...(cachedInputTokens > 0 ? [`${formatTokens(cachedInputTokens)} cached`] : []),
+    `${formatTokens(totals.outputTokens)} out`,
+    ...(uncategorizedTokens > 0 ? [`${formatTokens(uncategorizedTokens)} other`] : []),
+  ];
+  const tokenSubtitle = tokenSubtitleParts.join(" · ");
   const hasUncategorizedSeries = series.some((point) => point.uncategorizedTokens > 0);
   const attributionNote =
     snapshot.tokenAttribution === "thread-cumulative"
@@ -184,7 +188,7 @@ export function StatisticsPanel() {
               label="Est. cost"
               icon={DollarSignIcon}
               value={`~${formatUsd(cost.usd)}`}
-              sub={cost.hasUnpriced ? "excludes unpriced models" : "estimated spend"}
+              sub={cost.hasUnpriced ? "excludes unpriced tokens" : "estimated spend"}
             />
             <StatCard
               label="Most used model"
