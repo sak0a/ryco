@@ -41,7 +41,6 @@ import {
   aggregateByProject,
   aggregateByProvider,
   aggregateCostForModels,
-  buildModelProviderMap,
   buildProjectTitleMap,
   buildTimeSeries,
   filterBuckets,
@@ -54,16 +53,20 @@ import { useStatistics } from "./statistics/useStatistics";
 
 export function StatisticsPanel() {
   const { snapshot, loading, error, refresh, refreshing } = useStatistics();
-  const [filter, setFilter] = useState<StatFilter>({ range: "30d", projectId: null, model: null });
+  const [filter, setFilter] = useState<StatFilter>({
+    range: "30d",
+    projectId: null,
+    model: null,
+    provider: null,
+  });
 
   const derived = useMemo(() => {
     if (!snapshot) {
       return null;
     }
     const filtered = filterBuckets(snapshot, filter);
-    const modelProvider = buildModelProviderMap(snapshot);
     const projectTitle = buildProjectTitleMap(snapshot);
-    const models = aggregateByModel(filtered, modelProvider);
+    const models = aggregateByModel(filtered);
     const totalsAllModels = models.reduce((acc, entry) => acc + entry.totalTokens, 0);
     return {
       totals: sumTotals(filtered),
@@ -115,6 +118,21 @@ export function StatisticsPanel() {
       : 0;
   const tokenSpark = series.map((point) => point.totalTokens);
   const activeSpark = series.map((point) => point.activeMs);
+  const uncategorizedTokens = Math.max(
+    0,
+    totals.totalTokens - totals.inputTokens - totals.outputTokens,
+  );
+  const tokenSubtitle =
+    uncategorizedTokens > 0
+      ? `${formatTokens(totals.inputTokens)} in · ${formatTokens(totals.outputTokens)} out · ${formatTokens(uncategorizedTokens)} other`
+      : `${formatTokens(totals.inputTokens)} in · ${formatTokens(totals.outputTokens)} out`;
+  const hasUncategorizedSeries = series.some((point) => point.uncategorizedTokens > 0);
+  const attributionNote =
+    snapshot.tokenAttribution === "thread-cumulative"
+      ? "Token figures use cumulative thread snapshots when providers or older sessions do not expose per-turn deltas."
+      : snapshot.tokenAttribution === "mixed"
+        ? "Token figures combine exact per-turn deltas where available with cumulative snapshots for older or provider-limited sessions."
+        : "Token figures use exact per-turn deltas where providers report them.";
 
   return (
     <SettingsPageContainer>
@@ -158,7 +176,7 @@ export function StatisticsPanel() {
               label="Total tokens"
               icon={CpuIcon}
               value={formatTokens(totals.totalTokens)}
-              sub={`${formatTokens(totals.inputTokens)} in · ${formatTokens(totals.outputTokens)} out`}
+              sub={tokenSubtitle}
               delta={percentChange(totals.totalTokens, previous?.totalTokens)}
               sparkline={tokenSpark}
             />
@@ -207,6 +225,7 @@ export function StatisticsPanel() {
             <div className="mt-2 flex items-center gap-4 px-1 text-[11px] text-muted-foreground">
               <LegendDot colorIndex={0} label="Input" />
               <LegendDot colorIndex={1} label="Output" />
+              {hasUncategorizedSeries ? <LegendDot colorIndex={2} label="Other" /> : null}
             </div>
           </Panel>
 
@@ -274,8 +293,8 @@ export function StatisticsPanel() {
           </div>
 
           <p className="px-1 text-[11px] text-muted-foreground/80">
-            Token figures are attributed per turn. Costs are rough estimates from a built-in price
-            table and exclude subscription-billed models.
+            {attributionNote} Costs are rough estimates from a built-in price table and exclude
+            subscription-billed or breakdown-less usage.
           </p>
         </>
       )}

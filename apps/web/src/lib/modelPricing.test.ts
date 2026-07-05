@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { canonicalizeModel, estimateCostUsd, formatUsd, getModelPrice } from "./modelPricing";
+import {
+  canonicalizeModel,
+  estimateAggregateCost,
+  estimateCostUsd,
+  formatUsd,
+  getModelPrice,
+} from "./modelPricing";
 import { formatModelLabel } from "./statisticsFormat";
 
 describe("canonicalizeModel", () => {
@@ -20,6 +26,12 @@ describe("canonicalizeModel", () => {
     expect(canonicalizeModel("opus")).toBe("claude-opus-4-8");
     expect(canonicalizeModel("sonnet")).toBe("claude-sonnet-4-6");
   });
+
+  it("uses provider-specific aliases before global canonical slugs", () => {
+    expect(canonicalizeModel("gpt-5.4", "codex")).toBe("gpt-5.4");
+    expect(canonicalizeModel("gpt-5.4", "copilot")).toBe("gpt-5");
+    expect(canonicalizeModel("composer-1", "cursor")).toBe("composer-1.5");
+  });
 });
 
 describe("estimateCostUsd", () => {
@@ -35,7 +47,41 @@ describe("estimateCostUsd", () => {
       { inputTokens: 1_000_000, cachedInputTokens: 1_000_000, outputTokens: 1_000_000 },
       "claude-opus-4-8",
     );
-    expect(opus).toBeCloseTo(30.5, 5); // 5 + 0.5 + 25
+    expect(opus).toBeCloseTo(25.5, 5); // cached input is a discounted subset of input
+
+    const mixedInput = estimateCostUsd(
+      { inputTokens: 1_000_000, cachedInputTokens: 400_000, outputTokens: 0 },
+      "gpt-5.4",
+    );
+    expect(mixedInput).toBeCloseTo(1.6, 5); // 600k * $2.50 + 400k * $0.25
+  });
+
+  it("prices legacy cached input that was stored separately from input", () => {
+    const cost = estimateCostUsd(
+      {
+        inputTokens: 1_000_000,
+        cachedInputTokens: 400_000,
+        outputTokens: 0,
+        totalTokens: 1_400_000,
+      },
+      "gpt-5.4",
+    );
+    expect(cost).toBeCloseTo(2.6, 5); // 1M * $2.50 + 400k * $0.25
+  });
+
+  it("marks known-priced rows as partially unpriced when totals exceed known buckets", () => {
+    const cost = estimateAggregateCost([
+      {
+        model: "gpt-5.4",
+        inputTokens: 1_000_000,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 1_500_000,
+      },
+    ]);
+
+    expect(cost.usd).toBeCloseTo(2.5, 5);
+    expect(cost.hasUnpriced).toBe(true);
   });
 
   it("returns null for genuinely unknown models", () => {
@@ -48,13 +94,29 @@ describe("estimateCostUsd", () => {
     ).toBeNull();
   });
 
+  it("does not price total-only usage without an input/output breakdown", () => {
+    expect(
+      estimateCostUsd(
+        { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, totalTokens: 10_000 },
+        "gpt-5.4",
+      ),
+    ).toBeNull();
+  });
+
   it("prices models across providers (incl. provider-prefixed slugs)", () => {
     expect(getModelPrice("composer-2.5")).not.toBeNull();
     expect(getModelPrice("gemini-3-pro")).not.toBeNull();
     expect(getModelPrice("google/gemini-2.5-flash")).not.toBeNull();
     expect(getModelPrice("deepseek/deepseek-chat")).not.toBeNull();
+    expect(getModelPrice("grok-build-0.1")).not.toBeNull();
     expect(getModelPrice("grok-code-fast-1")).not.toBeNull();
     expect(getModelPrice("moonshotai/kimi-k2.6")).not.toBeNull();
+  });
+
+  it("prices ambiguous model slugs with provider-specific aliases", () => {
+    const tokens = { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 1_000_000 };
+    expect(estimateCostUsd(tokens, "gpt-5.4", "codex")).toBeCloseTo(17.5, 5);
+    expect(estimateCostUsd(tokens, "gpt-5.4", "copilot")).toBeCloseTo(11.25, 5);
   });
 
   it("matches dated / preview router slugs via suffix fallback", () => {

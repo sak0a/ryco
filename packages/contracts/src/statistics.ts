@@ -6,8 +6,9 @@ import { IsoDateTime, ProjectId } from "./baseSchemas.ts";
  * Usage statistics surfaced in Settings → Statistics.
  *
  * The server returns the finest sensible granularity — one bucket per
- * `(date, project, model)` — and the client pivots/filters those buckets into
- * every chart (totals, per-model, per-project, time series) without re-fetching.
+ * `(date, project, provider, model)` — and the client pivots/filters those
+ * buckets into every chart (totals, per-model, per-project, time series)
+ * without re-fetching.
  * Token counts and timings are derived on demand from the existing projection
  * tables; no dedicated statistics tables exist.
  */
@@ -50,9 +51,9 @@ export const StatisticsProjectRef = Schema.Struct({
 export type StatisticsProjectRef = typeof StatisticsProjectRef.Type;
 
 /**
- * One row per `(date, project, model)`. Numeric fields are plain numbers (sums)
- * to stay permissive — a provider that reports fractional usage will not fail
- * decoding.
+ * One row per `(date, project, provider, model)`. Numeric fields are plain
+ * numbers (sums) to stay permissive — a provider that reports fractional usage
+ * will not fail decoding.
  */
 export const StatisticsDailyBucket = Schema.Struct({
   /** Calendar day in UTC, formatted YYYY-MM-DD. */
@@ -64,6 +65,8 @@ export const StatisticsDailyBucket = Schema.Struct({
   outputTokens: Schema.Number,
   cachedInputTokens: Schema.Number,
   reasoningTokens: Schema.Number,
+  /** Provider-reported total when available; may exceed known input/output split. */
+  totalTokens: Schema.Number,
   turns: Schema.Number,
   activeMs: Schema.Number,
   toolUses: Schema.Number,
@@ -108,8 +111,14 @@ export type StatisticsTotals = typeof StatisticsTotals.Type;
  *  - `per-turn-delta`: exact, one definitive delta per (thread, turn).
  *  - `thread-cumulative`: approximate, a thread's cumulative total attributed to
  *    its primary model and last-activity day (fallback when deltas are absent).
+ *  - `mixed`: exact deltas for threads that have them, cumulative fallback for
+ *    older/provider-limited threads.
  */
-export const StatisticsTokenAttribution = Schema.Literals(["per-turn-delta", "thread-cumulative"]);
+export const StatisticsTokenAttribution = Schema.Literals([
+  "per-turn-delta",
+  "thread-cumulative",
+  "mixed",
+]);
 export type StatisticsTokenAttribution = typeof StatisticsTokenAttribution.Type;
 
 export const StatisticsSnapshot = Schema.Struct({

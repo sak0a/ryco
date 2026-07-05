@@ -6,11 +6,12 @@
  * on demand. No dedicated statistics tables exist; everything is derived from
  * data already persisted by the projection pipeline.
  *
- * Token figures use a per-turn delta attribution: for each `(thread, turn)` we
- * read the final `context-window.updated` activity and sum its `last*` deltas,
- * bucketed by day/project/model. When deltas are absent (older data / providers
- * that only report cumulative totals) we fall back to attributing a thread's
- * cumulative total to its primary model and last-activity day.
+ * Token figures prefer per-turn attribution: for each `(thread, turn)` with
+ * exact `last*` breakdowns we read the final `context-window.updated` activity
+ * and bucket its provider-reported turn total by day/project/provider/model.
+ * Threads without exact deltas (older data / providers that only report
+ * cumulative context usage) fall back to attributing the latest cumulative
+ * total to the thread's primary model and last-activity day.
  *
  * @module StatisticsQuery
  */
@@ -57,6 +58,7 @@ const ThreadRow = Schema.Struct({
   threadId: Schema.String,
   projectId: ProjectId,
   model: Schema.NullOr(Schema.String),
+  providerInstanceId: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   providerName: Schema.NullOr(Schema.String),
 });
@@ -104,6 +106,7 @@ interface MutableBucket {
   outputTokens: number;
   cachedInputTokens: number;
   reasoningTokens: number;
+  totalTokens: number;
   turns: number;
   activeMs: number;
   toolUses: number;
@@ -123,6 +126,48 @@ function dayOf(iso: string): string | null {
   return iso.length >= 10 ? iso.slice(0, 10) : null;
 }
 
+function bestPerTurnTotalTokenCount(payload: Record<string, unknown> | null): number {
+  const reportedTotal = num(payload?.lastUsedTokens);
+  if (reportedTotal > 0) {
+    return reportedTotal;
+  }
+  return num(payload?.lastInputTokens) + num(payload?.lastOutputTokens);
+}
+
+function bestCumulativeTotalTokenCount(payload: Record<string, unknown> | null): number {
+  const reportedTotal = num(payload?.usedTokens);
+  if (reportedTotal > 0) {
+    return reportedTotal;
+  }
+  return num(payload?.inputTokens) + num(payload?.outputTokens);
+}
+
+function hasExactPerTurnBreakdown(payload: Record<string, unknown> | null): boolean {
+  return (
+    num(payload?.lastInputTokens) +
+      num(payload?.lastOutputTokens) +
+      num(payload?.lastCachedInputTokens) +
+      num(payload?.lastReasoningOutputTokens) >
+    0
+  );
+}
+
+function addPerTurnUsage(bucket: MutableBucket, payload: Record<string, unknown> | null): void {
+  bucket.inputTokens += num(payload?.lastInputTokens);
+  bucket.outputTokens += num(payload?.lastOutputTokens);
+  bucket.cachedInputTokens += num(payload?.lastCachedInputTokens);
+  bucket.reasoningTokens += num(payload?.lastReasoningOutputTokens);
+  bucket.totalTokens += bestPerTurnTotalTokenCount(payload);
+}
+
+function addCumulativeUsage(bucket: MutableBucket, payload: Record<string, unknown> | null): void {
+  bucket.inputTokens += num(payload?.inputTokens);
+  bucket.outputTokens += num(payload?.outputTokens);
+  bucket.cachedInputTokens += num(payload?.cachedInputTokens);
+  bucket.reasoningTokens += num(payload?.reasoningOutputTokens);
+  bucket.totalTokens += bestCumulativeTotalTokenCount(payload);
+}
+
 const makeStatisticsQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -135,9 +180,14 @@ const makeStatisticsQuery = Effect.gen(function* () {
           t.thread_id AS "threadId",
           t.project_id AS "projectId",
           json_extract(t.model_selection_json, '$.model') AS "model",
+          COALESCE(
+            json_extract(t.model_selection_json, '$.instanceId'),
+            json_extract(t.model_selection_json, '$.provider')
+          ) AS "providerInstanceId",
           t.created_at AS "createdAt",
           COALESCE(
             s.provider_name,
+            json_extract(t.model_selection_json, '$.instanceId'),
             json_extract(t.model_selection_json, '$.provider')
           ) AS "providerName"
         FROM projection_threads t
@@ -280,11 +330,11 @@ const makeStatisticsQuery = Effect.gen(function* () {
         string,
         { projectId: ProjectId; model: string; provider: string | undefined; createdAt: string }
       >();
-      const modelProvider = new Map<string, string | undefined>();
+      const modelRefs = new Map<string, StatisticsModelRef>();
       for (const row of threadRows) {
         // Coalesce blanks to safe display values: empty/whitespace strings would
         // fail success-encoding downstream and crash the RPC.
-        const provider = row.providerName?.trim() || undefined;
+        const provider = row.providerName?.trim() || row.providerInstanceId?.trim() || undefined;
         const model = (row.model ?? "").trim() || "unknown";
         threadMeta.set(row.threadId, {
           projectId: row.projectId,
@@ -292,25 +342,30 @@ const makeStatisticsQuery = Effect.gen(function* () {
           provider,
           createdAt: row.createdAt,
         });
-        if (!modelProvider.has(model) || (modelProvider.get(model) === undefined && provider)) {
-          modelProvider.set(model, provider);
-        }
+        const modelKey = `${provider ?? ""}\u0000${model}`;
+        modelRefs.set(modelKey, provider ? { model, provider } : { model });
       }
 
       const buckets = new Map<string, MutableBucket>();
-      const getBucket = (date: string, projectId: ProjectId, model: string): MutableBucket => {
-        const key = `${date} ${projectId} ${model}`;
+      const getBucket = (
+        date: string,
+        projectId: ProjectId,
+        model: string,
+        provider: string | undefined,
+      ): MutableBucket => {
+        const key = `${date}\u0000${projectId}\u0000${provider ?? ""}\u0000${model}`;
         let bucket = buckets.get(key);
         if (!bucket) {
           bucket = {
             date,
             projectId,
             model,
-            provider: modelProvider.get(model),
+            provider,
             inputTokens: 0,
             outputTokens: 0,
             cachedInputTokens: 0,
             reasoningTokens: 0,
+            totalTokens: 0,
             turns: 0,
             activeMs: 0,
             toolUses: 0,
@@ -339,7 +394,6 @@ const makeStatisticsQuery = Effect.gen(function* () {
       // iteration order (turn_id is opaque/non-chronological), so the per-thread
       // pick uses an explicit latest-by-(createdAt, sequence) comparison.
       const lastPerTurn = new Map<string, (typeof tokenRows)[number]>();
-      const lastPerThread = new Map<string, (typeof tokenRows)[number]>();
       const isLater = (a: (typeof tokenRows)[number], b: (typeof tokenRows)[number]): boolean => {
         if (a.createdAt !== b.createdAt) {
           return a.createdAt > b.createdAt;
@@ -348,56 +402,65 @@ const makeStatisticsQuery = Effect.gen(function* () {
       };
       for (const row of tokenRows) {
         considerIso(row.createdAt);
-        lastPerTurn.set(`${row.threadId} ${row.turnId ?? ""}`, row);
-        const prevThread = lastPerThread.get(row.threadId);
-        if (!prevThread || isLater(row, prevThread)) {
-          lastPerThread.set(row.threadId, row);
+        const turnKey = `${row.threadId}\u0000${row.turnId ?? ""}`;
+        const prevTurn = lastPerTurn.get(turnKey);
+        if (!prevTurn || isLater(row, prevTurn)) {
+          lastPerTurn.set(turnKey, row);
         }
       }
 
-      let perTurnDeltaSum = 0;
+      const firstExactPerThread = new Map<string, (typeof tokenRows)[number]>();
       for (const row of lastPerTurn.values()) {
         const payload = safeParse(row.payloadJson);
-        perTurnDeltaSum +=
-          num(payload?.lastInputTokens) +
-          num(payload?.lastOutputTokens) +
-          num(payload?.lastCachedInputTokens) +
-          num(payload?.lastReasoningOutputTokens);
+        if (hasExactPerTurnBreakdown(payload)) {
+          const prev = firstExactPerThread.get(row.threadId);
+          if (!prev || isLater(prev, row)) {
+            firstExactPerThread.set(row.threadId, row);
+          }
+        }
       }
-      let cumulativeSum = 0;
-      for (const row of lastPerThread.values()) {
+      const cumulativeFallbackByThread = new Map<string, (typeof tokenRows)[number]>();
+      for (const row of lastPerTurn.values()) {
         const payload = safeParse(row.payloadJson);
-        cumulativeSum += num(payload?.inputTokens) + num(payload?.outputTokens);
+        if (hasExactPerTurnBreakdown(payload)) continue;
+        const firstExact = firstExactPerThread.get(row.threadId);
+        if (firstExact && !isLater(firstExact, row)) {
+          continue;
+        }
+        const prev = cumulativeFallbackByThread.get(row.threadId);
+        if (!prev || isLater(row, prev)) {
+          cumulativeFallbackByThread.set(row.threadId, row);
+        }
+      }
+      let usedExactPerTurn = false;
+      let usedCumulativeFallback = false;
+
+      for (const row of lastPerTurn.values()) {
+        const payload = safeParse(row.payloadJson);
+        if (!hasExactPerTurnBreakdown(payload)) continue;
+        const meta = threadMeta.get(row.threadId);
+        const date = dayOf(row.createdAt);
+        if (!meta || !date) continue;
+        addPerTurnUsage(getBucket(date, meta.projectId, meta.model, meta.provider), payload);
+        usedExactPerTurn = true;
+      }
+
+      for (const row of cumulativeFallbackByThread.values()) {
+        const meta = threadMeta.get(row.threadId);
+        const date = dayOf(row.createdAt);
+        if (!meta || !date) continue;
+        const payload = safeParse(row.payloadJson);
+        if (bestCumulativeTotalTokenCount(payload) <= 0) continue;
+        addCumulativeUsage(getBucket(date, meta.projectId, meta.model, meta.provider), payload);
+        usedCumulativeFallback = true;
       }
 
       const attribution: StatisticsTokenAttribution =
-        perTurnDeltaSum === 0 && cumulativeSum > 0 ? "thread-cumulative" : "per-turn-delta";
-
-      if (attribution === "per-turn-delta") {
-        for (const row of lastPerTurn.values()) {
-          const meta = threadMeta.get(row.threadId);
-          const date = dayOf(row.createdAt);
-          if (!meta || !date) continue;
-          const payload = safeParse(row.payloadJson);
-          const bucket = getBucket(date, meta.projectId, meta.model);
-          bucket.inputTokens += num(payload?.lastInputTokens);
-          bucket.outputTokens += num(payload?.lastOutputTokens);
-          bucket.cachedInputTokens += num(payload?.lastCachedInputTokens);
-          bucket.reasoningTokens += num(payload?.lastReasoningOutputTokens);
-        }
-      } else {
-        for (const row of lastPerThread.values()) {
-          const meta = threadMeta.get(row.threadId);
-          const date = dayOf(row.createdAt);
-          if (!meta || !date) continue;
-          const payload = safeParse(row.payloadJson);
-          const bucket = getBucket(date, meta.projectId, meta.model);
-          bucket.inputTokens += num(payload?.inputTokens);
-          bucket.outputTokens += num(payload?.outputTokens);
-          bucket.cachedInputTokens += num(payload?.cachedInputTokens);
-          bucket.reasoningTokens += num(payload?.reasoningOutputTokens);
-        }
-      }
+        usedExactPerTurn && usedCumulativeFallback
+          ? "mixed"
+          : usedCumulativeFallback
+            ? "thread-cumulative"
+            : "per-turn-delta";
 
       // ── Turns: counts, active time, and file/line changes ─────────────────
       for (const row of turnRows) {
@@ -408,7 +471,7 @@ const makeStatisticsQuery = Effect.gen(function* () {
         const anchor = row.completedAt ?? row.startedAt;
         const date = anchor ? dayOf(anchor) : null;
         if (!date) continue;
-        const bucket = getBucket(date, meta.projectId, meta.model);
+        const bucket = getBucket(date, meta.projectId, meta.model, meta.provider);
         if (row.completedAt) {
           bucket.turns += 1;
           if (row.startedAt) {
@@ -432,7 +495,7 @@ const makeStatisticsQuery = Effect.gen(function* () {
       for (const row of toolRows) {
         const meta = threadMeta.get(row.threadId);
         if (!meta) continue;
-        const bucket = getBucket(row.date, meta.projectId, meta.model);
+        const bucket = getBucket(row.date, meta.projectId, meta.model, meta.provider);
         bucket.toolUses += num(row.count);
       }
 
@@ -441,7 +504,7 @@ const makeStatisticsQuery = Effect.gen(function* () {
         considerIso(meta.createdAt);
         const date = dayOf(meta.createdAt);
         if (!date) continue;
-        getBucket(date, meta.projectId, meta.model).threadsCreated += 1;
+        getBucket(date, meta.projectId, meta.model, meta.provider).threadsCreated += 1;
       }
 
       // ── Worktree summary ──────────────────────────────────────────────────
@@ -492,8 +555,15 @@ const makeStatisticsQuery = Effect.gen(function* () {
         totals.deletions += bucket.deletions;
         totals.commits += bucket.commits;
         totals.pushes += bucket.pushes;
+        totals.totalTokens += bucket.totalTokens;
       }
-      totals.totalTokens = totals.inputTokens + totals.outputTokens;
+      dailyBuckets.sort((a, b) =>
+        a.date === b.date
+          ? a.projectId === b.projectId
+            ? (a.provider ?? "").localeCompare(b.provider ?? "") || a.model.localeCompare(b.model)
+            : a.projectId.localeCompare(b.projectId)
+          : a.date.localeCompare(b.date),
+      );
 
       const projectTitle = new Map<ProjectId, string>();
       for (const row of projectRows) {
@@ -512,8 +582,10 @@ const makeStatisticsQuery = Effect.gen(function* () {
         id,
         title: projectTitle.get(id)?.trim() || id,
       }));
-      const models: Array<StatisticsModelRef> = [...modelProvider].map(([model, provider]) =>
-        provider ? { model, provider } : { model },
+      projects.sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+      const models: Array<StatisticsModelRef> = [...modelRefs.values()].toSorted(
+        (a, b) =>
+          (a.provider ?? "").localeCompare(b.provider ?? "") || a.model.localeCompare(b.model),
       );
 
       const snapshot: StatisticsSnapshot = {

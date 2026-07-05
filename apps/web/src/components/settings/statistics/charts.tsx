@@ -31,6 +31,7 @@ function truncateLabel(value: string, max = 14): string {
 }
 
 export function TokensOverTimeChart({ data }: { data: ReadonlyArray<DayPoint> }) {
+  const hasUncategorized = data.some((point) => point.uncategorizedTokens > 0);
   return (
     <ChartContainer className="h-[240px]">
       <AreaChart data={[...data]} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
@@ -42,6 +43,10 @@ export function TokensOverTimeChart({ data }: { data: ReadonlyArray<DayPoint> })
           <linearGradient id="statFillOutput" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor={chartColor(1)} stopOpacity={0.4} />
             <stop offset="95%" stopColor={chartColor(1)} stopOpacity={0.04} />
+          </linearGradient>
+          <linearGradient id="statFillOther" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={chartColor(2)} stopOpacity={0.35} />
+            <stop offset="95%" stopColor={chartColor(2)} stopOpacity={0.04} />
           </linearGradient>
         </defs>
         <CartesianGrid vertical={false} />
@@ -85,6 +90,17 @@ export function TokensOverTimeChart({ data }: { data: ReadonlyArray<DayPoint> })
           fill="url(#statFillOutput)"
           strokeWidth={1.5}
         />
+        {hasUncategorized ? (
+          <Area
+            dataKey="uncategorizedTokens"
+            name="Other"
+            type="monotone"
+            stackId="tokens"
+            stroke={chartColor(2)}
+            fill="url(#statFillOther)"
+            strokeWidth={1.5}
+          />
+        ) : null}
       </AreaChart>
     </ChartContainer>
   );

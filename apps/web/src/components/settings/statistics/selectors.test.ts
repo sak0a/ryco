@@ -1,7 +1,7 @@
 import { ProjectId, type StatisticsDailyBucket, type StatisticsSnapshot } from "@ryco/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildTimeSeries, filterBuckets, previousTotals } from "./selectors";
+import { aggregateByModel, buildTimeSeries, filterBuckets, previousTotals } from "./selectors";
 
 const PROJECT = ProjectId.make("project-1");
 
@@ -17,6 +17,7 @@ function makeBucket(
     outputTokens: 0,
     cachedInputTokens: 0,
     reasoningTokens: 0,
+    totalTokens: 0,
     turns: 0,
     activeMs: 0,
     toolUses: 0,
@@ -97,13 +98,25 @@ describe("previousTotals", () => {
       makeBucket("2026-06-10", { inputTokens: 999 }), // older, excluded
     ];
     const snapshot = makeSnapshot(buckets);
-    const prev = previousTotals(snapshot, { range: "7d", projectId: null, model: null });
+    const prev = previousTotals(snapshot, {
+      range: "7d",
+      projectId: null,
+      model: null,
+      provider: null,
+    });
     expect(prev?.inputTokens).toBe(50);
   });
 
   it("is null for the 'all' range", () => {
     const snapshot = makeSnapshot([makeBucket("2026-06-25")]);
-    expect(previousTotals(snapshot, { range: "all", projectId: null, model: null })).toBeNull();
+    expect(
+      previousTotals(snapshot, {
+        range: "all",
+        projectId: null,
+        model: null,
+        provider: null,
+      }),
+    ).toBeNull();
   });
 });
 
@@ -115,8 +128,68 @@ describe("filterBuckets", () => {
       makeBucket("2026-01-01", { model: "gpt-5.4", inputTokens: 9 }),
     ];
     const snapshot = makeSnapshot(buckets);
-    const filtered = filterBuckets(snapshot, { range: "7d", projectId: null, model: "gpt-5.4" });
+    const filtered = filterBuckets(snapshot, {
+      range: "7d",
+      projectId: null,
+      model: "gpt-5.4",
+      provider: null,
+    });
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.inputTokens).toBe(1);
+  });
+
+  it("filters by provider when a model/provider pair is selected", () => {
+    const buckets = [
+      makeBucket("2026-06-26", {
+        model: "gpt-5.4",
+        provider: "codex",
+        totalTokens: 100,
+      }),
+      makeBucket("2026-06-26", {
+        model: "gpt-5.4",
+        provider: "copilot",
+        totalTokens: 200,
+      }),
+    ];
+    const snapshot = makeSnapshot(buckets);
+    const filtered = filterBuckets(snapshot, {
+      range: "7d",
+      projectId: null,
+      model: "gpt-5.4",
+      provider: "copilot",
+    });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.provider).toBe("copilot");
+  });
+});
+
+describe("aggregateByModel", () => {
+  it("keeps identical model slugs separate by provider and uses bucket totalTokens", () => {
+    const buckets = [
+      makeBucket("2026-06-26", {
+        model: "gpt-5.4",
+        provider: "codex",
+        inputTokens: 100,
+        outputTokens: 10,
+        totalTokens: 110,
+      }),
+      makeBucket("2026-06-26", {
+        model: "gpt-5.4",
+        provider: "copilot",
+        inputTokens: 100,
+        outputTokens: 10,
+        totalTokens: 500,
+      }),
+    ];
+
+    const models = aggregateByModel(buckets);
+
+    expect(models).toHaveLength(2);
+    expect(models.map((entry) => [entry.provider, entry.totalTokens])).toEqual([
+      ["copilot", 500],
+      ["codex", 110],
+    ]);
+    expect(models[0]?.costUsd).toBeCloseTo(0.000225, 8);
+    expect(models[1]?.costUsd).toBeCloseTo(0.0004, 8);
   });
 });
