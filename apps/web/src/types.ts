@@ -46,7 +46,19 @@ export interface ChatImageAttachment {
   previewUrl?: string;
 }
 
-export type ChatAttachment = ChatImageAttachment;
+/** Compact display snapshot of a PR / issue / work item attached to a message. */
+export interface ChatContextAttachment {
+  type: "context";
+  id: string;
+  kind: "issue" | "change-request" | "work-item";
+  provider: string;
+  reference: string;
+  title: string;
+  state: string;
+  url: string;
+}
+
+export type ChatAttachment = ChatImageAttachment | ChatContextAttachment;
 
 export interface ChatMessage {
   id: MessageId;

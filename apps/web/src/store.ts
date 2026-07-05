@@ -181,17 +181,21 @@ function mapSession(session: OrchestrationSession): ThreadSession {
 }
 
 function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage): ChatMessage {
-  const attachments = message.attachments?.map((attachment) => ({
-    type: "image" as const,
-    id: attachment.id,
-    name: attachment.name,
-    mimeType: attachment.mimeType,
-    sizeBytes: attachment.sizeBytes,
-    previewUrl: resolveEnvironmentHttpUrl({
-      environmentId,
-      pathname: attachmentPreviewRoutePath(attachment.id),
-    }),
-  }));
+  const attachments = message.attachments?.map((attachment) =>
+    attachment.type === "context"
+      ? { ...attachment }
+      : {
+          type: "image" as const,
+          id: attachment.id,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          previewUrl: resolveEnvironmentHttpUrl({
+            environmentId,
+            pathname: attachmentPreviewRoutePath(attachment.id),
+          }),
+        },
+  );
 
   return {
     id: message.id,

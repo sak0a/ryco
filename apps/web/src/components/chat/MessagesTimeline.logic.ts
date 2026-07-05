@@ -522,13 +522,28 @@ function areChatAttachmentsUnchanged(
 }
 
 function areChatAttachmentUnchanged(previous: ChatAttachment, next: ChatAttachment): boolean {
-  return (
-    previous === next ||
-    (previous.type === next.type &&
+  if (previous === next) {
+    return true;
+  }
+  if (previous.type === "image" && next.type === "image") {
+    return (
       previous.id === next.id &&
       previous.name === next.name &&
       previous.mimeType === next.mimeType &&
       previous.sizeBytes === next.sizeBytes &&
-      previous.previewUrl === next.previewUrl)
-  );
+      previous.previewUrl === next.previewUrl
+    );
+  }
+  if (previous.type === "context" && next.type === "context") {
+    return (
+      previous.id === next.id &&
+      previous.kind === next.kind &&
+      previous.provider === next.provider &&
+      previous.reference === next.reference &&
+      previous.title === next.title &&
+      previous.state === next.state &&
+      previous.url === next.url
+    );
+  }
+  return false;
 }

@@ -311,7 +311,6 @@ function keyExtractor(item: MessagesTimelineRow) {
 // ---------------------------------------------------------------------------
 
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
-type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
 
@@ -341,7 +340,9 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
       {row.kind === "message" &&
         row.message.role === "user" &&
         (() => {
-          const userImages = row.message.attachments ?? [];
+          const userImages = (row.message.attachments ?? []).filter(
+            (attachment) => attachment.type === "image",
+          );
           const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
           const terminalContexts = displayedUserMessage.contexts;
           const canRevertAgentWork = typeof row.revertTurnCount === "number";
@@ -352,7 +353,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   {userImages.length > 0 && (
                     <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                       {userImages.map(
-                        (image: NonNullable<TimelineMessage["attachments"]>[number]) => (
+                        (image) => (
                           <div
                             key={image.id}
                             className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
