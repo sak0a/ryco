@@ -48,12 +48,22 @@ Decisions locked during brainstorming:
   `ChatMessage.attachments` is therefore images-only
   (`apps/web/src/types.ts:40-60`).
 - `ThreadTurnStartCommand` carries `sourceControlContexts` at the command
-  root (`orchestration.ts:657-699`); they are formatted into the prompt by
-  `packages/shared/src/sourceControlContextFormatter.ts` and prepended in
-  all three provider adapters (`ClaudeAdapter.ts:695-700`,
-  `CodexAdapter.ts:1648`, `OpenCodeAdapter.ts:1616`). They are **not**
-  persisted on the message (`ProjectionThreadMessages.ts` decodes
-  `attachments_json` as `Schema.Array(ChatAttachment)`).
+  root (`orchestration.ts:657-699`); all three provider adapters call
+  `formatSourceControlContextsForAgent(input.sourceControlContexts ?? [])`
+  (`ClaudeAdapter.ts:695-700`, `CodexAdapter.ts:1648`,
+  `OpenCodeAdapter.ts:1616`). They are **not** persisted on the message
+  (`ProjectionThreadMessages.ts` decodes `attachments_json` as
+  `Schema.Array(ChatAttachment)`).
+- **Latent bug (discovered during planning): the contexts never reach the
+  adapters.** The decider's `thread.turn-start-requested` event payload
+  (`orchestration.ts:1140-1154`) has no context field, and
+  `ProviderCommandReactor.buildSendTurnRequestForThread` never populates
+  `ProviderSendTurnInput.sourceControlContexts` — the adapters' formatter
+  always receives `[]`, so attached PR/issue context is silently dropped
+  before the prompt is built. This spec's server work includes the fix:
+  contexts ride the `thread.turn-start-requested` payload and the reactor
+  forwards them (both source-control and the new work-item contexts) into
+  the send-turn request.
 - `MessagesTimeline.tsx:344-379` renders only image attachments.
 - `ComposerWorkItemContext` already exists
   (`packages/contracts/src/workItems.ts:161-169`) but nothing produces or
@@ -118,6 +128,20 @@ export const ChatAttachment = Schema.Union([
   `{ id, provider, key, detail: WorkItemDetail, fetchedAt, staleAfter }`.
 
 ## Server changes
+
+### Context plumbing fix (event payload → reactor → provider)
+
+- `ThreadTurnStartRequestedPayload` gains optional `sourceControlContexts`
+  and `workItemContexts`; the decider copies both from the command into
+  the `thread.turn-start-requested` event.
+- `ProviderCommandReactor.buildSendTurnRequestForThread` forwards both
+  arrays into the send-turn request, fixing the silent drop.
+- The reactor filters `message.attachments` to `type === "image"` when
+  building the provider request, so context attachments never enter the
+  image pipeline or its max-8 cap.
+- `Normalizer.normalizeDispatchCommand` passes `type: "context"`
+  attachments through unchanged (they are already in persisted shape);
+  only `type: "image"` entries go through the data-URL decode/store path.
 
 ### Work-item prompt formatter
 
