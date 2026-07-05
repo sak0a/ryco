@@ -179,10 +179,29 @@ export interface TokenTotals {
   readonly totalTokens?: number;
 }
 
+function tokenCount(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function unpricedTokenRemainder(tokens: TokenTotals): number {
+  const totalTokens = tokenCount(tokens.totalTokens);
+  if (totalTokens <= 0) {
+    return 0;
+  }
+  return Math.max(
+    0,
+    totalTokens -
+      tokenCount(tokens.inputTokens) -
+      tokenCount(tokens.outputTokens) -
+      tokenCount(tokens.cachedInputTokens),
+  );
+}
+
 /**
  * Estimate spend for one model's token totals. `cachedInputTokens` is treated
  * as the discounted subset of `inputTokens`, matching Codex and the normalized
- * provider usage snapshots.
+ * provider usage snapshots. Legacy buckets where cached reads were stored as a
+ * separate input bucket are detected via `totalTokens` and still billed.
  * Returns `null` when the model has no known per-token price.
  */
 export function estimateCostUsd(
@@ -194,17 +213,29 @@ export function estimateCostUsd(
   if (!price) {
     return null;
   }
-  const hasBreakdown =
-    tokens.inputTokens > 0 || tokens.cachedInputTokens > 0 || tokens.outputTokens > 0;
-  if (!hasBreakdown && (tokens.totalTokens ?? 0) > 0) {
+  const inputTokens = tokenCount(tokens.inputTokens);
+  const cachedInputTokens = tokenCount(tokens.cachedInputTokens);
+  const outputTokens = tokenCount(tokens.outputTokens);
+  const totalTokens = tokenCount(tokens.totalTokens);
+  const hasBreakdown = inputTokens > 0 || cachedInputTokens > 0 || outputTokens > 0;
+  if (!hasBreakdown && totalTokens > 0) {
     return null;
   }
-  const cachedInputTokens = Math.max(0, Math.min(tokens.cachedInputTokens, tokens.inputTokens));
-  const uncachedInputTokens = Math.max(0, tokens.inputTokens - cachedInputTokens);
+  const extraBeyondInputOutput = Math.max(0, totalTokens - inputTokens - outputTokens);
+  const overflowCachedInputTokens = Math.max(0, cachedInputTokens - inputTokens);
+  const separateCachedInputTokens = Math.min(
+    cachedInputTokens,
+    Math.max(extraBeyondInputOutput, overflowCachedInputTokens),
+  );
+  const subsetCachedInputTokens = Math.min(
+    inputTokens,
+    Math.max(0, cachedInputTokens - separateCachedInputTokens),
+  );
+  const uncachedInputTokens = Math.max(0, inputTokens - subsetCachedInputTokens);
   return (
     (uncachedInputTokens * price.inputPer1M +
-      cachedInputTokens * price.cachedInputPer1M +
-      tokens.outputTokens * price.outputPer1M) /
+      (subsetCachedInputTokens + separateCachedInputTokens) * price.cachedInputPer1M +
+      outputTokens * price.outputPer1M) /
     1_000_000
   );
 }
@@ -238,6 +269,9 @@ export function estimateAggregateCost(
       continue;
     }
     usd += cost;
+    if (unpricedTokenRemainder(row) > 0) {
+      hasUnpriced = true;
+    }
   }
   return { usd, hasUnpriced };
 }

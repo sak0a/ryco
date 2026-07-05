@@ -48,22 +48,7 @@ export function emptyTotals(): MetricTotals {
 }
 
 function snapshotTotals(totals: MetricTotals): MetricTotals {
-  return {
-    inputTokens: totals.inputTokens,
-    outputTokens: totals.outputTokens,
-    cachedInputTokens: totals.cachedInputTokens,
-    reasoningTokens: totals.reasoningTokens,
-    totalTokens: totals.totalTokens,
-    turns: totals.turns,
-    activeMs: totals.activeMs,
-    toolUses: totals.toolUses,
-    filesChanged: totals.filesChanged,
-    additions: totals.additions,
-    deletions: totals.deletions,
-    commits: totals.commits,
-    pushes: totals.pushes,
-    threadsCreated: totals.threadsCreated,
-  };
+  return { ...totals };
 }
 
 function accumulate(target: MetricTotals, bucket: StatisticsDailyBucket): void {

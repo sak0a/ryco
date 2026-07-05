@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { canonicalizeModel, estimateCostUsd, formatUsd, getModelPrice } from "./modelPricing";
+import {
+  canonicalizeModel,
+  estimateAggregateCost,
+  estimateCostUsd,
+  formatUsd,
+  getModelPrice,
+} from "./modelPricing";
 import { formatModelLabel } from "./statisticsFormat";
 
 describe("canonicalizeModel", () => {
@@ -48,6 +54,34 @@ describe("estimateCostUsd", () => {
       "gpt-5.4",
     );
     expect(mixedInput).toBeCloseTo(1.6, 5); // 600k * $2.50 + 400k * $0.25
+  });
+
+  it("prices legacy cached input that was stored separately from input", () => {
+    const cost = estimateCostUsd(
+      {
+        inputTokens: 1_000_000,
+        cachedInputTokens: 400_000,
+        outputTokens: 0,
+        totalTokens: 1_400_000,
+      },
+      "gpt-5.4",
+    );
+    expect(cost).toBeCloseTo(2.6, 5); // 1M * $2.50 + 400k * $0.25
+  });
+
+  it("marks known-priced rows as partially unpriced when totals exceed known buckets", () => {
+    const cost = estimateAggregateCost([
+      {
+        model: "gpt-5.4",
+        inputTokens: 1_000_000,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 1_500_000,
+      },
+    ]);
+
+    expect(cost.usd).toBeCloseTo(2.5, 5);
+    expect(cost.hasUnpriced).toBe(true);
   });
 
   it("returns null for genuinely unknown models", () => {
