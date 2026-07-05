@@ -25,8 +25,10 @@ import {
 } from "./orchestration.ts";
 import { ProviderInstanceId, ProviderDriverKind } from "./providerInstance.ts";
 import { ComposerSourceControlContext } from "./sourceControl.ts";
+import { ComposerWorkItemContext } from "./workItems.ts";
 
 export const PROVIDER_SEND_TURN_MAX_SOURCE_CONTROL_CONTEXTS = 10;
+export const PROVIDER_SEND_TURN_MAX_WORK_ITEM_CONTEXTS = 10;
 
 const ProviderSessionStatus = Schema.Literals([
   "connecting",
@@ -83,6 +85,11 @@ export const ProviderSendTurnInput = Schema.Struct({
   sourceControlContexts: Schema.optional(
     Schema.Array(ComposerSourceControlContext).check(
       Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_SOURCE_CONTROL_CONTEXTS),
+    ),
+  ),
+  workItemContexts: Schema.optional(
+    Schema.Array(ComposerWorkItemContext).check(
+      Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_WORK_ITEM_CONTEXTS),
     ),
   ),
   modelSelection: Schema.optional(ModelSelection),

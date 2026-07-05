@@ -1,7 +1,8 @@
 import { assert, it } from "@effect/vitest";
-import { Effect, Schema } from "effect";
+import { DateTime, Effect, Option, Schema } from "effect";
 
 import {
+  ChatAttachment,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   ModelSelection,
@@ -804,5 +805,116 @@ it.effect("ModelSelection rejects malformed instance ids", () =>
       }),
     );
     assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+// --- Chat context attachments + work-item contexts -------------------------
+
+const decodeChatAttachment = Schema.decodeUnknownEffect(ChatAttachment);
+const decodeChatAttachments = Schema.decodeUnknownEffect(Schema.Array(ChatAttachment));
+
+const workItemContextFixture = {
+  id: "ctx-work-item-1",
+  provider: "jira",
+  key: "RYC-231",
+  detail: {
+    provider: "jira",
+    key: "RYC-231",
+    title: "Attribute token spend per turn",
+    url: "https://acme.atlassian.net/browse/RYC-231",
+    state: "in_progress",
+    stateName: "In Progress",
+    assignee: null,
+    updatedAt: Option.none(),
+    description: "Track per-turn token deltas.",
+    comments: [],
+    transitions: [],
+    linkedChangeRequests: [],
+    editableFields: [],
+    activity: [],
+    truncated: false,
+  },
+  fetchedAt: DateTime.fromDateUnsafe(new Date("2026-07-05T10:00:00.000Z")),
+  staleAfter: DateTime.fromDateUnsafe(new Date("2026-07-05T10:05:00.000Z")),
+};
+
+it.effect("decodes a context chat attachment", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeChatAttachment({
+      type: "context",
+      id: "ctx-att-1",
+      kind: "work-item",
+      provider: "jira",
+      reference: "RYC-231",
+      title: "Attribute token spend per turn",
+      state: "In Progress",
+      url: "https://acme.atlassian.net/browse/RYC-231",
+    });
+    assert.strictEqual(parsed.type, "context");
+    if (parsed.type === "context") {
+      assert.strictEqual(parsed.kind, "work-item");
+      assert.strictEqual(parsed.reference, "RYC-231");
+    }
+  }),
+);
+
+it.effect("still decodes legacy images-only attachment arrays", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeChatAttachments([
+      {
+        type: "image",
+        id: "img-1",
+        name: "screenshot.png",
+        mimeType: "image/png",
+        sizeBytes: 1024,
+      },
+    ]);
+    assert.strictEqual(parsed.length, 1);
+    assert.strictEqual(parsed[0]?.type, "image");
+  }),
+);
+
+it.effect("accepts context attachments and work-item contexts in thread.turn.start", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-turn-ctx",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-ctx",
+        role: "user",
+        text: "implement the attached ticket",
+        attachments: [
+          {
+            type: "context",
+            id: "ctx-att-1",
+            kind: "change-request",
+            provider: "github",
+            reference: "#42",
+            title: "Add token usage attribution",
+            state: "open",
+            url: "https://github.com/acme/ryco/pull/42",
+          },
+        ],
+      },
+      workItemContexts: [workItemContextFixture],
+      createdAt: "2026-07-05T10:00:00.000Z",
+    });
+    assert.strictEqual(parsed.message.attachments[0]?.type, "context");
+    assert.strictEqual(parsed.workItemContexts?.length, 1);
+    assert.strictEqual(parsed.workItemContexts?.[0]?.key, "RYC-231");
+  }),
+);
+
+it.effect("carries work-item contexts on thread.turn-start-requested payloads", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartRequestedPayload({
+      threadId: "thread-1",
+      messageId: "msg-ctx",
+      workItemContexts: [workItemContextFixture],
+      createdAt: "2026-07-05T10:00:00.000Z",
+    });
+    assert.strictEqual(parsed.workItemContexts?.length, 1);
+    assert.strictEqual(parsed.workItemContexts?.[0]?.provider, "jira");
   }),
 );

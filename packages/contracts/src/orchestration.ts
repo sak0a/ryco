@@ -18,7 +18,7 @@ import {
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import { ComposerSourceControlContext } from "./sourceControl.ts";
-import { WorkItemProviderKind, WorkItemState } from "./workItems.ts";
+import { ComposerWorkItemContext, WorkItemProviderKind, WorkItemState } from "./workItems.ts";
 import {
   IssueState,
   PullRequestState,
@@ -182,9 +182,29 @@ const UploadChatImageAttachment = Schema.Struct({
 });
 export type UploadChatImageAttachment = typeof UploadChatImageAttachment.Type;
 
-export const ChatAttachment = Schema.Union([ChatImageAttachment]);
+export const ChatContextAttachmentKind = Schema.Literals(["issue", "change-request", "work-item"]);
+export type ChatContextAttachmentKind = typeof ChatContextAttachmentKind.Type;
+
+/**
+ * Compact display snapshot of an attached PR / issue / work item. Persisted
+ * with the message so the timeline can render what the agent received; the
+ * full detail rides the command-level context arrays instead.
+ */
+export const ChatContextAttachment = Schema.Struct({
+  type: Schema.Literal("context"),
+  id: ChatAttachmentId,
+  kind: ChatContextAttachmentKind,
+  provider: TrimmedNonEmptyString.check(Schema.isMaxLength(40)),
+  reference: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  title: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
+  state: TrimmedNonEmptyString.check(Schema.isMaxLength(60)),
+  url: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
+});
+export type ChatContextAttachment = typeof ChatContextAttachment.Type;
+
+export const ChatAttachment = Schema.Union([ChatImageAttachment, ChatContextAttachment]);
 export type ChatAttachment = typeof ChatAttachment.Type;
-const UploadChatAttachment = Schema.Union([UploadChatImageAttachment]);
+const UploadChatAttachment = Schema.Union([UploadChatImageAttachment, ChatContextAttachment]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
 
 export const ProjectScriptIcon = Schema.Literals([
@@ -674,6 +694,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   sourceControlContexts: Schema.optional(Schema.Array(ComposerSourceControlContext)),
+  workItemContexts: Schema.optional(Schema.Array(ComposerWorkItemContext)),
   createdAt: IsoDateTime,
 });
 
@@ -695,6 +716,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   sourceControlContexts: Schema.optional(Schema.Array(ComposerSourceControlContext)),
+  workItemContexts: Schema.optional(Schema.Array(ComposerWorkItemContext)),
   createdAt: IsoDateTime,
 });
 
@@ -1150,6 +1172,8 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_AGENT_TOKEN_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  sourceControlContexts: Schema.optional(Schema.Array(ComposerSourceControlContext)),
+  workItemContexts: Schema.optional(Schema.Array(ComposerWorkItemContext)),
   createdAt: IsoDateTime,
 });
 
