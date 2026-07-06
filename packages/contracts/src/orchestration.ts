@@ -20,6 +20,7 @@ import { ProviderInstanceId } from "./providerInstance.ts";
 import { ComposerSourceControlContext } from "./sourceControl.ts";
 import { ComposerWorkItemContext, WorkItemProviderKind, WorkItemState } from "./workItems.ts";
 import {
+  CreateWorktreeIntent,
   IssueState,
   PullRequestState,
   StatusBucket,
@@ -666,9 +667,21 @@ const ThreadTurnStartBootstrapPrepareWorktree = Schema.Struct({
   branch: Schema.optional(TrimmedNonEmptyString),
 });
 
+/**
+ * Item-action workspace bootstrap: the server re-resolves the intent at
+ * send time (reuse linked worktree / local main-repo checkout / create
+ * worktree) and executes the outcome for the bootstrap-created thread.
+ * Mutually exclusive with `prepareWorktree` (asserted server-side).
+ */
+const ThreadTurnStartBootstrapPrepareWorkspace = Schema.Struct({
+  projectId: ProjectId,
+  intent: CreateWorktreeIntent,
+});
+
 const ThreadTurnStartBootstrap = Schema.Struct({
   createThread: Schema.optional(ThreadTurnStartBootstrapCreateThread),
   prepareWorktree: Schema.optional(ThreadTurnStartBootstrapPrepareWorktree),
+  prepareWorkspace: Schema.optional(ThreadTurnStartBootstrapPrepareWorkspace),
   runSetupScript: Schema.optional(Schema.Boolean),
 });
 

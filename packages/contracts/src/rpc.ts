@@ -187,6 +187,7 @@ import {
 } from "./workItems.ts";
 import {
   CreateWorktreeIntent,
+  ItemActionWorkspacePlan,
   StatusBucket,
   WorktreeCheckoutLocation,
   WorktreeId,
@@ -224,6 +225,7 @@ export const WS_METHODS = {
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
   gitCreateWorktreeForProject: "git.createWorktreeForProject",
+  gitResolveActionWorkspace: "git.resolveActionWorkspace",
   gitFindWorktreeForOrigin: "git.findWorktreeForOrigin",
   gitArchiveWorktree: "git.archiveWorktree",
   gitRestoreWorktree: "git.restoreWorktree",
@@ -379,6 +381,17 @@ export const TextGenerationBranchNameResult = Schema.Struct({
   branch: Schema.String,
 });
 export type TextGenerationBranchNameResult = typeof TextGenerationBranchNameResult.Type;
+
+export const GitResolveActionWorkspaceInput = Schema.Struct({
+  projectId: ProjectId,
+  intent: CreateWorktreeIntent,
+});
+export type GitResolveActionWorkspaceInput = typeof GitResolveActionWorkspaceInput.Type;
+
+export const GitResolveActionWorkspaceOutput = Schema.Struct({
+  plan: ItemActionWorkspacePlan,
+});
+export type GitResolveActionWorkspaceOutput = typeof GitResolveActionWorkspaceOutput.Type;
 
 export const GitFindWorktreeForOriginInput = Schema.Union([
   Schema.Struct({
@@ -1004,6 +1017,12 @@ export const WsGitCreateWorktreeForProjectRpc = Rpc.make(WS_METHODS.gitCreateWor
   error: Schema.Union([GitManagerServiceError, AuthRpcError]),
 });
 
+export const WsGitResolveActionWorkspaceRpc = Rpc.make(WS_METHODS.gitResolveActionWorkspace, {
+  payload: GitResolveActionWorkspaceInput,
+  success: GitResolveActionWorkspaceOutput,
+  error: Schema.Union([GitManagerServiceError, AuthRpcError]),
+});
+
 export const WsGitFindWorktreeForOriginRpc = Rpc.make(WS_METHODS.gitFindWorktreeForOrigin, {
   payload: GitFindWorktreeForOriginInput,
   success: GitFindWorktreeForOriginOutput,
@@ -1280,6 +1299,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
   WsGitCreateWorktreeForProjectRpc,
+  WsGitResolveActionWorkspaceRpc,
   WsGitFindWorktreeForOriginRpc,
   WsGitArchiveWorktreeRpc,
   WsGitRestoreWorktreeRpc,

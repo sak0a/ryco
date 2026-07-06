@@ -97,3 +97,27 @@ export const CreateWorktreeIntent = Schema.Union([
   }),
 ]);
 export type CreateWorktreeIntent = typeof CreateWorktreeIntent.Type;
+
+/**
+ * Resolved workspace outcome for an item action ("fix conflicts",
+ * "implement issue", …). Produced read-only by `git.resolveActionWorkspace`
+ * for display in the draft; the send-time bootstrap re-resolves the intent
+ * authoritatively before executing.
+ */
+export const ItemActionWorkspacePlan = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("reuse-worktree"),
+    worktreeId: WorktreeId,
+    worktreePath: TrimmedNonEmptyString,
+    branch: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("local-main-checkout"),
+    branch: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("create-worktree"),
+    plannedBranch: Schema.optional(TrimmedNonEmptyString),
+  }),
+]);
+export type ItemActionWorkspacePlan = typeof ItemActionWorkspacePlan.Type;

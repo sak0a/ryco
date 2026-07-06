@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
 
-import { CreateWorktreeIntent, Worktree, WorktreeId, WorktreeOrigin } from "./worktree.ts";
+import { CreateWorktreeIntent, ItemActionWorkspacePlan, Worktree, WorktreeId, WorktreeOrigin } from "./worktree.ts";
 
 describe("WorktreeId", () => {
   it("is a branded string", () => {
@@ -160,5 +160,38 @@ describe("Worktree", () => {
     expect(decoded.workItemProvider).toBe("jira");
     expect(decoded.workItemKey).toBe("KAN-4");
     expect(decoded.workItemStateName).toBe("Next to come");
+  });
+});
+
+describe("item action workspace plan", () => {
+  it("decodes each plan variant", () => {
+    const reuse = Schema.decodeUnknownSync(ItemActionWorkspacePlan)({
+      kind: "reuse-worktree",
+      worktreeId: "worktree-1",
+      worktreePath: "/tmp/worktrees/feature-x__abcde",
+      branch: "feature/x",
+    });
+    expect(reuse.kind).toBe("reuse-worktree");
+
+    const localMain = Schema.decodeUnknownSync(ItemActionWorkspacePlan)({
+      kind: "local-main-checkout",
+      branch: "feature/x",
+    });
+    expect(localMain.kind).toBe("local-main-checkout");
+
+    const create = Schema.decodeUnknownSync(ItemActionWorkspacePlan)({
+      kind: "create-worktree",
+      plannedBranch: "feature/x",
+    });
+    expect(create.kind).toBe("create-worktree");
+    if (create.kind === "create-worktree") {
+      expect(create.plannedBranch).toBe("feature/x");
+    }
+  });
+
+  it("rejects unknown plan kinds", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(ItemActionWorkspacePlan)({ kind: "teleport" }),
+    ).toThrow();
   });
 });
