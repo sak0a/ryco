@@ -1,10 +1,10 @@
 # 10 — Ask mode
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Agent modes |
-| **Order in batch** | 1 of 2 |
-| **Depends on (same batch)** | — |
+| Field                       | Value       |
+| --------------------------- | ----------- |
+| **Batch**                   | Agent modes |
+| **Order in batch**          | 1 of 2      |
+| **Depends on (same batch)** | —           |
 
 ## Prompt
 

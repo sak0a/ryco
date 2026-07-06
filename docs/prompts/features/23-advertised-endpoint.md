@@ -1,10 +1,10 @@
 # 23 — AdvertisedEndpoint model
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Ops / trust |
-| **Order in batch** | 4 of 6 |
-| **Depends on (same batch)** | 22 |
+| Field                       | Value       |
+| --------------------------- | ----------- |
+| **Batch**                   | Ops / trust |
+| **Order in batch**          | 4 of 6      |
+| **Depends on (same batch)** | 22          |
 
 ## Prompt
 

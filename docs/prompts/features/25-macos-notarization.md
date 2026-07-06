@@ -1,10 +1,10 @@
 # 25 — macOS notarization
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Ops / trust |
-| **Order in batch** | 6 of 6 |
-| **Depends on (same batch)** | — |
+| Field                       | Value       |
+| --------------------------- | ----------- |
+| **Batch**                   | Ops / trust |
+| **Order in batch**          | 6 of 6      |
+| **Depends on (same batch)** | —           |
 
 ## Prompt
 

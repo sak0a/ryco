@@ -1,10 +1,10 @@
 # 19 — Jira ↔ worktree linkage UX
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Git / workflow |
-| **Order in batch** | 4 of 4 |
-| **Depends on (same batch)** | — |
+| Field                       | Value          |
+| --------------------------- | -------------- |
+| **Batch**                   | Git / workflow |
+| **Order in batch**          | 4 of 4         |
+| **Depends on (same batch)** | —              |
 
 ## Prompt
 

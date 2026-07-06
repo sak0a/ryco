@@ -6,12 +6,12 @@ Copy everything below the line into your agent session in the **batch worktree**
 
 ## Setup
 
-| Item | Value |
-|------|-------|
-| **Branch** | `feat/batch-differentiation` |
-| **Worktree** | One dedicated worktree for this batch |
-| **PR** | Single PR containing all five features |
-| **Agent** | One Cursor agent session (no subagents) |
+| Item         | Value                                   |
+| ------------ | --------------------------------------- |
+| **Branch**   | `feat/batch-differentiation`            |
+| **Worktree** | One dedicated worktree for this batch   |
+| **PR**       | Single PR containing all five features  |
+| **Agent**    | One Cursor agent session (no subagents) |
 
 Read [AGENTS.md](../../AGENTS.md).
 
@@ -29,13 +29,13 @@ Do not commit unless explicitly asked.
 
 ## Implementation order
 
-| Step | ID | Feature | Feature file |
-|------|-----|---------|--------------|
-| 1 | 26 | Project dashboard | [features/26-project-dashboard.md](../features/26-project-dashboard.md) |
-| 2 | 27 | Thread export (markdown) | [features/27-thread-export-markdown.md](../features/27-thread-export-markdown.md) |
-| 3 | 28 | Usage budgets & alerts | [features/28-usage-budgets.md](../features/28-usage-budgets.md) |
-| 4 | 29 | Shared project templates | [features/29-project-templates.md](../features/29-project-templates.md) |
-| 5 | 30 | Project script presets | [features/30-project-script-presets.md](../features/30-project-script-presets.md) |
+| Step | ID  | Feature                  | Feature file                                                                      |
+| ---- | --- | ------------------------ | --------------------------------------------------------------------------------- |
+| 1    | 26  | Project dashboard        | [features/26-project-dashboard.md](../features/26-project-dashboard.md)           |
+| 2    | 27  | Thread export (markdown) | [features/27-thread-export-markdown.md](../features/27-thread-export-markdown.md) |
+| 3    | 28  | Usage budgets & alerts   | [features/28-usage-budgets.md](../features/28-usage-budgets.md)                   |
+| 4    | 29  | Shared project templates | [features/29-project-templates.md](../features/29-project-templates.md)           |
+| 5    | 30  | Project script presets   | [features/30-project-script-presets.md](../features/30-project-script-presets.md) |
 
 ## Feature summaries
 

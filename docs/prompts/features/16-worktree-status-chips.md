@@ -1,10 +1,10 @@
 # 16 — Worktree status chips
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Git / workflow |
-| **Order in batch** | 1 of 4 |
-| **Depends on (same batch)** | — |
+| Field                       | Value          |
+| --------------------------- | -------------- |
+| **Batch**                   | Git / workflow |
+| **Order in batch**          | 1 of 4         |
+| **Depends on (same batch)** | —              |
 
 ## Prompt
 
