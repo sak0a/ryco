@@ -3,7 +3,13 @@ import "../../index.css";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 import { page, userEvent } from "vite-plus/test/browser";
-import type { ChangeRequest, EnvironmentId, SourceControlIssueSummary } from "@ryco/contracts";
+import type {
+  ChangeRequest,
+  EnvironmentId,
+  ProjectId,
+  SourceControlIssueSummary,
+  WorkItemSummary,
+} from "@ryco/contracts";
 
 const issueListData: SourceControlIssueSummary[] = [
   {
@@ -59,6 +65,26 @@ vi.mock("~/rpc/useSourceControl", () => ({
   useSourceControlChangeRequestSearch: vi.fn((input: { enabled?: boolean }) => searchState(input)),
 }));
 
+const workItemListData: WorkItemSummary[] = [
+  {
+    provider: "jira",
+    key: "RYC-231",
+    title: "Attribute token spend per turn",
+    url: "https://acme.atlassian.net/browse/RYC-231",
+    state: "in_progress",
+    stateName: "In Progress",
+    assignee: null,
+    updatedAt: { _tag: "None" } as never,
+  } as WorkItemSummary,
+];
+
+vi.mock("~/rpc/useWorkItems", () => ({
+  useWorkItemList: vi.fn((input: { enabled?: boolean }) =>
+    readyState(input.enabled === false ? null : workItemListData),
+  ),
+  useWorkItemSearch: vi.fn((input: { enabled?: boolean }) => searchState(input)),
+}));
+
 // ---------------------------------------------------------------------------
 // Import the component under test AFTER mocks are registered
 // ---------------------------------------------------------------------------
@@ -68,25 +94,33 @@ import { ContextPickerPopup } from "./ContextPickerPopup";
 const TEST_ENVIRONMENT_ID = "environment-local" as unknown as EnvironmentId;
 const TEST_CWD = "/repo/project";
 
+const TEST_PROJECT_ID = "project-1" as unknown as ProjectId;
+
 async function mountPopup(overrides?: {
   onSelectIssue?: (issue: SourceControlIssueSummary) => void;
   onSelectChangeRequest?: (cr: ChangeRequest) => void;
+  onSelectWorkItem?: (workItem: WorkItemSummary) => void;
   onAttachFile?: (file: File) => void;
+  hasJiraProvider?: boolean;
 }) {
   const host = document.createElement("div");
   document.body.append(host);
 
   const onSelectIssue = overrides?.onSelectIssue ?? vi.fn();
   const onSelectChangeRequest = overrides?.onSelectChangeRequest ?? vi.fn();
+  const onSelectWorkItem = overrides?.onSelectWorkItem ?? vi.fn();
   const onAttachFile = overrides?.onAttachFile ?? vi.fn();
 
   const screen = await render(
     <ContextPickerPopup
       environmentId={TEST_ENVIRONMENT_ID}
       cwd={TEST_CWD}
+      projectId={TEST_PROJECT_ID}
       hasSourceControlRemote={true}
+      hasJiraProvider={overrides?.hasJiraProvider ?? false}
       onSelectIssue={onSelectIssue}
       onSelectChangeRequest={onSelectChangeRequest}
+      onSelectWorkItem={onSelectWorkItem}
       onAttachFile={onAttachFile}
     />,
     { container: host },
@@ -95,6 +129,7 @@ async function mountPopup(overrides?: {
   return {
     onSelectIssue,
     onSelectChangeRequest,
+    onSelectWorkItem,
     onAttachFile,
     cleanup: async () => {
       await screen.unmount();
@@ -186,6 +221,47 @@ describe("ContextPickerPopup", () => {
       await vi.waitFor(() => {
         expect(onSelectIssue).toHaveBeenCalledTimes(1);
         expect(onSelectIssue.mock.calls[0]?.[0]?.number).toBe(42);
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("hides the Jira tab when the project has no Jira link", async () => {
+    const { cleanup } = await mountPopup({ hasJiraProvider: false });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain("Issues");
+      });
+      expect(document.body.textContent).not.toContain("Jira");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("shows the Jira tab and selects a work item when linked", async () => {
+    const onSelectWorkItem = vi.fn();
+    const { cleanup } = await mountPopup({ hasJiraProvider: true, onSelectWorkItem });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain("Jira");
+      });
+
+      await page.getByRole("tab", { name: "Jira" }).click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("RYC-231");
+        expect(text).toContain("Attribute token spend per turn");
+      });
+
+      await userEvent.click(page.getByRole("button", { name: /Attribute token spend per turn/i }));
+
+      await vi.waitFor(() => {
+        expect(onSelectWorkItem).toHaveBeenCalledTimes(1);
+        expect(onSelectWorkItem.mock.calls[0]?.[0]?.key).toBe("RYC-231");
       });
     } finally {
       await cleanup();

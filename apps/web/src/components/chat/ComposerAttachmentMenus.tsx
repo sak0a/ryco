@@ -1,12 +1,15 @@
 import type {
   ChangeRequest,
   ComposerSourceControlContext,
+  ComposerWorkItemContext,
   EnvironmentId,
   ProjectEntry,
+  ProjectId,
   ProviderDriverKind,
   ScopedThreadRef,
   ServerProvider,
   SourceControlIssueSummary,
+  WorkItemSummary,
 } from "@ryco/contracts";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { DateTime } from "effect";
@@ -21,6 +24,7 @@ import {
   useSourceControlChangeRequestList,
   useSourceControlIssueList,
 } from "~/rpc/useSourceControl";
+import { fetchWorkItemDetail, useWorkItemList } from "~/rpc/useWorkItems";
 import { buildScopedSourceControlComposerItems } from "./composerSourceControlItems";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
@@ -38,6 +42,8 @@ export interface UseComposerAttachmentMenusParams {
   composerTrigger: ComposerTrigger | null;
   environmentId: EnvironmentId;
   gitCwd: string | null;
+  projectId: ProjectId | null;
+  hasJiraProvider: boolean;
   selectedProvider: ProviderDriverKind;
   selectedProviderStatus: ServerProvider | null;
   composerHighlightedItemId: string | null;
@@ -69,6 +75,8 @@ export function useComposerAttachmentMenus(
     composerTrigger,
     environmentId,
     gitCwd,
+    projectId,
+    hasJiraProvider,
     selectedProvider,
     selectedProviderStatus,
     composerHighlightedItemId,
@@ -108,6 +116,16 @@ export function useComposerAttachmentMenus(
     limit: 50,
     enabled: isSourceControlTrigger,
   });
+  const workItemListQuery = useWorkItemList({
+    environmentId,
+    projectId,
+    state: "open",
+    limit: 50,
+    enabled: isSourceControlTrigger && hasJiraProvider,
+  });
+  const workItemsForMenu: ReadonlyArray<WorkItemSummary> = hasJiraProvider
+    ? (workItemListQuery.data ?? [])
+    : [];
 
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
@@ -182,6 +200,7 @@ export function useComposerAttachmentMenus(
         ...buildScopedSourceControlComposerItems(composerTrigger.query, {
           issues: issueListQuery.data ?? [],
           prs: changeRequestListQuery.data ?? [],
+          workItems: workItemsForMenu,
         }),
       ];
     }
@@ -190,6 +209,7 @@ export function useComposerAttachmentMenus(
     composerTrigger,
     issueListQuery.data,
     changeRequestListQuery.data,
+    workItemsForMenu,
     selectedProvider,
     selectedProviderStatus,
     workspaceEntries,
@@ -220,19 +240,23 @@ export function useComposerAttachmentMenus(
         workspaceEntriesQuery.isLoading ||
         workspaceEntriesQuery.isFetching)) ||
     (composerTriggerKind === "source-control" &&
-      (issueListQuery.isLoading || changeRequestListQuery.isLoading));
+      (issueListQuery.isLoading ||
+        changeRequestListQuery.isLoading ||
+        (hasJiraProvider && workItemListQuery.isLoading)));
 
   const composerMenuEmptyState = useMemo(() => {
     if (composerTriggerKind === "skill") {
       return "No skills found. Try / to browse provider commands.";
     }
     if (composerTriggerKind === "source-control") {
-      return "No matching issues or pull requests.";
+      return hasJiraProvider
+        ? "No matching issues, pull requests, or Jira work items."
+        : "No matching issues or pull requests.";
     }
     return composerTriggerKind === "path"
       ? "No matching files or folders."
       : "No matching command.";
-  }, [composerTriggerKind]);
+  }, [composerTriggerKind, hasJiraProvider]);
 
   return {
     composerMenuItems,
@@ -343,6 +367,64 @@ export function useComposerSourceControlContextSelection(
   );
 
   return { handleSelectIssue, handleSelectChangeRequest };
+}
+
+export interface UseComposerWorkItemContextSelectionParams {
+  environmentId: EnvironmentId;
+  projectId: ProjectId | null;
+  composerDraftTarget: ScopedThreadRef | DraftId;
+  addWorkItemContext: (
+    target: ScopedThreadRef | DraftId,
+    context: ComposerWorkItemContext,
+  ) => { added: boolean; reason?: "duplicate" };
+}
+
+export interface ComposerWorkItemContextSelection {
+  handleSelectWorkItem: (workItem: Pick<WorkItemSummary, "provider" | "key">) => Promise<void>;
+}
+
+/**
+ * Owns fetch-and-attach for Jira work items picked from the `#` menu or the
+ * context picker's Jira tab. Mirrors
+ * `useComposerSourceControlContextSelection`.
+ */
+export function useComposerWorkItemContextSelection(
+  params: UseComposerWorkItemContextSelectionParams,
+): ComposerWorkItemContextSelection {
+  const { environmentId, projectId, composerDraftTarget, addWorkItemContext } = params;
+
+  const handleSelectWorkItem = useCallback(
+    async (workItem: Pick<WorkItemSummary, "provider" | "key">) => {
+      if (!environmentId || !projectId) return;
+      const key = workItem.key.toUpperCase();
+      try {
+        const detail = await fetchWorkItemDetail({ environmentId, projectId, key });
+        const now = DateTime.fromDateUnsafe(new Date());
+        const staleAfter = DateTime.fromDateUnsafe(new Date(Date.now() + 5 * 60 * 1000));
+        const context: ComposerWorkItemContext = {
+          id: randomUUID(),
+          provider: workItem.provider,
+          key: detail.key,
+          detail,
+          fetchedAt: now,
+          staleAfter,
+        };
+        const result = addWorkItemContext(composerDraftTarget, context);
+        if (!result.added && result.reason === "duplicate") {
+          toastManager.add({ type: "info", title: "Already attached." });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "unknown error";
+        toastManager.add({
+          type: "error",
+          title: `Couldn't fetch ${key}: ${message}`,
+        });
+      }
+    },
+    [environmentId, projectId, composerDraftTarget, addWorkItemContext],
+  );
+
+  return { handleSelectWorkItem };
 }
 
 export interface ComposerCommandMenuOverlayProps {

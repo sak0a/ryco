@@ -137,6 +137,7 @@ import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/Compos
 import { ComposerHintRow } from "./chat/ComposerHintRow";
 import type { HintRowTrigger } from "./chat/ComposerHintRow.logic";
 import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
+import { useAtlassianProjectLink } from "~/rpc/useAtlassian";
 import {
   ChatOverviewPanel,
   FloatingOverviewMotionFrame,
@@ -1118,13 +1119,22 @@ export default function ChatView(props: ChatViewProps) {
       ),
     [sourceControlDiscoveryForHints.data],
   );
-  // The Atlassian/Jira source-control provider isn't shipped yet. When the
-  // Atlassian integration plan
-  // (docs/superpowers/plans/2026-05-12-atlassian-bitbucket-jira-integration.md)
-  // adds a new kind to SourceControlProviderKind, replace this with a useMemo
-  // over sourceControlDiscoveryForHints.data?.sourceControlProviders that
-  // checks `provider.kind` for the new value.
-  const hasJiraProvider = false;
+  // Jira availability follows the project's Atlassian link: a Jira connection
+  // plus at least one linked project key (same predicate as the Project
+  // Explorer's Jira tab).
+  const atlassianProjectLinkQuery = useAtlassianProjectLink({
+    environmentId,
+    projectId: activeProject?.id ?? null,
+    enabled: activeProject !== undefined,
+  });
+  const hasJiraProvider = useMemo(() => {
+    const projectLink = atlassianProjectLinkQuery.data ?? null;
+    return (
+      projectLink?.jiraConnectionId !== null &&
+      projectLink?.jiraConnectionId !== undefined &&
+      projectLink.jiraProjectKeys.length > 0
+    );
+  }, [atlassianProjectLinkQuery.data]);
   // First-turn-only: hide as soon as anything has been sent. We check both the
   // persisted messages array and the optimistic send buffer because the latter
   // is populated immediately on send while the former only updates once the
@@ -2863,6 +2873,8 @@ export default function ChatView(props: ChatViewProps) {
                   keybindings={keybindings}
                   terminalOpen={Boolean(terminalState.terminalOpen)}
                   gitCwd={gitCwd}
+                  activeProjectId={activeProject?.id ?? null}
+                  hasJiraProvider={hasJiraProvider}
                   promptRef={promptRef}
                   composerImagesRef={composerImagesRef}
                   composerTerminalContextsRef={composerTerminalContextsRef}

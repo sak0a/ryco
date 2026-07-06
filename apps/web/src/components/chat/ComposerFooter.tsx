@@ -2,11 +2,13 @@ import type {
   AgentTokenMode,
   ChangeRequest,
   EnvironmentId,
+  ProjectId,
   ProviderInteractionMode,
   ResolvedKeybindingsConfig,
   RuntimeMode,
   ServerProvider,
   SourceControlIssueSummary,
+  WorkItemSummary,
 } from "@ryco/contracts";
 import type { ProviderDriverKind, ProviderInstanceId } from "@ryco/contracts";
 import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
@@ -403,9 +405,12 @@ export interface ComposerFooterProps {
   // Context picker
   environmentId: EnvironmentId;
   gitCwd: string | null;
+  projectId: ProjectId | null;
   hasSourceControlRemote: boolean;
+  hasJiraProvider: boolean;
   onSelectIssue: (issue: SourceControlIssueSummary) => void;
   onSelectChangeRequest: (cr: ChangeRequest) => void;
+  onSelectWorkItem: (workItem: WorkItemSummary) => void;
   onAttachFile: (file: File) => void;
 
   // Model picker
@@ -475,9 +480,12 @@ export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooter
         <ContextPickerButton
           environmentId={props.environmentId}
           cwd={props.gitCwd ?? ""}
+          projectId={props.projectId}
           hasSourceControlRemote={props.hasSourceControlRemote}
+          hasJiraProvider={props.hasJiraProvider}
           onSelectIssue={props.onSelectIssue}
           onSelectChangeRequest={props.onSelectChangeRequest}
+          onSelectWorkItem={props.onSelectWorkItem}
           onAttachFile={props.onAttachFile}
         />
         <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />

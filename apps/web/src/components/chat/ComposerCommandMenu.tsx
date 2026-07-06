@@ -5,9 +5,12 @@ import {
   type ServerProviderSkill,
   type ServerProviderSlashCommand,
   type SourceControlIssueSummary,
+  type WorkItemSummary,
 } from "@ryco/contracts";
 import { BotIcon, CircleDotIcon, GitBranchIcon } from "lucide-react";
 import { memo, useLayoutEffect, useMemo, useRef } from "react";
+
+import { AtlassianJiraIcon } from "../Icons";
 
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
 import { formatProviderSkillInstallSource } from "~/providerSkillPresentation";
@@ -65,6 +68,13 @@ export type ComposerCommandItem =
       id: string;
       type: "source-control-pr";
       summary: ChangeRequest;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
+      type: "work-item";
+      summary: WorkItemSummary;
       label: string;
       description: string;
     };
@@ -267,6 +277,9 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       ) : null}
       {props.item.type === "source-control-pr" ? (
         <GitBranchIcon className="size-4 shrink-0 text-muted-foreground/80" />
+      ) : null}
+      {props.item.type === "work-item" ? (
+        <AtlassianJiraIcon className="size-4 shrink-0 text-muted-foreground/80" />
       ) : null}
       <span className="flex min-w-0 flex-1 items-center gap-2">
         <span className="shrink-0">{props.item.label}</span>

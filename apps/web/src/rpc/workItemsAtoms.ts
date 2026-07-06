@@ -232,6 +232,25 @@ export const workItemDetailQuery = defineQuery<WorkItemDetailInput, WorkItemDeta
 });
 
 /**
+ * Imperative one-shot detail fetch for attach flows (composer context chips),
+ * mirroring `fetchSourceControlIssueDetail` in `sourceControlAtoms.ts`.
+ */
+export function fetchWorkItemDetail(input: {
+  readonly environmentId: EnvironmentId | null;
+  readonly projectId: ProjectId | null;
+  readonly key: string;
+}): Promise<WorkItemDetailModel> {
+  if (!input.environmentId || !input.projectId) {
+    return Promise.reject(new Error("Work item detail is unavailable."));
+  }
+  return workItemsClient(input.environmentId).get({
+    projectId: input.projectId,
+    key: input.key,
+    fullContent: false,
+  });
+}
+
+/**
  * Imperatively seed the cached detail for a work item (both truncated and
  * full-content variants), mirroring the former
  * `queryClient.setQueryData(workItemsQueryKeys.detail(...))` after comment and

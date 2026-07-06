@@ -1,4 +1,8 @@
-import type { ComposerSourceControlContext, ServerProviderSkill } from "@ryco/contracts";
+import type {
+  ComposerSourceControlContext,
+  ComposerWorkItemContext,
+  ServerProviderSkill,
+} from "@ryco/contracts";
 import { memo } from "react";
 import { CircleAlertIcon, XIcon } from "lucide-react";
 import type { ComposerImageAttachment } from "../../composerDraftStore";
@@ -12,6 +16,7 @@ import { type ComposerCommandItem } from "./ComposerCommandMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { SourceControlContextChip } from "./SourceControlContextChip";
+import { WorkItemContextChip } from "./WorkItemContextChip";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
@@ -50,6 +55,10 @@ export interface ComposerPromptShellProps {
   // Source-control context chips
   composerSourceControlContexts: ReadonlyArray<ComposerSourceControlContext>;
   onRemoveSourceControlContext: (id: string) => void;
+
+  // Jira work-item context chips
+  composerWorkItemContexts: ReadonlyArray<ComposerWorkItemContext>;
+  onRemoveWorkItemContext: (id: string) => void;
 
   // Image attachments
   composerImages: ComposerImageAttachment[];
@@ -123,6 +132,8 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
     onSelectComposerItem,
     composerSourceControlContexts,
     onRemoveSourceControlContext,
+    composerWorkItemContexts,
+    onRemoveWorkItemContext,
     composerImages,
     nonPersistedComposerImageIdSet,
     onExpandImage,
@@ -177,7 +188,7 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
       {!isComposerCollapsedMobile &&
         !isComposerApprovalState &&
         pendingUserInputCount === 0 &&
-        composerSourceControlContexts.length > 0 && (
+        (composerSourceControlContexts.length > 0 || composerWorkItemContexts.length > 0) && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {composerSourceControlContexts.map((ctx) => (
               <SourceControlContextChip
@@ -185,6 +196,9 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
                 context={ctx}
                 onRemove={onRemoveSourceControlContext}
               />
+            ))}
+            {composerWorkItemContexts.map((ctx) => (
+              <WorkItemContextChip key={ctx.id} context={ctx} onRemove={onRemoveWorkItemContext} />
             ))}
           </div>
         )}

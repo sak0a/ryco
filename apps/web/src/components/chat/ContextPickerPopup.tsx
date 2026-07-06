@@ -1,4 +1,10 @@
-import type { ChangeRequest, EnvironmentId, SourceControlIssueSummary } from "@ryco/contracts";
+import type {
+  ChangeRequest,
+  EnvironmentId,
+  ProjectId,
+  SourceControlIssueSummary,
+  WorkItemSummary,
+} from "@ryco/contracts";
 import { type DragEvent, type ChangeEvent, useRef, useState } from "react";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { PaperclipIcon } from "lucide-react";
@@ -8,24 +14,38 @@ import {
   useSourceControlIssueList,
   useSourceControlIssueSearch,
 } from "~/rpc/useSourceControl";
+import { useWorkItemList, useWorkItemSearch } from "~/rpc/useWorkItems";
+import { workItemStateLabel } from "~/lib/workItemState";
+import { cn } from "~/lib/utils";
 import { searchSourceControlSummaries } from "./composerSourceControlContextSearch";
 import { ContextPickerList } from "./ContextPickerList";
 import { ContextPickerTabs } from "./ContextPickerTabs";
 
-type TabId = "issues" | "prs";
+type TabId = "issues" | "prs" | "jira";
 
 export function ContextPickerPopup(props: {
   environmentId: EnvironmentId | null;
   cwd: string;
+  projectId: ProjectId | null;
   hasSourceControlRemote: boolean;
+  hasJiraProvider: boolean;
   onSelectIssue: (issue: SourceControlIssueSummary) => void;
   onSelectChangeRequest: (cr: ChangeRequest) => void;
+  onSelectWorkItem: (workItem: WorkItemSummary) => void;
   onAttachFile: (file: File) => void;
 }) {
   const [activeTab, setActiveTab] = useState<TabId>("issues");
   const [query, setQuery] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const availableTabs: TabId[] = [
+    ...(props.hasSourceControlRemote ? (["issues", "prs"] as TabId[]) : []),
+    ...(props.hasJiraProvider ? (["jira"] as TabId[]) : []),
+  ];
+  const effectiveTab: TabId = availableTabs.includes(activeTab)
+    ? activeTab
+    : (availableTabs[0] ?? "issues");
 
   const [debouncedQuery] = useDebouncedValue(query, { wait: 200 });
 
@@ -54,9 +74,9 @@ export function ContextPickerPopup(props: {
 
   // Fall-through server search when client filter is empty and query is long enough
   const needsServerSearchIssues =
-    activeTab === "issues" && filteredIssues.length === 0 && debouncedQuery.length >= 2;
+    effectiveTab === "issues" && filteredIssues.length === 0 && debouncedQuery.length >= 2;
   const needsServerSearchPrs =
-    activeTab === "prs" && filteredPrs.length === 0 && debouncedQuery.length >= 2;
+    effectiveTab === "prs" && filteredPrs.length === 0 && debouncedQuery.length >= 2;
 
   const serverIssueSearchQuery = useSourceControlIssueSearch({
     environmentId: props.environmentId,
@@ -70,6 +90,34 @@ export function ContextPickerPopup(props: {
     query: debouncedQuery,
     enabled: needsServerSearchPrs,
   });
+
+  // Jira work items (tab rendered only when the project has a Jira link)
+  const workItemListQuery = useWorkItemList({
+    environmentId: props.environmentId,
+    projectId: props.projectId,
+    state: "open",
+    limit: 50,
+    enabled: props.hasJiraProvider,
+  });
+  const cachedWorkItems = workItemListQuery.data ?? [];
+  const filteredWorkItems = filterWorkItemsByQuery(cachedWorkItems, query);
+  const needsServerSearchWorkItems =
+    props.hasJiraProvider &&
+    effectiveTab === "jira" &&
+    filteredWorkItems.length === 0 &&
+    debouncedQuery.length >= 2;
+  const serverWorkItemSearchQuery = useWorkItemSearch({
+    environmentId: props.environmentId,
+    projectId: props.projectId,
+    query: debouncedQuery,
+    enabled: needsServerSearchWorkItems,
+  });
+  const displayWorkItems: ReadonlyArray<WorkItemSummary> = needsServerSearchWorkItems
+    ? (serverWorkItemSearchQuery.data ?? [])
+    : filteredWorkItems;
+  const isLoadingWorkItems =
+    workItemListQuery.isLoading ||
+    (needsServerSearchWorkItems && serverWorkItemSearchQuery.isLoading);
 
   // Effective display lists
   const displayIssues: ReadonlyArray<SourceControlIssueSummary> = needsServerSearchIssues
@@ -151,32 +199,46 @@ export function ContextPickerPopup(props: {
         />
       </div>
 
-      {props.hasSourceControlRemote ? (
+      {props.hasSourceControlRemote || props.hasJiraProvider ? (
         <>
           {/* Tabs */}
           <ContextPickerTabs
             tabs={[
-              { id: "issues", label: "Issues", count: cachedIssues.length },
-              { id: "prs", label: "PRs", count: cachedPrs.length },
+              ...(props.hasSourceControlRemote
+                ? [
+                    { id: "issues", label: "Issues", count: cachedIssues.length },
+                    { id: "prs", label: "PRs", count: cachedPrs.length },
+                  ]
+                : []),
+              ...(props.hasJiraProvider
+                ? [{ id: "jira", label: "Jira", count: cachedWorkItems.length }]
+                : []),
             ]}
-            activeId={activeTab}
+            activeId={effectiveTab}
             onSelect={(id) => setActiveTab(id as TabId)}
           />
 
           {/* List */}
-          {activeTab === "issues" ? (
+          {effectiveTab === "issues" ? (
             <ContextPickerList
               items={displayIssues}
               isLoading={isLoadingIssues}
               emptyText={query.length > 0 ? "No matching issues" : "No open issues"}
               onSelect={props.onSelectIssue}
             />
-          ) : (
+          ) : effectiveTab === "prs" ? (
             <ContextPickerList
               items={displayPrs as unknown as ReadonlyArray<SourceControlIssueSummary>}
               isLoading={isLoadingPrs}
               emptyText={query.length > 0 ? "No matching PRs" : "No open PRs"}
               onSelect={(item) => props.onSelectChangeRequest(item as unknown as ChangeRequest)}
+            />
+          ) : (
+            <WorkItemPickerList
+              items={displayWorkItems}
+              isLoading={isLoadingWorkItems}
+              emptyText={query.length > 0 ? "No matching work items" : "No open work items"}
+              onSelect={props.onSelectWorkItem}
             />
           )}
         </>
@@ -186,5 +248,54 @@ export function ContextPickerPopup(props: {
         </p>
       )}
     </div>
+  );
+}
+
+function filterWorkItemsByQuery(
+  workItems: ReadonlyArray<WorkItemSummary>,
+  query: string,
+): ReadonlyArray<WorkItemSummary> {
+  const q = query.trim().toLowerCase();
+  if (q.length === 0) return workItems;
+  return workItems.filter((item) => {
+    const key = item.key.toLowerCase();
+    const title = item.title.toLowerCase();
+    return key === q || key.startsWith(q) || title.includes(q);
+  });
+}
+
+function WorkItemPickerList(props: {
+  items: ReadonlyArray<WorkItemSummary>;
+  isLoading: boolean;
+  emptyText: string;
+  onSelect: (item: WorkItemSummary) => void;
+}) {
+  if (props.isLoading && props.items.length === 0) {
+    return <div className="px-3 py-4 text-xs text-muted-foreground">Loading…</div>;
+  }
+  if (props.items.length === 0) {
+    return <div className="px-3 py-4 text-xs text-muted-foreground">{props.emptyText}</div>;
+  }
+  return (
+    <ul className="max-h-72 overflow-y-auto" role="listbox">
+      {props.items.map((item) => (
+        <li key={`${item.provider}:${item.key}`}>
+          <button
+            type="button"
+            onClick={() => props.onSelect(item)}
+            className={cn(
+              "flex w-full items-center gap-2 px-3 py-2 text-left text-sm",
+              "hover:bg-accent",
+            )}
+          >
+            <span className="shrink-0 font-mono text-xs text-muted-foreground">{item.key}</span>
+            <span className="min-w-0 flex-1 truncate">{item.title}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {workItemStateLabel(item)}
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }

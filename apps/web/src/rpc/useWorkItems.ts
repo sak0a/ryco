@@ -25,6 +25,7 @@ import {
 } from "./workItemsAtoms";
 
 export {
+  fetchWorkItemDetail,
   invalidateWorkItems,
   setWorkItemDetailCache,
   type WorkItemDetailInput,

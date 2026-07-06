@@ -1,4 +1,10 @@
-import type { ChangeRequest, EnvironmentId, SourceControlIssueSummary } from "@ryco/contracts";
+import type {
+  ChangeRequest,
+  EnvironmentId,
+  ProjectId,
+  SourceControlIssueSummary,
+  WorkItemSummary,
+} from "@ryco/contracts";
 import { useState } from "react";
 import { PaperclipIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -9,9 +15,12 @@ import { ContextPickerPopup } from "./ContextPickerPopup";
 export function ContextPickerButton(props: {
   environmentId: EnvironmentId | null;
   cwd: string;
+  projectId: ProjectId | null;
   hasSourceControlRemote: boolean;
+  hasJiraProvider: boolean;
   onSelectIssue: (issue: SourceControlIssueSummary) => void;
   onSelectChangeRequest: (cr: ChangeRequest) => void;
+  onSelectWorkItem: (workItem: WorkItemSummary) => void;
   onAttachFile: (file: File) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -42,13 +51,19 @@ export function ContextPickerButton(props: {
         <ContextPickerPopup
           environmentId={props.environmentId}
           cwd={props.cwd}
+          projectId={props.projectId}
           hasSourceControlRemote={props.hasSourceControlRemote}
+          hasJiraProvider={props.hasJiraProvider}
           onSelectIssue={(issue) => {
             props.onSelectIssue(issue);
             setOpen(false);
           }}
           onSelectChangeRequest={(cr) => {
             props.onSelectChangeRequest(cr);
+            setOpen(false);
+          }}
+          onSelectWorkItem={(workItem) => {
+            props.onSelectWorkItem(workItem);
             setOpen(false);
           }}
           onAttachFile={(file) => {

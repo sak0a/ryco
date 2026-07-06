@@ -1,8 +1,10 @@
 import type {
   ApprovalRequestId,
   ComposerSourceControlContext,
+  ComposerWorkItemContext,
   EnvironmentId,
   ModelSelection,
+  ProjectId,
   ProviderApprovalDecision,
   ProviderInteractionMode,
   ResolvedKeybindingsConfig,
@@ -56,6 +58,7 @@ import {
 import {
   useComposerAttachmentMenus,
   useComposerSourceControlContextSelection,
+  useComposerWorkItemContextSelection,
 } from "./ComposerAttachmentMenus";
 import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
 import {
@@ -178,6 +181,7 @@ export interface ChatComposerHandle {
     images: ComposerImageAttachment[];
     terminalContexts: TerminalContextDraft[];
     sourceControlContexts: ComposerSourceControlContext[];
+    workItemContexts: ComposerWorkItemContext[];
     selectedPromptEffort: string | null;
     selectedModelOptionsForDispatch: unknown;
     selectedModelSelection: ModelSelection;
@@ -260,6 +264,8 @@ export interface ChatComposerProps {
   keybindings: ResolvedKeybindingsConfig;
   terminalOpen: boolean;
   gitCwd: string | null;
+  activeProjectId: ProjectId | null;
+  hasJiraProvider: boolean;
 
   // Refs the parent needs kept in sync
   promptRef: React.MutableRefObject<string>;
@@ -350,6 +356,8 @@ export const ChatComposer = memo(
       keybindings,
       terminalOpen,
       gitCwd,
+      activeProjectId,
+      hasJiraProvider,
       promptRef,
       composerImagesRef,
       composerTerminalContextsRef,
@@ -383,6 +391,7 @@ export const ChatComposer = memo(
     const composerImages = composerDraft.images;
     const composerTerminalContexts = composerDraft.terminalContexts;
     const composerSourceControlContexts = composerDraft.sourceControlContexts;
+    const composerWorkItemContexts = composerDraft.workItemContexts;
     const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
 
     const sourceControlDiscovery = useSourceControlDiscovery();
@@ -418,6 +427,10 @@ export const ChatComposer = memo(
     );
     const removeSourceControlContextFromDraft = useComposerDraftStore(
       (store) => store.removeSourceControlContext,
+    );
+    const addWorkItemContextToDraft = useComposerDraftStore((store) => store.addWorkItemContext);
+    const removeWorkItemContextFromDraft = useComposerDraftStore(
+      (store) => store.removeWorkItemContext,
     );
 
     // ------------------------------------------------------------------
@@ -664,8 +677,15 @@ export const ChatComposer = memo(
           imageCount: composerImages.length,
           terminalContexts: composerTerminalContexts,
           sourceControlContexts: composerSourceControlContexts,
+          workItemContexts: composerWorkItemContexts,
         }),
-      [composerImages.length, composerSourceControlContexts, composerTerminalContexts, prompt],
+      [
+        composerImages.length,
+        composerSourceControlContexts,
+        composerWorkItemContexts,
+        composerTerminalContexts,
+        prompt,
+      ],
     );
 
     // ------------------------------------------------------------------
@@ -683,6 +703,8 @@ export const ChatComposer = memo(
       composerTrigger,
       environmentId,
       gitCwd,
+      projectId: activeProjectId,
+      hasJiraProvider,
       selectedProvider,
       selectedProviderStatus,
       composerHighlightedItemId,
@@ -1201,6 +1223,12 @@ export const ChatComposer = memo(
         composerDraftTarget,
         addSourceControlContext: addSourceControlContextToDraft,
       });
+    const { handleSelectWorkItem } = useComposerWorkItemContextSelection({
+      environmentId,
+      projectId: activeProjectId,
+      composerDraftTarget,
+      addWorkItemContext: addWorkItemContextToDraft,
+    });
 
     const onSelectComposerItem = useCallback(
       (item: ComposerCommandItem) => {
@@ -1310,12 +1338,25 @@ export const ChatComposer = memo(
           void handleSelectChangeRequest(item.summary);
           return;
         }
+        if (item.type === "work-item") {
+          // Delete the `#...` text range from the composer
+          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          });
+          if (applied) {
+            setComposerHighlightedItemId(null);
+          }
+          // Fetch detail and attach chip (event-driven, non-blocking)
+          void handleSelectWorkItem(item.summary);
+          return;
+        }
       },
       [
         applyPromptReplacement,
         handleInteractionModeChange,
         handleSelectIssue,
         handleSelectChangeRequest,
+        handleSelectWorkItem,
         resolveActiveComposerTrigger,
       ],
     );
@@ -1484,6 +1525,13 @@ export const ChatComposer = memo(
       [composerDraftTarget, removeSourceControlContextFromDraft],
     );
 
+    const handleRemoveWorkItemContext = useCallback(
+      (id: string) => {
+        removeWorkItemContextFromDraft(composerDraftTarget, id);
+      },
+      [composerDraftTarget, removeWorkItemContextFromDraft],
+    );
+
     const handleInterruptPrimaryAction = useCallback(() => {
       void onInterrupt();
     }, [onInterrupt]);
@@ -1643,6 +1691,7 @@ export const ChatComposer = memo(
           images: composerImagesRef.current,
           terminalContexts: composerTerminalContextsRef.current,
           sourceControlContexts: composerSourceControlContexts,
+          workItemContexts: composerWorkItemContexts,
           selectedPromptEffort,
           selectedModelOptionsForDispatch,
           selectedModelSelection,
@@ -1656,6 +1705,7 @@ export const ChatComposer = memo(
         composerDraftTarget,
         composerCursor,
         composerSourceControlContexts,
+        composerWorkItemContexts,
         composerTerminalContexts,
         insertComposerDraftTerminalContext,
         isMobileViewport,
@@ -1887,6 +1937,8 @@ export const ChatComposer = memo(
               onSelectComposerItem={onSelectComposerItem}
               composerSourceControlContexts={composerSourceControlContexts}
               onRemoveSourceControlContext={handleRemoveSourceControlContext}
+              composerWorkItemContexts={composerWorkItemContexts}
+              onRemoveWorkItemContext={handleRemoveWorkItemContext}
               composerImages={composerImages}
               nonPersistedComposerImageIdSet={nonPersistedComposerImageIdSet}
               onExpandImage={onExpandImage}
@@ -1932,9 +1984,12 @@ export const ChatComposer = memo(
                 hideOnMobilePendingAnswers={showMobilePendingAnswerActions}
                 environmentId={environmentId}
                 gitCwd={gitCwd}
+                projectId={activeProjectId}
                 hasSourceControlRemote={hasSourceControlRemote}
+                hasJiraProvider={hasJiraProvider}
                 onSelectIssue={handleSelectIssue}
                 onSelectChangeRequest={handleSelectChangeRequest}
+                onSelectWorkItem={handleSelectWorkItem}
                 onAttachFile={(file) => {
                   void addComposerAttachments([file]);
                 }}

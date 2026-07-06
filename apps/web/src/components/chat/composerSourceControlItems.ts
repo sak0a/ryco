@@ -1,4 +1,4 @@
-import type { ChangeRequest, SourceControlIssueSummary } from "@ryco/contracts";
+import type { ChangeRequest, SourceControlIssueSummary, WorkItemSummary } from "@ryco/contracts";
 import {
   scopeSourceControlQuery,
   searchSourceControlSummaries,
@@ -9,6 +9,7 @@ import type { ComposerCommandItem } from "./ComposerCommandMenu";
 export interface ScopedSourceControlInputs {
   readonly issues: ReadonlyArray<SourceControlIssueSummary>;
   readonly prs: ReadonlyArray<ChangeRequest>;
+  readonly workItems?: ReadonlyArray<WorkItemSummary>;
 }
 
 export function buildScopedSourceControlComposerItems(
@@ -18,9 +19,20 @@ export function buildScopedSourceControlComposerItems(
   const { scope, search } = scopeSourceControlQuery(query);
   const wantIssues = scope === "mixed" || scope === "issues";
   const wantPrs = scope === "mixed" || scope === "prs";
+  const wantWorkItems = scope === "mixed" || scope === "jira";
+
+  const workItemItems: ReadonlyArray<ComposerCommandItem> = wantWorkItems
+    ? filterWorkItems(inputs.workItems ?? [], search).map((workItem) => ({
+        id: `work-item:${workItem.provider}:${workItem.key}`,
+        type: "work-item" as const,
+        summary: workItem,
+        label: workItem.key,
+        description: workItem.title,
+      }))
+    : [];
 
   if (scope === "jira") {
-    return [];
+    return workItemItems;
   }
 
   const issueItems: ReadonlyArray<ComposerCommandItem> = wantIssues
@@ -43,7 +55,20 @@ export function buildScopedSourceControlComposerItems(
       }))
     : [];
 
-  return [...issueItems, ...prItems];
+  return [...issueItems, ...prItems, ...workItemItems];
+}
+
+function filterWorkItems(
+  workItems: ReadonlyArray<WorkItemSummary>,
+  search: string,
+): ReadonlyArray<WorkItemSummary> {
+  const q = search.trim().toLowerCase();
+  if (q.length === 0) return workItems;
+  return workItems.filter((item) => {
+    const key = item.key.toLowerCase();
+    const title = item.title.toLowerCase();
+    return key === q || key.startsWith(q) || title.includes(q);
+  });
 }
 
 function filterPrs(
