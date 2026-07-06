@@ -138,6 +138,7 @@ import { ComposerHintRow } from "./chat/ComposerHintRow";
 import type { HintRowTrigger } from "./chat/ComposerHintRow.logic";
 import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
 import { useAtlassianProjectLink } from "~/rpc/useAtlassian";
+import { fetchWorkItemDetail } from "~/rpc/useWorkItems";
 import {
   ChatOverviewPanel,
   FloatingOverviewMotionFrame,
@@ -2073,6 +2074,7 @@ export default function ChatView(props: ChatViewProps) {
       images: composerImages,
       terminalContexts: composerTerminalContexts,
       sourceControlContexts: composerSourceControlContexts,
+      workItemContexts: composerWorkItemContexts,
       selectedProvider: ctxSelectedProvider,
       selectedModel: ctxSelectedModel,
       selectedProviderModels: ctxSelectedProviderModels,
@@ -2089,6 +2091,8 @@ export default function ChatView(props: ChatViewProps) {
       prompt: promptForSend,
       imageCount: composerImages.length,
       terminalContexts: composerTerminalContexts,
+      sourceControlContexts: composerSourceControlContexts,
+      workItemContexts: composerWorkItemContexts,
     });
     if (showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
@@ -2160,6 +2164,7 @@ export default function ChatView(props: ChatViewProps) {
         images: composerImages,
         sendableTerminalContexts: sendableComposerTerminalContexts,
         sourceControlContexts: composerSourceControlContexts,
+        workItemContexts: composerWorkItemContexts,
         selectedProvider: ctxSelectedProvider,
         selectedModel: ctxSelectedModel,
         selectedProviderModels: ctxSelectedProviderModels,
@@ -2233,6 +2238,14 @@ export default function ChatView(props: ChatViewProps) {
               reference: String(ctx.detail.number),
             }),
           );
+          return { ...ctx, detail, fetchedAt: now, staleAfter: staleAfterDate };
+        },
+        workItemFetcher: async (ctx) => {
+          const projectId = activeProject?.id ?? null;
+          if (!projectId) return ctx;
+          const now = DateTime.fromDateUnsafe(new Date());
+          const staleAfterDate = DateTime.fromDateUnsafe(new Date(Date.now() + 5 * 60 * 1000));
+          const detail = await fetchWorkItemDetail({ environmentId, projectId, key: ctx.key });
           return { ...ctx, detail, fetchedAt: now, staleAfter: staleAfterDate };
         },
       },

@@ -1,5 +1,6 @@
 import {
   type ComposerSourceControlContext,
+  type ComposerWorkItemContext,
   type EnvironmentId,
   isProviderDriverKind,
   ProjectId,
@@ -303,6 +304,31 @@ export async function refreshStaleSourceControlContexts(
     fetcher: (context: ComposerSourceControlContext) => Promise<ComposerSourceControlContext>;
   },
 ): Promise<ComposerSourceControlContext[]> {
+  const now = DateTime.fromDateUnsafe(new Date());
+  return Promise.all(
+    contexts.map(async (ctx) => {
+      const isStale = DateTime.isLessThanOrEqualTo(ctx.staleAfter, now);
+      if (!isStale) return ctx;
+      try {
+        return await options.fetcher(ctx);
+      } catch {
+        // best-effort: keep original on failure
+        return ctx;
+      }
+    }),
+  );
+}
+
+/**
+ * Work-item sibling of `refreshStaleSourceControlContexts` — same best-effort
+ * refetch semantics for attached Jira contexts.
+ */
+export async function refreshStaleWorkItemContexts(
+  contexts: ReadonlyArray<ComposerWorkItemContext>,
+  options: {
+    fetcher: (context: ComposerWorkItemContext) => Promise<ComposerWorkItemContext>;
+  },
+): Promise<ComposerWorkItemContext[]> {
   const now = DateTime.fromDateUnsafe(new Date());
   return Promise.all(
     contexts.map(async (ctx) => {

@@ -2,6 +2,7 @@ import {
   DEFAULT_MODEL,
   type AgentTokenMode,
   type ComposerSourceControlContext,
+  type ComposerWorkItemContext,
   type EnvironmentApi,
   type EnvironmentId,
   type ModelSelection,
@@ -35,8 +36,10 @@ import {
   cloneComposerImageForRetry,
   readFileAsDataUrl,
   refreshStaleSourceControlContexts,
+  refreshStaleWorkItemContexts,
   revokeUserMessagePreviewUrls,
 } from "../components/ChatView.logic";
+import { buildChatContextAttachments } from "../lib/chatContextAttachments";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -51,6 +54,7 @@ export interface SendTurnComposerSnapshot {
   images: ComposerImageAttachment[];
   sendableTerminalContexts: TerminalContextDraft[];
   sourceControlContexts: ComposerSourceControlContext[];
+  workItemContexts: ComposerWorkItemContext[];
   selectedProvider: ProviderDriverKind;
   selectedModel: string;
   selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
@@ -126,6 +130,7 @@ export interface SendTurnRollbackRefs {
 
 export interface SendTurnSourceControlFetcher {
   fetcher: (ctx: ComposerSourceControlContext) => Promise<ComposerSourceControlContext>;
+  workItemFetcher: (ctx: ComposerWorkItemContext) => Promise<ComposerWorkItemContext>;
 }
 
 export interface SendTurnPersistSettingsDeps {
@@ -327,6 +332,11 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
   const imagesSnapshot = [...composer.images];
   const terminalContextsSnapshot = [...composer.sendableTerminalContexts];
   const sourceControlSnapshot = [...composer.sourceControlContexts];
+  const workItemSnapshot = [...composer.workItemContexts];
+  const contextAttachments = buildChatContextAttachments({
+    sourceControlContexts: sourceControlSnapshot,
+    workItemContexts: workItemSnapshot,
+  });
 
   const messageTextForSend = appendTerminalContextsToPrompt(
     composer.prompt,
@@ -352,14 +362,17 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
     })),
   );
 
-  const optimisticAttachments = imagesSnapshot.map((image) => ({
-    type: "image" as const,
-    id: image.id,
-    name: image.name,
-    mimeType: image.mimeType,
-    sizeBytes: image.sizeBytes,
-    previewUrl: image.previewUrl,
-  }));
+  const optimisticAttachments = [
+    ...imagesSnapshot.map((image) => ({
+      type: "image" as const,
+      id: image.id,
+      name: image.name,
+      mimeType: image.mimeType,
+      sizeBytes: image.sizeBytes,
+      previewUrl: image.previewUrl,
+    })),
+    ...contextAttachments,
+  ];
 
   // Scroll to end before optimistic message for auto-pin.
   await scroll.scrollToEndBeforeOptimistic();
@@ -460,6 +473,9 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
       sourceControlSnapshot,
       sourceControl,
     );
+    const freshWorkItemContexts = await refreshStaleWorkItemContexts(workItemSnapshot, {
+      fetcher: sourceControl.workItemFetcher,
+    });
 
     const bootstrap = buildSendTurnBootstrap({
       isLocalDraftThread: thread.isLocalDraftThread,
@@ -486,7 +502,7 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
         messageId: messageIdForSend,
         role: "user",
         text: outgoingMessageText,
-        attachments: turnAttachments,
+        attachments: [...turnAttachments, ...contextAttachments],
       },
       modelSelection: composer.selectedModelSelection,
       titleSeed: title,
@@ -497,6 +513,7 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
       ...(freshSourceControlContexts.length > 0
         ? { sourceControlContexts: freshSourceControlContexts }
         : {}),
+      ...(freshWorkItemContexts.length > 0 ? { workItemContexts: freshWorkItemContexts } : {}),
       createdAt: messageCreatedAt,
     });
     turnStartSucceeded = true;
