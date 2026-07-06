@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
 
-import { CreateWorktreeIntent, ItemActionWorkspacePlan, Worktree, WorktreeId, WorktreeOrigin } from "./worktree.ts";
+import {
+  CreateWorktreeIntent,
+  ItemActionWorkspacePlan,
+  Worktree,
+  WorktreeId,
+  WorktreeOrigin,
+} from "./worktree.ts";
 
 describe("WorktreeId", () => {
   it("is a branded string", () => {
@@ -190,8 +196,6 @@ describe("item action workspace plan", () => {
   });
 
   it("rejects unknown plan kinds", () => {
-    expect(() =>
-      Schema.decodeUnknownSync(ItemActionWorkspacePlan)({ kind: "teleport" }),
-    ).toThrow();
+    expect(() => Schema.decodeUnknownSync(ItemActionWorkspacePlan)({ kind: "teleport" })).toThrow();
   });
 });
