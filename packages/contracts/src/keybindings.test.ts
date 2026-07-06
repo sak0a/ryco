@@ -82,6 +82,12 @@ it.effect("parses keybinding rules", () =>
       command: "thread.previous",
     });
     assert.strictEqual(parsedThreadPrevious.command, "thread.previous");
+
+    const parsedThreadFind = yield* decode(KeybindingRule, {
+      key: "mod+f",
+      command: "thread.find",
+    });
+    assert.strictEqual(parsedThreadFind.command, "thread.find");
   }),
 );
 

@@ -552,6 +552,14 @@ export function isOpenFavoriteEditorShortcut(
   return matchesCommandShortcut(event, keybindings, "editor.openFavorite", options);
 }
 
+export function isThreadFindShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return matchesCommandShortcut(event, keybindings, "thread.find", options);
+}
+
 export function isTerminalClearShortcut(
   event: ShortcutEventLike,
   platform = navigator.platform,

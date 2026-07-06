@@ -55,6 +55,7 @@ import {
   type TimelineStableState,
   type TimelineStreamingState,
 } from "./MessagesTimeline.logic";
+import type { ThreadMessageSearchOccurrence } from "./ThreadMessageSearch.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -73,7 +74,7 @@ import {
   formatInlineTerminalContextLabel,
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
-import { SkillInlineText } from "./SkillInlineText";
+import { SkillInlineText, type SkillInlineTextSearchHighlight } from "./SkillInlineText";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,10 @@ const NOOP_CLOSE_DIFF = () => {};
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const EMPTY_THREAD_MESSAGE_SEARCH_OCCURRENCES_BY_MESSAGE_ID: ReadonlyMap<
+  MessageId,
+  ReadonlyArray<ThreadMessageSearchOccurrence>
+> = new Map();
 const MESSAGE_SEARCH_HIGHLIGHT_DURATION_MS = 1_800;
 const MESSAGE_ACTION_BUTTON_CLASS_NAME =
   "size-6 min-w-6 rounded-md border-0 bg-transparent px-0 text-muted-foreground/45 shadow-none transition-[background-color,color,box-shadow] before:hidden hover:bg-foreground/8 hover:text-foreground/75 hover:shadow-sm/5 focus-visible:ring-1 focus-visible:ring-ring/60 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/35";
@@ -108,6 +113,13 @@ interface MessagesTimelineProps {
   listRef: React.RefObject<LegendListRef | null>;
   targetMessageId?: MessageId | null;
   targetMessageRequestId?: number;
+  targetMessageRowHighlight?: boolean;
+  threadMessageSearchQuery?: string;
+  threadMessageSearchOccurrencesByMessageId?: ReadonlyMap<
+    MessageId,
+    ReadonlyArray<ThreadMessageSearchOccurrence>
+  >;
+  activeThreadMessageSearchOccurrence?: ThreadMessageSearchOccurrence | null;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
@@ -141,6 +153,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   listRef,
   targetMessageId = null,
   targetMessageRequestId = 0,
+  targetMessageRowHighlight = true,
+  threadMessageSearchQuery = "",
+  threadMessageSearchOccurrencesByMessageId = EMPTY_THREAD_MESSAGE_SEARCH_OCCURRENCES_BY_MESSAGE_ID,
+  activeThreadMessageSearchOccurrence = null,
   timelineEntries,
   completionDividerBeforeEntryId,
   completionSummary,
@@ -224,7 +240,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       return;
     }
 
-    setHighlightedMessageId(targetMessageId);
+    setHighlightedMessageId(targetMessageRowHighlight ? targetMessageId : null);
     void listRef.current?.scrollToIndex?.({
       animated: true,
       index: targetRowIndex,
@@ -232,6 +248,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     });
 
     const frameId = window.requestAnimationFrame(() => {
+      if (!targetMessageRowHighlight) {
+        const activeSearchHit = document.querySelector<HTMLElement>(
+          '[data-thread-message-search-active="true"]',
+        );
+        if (activeSearchHit) {
+          activeSearchHit.scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
+      }
       for (const element of document.querySelectorAll<HTMLElement>("[data-message-id]")) {
         if (element.dataset.messageId === targetMessageId) {
           element.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -247,7 +272,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       window.cancelAnimationFrame(frameId);
       window.clearTimeout(timeoutId);
     };
-  }, [listRef, rows, targetMessageId, targetMessageRequestId]);
+  }, [listRef, rows, targetMessageId, targetMessageRequestId, targetMessageRowHighlight]);
 
   // Streaming-frequent context — rebuilt on turn-lifecycle transitions.
   const streamingState = useMemo<TimelineStreamingState>(
@@ -284,6 +309,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         skills,
         activeThreadEnvironmentId,
         highlightedMessageId,
+        threadMessageSearchQuery,
+        threadMessageSearchOccurrencesByMessageId,
+        activeThreadMessageSearchOccurrence,
         onRevertUserMessage,
         onImageExpand,
         onOpenTurnDiff,
@@ -298,6 +326,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       highlightedMessageId,
+      threadMessageSearchQuery,
+      threadMessageSearchOccurrencesByMessageId,
+      activeThreadMessageSearchOccurrence,
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
@@ -369,6 +400,23 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
   const ctx = { ...use(TimelineStableCtx), ...use(TimelineStreamingCtx) };
   const isHighlightedMessage =
     row.kind === "message" && ctx.highlightedMessageId === row.message.id;
+  const messageSearchOccurrences =
+    row.kind === "message"
+      ? ctx.threadMessageSearchOccurrencesByMessageId.get(row.message.id)
+      : undefined;
+  const messageSearchHighlight =
+    row.kind === "message" &&
+    messageSearchOccurrences !== undefined &&
+    messageSearchOccurrences.length > 0 &&
+    ctx.threadMessageSearchQuery.trim().length > 0
+      ? {
+          query: ctx.threadMessageSearchQuery,
+          activeOccurrenceIndex:
+            ctx.activeThreadMessageSearchOccurrence?.messageId === row.message.id
+              ? ctx.activeThreadMessageSearchOccurrence.messageOccurrenceIndex
+              : null,
+        }
+      : undefined;
 
   return (
     <div
@@ -444,6 +492,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                       text={displayedUserMessage.visibleText}
                       terminalContexts={terminalContexts}
                       skills={ctx.skills}
+                      searchHighlight={messageSearchHighlight}
                     />
                   )}
                 </div>
@@ -521,6 +570,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   cwd={ctx.markdownCwd}
                   isStreaming={assistantResponseStillInProgress}
                   skills={ctx.skills}
+                  searchHighlight={messageSearchHighlight}
                 />
                 {!assistantResponseStillInProgress && (
                   <AssistantChangedFilesSection
@@ -885,7 +935,18 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   text: string;
   terminalContexts: ParsedTerminalContextEntry[];
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  searchHighlight?: Omit<SkillInlineTextSearchHighlight, "cursor" | "keyPrefix"> | undefined;
 }) {
+  const searchHighlightCursorRef = useRef({ occurrenceIndex: 0 });
+  searchHighlightCursorRef.current.occurrenceIndex = 0;
+  const searchHighlight = props.searchHighlight
+    ? {
+        ...props.searchHighlight,
+        cursor: searchHighlightCursorRef.current,
+        keyPrefix: "user-message",
+      }
+    : undefined;
+
   if (props.terminalContexts.length > 0) {
     const hasEmbeddedInlineLabels = textContainsInlineTerminalContextLabels(
       props.text,
@@ -907,7 +968,11 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         if (matchIndex > cursor) {
           inlineNodes.push(
             <span key={`user-terminal-context-inline-before:${context.header}:${cursor}`}>
-              <SkillInlineText text={props.text.slice(cursor, matchIndex)} skills={props.skills} />
+              <SkillInlineText
+                text={props.text.slice(cursor, matchIndex)}
+                skills={props.skills}
+                searchHighlight={searchHighlight}
+              />
             </span>,
           );
         }
@@ -924,7 +989,11 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         if (cursor < props.text.length) {
           inlineNodes.push(
             <span key={`user-message-terminal-context-inline-rest:${cursor}`}>
-              <SkillInlineText text={props.text.slice(cursor)} skills={props.skills} />
+              <SkillInlineText
+                text={props.text.slice(cursor)}
+                skills={props.skills}
+                searchHighlight={searchHighlight}
+              />
             </span>,
           );
         }
@@ -954,7 +1023,11 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     if (props.text.length > 0) {
       inlineNodes.push(
         <span key="user-message-terminal-context-inline-text">
-          <SkillInlineText text={props.text} skills={props.skills} />
+          <SkillInlineText
+            text={props.text}
+            skills={props.skills}
+            searchHighlight={searchHighlight}
+          />
         </span>,
       );
     } else if (inlinePrefix.length === 0) {
@@ -974,7 +1047,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
 
   return (
     <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
-      <SkillInlineText text={props.text} skills={props.skills} />
+      <SkillInlineText text={props.text} skills={props.skills} searchHighlight={searchHighlight} />
     </div>
   );
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { MessageId } from "@ryco/contracts";
 import type { TimelineEntry } from "../../session-logic";
 import {
-  buildThreadMessageSearchMatches,
+  buildThreadMessageSearchOccurrences,
   clampThreadMessageSearchIndex,
   moveThreadMessageSearchIndex,
 } from "./ThreadMessageSearch.logic";
@@ -26,36 +26,61 @@ function messageEntry(input: {
   };
 }
 
-describe("buildThreadMessageSearchMatches", () => {
-  it("returns user and assistant message matches in timeline order", () => {
-    const matches = buildThreadMessageSearchMatches({
+describe("buildThreadMessageSearchOccurrences", () => {
+  it("returns user and assistant occurrences in timeline order", () => {
+    const occurrences = buildThreadMessageSearchOccurrences({
       query: "deploy",
       timelineEntries: [
         messageEntry({ id: "message-1", role: "assistant", text: "No match" }),
         messageEntry({ id: "message-2", role: "user", text: "Deploy the app" }),
-        messageEntry({ id: "message-3", role: "assistant", text: "Deployment is done" }),
+        messageEntry({ id: "message-3", role: "assistant", text: "Deploy then deploy again" }),
       ],
     });
 
-    expect(matches.map((match) => match.messageId)).toEqual([
+    expect(occurrences.map((occurrence) => occurrence.messageId)).toEqual([
       MessageId.make("message-2"),
       MessageId.make("message-3"),
+      MessageId.make("message-3"),
+    ]);
+    expect(occurrences.map((occurrence) => occurrence.messageOccurrenceIndex)).toEqual([0, 0, 1]);
+  });
+
+  it("records matched text spans for exact occurrence highlighting", () => {
+    const occurrences = buildThreadMessageSearchOccurrences({
+      query: "fix",
+      timelineEntries: [
+        messageEntry({ id: "message-1", role: "assistant", text: "fix one then fix two" }),
+      ],
+    });
+
+    expect(
+      occurrences.map((occurrence) => ({
+        start: occurrence.start,
+        end: occurrence.end,
+        text: occurrence.text,
+      })),
+    ).toEqual([
+      { start: 0, end: 3, text: "fix" },
+      { start: 13, end: 16, text: "fix" },
     ]);
   });
 
-  it("normalizes case and whitespace", () => {
-    const matches = buildThreadMessageSearchMatches({
+  it("normalizes case and query whitespace", () => {
+    const occurrences = buildThreadMessageSearchOccurrences({
       query: "alpha beta",
       timelineEntries: [
         messageEntry({ id: "message-1", role: "assistant", text: "Alpha\n\nBeta shipped" }),
       ],
     });
 
-    expect(matches.map((match) => match.messageId)).toEqual([MessageId.make("message-1")]);
+    expect(occurrences.map((occurrence) => occurrence.messageId)).toEqual([
+      MessageId.make("message-1"),
+    ]);
+    expect(occurrences[0]?.text).toBe("Alpha\n\nBeta");
   });
 
   it("skips system messages and non-message timeline entries", () => {
-    const matches = buildThreadMessageSearchMatches({
+    const occurrences = buildThreadMessageSearchOccurrences({
       query: "secret",
       timelineEntries: [
         messageEntry({ id: "message-1", role: "system", text: "secret instructions" }),
@@ -73,12 +98,12 @@ describe("buildThreadMessageSearchMatches", () => {
       ],
     });
 
-    expect(matches).toEqual([]);
+    expect(occurrences).toEqual([]);
   });
 
   it("returns no matches for empty queries", () => {
     expect(
-      buildThreadMessageSearchMatches({
+      buildThreadMessageSearchOccurrences({
         query: "   ",
         timelineEntries: [messageEntry({ id: "message-1", role: "user", text: "anything" })],
       }),

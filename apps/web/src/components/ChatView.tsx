@@ -89,6 +89,7 @@ import {
   isDialogShortcutTarget,
   isEditableShortcutTarget,
   matchesExactModShortcut,
+  resolveShortcutCommand,
   shouldIgnoreGlobalNavigationShortcut,
   shortcutLabelForCommand,
 } from "../keybindings";
@@ -127,10 +128,11 @@ import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { deriveRevertTurnCountByUserMessageId } from "./chat/MessagesTimeline.logic";
 import { ThreadMessageSearchBar } from "./chat/ThreadMessageSearchBar";
 import {
-  buildThreadMessageSearchMatches,
+  buildThreadMessageSearchOccurrences,
   clampThreadMessageSearchIndex,
   moveThreadMessageSearchIndex,
 } from "./chat/ThreadMessageSearch.logic";
+import type { ThreadMessageSearchOccurrence } from "./chat/ThreadMessageSearch.logic";
 import { ChatHeader } from "./chat/ChatHeader";
 import { type ChatSessionTabsItem } from "./chat/ChatSessionTabs";
 import { useChatSessionTabsPrefetch } from "./chat/useChatSessionTabsPrefetch";
@@ -1363,22 +1365,39 @@ export default function ChatView(props: ChatViewProps) {
       ),
     [activeThread?.proposedPlans, contextCompactionEntries, timelineMessages, workLogEntries],
   );
-  const threadMessageSearchMatches = useMemo(
+  const threadMessageSearchOccurrences = useMemo(
     () =>
-      buildThreadMessageSearchMatches({
+      buildThreadMessageSearchOccurrences({
         timelineEntries,
         query: threadMessageSearchQuery,
       }),
     [threadMessageSearchQuery, timelineEntries],
   );
-  const threadMessageSearchMatchCount = threadMessageSearchMatches.length;
+  const threadMessageSearchOccurrencesByMessageId = useMemo(() => {
+    if (!threadMessageSearchOpen) {
+      return new Map<MessageId, ReadonlyArray<ThreadMessageSearchOccurrence>>();
+    }
+
+    const byMessageId = new Map<MessageId, ThreadMessageSearchOccurrence[]>();
+    for (const occurrence of threadMessageSearchOccurrences) {
+      const existing = byMessageId.get(occurrence.messageId);
+      if (existing) {
+        existing.push(occurrence);
+      } else {
+        byMessageId.set(occurrence.messageId, [occurrence]);
+      }
+    }
+    return byMessageId;
+  }, [threadMessageSearchOccurrences, threadMessageSearchOpen]);
+  const threadMessageSearchMatchCount = threadMessageSearchOccurrences.length;
   const selectedThreadMessageSearchIndex = clampThreadMessageSearchIndex(
     threadMessageSearchSelectedIndex,
     threadMessageSearchMatchCount,
   );
-  const selectedThreadMessageSearchMatch =
-    threadMessageSearchMatches[selectedThreadMessageSearchIndex] ?? null;
-  const selectedThreadMessageSearchMessageId = selectedThreadMessageSearchMatch?.messageId ?? null;
+  const selectedThreadMessageSearchOccurrence =
+    threadMessageSearchOccurrences[selectedThreadMessageSearchIndex] ?? null;
+  const selectedThreadMessageSearchMessageId =
+    selectedThreadMessageSearchOccurrence?.messageId ?? null;
   const revealThreadMessageSearchMatch = useCallback((messageId: MessageId) => {
     setThreadMessageSearchTarget((current) => ({
       messageId,
@@ -1595,16 +1614,16 @@ export default function ChatView(props: ChatViewProps) {
         direction,
       });
       setThreadMessageSearchSelectedIndex(nextIndex);
-      const nextMatch = threadMessageSearchMatches[nextIndex];
-      if (nextMatch) {
-        revealThreadMessageSearchMatch(nextMatch.messageId);
+      const nextOccurrence = threadMessageSearchOccurrences[nextIndex];
+      if (nextOccurrence) {
+        revealThreadMessageSearchMatch(nextOccurrence.messageId);
       }
     },
     [
       revealThreadMessageSearchMatch,
       selectedThreadMessageSearchIndex,
       threadMessageSearchMatchCount,
-      threadMessageSearchMatches,
+      threadMessageSearchOccurrences,
     ],
   );
   const addTerminalContextToDraft = useCallback(
@@ -2117,7 +2136,14 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (!activeThreadId || event.defaultPrevented) return;
-      if (!matchesExactModShortcut(event, "f")) return;
+      const command = resolveShortcutCommand(event, keybindings, {
+        context: {
+          terminalFocus: isTerminalFocused(),
+          terminalOpen: Boolean(terminalState.terminalOpen),
+          modelPickerOpen: readComposer()?.isModelPickerOpen() ?? false,
+        },
+      });
+      if (command !== "thread.find") return;
       if (shouldIgnoreThreadMessageSearchShortcut(event)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -2125,7 +2151,13 @@ export default function ChatView(props: ChatViewProps) {
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [activeThreadId, openThreadMessageSearch]);
+  }, [
+    activeThreadId,
+    keybindings,
+    openThreadMessageSearch,
+    readComposer,
+    terminalState.terminalOpen,
+  ]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
@@ -2875,6 +2907,14 @@ export default function ChatView(props: ChatViewProps) {
                   threadMessageSearchTarget?.messageId ?? rawSearch.messageId ?? null
                 }
                 targetMessageRequestId={threadMessageSearchTarget?.requestId ?? 0}
+                targetMessageRowHighlight={threadMessageSearchTarget === null}
+                threadMessageSearchQuery={threadMessageSearchOpen ? threadMessageSearchQuery : ""}
+                threadMessageSearchOccurrencesByMessageId={
+                  threadMessageSearchOccurrencesByMessageId
+                }
+                activeThreadMessageSearchOccurrence={
+                  threadMessageSearchOpen ? selectedThreadMessageSearchOccurrence : null
+                }
                 timelineEntries={timelineEntries}
                 completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                 completionSummary={completionSummary}

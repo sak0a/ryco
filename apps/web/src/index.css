@@ -838,6 +838,21 @@ label:has(> select#reasoning-effort) select {
   opacity: 0.8;
 }
 
+.thread-message-search-highlight {
+  border-radius: calc(var(--radius-sm) - 1px);
+  background: color-mix(in srgb, var(--warning) 38%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 28%, transparent);
+  color: inherit;
+  padding: 0 0.08em;
+}
+
+.thread-message-search-highlight-active {
+  background: color-mix(in srgb, var(--warning) 72%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--warning) 64%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--warning) 18%, transparent);
+}
+
 .chat-markdown blockquote {
   border-left: 2px solid var(--border);
   padding-left: 0.8rem;
