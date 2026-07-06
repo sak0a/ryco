@@ -8,7 +8,14 @@ const PROJECT_ID = ProjectId.make("project-1");
 const WORKSPACE_ROOT = "/tmp/resolve-action-workspace/project";
 const WORKTREE_ID = WorktreeId.make("worktree-1");
 
-const registeredWorktree = {
+const registeredWorktree: {
+  worktreeId: WorktreeId;
+  projectId: ProjectId;
+  branch: string;
+  worktreePath: string | null;
+  origin: string;
+  archivedAt: string | null;
+} = {
   worktreeId: WORKTREE_ID,
   projectId: PROJECT_ID,
   branch: "feature/tokens",
