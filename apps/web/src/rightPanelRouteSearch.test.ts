@@ -1,4 +1,4 @@
-import { TurnId } from "@ryco/contracts";
+import { MessageId, TurnId } from "@ryco/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -78,6 +78,18 @@ describe("parseRightPanelRouteSearch", () => {
 
   it("drops invalid agent workspace tabs", () => {
     expect(parseRightPanelRouteSearch({ workspaceTab: "agent" })).toEqual({});
+  });
+
+  it("preserves message jump search with and without panel state", () => {
+    expect(parseRightPanelRouteSearch({ messageId: "message-1" })).toEqual({
+      messageId: MessageId.make("message-1"),
+    });
+    expect(parseRightPanelRouteSearch({ workspaceTab: "files", messageId: "message-1" })).toEqual({
+      workspaceOpen: "1",
+      workspaceTab: "files",
+      preview: "1",
+      messageId: MessageId.make("message-1"),
+    });
   });
 });
 

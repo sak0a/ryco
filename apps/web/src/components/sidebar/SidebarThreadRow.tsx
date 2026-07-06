@@ -1,4 +1,4 @@
-import { ArchiveIcon, CloudIcon, TerminalIcon, XIcon } from "lucide-react";
+import { ArchiveIcon, CloudIcon, PinIcon, TerminalIcon, XIcon } from "lucide-react";
 import React, { memo, useCallback, useMemo } from "react";
 import type { ScopedThreadRef } from "@ryco/contracts";
 import { scopedThreadKey, scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime";
@@ -147,6 +147,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
   const draftId = thread.draftId ?? null;
   const isMobile = useIsMobile();
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
+  const isPinned = useUiStateStore((state) => state.pinnedThreadKeys[threadKey] === true);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const hasSelection = useThreadSelectionStore((state) => state.selectedThreadKeys.size > 0);
   const runningTerminalIds = useTerminalStateStore(
@@ -457,17 +458,27 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
               <TooltipTrigger
                 render={
                   <span
-                    className={resolveThreadStatusTextClassName(
-                      threadStatus,
-                      "min-w-0 flex-1 truncate text-xs",
-                    )}
                     aria-label={
                       threadStatus ? `${threadStatus.label}: ${thread.title}` : thread.title
                     }
-                    style={threadStatusTextStyle}
-                    data-testid={`thread-title-${thread.id}`}
+                    className="flex min-w-0 flex-1 items-center gap-1"
                   >
-                    {thread.title}
+                    <span
+                      className={resolveThreadStatusTextClassName(
+                        threadStatus,
+                        "min-w-0 flex-1 truncate text-xs",
+                      )}
+                      style={threadStatusTextStyle}
+                      data-testid={`thread-title-${thread.id}`}
+                    >
+                      {thread.title}
+                    </span>
+                    {isPinned ? (
+                      <PinIcon
+                        className="size-3 shrink-0 text-muted-foreground/55"
+                        aria-label="Pinned"
+                      />
+                    ) : null}
                   </span>
                 }
               />

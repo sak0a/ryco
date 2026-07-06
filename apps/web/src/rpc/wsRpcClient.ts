@@ -191,6 +191,7 @@ export interface WsRpcClient {
   readonly threads: {
     readonly setManualBucket: RpcUnaryMethod<typeof WS_METHODS.threadsSetManualBucket>;
     readonly setManualPosition: RpcUnaryMethod<typeof WS_METHODS.threadsSetManualPosition>;
+    readonly searchMessages: RpcUnaryMethod<typeof WS_METHODS.searchThreadMessages>;
   };
   readonly server: {
     readonly getConfig: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetConfig>;
@@ -249,6 +250,9 @@ export interface WsRpcClient {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
+    readonly searchThreadMessages: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.searchThreadMessages
+    >;
     readonly subscribeShell: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeShell>;
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
   };
@@ -459,6 +463,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.threadsSetManualBucket](input)),
       setManualPosition: (input) =>
         transport.request((client) => client[WS_METHODS.threadsSetManualPosition](input)),
+      searchMessages: (input) =>
+        transport.request((client) => client[WS_METHODS.searchThreadMessages](input)),
     },
     server: {
       getConfig: () => transport.request((client) => client[WS_METHODS.serverGetConfig]({})),
@@ -531,6 +537,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getTurnDiff](input)),
       getFullThreadDiff: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getFullThreadDiff](input)),
+      searchThreadMessages: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.searchThreadMessages](input)),
       subscribeShell: (listener, options) =>
         transport.subscribe(
           (client) => client[ORCHESTRATION_WS_METHODS.subscribeShell]({}),

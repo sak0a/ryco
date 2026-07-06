@@ -18,6 +18,7 @@ import {
   modelPickerJumpIndexFromCommand,
   matchesExactModShortcut,
   isOpenFavoriteEditorShortcut,
+  isThreadFindShortcut,
   isTerminalClearShortcut,
   isTerminalCloseShortcut,
   isTerminalNewShortcut,
@@ -137,6 +138,11 @@ const DEFAULT_BINDINGS = compile([
   { shortcut: modShortcut("o", { shiftKey: true }), command: "chat.new" },
   { shortcut: modShortcut("n", { shiftKey: true }), command: "chat.newLocal" },
   { shortcut: modShortcut("o"), command: "editor.openFavorite" },
+  {
+    shortcut: modShortcut("f"),
+    command: "thread.find",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
   { shortcut: modShortcut("[", { shiftKey: true }), command: "thread.previous" },
   { shortcut: modShortcut("]", { shiftKey: true }), command: "thread.next" },
   { shortcut: modShortcut("1"), command: "thread.jump.1" },
@@ -326,6 +332,7 @@ describe("shortcutLabelForCommand", () => {
       shortcutLabelForCommand(DEFAULT_BINDINGS, "editor.openFavorite", "Linux"),
       "Ctrl+O",
     );
+    assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "thread.find", "MacIntel"), "⌘F");
     assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "thread.jump.3", "MacIntel"),
       "⌘3",
@@ -514,6 +521,21 @@ describe("chat/editor shortcuts", () => {
     );
     assert.isFalse(
       isDiffToggleShortcut(event({ key: "d", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: true },
+      }),
+    );
+  });
+
+  it("matches thread.find shortcut outside terminal focus", () => {
+    assert.isTrue(
+      isThreadFindShortcut(event({ key: "f", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+    );
+    assert.isFalse(
+      isThreadFindShortcut(event({ key: "f", metaKey: true }), DEFAULT_BINDINGS, {
         platform: "MacIntel",
         context: { terminalFocus: true },
       }),

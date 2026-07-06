@@ -24,7 +24,10 @@ import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
-import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
+import {
+  renderSkillInlineMarkdownChildren,
+  type SkillInlineTextSearchHighlight,
+} from "./chat/SkillInlineText";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { openInPreferredEditor } from "../editorPreferences";
@@ -63,6 +66,7 @@ interface ChatMarkdownProps {
   cwd: string | undefined;
   isStreaming?: boolean;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  searchHighlight?: Omit<SkillInlineTextSearchHighlight, "cursor" | "keyPrefix"> | undefined;
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
@@ -596,10 +600,21 @@ const RenderedChatMarkdown = memo(function RenderedChatMarkdown({
   cwd,
   isStreaming = false,
   skills = EMPTY_MARKDOWN_SKILLS,
+  searchHighlight,
 }: ChatMarkdownProps) {
   usePerfMark("ChatMarkdown");
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
+  const searchHighlightCursorRef = useRef({ occurrenceIndex: 0 });
+  searchHighlightCursorRef.current.occurrenceIndex = 0;
+  const markdownSearchHighlightRef = useRef<SkillInlineTextSearchHighlight | undefined>(undefined);
+  markdownSearchHighlightRef.current = searchHighlight
+    ? {
+        ...searchHighlight,
+        cursor: searchHighlightCursorRef.current,
+        keyPrefix: "chat-markdown",
+      }
+    : undefined;
   const markdownFileLinkMetaByHref = useMemo(() => {
     const metaByHref = new Map<
       string,
@@ -625,16 +640,73 @@ const RenderedChatMarkdown = memo(function RenderedChatMarkdown({
   const markdownComponents = useMemo<Components>(
     () => ({
       p({ node: _node, children, ...props }) {
-        return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
+        return (
+          <p {...props}>
+            {renderSkillInlineMarkdownChildren(
+              children,
+              skills,
+              markdownSearchHighlightRef.current,
+            )}
+          </p>
+        );
       },
       li({ node: _node, children, ...props }) {
-        return <li {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</li>;
+        return (
+          <li {...props}>
+            {renderSkillInlineMarkdownChildren(
+              children,
+              skills,
+              markdownSearchHighlightRef.current,
+            )}
+          </li>
+        );
+      },
+      blockquote({ node: _node, children, ...props }) {
+        return (
+          <blockquote {...props}>
+            {renderSkillInlineMarkdownChildren(
+              children,
+              skills,
+              markdownSearchHighlightRef.current,
+            )}
+          </blockquote>
+        );
+      },
+      td({ node: _node, children, ...props }) {
+        return (
+          <td {...props}>
+            {renderSkillInlineMarkdownChildren(
+              children,
+              skills,
+              markdownSearchHighlightRef.current,
+            )}
+          </td>
+        );
+      },
+      th({ node: _node, children, ...props }) {
+        return (
+          <th {...props}>
+            {renderSkillInlineMarkdownChildren(
+              children,
+              skills,
+              markdownSearchHighlightRef.current,
+            )}
+          </th>
+        );
       },
       a({ node: _node, href, ...props }) {
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
         const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;
         if (!fileLinkMeta) {
-          return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
+          return (
+            <a {...props} href={href} target="_blank" rel="noopener noreferrer">
+              {renderSkillInlineMarkdownChildren(
+                props.children,
+                skills,
+                markdownSearchHighlightRef.current,
+              )}
+            </a>
+          );
         }
 
         const parentSuffix = fileLinkParentSuffixByPath.get(fileLinkMeta.filePath);

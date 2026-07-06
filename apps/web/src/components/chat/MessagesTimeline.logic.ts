@@ -17,6 +17,7 @@ import {
 } from "@ryco/contracts";
 import { type TimestampFormat } from "@ryco/contracts/settings";
 import { type ExpandedImagePreview } from "./ExpandedImagePreview";
+import type { ThreadMessageSearchOccurrence } from "./ThreadMessageSearch.logic";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
 
@@ -47,6 +48,13 @@ export interface TimelineStableState {
   workspaceRoot: string | undefined;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
+  highlightedMessageId: MessageId | null;
+  threadMessageSearchQuery: string;
+  threadMessageSearchOccurrencesByMessageId: ReadonlyMap<
+    MessageId,
+    ReadonlyArray<ThreadMessageSearchOccurrence>
+  >;
+  activeThreadMessageSearchOccurrence: ThreadMessageSearchOccurrence | null;
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
@@ -83,6 +91,10 @@ export function buildTimelineStableState(input: TimelineStableState): TimelineSt
     workspaceRoot: input.workspaceRoot,
     skills: input.skills,
     activeThreadEnvironmentId: input.activeThreadEnvironmentId,
+    highlightedMessageId: input.highlightedMessageId,
+    threadMessageSearchQuery: input.threadMessageSearchQuery,
+    threadMessageSearchOccurrencesByMessageId: input.threadMessageSearchOccurrencesByMessageId,
+    activeThreadMessageSearchOccurrence: input.activeThreadMessageSearchOccurrence,
     onRevertUserMessage: input.onRevertUserMessage,
     onImageExpand: input.onImageExpand,
     onOpenTurnDiff: input.onOpenTurnDiff,

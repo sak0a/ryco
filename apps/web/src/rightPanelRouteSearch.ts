@@ -1,22 +1,40 @@
+import { MessageId } from "@ryco/contracts";
 import { type DiffRouteSearch, parseDiffRouteSearch } from "./diffRouteSearch";
 import { type PreviewRouteSearch, parsePreviewRouteSearch } from "./previewRouteSearch";
 import { type WorkspaceRouteSearch, parseWorkspaceRouteSearch } from "./workspaceRouteSearch";
 
 export type RightPanelMode = "review" | "files" | "terminal" | "agent";
 
-export type RightPanelRouteSearch = DiffRouteSearch & PreviewRouteSearch & WorkspaceRouteSearch;
+export interface MessageRouteSearch {
+  messageId?: MessageId;
+}
+
+export type RightPanelRouteSearch = DiffRouteSearch &
+  PreviewRouteSearch &
+  WorkspaceRouteSearch &
+  MessageRouteSearch;
+
+function parseMessageRouteSearch(search: Record<string, unknown>): MessageRouteSearch {
+  const rawMessageId = typeof search.messageId === "string" ? search.messageId.trim() : "";
+  return rawMessageId.length > 0 ? { messageId: MessageId.make(rawMessageId) } : {};
+}
 
 export function parseRightPanelRouteSearch(search: Record<string, unknown>): RightPanelRouteSearch {
   const workspaceSearch = parseWorkspaceRouteSearch(search);
   const diffSearch = parseDiffRouteSearch(search);
   const previewSearch = parsePreviewRouteSearch(search);
+  const messageSearch = parseMessageRouteSearch(search);
 
   if (workspaceSearch.workspaceTab === "agent" && workspaceSearch.workspaceAgentKey) {
-    return workspaceSearch;
+    return {
+      ...workspaceSearch,
+      ...messageSearch,
+    };
   }
   if (workspaceSearch.workspaceTab === "review") {
     return {
       ...diffSearch,
+      ...messageSearch,
       workspaceOpen: "1",
       workspaceTab: "review",
       diff: "1",
@@ -25,6 +43,7 @@ export function parseRightPanelRouteSearch(search: Record<string, unknown>): Rig
   if (workspaceSearch.workspaceTab === "files") {
     return {
       ...previewSearch,
+      ...messageSearch,
       workspaceOpen: "1",
       workspaceTab: "files",
       preview: "1",
@@ -32,6 +51,7 @@ export function parseRightPanelRouteSearch(search: Record<string, unknown>): Rig
   }
   if (workspaceSearch.workspaceTab === "terminal") {
     return {
+      ...messageSearch,
       workspaceOpen: "1",
       workspaceTab: "terminal",
     };
@@ -40,6 +60,7 @@ export function parseRightPanelRouteSearch(search: Record<string, unknown>): Rig
   if (diffSearch.diff === "1") {
     return {
       ...diffSearch,
+      ...messageSearch,
       workspaceOpen: "1",
       workspaceTab: "review",
     };
@@ -47,14 +68,18 @@ export function parseRightPanelRouteSearch(search: Record<string, unknown>): Rig
   if (previewSearch.preview === "1") {
     return {
       ...previewSearch,
+      ...messageSearch,
       workspaceOpen: "1",
       workspaceTab: "files",
     };
   }
   if (workspaceSearch.workspaceOpen === "1") {
-    return workspaceSearch;
+    return {
+      ...workspaceSearch,
+      ...messageSearch,
+    };
   }
-  return {};
+  return messageSearch;
 }
 
 export function getRightPanelMode(search: RightPanelRouteSearch): RightPanelMode | null {

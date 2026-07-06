@@ -13,6 +13,7 @@ import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import type { VcsError } from "@ryco/contracts";
 import { ServerConfig } from "../../config.ts";
 import { ThreadId } from "@ryco/contracts";
+import { configureTestGitCommitIdentity } from "../../vcs/testing/GitTestRepo.ts";
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "ryco-checkpoint-store-test-",
@@ -75,8 +76,7 @@ function initRepoWithCommit(
 > {
   return Effect.gen(function* () {
     yield* git(cwd, ["init"]);
-    yield* git(cwd, ["config", "user.email", "test@test.com"]);
-    yield* git(cwd, ["config", "user.name", "Test"]);
+    yield* configureTestGitCommitIdentity(cwd, git);
     yield* writeTextFile(path.join(cwd, "README.md"), "# test\n");
     yield* git(cwd, ["add", "."]);
     yield* git(cwd, ["commit", "-m", "initial commit"]);
