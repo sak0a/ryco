@@ -1,10 +1,10 @@
 # 24 — Long-thread server pagination
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Ops / trust |
-| **Order in batch** | 5 of 6 |
-| **Depends on (same batch)** | — |
+| Field                       | Value       |
+| --------------------------- | ----------- |
+| **Batch**                   | Ops / trust |
+| **Order in batch**          | 5 of 6      |
+| **Depends on (same batch)** | —           |
 
 ## Prompt
 

@@ -1,10 +1,10 @@
 # 14 — Desktop turn-complete notification
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Daily UX |
-| **Order in batch** | 4 of 5 |
-| **Depends on (same batch)** | — |
+| Field                       | Value    |
+| --------------------------- | -------- |
+| **Batch**                   | Daily UX |
+| **Order in batch**          | 4 of 5   |
+| **Depends on (same batch)** | —        |
 
 ## Prompt
 

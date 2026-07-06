@@ -1,9 +1,9 @@
 # 20 — Diagnostics panel expansion
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Ops / trust |
-| **Order in batch** | 2 of 6 |
+| Field                       | Value            |
+| --------------------------- | ---------------- |
+| **Batch**                   | Ops / trust      |
+| **Order in batch**          | 2 of 6           |
 | **Depends on (same batch)** | 21 (metrics RPC) |
 
 ## Prompt

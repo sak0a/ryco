@@ -1,10 +1,10 @@
 # 06 — Diff panel cancel + LRU cache
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Perf / refactor |
-| **Order in batch** | 2 of 6 |
-| **Depends on (same batch)** | — |
+| Field                       | Value           |
+| --------------------------- | --------------- |
+| **Batch**                   | Perf / refactor |
+| **Order in batch**          | 2 of 6          |
+| **Depends on (same batch)** | —               |
 
 ## Prompt
 

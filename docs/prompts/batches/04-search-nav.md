@@ -6,12 +6,12 @@ Copy everything below the line into your agent session in the **batch worktree**
 
 ## Setup
 
-| Item | Value |
-|------|-------|
-| **Branch** | `feat/batch-search-nav` |
-| **Worktree** | One dedicated worktree for this batch |
-| **PR** | Single PR containing both features |
-| **Agent** | One Cursor agent session (no subagents) |
+| Item         | Value                                   |
+| ------------ | --------------------------------------- |
+| **Branch**   | `feat/batch-search-nav`                 |
+| **Worktree** | One dedicated worktree for this batch   |
+| **PR**       | Single PR containing both features      |
+| **Agent**    | One Cursor agent session (no subagents) |
 
 Read [AGENTS.md](../../AGENTS.md).
 
@@ -27,10 +27,10 @@ Do not commit unless explicitly asked.
 
 ## Implementation order
 
-| Step | ID | Feature | Feature file |
-|------|-----|---------|--------------|
-| 1 | 11 | Message search | [features/11-message-search.md](../features/11-message-search.md) |
-| 2 | 12 | Pin threads | [features/12-pin-threads.md](../features/12-pin-threads.md) |
+| Step | ID  | Feature        | Feature file                                                      |
+| ---- | --- | -------------- | ----------------------------------------------------------------- |
+| 1    | 11  | Message search | [features/11-message-search.md](../features/11-message-search.md) |
+| 2    | 12  | Pin threads    | [features/12-pin-threads.md](../features/12-pin-threads.md)       |
 
 ## Feature summaries
 

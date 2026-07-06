@@ -1,10 +1,10 @@
 # 15 — Per-project default provider/model
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Agent modes |
-| **Order in batch** | 2 of 2 |
-| **Depends on (same batch)** | 10 |
+| Field                       | Value       |
+| --------------------------- | ----------- |
+| **Batch**                   | Agent modes |
+| **Order in batch**          | 2 of 2      |
+| **Depends on (same batch)** | 10          |
 
 ## Prompt
 

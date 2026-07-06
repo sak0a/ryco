@@ -1,10 +1,10 @@
 # 27 — Thread export (markdown)
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Differentiation |
-| **Order in batch** | 2 of 5 |
-| **Depends on (same batch)** | — |
+| Field                       | Value           |
+| --------------------------- | --------------- |
+| **Batch**                   | Differentiation |
+| **Order in batch**          | 2 of 5          |
+| **Depends on (same batch)** | —               |
 
 ## Prompt
 

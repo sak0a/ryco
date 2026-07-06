@@ -1,10 +1,10 @@
 # 03 — Thread archiving polish (sidebar limits + sorting)
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Daily UX |
-| **Order in batch** | 2 of 5 |
-| **Depends on (same batch)** | — |
+| Field                       | Value    |
+| --------------------------- | -------- |
+| **Batch**                   | Daily UX |
+| **Order in batch**          | 2 of 5   |
+| **Depends on (same batch)** | —        |
 
 ## Prompt
 

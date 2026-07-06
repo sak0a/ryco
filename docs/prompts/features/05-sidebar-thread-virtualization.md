@@ -1,10 +1,10 @@
 # 05 — Sidebar thread list virtualization
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Perf / refactor |
-| **Order in batch** | 1 of 6 |
-| **Depends on (same batch)** | — |
+| Field                       | Value           |
+| --------------------------- | --------------- |
+| **Batch**                   | Perf / refactor |
+| **Order in batch**          | 1 of 6          |
+| **Depends on (same batch)** | —               |
 
 ## Prompt
 

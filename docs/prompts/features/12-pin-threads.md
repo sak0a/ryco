@@ -1,10 +1,10 @@
 # 12 — Pin threads
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Search & nav |
-| **Order in batch** | 2 of 2 |
-| **Depends on (same batch)** | — |
+| Field                       | Value        |
+| --------------------------- | ------------ |
+| **Batch**                   | Search & nav |
+| **Order in batch**          | 2 of 2       |
+| **Depends on (same batch)** | —            |
 
 ## Prompt
 

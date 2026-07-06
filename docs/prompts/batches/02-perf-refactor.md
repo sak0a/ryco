@@ -6,12 +6,12 @@ Copy everything below the line into your agent session in the **batch worktree**
 
 ## Setup
 
-| Item | Value |
-|------|-------|
-| **Branch** | `feat/batch-perf-refactor` |
-| **Worktree** | One dedicated worktree for this batch |
-| **PR** | Single PR containing all features below |
-| **Agent** | One Cursor agent session (no subagents) |
+| Item         | Value                                   |
+| ------------ | --------------------------------------- |
+| **Branch**   | `feat/batch-perf-refactor`              |
+| **Worktree** | One dedicated worktree for this batch   |
+| **PR**       | Single PR containing all features below |
+| **Agent**    | One Cursor agent session (no subagents) |
 
 Read [AGENTS.md](../../AGENTS.md) and `.plans/21-concrete-improvement-roadmap.md`.
 
@@ -27,14 +27,14 @@ Do not commit unless explicitly asked.
 
 ## Implementation order
 
-| Step | ID | Feature | Feature file |
-|------|-----|---------|--------------|
-| 1 | 05 | Sidebar thread virtualization | [features/05-sidebar-thread-virtualization.md](../features/05-sidebar-thread-virtualization.md) |
-| 2 | 06 | Diff panel cancel + LRU cache | [features/06-diff-panel-cache.md](../features/06-diff-panel-cache.md) |
-| 3 | 09 | Perf budget harness | [features/09-perf-budget-harness.md](../features/09-perf-budget-harness.md) |
-| 4 | 04 | ChatView decomposition | [features/04-chatview-decomposition.md](../features/04-chatview-decomposition.md) |
-| 5 | 08 | Finish AtomRpc migration | [features/08-finish-atomrpc-migration.md](../features/08-finish-atomrpc-migration.md) |
-| 6 | 07 | Client push coalescing | [features/07-client-push-coalescing.md](../features/07-client-push-coalescing.md) |
+| Step | ID  | Feature                       | Feature file                                                                                    |
+| ---- | --- | ----------------------------- | ----------------------------------------------------------------------------------------------- |
+| 1    | 05  | Sidebar thread virtualization | [features/05-sidebar-thread-virtualization.md](../features/05-sidebar-thread-virtualization.md) |
+| 2    | 06  | Diff panel cancel + LRU cache | [features/06-diff-panel-cache.md](../features/06-diff-panel-cache.md)                           |
+| 3    | 09  | Perf budget harness           | [features/09-perf-budget-harness.md](../features/09-perf-budget-harness.md)                     |
+| 4    | 04  | ChatView decomposition        | [features/04-chatview-decomposition.md](../features/04-chatview-decomposition.md)               |
+| 5    | 08  | Finish AtomRpc migration      | [features/08-finish-atomrpc-migration.md](../features/08-finish-atomrpc-migration.md)           |
+| 6    | 07  | Client push coalescing        | [features/07-client-push-coalescing.md](../features/07-client-push-coalescing.md)               |
 
 **Why this order:** Low-risk perf wins first → ChatView split reduces merge surface → AtomRpc migration → coalescing last (streaming correctness is subtle).
 

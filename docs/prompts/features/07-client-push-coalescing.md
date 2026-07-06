@@ -1,10 +1,10 @@
 # 07 — Client push coalescing (store layer)
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Perf / refactor |
-| **Order in batch** | 6 of 6 |
-| **Depends on (same batch)** | 04 |
+| Field                       | Value           |
+| --------------------------- | --------------- |
+| **Batch**                   | Perf / refactor |
+| **Order in batch**          | 6 of 6          |
+| **Depends on (same batch)** | 04              |
 
 ## Prompt
 
