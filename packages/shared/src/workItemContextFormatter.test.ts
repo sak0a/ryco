@@ -91,7 +91,9 @@ describe("formatWorkItemContextsForAgent", () => {
     expect(output).toContain("Parent: RYC-200");
     expect(output).toContain("Track per-turn token deltas across providers.");
     expect(output).toContain("Recent comments:");
-    expect(output).toContain("- carol (2026-07-01T09:00:00Z): Cached inputs need special handling.");
+    expect(output).toContain(
+      "- carol (2026-07-01T09:00:00Z): Cached inputs need special handling.",
+    );
     expect(output).not.toContain("truncated by the server");
   });
 

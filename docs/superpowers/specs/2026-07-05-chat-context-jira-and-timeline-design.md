@@ -83,27 +83,20 @@ Decisions locked during brainstorming:
 `packages/contracts/src/orchestration.ts`:
 
 ```ts
-export const ChatContextAttachmentKind = Schema.Literals([
-  "issue",
-  "change-request",
-  "work-item",
-]);
+export const ChatContextAttachmentKind = Schema.Literals(["issue", "change-request", "work-item"]);
 
 export const ChatContextAttachment = Schema.Struct({
   type: Schema.Literal("context"),
   id: ChatAttachmentId,
   kind: ChatContextAttachmentKind,
-  provider: TrimmedNonEmptyString,   // "github" | "gitlab" | … | "jira"
-  reference: TrimmedNonEmptyString,  // "#42" | "owner/repo#42" | "RYC-231"
+  provider: TrimmedNonEmptyString, // "github" | "gitlab" | … | "jira"
+  reference: TrimmedNonEmptyString, // "#42" | "owner/repo#42" | "RYC-231"
   title: TrimmedNonEmptyString,
-  state: TrimmedNonEmptyString,      // display snapshot: "open" | "merged" | "In Progress" | …
+  state: TrimmedNonEmptyString, // display snapshot: "open" | "merged" | "In Progress" | …
   url: TrimmedNonEmptyString,
 });
 
-export const ChatAttachment = Schema.Union([
-  ChatImageAttachment,
-  ChatContextAttachment,
-]);
+export const ChatAttachment = Schema.Union([ChatImageAttachment, ChatContextAttachment]);
 ```
 
 - `UploadChatAttachment` gains the same member unchanged (context
@@ -168,7 +161,7 @@ they now may contain `type: "context"` members.
 ### Composer draft store (`composerDraftStore.ts`)
 
 - `ComposerThreadDraftState` gains `workItemContexts:
-  ComposerWorkItemContext[]` (not persisted, matching
+ComposerWorkItemContext[]` (not persisted, matching
   `sourceControlContexts`).
 - Mutators `addWorkItemContext` (dedupe by `provider:key`, returns
   `{ added, reason?: "duplicate" }`), `removeWorkItemContext`,
@@ -232,17 +225,17 @@ they now may contain `type: "context"` members.
 
 ## Behavior
 
-| Situation | Behavior |
-| --- | --- |
-| `#RYC-231` typed, project linked to Jira | Direct-attach work item; token removed from prompt; chip appears. |
-| `#RYC-231` typed, no Jira link | Treated as plain text search in the existing tabs; no Jira behavior. |
-| Jira tab, project not linked | Tab hidden entirely (setup lives in the Project Explorer Jira tab, not the picker). |
-| Duplicate work-item attach | No-op + "Already attached" toast (matches source-control dedupe). |
-| Send with contexts | Compact snapshots persist on the message; full details injected into prompt; draft chips clear on ack. |
-| Timeline chip click | Live detail dialog; snapshot on the chip never mutates. |
-| Item deleted upstream after send | Chip still renders (snapshot is local); the click-through dialog surfaces the fetch error. |
-| Historical messages | No context attachments → no chip row → rendering unchanged. |
-| Offline at send | Existing behavior: stale refresh fails silently, cached contexts sent. |
+| Situation                                | Behavior                                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `#RYC-231` typed, project linked to Jira | Direct-attach work item; token removed from prompt; chip appears.                                      |
+| `#RYC-231` typed, no Jira link           | Treated as plain text search in the existing tabs; no Jira behavior.                                   |
+| Jira tab, project not linked             | Tab hidden entirely (setup lives in the Project Explorer Jira tab, not the picker).                    |
+| Duplicate work-item attach               | No-op + "Already attached" toast (matches source-control dedupe).                                      |
+| Send with contexts                       | Compact snapshots persist on the message; full details injected into prompt; draft chips clear on ack. |
+| Timeline chip click                      | Live detail dialog; snapshot on the chip never mutates.                                                |
+| Item deleted upstream after send         | Chip still renders (snapshot is local); the click-through dialog surfaces the fetch error.             |
+| Historical messages                      | No context attachments → no chip row → rendering unchanged.                                            |
+| Offline at send                          | Existing behavior: stale refresh fails silently, cached contexts sent.                                 |
 
 ## Edge cases
 
@@ -261,15 +254,15 @@ they now may contain `type: "context"` members.
 
 Vitest, colocated; browser mode for components.
 
-| Area | Coverage |
-| --- | --- |
-| Contracts | `ChatContextAttachment` decode/encode round-trip; legacy images-only `attachments_json` still decodes; turn command with `workItemContexts`. |
-| Formatter | `workItemContextFormatter` truncation caps, empty-array omission, block ordering with source-control block. |
-| Draft store | Work-item mutators: add/dedupe/remove/clear-on-send. |
-| Trigger | Jira-key regex direct-attach; gating on Jira link; `#42` unaffected. |
-| Picker (browser) | Jira tab visibility, search, attach → chip. |
-| Send path | Compact attachment built for each kind; snapshot fields correct; both arrays on command; clear on ack. |
-| Timeline (browser) | Chips render above bubble for context attachments; images-only messages unchanged; click opens dialog. |
+| Area               | Coverage                                                                                                                                     |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Contracts          | `ChatContextAttachment` decode/encode round-trip; legacy images-only `attachments_json` still decodes; turn command with `workItemContexts`. |
+| Formatter          | `workItemContextFormatter` truncation caps, empty-array omission, block ordering with source-control block.                                  |
+| Draft store        | Work-item mutators: add/dedupe/remove/clear-on-send.                                                                                         |
+| Trigger            | Jira-key regex direct-attach; gating on Jira link; `#42` unaffected.                                                                         |
+| Picker (browser)   | Jira tab visibility, search, attach → chip.                                                                                                  |
+| Send path          | Compact attachment built for each kind; snapshot fields correct; both arrays on command; clear on ack.                                       |
+| Timeline (browser) | Chips render above bubble for context attachments; images-only messages unchanged; click opens dialog.                                       |
 
 ## Pre-merge gate
 

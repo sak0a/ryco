@@ -123,9 +123,11 @@ export function useComposerAttachmentMenus(
     limit: 50,
     enabled: isSourceControlTrigger && hasJiraProvider,
   });
-  const workItemsForMenu: ReadonlyArray<WorkItemSummary> = hasJiraProvider
-    ? (workItemListQuery.data ?? [])
-    : [];
+  const workItemListData = workItemListQuery.data;
+  const workItemsForMenu = useMemo<ReadonlyArray<WorkItemSummary>>(
+    () => (hasJiraProvider ? (workItemListData ?? []) : []),
+    [hasJiraProvider, workItemListData],
+  );
 
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];

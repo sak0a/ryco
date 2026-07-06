@@ -23,9 +23,8 @@ export function WorkItemContextChip(props: WorkItemContextChipProps) {
   const isTruncated = context.detail.truncated;
   const stateLabel = workItemStateLabel(context.detail);
   const isDone = context.detail.state === "done" || context.detail.state === "closed";
-  const tooltipBody = context.detail.description.trim().length > 0
-    ? context.detail.description
-    : null;
+  const tooltipBody =
+    context.detail.description.trim().length > 0 ? context.detail.description : null;
 
   return (
     <Tooltip>

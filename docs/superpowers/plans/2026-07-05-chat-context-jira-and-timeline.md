@@ -32,38 +32,38 @@ browser), React, Zustand draft store, Bun monorepo.
 
 ## File Structure (preview)
 
-| Path | Status | Responsibility |
-| --- | --- | --- |
-| `packages/contracts/src/orchestration.ts` | modify | `ChatContextAttachment` + union; `workItemContexts` on turn commands; event payload fields. |
-| `packages/contracts/src/provider.ts` | modify | `workItemContexts` on `ProviderSendTurnInput` + cap constant. |
-| `packages/shared/src/workItemContextFormatter.ts` | create | Jira → Markdown prompt block. |
-| `packages/shared/src/workItemContextFormatter.test.ts` | create | Formatter unit tests. |
-| `apps/server/src/orchestration/decider.ts` | modify | Copy both context arrays onto `thread.turn-start-requested`. |
-| `apps/server/src/orchestration/Normalizer.ts` | modify | Pass `type: "context"` attachments through untouched. |
-| `apps/server/src/orchestration/Layers/ProviderCommandReactor.ts` | modify | Forward contexts into send-turn request; images-only provider attachments. |
-| `apps/server/src/provider/Layers/ClaudeAdapter.ts` | modify | Append work-item block. |
-| `apps/server/src/provider/Layers/CodexAdapter.ts` | modify | Append work-item block. |
-| `apps/server/src/provider/Layers/OpenCodeAdapter.ts` | modify | Append work-item block. |
-| `apps/web/src/types.ts` | modify | Web mirror of `ChatContextAttachment`. |
-| `apps/web/src/composerDraftStore.ts` | modify | `workItemContexts` slice + mutators. |
-| `apps/web/src/composerDraftStore.test.tsx` | modify | Slice tests (add/dedupe/remove/clear). |
-| `apps/web/src/composer-logic.ts` | modify | Jira-key detection on `#` trigger. |
-| `apps/web/src/composer-logic.test.ts` | modify | Trigger tests. |
-| `apps/web/src/components/chat/WorkItemContextChip.tsx` | create | Composer chip for Jira contexts. |
-| `apps/web/src/components/chat/ComposerAttachmentMenus.tsx` | modify | Jira results in `#` menu + selection handler. |
-| `apps/web/src/components/chat/ContextPickerPopup.tsx` | modify | Jira tab. |
-| `apps/web/src/components/chat/ContextPickerTabs.tsx` | modify | `TabId` gains `"jira"`. |
-| `apps/web/src/components/chat/ContextPickerPopup.browser.tsx` | modify | Jira tab browser flow. |
-| `apps/web/src/components/chat/ComposerHintRow.logic.ts` | modify | `#jira` pill opens picker Jira tab. |
-| `apps/web/src/components/chat/ComposerPromptShell.tsx` | modify | Render work-item chips in the chip row. |
-| `apps/web/src/components/chat/ChatComposer.tsx` | modify | Wire work-item contexts (state, handlers, props). |
-| `apps/web/src/components/ChatView.logic.ts` | modify | `refreshStaleWorkItemContexts`; send-state count includes work items. |
-| `apps/web/src/components/ChatView.tsx` | modify | Pass work-item contexts to send; timeline context dialog state. |
-| `apps/web/src/hooks/executeChatSendTurn.ts` | modify | Snapshot, compact attachments, dispatch `workItemContexts`, clear on ack. |
-| `apps/web/src/lib/chatContextAttachments.ts` | create | Build compact `ChatContextAttachment`s from draft contexts. |
-| `apps/web/src/lib/chatContextAttachments.test.ts` | create | Builder unit tests. |
-| `apps/web/src/components/chat/TimelineContextChips.tsx` | create | Read-only chip row above user bubble. |
-| `apps/web/src/components/chat/MessagesTimeline.tsx` | modify | Partition attachments; render chip row; click → detail dialog. |
+| Path                                                             | Status | Responsibility                                                                              |
+| ---------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------- |
+| `packages/contracts/src/orchestration.ts`                        | modify | `ChatContextAttachment` + union; `workItemContexts` on turn commands; event payload fields. |
+| `packages/contracts/src/provider.ts`                             | modify | `workItemContexts` on `ProviderSendTurnInput` + cap constant.                               |
+| `packages/shared/src/workItemContextFormatter.ts`                | create | Jira → Markdown prompt block.                                                               |
+| `packages/shared/src/workItemContextFormatter.test.ts`           | create | Formatter unit tests.                                                                       |
+| `apps/server/src/orchestration/decider.ts`                       | modify | Copy both context arrays onto `thread.turn-start-requested`.                                |
+| `apps/server/src/orchestration/Normalizer.ts`                    | modify | Pass `type: "context"` attachments through untouched.                                       |
+| `apps/server/src/orchestration/Layers/ProviderCommandReactor.ts` | modify | Forward contexts into send-turn request; images-only provider attachments.                  |
+| `apps/server/src/provider/Layers/ClaudeAdapter.ts`               | modify | Append work-item block.                                                                     |
+| `apps/server/src/provider/Layers/CodexAdapter.ts`                | modify | Append work-item block.                                                                     |
+| `apps/server/src/provider/Layers/OpenCodeAdapter.ts`             | modify | Append work-item block.                                                                     |
+| `apps/web/src/types.ts`                                          | modify | Web mirror of `ChatContextAttachment`.                                                      |
+| `apps/web/src/composerDraftStore.ts`                             | modify | `workItemContexts` slice + mutators.                                                        |
+| `apps/web/src/composerDraftStore.test.tsx`                       | modify | Slice tests (add/dedupe/remove/clear).                                                      |
+| `apps/web/src/composer-logic.ts`                                 | modify | Jira-key detection on `#` trigger.                                                          |
+| `apps/web/src/composer-logic.test.ts`                            | modify | Trigger tests.                                                                              |
+| `apps/web/src/components/chat/WorkItemContextChip.tsx`           | create | Composer chip for Jira contexts.                                                            |
+| `apps/web/src/components/chat/ComposerAttachmentMenus.tsx`       | modify | Jira results in `#` menu + selection handler.                                               |
+| `apps/web/src/components/chat/ContextPickerPopup.tsx`            | modify | Jira tab.                                                                                   |
+| `apps/web/src/components/chat/ContextPickerTabs.tsx`             | modify | `TabId` gains `"jira"`.                                                                     |
+| `apps/web/src/components/chat/ContextPickerPopup.browser.tsx`    | modify | Jira tab browser flow.                                                                      |
+| `apps/web/src/components/chat/ComposerHintRow.logic.ts`          | modify | `#jira` pill opens picker Jira tab.                                                         |
+| `apps/web/src/components/chat/ComposerPromptShell.tsx`           | modify | Render work-item chips in the chip row.                                                     |
+| `apps/web/src/components/chat/ChatComposer.tsx`                  | modify | Wire work-item contexts (state, handlers, props).                                           |
+| `apps/web/src/components/ChatView.logic.ts`                      | modify | `refreshStaleWorkItemContexts`; send-state count includes work items.                       |
+| `apps/web/src/components/ChatView.tsx`                           | modify | Pass work-item contexts to send; timeline context dialog state.                             |
+| `apps/web/src/hooks/executeChatSendTurn.ts`                      | modify | Snapshot, compact attachments, dispatch `workItemContexts`, clear on ack.                   |
+| `apps/web/src/lib/chatContextAttachments.ts`                     | create | Build compact `ChatContextAttachment`s from draft contexts.                                 |
+| `apps/web/src/lib/chatContextAttachments.test.ts`                | create | Builder unit tests.                                                                         |
+| `apps/web/src/components/chat/TimelineContextChips.tsx`          | create | Read-only chip row above user bubble.                                                       |
+| `apps/web/src/components/chat/MessagesTimeline.tsx`              | modify | Partition attachments; render chip row; click → detail dialog.                              |
 
 ---
 
@@ -76,11 +76,7 @@ browser), React, Zustand draft store, Bun monorepo.
 - [ ] **Step 1: Add the context attachment schema** (after `UploadChatImageAttachment`, `orchestration.ts:183`)
 
 ```ts
-export const ChatContextAttachmentKind = Schema.Literals([
-  "issue",
-  "change-request",
-  "work-item",
-]);
+export const ChatContextAttachmentKind = Schema.Literals(["issue", "change-request", "work-item"]);
 export type ChatContextAttachmentKind = typeof ChatContextAttachmentKind.Type;
 
 /**
@@ -109,8 +105,8 @@ export type UploadChatAttachment = typeof UploadChatAttachment.Type;
 (Replace the existing two union declarations at `orchestration.ts:185-188`.)
 
 - [ ] **Step 2: Add `workItemContexts` to both turn commands** — in
-  `ThreadTurnStartCommand` (line ~676) and `ClientThreadTurnStartCommand`
-  (line ~697), directly below `sourceControlContexts`:
+      `ThreadTurnStartCommand` (line ~676) and `ClientThreadTurnStartCommand`
+      (line ~697), directly below `sourceControlContexts`:
 
 ```ts
 workItemContexts: Schema.optional(Schema.Array(ComposerWorkItemContext)),
@@ -121,7 +117,7 @@ import cycle (`workItems.ts` must not import from `orchestration.ts`; it
 doesn't today).
 
 - [ ] **Step 3: Extend the event payload** — `ThreadTurnStartRequestedPayload`
-  (`orchestration.ts:1140-1154`) gains, below `sourceProposedPlan`:
+      (`orchestration.ts:1140-1154`) gains, below `sourceProposedPlan`:
 
 ```ts
 sourceControlContexts: Schema.optional(Schema.Array(ComposerSourceControlContext)),
@@ -129,22 +125,22 @@ workItemContexts: Schema.optional(Schema.Array(ComposerWorkItemContext)),
 ```
 
 - [ ] **Step 4: Provider input** — in `packages/contracts/src/provider.ts`,
-  below `PROVIDER_SEND_TURN_MAX_SOURCE_CONTROL_CONTEXTS` (line 29) add
-  `export const PROVIDER_SEND_TURN_MAX_WORK_ITEM_CONTEXTS = 10;` and give
-  `ProviderSendTurnInput` a `workItemContexts` field mirroring the
-  `sourceControlContexts` field's shape/cap. Import `ComposerWorkItemContext`
-  from `./workItems.ts`.
+      below `PROVIDER_SEND_TURN_MAX_SOURCE_CONTROL_CONTEXTS` (line 29) add
+      `export const PROVIDER_SEND_TURN_MAX_WORK_ITEM_CONTEXTS = 10;` and give
+      `ProviderSendTurnInput` a `workItemContexts` field mirroring the
+      `sourceControlContexts` field's shape/cap. Import `ComposerWorkItemContext`
+      from `./workItems.ts`.
 
 - [ ] **Step 5: Verify** — `bun typecheck` (expect existing-code fallout only
-  where `ChatAttachment` was assumed image-only; fix those sites by
-  narrowing on `attachment.type === "image"`; the known ones are handled in
-  Tasks 3 and 8).
+      where `ChatAttachment` was assumed image-only; fix those sites by
+      narrowing on `attachment.type === "image"`; the known ones are handled in
+      Tasks 3 and 8).
 
 - [ ] **Step 6: Contract tests** — extend the orchestration contract test
-  (sibling of existing schema tests): `ChatContextAttachment` round-trip;
-  images-only legacy `attachments_json` array still decodes via
-  `Schema.Array(ChatAttachment)`; turn command with `workItemContexts`
-  decodes.
+      (sibling of existing schema tests): `ChatContextAttachment` round-trip;
+      images-only legacy `attachments_json` array still decodes via
+      `Schema.Array(ChatAttachment)`; turn command with `workItemContexts`
+      decodes.
 
 - [ ] **Step 7: Commit** — `feat(contracts): add chat context attachments and work-item contexts`
 
@@ -170,8 +166,8 @@ export type ChatAttachment = ChatImageAttachment | ChatContextAttachment;
 ```
 
 - [ ] **Step 2:** `bun typecheck` — fix any web narrowing fallout (sites
-  assuming `attachments` are images; `MessagesTimeline.tsx:344` is handled
-  properly in Task 9 — for now narrow with `.filter((a) => a.type === "image")`).
+      assuming `attachments` are images; `MessagesTimeline.tsx:344` is handled
+      properly in Task 9 — for now narrow with `.filter((a) => a.type === "image")`).
 - [ ] **Step 3: Commit** — `feat(web): mirror chat context attachment type`
 
 ---
@@ -185,9 +181,9 @@ export type ChatAttachment = ChatImageAttachment | ChatContextAttachment;
 `apps/server/src/orchestration/Layers/ProviderCommandReactor.ts`
 
 - [ ] **Step 1: Normalizer pass-through** — in `normalizeDispatchCommand`
-  (`Normalizer.ts:90-153`), the `Effect.forEach` over
-  `command.message.attachments` currently assumes every entry has a
-  `dataUrl`. Branch first:
+      (`Normalizer.ts:90-153`), the `Effect.forEach` over
+      `command.message.attachments` currently assumes every entry has a
+      `dataUrl`. Branch first:
 
 ```ts
 if (attachment.type === "context") {
@@ -196,8 +192,8 @@ if (attachment.type === "context") {
 ```
 
 - [ ] **Step 2: Decider copies contexts onto the event** — in the
-  `thread.turn.start` case (`decider.ts`, `turnStartRequestedEvent` payload
-  at ~515-529), below `sourceProposedPlan`:
+      `thread.turn.start` case (`decider.ts`, `turnStartRequestedEvent` payload
+      at ~515-529), below `sourceProposedPlan`:
 
 ```ts
 ...(command.sourceControlContexts !== undefined && command.sourceControlContexts.length > 0
@@ -209,7 +205,7 @@ if (attachment.type === "context") {
 ```
 
 - [ ] **Step 3: Reactor forwards contexts** — in
-  `ProviderCommandReactor.ts`:
+      `ProviderCommandReactor.ts`:
   - `buildSendTurnRequestForThread` input (line ~528) gains optional
     `sourceControlContexts` / `workItemContexts`; spread them into the
     returned request object (below `customSystemPrompt`).
@@ -222,13 +218,13 @@ if (attachment.type === "context") {
     max-8 cap.
 
 - [ ] **Step 4: Tests** — extend the decider test (turn.start emits payload
-  containing the context arrays) and the reactor test (send-turn request
-  contains `sourceControlContexts`/`workItemContexts`; provider attachments
-  exclude `type: "context"` entries). This is the regression test for the
-  silent-drop bug.
+      containing the context arrays) and the reactor test (send-turn request
+      contains `sourceControlContexts`/`workItemContexts`; provider attachments
+      exclude `type: "context"` entries). This is the regression test for the
+      silent-drop bug.
 
 - [ ] **Step 5: Verify** — `bun --filter ryco-cli run test` (server package
-  tests) and `bun typecheck`.
+      tests) and `bun typecheck`.
 - [ ] **Step 6: Commit** — `fix(server): forward attached contexts to provider send-turn requests`
 
 ### Task 4: Work-item prompt formatter + adapter wiring
@@ -237,8 +233,8 @@ if (attachment.type === "context") {
 modify the three adapters
 
 - [ ] **Step 1: Formatter** — mirror
-  `sourceControlContextFormatter.ts` (same file layout, same truncation
-  note handling):
+      `sourceControlContextFormatter.ts` (same file layout, same truncation
+      note handling):
 
 ```ts
 export function formatWorkItemContextsForAgent(
@@ -253,12 +249,12 @@ body), truncation note when `detail.truncated`. Export from the package
 index the same way the source-control formatter is exported.
 
 - [ ] **Step 2: Formatter tests** — empty array → `""`; full ticket renders
-  every populated field; optional fields omitted; truncation note gated on
-  `truncated`.
+      every populated field; optional fields omitted; truncation note gated on
+      `truncated`.
 
 - [ ] **Step 3: Adapters** — at each existing call site
-  (`ClaudeAdapter.ts:695-700`, `CodexAdapter.ts:1648`,
-  `OpenCodeAdapter.ts:1616`) compose both blocks:
+      (`ClaudeAdapter.ts:695-700`, `CodexAdapter.ts:1648`,
+      `OpenCodeAdapter.ts:1616`) compose both blocks:
 
 ```ts
 const sourceControlBlock = formatSourceControlContextsForAgent(input.sourceControlContexts ?? []);
@@ -279,25 +275,25 @@ const contextBlocks = [sourceControlBlock, workItemBlock].filter(Boolean).join("
 **Files:** modify `apps/web/src/composerDraftStore.ts` (+ its test)
 
 - [ ] **Step 1:** `ComposerThreadDraftState` (line 76-98) gains
-  `/** Jira work-item contexts attached to this draft. Not persisted. */`
-  `workItemContexts: ComposerWorkItemContext[]`. Update every draft-state
-  initializer/reset in the file (search for `sourceControlContexts: []`).
+      `/** Jira work-item contexts attached to this draft. Not persisted. */`
+      `workItemContexts: ComposerWorkItemContext[]`. Update every draft-state
+      initializer/reset in the file (search for `sourceControlContexts: []`).
 - [ ] **Step 2:** Mutators mirroring the source-control trio
-  (`composerDraftStore.ts:274-279`): `addWorkItemContext` (dedupe key
-  `${provider}:${key.toUpperCase()}`, returns `{ added, reason?: "duplicate" }`),
-  `removeWorkItemContext(target, id)`, `clearWorkItemContexts(target)`.
+      (`composerDraftStore.ts:274-279`): `addWorkItemContext` (dedupe key
+      `${provider}:${key.toUpperCase()}`, returns `{ added, reason?: "duplicate" }`),
+      `removeWorkItemContext(target, id)`, `clearWorkItemContexts(target)`.
 - [ ] **Step 3:** Tests in `composerDraftStore.test.tsx`: add, duplicate
-  no-op with reason, remove, clear; persistence partial excludes the field
-  (mirror the existing `sourceControlContexts` assertions).
+      no-op with reason, remove, clear; persistence partial excludes the field
+      (mirror the existing `sourceControlContexts` assertions).
 - [ ] **Step 4:** `bun typecheck`, targeted test run, commit —
-  `feat(web): work-item context slice in composer draft store`
+      `feat(web): work-item context slice in composer draft store`
 
 ### Task 6: `#` trigger detects Jira keys
 
 **Files:** modify `apps/web/src/composer-logic.ts` (+ test)
 
 - [ ] **Step 1:** In `detectComposerTrigger` (`composer-logic.ts:308-317`)
-  extend the `#` branch:
+      extend the `#` branch:
 
 ```ts
 if (token.startsWith("#")) {
@@ -321,10 +317,10 @@ lookup is actually offered is decided in the menus layer (Task 7) based on
 the project's Jira link.
 
 - [ ] **Step 2:** Tests: `#RYC-231` → key `RYC-231`; `#ryc-231` uppercased;
-  `#42` unchanged (`directAttach: true`, no key); `#RYC-` / `#RYC-0` → no
-  key; `#bug` → plain query.
+      `#42` unchanged (`directAttach: true`, no key); `#RYC-` / `#RYC-0` → no
+      key; `#bug` → plain query.
 - [ ] **Step 3:** Typecheck, test, commit —
-  `feat(web): detect jira keys in composer # trigger`
+      `feat(web): detect jira keys in composer # trigger`
 
 ### Task 7: Jira picker tab, menu items, chip, hint pill
 
@@ -341,41 +337,41 @@ project's Atlassian link has `jiraConnectionId` set and
 duplicating).
 
 - [ ] **Step 1: Chip** — `WorkItemContextChip.tsx` mirrors
-  `SourceControlContextChip.tsx`: `AtlassianJiraIcon`, `key`, truncated
-  title, status badge colored by `statusCategory`, remove ✕, truncated
-  badge. Render alongside source-control chips in `ComposerPromptShell.tsx`
-  (chip row at lines 177-190) via new props.
+      `SourceControlContextChip.tsx`: `AtlassianJiraIcon`, `key`, truncated
+      title, status badge colored by `statusCategory`, remove ✕, truncated
+      badge. Render alongside source-control chips in `ComposerPromptShell.tsx`
+      (chip row at lines 177-190) via new props.
 - [ ] **Step 2: Menu integration** — in `useComposerAttachmentMenus`
-  (`ComposerAttachmentMenus.tsx`, `#` branch at ~180-187): when Jira is
-  linked, append work-item items from `useWorkItemSearch` results; new
-  selection handler `useComposerWorkItemContextSelection` mirroring the
-  source-control one (~268-346): fetch `WorkItemDetail` (existing
-  `workItems.get` RPC via the `useWorkItems` fetch helpers), build
-  `ComposerWorkItemContext` (`staleAfter = fetchedAt + 5 min`, same
-  constant as source-control), call `addWorkItemContext`, strip the `#…`
-  token (`ChatComposer.tsx:1289-1312` pattern). A trigger with
-  `directAttachWorkItemKey` attaches directly without opening the list.
+      (`ComposerAttachmentMenus.tsx`, `#` branch at ~180-187): when Jira is
+      linked, append work-item items from `useWorkItemSearch` results; new
+      selection handler `useComposerWorkItemContextSelection` mirroring the
+      source-control one (~268-346): fetch `WorkItemDetail` (existing
+      `workItems.get` RPC via the `useWorkItems` fetch helpers), build
+      `ComposerWorkItemContext` (`staleAfter = fetchedAt + 5 min`, same
+      constant as source-control), call `addWorkItemContext`, strip the `#…`
+      token (`ChatComposer.tsx:1289-1312` pattern). A trigger with
+      `directAttachWorkItemKey` attaches directly without opening the list.
 - [ ] **Step 3: Picker tab** — `ContextPickerTabs.tsx` `TabId` gains
-  `"jira"` (label "Jira", `AtlassianJiraIcon`), rendered only under the
-  gating rule. `ContextPickerPopup.tsx` renders the work-item list for the
-  tab (reuse `ContextPickerList` row shape: key + title + state badge +
-  updated date), search wired to `useWorkItemSearch` with the popup's
-  existing debounce; selection goes through the same handler as Step 2.
+      `"jira"` (label "Jira", `AtlassianJiraIcon`), rendered only under the
+      gating rule. `ContextPickerPopup.tsx` renders the work-item list for the
+      tab (reuse `ContextPickerList` row shape: key + title + state badge +
+      updated date), search wired to `useWorkItemSearch` with the popup's
+      existing debounce; selection goes through the same handler as Step 2.
 - [ ] **Step 4: Hint pill** — `ComposerHintRow.logic.ts` `JIRA_PILL`
-  (lines 33-38): action opens the context picker on the Jira tab instead of
-  its current placeholder behavior.
+      (lines 33-38): action opens the context picker on the Jira tab instead of
+      its current placeholder behavior.
 - [ ] **Step 5: Wiring** — `ChatComposer.tsx`: draft selector for
-  `workItemContexts` (mirror line 385 + 416-420), handlers (mirror
-  1197-1202, 1480-1484), pass down to `ComposerPromptShell` and the picker
-  (mirror 1888-1889, 1936-1938). `ChatView.logic.ts`
-  `deriveComposerSendState` (line ~251-262): count work-item contexts so a
-  contexts-only send is enabled.
+      `workItemContexts` (mirror line 385 + 416-420), handlers (mirror
+      1197-1202, 1480-1484), pass down to `ComposerPromptShell` and the picker
+      (mirror 1888-1889, 1936-1938). `ChatView.logic.ts`
+      `deriveComposerSendState` (line ~251-262): count work-item contexts so a
+      contexts-only send is enabled.
 - [ ] **Step 6: Browser test** — extend `ContextPickerPopup.browser.tsx`:
-  Jira tab hidden when unlinked, visible when linked; search + select
-  attaches a chip; duplicate select toasts. Extend the composer browser
-  flow for `#RYC-231` direct attach.
+      Jira tab hidden when unlinked, visible when linked; search + select
+      attaches a chip; duplicate select toasts. Extend the composer browser
+      flow for `#RYC-231` direct attach.
 - [ ] **Step 7:** Typecheck, test, commit —
-  `feat(web): jira work items attachable from composer`
+      `feat(web): jira work items attachable from composer`
 
 ---
 
@@ -408,9 +404,9 @@ from the existing `reference` string when it contains a slash), `title` =
 UUIDs). Unit tests for each mapping incl. draft-PR and cross-repo cases.
 
 - [ ] **Step 2: Stale refresh** — `ChatView.logic.ts`: add
-  `refreshStaleWorkItemContexts` mirroring
-  `refreshStaleSourceControlContexts` (refetch detail when
-  `staleAfter < now`, best-effort, fall back to cached).
+      `refreshStaleWorkItemContexts` mirroring
+      `refreshStaleSourceControlContexts` (refetch detail when
+      `staleAfter < now`, best-effort, fall back to cached).
 - [ ] **Step 3: Send flow** — `executeChatSendTurn.ts`:
   - Snapshot: `const workItemSnapshot = [...composer.workItemContexts]`
     (line ~329; extend the input type at line 53 and `ChatView.tsx` call
@@ -418,7 +414,7 @@ UUIDs). Unit tests for each mapping incl. draft-PR and cross-repo cases.
   - After `freshSourceControlContexts` (line ~459), compute
     `freshWorkItemContexts` via the new refresher.
   - Build `const contextAttachments = buildChatContextAttachments(...)`
-    from the *fresh* arrays; append to `optimisticAttachments` (line ~355)
+    from the _fresh_ arrays; append to `optimisticAttachments` (line ~355)
     and to the dispatched `message.attachments` (line ~489,
     `[...turnAttachments, ...contextAttachments]`).
   - Dispatch `...(freshWorkItemContexts.length > 0 ? { workItemContexts: freshWorkItemContexts } : {})`
@@ -426,8 +422,8 @@ UUIDs). Unit tests for each mapping incl. draft-PR and cross-repo cases.
   - Clear work-item contexts wherever source-control contexts are cleared
     on turn-accepted ack (search `clearSourceControlContexts` call sites).
 - [ ] **Step 4: Verify + commit** — typecheck, extend the existing
-  `executeChatSendTurn` tests for the new fields —
-  `feat(web): persist compact context attachments with sent messages`
+      `executeChatSendTurn` tests for the new fields —
+      `feat(web): persist compact context attachments with sent messages`
 
 ### Task 9: Timeline chips
 
@@ -436,31 +432,31 @@ modify `apps/web/src/components/chat/MessagesTimeline.tsx`,
 `apps/web/src/components/ChatView.tsx`
 
 - [ ] **Step 1: Component** — `TimelineContextChips.tsx`: read-only chip
-  row (wrap, right-aligned): provider glyph (reuse the icon mapping from
-  `SourceControlContextChip` / `AtlassianJiraIcon`), bold reference,
-  truncated title (max ~180px), state badge (reuse
-  `stateBadgeVariants.ts` coloring where states match; fall back to
-  neutral). Props: `attachments: ChatContextAttachment[]`,
-  `onOpen(attachment)`.
+      row (wrap, right-aligned): provider glyph (reuse the icon mapping from
+      `SourceControlContextChip` / `AtlassianJiraIcon`), bold reference,
+      truncated title (max ~180px), state badge (reuse
+      `stateBadgeVariants.ts` coloring where states match; fall back to
+      neutral). Props: `attachments: ChatContextAttachment[]`,
+      `onOpen(attachment)`.
 - [ ] **Step 2: Timeline** — `MessagesTimeline.tsx` user-message branch
-  (line ~344): partition `row.message.attachments` into
-  `userImages` (`type === "image"`) and `contextAttachments`
-  (`type === "context"`). Render `<TimelineContextChips …>` **above** the
-  bubble `div` (outside the rounded container, inside the
-  `max-w-[80%]` column), matching the approved mockup. Image rendering
-  unchanged.
+      (line ~344): partition `row.message.attachments` into
+      `userImages` (`type === "image"`) and `contextAttachments`
+      (`type === "context"`). Render `<TimelineContextChips …>` **above** the
+      bubble `div` (outside the rounded container, inside the
+      `max-w-[80%]` column), matching the approved mockup. Image rendering
+      unchanged.
 - [ ] **Step 3: Click-through** — `onOpen` bubbles via the timeline ctx
-  (pattern: `ctx.onImageExpand`) up to `ChatView.tsx`, which opens the
-  existing `LinkedWorktreeItemDialog` for the item: parse
-  `attachment.kind` + `reference` → issue/PR number or work-item key. When
-  the reference isn't resolvable in this workspace (cross-repo), open
-  `attachment.url` externally instead.
+      (pattern: `ctx.onImageExpand`) up to `ChatView.tsx`, which opens the
+      existing `LinkedWorktreeItemDialog` for the item: parse
+      `attachment.kind` + `reference` → issue/PR number or work-item key. When
+      the reference isn't resolvable in this workspace (cross-repo), open
+      `attachment.url` externally instead.
 - [ ] **Step 4: Browser test** — timeline renders chips for a message with
-  context attachments; images-only messages unchanged; click fires the
-  open handler (assert dialog opens with the right item in the ChatView
-  harness if practical, else unit-test the parse/dispatch helper).
+      context attachments; images-only messages unchanged; click fires the
+      open handler (assert dialog opens with the right item in the ChatView
+      harness if practical, else unit-test the parse/dispatch helper).
 - [ ] **Step 5:** Typecheck, test, commit —
-  `feat(web): render attached contexts in chat timeline`
+      `feat(web): render attached contexts in chat timeline`
 
 ---
 
@@ -469,12 +465,12 @@ modify `apps/web/src/components/chat/MessagesTimeline.tsx`,
 ### Task 10: Full pre-merge gate + manual smoke
 
 - [ ] **Step 1:** `bun fmt && bun lint && bun typecheck && bun run test`
-  (clear stale `tsconfig.tsbuildinfo` first if typecheck output looks
-  cached; the real bar is zero `error TS` lines).
+      (clear stale `tsconfig.tsbuildinfo` first if typecheck output looks
+      cached; the real bar is zero `error TS` lines).
 - [ ] **Step 2:** Manual smoke in the dev app (`bun dev:desktop`; rebuild
-  the server bundle first: `bun --filter ryco-cli run build:bundle`):
-  attach a GitHub issue + a Jira ticket, send, confirm (a) chips render in
-  the timeline, (b) the agent's turn shows it received both contexts
-  (check the prompt via provider logs or the agent's own acknowledgement),
-  (c) chip click opens live detail.
+      the server bundle first: `bun --filter ryco-cli run build:bundle`):
+      attach a GitHub issue + a Jira ticket, send, confirm (a) chips render in
+      the timeline, (b) the agent's turn shows it received both contexts
+      (check the prompt via provider logs or the agent's own acknowledgement),
+      (c) chip click opens live detail.
 - [ ] **Step 3:** Update the spec if implementation diverged; commit.

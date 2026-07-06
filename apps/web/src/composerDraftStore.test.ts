@@ -1710,8 +1710,12 @@ describe("composerDraftStore workItemContexts", () => {
   });
 
   it("removeWorkItemContext removes a context by id", () => {
-    useComposerDraftStore.getState().addWorkItemContext(threadRef, makeWorkItemContext("ctx-1", "RYC-1"));
-    useComposerDraftStore.getState().addWorkItemContext(threadRef, makeWorkItemContext("ctx-2", "RYC-2"));
+    useComposerDraftStore
+      .getState()
+      .addWorkItemContext(threadRef, makeWorkItemContext("ctx-1", "RYC-1"));
+    useComposerDraftStore
+      .getState()
+      .addWorkItemContext(threadRef, makeWorkItemContext("ctx-2", "RYC-2"));
     useComposerDraftStore.getState().removeWorkItemContext(threadRef, "ctx-1");
 
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
@@ -1720,7 +1724,9 @@ describe("composerDraftStore workItemContexts", () => {
   });
 
   it("clearWorkItemContexts empties the list and drops an otherwise-empty draft", () => {
-    useComposerDraftStore.getState().addWorkItemContext(threadRef, makeWorkItemContext("ctx-1", "RYC-1"));
+    useComposerDraftStore
+      .getState()
+      .addWorkItemContext(threadRef, makeWorkItemContext("ctx-1", "RYC-1"));
     useComposerDraftStore.getState().clearWorkItemContexts(threadRef);
 
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
@@ -1728,7 +1734,9 @@ describe("composerDraftStore workItemContexts", () => {
   });
 
   it("clearComposerContent wipes workItemContexts", () => {
-    useComposerDraftStore.getState().addWorkItemContext(threadRef, makeWorkItemContext("ctx-1", "RYC-1"));
+    useComposerDraftStore
+      .getState()
+      .addWorkItemContext(threadRef, makeWorkItemContext("ctx-1", "RYC-1"));
     useComposerDraftStore.getState().setPrompt(threadRef, "hello");
     useComposerDraftStore.getState().clearComposerContent(threadRef);
 

@@ -5,7 +5,6 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
-  type ChatAttachment,
   type ChatImageAttachment,
   type ProviderRuntimeEvent,
   type ProviderSendTurnInput,

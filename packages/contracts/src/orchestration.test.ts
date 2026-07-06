@@ -911,9 +911,8 @@ it.effect("carries work-item contexts on thread.turn-start-requested payloads", 
   Effect.gen(function* () {
     // The payload stores contexts in their JSON wire form (toCodecJson) so
     // they survive the event store's raw JSON stringify.
-    const decodedContext = Schema.decodeUnknownSync(ComposerWorkItemContext)(
-      workItemContextFixture,
-    );
+    const decodedContext =
+      Schema.decodeUnknownSync(ComposerWorkItemContext)(workItemContextFixture);
     const wireContexts = Schema.encodeUnknownSync(
       Schema.toCodecJson(Schema.Array(ComposerWorkItemContext)),
     )([decodedContext]);

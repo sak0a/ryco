@@ -10,13 +10,13 @@ only then are worktrees/branches created.
 
 v1 actions (all decided in brainstorming):
 
-| Item | Condition (from already-fetched detail) | Action |
-| --- | --- | --- |
-| PR | `mergeability === "conflicting"` | Resolve merge conflicts |
-| PR | latest review state `changes_requested` | Address review feedback |
-| PR | check rollup contains failures | Fix failing checks |
-| Issue | `state === "open"` | Implement |
-| Jira ticket | open / in-progress state category | Implement |
+| Item        | Condition (from already-fetched detail) | Action                  |
+| ----------- | --------------------------------------- | ----------------------- |
+| PR          | `mergeability === "conflicting"`        | Resolve merge conflicts |
+| PR          | latest review state `changes_requested` | Address review feedback |
+| PR          | check rollup contains failures          | Fix failing checks      |
+| Issue       | `state === "open"`                      | Implement               |
+| Jira ticket | open / in-progress state category       | Implement               |
 
 Locked UX decisions:
 
@@ -72,7 +72,7 @@ Locked UX decisions:
   (`orchestration.ts:631-655`) handled by `dispatchBootstrapTurnStart`
   (`apps/server/src/ws/context.ts:275-481`). The bootstrap's
   `prepareWorktree` currently supports only `{ projectCwd, baseBranch,
-  branch? }` — it cannot express "check out PR head" or "reuse worktree X".
+branch? }` — it cannot express "check out PR head" or "reuse worktree X".
 - Preset-prompt precedent: `buildPlanImplementationPrompt`
   (`apps/web/src/proposedPlan.ts:73-90`).
 
@@ -101,17 +101,20 @@ so a stale plan degrades gracefully instead of failing).
 
 ```ts
 export const ItemActionWorkspacePlan = Schema.Union([
-  Schema.Struct({                       // decision-tree outcomes 1 & 2
+  Schema.Struct({
+    // decision-tree outcomes 1 & 2
     kind: Schema.Literal("reuse-worktree"),
     worktreeId: WorktreeId,
     worktreePath: TrimmedNonEmptyString,
     branch: TrimmedNonEmptyString,
   }),
-  Schema.Struct({                       // outcome 3: branch at main repo root
+  Schema.Struct({
+    // outcome 3: branch at main repo root
     kind: Schema.Literal("local-main-checkout"),
     branch: TrimmedNonEmptyString,
   }),
-  Schema.Struct({                       // outcome 4 / issue / workItem create
+  Schema.Struct({
+    // outcome 4 / issue / workItem create
     kind: Schema.Literal("create-worktree"),
     intent: CreateWorktreeIntent,
     baseBranch: Schema.optional(TrimmedNonEmptyString),
@@ -152,7 +155,7 @@ export const ItemActionWorkspacePlan = Schema.Union([
     `preparePullRequestThread`-equivalent paths, fork remotes, AI branch
     names, Jira key templates, setup scripts, cleanup-on-failure), then
     attach the bootstrap-created thread. Refactor note: the routine today
-    both creates a worktree *and* a thread; factor its worktree-creation
+    both creates a worktree _and_ a thread; factor its worktree-creation
     core out so the bootstrap can attach the thread it already created.
   - Existing failure cleanup (delete just-created thread) applies.
 
@@ -163,7 +166,7 @@ export const ItemActionWorkspacePlan = Schema.Union([
 `apps/web/src/components/projectExplorer/itemActions.ts`:
 
 - `derivePullRequestActions(detail: SourceControlChangeRequestDetail):
-  ItemAction[]` — conflicts / review / checks rows, each with label, icon,
+ItemAction[]` — conflicts / review / checks rows, each with label, icon,
   severity, and the prompt-template id. "Latest review state" means: the
   most recent review per reviewer, ignoring dismissed; any
   `changes_requested` survivor triggers the action.
@@ -231,30 +234,30 @@ whenever the plan kind is `reuse-worktree` or `local-main-checkout`.
 
 ## Behavior & edge cases
 
-| Case | Handling |
-| --- | --- |
-| Merged/closed PR, done ticket | No actions derived → no banner. |
-| Multiple states at once | One banner, one row per action (approved mockup). |
-| Fork (cross-repository) PR | `create-worktree` path uses the existing PR checkout machinery (`gh pr checkout` handles fork remotes). |
-| Branch at main repo root | `local-main-checkout` plan (approved option A) — local thread + inline notice; today's hard error is retired for this flow. |
-| Reused worktree has uncommitted changes | Reused as-is; prompt appends the `git status` instruction. |
-| Plan stale at send (worktree deleted, branch moved) | Server re-resolves at bootstrap time and proceeds with the fresh outcome; the thread's actual workspace is authoritative. |
-| `resolveActionWorkspace` fails (CLI missing, offline) | Toast with normalized provider error; no draft created. |
-| Draft abandoned | Nothing was created (resolution is read-only; mutations live in the bootstrap). |
-| Same action clicked twice | Two independent drafts (dedup is v2). |
-| Send fails after worktree creation | Existing bootstrap cleanup deletes the created thread; worktree cleanup follows `createWorktreeForProject`'s existing failure path. |
-| Jira ticket with existing linked branch (no worktree) | Existing `branchSource: "existing"` handling inside the workItem intent applies. |
+| Case                                                  | Handling                                                                                                                            |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Merged/closed PR, done ticket                         | No actions derived → no banner.                                                                                                     |
+| Multiple states at once                               | One banner, one row per action (approved mockup).                                                                                   |
+| Fork (cross-repository) PR                            | `create-worktree` path uses the existing PR checkout machinery (`gh pr checkout` handles fork remotes).                             |
+| Branch at main repo root                              | `local-main-checkout` plan (approved option A) — local thread + inline notice; today's hard error is retired for this flow.         |
+| Reused worktree has uncommitted changes               | Reused as-is; prompt appends the `git status` instruction.                                                                          |
+| Plan stale at send (worktree deleted, branch moved)   | Server re-resolves at bootstrap time and proceeds with the fresh outcome; the thread's actual workspace is authoritative.           |
+| `resolveActionWorkspace` fails (CLI missing, offline) | Toast with normalized provider error; no draft created.                                                                             |
+| Draft abandoned                                       | Nothing was created (resolution is read-only; mutations live in the bootstrap).                                                     |
+| Same action clicked twice                             | Two independent drafts (dedup is v2).                                                                                               |
+| Send fails after worktree creation                    | Existing bootstrap cleanup deletes the created thread; worktree cleanup follows `createWorktreeForProject`'s existing failure path. |
+| Jira ticket with existing linked branch (no worktree) | Existing `branchSource: "existing"` handling inside the workItem intent applies.                                                    |
 
 ## Testing
 
-| Area | Coverage |
-| --- | --- |
-| `itemActions.ts` | Each condition → action; combined states; closed/merged/done → `[]`; latest-review-per-reviewer logic incl. dismissals. |
-| `itemActionPrompts.ts` | Template output per action; dirty-worktree suffix gating by plan kind. |
-| `resolveActionWorkspace` (server) | All four tree outcomes for PRs; issue/workItem reuse vs create; read-only guarantee (no git mutation side effects). |
-| Bootstrap extension (server) | Each plan kind end-to-end against a fixture repo: reuse attaches, local-main threads on root, create executes intent; stale-plan re-resolution; failure cleanup. |
-| Banner (browser) | Renders rows per action, spinner on click, absent when no actions. |
-| Click flow (browser) | Click → draft opens with prompt + chip + plan line; explorer dialog closes; resolution error → toast, no navigation. |
+| Area                              | Coverage                                                                                                                                                         |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `itemActions.ts`                  | Each condition → action; combined states; closed/merged/done → `[]`; latest-review-per-reviewer logic incl. dismissals.                                          |
+| `itemActionPrompts.ts`            | Template output per action; dirty-worktree suffix gating by plan kind.                                                                                           |
+| `resolveActionWorkspace` (server) | All four tree outcomes for PRs; issue/workItem reuse vs create; read-only guarantee (no git mutation side effects).                                              |
+| Bootstrap extension (server)      | Each plan kind end-to-end against a fixture repo: reuse attaches, local-main threads on root, create executes intent; stale-plan re-resolution; failure cleanup. |
+| Banner (browser)                  | Renders rows per action, spinner on click, absent when no actions.                                                                                               |
+| Click flow (browser)              | Click → draft opens with prompt + chip + plan line; explorer dialog closes; resolution error → toast, no navigation.                                             |
 
 ## Dependencies
 

@@ -22,7 +22,18 @@ import {
   ThreadId,
   TurnId,
 } from "@ryco/contracts";
-import { DateTime, Effect, Exit, Layer, ManagedRuntime, Option, PubSub, Schema, Scope, Stream } from "effect";
+import {
+  DateTime,
+  Effect,
+  Exit,
+  Layer,
+  ManagedRuntime,
+  Option,
+  PubSub,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
