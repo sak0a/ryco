@@ -107,6 +107,7 @@ interface MessagesTimelineProps {
   activeTurnStartedAt: string | null;
   listRef: React.RefObject<LegendListRef | null>;
   targetMessageId?: MessageId | null;
+  targetMessageRequestId?: number;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
@@ -139,6 +140,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   activeTurnStartedAt,
   listRef,
   targetMessageId = null,
+  targetMessageRequestId = 0,
   timelineEntries,
   completionDividerBeforeEntryId,
   completionSummary,
@@ -245,7 +247,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       window.cancelAnimationFrame(frameId);
       window.clearTimeout(timeoutId);
     };
-  }, [listRef, rows, targetMessageId]);
+  }, [listRef, rows, targetMessageId, targetMessageRequestId]);
 
   // Streaming-frequent context — rebuilt on turn-lifecycle transitions.
   const streamingState = useMemo<TimelineStreamingState>(

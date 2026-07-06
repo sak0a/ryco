@@ -85,6 +85,9 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
 import {
+  hasOpenDialogShortcutTarget,
+  isDialogShortcutTarget,
+  isEditableShortcutTarget,
   matchesExactModShortcut,
   shouldIgnoreGlobalNavigationShortcut,
   shortcutLabelForCommand,
@@ -122,6 +125,12 @@ import {
 } from "./worktrees/LinkedWorktreeItemDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { deriveRevertTurnCountByUserMessageId } from "./chat/MessagesTimeline.logic";
+import { ThreadMessageSearchBar } from "./chat/ThreadMessageSearchBar";
+import {
+  buildThreadMessageSearchMatches,
+  clampThreadMessageSearchIndex,
+  moveThreadMessageSearchIndex,
+} from "./chat/ThreadMessageSearch.logic";
 import { ChatHeader } from "./chat/ChatHeader";
 import { type ChatSessionTabsItem } from "./chat/ChatSessionTabs";
 import { useChatSessionTabsPrefetch } from "./chat/useChatSessionTabsPrefetch";
@@ -179,6 +188,7 @@ import {
   useServerConfig,
   useServerKeybindings,
 } from "~/rpc/serverState";
+import { isTerminalFocused } from "../lib/terminalFocus";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
@@ -314,6 +324,40 @@ interface TerminalLaunchContext {
   worktreePath: string | null;
 }
 
+interface ThreadMessageSearchTarget {
+  messageId: MessageId;
+  requestId: number;
+}
+
+function elementFromEventTarget(target: EventTarget | null | undefined): Element | null {
+  if (typeof Element === "undefined") return null;
+  return target instanceof Element ? target : null;
+}
+
+function isAllowedThreadSearchEditableTarget(target: EventTarget | null | undefined): boolean {
+  return (
+    elementFromEventTarget(target)?.closest(
+      '[data-chat-composer-form="true"], [data-thread-message-search="true"]',
+    ) !== null
+  );
+}
+
+function shouldIgnoreThreadMessageSearchShortcut(
+  event: globalThis.KeyboardEvent & { isComposing?: boolean },
+): boolean {
+  if (event.type !== "keydown") return true;
+  if (event.isComposing) return true;
+  if (isTerminalFocused()) return true;
+  if (isDialogShortcutTarget(event.target) || hasOpenDialogShortcutTarget()) return true;
+  if (
+    isEditableShortcutTarget(event.target) &&
+    !isAllowedThreadSearchEditableTarget(event.target)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export default function ChatView(props: ChatViewProps) {
   usePerfMark("ChatView");
   const {
@@ -408,6 +452,12 @@ export default function ChatView(props: ChatViewProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
+  const [threadMessageSearchOpen, setThreadMessageSearchOpen] = useState(false);
+  const [threadMessageSearchQuery, setThreadMessageSearchQuery] = useState("");
+  const [threadMessageSearchFocusRequestId, setThreadMessageSearchFocusRequestId] = useState(0);
+  const [threadMessageSearchSelectedIndex, setThreadMessageSearchSelectedIndex] = useState(0);
+  const [threadMessageSearchTarget, setThreadMessageSearchTarget] =
+    useState<ThreadMessageSearchTarget | null>(null);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
@@ -582,6 +632,12 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  useEffect(() => {
+    setThreadMessageSearchOpen(false);
+    setThreadMessageSearchQuery("");
+    setThreadMessageSearchSelectedIndex(0);
+    setThreadMessageSearchTarget(null);
+  }, [activeThreadKey]);
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
@@ -1307,6 +1363,47 @@ export default function ChatView(props: ChatViewProps) {
       ),
     [activeThread?.proposedPlans, contextCompactionEntries, timelineMessages, workLogEntries],
   );
+  const threadMessageSearchMatches = useMemo(
+    () =>
+      buildThreadMessageSearchMatches({
+        timelineEntries,
+        query: threadMessageSearchQuery,
+      }),
+    [threadMessageSearchQuery, timelineEntries],
+  );
+  const threadMessageSearchMatchCount = threadMessageSearchMatches.length;
+  const selectedThreadMessageSearchIndex = clampThreadMessageSearchIndex(
+    threadMessageSearchSelectedIndex,
+    threadMessageSearchMatchCount,
+  );
+  const selectedThreadMessageSearchMatch =
+    threadMessageSearchMatches[selectedThreadMessageSearchIndex] ?? null;
+  const selectedThreadMessageSearchMessageId = selectedThreadMessageSearchMatch?.messageId ?? null;
+  const revealThreadMessageSearchMatch = useCallback((messageId: MessageId) => {
+    setThreadMessageSearchTarget((current) => ({
+      messageId,
+      requestId: (current?.requestId ?? 0) + 1,
+    }));
+  }, []);
+  useEffect(() => {
+    setThreadMessageSearchSelectedIndex(0);
+  }, [activeThreadKey, threadMessageSearchQuery]);
+  useEffect(() => {
+    setThreadMessageSearchSelectedIndex((currentIndex) =>
+      clampThreadMessageSearchIndex(currentIndex, threadMessageSearchMatchCount),
+    );
+  }, [threadMessageSearchMatchCount]);
+  useEffect(() => {
+    if (!threadMessageSearchOpen || !selectedThreadMessageSearchMessageId) {
+      setThreadMessageSearchTarget(null);
+      return;
+    }
+    revealThreadMessageSearchMatch(selectedThreadMessageSearchMessageId);
+  }, [
+    revealThreadMessageSearchMatch,
+    selectedThreadMessageSearchMessageId,
+    threadMessageSearchOpen,
+  ]);
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
   const turnDiffSummaryByAssistantMessageId = useMemo(() => {
@@ -1477,6 +1574,39 @@ export default function ChatView(props: ChatViewProps) {
       focusComposer();
     });
   }, [focusComposer]);
+  const openThreadMessageSearch = useCallback(() => {
+    if (!activeThreadId) return;
+    setThreadMessageSearchOpen(true);
+    setThreadMessageSearchFocusRequestId((requestId) => requestId + 1);
+  }, [activeThreadId]);
+  const closeThreadMessageSearch = useCallback(() => {
+    setThreadMessageSearchOpen(false);
+    setThreadMessageSearchTarget(null);
+    scheduleComposerFocus();
+  }, [scheduleComposerFocus]);
+  const navigateThreadMessageSearch = useCallback(
+    (direction: "next" | "previous") => {
+      if (threadMessageSearchMatchCount === 0) {
+        return;
+      }
+      const nextIndex = moveThreadMessageSearchIndex({
+        currentIndex: selectedThreadMessageSearchIndex,
+        matchCount: threadMessageSearchMatchCount,
+        direction,
+      });
+      setThreadMessageSearchSelectedIndex(nextIndex);
+      const nextMatch = threadMessageSearchMatches[nextIndex];
+      if (nextMatch) {
+        revealThreadMessageSearchMatch(nextMatch.messageId);
+      }
+    },
+    [
+      revealThreadMessageSearchMatch,
+      selectedThreadMessageSearchIndex,
+      threadMessageSearchMatchCount,
+      threadMessageSearchMatches,
+    ],
+  );
   const addTerminalContextToDraft = useCallback(
     (selection: TerminalContextSelection) => {
       readComposer()?.addTerminalContext(selection);
@@ -1983,6 +2113,19 @@ export default function ChatView(props: ChatViewProps) {
 
     terminalOpenByThreadRef.current[activeThreadKey] = current;
   }, [activeThreadKey, focusComposer, terminalState.terminalOpen]);
+
+  useEffect(() => {
+    const handler = (event: globalThis.KeyboardEvent) => {
+      if (!activeThreadId || event.defaultPrevented) return;
+      if (!matchesExactModShortcut(event, "f")) return;
+      if (shouldIgnoreThreadMessageSearchShortcut(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openThreadMessageSearch();
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [activeThreadId, openThreadMessageSearch]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
@@ -2728,7 +2871,10 @@ export default function ChatView(props: ChatViewProps) {
                 activeTurnId={activeLatestTurn?.turnId ?? null}
                 activeTurnStartedAt={activeWorkStartedAt}
                 listRef={legendListRef}
-                targetMessageId={rawSearch.messageId ?? null}
+                targetMessageId={
+                  threadMessageSearchTarget?.messageId ?? rawSearch.messageId ?? null
+                }
+                targetMessageRequestId={threadMessageSearchTarget?.requestId ?? 0}
                 timelineEntries={timelineEntries}
                 completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                 completionSummary={completionSummary}
@@ -2752,6 +2898,19 @@ export default function ChatView(props: ChatViewProps) {
             ) : (
               <div aria-hidden className="flex min-h-0 flex-1" />
             )}
+
+            {threadMessageSearchOpen ? (
+              <ThreadMessageSearchBar
+                query={threadMessageSearchQuery}
+                focusRequestId={threadMessageSearchFocusRequestId}
+                matchCount={threadMessageSearchMatchCount}
+                selectedIndex={selectedThreadMessageSearchIndex}
+                onQueryChange={setThreadMessageSearchQuery}
+                onNext={() => navigateThreadMessageSearch("next")}
+                onPrevious={() => navigateThreadMessageSearch("previous")}
+                onClose={closeThreadMessageSearch}
+              />
+            ) : null}
 
             {renderFloatingOverviewSidebar ? (
               <FloatingOverviewMotionFrame
