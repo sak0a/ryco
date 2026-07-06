@@ -251,4 +251,42 @@ describe("buildSendTurnBootstrap", () => {
     expect(result?.prepareWorktree?.branch).toBeUndefined();
     expect(result?.createThread).toBeUndefined();
   });
+
+  it("emits prepareWorkspace for item-action drafts and suppresses prepareWorktree", () => {
+    const pendingWorkspace = {
+      intent: { kind: "pr" as const, number: 42 },
+      plan: { kind: "create-worktree" as const, plannedBranch: "feature/tokens" },
+    };
+    const result = buildSendTurnBootstrap({
+      ...baseInput,
+      isLocalDraftThread: true,
+      baseBranchForWorktree: "main",
+      shouldMaterializeLegacyBranchWorktree: false,
+      pendingWorkspace,
+    });
+
+    expect(result?.prepareWorkspace).toEqual({
+      projectId: baseInput.projectId,
+      intent: pendingWorkspace.intent,
+    });
+    expect(result?.prepareWorktree).toBeUndefined();
+    expect(result?.runSetupScript).toBeUndefined();
+    expect(result?.createThread).toBeDefined();
+  });
+
+  it("ignores pendingWorkspace on non-draft sends", () => {
+    const result = buildSendTurnBootstrap({
+      ...baseInput,
+      isLocalDraftThread: false,
+      baseBranchForWorktree: "main",
+      shouldMaterializeLegacyBranchWorktree: false,
+      pendingWorkspace: {
+        intent: { kind: "pr" as const, number: 42 },
+        plan: { kind: "create-worktree" as const },
+      },
+    });
+
+    expect(result?.prepareWorkspace).toBeUndefined();
+    expect(result?.prepareWorktree).toBeDefined();
+  });
 });

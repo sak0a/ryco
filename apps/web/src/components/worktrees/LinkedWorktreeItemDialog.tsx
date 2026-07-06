@@ -71,17 +71,21 @@ export function LinkedWorktreeItemDialog(props: LinkedWorktreeItemDialogProps) {
             <IssueDetail
               environmentId={props.environmentId}
               cwd={props.cwd}
+              projectId={props.projectId}
               issueNumber={pivot.number}
               onBack={handleBackFromPivot}
               onSelectLinkedChangeRequest={handleSelectLinkedChangeRequest}
+              onItemActionStarted={close}
             />
           ) : (
             <PullRequestDetail
               environmentId={props.environmentId}
               cwd={props.cwd}
+              projectId={props.projectId}
               pullRequestNumber={pivot.number}
               onBack={handleBackFromPivot}
               onSelectLinkedIssue={handleSelectLinkedIssue}
+              onItemActionStarted={close}
             />
           )
         ) : item.kind === "workItem" ? (
@@ -92,22 +96,27 @@ export function LinkedWorktreeItemDialog(props: LinkedWorktreeItemDialogProps) {
             workItemKey={item.key}
             onBack={close}
             onSelectLinkedChangeRequest={handleSelectLinkedChangeRequest}
+            onItemActionStarted={close}
           />
         ) : item.kind === "pr" ? (
           <PullRequestDetail
             environmentId={props.environmentId}
             cwd={props.cwd}
+            projectId={props.projectId}
             pullRequestNumber={item.number}
             onBack={close}
             onSelectLinkedIssue={handleSelectLinkedIssue}
+            onItemActionStarted={close}
           />
         ) : (
           <IssueDetail
             environmentId={props.environmentId}
             cwd={props.cwd}
+            projectId={props.projectId}
             issueNumber={item.number}
             onBack={close}
             onSelectLinkedChangeRequest={handleSelectLinkedChangeRequest}
+            onItemActionStarted={close}
           />
         )}
       </DialogPopup>

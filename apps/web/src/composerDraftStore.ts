@@ -17,6 +17,8 @@ import {
   ThreadId,
   type ComposerSourceControlContext,
   type ComposerWorkItemContext,
+  type CreateWorktreeIntent,
+  type ItemActionWorkspacePlan,
 } from "@ryco/contracts";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
 import * as Schema from "effect/Schema";
@@ -106,6 +108,16 @@ export interface ComposerThreadDraftState {
  * Unlike a real server thread, a draft session can still change target
  * environment/worktree configuration before the first send.
  */
+/**
+ * Workspace intent attached to an item-action draft ("fix conflicts",
+ * "implement issue", …). The plan is the click-time resolution shown in the
+ * draft; the intent is what the send bootstrap re-resolves and executes.
+ */
+export interface DraftPendingWorkspace {
+  intent: CreateWorktreeIntent;
+  plan: ItemActionWorkspacePlan;
+}
+
 export interface DraftSessionState {
   threadId: ThreadId;
   environmentId: EnvironmentId;
@@ -118,6 +130,7 @@ export interface DraftSessionState {
   branch: string | null;
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
+  pendingWorkspace?: DraftPendingWorkspace | null;
   promotedTo?: ScopedThreadRef | null;
 }
 
@@ -182,6 +195,7 @@ export interface ComposerDraftStoreState {
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       tokenMode?: AgentTokenMode;
+      pendingWorkspace?: DraftPendingWorkspace | null;
     },
   ) => void;
   /** Creates or updates the draft session tracked for a concrete project ref. */
@@ -211,6 +225,7 @@ export interface ComposerDraftStoreState {
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       tokenMode?: AgentTokenMode;
+      pendingWorkspace?: DraftPendingWorkspace | null;
     },
   ) => void;
   clearProjectDraftThreadId: (projectRef: ScopedProjectRef) => void;
@@ -645,6 +660,7 @@ function createDraftThreadState(
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
     tokenMode?: AgentTokenMode;
+    pendingWorkspace?: DraftPendingWorkspace | null;
   },
 ): DraftThreadState {
   const projectChanged =
@@ -682,6 +698,12 @@ function createDraftThreadState(
         : projectChanged
           ? "local"
           : (existingThread?.envMode ?? "local")),
+    pendingWorkspace:
+      options?.pendingWorkspace === undefined
+        ? projectChanged
+          ? null
+          : (existingThread?.pendingWorkspace ?? null)
+        : options.pendingWorkspace,
     promotedTo: null,
   };
 }
@@ -714,6 +736,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
+    (left.pendingWorkspace ?? null) === (right.pendingWorkspace ?? null) &&
     scopedThreadRefsEqual(left.promotedTo, right.promotedTo)
   );
 }
@@ -971,6 +994,12 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   ? null
                   : existing.branch
                 : (options.branch ?? null);
+            const nextPendingWorkspace =
+              options.pendingWorkspace === undefined
+                ? projectChanged
+                  ? null
+                  : (existing.pendingWorkspace ?? null)
+                : options.pendingWorkspace;
             const nextDraftThread: DraftThreadState = {
               threadId: existing.threadId,
               environmentId: nextProjectRef.environmentId,
@@ -992,6 +1021,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   : projectChanged
                     ? "local"
                     : (existing.envMode ?? "local")),
+              pendingWorkspace: nextPendingWorkspace,
               promotedTo: existing.promotedTo ?? null,
             };
             const isUnchanged =
@@ -1005,6 +1035,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.branch === existing.branch &&
               nextDraftThread.worktreePath === existing.worktreePath &&
               nextDraftThread.envMode === existing.envMode &&
+              (nextDraftThread.pendingWorkspace ?? null) === (existing.pendingWorkspace ?? null) &&
               scopedThreadRefsEqual(nextDraftThread.promotedTo, existing.promotedTo);
             if (isUnchanged) {
               return state;

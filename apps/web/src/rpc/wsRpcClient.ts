@@ -180,6 +180,7 @@ export interface WsRpcClient {
     readonly createWorktreeForProject: RpcUnaryMethod<
       typeof WS_METHODS.gitCreateWorktreeForProject
     >;
+    readonly resolveActionWorkspace: RpcUnaryMethod<typeof WS_METHODS.gitResolveActionWorkspace>;
     readonly findWorktreeForOrigin: RpcUnaryMethod<typeof WS_METHODS.gitFindWorktreeForOrigin>;
     readonly archiveWorktree: RpcUnaryMethod<typeof WS_METHODS.gitArchiveWorktree>;
     readonly restoreWorktree: RpcUnaryMethod<typeof WS_METHODS.gitRestoreWorktree>;
@@ -441,6 +442,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.gitPreparePullRequestThread](input)),
       createWorktreeForProject: (input) =>
         transport.request((client) => client[WS_METHODS.gitCreateWorktreeForProject](input)),
+      resolveActionWorkspace: (input) =>
+        transport.request((client) => client[WS_METHODS.gitResolveActionWorkspace](input)),
       findWorktreeForOrigin: (input) =>
         transport.request((client) => client[WS_METHODS.gitFindWorktreeForOrigin](input)),
       archiveWorktree: (input) =>

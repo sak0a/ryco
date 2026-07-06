@@ -3,7 +3,7 @@ import type {
   ComposerWorkItemContext,
   ServerProviderSkill,
 } from "@ryco/contracts";
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import { CircleAlertIcon, XIcon } from "lucide-react";
 import type { ComposerImageAttachment } from "../../composerDraftStore";
 import type { ComposerTrigger } from "../../composer-logic";
@@ -59,6 +59,9 @@ export interface ComposerPromptShellProps {
   // Jira work-item context chips
   composerWorkItemContexts: ReadonlyArray<ComposerWorkItemContext>;
   onRemoveWorkItemContext: (id: string) => void;
+
+  // Item-action draft workspace plan line
+  workspacePlanNotice?: ReactNode;
 
   // Image attachments
   composerImages: ComposerImageAttachment[];
@@ -134,6 +137,7 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
     onRemoveSourceControlContext,
     composerWorkItemContexts,
     onRemoveWorkItemContext,
+    workspacePlanNotice,
     composerImages,
     nonPersistedComposerImageIdSet,
     onExpandImage,
@@ -184,6 +188,11 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
         onHighlightedItemChange={onComposerMenuItemHighlighted}
         onSelect={onSelectComposerItem}
       />
+
+      {!isComposerCollapsedMobile &&
+        !isComposerApprovalState &&
+        pendingUserInputCount === 0 &&
+        workspacePlanNotice}
 
       {!isComposerCollapsedMobile &&
         !isComposerApprovalState &&

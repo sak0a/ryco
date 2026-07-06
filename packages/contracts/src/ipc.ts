@@ -5,6 +5,8 @@ import type {
   GitDeleteWorktreeInput,
   GitFindWorktreeForOriginInput,
   GitFindWorktreeForOriginOutput,
+  GitResolveActionWorkspaceInput,
+  GitResolveActionWorkspaceOutput,
   GitRestoreWorktreeInput,
   ProjectsInitializeGitInput,
   ThreadsSetManualBucketInput,
@@ -452,6 +454,9 @@ export interface EnvironmentApi {
     createWorktreeForProject?: (
       input: GitCreateWorktreeForProjectInput,
     ) => Promise<GitCreateWorktreeForProjectOutput>;
+    resolveActionWorkspace?: (
+      input: GitResolveActionWorkspaceInput,
+    ) => Promise<GitResolveActionWorkspaceOutput>;
     findWorktreeForOrigin?: (
       input: GitFindWorktreeForOriginInput,
     ) => Promise<GitFindWorktreeForOriginOutput>;

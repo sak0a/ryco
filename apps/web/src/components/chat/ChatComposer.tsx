@@ -37,6 +37,8 @@ import {
   replaceTextRange,
 } from "../../composer-logic";
 import { serializeComposerMentionPath } from "../../composerMentionSyntax";
+import { CornerDownRightIcon, XIcon } from "lucide-react";
+import { describeWorkspacePlan } from "../projectExplorer/itemActions";
 import { readFileAsDataUrl } from "../ChatView.logic";
 import {
   deriveComposerFooterActionLayoutKey,
@@ -431,6 +433,12 @@ export const ChatComposer = memo(
     const addWorkItemContextToDraft = useComposerDraftStore((store) => store.addWorkItemContext);
     const removeWorkItemContextFromDraft = useComposerDraftStore(
       (store) => store.removeWorkItemContext,
+    );
+    const setDraftThreadContextInStore = useComposerDraftStore(
+      (store) => store.setDraftThreadContext,
+    );
+    const draftPendingWorkspace = useComposerDraftStore((store) =>
+      draftId ? (store.getDraftSession(draftId)?.pendingWorkspace ?? null) : null,
     );
 
     // ------------------------------------------------------------------
@@ -1532,6 +1540,33 @@ export const ChatComposer = memo(
       [composerDraftTarget, removeWorkItemContextFromDraft],
     );
 
+    const handleDismissPendingWorkspace = useCallback(() => {
+      if (!draftId) return;
+      setDraftThreadContextInStore(draftId, {
+        pendingWorkspace: null,
+        branch: null,
+        worktreePath: null,
+        envMode: "local",
+      });
+    }, [draftId, setDraftThreadContextInStore]);
+
+    const workspacePlanNotice = draftPendingWorkspace ? (
+      <div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <CornerDownRightIcon className="size-3 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 truncate">
+          {describeWorkspacePlan(draftPendingWorkspace.plan)}
+        </span>
+        <button
+          type="button"
+          aria-label="Discard workspace plan"
+          className="shrink-0 rounded-sm p-0.5 text-muted-foreground/60 hover:text-foreground"
+          onClick={handleDismissPendingWorkspace}
+        >
+          <XIcon className="size-3" aria-hidden="true" />
+        </button>
+      </div>
+    ) : null;
+
     const handleInterruptPrimaryAction = useCallback(() => {
       void onInterrupt();
     }, [onInterrupt]);
@@ -1939,6 +1974,7 @@ export const ChatComposer = memo(
               onRemoveSourceControlContext={handleRemoveSourceControlContext}
               composerWorkItemContexts={composerWorkItemContexts}
               onRemoveWorkItemContext={handleRemoveWorkItemContext}
+              workspacePlanNotice={workspacePlanNotice}
               composerImages={composerImages}
               nonPersistedComposerImageIdSet={nonPersistedComposerImageIdSet}
               onExpandImage={onExpandImage}

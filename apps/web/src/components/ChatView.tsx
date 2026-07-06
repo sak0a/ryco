@@ -2188,6 +2188,7 @@ export default function ChatView(props: ChatViewProps) {
         shouldMaterializeLegacyBranchWorktree,
         baseBranchForWorktree,
         shouldCreateWorktree,
+        pendingWorkspace: isLocalDraftThread ? (draftThread?.pendingWorkspace ?? null) : null,
       },
       settings: { runtimeMode, interactionMode, tokenMode },
       project: {

@@ -18,7 +18,11 @@ import { createModelSelection } from "@ryco/shared/model";
 import { truncate } from "@ryco/shared/String";
 import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";
 
-import type { ComposerImageAttachment, DraftId } from "../composerDraftStore";
+import type {
+  ComposerImageAttachment,
+  DraftId,
+  DraftPendingWorkspace,
+} from "../composerDraftStore";
 import type { ChatMessage } from "../types";
 import type { TerminalContextDraft } from "../lib/terminalContext";
 import type { ChatComposerHandle } from "../components/chat/ChatComposer";
@@ -78,6 +82,8 @@ export interface SendTurnWorktreePlan {
   shouldMaterializeLegacyBranchWorktree: boolean;
   baseBranchForWorktree: string | null;
   shouldCreateWorktree: boolean;
+  /** Item-action workspace intent carried by the draft, executed by the bootstrap. */
+  pendingWorkspace: DraftPendingWorkspace | null;
 }
 
 export interface SendTurnSettings {
@@ -246,6 +252,7 @@ export function buildSendTurnBootstrap(input: {
   activeThreadBranch: string | null;
   worktreePath: string | null;
   threadCreatedAt: string;
+  pendingWorkspace?: DraftPendingWorkspace | null;
 }):
   | {
       createThread?: {
@@ -264,9 +271,14 @@ export function buildSendTurnBootstrap(input: {
         baseBranch: string;
         branch?: string;
       };
+      prepareWorkspace?: {
+        projectId: ProjectId;
+        intent: DraftPendingWorkspace["intent"];
+      };
       runSetupScript?: boolean;
     }
   | undefined {
+  const pendingWorkspace = input.isLocalDraftThread ? (input.pendingWorkspace ?? null) : null;
   if (!input.isLocalDraftThread && !input.baseBranchForWorktree) {
     return undefined;
   }
@@ -287,18 +299,27 @@ export function buildSendTurnBootstrap(input: {
           },
         }
       : {}),
-    ...(input.baseBranchForWorktree
+    ...(pendingWorkspace
       ? {
-          prepareWorktree: {
-            projectCwd: input.projectCwd,
-            baseBranch: input.baseBranchForWorktree,
-            ...(input.shouldMaterializeLegacyBranchWorktree
-              ? {}
-              : { branch: buildTemporaryWorktreeBranchName() }),
+          // The server re-resolves the intent and executes the outcome;
+          // its worktree-creation path launches its own setup script.
+          prepareWorkspace: {
+            projectId: input.projectId,
+            intent: pendingWorkspace.intent,
           },
-          runSetupScript: true,
         }
-      : {}),
+      : input.baseBranchForWorktree
+        ? {
+            prepareWorktree: {
+              projectCwd: input.projectCwd,
+              baseBranch: input.baseBranchForWorktree,
+              ...(input.shouldMaterializeLegacyBranchWorktree
+                ? {}
+                : { branch: buildTemporaryWorktreeBranchName() }),
+            },
+            runSetupScript: true,
+          }
+        : {}),
   };
 }
 
@@ -481,6 +502,7 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
       isLocalDraftThread: thread.isLocalDraftThread,
       baseBranchForWorktree: worktree.baseBranchForWorktree,
       shouldMaterializeLegacyBranchWorktree: worktree.shouldMaterializeLegacyBranchWorktree,
+      pendingWorkspace: worktree.pendingWorkspace,
       projectId: project.projectId,
       projectCwd: project.projectCwd,
       title,

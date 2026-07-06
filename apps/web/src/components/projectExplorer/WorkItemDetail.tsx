@@ -12,6 +12,9 @@ import type {
   WorkItemUpdateFields,
 } from "@ryco/contracts";
 import { scopeProjectRef } from "@ryco/client-runtime";
+import { useStartItemActionThread } from "../../hooks/useStartItemActionThread";
+import { deriveWorkItemActions, type ItemActionKind } from "./itemActions";
+import { NeedsAttentionBanner } from "./NeedsAttentionBanner";
 import { DateTime, Option } from "effect";
 import { useQuery } from "~/rpc/queryClient";
 import { useShallow } from "zustand/react/shallow";
@@ -114,10 +117,17 @@ interface WorkItemDetailProps {
   workItemKey: string;
   onBack: () => void;
   onSelectLinkedChangeRequest?: ((number: number) => void) | undefined;
+  /** Called after an item action successfully opened a draft thread. */
+  onItemActionStarted?: (() => void) | undefined;
 }
 
 export function WorkItemDetail(props: WorkItemDetailProps) {
   const [editingComment, setEditingComment] = useState<WorkItemComment | null>(null);
+  const startItemAction = useStartItemActionThread({
+    environmentId: props.environmentId,
+    projectId: props.projectId,
+  });
+  const [busyActionKind, setBusyActionKind] = useState<ItemActionKind | null>(null);
   const [quoteInsertion, setQuoteInsertion] = useState<CommentQuoteInsertion | null>(null);
   const [descriptionDialogOpen, setDescriptionDialogOpen] = useState(false);
 
@@ -296,6 +306,20 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
           >
             <WorkItemConversation
               detail={detail}
+              banner={
+                <NeedsAttentionBanner
+                  actions={deriveWorkItemActions(detail)}
+                  busyActionKind={busyActionKind}
+                  onRun={(action) => {
+                    setBusyActionKind(action.kind);
+                    void startItemAction({ kind: "work-item", action, detail })
+                      .then((started) => {
+                        if (started) props.onItemActionStarted?.();
+                      })
+                      .finally(() => setBusyActionKind(null));
+                  }}
+                />
+              }
               canImproveDescription={
                 props.cwd !== null && editableField(detail, "description") !== null
               }
@@ -391,6 +415,7 @@ function mergeLinkedChangeRequests(
 
 function WorkItemConversation(props: {
   readonly detail: WorkItemDetailModel;
+  readonly banner?: ReactNode;
   readonly canImproveDescription: boolean;
   readonly addCommentPending: boolean;
   readonly transitionPending: boolean;
@@ -484,6 +509,8 @@ function WorkItemConversation(props: {
           </div>
         ) : null}
       </header>
+
+      {props.banner}
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-muted/8 px-4 py-5 sm:px-5 lg:px-6">
         <div className="mx-auto w-full max-w-[980px]">

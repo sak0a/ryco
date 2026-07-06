@@ -1744,3 +1744,54 @@ describe("composerDraftStore workItemContexts", () => {
     expect(draft).toBeUndefined();
   });
 });
+
+describe("composerDraftStore pendingWorkspace", () => {
+  beforeEach(() => {
+    useComposerDraftStore.setState({
+      draftsByThreadKey: {},
+      draftThreadsByThreadKey: {},
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+      stickyModelSelectionByProvider: {},
+      stickyActiveProvider: null,
+    });
+  });
+
+  const PROJECT_REF = {
+    environmentId: TEST_ENVIRONMENT_ID,
+    projectId: "project-pw" as never,
+  } as const;
+
+  function makePendingWorkspace() {
+    return {
+      intent: { kind: "pr" as const, number: 42 },
+      plan: { kind: "create-worktree" as const, plannedBranch: "feature/tokens" },
+    };
+  }
+
+  it("stores and clears the pending workspace via setDraftThreadContext", () => {
+    const draftId = "draft-pw-1" as never;
+    useComposerDraftStore
+      .getState()
+      .setLogicalProjectDraftThreadId("logical-pw", PROJECT_REF, draftId, {
+        threadId: ThreadId.make("thread-pw-1"),
+      });
+
+    const pendingWorkspace = makePendingWorkspace();
+    useComposerDraftStore.getState().setDraftThreadContext(draftId, { pendingWorkspace });
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)?.pendingWorkspace).toBe(
+      pendingWorkspace,
+    );
+
+    // Unrelated updates keep it.
+    useComposerDraftStore.getState().setDraftThreadContext(draftId, { branch: "feature/tokens" });
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)?.pendingWorkspace).toBe(
+      pendingWorkspace,
+    );
+
+    // Explicit null clears it.
+    useComposerDraftStore.getState().setDraftThreadContext(draftId, { pendingWorkspace: null });
+    expect(
+      useComposerDraftStore.getState().getDraftSession(draftId)?.pendingWorkspace ?? null,
+    ).toBeNull();
+  });
+});

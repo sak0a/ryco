@@ -332,18 +332,22 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
           <IssueDetail
             environmentId={environmentId}
             cwd={cwd}
+            projectId={selectedMember?.id ?? null}
             issueNumber={selection.number}
             onBack={handleBack}
             onSelectLinkedChangeRequest={handleSelectLinkedChangeRequest}
+            onItemActionStarted={() => props.onOpenChange(false)}
           />
         ) : selection.kind === "pr" ? (
           <PullRequestDetail
             environmentId={environmentId}
             cwd={cwd}
+            projectId={selectedMember?.id ?? null}
             pullRequestNumber={selection.number}
             onBack={handleBack}
             onSelectLinkedIssue={handleSelectLinkedIssue}
             onSelectLinkedWorkItem={handleSelectLinkedWorkItem}
+            onItemActionStarted={() => props.onOpenChange(false)}
           />
         ) : (
           <WorkItemDetail
@@ -353,6 +357,7 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
             workItemKey={selection.key}
             onBack={handleBack}
             onSelectLinkedChangeRequest={handleSelectLinkedChangeRequest}
+            onItemActionStarted={() => props.onOpenChange(false)}
           />
         )}
       </DialogPopup>

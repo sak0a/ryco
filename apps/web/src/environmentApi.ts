@@ -48,6 +48,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       resolvePullRequest: rpcClient.git.resolvePullRequest,
       preparePullRequestThread: rpcClient.git.preparePullRequestThread,
       createWorktreeForProject: rpcClient.git.createWorktreeForProject,
+      resolveActionWorkspace: rpcClient.git.resolveActionWorkspace,
       findWorktreeForOrigin: rpcClient.git.findWorktreeForOrigin,
       archiveWorktree: rpcClient.git.archiveWorktree,
       restoreWorktree: rpcClient.git.restoreWorktree,

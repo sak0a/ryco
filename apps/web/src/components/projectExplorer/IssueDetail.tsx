@@ -1,10 +1,14 @@
 import type {
   EnvironmentId,
+  ProjectId,
   SourceControlCommentReactionContent,
   SourceControlIssueDetail,
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
-import { useCallback, useRef, useState } from "react";
+import { type ReactNode, useCallback, useRef, useState } from "react";
+import { useStartItemActionThread } from "../../hooks/useStartItemActionThread";
+import { deriveIssueActions, type ItemActionKind } from "./itemActions";
+import { NeedsAttentionBanner } from "./NeedsAttentionBanner";
 import { CircleDotIcon, FileTextIcon, MessageSquareIcon, SendIcon } from "lucide-react";
 import { errorMessage } from "~/lib/errorMessage";
 import {
@@ -39,16 +43,24 @@ const dateFmt = new Intl.DateTimeFormat(undefined, {
 interface IssueDetailProps {
   environmentId: EnvironmentId | null;
   cwd: string | null;
+  projectId?: ProjectId | null;
   issueNumber: number;
   onBack: () => void;
   onSelectLinkedChangeRequest?: ((number: number) => void) | undefined;
   onAttach?: ((mode: "local" | "worktree") => Promise<void> | void) | undefined;
   attachInProgress?: "local" | "worktree" | null;
   attachLabel?: string;
+  /** Called after an item action successfully opened a draft thread. */
+  onItemActionStarted?: (() => void) | undefined;
 }
 
 export function IssueDetail(props: IssueDetailProps) {
   const reference = String(props.issueNumber);
+  const startItemAction = useStartItemActionThread({
+    environmentId: props.environmentId,
+    projectId: props.projectId ?? null,
+  });
+  const [busyActionKind, setBusyActionKind] = useState<ItemActionKind | null>(null);
   const detailQuery = useSourceControlIssueDetail({
     environmentId: props.environmentId,
     cwd: props.cwd,
@@ -82,6 +94,22 @@ export function IssueDetail(props: IssueDetailProps) {
         ) : detail ? (
           <IssueDetailBody
             detail={detail}
+            banner={
+              props.projectId ? (
+                <NeedsAttentionBanner
+                  actions={deriveIssueActions(detail)}
+                  busyActionKind={busyActionKind}
+                  onRun={(action) => {
+                    setBusyActionKind(action.kind);
+                    void startItemAction({ kind: "issue", action, detail })
+                      .then((started) => {
+                        if (started) props.onItemActionStarted?.();
+                      })
+                      .finally(() => setBusyActionKind(null));
+                  }}
+                />
+              ) : null
+            }
             onSelectLinkedChangeRequest={props.onSelectLinkedChangeRequest}
             onSubmitComment={
               detail.provider === "github" && props.environmentId !== null && props.cwd !== null
@@ -127,6 +155,7 @@ export function IssueDetail(props: IssueDetailProps) {
 
 function IssueDetailBody(props: {
   detail: SourceControlIssueDetail;
+  banner?: ReactNode;
   onSelectLinkedChangeRequest?: ((number: number) => void) | undefined;
   onSubmitComment?:
     | ((input: { readonly body: string; readonly clientMutationId: string }) => Promise<void>)
@@ -209,6 +238,8 @@ function IssueDetailBody(props: {
             ]}
           />
         </header>
+
+        {props.banner}
 
         <div className="min-h-0 overflow-visible bg-muted/8 px-4 py-5 sm:px-5 lg:flex-1 lg:overflow-y-auto lg:px-6">
           <div className="mx-auto w-full max-w-[980px]">

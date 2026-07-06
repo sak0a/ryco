@@ -1,12 +1,16 @@
 import type {
   EnvironmentId,
+  ProjectId,
   SourceControlCommentReactionContent,
   SourceControlChangeRequestCommit,
   SourceControlChangeRequestDetail,
   SourceControlChangeRequestFile,
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useStartItemActionThread } from "../../hooks/useStartItemActionThread";
+import { derivePullRequestActions, type ItemActionKind } from "./itemActions";
+import { NeedsAttentionBanner } from "./NeedsAttentionBanner";
+import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import {
   ChevronRightIcon,
   Clock3Icon,
@@ -81,16 +85,24 @@ type PullRequestTab = "conversation" | "checks" | "commits" | "files";
 interface PullRequestDetailProps {
   environmentId: EnvironmentId | null;
   cwd: string | null;
+  projectId?: ProjectId | null;
   pullRequestNumber: number;
   onBack: () => void;
   onSelectLinkedIssue: (issueNumber: number) => void;
   onSelectLinkedWorkItem?: ((workItemKey: string) => void) | undefined;
   onAttach?: ((mode: "local" | "worktree") => Promise<void> | void) | undefined;
   attachInProgress?: "local" | "worktree" | null;
+  /** Called after an item action successfully opened a draft thread. */
+  onItemActionStarted?: (() => void) | undefined;
 }
 
 export function PullRequestDetail(props: PullRequestDetailProps) {
   const reference = String(props.pullRequestNumber);
+  const startItemAction = useStartItemActionThread({
+    environmentId: props.environmentId,
+    projectId: props.projectId ?? null,
+  });
+  const [busyActionKind, setBusyActionKind] = useState<ItemActionKind | null>(null);
   const resolveDetailIntervalMs = useCallback(
     (data: SourceControlChangeRequestDetail | null): number | false =>
       data?.state === "open" ? CHANGE_REQUEST_DETAIL_OPEN_REFETCH_INTERVAL_MS : false,
@@ -132,6 +144,22 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
         ) : detail ? (
           <PullRequestDetailBody
             detail={detail}
+            banner={
+              props.projectId ? (
+                <NeedsAttentionBanner
+                  actions={derivePullRequestActions(detail)}
+                  busyActionKind={busyActionKind}
+                  onRun={(action) => {
+                    setBusyActionKind(action.kind);
+                    void startItemAction({ kind: "pull-request", action, detail })
+                      .then((started) => {
+                        if (started) props.onItemActionStarted?.();
+                      })
+                      .finally(() => setBusyActionKind(null));
+                  }}
+                />
+              ) : null
+            }
             environmentId={props.environmentId}
             cwd={props.cwd}
             onSelectLinkedIssue={props.onSelectLinkedIssue}
@@ -180,6 +208,7 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
 
 function PullRequestDetailBody(props: {
   detail: SourceControlChangeRequestDetail;
+  banner?: ReactNode;
   environmentId: EnvironmentId | null;
   cwd: string | null;
   onSelectLinkedIssue: (issueNumber: number) => void;
@@ -294,6 +323,8 @@ function PullRequestDetailBody(props: {
             </div>
           </div>
         </header>
+
+        {props.banner}
 
         <ContextPickerTabs
           tabs={[

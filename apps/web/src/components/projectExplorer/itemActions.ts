@@ -1,9 +1,24 @@
 import type {
+  ItemActionWorkspacePlan,
   SourceControlChangeRequestDetail,
   SourceControlIssueDetail,
   WorkItemDetail,
 } from "@ryco/contracts";
 import { getPrCheckStatusFromChangeRequest } from "./prCheckStatus";
+
+/** Human-readable one-liner for the resolved workspace plan of a draft. */
+export function describeWorkspacePlan(plan: ItemActionWorkspacePlan): string {
+  switch (plan.kind) {
+    case "reuse-worktree":
+      return `Reusing the worktree on ${plan.branch}`;
+    case "local-main-checkout":
+      return `Working in the main repo checkout on ${plan.branch}`;
+    case "create-worktree":
+      return plan.plannedBranch
+        ? `Will create a worktree on ${plan.plannedBranch}`
+        : "Will create a worktree for this item";
+  }
+}
 
 export type ItemActionKind =
   | "pr-conflicts"
