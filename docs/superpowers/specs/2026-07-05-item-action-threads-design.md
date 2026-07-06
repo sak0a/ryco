@@ -232,6 +232,27 @@ Sketches (final copy at implementation):
 The "reused worktree may be dirty" instruction is appended automatically
 whenever the plan kind is `reuse-worktree` or `local-main-checkout`.
 
+## Implementation notes (deviations)
+
+- The bootstrap's `prepareWorkspace` carries `{ projectId, intent }`, not
+  the resolved plan: the server re-resolves the intent at send time, which
+  makes the send authoritative by construction (a stale click-time plan
+  can't be executed) and doubles as the "verify the worktree/branch still
+  exists" step the spec called for.
+- Draft sessions are keyed one-per-logical-project, so clicking a second
+  action (or the same one twice) reuses the project draft and overwrites
+  its prompt/context/plan — there are no parallel independent drafts.
+- The click-time plan is stored on the draft (`pendingWorkspace`) purely
+  for the composer's plan line, which also carries a ✕ that discards the
+  plan and reverts the draft to a plain local thread.
+- `createWorktreeForProject` gained an `existingThreadId` option instead
+  of a standalone worktree-creation core: with it, `thread.create`
+  dispatches become `thread.meta.update` on the bootstrap's thread, and
+  the missing-default-model-selection failure only applies when a thread
+  or AI branch name actually needs it (deterministic fallbacks otherwise).
+- Banner placement threads through the detail views' body components as a
+  `banner` ReactNode slot (their headers live inside inner components).
+
 ## Behavior & edge cases
 
 | Case                                                  | Handling                                                                                                                            |

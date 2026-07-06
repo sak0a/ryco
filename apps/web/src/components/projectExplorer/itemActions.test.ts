@@ -6,14 +6,9 @@ import type {
   WorkItemDetail,
 } from "@ryco/contracts";
 
-import {
-  deriveIssueActions,
-  derivePullRequestActions,
-  deriveWorkItemActions,
-} from "./itemActions";
+import { deriveIssueActions, derivePullRequestActions, deriveWorkItemActions } from "./itemActions";
 
-const fakeDateTime = (iso: string) =>
-  ({ toJSON: () => iso, toString: () => iso }) as never;
+const fakeDateTime = (iso: string) => ({ toJSON: () => iso, toString: () => iso }) as never;
 
 function makePrDetail(
   overrides?: Partial<{

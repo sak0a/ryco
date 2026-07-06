@@ -174,9 +174,7 @@ describe("resolveActionWorkspace", () => {
 
   it("ignores remote refs matching the head branch", async () => {
     const operations = makeOperations({
-      refs: [
-        { name: "feature/tokens", isRemote: true, current: false, worktreePath: null },
-      ],
+      refs: [{ name: "feature/tokens", isRemote: true, current: false, worktreePath: null }],
     });
     const result = await Effect.runPromise(
       operations.resolveActionWorkspace({
@@ -252,18 +250,15 @@ describe("createWorktreeForProject with existingThreadId", () => {
 
   const provideStubServices = <A, E>(effect: Effect.Effect<A, E, unknown>) =>
     effect.pipe(
-      Effect.provideService(
-        SourceControlProviderRegistry,
-        { resolve: () => Effect.die("not used") } as never,
-      ),
-      Effect.provideService(
-        ProjectionWorktreeRepository,
-        { getById: () => Effect.succeed(Option.none()) } as never,
-      ),
-      Effect.provideService(
-        OrchestrationEngineService,
-        { dispatch: () => Effect.succeed({ sequence: 0 }) } as never,
-      ),
+      Effect.provideService(SourceControlProviderRegistry, {
+        resolve: () => Effect.die("not used"),
+      } as never),
+      Effect.provideService(ProjectionWorktreeRepository, {
+        getById: () => Effect.succeed(Option.none()),
+      } as never),
+      Effect.provideService(OrchestrationEngineService, {
+        dispatch: () => Effect.succeed({ sequence: 0 }),
+      } as never),
     ) as Effect.Effect<A, E>;
 
   it("attaches the existing thread when a linked worktree is reused", async () => {
