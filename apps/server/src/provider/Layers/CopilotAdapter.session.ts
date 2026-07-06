@@ -6,6 +6,7 @@ import {
   ThreadId,
   TurnId,
   type ChatAttachment,
+  type ChatImageAttachment,
   type ProviderRuntimeEvent,
   type ProviderSendTurnInput,
   type ProviderSession,
@@ -89,7 +90,7 @@ function parseResumeCursor(resumeCursor: unknown): string | undefined {
     : undefined;
 }
 
-function attachmentMimeType(attachment: ChatAttachment): string {
+function attachmentMimeType(attachment: ChatImageAttachment): string {
   return attachment.mimeType;
 }
 
@@ -306,7 +307,7 @@ export const makeSendTurn =
     Effect.gen(function* () {
       const record = yield* deps.requireSession(input.threadId);
       const attachments: MessageOptions["attachments"] = yield* Effect.forEach(
-        input.attachments ?? [],
+        (input.attachments ?? []).filter((attachment) => attachment.type === "image"),
         (attachment) =>
           Effect.gen(function* () {
             const filePath = resolveAttachmentPath({

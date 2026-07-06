@@ -23,6 +23,7 @@ import {
   RuntimeRequestId,
   ProviderApprovalDecision,
   ThreadId,
+  type ChatImageAttachment,
   ProviderSendTurnInput,
   DEFAULT_AGENT_TOKEN_MODE,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -38,6 +39,7 @@ import {
   getModelSelectionStringOptionValue,
 } from "@ryco/shared/model";
 import { formatSourceControlContextsForAgent } from "@ryco/shared/sourceControlContextFormatter";
+import { formatWorkItemContextsForAgent } from "@ryco/shared/workItemContextFormatter";
 
 import {
   ProviderAdapterRequestError,
@@ -89,7 +91,7 @@ interface CodexAdapterSessionContext {
 }
 
 interface ResolvedCodexAttachment {
-  readonly attachment: NonNullable<ProviderSendTurnInput["attachments"]>[number];
+  readonly attachment: ChatImageAttachment;
   readonly path: string;
   readonly sizeBytes: number;
 }
@@ -1509,7 +1511,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
 
   const resolveAttachmentForPreflight = Effect.fn("resolveAttachmentForPreflight")(function* (
-    attachment: NonNullable<ProviderSendTurnInput["attachments"]>[number],
+    attachment: ChatImageAttachment,
   ) {
     const attachmentPath = resolveAttachmentPath({
       attachmentsDir: serverConfig.attachmentsDir,
@@ -1568,7 +1570,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const preflightAttachments = Effect.fn("preflightAttachments")(function* (
     input: ProviderSendTurnInput,
   ) {
-    const attachments = input.attachments ?? [];
+    const attachments = (input.attachments ?? []).filter(
+      (attachment) => attachment.type === "image",
+    );
     if (attachments.length > PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
       return yield* new ProviderAdapterRequestError({
         provider: PROVIDER,
@@ -1645,7 +1649,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       input.modelSelection?.instanceId === boundInstanceId
         ? getModelSelectionBooleanOptionValue(input.modelSelection, "fastMode")
         : undefined;
-    const formatted = formatSourceControlContextsForAgent(input.sourceControlContexts ?? []);
+    const formatted = [
+      formatSourceControlContextsForAgent(input.sourceControlContexts ?? []),
+      formatWorkItemContextsForAgent(input.workItemContexts ?? []),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     const codexInput = formatted ? formatted + "\n\n" + (input.input ?? "") : input.input;
     return yield* session.runtime
       .sendTurn({

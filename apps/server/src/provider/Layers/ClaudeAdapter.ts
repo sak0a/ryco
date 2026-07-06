@@ -57,6 +57,7 @@ import {
   resolvePromptInjectedEffort,
 } from "@ryco/shared/model";
 import { formatSourceControlContextsForAgent } from "@ryco/shared/sourceControlContextFormatter";
+import { formatWorkItemContextsForAgent } from "@ryco/shared/workItemContextFormatter";
 import {
   Cause,
   DateTime,
@@ -692,7 +693,12 @@ function buildPromptText(
   const caps = getClaudeModelCapabilities(claudeModel);
 
   const promptEffort = resolvePromptInjectedEffort(caps, rawEffort);
-  const formatted = formatSourceControlContextsForAgent(input.sourceControlContexts ?? []);
+  const formatted = [
+    formatSourceControlContextsForAgent(input.sourceControlContexts ?? []),
+    formatWorkItemContextsForAgent(input.workItemContexts ?? []),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const text = applyClaudePromptEffortPrefix(
     formatted ? formatted + "\n\n" + (input.input?.trim() ?? "") : (input.input?.trim() ?? ""),
     promptEffort,

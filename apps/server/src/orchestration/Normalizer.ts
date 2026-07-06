@@ -91,6 +91,11 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       command.message.attachments,
       (attachment) =>
         Effect.gen(function* () {
+          if (attachment.type === "context") {
+            // Context attachments are already in persisted shape — no upload
+            // payload to decode or write to disk.
+            return attachment;
+          }
           const parsed = parseBase64DataUrl(attachment.dataUrl);
           if (!parsed || !parsed.mimeType.startsWith("image/")) {
             return yield* new OrchestrationDispatchCommandError({

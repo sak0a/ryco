@@ -1,6 +1,11 @@
 import { pathToFileURL } from "node:url";
 
-import type { ChatAttachment, ProviderApprovalDecision, RuntimeMode } from "@ryco/contracts";
+import type {
+  ChatAttachment,
+  ChatImageAttachment,
+  ProviderApprovalDecision,
+  RuntimeMode,
+} from "@ryco/contracts";
 import type {
   Agent,
   FilePartInput,
@@ -207,11 +212,14 @@ export function openCodeQuestionId(
 
 export function toOpenCodeFileParts(input: {
   readonly attachments: ReadonlyArray<ChatAttachment> | undefined;
-  readonly resolveAttachmentPath: (attachment: ChatAttachment) => string | null;
+  readonly resolveAttachmentPath: (attachment: ChatImageAttachment) => string | null;
 }): Array<FilePartInput> {
   const parts: Array<FilePartInput> = [];
 
   for (const attachment of input.attachments ?? []) {
+    if (attachment.type !== "image") {
+      continue;
+    }
     const attachmentPath = input.resolveAttachmentPath(attachment);
     if (!attachmentPath) {
       continue;

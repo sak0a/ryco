@@ -1172,8 +1172,13 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_AGENT_TOKEN_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
-  sourceControlContexts: Schema.optional(Schema.Array(ComposerSourceControlContext)),
-  workItemContexts: Schema.optional(Schema.Array(ComposerWorkItemContext)),
+  // JSON codec: event payloads are persisted with a raw JSON stringify, so
+  // rich values (DateTime, Option) inside contexts must round-trip through
+  // their JSON wire form.
+  sourceControlContexts: Schema.optional(
+    Schema.toCodecJson(Schema.Array(ComposerSourceControlContext)),
+  ),
+  workItemContexts: Schema.optional(Schema.toCodecJson(Schema.Array(ComposerWorkItemContext))),
   createdAt: IsoDateTime,
 });
 

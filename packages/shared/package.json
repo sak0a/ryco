@@ -95,6 +95,10 @@
     "./sourceControlContextFormatter": {
       "types": "./src/sourceControlContextFormatter.ts",
       "import": "./src/sourceControlContextFormatter.ts"
+    },
+    "./workItemContextFormatter": {
+      "types": "./src/workItemContextFormatter.ts",
+      "import": "./src/workItemContextFormatter.ts"
     }
   },
   "scripts": {

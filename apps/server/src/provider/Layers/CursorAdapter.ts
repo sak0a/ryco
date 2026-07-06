@@ -986,8 +986,11 @@ export function makeCursorAdapter(
         if (input.input?.trim()) {
           promptParts.push({ type: "text", text: input.input.trim() });
         }
-        if (input.attachments && input.attachments.length > 0) {
-          for (const attachment of input.attachments) {
+        const imageAttachments = (input.attachments ?? []).filter(
+          (attachment) => attachment.type === "image",
+        );
+        if (imageAttachments.length > 0) {
+          for (const attachment of imageAttachments) {
             const attachmentPath = resolveAttachmentPath({
               attachmentsDir: serverConfig.attachmentsDir,
               attachment,

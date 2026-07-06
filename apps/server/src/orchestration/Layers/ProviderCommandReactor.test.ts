@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  ComposerSourceControlContext,
+  ComposerWorkItemContext,
   ModelSelection,
   ProviderRuntimeEvent,
   ProviderSession,
@@ -20,7 +22,7 @@ import {
   ThreadId,
   TurnId,
 } from "@ryco/contracts";
-import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
+import { DateTime, Effect, Exit, Layer, ManagedRuntime, Option, PubSub, Schema, Scope, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
@@ -451,6 +453,108 @@ describe("ProviderCommandReactor", () => {
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  // Regression: sourceControlContexts used to be accepted on the command but
+  // silently dropped before the provider send-turn request was built.
+  it("forwards attached contexts to the provider turn and keeps provider attachments images-only", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    const sourceControlContext = Schema.decodeUnknownSync(ComposerSourceControlContext)({
+      id: "ctx-sc-1",
+      kind: "issue",
+      provider: "github",
+      reference: "owner/repo#42",
+      detail: {
+        provider: "github",
+        number: 42,
+        title: "Add token usage attribution",
+        url: "https://github.com/owner/repo/issues/42",
+        state: "open",
+        updatedAt: Option.none(),
+        body: "Attribution is missing per-turn deltas.",
+        comments: [],
+        truncated: false,
+      },
+      fetchedAt: DateTime.fromDateUnsafe(new Date(now)),
+      staleAfter: DateTime.fromDateUnsafe(new Date(Date.now() + 5 * 60 * 1000)),
+    });
+    const workItemContext = Schema.decodeUnknownSync(ComposerWorkItemContext)({
+      id: "ctx-wi-1",
+      provider: "jira",
+      key: "RYC-231",
+      detail: {
+        provider: "jira",
+        key: "RYC-231",
+        title: "Attribute token spend per turn",
+        url: "https://acme.atlassian.net/browse/RYC-231",
+        state: "in_progress",
+        stateName: "In Progress",
+        assignee: null,
+        updatedAt: Option.none(),
+        description: "Track per-turn token deltas.",
+        comments: [],
+        transitions: [],
+        linkedChangeRequests: [],
+        editableFields: [],
+        activity: [],
+        truncated: false,
+      },
+      fetchedAt: DateTime.fromDateUnsafe(new Date(now)),
+      staleAfter: DateTime.fromDateUnsafe(new Date(Date.now() + 5 * 60 * 1000)),
+    });
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-contexts"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-contexts"),
+          role: "user",
+          text: "use the attached context",
+          attachments: [
+            {
+              type: "context",
+              id: "ctx-att-1" as never,
+              kind: "issue",
+              provider: "github",
+              reference: "#42",
+              title: "Add token usage attribution",
+              state: "open",
+              url: "https://github.com/owner/repo/issues/42",
+            },
+          ],
+        },
+        sourceControlContexts: [sourceControlContext],
+        workItemContexts: [workItemContext],
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    const request = harness.sendTurn.mock.calls[0]?.[0] as
+      | {
+          attachments?: ReadonlyArray<{ type: string }>;
+          sourceControlContexts?: ReadonlyArray<{ reference: string }>;
+          workItemContexts?: ReadonlyArray<{ key: string }>;
+        }
+      | undefined;
+    expect(request?.sourceControlContexts).toHaveLength(1);
+    expect(request?.sourceControlContexts?.[0]?.reference).toBe("owner/repo#42");
+    expect(request?.workItemContexts).toHaveLength(1);
+    expect(request?.workItemContexts?.[0]?.key).toBe("RYC-231");
+    // The compact context attachment stays on the persisted message but is
+    // filtered out of the provider image pipeline.
+    expect(request?.attachments ?? []).toHaveLength(0);
+
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    const message = thread?.messages.find((entry) => entry.id === "user-message-contexts");
+    expect(message?.attachments?.[0]?.type).toBe("context");
   });
 
   it("generates a thread title on the first turn", async () => {

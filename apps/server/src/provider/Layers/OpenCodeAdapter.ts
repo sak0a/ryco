@@ -27,6 +27,7 @@ import type {
 } from "@opencode-ai/sdk/v2";
 import { getModelSelectionStringOptionValue } from "@ryco/shared/model";
 import { formatSourceControlContextsForAgent } from "@ryco/shared/sourceControlContextFormatter";
+import { formatWorkItemContextsForAgent } from "@ryco/shared/workItemContextFormatter";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -1613,7 +1614,12 @@ export function makeOpenCodeAdapter(
         });
       }
 
-      const formatted = formatSourceControlContextsForAgent(input.sourceControlContexts ?? []);
+      const formatted = [
+        formatSourceControlContextsForAgent(input.sourceControlContexts ?? []),
+        formatWorkItemContextsForAgent(input.workItemContexts ?? []),
+      ]
+        .filter(Boolean)
+        .join("\n\n");
       const text = formatted
         ? formatted + "\n\n" + (input.input?.trim() ?? "")
         : input.input?.trim();

@@ -4,8 +4,12 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
 } from "@ryco/contracts";
-import { DEFAULT_AGENT_TOKEN_MODE } from "@ryco/contracts";
-import { Effect } from "effect";
+import {
+  ComposerSourceControlContext,
+  ComposerWorkItemContext,
+  DEFAULT_AGENT_TOKEN_MODE,
+} from "@ryco/contracts";
+import { Effect, Schema } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
@@ -23,6 +27,18 @@ import {
 import { projectEvent } from "./projector.ts";
 
 const nowIso = () => new Date().toISOString();
+
+// The event store persists payloads with a raw JSON stringify and decodes rows
+// through the full event schema on read. Context arrays carry rich values
+// (DateTime, Option) in Type-space, so the decider writes their JSON wire form
+// (matching the payload schema's toCodecJson fields); reading the event back
+// decodes them to rich values for consumers.
+const encodeSourceControlContextsForEvent = Schema.encodeUnknownSync(
+  Schema.toCodecJson(Schema.Array(ComposerSourceControlContext)),
+);
+const encodeWorkItemContextsForEvent = Schema.encodeUnknownSync(
+  Schema.toCodecJson(Schema.Array(ComposerWorkItemContext)),
+);
 const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
   eventId: crypto.randomUUID() as OrchestrationEvent["eventId"],
   aggregateKind: "thread",
@@ -524,6 +540,21 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: targetThread.interactionMode,
           tokenMode: normalizeTokenMode(targetThread.tokenMode),
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
+          ...(command.sourceControlContexts !== undefined &&
+          command.sourceControlContexts.length > 0
+            ? {
+                sourceControlContexts: encodeSourceControlContextsForEvent(
+                  command.sourceControlContexts,
+                ) as unknown as typeof command.sourceControlContexts,
+              }
+            : {}),
+          ...(command.workItemContexts !== undefined && command.workItemContexts.length > 0
+            ? {
+                workItemContexts: encodeWorkItemContextsForEvent(
+                  command.workItemContexts,
+                ) as unknown as typeof command.workItemContexts,
+              }
+            : {}),
           createdAt: command.createdAt,
         },
       };

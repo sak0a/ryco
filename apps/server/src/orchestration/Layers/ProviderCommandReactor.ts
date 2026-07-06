@@ -1,6 +1,8 @@
 import {
   type ChatAttachment,
   CommandId,
+  type ComposerSourceControlContext,
+  type ComposerWorkItemContext,
   DEFAULT_AGENT_TOKEN_MODE,
   EventId,
   type ModelSelection,
@@ -529,6 +531,8 @@ const make = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
+    readonly sourceControlContexts?: ReadonlyArray<ComposerSourceControlContext>;
+    readonly workItemContexts?: ReadonlyArray<ComposerWorkItemContext>;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
     readonly tokenMode?: AgentTokenMode;
@@ -549,7 +553,14 @@ const make = Effect.gen(function* () {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
-    const normalizedAttachments = input.attachments ?? [];
+    // Provider attachments are the image pipeline only; compact context
+    // attachments stay on the persisted message and ride the dedicated
+    // context arrays below instead.
+    const normalizedAttachments = (input.attachments ?? []).filter(
+      (attachment) => attachment.type === "image",
+    );
+    const sourceControlContexts = input.sourceControlContexts ?? [];
+    const workItemContexts = input.workItemContexts ?? [];
     const project = yield* resolveProject(thread.projectId);
     const customSystemPrompt = project?.customSystemPrompt?.trim() || undefined;
     const activeSession = yield* providerService
@@ -584,6 +595,8 @@ const make = Effect.gen(function* () {
       threadId: input.threadId,
       ...(normalizedInput ? { input: normalizedInput } : {}),
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
+      ...(sourceControlContexts.length > 0 ? { sourceControlContexts } : {}),
+      ...(workItemContexts.length > 0 ? { workItemContexts } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
       tokenMode: input.tokenMode ?? thread.tokenMode ?? DEFAULT_TOKEN_MODE,
@@ -728,6 +741,10 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    const messageImageAttachments = (message.attachments ?? []).filter(
+      (attachment) => attachment.type === "image",
+    );
+
     const isFirstUserMessageTurn =
       thread.messages.filter((entry) => entry.role === "user").length === 1;
     if (isFirstUserMessageTurn) {
@@ -739,7 +756,7 @@ const make = Effect.gen(function* () {
         }) ?? process.cwd();
       const generationInput = {
         messageText: message.text,
-        ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+        ...(messageImageAttachments.length > 0 ? { attachments: messageImageAttachments } : {}),
         ...(event.payload.titleSeed !== undefined ? { titleSeed: event.payload.titleSeed } : {}),
       };
 
@@ -798,7 +815,13 @@ const make = Effect.gen(function* () {
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
       messageText: message.text,
-      ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+      ...(messageImageAttachments.length > 0 ? { attachments: messageImageAttachments } : {}),
+      ...(event.payload.sourceControlContexts !== undefined
+        ? { sourceControlContexts: event.payload.sourceControlContexts }
+        : {}),
+      ...(event.payload.workItemContexts !== undefined
+        ? { workItemContexts: event.payload.workItemContexts }
+        : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
         : {}),

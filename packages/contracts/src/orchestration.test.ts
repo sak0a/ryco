@@ -23,6 +23,7 @@ import {
   ThreadTurnStartRequestedPayload,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { ComposerWorkItemContext } from "./workItems.ts";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeFullThreadDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFullThreadDiffInput);
@@ -908,10 +909,18 @@ it.effect("accepts context attachments and work-item contexts in thread.turn.sta
 
 it.effect("carries work-item contexts on thread.turn-start-requested payloads", () =>
   Effect.gen(function* () {
+    // The payload stores contexts in their JSON wire form (toCodecJson) so
+    // they survive the event store's raw JSON stringify.
+    const decodedContext = Schema.decodeUnknownSync(ComposerWorkItemContext)(
+      workItemContextFixture,
+    );
+    const wireContexts = Schema.encodeUnknownSync(
+      Schema.toCodecJson(Schema.Array(ComposerWorkItemContext)),
+    )([decodedContext]);
     const parsed = yield* decodeThreadTurnStartRequestedPayload({
       threadId: "thread-1",
       messageId: "msg-ctx",
-      workItemContexts: [workItemContextFixture],
+      workItemContexts: wireContexts,
       createdAt: "2026-07-05T10:00:00.000Z",
     });
     assert.strictEqual(parsed.workItemContexts?.length, 1);
