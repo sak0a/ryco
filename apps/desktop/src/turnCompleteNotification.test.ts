@@ -35,6 +35,7 @@ describe("parseTurnCompleteNotification", () => {
     expect(parseTurnCompleteNotification({ title: "Done" })).toBeNull();
     expect(parseTurnCompleteNotification({ threadId: "thread-1" })).toBeNull();
     expect(parseTurnCompleteNotification({ threadId: "", title: "Done" })).toBeNull();
+    expect(parseTurnCompleteNotification({ threadId: "   ", title: "Done" })).toBeNull();
     expect(parseTurnCompleteNotification({ threadId: "thread-1", title: "   " })).toBeNull();
   });
 

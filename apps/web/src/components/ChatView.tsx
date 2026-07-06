@@ -2144,13 +2144,15 @@ export default function ChatView(props: ChatViewProps) {
   // Build the executeChatSendTurn input from a composer snapshot and dispatch it.
   // Shared by direct sends (with an undo window) and queue flushes (without one),
   // so a queued message replays exactly like a live send.
+  // Returns true once the send path has actually started (all guards passed), so
+  // the queue only drops an item after it is genuinely on its way.
   const dispatchComposerSnapshot = async (
     composerSnapshot: SendTurnComposerSnapshot,
     settingsSnapshot: SendTurnSettings,
     undo: SendTurnUndoDeps | undefined,
-  ) => {
+  ): Promise<boolean> => {
     const api = readEnvironmentApi(environmentId);
-    if (!api || !activeThread || !activeProject) return;
+    if (!api || !activeThread || !activeProject) return false;
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const { shouldMaterializeLegacyBranchWorktree, baseBranchForWorktree, shouldCreateWorktree } =
@@ -2167,7 +2169,7 @@ export default function ChatView(props: ChatViewProps) {
     // fall back to local execution when branch selection is missing.
     if (shouldCreateWorktree && !activeThreadBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
-      return;
+      return false;
     }
 
     await executeChatSendTurn({
@@ -2246,6 +2248,7 @@ export default function ChatView(props: ChatViewProps) {
       composerHandle: { readComposer },
       formatOutgoingPrompt,
     });
+    return true;
   };
   const dispatchComposerSnapshotRef = useRef(dispatchComposerSnapshot);
   dispatchComposerSnapshotRef.current = dispatchComposerSnapshot;
@@ -2253,10 +2256,13 @@ export default function ChatView(props: ChatViewProps) {
   const runSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readEnvironmentApi(environmentId);
+    // When a turn is already running the submit is queued, so don't let the
+    // transient post-dispatch `isSendBusy` window swallow a mid-turn message.
+    const turnActive = phase === "running";
     if (
       !api ||
       !activeThread ||
-      isSendBusy ||
+      (isSendBusy && !turnActive) ||
       isConnecting ||
       activeEnvironmentUnavailable ||
       sendInFlightRef.current
@@ -2398,13 +2404,21 @@ export default function ChatView(props: ChatViewProps) {
   // interrupt or provider error leaves the remaining queue intact.
   useEffect(() => {
     if (!activeThreadKey) return;
+    const threadKey = activeThreadKey;
     const next = queuedMessages[0];
     if (!next) return;
     if (isWorking || activeEnvironmentUnavailable) return;
     if (activePendingProgress || activePendingApproval) return;
     if (sendInFlightRef.current) return;
-    dequeueMessage(activeThreadKey);
-    void dispatchComposerSnapshotRef.current(next.composer, next.settings, undefined);
+    // Only remove the item once the send path has actually started; a guard
+    // early-return (missing env/thread/base branch) leaves it queued.
+    void dispatchComposerSnapshotRef
+      .current(next.composer, next.settings, undefined)
+      .then((started) => {
+        if (started) {
+          dequeueMessage(threadKey);
+        }
+      });
   }, [
     activeThreadKey,
     queuedMessages,

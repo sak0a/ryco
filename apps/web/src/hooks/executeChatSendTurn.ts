@@ -457,26 +457,6 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
       composer.selectedModelSelection.options,
     );
 
-    if (thread.isFirstMessage && thread.isServerThread) {
-      await api.orchestration.dispatchCommand({
-        type: "thread.meta.update",
-        commandId: newCommandId(),
-        threadId: thread.threadId,
-        title,
-      });
-    }
-
-    if (thread.isServerThread) {
-      await persistSettingsDeps.persistThreadSettingsForNextTurn({
-        threadId: thread.threadId,
-        createdAt: messageCreatedAt,
-        ...(composer.selectedModel ? { modelSelection: composer.selectedModelSelection } : {}),
-        runtimeMode: settings.runtimeMode,
-        interactionMode: settings.interactionMode,
-        tokenMode: settings.tokenMode,
-      });
-    }
-
     const turnAttachments = await turnAttachmentsPromise;
 
     const freshSourceControlContexts = await refreshStaleSourceControlContexts(
@@ -512,6 +492,28 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
         undone = true;
         return;
       }
+    }
+
+    // Server-side writes derived from this message must only run once the send
+    // commits; otherwise an undone first send leaves orphan title/settings.
+    if (thread.isFirstMessage && thread.isServerThread) {
+      await api.orchestration.dispatchCommand({
+        type: "thread.meta.update",
+        commandId: newCommandId(),
+        threadId: thread.threadId,
+        title,
+      });
+    }
+
+    if (thread.isServerThread) {
+      await persistSettingsDeps.persistThreadSettingsForNextTurn({
+        threadId: thread.threadId,
+        createdAt: messageCreatedAt,
+        ...(composer.selectedModel ? { modelSelection: composer.selectedModelSelection } : {}),
+        runtimeMode: settings.runtimeMode,
+        interactionMode: settings.interactionMode,
+        tokenMode: settings.tokenMode,
+      });
     }
 
     beginLocalDispatch({ preparingWorktree: false });

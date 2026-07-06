@@ -35,42 +35,47 @@ export const ComposerQueuedMessages = memo(function ComposerQueuedMessages({
         Queued · {messages.length}
       </div>
       <ul className="flex flex-col gap-0.5">
-        {messages.map((message, index) => (
-          <li
-            key={message.id}
-            className="flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-muted/50"
-          >
-            <span className="min-w-0 flex-1 truncate text-xs text-foreground">
-              {summarizeQueuedMessage(message)}
-            </span>
-            <button
-              type="button"
-              className={iconButtonClass}
-              disabled={index === 0}
-              onClick={() => onMove(message.id, "up")}
-              aria-label="Move queued message up"
+        {messages.map((message, index) => {
+          const summary = summarizeQueuedMessage(message);
+          // Include position + summary so screen readers can tell rows apart.
+          const rowLabel = `queued message ${index + 1} of ${messages.length}: ${summary}`;
+          return (
+            <li
+              key={message.id}
+              className="flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-muted/50"
             >
-              <ChevronUpIcon className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              className={iconButtonClass}
-              disabled={index === messages.length - 1}
-              onClick={() => onMove(message.id, "down")}
-              aria-label="Move queued message down"
-            >
-              <ChevronDownIcon className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              className={iconButtonClass}
-              onClick={() => onRemove(message.id)}
-              aria-label="Remove queued message"
-            >
-              <XIcon className="size-3.5" />
-            </button>
-          </li>
-        ))}
+              <span className="min-w-0 flex-1 truncate text-xs text-foreground" title={summary}>
+                {summary}
+              </span>
+              <button
+                type="button"
+                className={iconButtonClass}
+                disabled={index === 0}
+                onClick={() => onMove(message.id, "up")}
+                aria-label={`Move ${rowLabel} up`}
+              >
+                <ChevronUpIcon className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                className={iconButtonClass}
+                disabled={index === messages.length - 1}
+                onClick={() => onMove(message.id, "down")}
+                aria-label={`Move ${rowLabel} down`}
+              >
+                <ChevronDownIcon className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                className={iconButtonClass}
+                onClick={() => onRemove(message.id)}
+                aria-label={`Remove ${rowLabel}`}
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

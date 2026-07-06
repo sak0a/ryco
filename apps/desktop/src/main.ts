@@ -264,6 +264,9 @@ type LinuxDesktopNamedApp = Electron.App & {
 };
 
 let mainWindow: BrowserWindow | null = null;
+// Retain live turn-complete notifications: Electron GCs Notification objects once
+// the creating scope returns, which would drop their `click`/`close` handlers.
+const activeTurnCompleteNotifications = new Set<Notification>();
 let backendProcess: ChildProcess.ChildProcess | null = null;
 let backendPort = 0;
 let backendBindHost = DESKTOP_LOOPBACK_HOST;
@@ -2333,13 +2336,18 @@ function registerIpcHandlers(): void {
       title: notification.title,
       ...(notification.body ? { body: notification.body } : {}),
     });
+    activeTurnCompleteNotifications.add(native);
     native.on("click", () => {
+      activeTurnCompleteNotifications.delete(native);
       const targetWindow = mainWindow ?? BrowserWindow.getAllWindows()[0];
       if (!targetWindow || targetWindow.isDestroyed()) {
         return;
       }
       revealWindow(targetWindow);
       targetWindow.webContents.send(TURN_COMPLETE_NOTIFICATION_ACTIVATED_CHANNEL, notification);
+    });
+    native.on("close", () => {
+      activeTurnCompleteNotifications.delete(native);
     });
     native.show();
   });

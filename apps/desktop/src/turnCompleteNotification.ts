@@ -25,7 +25,7 @@ export function parseTurnCompleteNotification(
 
   const threadId = record.threadId;
   const title = record.title;
-  if (typeof threadId !== "string" || threadId.length === 0) {
+  if (typeof threadId !== "string" || threadId.trim().length === 0) {
     return null;
   }
   if (typeof title !== "string" || title.trim().length === 0) {
