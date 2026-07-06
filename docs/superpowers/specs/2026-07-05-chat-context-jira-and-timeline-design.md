@@ -126,7 +126,11 @@ export const ChatAttachment = Schema.Union([ChatImageAttachment, ChatContextAtta
 
 - `ThreadTurnStartRequestedPayload` gains optional `sourceControlContexts`
   and `workItemContexts`; the decider copies both from the command into
-  the `thread.turn-start-requested` event.
+  the `thread.turn-start-requested` event. The payload fields are declared
+  with `Schema.toCodecJson(...)` and the decider writes the encoded JSON
+  wire form: the event store persists payloads with a raw JSON stringify
+  and decodes rows through the event schema, so rich values (`DateTime`,
+  `Option`) inside contexts would not survive the round-trip otherwise.
 - `ProviderCommandReactor.buildSendTurnRequestForThread` forwards both
   arrays into the send-turn request, fixing the silent drop.
 - The reactor filters `message.attachments` to `type === "image"` when
@@ -184,8 +188,11 @@ ComposerWorkItemContext[]` (not persisted, matching
   the project has a Jira link (`jiraConnectionId` set and
   `jiraProjectKeys.length > 0`); list/search reuse `useWorkItemList` /
   `useWorkItemSearch` with the popup's existing search-input debounce.
-- `ComposerHintRow`: the scaffolded `#jira` pill now opens the picker on
-  the Jira tab.
+- `ComposerHintRow`: the scaffolded `#jira` pill now works end-to-end. As
+  implemented it inserts the `#jira` trigger into the composer (matching
+  the `#i` / `#pr` pills) and the inline menu surfaces work items for the
+  jira scope — rather than opening the picker popup on the Jira tab as
+  originally sketched. Same outcome, consistent pill behavior.
 
 ### Chips
 
@@ -236,6 +243,15 @@ ComposerWorkItemContext[]` (not persisted, matching
 | Item deleted upstream after send         | Chip still renders (snapshot is local); the click-through dialog surfaces the fetch error.             |
 | Historical messages                      | No context attachments → no chip row → rendering unchanged.                                            |
 | Offline at send                          | Existing behavior: stale refresh fails silently, cached contexts sent.                                 |
+
+## Implementation notes (deviations)
+
+- The context picker popup now also renders its tab strip when only Jira
+  is available (no source-control remote), instead of collapsing to the
+  "no remote" empty state.
+- Send rollback (dispatch failure) restores prompt/images/terminal
+  contexts but not attached PR/issue/Jira contexts — pre-existing behavior
+  for source-control contexts, mirrored for work items.
 
 ## Edge cases
 
