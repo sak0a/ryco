@@ -210,9 +210,20 @@ export const makeWorktreeOperations = (deps: {
         );
     }).pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
-  const createWorktreeForProject = (input: GitCreateWorktreeForProjectInput) =>
+  const createWorktreeForProject = (
+    input: GitCreateWorktreeForProjectInput,
+    options?: {
+      /**
+       * Attach this pre-existing thread (created by the send bootstrap)
+       * instead of creating a new one: `thread.create` dispatches become
+       * `thread.meta.update` on the given thread.
+       */
+      readonly existingThreadId?: ThreadId;
+    },
+  ) =>
     Effect.gen(function* () {
       const operation = "git.createWorktreeForProject";
+      const existingThreadId = options?.existingThreadId;
       if (
         input.intent.kind === "pr" ||
         input.intent.kind === "issue" ||
@@ -244,36 +255,51 @@ export const makeWorktreeOperations = (deps: {
                 );
         if (existing !== null) {
           const existingWorktree = yield* loadWorktreeForGitWorkflow(operation, existing);
-          const project = yield* loadProjectForGitWorkflow(operation, input.projectId);
-          const modelSelection = project.defaultModelSelection;
-          if (modelSelection === null) {
-            return yield* failGitWorkflow(
+          const now = new Date().toISOString();
+          let threadId: ThreadId;
+          if (existingThreadId !== undefined) {
+            threadId = existingThreadId;
+            yield* dispatchWorktreeCommand(
+              {
+                type: "thread.meta.update",
+                commandId: serverCommandId("worktree-thread-meta-update"),
+                threadId,
+                branch: existingWorktree.branch,
+                worktreePath: existingWorktree.worktreePath,
+              },
               operation,
-              `Project ${input.projectId} has no default model selection.`,
+            );
+          } else {
+            const project = yield* loadProjectForGitWorkflow(operation, input.projectId);
+            const modelSelection = project.defaultModelSelection;
+            if (modelSelection === null) {
+              return yield* failGitWorkflow(
+                operation,
+                `Project ${input.projectId} has no default model selection.`,
+              );
+            }
+            threadId = ThreadId.make(`thread-${crypto.randomUUID()}`);
+            yield* dispatchWorktreeCommand(
+              {
+                type: "thread.create",
+                commandId: serverCommandId("worktree-thread-create"),
+                threadId,
+                projectId: input.projectId,
+                title:
+                  existingWorktree.workItemTitle ??
+                  existingWorktree.prTitle ??
+                  existingWorktree.issueTitle ??
+                  existingWorktree.branch,
+                modelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: existingWorktree.branch,
+                worktreePath: existingWorktree.worktreePath,
+                createdAt: now,
+              },
+              operation,
             );
           }
-          const now = new Date().toISOString();
-          const threadId = ThreadId.make(`thread-${crypto.randomUUID()}`);
-          yield* dispatchWorktreeCommand(
-            {
-              type: "thread.create",
-              commandId: serverCommandId("worktree-thread-create"),
-              threadId,
-              projectId: input.projectId,
-              title:
-                existingWorktree.workItemTitle ??
-                existingWorktree.prTitle ??
-                existingWorktree.issueTitle ??
-                existingWorktree.branch,
-              modelSelection,
-              runtimeMode: "full-access",
-              interactionMode: "default",
-              branch: existingWorktree.branch,
-              worktreePath: existingWorktree.worktreePath,
-              createdAt: now,
-            },
-            operation,
-          );
           yield* dispatchWorktreeCommand(
             {
               type: "thread.attach-to-worktree",
@@ -290,7 +316,9 @@ export const makeWorktreeOperations = (deps: {
 
       const project = yield* loadProjectForGitWorkflow(operation, input.projectId);
       const modelSelection = project.defaultModelSelection;
-      if (modelSelection === null) {
+      // With an existing thread the model selection is only needed for AI
+      // branch-name generation, which degrades to deterministic fallbacks.
+      if (modelSelection === null && existingThreadId === undefined) {
         return yield* failGitWorkflow(
           operation,
           `Project ${input.projectId} has no default model selection.`,
@@ -299,7 +327,7 @@ export const makeWorktreeOperations = (deps: {
 
       const now = new Date().toISOString();
       const worktreeId = WorktreeId.make(`worktree-${crypto.randomUUID()}`);
-      const threadId = ThreadId.make(`thread-${crypto.randomUUID()}`);
+      const threadId = existingThreadId ?? ThreadId.make(`thread-${crypto.randomUUID()}`);
       let branch: string;
       let refName: string;
       let newRefName: string | undefined;
@@ -378,23 +406,25 @@ export const makeWorktreeOperations = (deps: {
           const generatedBranchFallback = buildIssueBranchNameFallback(number);
           branch =
             input.intent.branchName ??
-            (yield* textGeneration
-              .generateBranchName({
-                cwd: project.workspaceRoot,
-                message: buildIssueBranchNameMessage({
-                  number,
-                  title: input.intent.title,
-                  body: input.intent.body,
-                }),
-                modelSelection,
-              })
-              .pipe(
-                Effect.map(({ branch: generatedBranch }) => {
-                  const trimmedBranch = generatedBranch.trim();
-                  return trimmedBranch.length > 0 ? trimmedBranch : generatedBranchFallback;
-                }),
-                Effect.catch(() => Effect.succeed(generatedBranchFallback)),
-              ));
+            (modelSelection === null
+              ? generatedBranchFallback
+              : yield* textGeneration
+                  .generateBranchName({
+                    cwd: project.workspaceRoot,
+                    message: buildIssueBranchNameMessage({
+                      number,
+                      title: input.intent.title,
+                      body: input.intent.body,
+                    }),
+                    modelSelection,
+                  })
+                  .pipe(
+                    Effect.map(({ branch: generatedBranch }) => {
+                      const trimmedBranch = generatedBranch.trim();
+                      return trimmedBranch.length > 0 ? trimmedBranch : generatedBranchFallback;
+                    }),
+                    Effect.catch(() => Effect.succeed(generatedBranchFallback)),
+                  ));
           refName = input.intent.baseBranch ?? "HEAD";
           newRefName = branch;
           title = input.intent.title?.trim() || `Issue #${number}`;
@@ -422,20 +452,22 @@ export const makeWorktreeOperations = (deps: {
           } else {
             const requestedBranch =
               input.intent.branchName ??
-              (yield* textGeneration
-                .generateBranchName({
-                  cwd: project.workspaceRoot,
-                  message: buildWorkItemBranchNameMessage({
-                    key,
-                    title: input.intent.title,
-                    body: input.intent.body,
-                  }),
-                  modelSelection,
-                })
-                .pipe(
-                  Effect.map(({ branch: generatedBranch }) => generatedBranch),
-                  Effect.catch(() => Effect.succeed(generatedBranchFallback)),
-                ));
+              (modelSelection === null
+                ? generatedBranchFallback
+                : yield* textGeneration
+                    .generateBranchName({
+                      cwd: project.workspaceRoot,
+                      message: buildWorkItemBranchNameMessage({
+                        key,
+                        title: input.intent.title,
+                        body: input.intent.body,
+                      }),
+                      modelSelection,
+                    })
+                    .pipe(
+                      Effect.map(({ branch: generatedBranch }) => generatedBranch),
+                      Effect.catch(() => Effect.succeed(generatedBranchFallback)),
+                    ));
             branch = ensureWorkItemBranchNameIncludesKey({
               branch: requestedBranch,
               fallback: generatedBranchFallback,
@@ -565,22 +597,41 @@ export const makeWorktreeOperations = (deps: {
           );
         }
 
-        yield* dispatchWorktreeCommand(
-          {
-            type: "thread.create",
-            commandId: serverCommandId("worktree-thread-create"),
-            threadId,
-            projectId: input.projectId,
-            title,
-            modelSelection,
-            runtimeMode: "full-access",
-            interactionMode: "default",
-            branch,
-            worktreePath,
-            createdAt: now,
-          },
-          operation,
-        );
+        if (existingThreadId !== undefined) {
+          yield* dispatchWorktreeCommand(
+            {
+              type: "thread.meta.update",
+              commandId: serverCommandId("worktree-thread-meta-update"),
+              threadId,
+              branch,
+              worktreePath,
+            },
+            operation,
+          );
+        } else {
+          if (modelSelection === null) {
+            return yield* failGitWorkflow(
+              operation,
+              `Project ${input.projectId} has no default model selection.`,
+            );
+          }
+          yield* dispatchWorktreeCommand(
+            {
+              type: "thread.create",
+              commandId: serverCommandId("worktree-thread-create"),
+              threadId,
+              projectId: input.projectId,
+              title,
+              modelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch,
+              worktreePath,
+              createdAt: now,
+            },
+            operation,
+          );
+        }
 
         yield* dispatchWorktreeCommand(
           {

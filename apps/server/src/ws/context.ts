@@ -408,6 +408,15 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
             : Effect.void;
 
         const bootstrapProgram = Effect.gen(function* () {
+          if (bootstrap?.prepareWorkspace && bootstrap.prepareWorktree) {
+            return yield* Effect.fail(
+              new OrchestrationDispatchCommandError({
+                message:
+                  "Bootstrap cannot combine prepareWorkspace with prepareWorktree; pick one.",
+              }),
+            );
+          }
+
           if (bootstrap?.createThread) {
             yield* orchestrationEngine.dispatch({
               type: "thread.create",
@@ -423,6 +432,73 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
               createdAt: bootstrap.createThread.createdAt,
             });
             createdThread = true;
+          }
+
+          if (bootstrap?.prepareWorkspace) {
+            // Item-action workspace: the click-time plan is advisory; the
+            // send is authoritative, so re-resolve the intent and execute
+            // whatever it yields now.
+            const workspace = bootstrap.prepareWorkspace;
+            targetProjectId = workspace.projectId;
+            const resolved = yield* resolveActionWorkspace({
+              projectId: workspace.projectId,
+              intent: workspace.intent,
+            });
+            switch (resolved.plan.kind) {
+              case "reuse-worktree": {
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.meta.update",
+                  commandId: serverCommandId("bootstrap-thread-meta-update"),
+                  threadId: command.threadId,
+                  branch: resolved.plan.branch,
+                  worktreePath: resolved.plan.worktreePath,
+                });
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.attach-to-worktree",
+                  commandId: serverCommandId("bootstrap-thread-attach"),
+                  threadId: command.threadId,
+                  worktreeId: resolved.plan.worktreeId,
+                  attachedAt: new Date().toISOString(),
+                });
+                targetWorktreePath = resolved.plan.worktreePath;
+                yield* refreshGitStatus(resolved.plan.worktreePath);
+                break;
+              }
+              case "local-main-checkout": {
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.meta.update",
+                  commandId: serverCommandId("bootstrap-thread-meta-update"),
+                  threadId: command.threadId,
+                  branch: resolved.plan.branch,
+                  worktreePath: null,
+                });
+                break;
+              }
+              case "create-worktree": {
+                // Creates the worktree + projection record, updates the
+                // bootstrap thread's meta, attaches it, and launches the
+                // setup script — with its own cleanup-on-failure. The
+                // linked-state refresh it forks needs its services provided
+                // here since the bootstrap runs outside the RPC handler
+                // environment.
+                const created = yield* createWorktreeForProject(
+                  { projectId: workspace.projectId, intent: workspace.intent },
+                  { existingThreadId: command.threadId },
+                ).pipe(
+                  Effect.provideService(
+                    SourceControlProviderRegistry.SourceControlProviderRegistry,
+                    sourceControlRegistry,
+                  ),
+                  Effect.provideService(ProjectionWorktreeRepository, projectionWorktrees),
+                  Effect.provideService(OrchestrationEngineService, orchestrationEngine),
+                );
+                const createdWorktree = yield* projectionWorktrees
+                  .getById({ worktreeId: created.worktreeId })
+                  .pipe(Effect.map(Option.getOrNull));
+                targetWorktreePath = createdWorktree?.worktreePath ?? null;
+                break;
+              }
+            }
           }
 
           if (bootstrap?.prepareWorktree) {
