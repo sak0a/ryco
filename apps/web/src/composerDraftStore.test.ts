@@ -57,7 +57,7 @@ function selectionsByProvider(
 }
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { Option } from "effect";
-import type { ComposerSourceControlContext } from "@ryco/contracts";
+import type { ComposerSourceControlContext, ComposerWorkItemContext } from "@ryco/contracts";
 
 import {
   COMPOSER_DRAFT_STORAGE_KEY,
@@ -1636,6 +1636,99 @@ describe("composerDraftStore sourceControlContexts", () => {
     const ctx = makeSourceControlContext("ctx-1", "owner/repo#1");
 
     useComposerDraftStore.getState().addSourceControlContext(threadRef, ctx);
+    useComposerDraftStore.getState().setPrompt(threadRef, "hello");
+    useComposerDraftStore.getState().clearComposerContent(threadRef);
+
+    const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(draft).toBeUndefined();
+  });
+});
+
+function makeWorkItemContext(id: string, key: string = "RYC-1"): ComposerWorkItemContext {
+  return {
+    id,
+    provider: "jira",
+    key,
+    detail: {
+      provider: "jira",
+      key,
+      title: "Test work item" as any,
+      url: "https://acme.atlassian.net/browse/" + key,
+      state: "open",
+      assignee: null,
+      updatedAt: Option.none(),
+      description: "Work item body",
+      comments: [],
+      transitions: [],
+      linkedChangeRequests: [],
+      editableFields: [],
+      activity: [],
+      truncated: false,
+    },
+    fetchedAt: new Date().toISOString() as any,
+    staleAfter: new Date(Date.now() + 5 * 60 * 1000).toISOString() as any,
+  } as unknown as ComposerWorkItemContext;
+}
+
+describe("composerDraftStore workItemContexts", () => {
+  const threadId = ThreadId.make("thread-wi-ctx");
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
+
+  beforeEach(() => {
+    useComposerDraftStore.setState({
+      draftsByThreadKey: {},
+      draftThreadsByThreadKey: {},
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+      stickyModelSelectionByProvider: {},
+      stickyActiveProvider: null,
+    });
+  });
+
+  it("addWorkItemContext adds a context to the per-thread draft and returns { added: true }", () => {
+    const ctx = makeWorkItemContext("ctx-1", "RYC-1");
+
+    const result = useComposerDraftStore.getState().addWorkItemContext(threadRef, ctx);
+
+    expect(result).toEqual({ added: true });
+    const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(draft?.workItemContexts).toHaveLength(1);
+    expect(draft?.workItemContexts[0]?.id).toBe("ctx-1");
+  });
+
+  it("addWorkItemContext deduplicates by provider:key case-insensitively", () => {
+    const ctx1 = makeWorkItemContext("ctx-1", "RYC-1");
+    const ctx2 = makeWorkItemContext("ctx-2", "ryc-1"); // same key, different case + id
+
+    const first = useComposerDraftStore.getState().addWorkItemContext(threadRef, ctx1);
+    const second = useComposerDraftStore.getState().addWorkItemContext(threadRef, ctx2);
+
+    expect(first).toEqual({ added: true });
+    expect(second).toEqual({ added: false, reason: "duplicate" });
+    const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(draft?.workItemContexts).toHaveLength(1);
+    expect(draft?.workItemContexts[0]?.id).toBe("ctx-1");
+  });
+
+  it("removeWorkItemContext removes a context by id", () => {
+    useComposerDraftStore.getState().addWorkItemContext(threadRef, makeWorkItemContext("ctx-1", "RYC-1"));
+    useComposerDraftStore.getState().addWorkItemContext(threadRef, makeWorkItemContext("ctx-2", "RYC-2"));
+    useComposerDraftStore.getState().removeWorkItemContext(threadRef, "ctx-1");
+
+    const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(draft?.workItemContexts).toHaveLength(1);
+    expect(draft?.workItemContexts[0]?.id).toBe("ctx-2");
+  });
+
+  it("clearWorkItemContexts empties the list and drops an otherwise-empty draft", () => {
+    useComposerDraftStore.getState().addWorkItemContext(threadRef, makeWorkItemContext("ctx-1", "RYC-1"));
+    useComposerDraftStore.getState().clearWorkItemContexts(threadRef);
+
+    const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(draft).toBeUndefined();
+  });
+
+  it("clearComposerContent wipes workItemContexts", () => {
+    useComposerDraftStore.getState().addWorkItemContext(threadRef, makeWorkItemContext("ctx-1", "RYC-1"));
     useComposerDraftStore.getState().setPrompt(threadRef, "hello");
     useComposerDraftStore.getState().clearComposerContent(threadRef);
 

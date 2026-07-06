@@ -1213,6 +1213,7 @@ export function toHydratedThreadDraft(
         text: "",
       })) ?? [],
     sourceControlContexts: [],
+    workItemContexts: [],
     modelSelectionByProvider,
     activeProvider,
     runtimeMode: persistedDraft.runtimeMode ?? null,

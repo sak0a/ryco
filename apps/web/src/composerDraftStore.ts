@@ -16,6 +16,7 @@ import {
   type ScopedThreadRef,
   ThreadId,
   type ComposerSourceControlContext,
+  type ComposerWorkItemContext,
 } from "@ryco/contracts";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
 import * as Schema from "effect/Schema";
@@ -81,6 +82,8 @@ export interface ComposerThreadDraftState {
   terminalContexts: TerminalContextDraft[];
   /** Source-control contexts (issues / change requests) attached to this draft. Not persisted. */
   sourceControlContexts: ComposerSourceControlContext[];
+  /** Jira work-item contexts attached to this draft. Not persisted. */
+  workItemContexts: ComposerWorkItemContext[];
   /**
    * Per-instance model selection. Keyed by `ProviderInstanceId` (open
    * branded slug) so a default `codex` instance and a user-authored
@@ -277,6 +280,12 @@ export interface ComposerDraftStoreState {
   ) => { added: boolean; reason?: "duplicate" };
   removeSourceControlContext: (threadRef: ComposerThreadTarget, id: string) => void;
   clearSourceControlContexts: (threadRef: ComposerThreadTarget) => void;
+  addWorkItemContext: (
+    threadRef: ComposerThreadTarget,
+    context: ComposerWorkItemContext,
+  ) => { added: boolean; reason?: "duplicate" };
+  removeWorkItemContext: (threadRef: ComposerThreadTarget, id: string) => void;
+  clearWorkItemContexts: (threadRef: ComposerThreadTarget) => void;
   clearPersistedAttachments: (threadRef: ComposerThreadTarget) => void;
   syncPersistedAttachments: (
     threadRef: ComposerThreadTarget,
@@ -326,10 +335,12 @@ const EMPTY_IDS: string[] = [];
 const EMPTY_PERSISTED_ATTACHMENTS: PersistedComposerImageAttachment[] = [];
 const EMPTY_TERMINAL_CONTEXTS: TerminalContextDraft[] = [];
 const EMPTY_SOURCE_CONTROL_CONTEXTS: ComposerSourceControlContext[] = [];
+const EMPTY_WORK_ITEM_CONTEXTS: ComposerWorkItemContext[] = [];
 Object.freeze(EMPTY_IMAGES);
 Object.freeze(EMPTY_IDS);
 Object.freeze(EMPTY_PERSISTED_ATTACHMENTS);
 Object.freeze(EMPTY_SOURCE_CONTROL_CONTEXTS);
+Object.freeze(EMPTY_WORK_ITEM_CONTEXTS);
 const EMPTY_MODEL_SELECTION_BY_PROVIDER: Partial<Record<ProviderDriverKind, ModelSelection>> =
   Object.freeze({});
 export const EMPTY_COMPOSER_DRAFT_MODEL_STATE = Object.freeze<ComposerDraftModelState>({
@@ -344,6 +355,7 @@ export const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   persistedAttachments: EMPTY_PERSISTED_ATTACHMENTS,
   terminalContexts: EMPTY_TERMINAL_CONTEXTS,
   sourceControlContexts: EMPTY_SOURCE_CONTROL_CONTEXTS,
+  workItemContexts: EMPTY_WORK_ITEM_CONTEXTS,
   modelSelectionByProvider: EMPTY_MODEL_SELECTION_BY_PROVIDER,
   activeProvider: null,
   runtimeMode: null,
@@ -359,6 +371,7 @@ function createEmptyThreadDraft(): ComposerThreadDraftState {
     persistedAttachments: [],
     terminalContexts: [],
     sourceControlContexts: [],
+    workItemContexts: [],
     modelSelectionByProvider: {},
     activeProvider: null,
     runtimeMode: null,
@@ -431,6 +444,7 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
     draft.persistedAttachments.length === 0 &&
     draft.terminalContexts.length === 0 &&
     draft.sourceControlContexts.length === 0 &&
+    draft.workItemContexts.length === 0 &&
     Object.keys(draft.modelSelectionByProvider).length === 0 &&
     draft.activeProvider === null &&
     draft.runtimeMode === null &&
@@ -1759,6 +1773,79 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
         },
+        addWorkItemContext: (threadRef, context) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          if (threadKey.length === 0) {
+            return { added: false };
+          }
+          const dedupKey = `${context.provider}:${context.key.toUpperCase()}`;
+          let alreadyPresent = false;
+          set((state) => {
+            const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+            alreadyPresent = existing.workItemContexts.some(
+              (ctx) => `${ctx.provider}:${ctx.key.toUpperCase()}` === dedupKey,
+            );
+            if (alreadyPresent) {
+              return state;
+            }
+            return {
+              draftsByThreadKey: {
+                ...state.draftsByThreadKey,
+                [threadKey]: {
+                  ...existing,
+                  workItemContexts: [...existing.workItemContexts, context],
+                },
+              },
+            };
+          });
+          return alreadyPresent ? { added: false, reason: "duplicate" } : { added: true };
+        },
+        removeWorkItemContext: (threadRef, id) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          if (threadKey.length === 0) {
+            return;
+          }
+          set((state) => {
+            const current = state.draftsByThreadKey[threadKey];
+            if (!current) {
+              return state;
+            }
+            const nextDraft: ComposerThreadDraftState = {
+              ...current,
+              workItemContexts: current.workItemContexts.filter((ctx) => ctx.id !== id),
+            };
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+            if (shouldRemoveDraft(nextDraft)) {
+              delete nextDraftsByThreadKey[threadKey];
+            } else {
+              nextDraftsByThreadKey[threadKey] = nextDraft;
+            }
+            return { draftsByThreadKey: nextDraftsByThreadKey };
+          });
+        },
+        clearWorkItemContexts: (threadRef) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          if (threadKey.length === 0) {
+            return;
+          }
+          set((state) => {
+            const current = state.draftsByThreadKey[threadKey];
+            if (!current || current.workItemContexts.length === 0) {
+              return state;
+            }
+            const nextDraft: ComposerThreadDraftState = {
+              ...current,
+              workItemContexts: [],
+            };
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+            if (shouldRemoveDraft(nextDraft)) {
+              delete nextDraftsByThreadKey[threadKey];
+            } else {
+              nextDraftsByThreadKey[threadKey] = nextDraft;
+            }
+            return { draftsByThreadKey: nextDraftsByThreadKey };
+          });
+        },
         clearPersistedAttachments: (threadRef) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
           if (threadKey.length === 0) {
@@ -1832,6 +1919,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               persistedAttachments: [],
               terminalContexts: [],
               sourceControlContexts: [],
+              workItemContexts: [],
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) {
