@@ -475,6 +475,35 @@ describe("detectComposerTrigger – source control", () => {
     if (t?.kind !== "source-control") return;
     expect(t.directAttach).toBe(false);
   });
+  it("sets directAttachWorkItemKey for a Jira key '#RYC-231'", () => {
+    const t = detectComposerTrigger("do #RYC-231 ", 11);
+    expect(t?.kind).toBe("source-control");
+    if (t?.kind !== "source-control") return;
+    expect(t.directAttachWorkItemKey).toBe("RYC-231");
+    expect(t.directAttach).toBe(false);
+  });
+  it("uppercases lowercase Jira keys '#ryc-231'", () => {
+    const t = detectComposerTrigger("do #ryc-231 ", 11);
+    expect(t?.kind).toBe("source-control");
+    if (t?.kind !== "source-control") return;
+    expect(t.directAttachWorkItemKey).toBe("RYC-231");
+  });
+  it("does not set directAttachWorkItemKey for '#42'", () => {
+    const t = detectComposerTrigger("see #42 ", 7);
+    expect(t?.kind).toBe("source-control");
+    if (t?.kind !== "source-control") return;
+    expect(t.directAttachWorkItemKey).toBeUndefined();
+    expect(t.directAttach).toBe(true);
+  });
+  it("does not set directAttachWorkItemKey for incomplete keys", () => {
+    for (const text of ["do #RYC- ", "do #RYC-0 ", "do #-231 ", "do #bug "]) {
+      const cursor = text.length - 1;
+      const t = detectComposerTrigger(text, cursor);
+      expect(t?.kind).toBe("source-control");
+      if (t?.kind !== "source-control") continue;
+      expect(t.directAttachWorkItemKey).toBeUndefined();
+    }
+  });
 });
 
 describe("parseStandaloneComposerSlashCommand", () => {

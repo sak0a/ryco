@@ -16,6 +16,13 @@ export interface ComposerTrigger {
    * the menu. Always `false` for other trigger kinds.
    */
   directAttach?: boolean;
+  /**
+   * For `kind === "source-control"`, set to the normalized (uppercased) Jira key
+   * when the query matches the work-item key pattern (e.g. `#RYC-231`). The
+   * trigger stays project-agnostic — whether a Jira lookup is actually offered
+   * is decided by the menu layer based on the project's Jira link.
+   */
+  directAttachWorkItemKey?: string;
 }
 
 const isInlineTokenSegment = (
@@ -307,12 +314,14 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
   }
   if (token.startsWith("#")) {
     const query = token.slice(1);
+    const workItemKeyMatch = /^[A-Za-z][A-Za-z0-9]*-[1-9]\d*$/.test(query);
     return {
       kind: "source-control",
       query,
       rangeStart: tokenStart,
       rangeEnd: cursor,
       directAttach: /^[1-9]\d*$/.test(query),
+      ...(workItemKeyMatch ? { directAttachWorkItemKey: query.toUpperCase() } : {}),
     };
   }
   if (!token.startsWith("@")) {
