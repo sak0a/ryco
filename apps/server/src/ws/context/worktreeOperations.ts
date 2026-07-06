@@ -6,6 +6,7 @@ import {
   type CommandId,
   type GitCreateWorktreeForProjectInput,
   type GitManagerServiceError,
+  type GitResolveActionWorkspaceInput,
   type OrchestrationCommand,
   type OrchestrationDispatchCommandError,
   type ProjectId,
@@ -605,6 +606,90 @@ export const makeWorktreeOperations = (deps: {
       return { worktreeId, sessionId: threadId };
     });
 
+  /**
+   * Read-only resolution of the workspace an item action would run in.
+   * Mirrors the send-time decision tree without any git mutations:
+   * registered worktree → reuse; PR head branch at the project root →
+   * local main checkout; otherwise → create.
+   */
+  const resolveActionWorkspace = (input: GitResolveActionWorkspaceInput) =>
+    Effect.gen(function* () {
+      const operation = "git.resolveActionWorkspace";
+      const intent = input.intent;
+
+      if (intent.kind === "pr" || intent.kind === "issue" || intent.kind === "workItem") {
+        const existing =
+          intent.kind === "workItem"
+            ? yield* projectionWorktrees
+                .findByWorkItem({
+                  projectId: input.projectId,
+                  provider: intent.provider,
+                  key: intent.key,
+                })
+                .pipe(
+                  Effect.mapError((cause) =>
+                    toGitManagerError(operation, "Failed to find existing worktree.", cause),
+                  ),
+                )
+            : yield* projectionWorktrees
+                .findByOrigin({
+                  projectId: input.projectId,
+                  kind: intent.kind,
+                  number: intent.number ?? 0,
+                })
+                .pipe(
+                  Effect.mapError((cause) =>
+                    toGitManagerError(operation, "Failed to find existing worktree.", cause),
+                  ),
+                );
+        if (existing !== null) {
+          const existingWorktree = yield* loadWorktreeForGitWorkflow(operation, existing);
+          if (existingWorktree.worktreePath !== null && existingWorktree.archivedAt === null) {
+            return {
+              plan: {
+                kind: "reuse-worktree" as const,
+                worktreeId: existing,
+                worktreePath: existingWorktree.worktreePath,
+                branch: existingWorktree.branch,
+              },
+            };
+          }
+        }
+      }
+
+      if (intent.kind === "pr") {
+        const project = yield* loadProjectForGitWorkflow(operation, input.projectId);
+        const resolved = yield* gitWorkflow.resolvePullRequest({
+          cwd: project.workspaceRoot,
+          reference: String(intent.number ?? 0),
+        });
+        const headBranch = resolved.pullRequest.headBranch;
+        const refs = yield* gitWorkflow
+          .listRefs({ cwd: project.workspaceRoot, query: headBranch })
+          .pipe(
+            Effect.mapError((cause) =>
+              toGitManagerError(operation, "Failed to list local refs.", cause),
+            ),
+          );
+        const localHead = refs.refs.find((ref) => !ref.isRemote && ref.name === headBranch);
+        const checkedOutAtRoot =
+          localHead !== undefined &&
+          (localHead.worktreePath !== null
+            ? isProjectRootPath(localHead.worktreePath, project.workspaceRoot)
+            : localHead.current);
+        if (checkedOutAtRoot) {
+          return {
+            plan: { kind: "local-main-checkout" as const, branch: headBranch },
+          };
+        }
+        return {
+          plan: { kind: "create-worktree" as const, plannedBranch: headBranch },
+        };
+      }
+
+      return { plan: { kind: "create-worktree" as const } };
+    });
+
   const archiveWorktree = (input: {
     readonly worktreeId: WorktreeId;
     readonly deleteBranch: boolean;
@@ -832,6 +917,7 @@ export const makeWorktreeOperations = (deps: {
   return {
     dispatchWorktreeCommand,
     createWorktreeForProject,
+    resolveActionWorkspace,
     archiveWorktree,
     restoreWorktree,
     deleteWorktree,

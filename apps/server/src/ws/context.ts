@@ -559,6 +559,7 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
     const {
       dispatchWorktreeCommand,
       createWorktreeForProject,
+      resolveActionWorkspace,
       archiveWorktree,
       restoreWorktree,
       deleteWorktree,
@@ -661,6 +662,7 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
       refreshStateForLinkedReference,
       attachLinkedIssuesToPrAction,
       createWorktreeForProject,
+      resolveActionWorkspace,
       archiveWorktree,
       restoreWorktree,
       deleteWorktree,

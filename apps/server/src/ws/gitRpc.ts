@@ -27,6 +27,7 @@ export const makeGitHandlers = (ctx: WsRpcContext) => {
     serverCommandId,
     toGitManagerError,
     createWorktreeForProject,
+    resolveActionWorkspace,
     archiveWorktree,
     restoreWorktree,
     deleteWorktree,
@@ -182,6 +183,12 @@ export const makeGitHandlers = (ctx: WsRpcContext) => {
       observeRpcEffect(
         WS_METHODS.gitCreateWorktreeForProject,
         ownerEffect(WS_METHODS.gitCreateWorktreeForProject, createWorktreeForProject(input)),
+        { "rpc.aggregate": "git" },
+      ),
+    [WS_METHODS.gitResolveActionWorkspace]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.gitResolveActionWorkspace,
+        ownerEffect(WS_METHODS.gitResolveActionWorkspace, resolveActionWorkspace(input)),
         { "rpc.aggregate": "git" },
       ),
     [WS_METHODS.gitFindWorktreeForOrigin]: (input) =>
