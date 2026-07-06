@@ -1,10 +1,10 @@
 # 13 — Undo send (short cancel window)
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Daily UX |
-| **Order in batch** | 3 of 5 |
-| **Depends on (same batch)** | — |
+| Field                       | Value    |
+| --------------------------- | -------- |
+| **Batch**                   | Daily UX |
+| **Order in batch**          | 3 of 5   |
+| **Depends on (same batch)** | —        |
 
 ## Prompt
 

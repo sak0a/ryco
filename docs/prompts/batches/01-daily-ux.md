@@ -6,12 +6,12 @@ Copy everything below the line into your agent session in the **batch worktree**
 
 ## Setup
 
-| Item | Value |
-|------|-------|
-| **Branch** | `feat/batch-daily-ux` |
-| **Worktree** | One dedicated worktree for this batch |
-| **PR** | Single PR containing all features below |
-| **Agent** | One Cursor agent session (no subagents) |
+| Item         | Value                                   |
+| ------------ | --------------------------------------- |
+| **Branch**   | `feat/batch-daily-ux`                   |
+| **Worktree** | One dedicated worktree for this batch   |
+| **PR**       | Single PR containing all features below |
+| **Agent**    | One Cursor agent session (no subagents) |
 
 Read [AGENTS.md](../../AGENTS.md) first.
 
@@ -28,13 +28,13 @@ Do not commit unless explicitly asked.
 
 ## Implementation order
 
-| Step | ID | Feature | Feature file | Notes |
-|------|-----|---------|--------------|-------|
-| 1 | 01 | Scroll to bottom on send | [features/01-scroll-to-bottom-on-send.md](../features/01-scroll-to-bottom-on-send.md) | |
-| 2 | 03 | Sidebar sort + thread limit | [features/03-thread-archiving-sidebar-sort.md](../features/03-thread-archiving-sidebar-sort.md) | |
-| 3 | 13 | Undo send | [features/13-undo-send.md](../features/13-undo-send.md) | Before queue (same send pipeline) |
-| 4 | 14 | Desktop turn notification | [features/14-desktop-turn-notification.md](../features/14-desktop-turn-notification.md) | |
-| 5 | 02 | Message queueing | [features/02-message-queueing.md](../features/02-message-queueing.md) | Last — builds on send/undo behavior |
+| Step | ID  | Feature                     | Feature file                                                                                    | Notes                               |
+| ---- | --- | --------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------- |
+| 1    | 01  | Scroll to bottom on send    | [features/01-scroll-to-bottom-on-send.md](../features/01-scroll-to-bottom-on-send.md)           |                                     |
+| 2    | 03  | Sidebar sort + thread limit | [features/03-thread-archiving-sidebar-sort.md](../features/03-thread-archiving-sidebar-sort.md) |                                     |
+| 3    | 13  | Undo send                   | [features/13-undo-send.md](../features/13-undo-send.md)                                         | Before queue (same send pipeline)   |
+| 4    | 14  | Desktop turn notification   | [features/14-desktop-turn-notification.md](../features/14-desktop-turn-notification.md)         |                                     |
+| 5    | 02  | Message queueing            | [features/02-message-queueing.md](../features/02-message-queueing.md)                           | Last — builds on send/undo behavior |
 
 ## Feature summaries
 

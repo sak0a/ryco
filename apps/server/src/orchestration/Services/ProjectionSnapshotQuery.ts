@@ -13,6 +13,8 @@ import type {
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
   OrchestrationThread,
+  OrchestrationSearchThreadMessagesInput,
+  OrchestrationThreadMessageSearchResult,
   OrchestrationThreadShell,
   OrchestrationWorktreeShell,
   ProjectId,
@@ -136,6 +138,16 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadDetailById: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>;
+
+  /**
+   * Search active projected user/assistant messages across threads.
+   */
+  readonly searchThreadMessages: (
+    input: OrchestrationSearchThreadMessagesInput,
+  ) => Effect.Effect<
+    ReadonlyArray<OrchestrationThreadMessageSearchResult>,
+    ProjectionRepositoryError
+  >;
 }
 
 /**

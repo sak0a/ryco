@@ -11,6 +11,7 @@ import {
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
 } from "@ryco/contracts";
+import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate } from "@tanstack/react-router";
 import { Option } from "effect";
 import { prefetchFilesystemBrowse, useFilesystemBrowse } from "~/rpc/useProject";
@@ -85,9 +86,11 @@ import { useUiStateStore } from "../uiStateStore";
 import {
   ADDON_ICON_CLASS,
   buildBrowseGroups,
+  buildMessageSearchItems,
   buildProjectActionItems,
   buildRootGroups,
   buildThreadActionItems,
+  type CommandPaletteMessageSearchResult,
   type CommandPaletteActionItem,
   type CommandPaletteSubmenuItem,
   type CommandPaletteView,
@@ -120,6 +123,8 @@ import { useSettingsDialogStore } from "../settingsDialogStore";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 const BROWSE_STALE_TIME_MS = 30_000;
+const MESSAGE_SEARCH_MIN_QUERY_LENGTH = 2;
+const MESSAGE_SEARCH_LIMIT = 20;
 
 function getLocalFileManagerName(platform: string): string {
   if (isMacPlatform(platform)) {
@@ -384,6 +389,7 @@ function OpenCommandPaletteDialog() {
   const keybindings = useServerKeybindings();
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
   const currentView = viewStack.at(-1) ?? null;
+  const isRootView = currentView === null;
   const [browseGeneration, setBrowseGeneration] = useState(0);
   const [addProjectEnvironmentId, setAddProjectEnvironmentId] = useState<EnvironmentId | null>(
     null,
@@ -392,6 +398,9 @@ function OpenCommandPaletteDialog() {
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
   const [isRemoteProjectLookingUp, setIsRemoteProjectLookingUp] = useState(false);
   const [isRemoteProjectCloning, setIsRemoteProjectCloning] = useState(false);
+  const [messageSearchResults, setMessageSearchResults] = useState<
+    CommandPaletteMessageSearchResult[]
+  >([]);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primaryEnvironmentLabel = readPrimaryEnvironmentDescriptor()?.label ?? null;
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
@@ -481,6 +490,71 @@ function OpenCommandPaletteDialog() {
   const isBrowsing =
     !isRemoteProjectRepositoryStep && isFilesystemBrowseQuery(query, browseEnvironmentPlatform);
   const paletteMode = getCommandPaletteMode({ currentView, isBrowsing });
+  const canSearchMessages =
+    isRootView && !isActionsOnly && !isBrowsing && !isRemoteProjectCloneFlow;
+  const messageSearchQuery = canSearchMessages ? deferredQuery.trim() : "";
+  const [debouncedMessageSearchQuery] = useDebouncedValue(messageSearchQuery, { wait: 200 });
+  const messageSearchEnvironmentIds = useMemo(() => {
+    const seenEnvironmentIds = new Set<EnvironmentId>();
+    const environmentIds: EnvironmentId[] = [];
+    for (const thread of threads) {
+      if (seenEnvironmentIds.has(thread.environmentId)) continue;
+      seenEnvironmentIds.add(thread.environmentId);
+      environmentIds.push(thread.environmentId);
+    }
+    for (const project of projects) {
+      if (seenEnvironmentIds.has(project.environmentId)) continue;
+      seenEnvironmentIds.add(project.environmentId);
+      environmentIds.push(project.environmentId);
+    }
+    return environmentIds;
+  }, [projects, threads]);
+
+  useEffect(() => {
+    const searchQuery = debouncedMessageSearchQuery.trim();
+    if (
+      !canSearchMessages ||
+      searchQuery.length < MESSAGE_SEARCH_MIN_QUERY_LENGTH ||
+      messageSearchEnvironmentIds.length === 0
+    ) {
+      setMessageSearchResults([]);
+      return;
+    }
+
+    let cancelled = false;
+    const searches = messageSearchEnvironmentIds.map(async (environmentId) => {
+      const api = readEnvironmentApi(environmentId);
+      if (!api) {
+        return [];
+      }
+
+      try {
+        const results = await api.orchestration.searchThreadMessages({
+          query: searchQuery,
+          limit: MESSAGE_SEARCH_LIMIT,
+        });
+        return results.map((result) => Object.assign({ environmentId }, result));
+      } catch {
+        return [];
+      }
+    });
+
+    void Promise.all(searches).then((resultsByEnvironment) => {
+      if (cancelled) {
+        return;
+      }
+      setMessageSearchResults(
+        resultsByEnvironment
+          .flat()
+          .toSorted((left, right) => right.timestamp.localeCompare(left.timestamp))
+          .slice(0, MESSAGE_SEARCH_LIMIT),
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canSearchMessages, debouncedMessageSearchQuery, messageSearchEnvironmentIds]);
   const getAddProjectInitialQueryForEnvironment = useCallback(
     (environmentId: EnvironmentId | null): string => {
       const environmentSettings =
@@ -505,6 +579,41 @@ function OpenCommandPaletteDialog() {
   const projectTitleById = useMemo(
     () => new Map<ProjectId, string>(projects.map((project) => [project.id, project.name])),
     [projects],
+  );
+  const threadTitleById = useMemo(
+    () => new Map(threads.map((thread) => [thread.id, thread.title] as const)),
+    [threads],
+  );
+  const projectTitleByThreadId = useMemo(
+    () =>
+      new Map(
+        threads.map((thread) => [thread.id, projectTitleById.get(thread.projectId) ?? ""] as const),
+      ),
+    [projectTitleById, threads],
+  );
+  const openMessageSearchResult = useCallback(
+    async (result: CommandPaletteMessageSearchResult) => {
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(scopeThreadRef(result.environmentId, result.threadId)),
+        search: (previous: Record<string, unknown>) => ({
+          ...previous,
+          messageId: result.messageId,
+        }),
+      });
+    },
+    [navigate],
+  );
+  const messageSearchItems = useMemo(
+    () =>
+      buildMessageSearchItems({
+        searchResults: messageSearchResults,
+        threadTitleById,
+        projectTitleByThreadId,
+        icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+        runMessage: openMessageSearchResult,
+      }),
+    [messageSearchResults, openMessageSearchResult, projectTitleByThreadId, threadTitleById],
   );
 
   const activeThreadId = activeThread?.id;
@@ -1027,6 +1136,7 @@ function OpenCommandPaletteDialog() {
     isInSubmenu: currentView !== null,
     projectSearchItems: projectSearchItems,
     threadSearchItems: allThreadItems,
+    messageSearchItems,
   });
 
   const handleAddProject = useCallback(

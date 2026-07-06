@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 
 import { AtlassianSaveProjectLinkInput } from "./atlassian.ts";
+import { ORCHESTRATION_WS_METHODS } from "./orchestration.ts";
 import { WS_METHODS } from "./rpc.ts";
 import { StatisticsSnapshot } from "./statistics.ts";
 import { WorkItemGetInput } from "./workItems.ts";
@@ -24,6 +25,9 @@ describe("WS_METHODS Atlassian and work item names", () => {
     );
     expect(WS_METHODS.sourceControlAddChangeRequestCommentReaction).toBe(
       "sourceControl.addChangeRequestCommentReaction",
+    );
+    expect(ORCHESTRATION_WS_METHODS.searchThreadMessages).toBe(
+      "orchestration.searchThreadMessages",
     );
     expect(WS_METHODS.workItemsListProjects).toBe("workItems.listProjects");
     expect(WS_METHODS.workItemsList).toBe("workItems.list");

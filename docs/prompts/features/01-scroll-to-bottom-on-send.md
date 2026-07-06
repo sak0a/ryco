@@ -1,10 +1,10 @@
 # 01 — Scroll to bottom on send
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Daily UX |
-| **Order in batch** | 1 of 5 |
-| **Depends on (same batch)** | — |
+| Field                       | Value    |
+| --------------------------- | -------- |
+| **Batch**                   | Daily UX |
+| **Order in batch**          | 1 of 5   |
+| **Depends on (same batch)** | —        |
 
 ## Prompt
 

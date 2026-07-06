@@ -1,10 +1,10 @@
 # 04 — ChatView decomposition (finish split)
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Perf / refactor |
-| **Order in batch** | 4 of 6 |
-| **Depends on (same batch)** | — |
+| Field                       | Value           |
+| --------------------------- | --------------- |
+| **Batch**                   | Perf / refactor |
+| **Order in batch**          | 4 of 6          |
+| **Depends on (same batch)** | —               |
 
 ## Prompt
 

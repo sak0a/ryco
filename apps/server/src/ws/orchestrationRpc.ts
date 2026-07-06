@@ -1,6 +1,7 @@
 import { Effect, Option, Schema, Stream } from "effect";
 import { clamp } from "effect/Number";
 import {
+  AuthRpcError,
   CommandId,
   OrchestrationDispatchCommandError,
   OrchestrationGetFullThreadDiffError,
@@ -134,6 +135,28 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
               }),
           ),
         ),
+        { "rpc.aggregate": "orchestration" },
+      ),
+    [ORCHESTRATION_WS_METHODS.searchThreadMessages]: (input) =>
+      observeRpcEffect(
+        ORCHESTRATION_WS_METHODS.searchThreadMessages,
+        projectionSnapshotQuery
+          .searchThreadMessages({
+            ...input,
+            limit: clamp(input.limit, {
+              maximum: 50,
+              minimum: 1,
+            }),
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationGetSnapshotError({
+                  message: "Failed to search thread messages",
+                  cause,
+                }),
+            ),
+          ),
         { "rpc.aggregate": "orchestration" },
       ),
     [ORCHESTRATION_WS_METHODS.replayEvents]: (input) =>
@@ -317,6 +340,37 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
             },
             "threads.setManualPosition",
           ).pipe(Effect.as({})),
+        ),
+        { "rpc.aggregate": "orchestration" },
+      ),
+    [WS_METHODS.searchThreadMessages]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.searchThreadMessages,
+        ownerEffect(
+          WS_METHODS.searchThreadMessages,
+          Effect.gen(function* () {
+            const query = input.query.trim();
+            if (query.length === 0) {
+              return { results: [] };
+            }
+            const results = yield* projectionSnapshotQuery.searchThreadMessages({
+              query,
+              ...(input.projectId ? { projectId: input.projectId } : {}),
+              limit: clamp(input.limit ?? 20, {
+                maximum: 50,
+                minimum: 1,
+              }),
+            });
+            return { results };
+          }).pipe(
+            Effect.mapError(
+              () =>
+                new AuthRpcError({
+                  message: "Failed to search thread messages.",
+                  status: 403,
+                }),
+            ),
+          ),
         ),
         { "rpc.aggregate": "orchestration" },
       ),

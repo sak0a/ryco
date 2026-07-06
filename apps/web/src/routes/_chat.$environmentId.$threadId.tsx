@@ -33,6 +33,7 @@ export const Route = createFileRoute("/_chat/$environmentId/$threadId")({
         "workspaceOpen",
         "workspaceTab",
         "workspaceAgentKey",
+        "messageId",
       ]),
     ],
   },

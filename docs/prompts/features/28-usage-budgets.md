@@ -1,10 +1,10 @@
 # 28 — Usage budgets & alerts
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Differentiation |
-| **Order in batch** | 3 of 5 |
-| **Depends on (same batch)** | — |
+| Field                       | Value           |
+| --------------------------- | --------------- |
+| **Batch**                   | Differentiation |
+| **Order in batch**          | 3 of 5          |
+| **Depends on (same batch)** | —               |
 
 ## Prompt
 

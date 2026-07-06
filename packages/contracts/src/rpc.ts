@@ -82,6 +82,7 @@ import {
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetSnapshotError,
+  OrchestrationSearchThreadMessagesInput,
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
   OrchestrationReplayEventsError,
@@ -234,6 +235,9 @@ export const WS_METHODS = {
   threadsSetManualPosition: "threads.setManualPosition",
   worktreesSetManualPosition: "worktrees.setManualPosition",
   projectsInitializeGit: "projects.initializeGit",
+
+  // Thread search methods
+  searchThreadMessages: "threads.searchMessages",
 
   // Terminal methods
   terminalOpen: "terminal.open",
@@ -438,6 +442,26 @@ export const ProjectsInitializeGitInput = Schema.Struct({
   projectId: ProjectId,
 });
 export type ProjectsInitializeGitInput = typeof ProjectsInitializeGitInput.Type;
+
+export const SearchThreadMessagesInput = Schema.Struct({
+  query: Schema.String,
+  projectId: Schema.optional(ProjectId),
+  limit: Schema.optional(Schema.Number),
+});
+export type SearchThreadMessagesInput = typeof SearchThreadMessagesInput.Type;
+
+export const SearchThreadMessageResult = Schema.Struct({
+  threadId: ThreadId,
+  messageId: Schema.String,
+  snippet: Schema.String,
+  timestamp: Schema.String,
+});
+export type SearchThreadMessageResult = typeof SearchThreadMessageResult.Type;
+
+export const SearchThreadMessagesResult = Schema.Struct({
+  results: Schema.Array(SearchThreadMessageResult),
+});
+export type SearchThreadMessagesResult = typeof SearchThreadMessagesResult.Type;
 
 export const EmptyRpcResult = Schema.Struct({});
 export type EmptyRpcResult = typeof EmptyRpcResult.Type;
@@ -1040,6 +1064,12 @@ export const WsThreadsSetManualPositionRpc = Rpc.make(WS_METHODS.threadsSetManua
   error: Schema.Union([GitManagerServiceError, AuthRpcError]),
 });
 
+export const WsSearchThreadMessagesRpc = Rpc.make(WS_METHODS.searchThreadMessages, {
+  payload: SearchThreadMessagesInput,
+  success: SearchThreadMessagesResult,
+  error: Schema.Union([AuthRpcError]),
+});
+
 export const WsWorktreesSetManualPositionRpc = Rpc.make(WS_METHODS.worktreesSetManualPosition, {
   payload: WorktreesSetManualPositionInput,
   success: EmptyRpcResult,
@@ -1139,6 +1169,15 @@ export const WsOrchestrationGetFullThreadDiffRpc = Rpc.make(
     payload: OrchestrationGetFullThreadDiffInput,
     success: OrchestrationRpcSchemas.getFullThreadDiff.output,
     error: OrchestrationGetFullThreadDiffError,
+  },
+);
+
+export const WsOrchestrationSearchThreadMessagesRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.searchThreadMessages,
+  {
+    payload: OrchestrationSearchThreadMessagesInput,
+    success: OrchestrationRpcSchemas.searchThreadMessages.output,
+    error: OrchestrationGetSnapshotError,
   },
 );
 
@@ -1286,6 +1325,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitDeleteWorktreeRpc,
   WsThreadsSetManualBucketRpc,
   WsThreadsSetManualPositionRpc,
+  WsSearchThreadMessagesRpc,
   WsWorktreesSetManualPositionRpc,
   WsProjectsInitializeGitRpc,
   WsVcsListRefsRpc,
@@ -1307,6 +1347,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
+  WsOrchestrationSearchThreadMessagesRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationReplayEventsPageRpc,
   WsOrchestrationSubscribeShellRpc,

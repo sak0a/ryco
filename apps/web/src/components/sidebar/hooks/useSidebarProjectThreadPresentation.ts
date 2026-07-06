@@ -1,12 +1,16 @@
 import { useMemo } from "react";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
 import { type SidebarThreadSortOrder } from "@ryco/contracts/settings";
-import { sortThreads } from "../../../lib/threadSort";
-import { resolveProjectStatusIndicator, resolveThreadStatusPill } from "../../Sidebar.logic";
+import {
+  resolveProjectStatusIndicator,
+  resolveThreadStatusPill,
+  sortThreadsWithPinned,
+} from "../../Sidebar.logic";
 import { adaptProjectForSidebarTree } from "../sidebarTreeAdapters";
 import { useSidebarTree } from "./useSidebarTree";
 import type { SidebarThreadSummary, SidebarWorktreeSummary } from "../../../types";
 import type { SidebarProjectSnapshot } from "../../../sidebarProjectGrouping";
+import { useUiStateStore } from "../../../uiStateStore";
 
 const THREAD_PREVIEW_LIMIT = 6;
 
@@ -30,6 +34,16 @@ export function useSidebarProjectThreadPresentation(params: {
     projectExpanded,
     isThreadListExpanded,
   } = params;
+  const pinnedThreadKeysRecord = useUiStateStore((state) => state.pinnedThreadKeys);
+  const pinnedThreadKeys = useMemo(
+    () =>
+      new Set(
+        Object.entries(pinnedThreadKeysRecord).flatMap(([threadKey, pinned]) =>
+          pinned ? [threadKey] : [],
+        ),
+      ),
+    [pinnedThreadKeysRecord],
+  );
 
   const { projectStatus, visibleProjectThreads, orderedProjectThreadKeys } = useMemo(() => {
     const resolveProjectThreadStatus = (thread: SidebarThreadSummary) => {
@@ -43,10 +57,12 @@ export function useSidebarProjectThreadPresentation(params: {
         },
       });
     };
-    const visibleProjectThreads = sortThreads(
-      projectThreads.filter((thread) => thread.archivedAt === null),
-      threadSortOrder,
-    );
+    const visibleProjectThreads = sortThreadsWithPinned({
+      threads: projectThreads.filter((thread) => thread.archivedAt === null),
+      sortOrder: threadSortOrder,
+      pinnedThreadKeys,
+      getThreadKey: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+    });
     const projectStatus = resolveProjectStatusIndicator(
       visibleProjectThreads.map((thread) => resolveProjectThreadStatus(thread)),
     );
@@ -57,7 +73,7 @@ export function useSidebarProjectThreadPresentation(params: {
       projectStatus,
       visibleProjectThreads,
     };
-  }, [lastVisitedAtByThreadKey, projectThreads, threadSortOrder]);
+  }, [lastVisitedAtByThreadKey, pinnedThreadKeys, projectThreads, threadSortOrder]);
 
   const pinnedCollapsedThread = useMemo(() => {
     const activeThreadKey = activeRouteThreadKey ?? undefined;
@@ -129,10 +145,22 @@ export function useSidebarProjectThreadPresentation(params: {
     return adaptProjectForSidebarTree({
       lastVisitedAtByThreadKey,
       project,
-      threads: sortThreads(projectThreads, threadSortOrder),
+      threads: sortThreadsWithPinned({
+        threads: projectThreads,
+        sortOrder: threadSortOrder,
+        pinnedThreadKeys,
+        getThreadKey: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      }),
       worktrees: sidebarWorktrees,
     });
-  }, [lastVisitedAtByThreadKey, project, projectThreads, sidebarWorktrees, threadSortOrder]);
+  }, [
+    lastVisitedAtByThreadKey,
+    pinnedThreadKeys,
+    project,
+    projectThreads,
+    sidebarWorktrees,
+    threadSortOrder,
+  ]);
   const sidebarTree = useSidebarTree({
     projects: [sidebarTreeInput.project],
     threads: sidebarTreeInput.threads,

@@ -92,6 +92,7 @@ const NOOP_CLOSE_DIFF = () => {};
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const MESSAGE_SEARCH_HIGHLIGHT_DURATION_MS = 1_800;
 const MESSAGE_ACTION_BUTTON_CLASS_NAME =
   "size-6 min-w-6 rounded-md border-0 bg-transparent px-0 text-muted-foreground/45 shadow-none transition-[background-color,color,box-shadow] before:hidden hover:bg-foreground/8 hover:text-foreground/75 hover:shadow-sm/5 focus-visible:ring-1 focus-visible:ring-ring/60 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/35";
 
@@ -105,6 +106,7 @@ interface MessagesTimelineProps {
   activeTurnId?: TurnId | null;
   activeTurnStartedAt: string | null;
   listRef: React.RefObject<LegendListRef | null>;
+  targetMessageId?: MessageId | null;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
@@ -136,6 +138,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   activeTurnId,
   activeTurnStartedAt,
   listRef,
+  targetMessageId = null,
   timelineEntries,
   completionDividerBeforeEntryId,
   completionSummary,
@@ -178,6 +181,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<MessageId | null>(null);
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -203,6 +207,45 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       window.cancelAnimationFrame(frameId);
     };
   }, [listRef, onIsAtEndChange, rows.length]);
+
+  useEffect(() => {
+    if (targetMessageId === null) {
+      setHighlightedMessageId(null);
+      return;
+    }
+
+    const targetRowIndex = rows.findIndex(
+      (row) => row.kind === "message" && row.message.id === targetMessageId,
+    );
+    if (targetRowIndex < 0) {
+      setHighlightedMessageId(null);
+      return;
+    }
+
+    setHighlightedMessageId(targetMessageId);
+    void listRef.current?.scrollToIndex?.({
+      animated: true,
+      index: targetRowIndex,
+      viewPosition: 0.45,
+    });
+
+    const frameId = window.requestAnimationFrame(() => {
+      for (const element of document.querySelectorAll<HTMLElement>("[data-message-id]")) {
+        if (element.dataset.messageId === targetMessageId) {
+          element.scrollIntoView({ behavior: "smooth", block: "center" });
+          break;
+        }
+      }
+    });
+    const timeoutId = window.setTimeout(() => {
+      setHighlightedMessageId((current) => (current === targetMessageId ? null : current));
+    }, MESSAGE_SEARCH_HIGHLIGHT_DURATION_MS);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [listRef, rows, targetMessageId]);
 
   // Streaming-frequent context — rebuilt on turn-lifecycle transitions.
   const streamingState = useMemo<TimelineStreamingState>(
@@ -238,6 +281,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         workspaceRoot,
         skills,
         activeThreadEnvironmentId,
+        highlightedMessageId,
         onRevertUserMessage,
         onImageExpand,
         onOpenTurnDiff,
@@ -251,6 +295,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
+      highlightedMessageId,
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
@@ -320,16 +365,23 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
   // fields), so it re-renders on streaming transitions as before. The merged
   // object is local — it does not propagate through any context boundary.
   const ctx = { ...use(TimelineStableCtx), ...use(TimelineStreamingCtx) };
+  const isHighlightedMessage =
+    row.kind === "message" && ctx.highlightedMessageId === row.message.id;
 
   return (
     <div
       className={cn(
         "pb-4",
+        row.kind === "message"
+          ? "scroll-mt-12 rounded-xl transition-[background-color,box-shadow] duration-500"
+          : null,
+        isHighlightedMessage ? "bg-primary/10 ring-1 ring-primary/30" : null,
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
+      data-message-highlighted={isHighlightedMessage ? "true" : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
       {row.kind === "work" && <WorkGroupSection groupedEntries={row.groupedEntries} />}

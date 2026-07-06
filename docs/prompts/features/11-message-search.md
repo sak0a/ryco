@@ -1,10 +1,10 @@
 # 11 — Message search in command palette
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Search & nav |
-| **Order in batch** | 1 of 2 |
-| **Depends on (same batch)** | — |
+| Field                       | Value        |
+| --------------------------- | ------------ |
+| **Batch**                   | Search & nav |
+| **Order in batch**          | 1 of 2       |
+| **Depends on (same batch)** | —            |
 
 ## Prompt
 

@@ -6,12 +6,12 @@ Copy everything below the line into your agent session in the **batch worktree**
 
 ## Setup
 
-| Item | Value |
-|------|-------|
-| **Branch** | `feat/batch-git-workflow` |
-| **Worktree** | One dedicated worktree for this batch |
-| **PR** | Single PR containing all four features |
-| **Agent** | One Cursor agent session (no subagents) |
+| Item         | Value                                   |
+| ------------ | --------------------------------------- |
+| **Branch**   | `feat/batch-git-workflow`               |
+| **Worktree** | One dedicated worktree for this batch   |
+| **PR**       | Single PR containing all four features  |
+| **Agent**    | One Cursor agent session (no subagents) |
 
 Read [AGENTS.md](../../AGENTS.md).
 
@@ -27,12 +27,12 @@ Do not commit unless explicitly asked.
 
 ## Implementation order
 
-| Step | ID | Feature | Feature file |
-|------|-----|---------|--------------|
-| 1 | 16 | Worktree status chips | [features/16-worktree-status-chips.md](../features/16-worktree-status-chips.md) |
-| 2 | 17 | Execution env metadata | [features/17-execution-env-metadata.md](../features/17-execution-env-metadata.md) |
-| 3 | 18 | Forgejo + Bitbucket parity | [features/18-forgejo-bitbucket-parity.md](../features/18-forgejo-bitbucket-parity.md) |
-| 4 | 19 | Jira ↔ worktree flow | [features/19-jira-worktree-flow.md](../features/19-jira-worktree-flow.md) |
+| Step | ID  | Feature                    | Feature file                                                                          |
+| ---- | --- | -------------------------- | ------------------------------------------------------------------------------------- |
+| 1    | 16  | Worktree status chips      | [features/16-worktree-status-chips.md](../features/16-worktree-status-chips.md)       |
+| 2    | 17  | Execution env metadata     | [features/17-execution-env-metadata.md](../features/17-execution-env-metadata.md)     |
+| 3    | 18  | Forgejo + Bitbucket parity | [features/18-forgejo-bitbucket-parity.md](../features/18-forgejo-bitbucket-parity.md) |
+| 4    | 19  | Jira ↔ worktree flow       | [features/19-jira-worktree-flow.md](../features/19-jira-worktree-flow.md)             |
 
 ## Feature summaries
 

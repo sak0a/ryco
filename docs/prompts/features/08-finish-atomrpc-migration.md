@@ -1,10 +1,10 @@
 # 08 — Finish AtomRpc migration (remove React Query)
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Perf / refactor |
-| **Order in batch** | 5 of 6 |
-| **Depends on (same batch)** | 04 |
+| Field                       | Value           |
+| --------------------------- | --------------- |
+| **Batch**                   | Perf / refactor |
+| **Order in batch**          | 5 of 6          |
+| **Depends on (same batch)** | 04              |
 
 ## Prompt
 

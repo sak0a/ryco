@@ -1,10 +1,10 @@
 # 22 — Server auth middleware (phase 1)
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Ops / trust |
-| **Order in batch** | 3 of 6 |
-| **Depends on (same batch)** | — |
+| Field                       | Value       |
+| --------------------------- | ----------- |
+| **Batch**                   | Ops / trust |
+| **Order in batch**          | 3 of 6      |
+| **Depends on (same batch)** | —           |
 
 ## Prompt
 

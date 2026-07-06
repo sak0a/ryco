@@ -2728,6 +2728,7 @@ export default function ChatView(props: ChatViewProps) {
                 activeTurnId={activeLatestTurn?.turnId ?? null}
                 activeTurnStartedAt={activeWorkStartedAt}
                 listRef={legendListRef}
+                targetMessageId={rawSearch.messageId ?? null}
                 timelineEntries={timelineEntries}
                 completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                 completionSummary={completionSummary}

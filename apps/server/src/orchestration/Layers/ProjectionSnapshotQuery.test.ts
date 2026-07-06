@@ -457,6 +457,214 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
+  it.effect("searches active thread messages with project scoping and escaped wildcards", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES
+          (
+            'project-search-a',
+            'Search A',
+            '/tmp/search-a',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            '[]',
+            '2026-03-01T00:00:00.000Z',
+            '2026-03-01T00:00:00.000Z',
+            NULL
+          ),
+          (
+            'project-search-b',
+            'Search B',
+            '/tmp/search-b',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            '[]',
+            '2026-03-01T00:00:00.000Z',
+            '2026-03-01T00:00:00.000Z',
+            NULL
+          )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          latest_user_message_at,
+          pending_approval_count,
+          pending_user_input_count,
+          has_actionable_proposed_plan,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES
+          (
+            'thread-search-a',
+            'project-search-a',
+            'Authentication Thread',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            '2026-03-01T00:00:00.000Z',
+            '2026-03-01T00:00:00.000Z',
+            NULL
+          ),
+          (
+            'thread-search-b',
+            'project-search-b',
+            'Other Authentication Thread',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            '2026-03-01T00:00:00.000Z',
+            '2026-03-01T00:00:00.000Z',
+            NULL
+          ),
+          (
+            'thread-search-deleted',
+            'project-search-a',
+            'Deleted Thread',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            '2026-03-01T00:00:00.000Z',
+            '2026-03-01T00:00:00.000Z',
+            '2026-03-01T00:00:01.000Z'
+          )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id,
+          thread_id,
+          turn_id,
+          role,
+          text,
+          is_streaming,
+          created_at,
+          updated_at
+        )
+        VALUES
+          (
+            'message-search-a',
+            'thread-search-a',
+            NULL,
+            'user',
+            'Please inspect the authentication redirect flow and token cache.',
+            0,
+            '2026-03-01T00:00:02.000Z',
+            '2026-03-01T00:00:02.000Z'
+          ),
+          (
+            'message-search-b',
+            'thread-search-b',
+            NULL,
+            'assistant',
+            'Authentication failures now return a stable retry message.',
+            0,
+            '2026-03-01T00:00:03.000Z',
+            '2026-03-01T00:00:03.000Z'
+          ),
+          (
+            'message-search-wildcard',
+            'thread-search-a',
+            NULL,
+            'assistant',
+            'Literal 100% coverage is not required for this authentication fix.',
+            0,
+            '2026-03-01T00:00:04.000Z',
+            '2026-03-01T00:00:04.000Z'
+          ),
+          (
+            'message-search-deleted',
+            'thread-search-deleted',
+            NULL,
+            'assistant',
+            'authentication from deleted thread',
+            0,
+            '2026-03-01T00:00:05.000Z',
+            '2026-03-01T00:00:05.000Z'
+          )
+      `;
+
+      const allResults = yield* snapshotQuery.searchThreadMessages({
+        query: "authentication",
+        limit: 10,
+      });
+      assert.deepEqual(
+        allResults.map((result) => result.messageId),
+        [
+          asMessageId("message-search-wildcard"),
+          asMessageId("message-search-b"),
+          asMessageId("message-search-a"),
+        ],
+      );
+      assert.include(allResults[0]?.snippet ?? "", "authentication fix");
+
+      const projectResults = yield* snapshotQuery.searchThreadMessages({
+        query: "authentication",
+        projectId: asProjectId("project-search-b"),
+        limit: 10,
+      });
+      assert.deepEqual(
+        projectResults.map((result) => result.threadId),
+        [ThreadId.make("thread-search-b")],
+      );
+
+      const wildcardResults = yield* snapshotQuery.searchThreadMessages({
+        query: "100%",
+        limit: 10,
+      });
+      assert.deepEqual(
+        wildcardResults.map((result) => result.messageId),
+        [asMessageId("message-search-wildcard")],
+      );
+    }),
+  );
+
   it.effect(
     "reads targeted project, thread, and count queries without hydrating the full snapshot",
     () =>

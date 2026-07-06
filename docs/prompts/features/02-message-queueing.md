@@ -1,9 +1,9 @@
 # 02 — Message queueing
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Daily UX |
-| **Order in batch** | 5 of 5 |
+| Field                       | Value          |
+| --------------------------- | -------------- |
+| **Batch**                   | Daily UX       |
+| **Order in batch**          | 5 of 5         |
 | **Depends on (same batch)** | 13 (undo send) |
 
 ## Prompt

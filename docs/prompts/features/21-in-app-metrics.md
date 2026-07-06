@@ -1,10 +1,10 @@
 # 21 — In-app metrics snapshot
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Ops / trust |
-| **Order in batch** | 1 of 6 |
-| **Depends on (same batch)** | — |
+| Field                       | Value       |
+| --------------------------- | ----------- |
+| **Batch**                   | Ops / trust |
+| **Order in batch**          | 1 of 6      |
+| **Depends on (same batch)** | —           |
 
 ## Prompt
 

@@ -390,6 +390,27 @@ export function getSidebarThreadIdsToPrewarm<TThreadId>(
   return visibleThreadIds.slice(0, Math.max(0, limit));
 }
 
+export function sortThreadsWithPinned<T extends Pick<Thread, "id"> & ThreadSortInput>(input: {
+  threads: readonly T[];
+  sortOrder: SidebarThreadSortOrder;
+  pinnedThreadKeys: ReadonlySet<string>;
+  getThreadKey: (thread: T) => string;
+}): T[] {
+  const sortedThreads = sortThreads(input.threads, input.sortOrder);
+  if (input.pinnedThreadKeys.size === 0) {
+    return sortedThreads;
+  }
+
+  return sortedThreads.toSorted((left, right) => {
+    const leftPinned = input.pinnedThreadKeys.has(input.getThreadKey(left));
+    const rightPinned = input.pinnedThreadKeys.has(input.getThreadKey(right));
+    if (leftPinned === rightPinned) {
+      return 0;
+    }
+    return leftPinned ? -1 : 1;
+  });
+}
+
 export function shouldAutoAnimateSidebarProjectList(projectCount: number): boolean {
   return projectCount <= SIDEBAR_AUTO_ANIMATE_PROJECT_LIMIT;
 }

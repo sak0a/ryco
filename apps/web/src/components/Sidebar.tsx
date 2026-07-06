@@ -80,9 +80,9 @@ import {
   shouldAutoAnimateSidebarThreadLists,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
+  sortThreadsWithPinned,
   useThreadJumpHintVisibility,
 } from "./Sidebar.logic";
-import { sortThreads } from "../lib/threadSort";
 import { adaptProjectForSidebarTree } from "./sidebar/sidebarTreeAdapters";
 import { composeSidebarTree } from "./sidebar/hooks/useSidebarTree";
 import { SidebarProjectsContent, PROJECT_ROOT_DROP_ID } from "./sidebar/SidebarProjectList";
@@ -197,6 +197,7 @@ export default function Sidebar() {
   const projectFoldersById = useUiStateStore((store) => store.projectFoldersById);
   const projectFolderOrder = useUiStateStore((store) => store.projectFolderOrder);
   const projectTreeOrder = useUiStateStore((store) => store.projectTreeOrder);
+  const pinnedThreadKeysRecord = useUiStateStore((store) => store.pinnedThreadKeys);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
   const moveProjectsToFolder = useUiStateStore((store) => store.moveProjectsToFolder);
   const moveProjectsToRoot = useUiStateStore((store) => store.moveProjectsToRoot);
@@ -213,6 +214,15 @@ export default function Sidebar() {
   const { handleNewThread } = useNewThreadHandler();
   const { archiveThread, deleteThread } = useThreadActions();
   const { isMobile, setOpenMobile } = useSidebar();
+  const pinnedThreadKeys = useMemo(
+    () =>
+      new Set(
+        Object.entries(pinnedThreadKeysRecord).flatMap(([threadKey, pinned]) =>
+          pinned ? [threadKey] : [],
+        ),
+      ),
+    [pinnedThreadKeysRecord],
+  );
   const routeThreadRef = useParams({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
@@ -613,10 +623,13 @@ export default function Sidebar() {
         const projectsForRow =
           row.kind === "project" ? [row.project] : row.folder.expanded ? row.projects : [];
         return projectsForRow.flatMap((project) => {
-          const projectThreads = sortThreads(
-            threadsByProjectKey.get(project.projectKey) ?? [],
-            sidebarThreadSortOrder,
-          );
+          const projectThreads = sortThreadsWithPinned({
+            threads: threadsByProjectKey.get(project.projectKey) ?? [],
+            sortOrder: sidebarThreadSortOrder,
+            pinnedThreadKeys,
+            getThreadKey: (thread) =>
+              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          });
           const projectExpanded = projectExpandedById[project.projectKey] ?? true;
           const activeThreadKey = routeThreadKey ?? undefined;
           const pinnedCollapsedThreadKey =
@@ -660,6 +673,7 @@ export default function Sidebar() {
       }),
     [
       sidebarThreadSortOrder,
+      pinnedThreadKeys,
       projectExpandedById,
       projectTreeRows,
       routeThreadKey,

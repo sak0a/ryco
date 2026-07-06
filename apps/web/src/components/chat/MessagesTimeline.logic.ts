@@ -47,6 +47,7 @@ export interface TimelineStableState {
   workspaceRoot: string | undefined;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
+  highlightedMessageId: MessageId | null;
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
@@ -83,6 +84,7 @@ export function buildTimelineStableState(input: TimelineStableState): TimelineSt
     workspaceRoot: input.workspaceRoot,
     skills: input.skills,
     activeThreadEnvironmentId: input.activeThreadEnvironmentId,
+    highlightedMessageId: input.highlightedMessageId,
     onRevertUserMessage: input.onRevertUserMessage,
     onImageExpand: input.onImageExpand,
     onOpenTurnDiff: input.onOpenTurnDiff,

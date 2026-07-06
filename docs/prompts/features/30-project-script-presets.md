@@ -1,10 +1,10 @@
 # 30 — Project script presets
 
-| Field | Value |
-|-------|-------|
-| **Batch** | Differentiation |
-| **Order in batch** | 5 of 5 |
-| **Depends on (same batch)** | — |
+| Field                       | Value           |
+| --------------------------- | --------------- |
+| **Batch**                   | Differentiation |
+| **Order in batch**          | 5 of 5          |
+| **Depends on (same batch)** | —               |
 
 ## Prompt
 
