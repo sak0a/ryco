@@ -910,6 +910,21 @@ export default function Sidebar() {
     };
   }, []);
 
+  // Clicking a turn-complete desktop notification focuses the window (handled in
+  // the main process) and navigates to the thread whose turn finished.
+  useEffect(() => {
+    const bridge = typeof window !== "undefined" ? window.desktopBridge : undefined;
+    if (!bridge?.onTurnCompleteNotificationActivated) {
+      return;
+    }
+    return bridge.onTurnCompleteNotificationActivated((notification) => {
+      if (!notification.environmentId) {
+        return;
+      }
+      navigateToThread(scopeThreadRef(notification.environmentId, notification.threadId));
+    });
+  }, [navigateToThread]);
+
   const desktopUpdateButtonDisabled = isDesktopUpdateButtonDisabled(desktopUpdateState);
   const desktopUpdateButtonAction = desktopUpdateState
     ? resolveDesktopUpdateButtonAction(desktopUpdateState)

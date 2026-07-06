@@ -154,11 +154,20 @@ import { useLocalDispatchState } from "./chat/useLocalDispatchState";
 import { useChatProjectScripts } from "./chat/useChatProjectScripts";
 import { useChatAttachmentPreviewHandoff } from "./chat/useChatAttachmentPreviewHandoff";
 import { useChatSessionActions } from "../hooks/useChatSessionActions";
-import { executeChatSendTurn } from "../hooks/executeChatSendTurn";
+import {
+  executeChatSendTurn,
+  type SendTurnComposerSnapshot,
+  type SendTurnSettings,
+  type SendTurnUndoDeps,
+} from "../hooks/executeChatSendTurn";
+import { useMessageQueueStore } from "../messageQueueStore";
+import type { QueuedMessage } from "../messageQueue.logic";
+import { ComposerQueuedMessages } from "./chat/ComposerQueuedMessages";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
+  cloneComposerImageForRetry,
   collectUserMessageBlobPreviewUrls,
   deriveComposerSendState,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
@@ -195,6 +204,13 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_SESSION_TABS: ReadonlyArray<ChatSessionTabsItem> = Object.freeze([]);
 const PROVIDER_STATUS_KEY_SEPARATOR = "\0";
+
+// "Undo send" window: how long a freshly sent message can be pulled back before
+// the turn is dispatched to the provider (mid-range of the 3–5s target).
+const SEND_UNDO_WINDOW_MS = 4000;
+
+// Stable identity so the message-queue selector doesn't churn on empty threads.
+const EMPTY_QUEUED_MESSAGES: readonly QueuedMessage[] = Object.freeze([]);
 
 function providerStatusesContentKey(providers: ReadonlyArray<ServerProvider>): string {
   const parts: string[] = [`${providers.length}`];
@@ -582,6 +598,43 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+
+  // Message queue: prompts composed while a turn runs are queued and auto-sent on
+  // quiescence. Client-owned, keyed by the scoped thread key.
+  const enqueueMessage = useMessageQueueStore((store) => store.enqueue);
+  const removeMessageFromQueue = useMessageQueueStore((store) => store.remove);
+  const moveMessageInQueue = useMessageQueueStore((store) => store.move);
+  const dequeueMessage = useMessageQueueStore((store) => store.dequeue);
+  const queuedMessages = useMessageQueueStore((store) =>
+    activeThreadKey
+      ? (store.queuesByThreadKey[activeThreadKey] ?? EMPTY_QUEUED_MESSAGES)
+      : EMPTY_QUEUED_MESSAGES,
+  );
+  const handleRemoveQueuedMessage = useCallback(
+    (id: string) => {
+      if (!activeThreadKey) return;
+      const message = useMessageQueueStore
+        .getState()
+        .queuesByThreadKey[activeThreadKey]?.find((entry) => entry.id === id);
+      if (message) {
+        for (const image of message.composer.images) {
+          if (image.previewUrl.startsWith("blob:")) {
+            URL.revokeObjectURL(image.previewUrl);
+          }
+        }
+      }
+      removeMessageFromQueue(activeThreadKey, id);
+    },
+    [activeThreadKey, removeMessageFromQueue],
+  );
+  const handleMoveQueuedMessage = useCallback(
+    (id: string, direction: "up" | "down") => {
+      if (!activeThreadKey) return;
+      moveMessageInQueue(activeThreadKey, id, direction);
+    },
+    [activeThreadKey, moveMessageInQueue],
+  );
+
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
@@ -1157,6 +1210,53 @@ export default function ChatView(props: ChatViewProps) {
   );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
+
+  // Native desktop notification when a turn the user watched running completes
+  // while the Ryco window is unfocused. Only fires for turns observed running in
+  // this session (never for history loaded on mount), at most once per turn. The
+  // main process authoritatively re-checks focus; the `document.hasFocus()`
+  // pre-check just avoids a wasted IPC round-trip when we're clearly focused.
+  const notifyOnTurnComplete = settings.notifyOnTurnCompleteWhenUnfocused;
+  const seenRunningTurnIdsRef = useRef<Set<string>>(new Set());
+  const notifiedTurnIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const turnId = activeLatestTurn?.turnId;
+    if (!turnId) return;
+    if (phase === "running") {
+      seenRunningTurnIdsRef.current.add(turnId);
+      return;
+    }
+    if (!serverThread?.id) return;
+    if (!latestTurnSettled) return;
+    if (!activeLatestTurn?.completedAt) return;
+    if (!seenRunningTurnIdsRef.current.has(turnId)) return;
+    if (notifiedTurnIdsRef.current.has(turnId)) return;
+    notifiedTurnIdsRef.current.add(turnId);
+
+    if (!notifyOnTurnComplete) return;
+    if (typeof document !== "undefined" && document.hasFocus()) return;
+    const bridge = typeof window !== "undefined" ? window.desktopBridge : undefined;
+    if (!bridge?.notifyTurnComplete) return;
+    const title = activeThread?.title?.trim() ? activeThread.title : "Ryco";
+    void bridge
+      .notifyTurnComplete({
+        threadId: serverThread.id,
+        environmentId: serverThread.environmentId,
+        title,
+        body: "The agent finished responding.",
+      })
+      .catch(() => undefined);
+  }, [
+    phase,
+    latestTurnSettled,
+    activeLatestTurn?.turnId,
+    activeLatestTurn?.completedAt,
+    notifyOnTurnComplete,
+    serverThread?.id,
+    serverThread?.environmentId,
+    activeThread?.title,
+  ]);
+
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const threadActivityViewModel = useMemo(
     () => deriveThreadActivityViewModel(threadActivities, activeLatestTurn?.turnId),
@@ -2041,6 +2141,115 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
+  // Build the executeChatSendTurn input from a composer snapshot and dispatch it.
+  // Shared by direct sends (with an undo window) and queue flushes (without one),
+  // so a queued message replays exactly like a live send.
+  const dispatchComposerSnapshot = async (
+    composerSnapshot: SendTurnComposerSnapshot,
+    settingsSnapshot: SendTurnSettings,
+    undo: SendTurnUndoDeps | undefined,
+  ) => {
+    const api = readEnvironmentApi(environmentId);
+    if (!api || !activeThread || !activeProject) return;
+    const threadIdForSend = activeThread.id;
+    const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
+    const { shouldMaterializeLegacyBranchWorktree, baseBranchForWorktree, shouldCreateWorktree } =
+      resolveChatSendWorktreePlan({
+        isServerThread,
+        isFirstMessage,
+        threadWorktreePath: activeThread.worktreePath,
+        activeThreadBranch,
+        currentGitRefName: gitStatusQuery.data?.refName ?? null,
+        sendEnvMode,
+      });
+
+    // In worktree mode, require an explicit base branch so we don't silently
+    // fall back to local execution when branch selection is missing.
+    if (shouldCreateWorktree && !activeThreadBranch) {
+      setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
+      return;
+    }
+
+    await executeChatSendTurn({
+      composer: composerSnapshot,
+      thread: {
+        threadId: threadIdForSend,
+        isFirstMessage,
+        isServerThread,
+        isLocalDraftThread,
+        activeThreadBranch,
+        worktreePath: activeThread.worktreePath,
+        createdAt: activeThread.createdAt,
+        projectId: activeProject.id,
+      },
+      worktree: {
+        shouldMaterializeLegacyBranchWorktree,
+        baseBranchForWorktree,
+        shouldCreateWorktree,
+      },
+      settings: settingsSnapshot,
+      project: {
+        projectId: activeProject.id,
+        projectCwd: activeProject.cwd,
+        defaultModelSelection: activeProject.defaultModelSelection ?? null,
+      },
+      ...(undo ? { undo } : {}),
+      scroll: {
+        scrollToEndBeforeOptimistic: async () => {
+          isAtEndRef.current = true;
+          showScrollDebouncer.current.cancel();
+          setShowScrollToBottom(false);
+          await legendListRef.current?.scrollToEnd?.({ animated: false });
+        },
+      },
+      draft: {
+        composerDraftTarget,
+        environmentId,
+        clearComposerDraftContent,
+        setComposerDraftTokenMode,
+        setComposerDraftPrompt,
+        addComposerDraftImages,
+        setComposerDraftTerminalContexts,
+        setDraftThreadContext,
+      },
+      dispatch: {
+        api,
+        beginLocalDispatch,
+        resetLocalDispatch,
+        setOptimisticUserMessages,
+        setThreadError,
+      },
+      refs: { promptRef, composerImagesRef, composerTerminalContextsRef, sendInFlightRef },
+      sourceControl: {
+        fetcher: async (ctx) => {
+          const cwd = gitCwd;
+          if (!cwd) return ctx;
+          const now = DateTime.fromDateUnsafe(new Date());
+          const staleAfterDate = DateTime.fromDateUnsafe(new Date(Date.now() + 5 * 60 * 1000));
+          if (ctx.kind === "issue") {
+            const detail = await queryClient.fetchQuery(
+              issueDetailQueryOptions({ environmentId, cwd, reference: String(ctx.detail.number) }),
+            );
+            return { ...ctx, detail, fetchedAt: now, staleAfter: staleAfterDate };
+          }
+          const detail = await queryClient.fetchQuery(
+            changeRequestDetailQueryOptions({
+              environmentId,
+              cwd,
+              reference: String(ctx.detail.number),
+            }),
+          );
+          return { ...ctx, detail, fetchedAt: now, staleAfter: staleAfterDate };
+        },
+      },
+      persistSettings: { persistThreadSettingsForNextTurn },
+      composerHandle: { readComposer },
+      formatOutgoingPrompt,
+    });
+  };
+  const dispatchComposerSnapshotRef = useRef(dispatchComposerSnapshot);
+  dispatchComposerSnapshotRef.current = dispatchComposerSnapshot;
+
   const runSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readEnvironmentApi(environmentId);
@@ -2123,112 +2332,58 @@ export default function ChatView(props: ChatViewProps) {
       }
       return;
     }
-    if (!activeProject) return;
-    const threadIdForSend = activeThread.id;
-    const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
-    const { shouldMaterializeLegacyBranchWorktree, baseBranchForWorktree, shouldCreateWorktree } =
-      resolveChatSendWorktreePlan({
-        isServerThread,
-        isFirstMessage,
-        threadWorktreePath: activeThread.worktreePath,
-        activeThreadBranch,
-        currentGitRefName: gitStatusQuery.data?.refName ?? null,
-        sendEnvMode,
-      });
+    const composerSnapshot: SendTurnComposerSnapshot = {
+      prompt: promptForSend,
+      trimmedPrompt: trimmed,
+      images: composerImages,
+      sendableTerminalContexts: sendableComposerTerminalContexts,
+      sourceControlContexts: composerSourceControlContexts,
+      selectedProvider: ctxSelectedProvider,
+      selectedModel: ctxSelectedModel,
+      selectedProviderModels: ctxSelectedProviderModels,
+      selectedPromptEffort: ctxSelectedPromptEffort,
+      selectedModelSelection: ctxSelectedModelSelection,
+      expiredTerminalContextCount,
+    };
+    const settingsSnapshot: SendTurnSettings = { runtimeMode, interactionMode, tokenMode };
 
-    // In worktree mode, require an explicit base branch so we don't silently
-    // fall back to local execution when branch selection is missing.
-    if (shouldCreateWorktree && !activeThreadBranch) {
-      setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
+    // A turn is already running: queue this message instead of sending it. Queued
+    // messages auto-dispatch, in order, once the thread reaches quiescence.
+    if (phase === "running" && activeThreadKey) {
+      enqueueMessage(activeThreadKey, {
+        id: crypto.randomUUID(),
+        composer: {
+          ...composerSnapshot,
+          // Clearing the composer revokes the live blob preview URLs, so clone the
+          // image previews to keep the queued copies independent.
+          images: composerSnapshot.images.map(cloneComposerImageForRetry),
+        },
+        settings: settingsSnapshot,
+      });
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      setComposerDraftTokenMode(composerDraftTarget, tokenMode);
+      readComposer()?.resetCursorState();
       return;
     }
 
-    await executeChatSendTurn({
-      composer: {
-        prompt: promptForSend,
-        trimmedPrompt: trimmed,
-        images: composerImages,
-        sendableTerminalContexts: sendableComposerTerminalContexts,
-        sourceControlContexts: composerSourceControlContexts,
-        selectedProvider: ctxSelectedProvider,
-        selectedModel: ctxSelectedModel,
-        selectedProviderModels: ctxSelectedProviderModels,
-        selectedPromptEffort: ctxSelectedPromptEffort,
-        selectedModelSelection: ctxSelectedModelSelection,
-        expiredTerminalContextCount,
+    await dispatchComposerSnapshotRef.current(composerSnapshot, settingsSnapshot, {
+      windowMs: SEND_UNDO_WINDOW_MS,
+      present: ({ triggerUndo }) => {
+        const toastId = toastManager.add(
+          stackedThreadToast({
+            type: "info",
+            title: "Message sent",
+            description: "You can undo before the agent picks it up.",
+            timeout: SEND_UNDO_WINDOW_MS,
+            actionVariant: "outline",
+            actionProps: { children: "Undo", onClick: triggerUndo },
+          }),
+        );
+        return () => {
+          toastManager.close(toastId);
+        };
       },
-      thread: {
-        threadId: threadIdForSend,
-        isFirstMessage,
-        isServerThread,
-        isLocalDraftThread,
-        activeThreadBranch,
-        worktreePath: activeThread.worktreePath,
-        createdAt: activeThread.createdAt,
-        projectId: activeProject.id,
-      },
-      worktree: {
-        shouldMaterializeLegacyBranchWorktree,
-        baseBranchForWorktree,
-        shouldCreateWorktree,
-      },
-      settings: { runtimeMode, interactionMode, tokenMode },
-      project: {
-        projectId: activeProject.id,
-        projectCwd: activeProject.cwd,
-        defaultModelSelection: activeProject.defaultModelSelection ?? null,
-      },
-      scroll: {
-        scrollToEndBeforeOptimistic: async () => {
-          isAtEndRef.current = true;
-          showScrollDebouncer.current.cancel();
-          setShowScrollToBottom(false);
-          await legendListRef.current?.scrollToEnd?.({ animated: false });
-        },
-      },
-      draft: {
-        composerDraftTarget,
-        environmentId,
-        clearComposerDraftContent,
-        setComposerDraftTokenMode,
-        setComposerDraftPrompt,
-        addComposerDraftImages,
-        setComposerDraftTerminalContexts,
-        setDraftThreadContext,
-      },
-      dispatch: {
-        api,
-        beginLocalDispatch,
-        resetLocalDispatch,
-        setOptimisticUserMessages,
-        setThreadError,
-      },
-      refs: { promptRef, composerImagesRef, composerTerminalContextsRef, sendInFlightRef },
-      sourceControl: {
-        fetcher: async (ctx) => {
-          const cwd = gitCwd;
-          if (!cwd) return ctx;
-          const now = DateTime.fromDateUnsafe(new Date());
-          const staleAfterDate = DateTime.fromDateUnsafe(new Date(Date.now() + 5 * 60 * 1000));
-          if (ctx.kind === "issue") {
-            const detail = await queryClient.fetchQuery(
-              issueDetailQueryOptions({ environmentId, cwd, reference: String(ctx.detail.number) }),
-            );
-            return { ...ctx, detail, fetchedAt: now, staleAfter: staleAfterDate };
-          }
-          const detail = await queryClient.fetchQuery(
-            changeRequestDetailQueryOptions({
-              environmentId,
-              cwd,
-              reference: String(ctx.detail.number),
-            }),
-          );
-          return { ...ctx, detail, fetchedAt: now, staleAfter: staleAfterDate };
-        },
-      },
-      persistSettings: { persistThreadSettingsForNextTurn },
-      composerHandle: { readComposer },
-      formatOutgoingPrompt,
     });
   };
   const runSendRef = useRef(runSend);
@@ -2236,6 +2391,29 @@ export default function ChatView(props: ChatViewProps) {
   const onSend = useCallback((e?: { preventDefault: () => void }) => {
     void runSendRef.current(e);
   }, []);
+
+  // Flush the message queue: when the thread is idle, dispatch the next queued
+  // message. One at a time — the dispatched turn goes running, and the following
+  // item flushes on the next quiescence. Guards prevent firing mid-turn, while an
+  // interrupt or provider error leaves the remaining queue intact.
+  useEffect(() => {
+    if (!activeThreadKey) return;
+    const next = queuedMessages[0];
+    if (!next) return;
+    if (isWorking || activeEnvironmentUnavailable) return;
+    if (activePendingProgress || activePendingApproval) return;
+    if (sendInFlightRef.current) return;
+    dequeueMessage(activeThreadKey);
+    void dispatchComposerSnapshotRef.current(next.composer, next.settings, undefined);
+  }, [
+    activeThreadKey,
+    queuedMessages,
+    isWorking,
+    activeEnvironmentUnavailable,
+    activePendingProgress,
+    activePendingApproval,
+    dequeueMessage,
+  ]);
 
   const onSubmitPlanFollowUp = useCallback(
     async ({
@@ -2816,6 +2994,11 @@ export default function ChatView(props: ChatViewProps) {
                 hasSourceControlRemote={hasSourceControlRemote}
                 hasJiraProvider={hasJiraProvider}
                 onInsertTrigger={handleInsertHintTrigger}
+              />
+              <ComposerQueuedMessages
+                messages={queuedMessages}
+                onRemove={handleRemoveQueuedMessage}
+                onMove={handleMoveQueuedMessage}
               />
               <div className="relative z-10">
                 <ChatComposer

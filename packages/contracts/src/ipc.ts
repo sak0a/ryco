@@ -98,7 +98,7 @@ import type {
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
-import type { EnvironmentId } from "./baseSchemas.ts";
+import type { EnvironmentId, ThreadId } from "./baseSchemas.ts";
 import type { DiagnosticsSnapshot } from "./diagnostics.ts";
 import type { StatisticsSnapshot } from "./statistics.ts";
 import type {
@@ -246,6 +246,18 @@ export interface PickFolderOptions {
   initialPath?: string | null;
 }
 
+/**
+ * Payload for a native "agent turn complete" desktop notification. Carries just
+ * enough to render the toast and, on click, focus + navigate back to the thread
+ * whose turn finished.
+ */
+export interface DesktopTurnCompleteNotification {
+  readonly threadId: ThreadId;
+  readonly environmentId?: EnvironmentId | undefined;
+  readonly title: string;
+  readonly body?: string | undefined;
+}
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
@@ -299,6 +311,12 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  /** Show a native notification when a turn completes and the window is unfocused. */
+  notifyTurnComplete: (notification: DesktopTurnCompleteNotification) => Promise<void>;
+  /** Subscribe to notification clicks so the renderer can navigate to the thread. */
+  onTurnCompleteNotificationActivated: (
+    listener: (notification: DesktopTurnCompleteNotification) => void,
+  ) => () => void;
 }
 
 /**

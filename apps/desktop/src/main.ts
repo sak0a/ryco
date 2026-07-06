@@ -15,6 +15,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  Notification,
   protocol,
   safeStorage,
   shell,
@@ -95,6 +96,10 @@ import { resolveDesktopAppBranding } from "./appBranding.ts";
 import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
 import {
+  parseTurnCompleteNotification,
+  shouldShowTurnCompleteNotification,
+} from "./turnCompleteNotification.ts";
+import {
   createUnsignedMacUpdateInstallScript,
   parseMacCodeSignatureKind,
   resolveMacAppBundlePath,
@@ -134,6 +139,8 @@ const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
+const NOTIFY_TURN_COMPLETE_CHANNEL = "desktop:notify-turn-complete";
+const TURN_COMPLETE_NOTIFICATION_ACTIVATED_CHANNEL = "desktop:turn-complete-notification-activated";
 const BASE_DIR = readEnv("RYCO_HOME")?.trim() || Path.join(OS.homedir(), ".ryco");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
@@ -2305,6 +2312,36 @@ function registerIpcHandlers(): void {
     }
 
     nativeTheme.themeSource = theme;
+  });
+
+  ipcMain.removeHandler(NOTIFY_TURN_COMPLETE_CHANNEL);
+  ipcMain.handle(NOTIFY_TURN_COMPLETE_CHANNEL, async (_event, rawNotification: unknown) => {
+    const notification = parseTurnCompleteNotification(rawNotification);
+    if (!notification) {
+      return;
+    }
+    if (
+      !shouldShowTurnCompleteNotification({
+        windowFocused: mainWindow?.isFocused() ?? false,
+        notificationsSupported: Notification.isSupported(),
+      })
+    ) {
+      return;
+    }
+
+    const native = new Notification({
+      title: notification.title,
+      ...(notification.body ? { body: notification.body } : {}),
+    });
+    native.on("click", () => {
+      const targetWindow = mainWindow ?? BrowserWindow.getAllWindows()[0];
+      if (!targetWindow || targetWindow.isDestroyed()) {
+        return;
+      }
+      revealWindow(targetWindow);
+      targetWindow.webContents.send(TURN_COMPLETE_NOTIFICATION_ACTIVATED_CHANNEL, notification);
+    });
+    native.show();
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
