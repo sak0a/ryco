@@ -139,6 +139,8 @@ import type { HintRowTrigger } from "./chat/ComposerHintRow.logic";
 import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
 import { useAtlassianProjectLink } from "~/rpc/useAtlassian";
 import { fetchWorkItemDetail } from "~/rpc/useWorkItems";
+import { parseContextAttachmentLinkedItem } from "~/lib/chatContextAttachments";
+import type { ChatContextAttachment } from "../types";
 import {
   ChatOverviewPanel,
   FloatingOverviewMotionFrame,
@@ -2618,6 +2620,16 @@ export default function ChatView(props: ChatViewProps) {
   const onExpandTimelineImage = useCallback((preview: ExpandedImagePreview) => {
     setExpandedImage(preview);
   }, []);
+  const onOpenTimelineContextAttachment = useCallback((attachment: ChatContextAttachment) => {
+    const linkedItem = parseContextAttachmentLinkedItem(attachment);
+    if (linkedItem) {
+      setHeaderLinkedItem(linkedItem);
+      return;
+    }
+    // Cross-repo references aren't resolvable in this workspace; fall back to
+    // the item's URL.
+    window.open(attachment.url, "_blank", "noopener,noreferrer");
+  }, []);
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
@@ -2764,6 +2776,7 @@ export default function ChatView(props: ChatViewProps) {
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
+                onOpenContextAttachment={onOpenTimelineContextAttachment}
                 markdownCwd={gitCwd ?? undefined}
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}

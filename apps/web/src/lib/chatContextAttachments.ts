@@ -1,6 +1,31 @@
 import type { ComposerSourceControlContext, ComposerWorkItemContext } from "@ryco/contracts";
 import type { ChatContextAttachment } from "../types";
 
+export type ContextAttachmentLinkedItem =
+  | { kind: "pr"; number: number }
+  | { kind: "issue"; number: number }
+  | { kind: "workItem"; provider: "jira"; key: string };
+
+/**
+ * Resolves a timeline context attachment to the linked-item dialog target.
+ * Returns `null` when the reference can't be resolved in this workspace
+ * (e.g. a cross-repo `owner/repo#N` reference) — callers fall back to
+ * opening the attachment's URL externally.
+ */
+export function parseContextAttachmentLinkedItem(
+  attachment: ChatContextAttachment,
+): ContextAttachmentLinkedItem | null {
+  if (attachment.kind === "work-item") {
+    return { kind: "workItem", provider: "jira", key: attachment.reference };
+  }
+  const match = /^#(\d+)$/.exec(attachment.reference);
+  if (!match) {
+    return null;
+  }
+  const number = Number(match[1]);
+  return attachment.kind === "change-request" ? { kind: "pr", number } : { kind: "issue", number };
+}
+
 /**
  * Returns the compact display reference for a source-control context.
  * Cross-repo references keep their `owner/repo#N` form; same-repo references

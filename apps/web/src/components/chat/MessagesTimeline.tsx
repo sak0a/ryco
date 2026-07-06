@@ -17,7 +17,7 @@ import {
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
-import { type TurnDiffSummary } from "../../types";
+import { type ChatContextAttachment, type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
 import {
@@ -56,6 +56,7 @@ import {
   type TimelineStreamingState,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
+import { TimelineContextChips } from "./TimelineContextChips";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   deriveDisplayedUserMessageState,
@@ -117,6 +118,7 @@ interface MessagesTimelineProps {
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
+  onOpenContextAttachment: (attachment: ChatContextAttachment) => void;
   activeThreadEnvironmentId: EnvironmentId;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
@@ -148,6 +150,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onRevertUserMessage,
   isRevertingCheckpoint,
   onImageExpand,
+  onOpenContextAttachment,
   activeThreadEnvironmentId,
   markdownCwd,
   resolvedTheme,
@@ -240,6 +243,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         activeThreadEnvironmentId,
         onRevertUserMessage,
         onImageExpand,
+        onOpenContextAttachment,
         onOpenTurnDiff,
         onCloseDiff: onCloseDiff ?? NOOP_CLOSE_DIFF,
       }),
@@ -253,6 +257,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRevertUserMessage,
       onImageExpand,
+      onOpenContextAttachment,
       onOpenTurnDiff,
       onCloseDiff,
     ],
@@ -343,12 +348,19 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const userImages = (row.message.attachments ?? []).filter(
             (attachment) => attachment.type === "image",
           );
+          const contextAttachments = (row.message.attachments ?? []).filter(
+            (attachment) => attachment.type === "context",
+          );
           const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
           const terminalContexts = displayedUserMessage.contexts;
           const canRevertAgentWork = typeof row.revertTurnCount === "number";
           return (
             <div className="flex justify-end">
               <div className="group flex max-w-[80%] flex-col items-end">
+                <TimelineContextChips
+                  attachments={contextAttachments}
+                  onOpen={ctx.onOpenContextAttachment}
+                />
                 <div className="relative rounded-2xl rounded-br-sm bg-foreground/8 px-3 py-2 shadow-md/5 transition-[background-color,box-shadow] duration-200 group-hover:bg-foreground/10 group-hover:shadow-lg/8">
                   {userImages.length > 0 && (
                     <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">

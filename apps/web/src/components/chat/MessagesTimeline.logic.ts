@@ -5,6 +5,7 @@ import {
 } from "../../session-logic";
 import {
   type ChatAttachment,
+  type ChatContextAttachment,
   type ChatMessage,
   type ProposedPlan,
   type TurnDiffSummary,
@@ -49,6 +50,7 @@ export interface TimelineStableState {
   activeThreadEnvironmentId: EnvironmentId;
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
+  onOpenContextAttachment: (attachment: ChatContextAttachment) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onCloseDiff: () => void;
 }
@@ -85,6 +87,7 @@ export function buildTimelineStableState(input: TimelineStableState): TimelineSt
     activeThreadEnvironmentId: input.activeThreadEnvironmentId,
     onRevertUserMessage: input.onRevertUserMessage,
     onImageExpand: input.onImageExpand,
+    onOpenContextAttachment: input.onOpenContextAttachment,
     onOpenTurnDiff: input.onOpenTurnDiff,
     onCloseDiff: input.onCloseDiff,
   };

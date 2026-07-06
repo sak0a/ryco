@@ -1,7 +1,11 @@
 import { Option } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import type { ComposerSourceControlContext, ComposerWorkItemContext } from "@ryco/contracts";
-import { buildChatContextAttachments } from "./chatContextAttachments";
+import type { ChatContextAttachment } from "../types";
+import {
+  buildChatContextAttachments,
+  parseContextAttachmentLinkedItem,
+} from "./chatContextAttachments";
 
 function makeIssueContext(overrides?: {
   reference?: string;
@@ -142,5 +146,45 @@ describe("buildChatContextAttachments", () => {
       workItemContexts: [makeWorkItemContext()],
     });
     expect(attachments.map((a) => a.kind)).toEqual(["issue", "work-item"]);
+  });
+});
+
+describe("parseContextAttachmentLinkedItem", () => {
+  function makeAttachment(overrides: Partial<ChatContextAttachment>): ChatContextAttachment {
+    return {
+      type: "context",
+      id: "ctx-att-1",
+      kind: "issue",
+      provider: "github",
+      reference: "#42",
+      title: "Title",
+      state: "open",
+      url: "https://example.com",
+      ...overrides,
+    };
+  }
+
+  it("resolves same-repo issues and PRs to dialog items", () => {
+    expect(parseContextAttachmentLinkedItem(makeAttachment({ kind: "issue" }))).toEqual({
+      kind: "issue",
+      number: 42,
+    });
+    expect(
+      parseContextAttachmentLinkedItem(makeAttachment({ kind: "change-request", reference: "#7" })),
+    ).toEqual({ kind: "pr", number: 7 });
+  });
+
+  it("resolves work items by key", () => {
+    expect(
+      parseContextAttachmentLinkedItem(
+        makeAttachment({ kind: "work-item", provider: "jira", reference: "RYC-231" }),
+      ),
+    ).toEqual({ kind: "workItem", provider: "jira", key: "RYC-231" });
+  });
+
+  it("returns null for cross-repo references", () => {
+    expect(
+      parseContextAttachmentLinkedItem(makeAttachment({ reference: "owner/other#9" })),
+    ).toBeNull();
   });
 });

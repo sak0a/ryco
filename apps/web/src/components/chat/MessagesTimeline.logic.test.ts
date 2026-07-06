@@ -739,6 +739,7 @@ describe("timeline context split", () => {
     "activeThreadEnvironmentId",
     "onRevertUserMessage",
     "onImageExpand",
+    "onOpenContextAttachment",
     "onOpenTurnDiff",
     "onCloseDiff",
   ];
@@ -760,6 +761,7 @@ describe("timeline context split", () => {
       activeThreadEnvironmentId: EnvironmentId.make("environment-local"),
       onRevertUserMessage: () => {},
       onImageExpand: () => {},
+      onOpenContextAttachment: () => {},
       onOpenTurnDiff: () => {},
       onCloseDiff: () => {},
     };

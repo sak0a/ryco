@@ -90,6 +90,7 @@ function buildProps() {
     onRevertUserMessage: () => {},
     isRevertingCheckpoint: false,
     onImageExpand: () => {},
+    onOpenContextAttachment: () => {},
     activeThreadEnvironmentId: ACTIVE_THREAD_ENVIRONMENT_ID,
     markdownCwd: undefined,
     resolvedTheme: "light" as const,
@@ -133,6 +134,84 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Terminal 1 lines 1-5");
     expect(markup).toContain("lucide-terminal");
     expect(markup).toContain("yoo what&#x27;s ");
+  }, 20_000);
+
+  it("renders persisted context attachments as chips above the user bubble", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-ctx",
+            kind: "message",
+            createdAt: "2026-07-05T10:00:00.000Z",
+            message: {
+              id: MessageId.make("message-ctx"),
+              role: "user",
+              text: "implement the attached ticket",
+              createdAt: "2026-07-05T10:00:00.000Z",
+              streaming: false,
+              attachments: [
+                {
+                  type: "context",
+                  id: "ctx-att-1",
+                  kind: "change-request",
+                  provider: "github",
+                  reference: "#42",
+                  title: "Add token usage attribution",
+                  state: "open",
+                  url: "https://github.com/owner/repo/pull/42",
+                },
+                {
+                  type: "context",
+                  id: "ctx-att-2",
+                  kind: "work-item",
+                  provider: "jira",
+                  reference: "RYC-231",
+                  title: "Attribute token spend per turn",
+                  state: "In Progress",
+                  url: "https://acme.atlassian.net/browse/RYC-231",
+                },
+              ],
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("#42");
+    expect(markup).toContain("Add token usage attribution");
+    expect(markup).toContain("RYC-231");
+    expect(markup).toContain("In Progress");
+    expect(markup).toContain("data-context-attachment-id");
+    expect(markup).toContain("implement the attached ticket");
+  }, 20_000);
+
+  it("renders no chip row for messages without context attachments", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-plain",
+            kind: "message",
+            createdAt: "2026-07-05T10:00:00.000Z",
+            message: {
+              id: MessageId.make("message-plain"),
+              role: "user",
+              text: "plain message",
+              createdAt: "2026-07-05T10:00:00.000Z",
+              streaming: false,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("plain message");
+    expect(markup).not.toContain("data-context-attachment-id");
   }, 20_000);
 
   it("renders context compaction entries as timeline markers", async () => {
