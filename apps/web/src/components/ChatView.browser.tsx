@@ -3281,7 +3281,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       const initialModeButton = await waitForInteractionModeButton("Build");
-      expect(initialModeButton.title).toContain("enter plan mode");
+      expect(initialModeButton.title).toContain("Make changes and run commands.");
 
       window.dispatchEvent(
         new KeyboardEvent("keydown", {
@@ -3293,7 +3293,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
       await waitForLayout();
 
-      expect((await waitForInteractionModeButton("Build")).title).toContain("enter plan mode");
+      expect((await waitForInteractionModeButton("Build")).title).toContain(
+        "Make changes and run commands.",
+      );
 
       const composerEditor = await waitForComposerEditor();
       composerEditor.focus();
@@ -3309,7 +3311,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         async () => {
           expect((await waitForInteractionModeButton("Plan")).title).toContain(
-            "return to normal build mode",
+            "Chat toward a plan before making changes.",
           );
         },
         { timeout: 8_000, interval: 16 },
@@ -3326,7 +3328,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         async () => {
-          expect((await waitForInteractionModeButton("Build")).title).toContain("enter plan mode");
+          expect((await waitForInteractionModeButton("Build")).title).toContain(
+            "Make changes and run commands.",
+          );
         },
         { timeout: 8_000, interval: 16 },
       );
