@@ -17,11 +17,15 @@ import {
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
+  MessageCircleQuestionMarkIcon,
   PenLineIcon,
 } from "lucide-react";
 import { ComposerExpandableLabelControl } from "./ComposerExpandableLabelControl";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
-import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
+import {
+  ASK_MODE_UNSUPPORTED_DESCRIPTION,
+  CompactComposerControlsMenu,
+} from "./CompactComposerControlsMenu";
 import { ContextPickerButton } from "./ContextPickerButton";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { ProviderModelPicker } from "./ProviderModelPicker";
@@ -61,17 +65,44 @@ const runtimeModeConfig: Record<
 
 const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
 
+const interactionModeConfig: Record<
+  ProviderInteractionMode,
+  { label: string; triggerLabel: string; description: string; icon: LucideIcon }
+> = {
+  default: {
+    label: "Build",
+    triggerLabel: "Build",
+    description: "Make changes and run commands.",
+    icon: HammerIcon,
+  },
+  plan: {
+    label: "Plan",
+    triggerLabel: "Plan",
+    description: "Chat toward a plan before making changes.",
+    icon: ClipboardListIcon,
+  },
+  ask: {
+    label: "Ask",
+    triggerLabel: "Ask",
+    description: "Read-only — answer questions without editing files.",
+    icon: MessageCircleQuestionMarkIcon,
+  },
+};
+
+const interactionModeOptions = Object.keys(interactionModeConfig) as ProviderInteractionMode[];
+
 const SELECT_OPEN_SUPPRESSION_MS = 300;
 
 export const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
   showInteractionModeToggle: boolean;
+  askModeSupported: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
   tokenMode: AgentTokenMode;
   showPlanToggle: boolean;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
-  onToggleInteractionMode: () => void;
+  onInteractionModeChange: (mode: ProviderInteractionMode) => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   onTokenModeChange: (mode: AgentTokenMode) => void;
   onTogglePlanSidebar: () => void;
@@ -80,21 +111,38 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
   const RuntimeModeIcon = runtimeModeOption.icon;
   const tokenModeOption = tokenModePresentation[props.tokenMode];
   const TokenModeIcon = tokenModeOption.icon;
-  const InteractionModeIcon = props.interactionMode === "plan" ? ClipboardListIcon : HammerIcon;
+  const interactionModeOption = interactionModeConfig[props.interactionMode];
+  const InteractionModeIcon = interactionModeOption.icon;
   const tokenModeControlStyle = useUiStateStore((state) => state.tokenModeControlStyle);
   const wideComposerControlsAutoCollapse = useUiStateStore(
     (state) => state.wideComposerControlsAutoCollapse,
   );
+  const [interactionModeSelectOpen, setInteractionModeSelectOpen] = useState(false);
   const [runtimeModeSelectOpen, setRuntimeModeSelectOpen] = useState(false);
   const [tokenModeSelectOpen, setTokenModeSelectOpen] = useState(false);
+  const [interactionModeSelectOpenSuppressed, setInteractionModeSelectOpenSuppressed] =
+    useState(false);
   const [runtimeModeSelectOpenSuppressed, setRuntimeModeSelectOpenSuppressed] = useState(false);
   const [tokenModeSelectOpenSuppressed, setTokenModeSelectOpenSuppressed] = useState(false);
+  const interactionModeSuppressOpenUntilRef = useRef(0);
   const runtimeModeSuppressOpenUntilRef = useRef(0);
   const tokenModeSuppressOpenUntilRef = useRef(0);
+  const interactionModeSuppressOpenTimeoutRef = useRef<number | null>(null);
   const runtimeModeSuppressOpenTimeoutRef = useRef<number | null>(null);
   const tokenModeSuppressOpenTimeoutRef = useRef<number | null>(null);
   const isSelectOpenSuppressed = useCallback((suppressUntilRef: { current: number }) => {
     return performance.now() < suppressUntilRef.current;
+  }, []);
+  const startInteractionModeOpenSuppression = useCallback(() => {
+    interactionModeSuppressOpenUntilRef.current = performance.now() + SELECT_OPEN_SUPPRESSION_MS;
+    setInteractionModeSelectOpenSuppressed(true);
+    if (interactionModeSuppressOpenTimeoutRef.current !== null) {
+      window.clearTimeout(interactionModeSuppressOpenTimeoutRef.current);
+    }
+    interactionModeSuppressOpenTimeoutRef.current = window.setTimeout(() => {
+      interactionModeSuppressOpenTimeoutRef.current = null;
+      setInteractionModeSelectOpenSuppressed(false);
+    }, SELECT_OPEN_SUPPRESSION_MS);
   }, []);
   const startRuntimeModeOpenSuppression = useCallback(() => {
     runtimeModeSuppressOpenUntilRef.current = performance.now() + SELECT_OPEN_SUPPRESSION_MS;
@@ -118,6 +166,10 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
       setTokenModeSelectOpenSuppressed(false);
     }, SELECT_OPEN_SUPPRESSION_MS);
   }, []);
+  const closeInteractionModeSelectAfterItemPress = useCallback(() => {
+    startInteractionModeOpenSuppression();
+    window.setTimeout(() => setInteractionModeSelectOpen(false), 0);
+  }, [startInteractionModeOpenSuppression]);
   const closeRuntimeModeSelectAfterItemPress = useCallback(() => {
     startRuntimeModeOpenSuppression();
     window.setTimeout(() => setRuntimeModeSelectOpen(false), 0);
@@ -129,6 +181,9 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
 
   useEffect(() => {
     return () => {
+      if (interactionModeSuppressOpenTimeoutRef.current !== null) {
+        window.clearTimeout(interactionModeSuppressOpenTimeoutRef.current);
+      }
       if (runtimeModeSuppressOpenTimeoutRef.current !== null) {
         window.clearTimeout(runtimeModeSuppressOpenTimeoutRef.current);
       }
@@ -144,25 +199,70 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
 
       {props.showInteractionModeToggle ? (
         <>
-          <Button
-            variant="ghost"
-            className="group/composer-label-control shrink-0 whitespace-nowrap px-1.5 text-muted-foreground/70 hover:text-foreground/80 sm:px-2"
-            size="xs"
-            type="button"
-            onClick={props.onToggleInteractionMode}
-            aria-label={props.interactionMode === "plan" ? "Plan mode" : "Build mode"}
-            title={
-              props.interactionMode === "plan"
-                ? "Plan mode — click to return to normal build mode"
-                : "Default mode — click to enter plan mode"
-            }
+          <Select
+            value={props.interactionMode}
+            open={interactionModeSelectOpen}
+            onOpenChange={(open) => {
+              if (open && isSelectOpenSuppressed(interactionModeSuppressOpenUntilRef)) {
+                return;
+              }
+              setInteractionModeSelectOpen(open);
+            }}
+            onValueChange={(value) => {
+              if (!value) return;
+              props.onInteractionModeChange(value);
+              startInteractionModeOpenSuppression();
+              setInteractionModeSelectOpen(false);
+            }}
           >
-            <ComposerExpandableLabelControl
-              collapsed={wideComposerControlsAutoCollapse}
-              icon={<InteractionModeIcon className="size-4 sm:size-3.5" />}
-              label={props.interactionMode === "plan" ? "Plan" : "Build"}
-            />
-          </Button>
+            <SelectTrigger
+              variant="ghost"
+              size="xs"
+              className={cn(
+                "group/composer-label-control gap-1 px-1.5 font-medium text-muted-foreground/70 hover:text-foreground/80 sm:px-1.5",
+                wideComposerControlsAutoCollapse &&
+                  "min-w-7 justify-center px-1 sm:px-1 [&_[data-slot=select-icon]]:hidden",
+              )}
+              aria-label={`Interaction mode: ${interactionModeOption.triggerLabel}`}
+              title={interactionModeOption.description}
+            >
+              <ComposerExpandableLabelControl
+                collapsed={wideComposerControlsAutoCollapse}
+                expanded={interactionModeSelectOpen || interactionModeSelectOpenSuppressed}
+                icon={<InteractionModeIcon className="size-4 sm:size-3.5" />}
+                label={<SelectValue>{interactionModeOption.triggerLabel}</SelectValue>}
+              />
+            </SelectTrigger>
+            <SelectPopup
+              alignItemWithTrigger={false}
+              className="w-56 p-0.5 [&_[data-slot=select-item]]:min-h-7"
+            >
+              {interactionModeOptions.map((mode) => {
+                const option = interactionModeConfig[mode];
+                const OptionIcon = option.icon;
+                const unsupported = mode === "ask" && !props.askModeSupported;
+                return (
+                  <SelectItem
+                    key={mode}
+                    value={mode}
+                    disabled={unsupported}
+                    className="min-w-0 py-1.5"
+                    onClick={closeInteractionModeSelectAfterItemPress}
+                  >
+                    <div className="grid min-w-0 gap-0.5">
+                      <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                        <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                        {option.label}
+                      </span>
+                      <span className="text-muted-foreground text-xs leading-4">
+                        {unsupported ? ASK_MODE_UNSUPPORTED_DESCRIPTION : option.description}
+                      </span>
+                    </div>
+                  </SelectItem>
+                );
+              })}
+            </SelectPopup>
+          </Select>
 
           <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
         </>
@@ -424,6 +524,7 @@ export interface ComposerFooterProps {
 
   // Mode controls
   showInteractionModeToggle: boolean;
+  askModeSupported: boolean;
   showPlanSidebarToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
@@ -432,7 +533,7 @@ export interface ComposerFooterProps {
   planSidebarOpen: boolean;
   providerTraitsMenuContent: ReactNode;
   providerTraitsChips: ReactNode;
-  onToggleInteractionMode: () => void;
+  onInteractionModeChange: (mode: ProviderInteractionMode) => void;
   onTogglePlanSidebar: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   onTokenModeChange: (mode: AgentTokenMode) => void;
@@ -509,8 +610,9 @@ export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooter
             runtimeMode={props.runtimeMode}
             tokenMode={props.tokenMode}
             showInteractionModeToggle={props.showInteractionModeToggle}
+            askModeSupported={props.askModeSupported}
             traitsMenuContent={props.providerTraitsMenuContent}
-            onToggleInteractionMode={props.onToggleInteractionMode}
+            onInteractionModeChange={props.onInteractionModeChange}
             onTogglePlanSidebar={props.onTogglePlanSidebar}
             onRuntimeModeChange={props.onRuntimeModeChange}
             onTokenModeChange={props.onTokenModeChange}
@@ -525,13 +627,14 @@ export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooter
             ) : null}
             <ComposerFooterModeControls
               showInteractionModeToggle={props.showInteractionModeToggle}
+              askModeSupported={props.askModeSupported}
               interactionMode={props.interactionMode}
               runtimeMode={props.runtimeMode}
               tokenMode={props.tokenMode}
               showPlanToggle={props.showPlanSidebarToggle}
               planSidebarLabel={props.planSidebarLabel}
               planSidebarOpen={props.planSidebarOpen}
-              onToggleInteractionMode={props.onToggleInteractionMode}
+              onInteractionModeChange={props.onInteractionModeChange}
               onRuntimeModeChange={props.onRuntimeModeChange}
               onTokenModeChange={props.onTokenModeChange}
               onTogglePlanSidebar={props.onTogglePlanSidebar}

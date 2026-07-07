@@ -97,7 +97,11 @@ import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
-import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
+import {
+  getProviderModelCapabilities,
+  getProviderSupportsAskMode,
+  resolveSelectableProvider,
+} from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
@@ -235,6 +239,7 @@ function providerStatusesContentKey(providers: ReadonlyArray<ServerProvider>): s
       provider.badgeLabel ?? "",
       provider.continuation?.groupKey ?? "",
       provider.showInteractionModeToggle ? "1" : "0",
+      provider.supportsAskMode ? "1" : "0",
       provider.enabled ? "1" : "0",
       provider.status,
       provider.installed ? "1" : "0",
@@ -1867,8 +1872,15 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
   const toggleInteractionMode = useCallback(() => {
-    handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
-  }, [handleInteractionModeChange, interactionMode]);
+    const askModeSupported = getProviderSupportsAskMode(providerStatuses, selectedProvider);
+    const nextMode: ProviderInteractionMode =
+      interactionMode === "default"
+        ? "plan"
+        : interactionMode === "plan" && askModeSupported
+          ? "ask"
+          : "default";
+    handleInteractionModeChange(nextMode);
+  }, [handleInteractionModeChange, interactionMode, providerStatuses, selectedProvider]);
   const setOverviewSidebarOpen = useCallback(
     (open: boolean) => {
       setPlanSidebarOpen(open);
@@ -2610,7 +2622,7 @@ export default function ChatView(props: ChatViewProps) {
       interactionMode: nextInteractionMode,
     }: {
       text: string;
-      interactionMode: "default" | "plan";
+      interactionMode: ProviderInteractionMode;
     }) => {
       const api = readEnvironmentApi(environmentId);
       if (

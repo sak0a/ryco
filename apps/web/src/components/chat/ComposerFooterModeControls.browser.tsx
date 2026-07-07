@@ -9,13 +9,14 @@ import { ComposerFooterModeControls } from "./ComposerFooter";
 
 const baseProps = {
   showInteractionModeToggle: true,
+  askModeSupported: true,
   interactionMode: "default" as const,
   runtimeMode: "full-access" as const,
   tokenMode: "balanced" as const,
   showPlanToggle: true,
   planSidebarLabel: "Plan",
   planSidebarOpen: false,
-  onToggleInteractionMode: vi.fn(),
+  onInteractionModeChange: vi.fn(),
   onRuntimeModeChange: vi.fn(),
   onTokenModeChange: vi.fn(),
   onTogglePlanSidebar: vi.fn(),
@@ -144,6 +145,47 @@ describe("ComposerFooterModeControls", () => {
     });
     await wait(POPUP_CLOSE_VERIFICATION_DELAY_MS);
     expectSelectPopupClosed();
+  });
+
+  it("selects ask mode from the interaction mode popup when supported", async () => {
+    const onInteractionModeChange = vi.fn();
+    mounted = await render(
+      <ComposerFooterModeControls
+        {...baseProps}
+        onInteractionModeChange={onInteractionModeChange}
+      />,
+    );
+
+    await page.getByLabelText("Interaction mode: Build").click();
+    await page.getByRole("option", { name: /Ask/ }).click();
+
+    await vi.waitFor(() => {
+      expect(onInteractionModeChange).toHaveBeenCalledWith("ask");
+    });
+    await vi.waitFor(() => {
+      expectSelectPopupClosed();
+    });
+  });
+
+  it("disables the ask option with an explanation when unsupported", async () => {
+    const onInteractionModeChange = vi.fn();
+    mounted = await render(
+      <ComposerFooterModeControls
+        {...baseProps}
+        askModeSupported={false}
+        onInteractionModeChange={onInteractionModeChange}
+      />,
+    );
+
+    await page.getByLabelText("Interaction mode: Build").click();
+    await vi.waitFor(() => {
+      const askOption = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-slot="select-item"]'),
+      ).find((item) => item.textContent?.includes("Ask"));
+      expect(askOption?.hasAttribute("data-disabled")).toBe(true);
+      expect(askOption?.textContent).toContain("Not supported by this provider.");
+    });
+    expect(onInteractionModeChange).not.toHaveBeenCalled();
   });
 
   it("closes token mode popup after selecting the current value again", async () => {

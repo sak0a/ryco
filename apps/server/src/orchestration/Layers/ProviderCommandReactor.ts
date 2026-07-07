@@ -9,6 +9,7 @@ import {
   type ProjectId,
   type OrchestrationSession,
   ThreadId,
+  type ProviderInteractionMode,
   type ProviderSession,
   type RuntimeMode,
   type AgentTokenMode,
@@ -530,7 +531,7 @@ const make = Effect.gen(function* () {
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
-    readonly interactionMode?: "default" | "plan";
+    readonly interactionMode?: ProviderInteractionMode;
     readonly tokenMode?: AgentTokenMode;
     readonly createdAt: string;
   }) {

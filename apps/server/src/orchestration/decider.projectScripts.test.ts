@@ -97,6 +97,76 @@ describe("decider project scripts", () => {
     expect((event.payload as { scripts?: unknown[] }).scripts).toEqual(scripts);
   });
 
+  it("propagates defaultModelSelection in project.meta.update payload and read model", async () => {
+    const now = new Date().toISOString();
+    const initial = createEmptyReadModel(now);
+    const readModel = await Effect.runPromise(
+      projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-default-model"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-default-model"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.make("cmd-project-create-default-model"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-project-create-default-model"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-default-model"),
+          title: "Default model",
+          workspaceRoot: "/tmp/default-model",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+
+    const defaultModelSelection = createModelSelection(
+      ProviderInstanceId.make("claudeAgent"),
+      "opus",
+    );
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "project.meta.update",
+          commandId: CommandId.make("cmd-project-update-default-model"),
+          projectId: asProjectId("project-default-model"),
+          defaultModelSelection,
+        },
+        readModel,
+      }),
+    );
+
+    const event = Array.isArray(result) ? result[0] : result;
+    expect(event.type).toBe("project.meta-updated");
+    expect((event.payload as { defaultModelSelection?: unknown }).defaultModelSelection).toEqual(
+      defaultModelSelection,
+    );
+
+    const updated = await Effect.runPromise(
+      projectEvent(readModel, {
+        sequence: 2,
+        eventId: asEventId("evt-project-update-default-model"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-default-model"),
+        type: event.type,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-project-update-default-model"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-project-update-default-model"),
+        metadata: {},
+        payload: event.payload,
+      }),
+    );
+    expect(
+      updated.projects.find((project) => project.id === asProjectId("project-default-model"))
+        ?.defaultModelSelection,
+    ).toEqual(defaultModelSelection);
+  });
+
   it("emits user message and turn-start-requested events for thread.turn.start", async () => {
     const now = new Date().toISOString();
     const initial = createEmptyReadModel(now);

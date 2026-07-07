@@ -222,6 +222,10 @@ function resolveRequestedModeId(input: {
     return findModeByAliases(modeState.availableModes, ACP_PLAN_MODE_ALIASES)?.id;
   }
 
+  if (input.interactionMode === "ask") {
+    return findModeByAliases(modeState.availableModes, ACP_APPROVAL_MODE_ALIASES)?.id;
+  }
+
   if (input.runtimeMode === "approval-required") {
     return (
       findModeByAliases(modeState.availableModes, ACP_APPROVAL_MODE_ALIASES)?.id ??

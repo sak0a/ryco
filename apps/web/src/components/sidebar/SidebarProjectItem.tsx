@@ -659,12 +659,14 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
         preferredRemoteName={settingsDialog.projectSettingsPreferredRemoteName}
         workspaceRoot={settingsDialog.projectSettingsWorkspaceRoot}
         customSystemPrompt={settingsDialog.projectSettingsCustomSystemPrompt}
+        defaultModelSelection={settingsDialog.projectSettingsDefaultModelSelection}
         saving={settingsDialog.projectSettingsSaving}
         onClose={settingsDialog.closeProjectSettingsDialog}
         onSave={() => void settingsDialog.submitProjectSettings()}
         onTitleChange={settingsDialog.setProjectSettingsTitle}
         onWorkspaceRootChange={settingsDialog.setProjectSettingsWorkspaceRoot}
         onCustomSystemPromptChange={settingsDialog.setProjectSettingsCustomSystemPrompt}
+        onDefaultModelSelectionChange={settingsDialog.setProjectSettingsDefaultModelSelection}
         onPreferredRemoteChange={settingsDialog.setProjectSettingsPreferredRemoteName}
         onPickWorkspaceRoot={() => void settingsDialog.pickProjectSettingsWorkspaceRoot()}
         onOpenRemote={settingsDialog.openProjectRemoteByName}

@@ -43,6 +43,7 @@ export const COMPOSER_DRAFT_STORAGE_VERSION = 7;
 const DraftThreadEnvModeSchema = Schema.Literals(["local", "worktree"]);
 export const isRuntimeMode = Schema.is(RuntimeMode);
 export const isAgentTokenMode = Schema.is(AgentTokenMode);
+export const isProviderInteractionMode = Schema.is(ProviderInteractionMode);
 export type DraftThreadEnvMode = typeof DraftThreadEnvModeSchema.Type;
 
 const COMPOSER_PERSIST_DEBOUNCE_MS = 300;
@@ -710,11 +711,9 @@ function normalizePersistedDraftThreads(
         runtimeMode: isRuntimeMode(candidateDraftThread.runtimeMode)
           ? candidateDraftThread.runtimeMode
           : DEFAULT_RUNTIME_MODE,
-        interactionMode:
-          candidateDraftThread.interactionMode === "plan" ||
-          candidateDraftThread.interactionMode === "default"
-            ? candidateDraftThread.interactionMode
-            : DEFAULT_INTERACTION_MODE,
+        interactionMode: isProviderInteractionMode(candidateDraftThread.interactionMode)
+          ? candidateDraftThread.interactionMode
+          : DEFAULT_INTERACTION_MODE,
         tokenMode: isAgentTokenMode(candidateDraftThread.tokenMode)
           ? candidateDraftThread.tokenMode
           : DEFAULT_AGENT_TOKEN_MODE,
@@ -835,10 +834,9 @@ function normalizePersistedDraftsByThreadId(
     const runtimeMode = isRuntimeMode(draftCandidate.runtimeMode)
       ? draftCandidate.runtimeMode
       : null;
-    const interactionMode =
-      draftCandidate.interactionMode === "plan" || draftCandidate.interactionMode === "default"
-        ? draftCandidate.interactionMode
-        : null;
+    const interactionMode = isProviderInteractionMode(draftCandidate.interactionMode)
+      ? draftCandidate.interactionMode
+      : null;
     const tokenMode = isAgentTokenMode(draftCandidate.tokenMode) ? draftCandidate.tokenMode : null;
     const prompt = ensureInlineTerminalContextPlaceholders(
       promptCandidate,
