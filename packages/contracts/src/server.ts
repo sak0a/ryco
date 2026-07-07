@@ -199,6 +199,10 @@ export const ServerProvider = Schema.Struct({
   badgeLabel: Schema.optional(TrimmedNonEmptyString),
   continuation: Schema.optional(ServerProviderContinuation),
   showInteractionModeToggle: Schema.optional(Schema.Boolean),
+  // Whether the driver can honor the "ask" interaction mode with a
+  // read-only turn. Absent means unsupported; the UI renders the ask
+  // option disabled with an explanation.
+  supportsAskMode: Schema.optional(Schema.Boolean),
   enabled: Schema.Boolean,
   installed: Schema.Boolean,
   version: Schema.NullOr(TrimmedNonEmptyString),

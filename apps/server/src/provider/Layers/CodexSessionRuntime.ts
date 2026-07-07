@@ -29,6 +29,7 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { buildCodexInitializeParams } from "./CodexProvider.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import {
+  CODEX_ASK_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
@@ -320,13 +321,18 @@ function buildCodexCollaborationMode(input: {
     appendProjectCustomSystemPrompt(
       input.interactionMode === "plan"
         ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
-        : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
+        : input.interactionMode === "ask"
+          ? CODEX_ASK_MODE_DEVELOPER_INSTRUCTIONS
+          : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
       input.tokenReductionInstructions,
     ),
     input.customSystemPrompt,
   );
   return {
-    mode: input.interactionMode,
+    // The Codex app-server protocol only knows the "plan" and "default"
+    // collaboration modes; "ask" rides on "default" with ask developer
+    // instructions plus a read-only turn sandbox (see buildTurnStartParams).
+    mode: input.interactionMode === "plan" ? "plan" : "default",
     settings: {
       model,
       reasoning_effort: input.effort ?? "medium",
@@ -375,11 +381,18 @@ export function buildTurnStartParams(input: {
       : {}),
   });
 
+  // Ask mode forces a read-only sandbox so the turn cannot edit files,
+  // regardless of the thread's runtime mode.
+  const sandboxPolicy: EffectCodexSchema.V2TurnStartParams__SandboxPolicy =
+    input.interactionMode === "ask"
+      ? { type: "readOnly" }
+      : runtimeModeToTurnSandboxPolicy(input.runtimeMode);
+
   return Schema.decodeUnknownEffect(CodexTurnStartParamsWithCollaborationMode)({
     threadId: input.threadId,
     input: turnInput,
     approvalPolicy: config.approvalPolicy,
-    sandboxPolicy: runtimeModeToTurnSandboxPolicy(input.runtimeMode),
+    sandboxPolicy,
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
     ...(input.effort ? { effort: input.effort } : {}),

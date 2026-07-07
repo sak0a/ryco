@@ -1637,7 +1637,11 @@ export function makeOpenCodeAdapter(
       const variant = getModelSelectionStringOptionValue(modelSelection, "variant");
 
       context.activeTurnId = turnId;
-      context.activeAgent = agent ?? (input.interactionMode === "plan" ? "plan" : undefined);
+      // OpenCode has no dedicated ask agent; its "plan" agent is the
+      // read-only equivalent, so both plan and ask map onto it.
+      context.activeAgent =
+        agent ??
+        (input.interactionMode === "plan" || input.interactionMode === "ask" ? "plan" : undefined);
       context.activeVariant = variant;
       updateProviderSession(
         context,

@@ -142,6 +142,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
       planSidebarOpen={false}
       runtimeMode="approval-required"
       showInteractionModeToggle
+      askModeSupported
       traitsMenuContent={
         <TraitsMenuContent
           provider={provider}
@@ -154,7 +155,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
           onPromptChange={onPromptChange}
         />
       }
-      onToggleInteractionMode={vi.fn()}
+      onInteractionModeChange={vi.fn()}
       onTogglePlanSidebar={vi.fn()}
       onRuntimeModeChange={vi.fn()}
     />,
@@ -305,7 +306,8 @@ describe("CompactComposerControlsMenu", () => {
         planSidebarOpen={false}
         runtimeMode="approval-required"
         showInteractionModeToggle={false}
-        onToggleInteractionMode={vi.fn()}
+        askModeSupported={false}
+        onInteractionModeChange={vi.fn()}
         onTogglePlanSidebar={vi.fn()}
         onRuntimeModeChange={vi.fn()}
       />,
@@ -322,6 +324,40 @@ describe("CompactComposerControlsMenu", () => {
       expect(text).toContain("Access");
       expect(text).toContain("Supervised");
       expect(text).toContain("Full access");
+    });
+
+    await screen.unmount();
+    host.remove();
+  });
+
+  it("disables the ask mode item with an explanation when unsupported", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <CompactComposerControlsMenu
+        activePlan={false}
+        interactionMode="default"
+        planSidebarLabel="Plan"
+        planSidebarOpen={false}
+        runtimeMode="approval-required"
+        showInteractionModeToggle
+        askModeSupported={false}
+        onInteractionModeChange={vi.fn()}
+        onTogglePlanSidebar={vi.fn()}
+        onRuntimeModeChange={vi.fn()}
+      />,
+      { container: host },
+    );
+
+    await page.getByLabelText("More composer controls").click();
+
+    await vi.waitFor(() => {
+      const askItem = Array.from(
+        document.querySelectorAll<HTMLElement>('[role="menuitemradio"]'),
+      ).find((item) => item.textContent?.includes("Ask"));
+      expect(askItem).toBeDefined();
+      expect(askItem?.hasAttribute("data-disabled")).toBe(true);
+      expect(askItem?.textContent).toContain("Not supported by this provider.");
     });
 
     await screen.unmount();

@@ -86,7 +86,7 @@ import { ComposerPromptShell } from "./ComposerPromptShell";
 import { useComposerImageAttachments } from "./useComposerImageAttachments";
 import { cn, randomUUID } from "~/lib/utils";
 import { proposedPlanTitle } from "../../proposedPlan";
-import { getProviderInteractionModeToggle } from "../../providerModels";
+import { getProviderInteractionModeToggle, getProviderSupportsAskMode } from "../../providerModels";
 import {
   deriveProviderInstanceEntries,
   resolveProviderDriverKindForInstanceSelection,
@@ -580,6 +580,7 @@ export const ChatComposer = memo(
           providerStatuses,
           selectedProvider,
         ),
+        askModeSupported: getProviderSupportsAskMode(providerStatuses, selectedProvider),
       }),
       [providerStatuses, selectedProvider],
     );
@@ -1953,6 +1954,7 @@ export const ChatComposer = memo(
                 onModelPickerOpenChange={setIsComposerModelPickerOpen}
                 onProviderModelSelect={onProviderModelSelect}
                 showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
+                askModeSupported={composerProviderControls.askModeSupported}
                 showPlanSidebarToggle={showPlanSidebarToggle}
                 interactionMode={interactionMode}
                 runtimeMode={runtimeMode}
@@ -1961,7 +1963,7 @@ export const ChatComposer = memo(
                 planSidebarOpen={planSidebarOpen}
                 providerTraitsMenuContent={providerTraitsMenuContent}
                 providerTraitsChips={providerTraitsChips}
-                onToggleInteractionMode={toggleInteractionMode}
+                onInteractionModeChange={handleInteractionModeChange}
                 onTogglePlanSidebar={togglePlanSidebar}
                 onRuntimeModeChange={handleRuntimeModeChange}
                 onTokenModeChange={handleTokenModeChange}

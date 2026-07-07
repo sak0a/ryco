@@ -27,6 +27,7 @@ const PROVIDER_PROBE_TIMEOUT_MS = 8_000;
 const CODEX_PRESENTATION = {
   displayName: "Codex",
   showInteractionModeToggle: true,
+  supportsAskMode: true,
 } as const;
 
 export interface CodexAppServerProviderSnapshot {

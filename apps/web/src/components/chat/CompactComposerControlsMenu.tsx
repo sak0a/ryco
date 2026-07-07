@@ -18,6 +18,8 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 
+export const ASK_MODE_UNSUPPORTED_DESCRIPTION = "Not supported by this provider.";
+
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   activePlan: boolean;
   interactionMode: ProviderInteractionMode;
@@ -26,8 +28,9 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   runtimeMode: RuntimeMode;
   tokenMode?: AgentTokenMode;
   showInteractionModeToggle: boolean;
+  askModeSupported: boolean;
   traitsMenuContent?: ReactNode;
-  onToggleInteractionMode: () => void;
+  onInteractionModeChange: (mode: ProviderInteractionMode) => void;
   onTogglePlanSidebar: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   onTokenModeChange?: (mode: AgentTokenMode) => void;
@@ -66,11 +69,23 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
               value={props.interactionMode}
               onValueChange={(value) => {
                 if (!value || value === props.interactionMode) return;
-                props.onToggleInteractionMode();
+                props.onInteractionModeChange(value as ProviderInteractionMode);
               }}
             >
               <MenuRadioItem value="default">Chat</MenuRadioItem>
               <MenuRadioItem value="plan">Plan</MenuRadioItem>
+              <MenuRadioItem value="ask" disabled={!props.askModeSupported}>
+                {props.askModeSupported ? (
+                  "Ask"
+                ) : (
+                  <span className="grid gap-0.5">
+                    <span>Ask</span>
+                    <span className="text-muted-foreground text-xs leading-4">
+                      {ASK_MODE_UNSUPPORTED_DESCRIPTION}
+                    </span>
+                  </span>
+                )}
+              </MenuRadioItem>
             </MenuRadioGroup>
             <MenuDivider />
           </>
