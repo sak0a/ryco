@@ -28,6 +28,7 @@ type ComposerThreadTarget = ScopedThreadRef | DraftId;
 import { appendTerminalContextsToPrompt, formatTerminalContextLabel } from "../lib/terminalContext";
 import { collapseExpandedComposerCursor } from "../composer-logic";
 import { newCommandId, newMessageId } from "../lib/utils";
+import { runSendUndoWindow } from "./sendUndoController";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import {
   buildChatSendTitleSeed,
@@ -92,6 +93,17 @@ export interface SendTurnScrollDeps {
   scrollToEndBeforeOptimistic: () => Promise<void>;
 }
 
+export interface SendTurnUndoDeps {
+  /** How long the undo affordance stays live before the turn auto-commits. */
+  windowMs: number;
+  /**
+   * Present the undo affordance (e.g. a toast). Receives a `triggerUndo` callback
+   * to wire to the Undo control, and returns an optional disposer run once the
+   * window resolves. See `runSendUndoWindow`.
+   */
+  present: (controls: { triggerUndo: () => void }) => (() => void) | void;
+}
+
 export interface SendTurnComposerDraftDeps {
   composerDraftTarget: ComposerThreadTarget;
   environmentId: EnvironmentId;
@@ -150,6 +162,8 @@ export interface ExecuteChatSendTurnInput {
   settings: SendTurnSettings;
   project: SendTurnProjectContext;
   scroll: SendTurnScrollDeps;
+  /** When present, hold the provider dispatch behind a short cancellable undo window. */
+  undo?: SendTurnUndoDeps;
   draft: SendTurnComposerDraftDeps;
   dispatch: SendTurnDispatchDeps;
   refs: SendTurnRollbackRefs;
@@ -168,6 +182,21 @@ export interface ExecuteChatSendTurnInput {
 // ---------------------------------------------------------------------------
 // Rollback
 // ---------------------------------------------------------------------------
+
+/** Remove a pending optimistic user message from the timeline, revoking its previews. */
+export function removeOptimisticUserMessage(
+  setOptimisticUserMessages: (updater: (existing: ChatMessage[]) => ChatMessage[]) => void,
+  messageId: string,
+): void {
+  setOptimisticUserMessages((existing) => {
+    const removed = existing.filter((m) => m.id === messageId);
+    for (const m of removed) {
+      revokeUserMessagePreviewUrls(m);
+    }
+    const next = existing.filter((m) => m.id !== messageId);
+    return next.length === existing.length ? existing : next;
+  });
+}
 
 export function rollbackSendTurn(input: {
   refs: SendTurnRollbackRefs;
@@ -198,14 +227,7 @@ export function rollbackSendTurn(input: {
     return;
   }
 
-  dispatch.setOptimisticUserMessages((existing) => {
-    const removed = existing.filter((m) => m.id === messageId);
-    for (const m of removed) {
-      revokeUserMessagePreviewUrls(m);
-    }
-    const next = existing.filter((m) => m.id !== messageId);
-    return next.length === existing.length ? existing : next;
-  });
+  removeOptimisticUserMessage(dispatch.setOptimisticUserMessages, messageId);
 
   refs.promptRef.current = promptSnapshot;
   const retryImages = imagesSnapshot.map(cloneComposerImageForRetry);
@@ -408,6 +430,7 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
   composerHandle.readComposer()?.resetCursorState();
 
   let turnStartSucceeded = false;
+  let undone = false;
   await (async () => {
     let firstComposerImageName: string | null = null;
     if (imagesSnapshot.length > 0) {
@@ -434,26 +457,6 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
       composer.selectedModelSelection.options,
     );
 
-    if (thread.isFirstMessage && thread.isServerThread) {
-      await api.orchestration.dispatchCommand({
-        type: "thread.meta.update",
-        commandId: newCommandId(),
-        threadId: thread.threadId,
-        title,
-      });
-    }
-
-    if (thread.isServerThread) {
-      await persistSettingsDeps.persistThreadSettingsForNextTurn({
-        threadId: thread.threadId,
-        createdAt: messageCreatedAt,
-        ...(composer.selectedModel ? { modelSelection: composer.selectedModelSelection } : {}),
-        runtimeMode: settings.runtimeMode,
-        interactionMode: settings.interactionMode,
-        tokenMode: settings.tokenMode,
-      });
-    }
-
     const turnAttachments = await turnAttachmentsPromise;
 
     const freshSourceControlContexts = await refreshStaleSourceControlContexts(
@@ -476,6 +479,42 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
       worktreePath: thread.worktreePath,
       threadCreatedAt: thread.createdAt,
     });
+
+    // Short "undo send" window: hold the provider dispatch so the user can pull
+    // the message back before the turn is picked up. Skipped (immediate dispatch)
+    // when no `undo` config is supplied — e.g. queued auto-sends on quiescence.
+    if (input.undo && input.undo.windowMs > 0) {
+      const outcome = await runSendUndoWindow({
+        windowMs: input.undo.windowMs,
+        present: input.undo.present,
+      });
+      if (outcome === "undone") {
+        undone = true;
+        return;
+      }
+    }
+
+    // Server-side writes derived from this message must only run once the send
+    // commits; otherwise an undone first send leaves orphan title/settings.
+    if (thread.isFirstMessage && thread.isServerThread) {
+      await api.orchestration.dispatchCommand({
+        type: "thread.meta.update",
+        commandId: newCommandId(),
+        threadId: thread.threadId,
+        title,
+      });
+    }
+
+    if (thread.isServerThread) {
+      await persistSettingsDeps.persistThreadSettingsForNextTurn({
+        threadId: thread.threadId,
+        createdAt: messageCreatedAt,
+        ...(composer.selectedModel ? { modelSelection: composer.selectedModelSelection } : {}),
+        runtimeMode: settings.runtimeMode,
+        interactionMode: settings.interactionMode,
+        tokenMode: settings.tokenMode,
+      });
+    }
 
     beginLocalDispatch({ preparingWorktree: false });
     await api.orchestration.dispatchCommand({
@@ -513,6 +552,23 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
     });
     setThreadError(thread.threadId, err instanceof Error ? err.message : "Failed to send message.");
   });
+
+  if (undone) {
+    // Explicit undo always pulls the optimistic bubble back out of the timeline...
+    removeOptimisticUserMessage(setOptimisticUserMessages, messageIdForSend);
+    // ...and restores the composer content when the user hasn't typed anything new
+    // in the window (the guard inside `rollbackSendTurn` protects fresh input).
+    rollbackSendTurn({
+      refs,
+      composerHandle,
+      dispatch: { setOptimisticUserMessages },
+      draft,
+      messageId: messageIdForSend,
+      promptSnapshot: composer.prompt,
+      imagesSnapshot,
+      terminalContextsSnapshot,
+    });
+  }
 
   refs.sendInFlightRef.current = false;
   if (!turnStartSucceeded) {

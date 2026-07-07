@@ -894,6 +894,36 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        {isElectron ? (
+          <SettingsRow
+            title="Turn-complete notifications"
+            description="Show a desktop notification when an agent finishes a turn while the Ryco window is unfocused."
+            resetAction={
+              settings.notifyOnTurnCompleteWhenUnfocused !==
+              DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleteWhenUnfocused ? (
+                <SettingResetButton
+                  label="turn-complete notifications"
+                  onClick={() =>
+                    updateSettings({
+                      notifyOnTurnCompleteWhenUnfocused:
+                        DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleteWhenUnfocused,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.notifyOnTurnCompleteWhenUnfocused}
+                onCheckedChange={(checked) =>
+                  updateSettings({ notifyOnTurnCompleteWhenUnfocused: Boolean(checked) })
+                }
+                aria-label="Notify when a turn completes while unfocused"
+              />
+            }
+          />
+        ) : null}
       </SettingsSection>
 
       <SettingsSection title="About">

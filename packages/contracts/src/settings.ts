@@ -90,6 +90,11 @@ export const ClientSettingsSchema = Schema.Struct({
   gitStatusPollIntervalMs: GitStatusPollIntervalMs.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_GIT_STATUS_POLL_INTERVAL_MS)),
   ),
+  // Desktop-only: post a native notification when an agent turn completes while
+  // the Ryco window is unfocused. No-op in the browser (no desktop bridge).
+  notifyOnTurnCompleteWhenUnfocused: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+  ),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 

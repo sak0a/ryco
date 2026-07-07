@@ -3,13 +3,19 @@ import {
   EnvironmentId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
+  ThreadId,
 } from "@ryco/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { DraftId } from "../composerDraftStore";
 import type { ChatMessage } from "../types";
-import { buildSendTurnBootstrap, rollbackSendTurn } from "./executeChatSendTurn";
+import {
+  buildSendTurnBootstrap,
+  executeChatSendTurn,
+  rollbackSendTurn,
+} from "./executeChatSendTurn";
 
 // ---------------------------------------------------------------------------
 // rollbackSendTurn
@@ -250,5 +256,104 @@ describe("buildSendTurnBootstrap", () => {
     expect(result?.prepareWorktree?.baseBranch).toBe("feature/foo");
     expect(result?.prepareWorktree?.branch).toBeUndefined();
     expect(result?.createThread).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// executeChatSendTurn — scroll-to-bottom on send (feature 01)
+// ---------------------------------------------------------------------------
+
+describe("executeChatSendTurn", () => {
+  it("scrolls to the bottom before appending the optimistic message on send", async () => {
+    // Records the observable side-effect order so we can assert the timeline is
+    // pinned to the bottom *before* the user's message is inserted.
+    const order: string[] = [];
+    const scrollToEndBeforeOptimistic = vi.fn(async () => {
+      order.push("scroll");
+    });
+    const setOptimisticUserMessages = vi.fn(() => {
+      order.push("optimistic");
+    });
+    const dispatchCommand = vi.fn(async () => {
+      order.push("dispatch");
+    });
+
+    await executeChatSendTurn({
+      composer: {
+        prompt: "Hello there",
+        trimmedPrompt: "Hello there",
+        images: [],
+        sendableTerminalContexts: [],
+        sourceControlContexts: [],
+        selectedProvider: ProviderDriverKind.make("codex"),
+        selectedModel: DEFAULT_MODEL,
+        selectedProviderModels: [],
+        selectedPromptEffort: null,
+        selectedModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: DEFAULT_MODEL,
+        },
+        expiredTerminalContextCount: 0,
+      },
+      thread: {
+        threadId: ThreadId.make("thread-1"),
+        isFirstMessage: false,
+        isServerThread: true,
+        isLocalDraftThread: false,
+        activeThreadBranch: null,
+        worktreePath: null,
+        createdAt: "2026-06-14T00:00:00Z",
+        projectId: ProjectId.make("project-1"),
+      },
+      worktree: {
+        shouldMaterializeLegacyBranchWorktree: false,
+        baseBranchForWorktree: null,
+        shouldCreateWorktree: false,
+      },
+      settings: { runtimeMode: "full-access", interactionMode: "default", tokenMode: "balanced" },
+      project: {
+        projectId: ProjectId.make("project-1"),
+        projectCwd: "/tmp/project",
+        defaultModelSelection: null,
+      },
+      scroll: { scrollToEndBeforeOptimistic },
+      // No `undo` config: this send dispatches immediately (matching the assertion order).
+      draft: {
+        composerDraftTarget: DraftId.make("draft-1"),
+        environmentId: EnvironmentId.make("env-1"),
+        clearComposerDraftContent: vi.fn(),
+        setComposerDraftTokenMode: vi.fn(),
+        setComposerDraftPrompt: vi.fn(),
+        addComposerDraftImages: vi.fn(),
+        setComposerDraftTerminalContexts: vi.fn(),
+        setDraftThreadContext: vi.fn(),
+      },
+      dispatch: {
+        api: { orchestration: { dispatchCommand } } as never,
+        beginLocalDispatch: vi.fn(),
+        resetLocalDispatch: vi.fn(),
+        setOptimisticUserMessages,
+        setThreadError: vi.fn(),
+      },
+      refs: {
+        promptRef: { current: "" },
+        composerImagesRef: { current: [] },
+        composerTerminalContextsRef: { current: [] },
+        sendInFlightRef: { current: false },
+      } as never,
+      sourceControl: { fetcher: vi.fn(async (ctx) => ctx) },
+      persistSettings: { persistThreadSettingsForNextTurn: vi.fn(async () => {}) },
+      composerHandle: { readComposer: () => null },
+      formatOutgoingPrompt: ({ text }) => text,
+    });
+
+    expect(scrollToEndBeforeOptimistic).toHaveBeenCalledTimes(1);
+    expect(setOptimisticUserMessages).toHaveBeenCalledTimes(1);
+    expect(dispatchCommand).toHaveBeenCalledTimes(1);
+    // Scroll pins to the bottom, then the optimistic message is inserted, then dispatched.
+    expect(order).toEqual(["scroll", "optimistic", "dispatch"]);
+    expect(dispatchCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "thread.turn.start" }),
+    );
   });
 });

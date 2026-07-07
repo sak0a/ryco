@@ -66,6 +66,7 @@ const clientSettings: ClientSettings = {
   timestampFormat: "24-hour",
   preferredEditor: null,
   gitStatusPollIntervalMs: 0,
+  notifyOnTurnCompleteWhenUnfocused: true,
 };
 
 const savedRegistryRecord: PersistedSavedEnvironmentRecord = {
