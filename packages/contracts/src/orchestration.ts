@@ -32,6 +32,7 @@ export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
+  searchThreadMessages: "orchestration.searchThreadMessages",
   replayEvents: "orchestration.replayEvents",
   replayEventsPage: "orchestration.replayEventsPage",
   subscribeShell: "orchestration.subscribeShell",
@@ -1588,6 +1589,29 @@ export type OrchestrationGetFullThreadDiffInput = typeof OrchestrationGetFullThr
 export const OrchestrationGetFullThreadDiffResult = ThreadTurnDiff;
 export type OrchestrationGetFullThreadDiffResult = typeof OrchestrationGetFullThreadDiffResult.Type;
 
+export const OrchestrationSearchThreadMessagesInput = Schema.Struct({
+  query: TrimmedNonEmptyString,
+  projectId: Schema.optional(ProjectId),
+  limit: PositiveInt,
+});
+export type OrchestrationSearchThreadMessagesInput =
+  typeof OrchestrationSearchThreadMessagesInput.Type;
+
+export const OrchestrationThreadMessageSearchResult = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  snippet: Schema.String,
+  timestamp: IsoDateTime,
+});
+export type OrchestrationThreadMessageSearchResult =
+  typeof OrchestrationThreadMessageSearchResult.Type;
+
+export const OrchestrationSearchThreadMessagesResult = Schema.Array(
+  OrchestrationThreadMessageSearchResult,
+);
+export type OrchestrationSearchThreadMessagesResult =
+  typeof OrchestrationSearchThreadMessagesResult.Type;
+
 export const OrchestrationReplayEventsInput = Schema.Struct({
   fromSequenceExclusive: NonNegativeInt,
 });
@@ -1621,6 +1645,10 @@ export const OrchestrationRpcSchemas = {
   getFullThreadDiff: {
     input: OrchestrationGetFullThreadDiffInput,
     output: OrchestrationGetFullThreadDiffResult,
+  },
+  searchThreadMessages: {
+    input: OrchestrationSearchThreadMessagesInput,
+    output: OrchestrationSearchThreadMessagesResult,
   },
   replayEvents: {
     input: OrchestrationReplayEventsInput,

@@ -21,6 +21,7 @@ describe("keybindingCategories", () => {
   });
 
   it("maps thread navigation to the Threads category", () => {
+    expect(getCommandMeta("thread.find").category).toBe(KEYBINDING_CATEGORIES.thread);
     expect(getCommandMeta("thread.previous").category).toBe(KEYBINDING_CATEGORIES.thread);
     expect(getCommandMeta("thread.jump.1").category).toBe(KEYBINDING_CATEGORIES.thread);
     expect(getCommandMeta("thread.jump.9").category).toBe(KEYBINDING_CATEGORIES.thread);
@@ -41,6 +42,7 @@ describe("keybindingCategories", () => {
     expect(getCommandMeta("workspace.files").title).toBe("Open workspace files");
     expect(getCommandMeta("commandPalette.toggle").title).toBe("Open command palette");
     expect(getCommandMeta("editor.openFavorite").title).toBe("Open in preferred editor");
+    expect(getCommandMeta("thread.find").title).toBe("Find in current thread");
   });
 
   it("derives a title from the script id when no override is given", () => {
@@ -55,6 +57,9 @@ describe("keybindingCategories", () => {
   it("assigns increasing sort weights within a category", () => {
     expect(getCommandMeta("terminal.toggle").sortWeight).toBeLessThan(
       getCommandMeta("terminal.close").sortWeight,
+    );
+    expect(getCommandMeta("thread.find").sortWeight).toBeLessThan(
+      getCommandMeta("thread.previous").sortWeight,
     );
     expect(getCommandMeta("thread.previous").sortWeight).toBeLessThan(
       getCommandMeta("thread.jump.1").sortWeight,

@@ -13,6 +13,7 @@ import { useComposerDraftStore, type DraftId } from "../../../composerDraftStore
 import { selectThreadByRef, useStore } from "../../../store";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../../../threadRoutes";
 import { useThreadSelectionStore } from "../../../threadSelectionStore";
+import { useUiStateStore } from "../../../uiStateStore";
 import type { useRouter } from "@tanstack/react-router";
 import type { useNewThreadHandler } from "../../../hooks/useHandleNewThread";
 import type { useThreadActions } from "../../../hooks/useThreadActions";
@@ -434,6 +435,7 @@ export function useSidebarThreadActions(params: {
       if (!thread) return;
       const draftId = (thread as SidebarThreadSummary & { draftId?: DraftId | undefined }).draftId;
       const archiveAvailable = !draftId && canArchiveSidebarThread(thread);
+      const isPinned = useUiStateStore.getState().pinnedThreadKeys[threadKey] === true;
       const threadProject = memberProjectByScopedKey.get(
         scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
       );
@@ -453,6 +455,7 @@ export function useSidebarThreadActions(params: {
       }
       const clicked = await api.contextMenu.show(
         [
+          { id: isPinned ? "unpin" : "pin", label: isPinned ? "Unpin thread" : "Pin thread" },
           { id: "rename", label: "Rename thread" },
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
@@ -469,6 +472,11 @@ export function useSidebarThreadActions(params: {
 
       if (clicked === "rename") {
         startThreadRename(threadKey, thread.title);
+        return;
+      }
+
+      if (clicked === "pin" || clicked === "unpin") {
+        useUiStateStore.getState().setThreadPinned(threadKey, clicked === "pin");
         return;
       }
 

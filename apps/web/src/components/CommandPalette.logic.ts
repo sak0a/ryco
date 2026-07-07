@@ -1,4 +1,9 @@
-import { type KeybindingCommand, type FilesystemBrowseEntry } from "@ryco/contracts";
+import {
+  type EnvironmentId,
+  type KeybindingCommand,
+  type FilesystemBrowseEntry,
+  type OrchestrationThreadMessageSearchResult,
+} from "@ryco/contracts";
 import type { SidebarThreadSortOrder } from "@ryco/contracts/settings";
 import { type ReactNode } from "react";
 import { sortThreads } from "../lib/threadSort";
@@ -225,12 +230,44 @@ function rankCommandPaletteItemMatch(
   return 0;
 }
 
+export type CommandPaletteMessageSearchResult = OrchestrationThreadMessageSearchResult & {
+  readonly environmentId: EnvironmentId;
+};
+
+export function buildMessageSearchItems(input: {
+  searchResults: ReadonlyArray<CommandPaletteMessageSearchResult>;
+  threadTitleById: ReadonlyMap<Thread["id"], string>;
+  projectTitleByThreadId: ReadonlyMap<Thread["id"], string>;
+  icon: ReactNode;
+  runMessage: (result: CommandPaletteMessageSearchResult) => Promise<void>;
+}): CommandPaletteActionItem[] {
+  return input.searchResults.map((result) => {
+    const threadTitle = input.threadTitleById.get(result.threadId) ?? "Thread";
+    const projectTitle = input.projectTitleByThreadId.get(result.threadId);
+    const description = [threadTitle, projectTitle].filter(Boolean).join(" · ");
+
+    return {
+      kind: "action" as const,
+      value: `message:${result.environmentId}:${result.threadId}:${result.messageId}`,
+      searchTerms: [result.snippet, threadTitle, projectTitle ?? ""],
+      title: result.snippet,
+      description,
+      timestamp: formatRelativeTimeLabel(result.timestamp),
+      icon: input.icon,
+      run: async () => {
+        await input.runMessage(result);
+      },
+    };
+  });
+}
+
 export function filterCommandPaletteGroups(input: {
   activeGroups: ReadonlyArray<CommandPaletteGroup>;
   query: string;
   isInSubmenu: boolean;
   projectSearchItems: ReadonlyArray<CommandPaletteActionItem>;
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
+  messageSearchItems?: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
   const isActionsFilter = input.query.startsWith(">");
   const searchQuery = isActionsFilter ? input.query.slice(1) : input.query;
@@ -264,6 +301,13 @@ export function filterCommandPaletteGroups(input: {
         value: "threads-search",
         label: "Threads",
         items: input.threadSearchItems,
+      });
+    }
+    if (input.messageSearchItems && input.messageSearchItems.length > 0) {
+      searchableGroups.push({
+        value: "messages-search",
+        label: "Messages",
+        items: input.messageSearchItems,
       });
     }
   }

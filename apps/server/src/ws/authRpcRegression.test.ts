@@ -2,9 +2,14 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
 import {
+  AuthRpcError,
   AuthSessionId,
   CommandId,
+  MessageId,
   ORCHESTRATION_WS_METHODS,
+  OrchestrationDispatchCommandError,
+  OrchestrationGetSnapshotError,
+  ProjectId,
   ThreadId,
   type ClientOrchestrationCommand,
   type OrchestrationCommand,
@@ -73,6 +78,19 @@ const dispatchCommand: ClientOrchestrationCommand = {
   changedAt: "2026-01-01T00:00:00.000Z",
 };
 
+type OrchestrationHandlers = ReturnType<typeof makeOrchestrationHandlers>;
+
+function getTestHandler<Input, Output, Error = unknown>(
+  handlers: OrchestrationHandlers,
+  method: keyof OrchestrationHandlers,
+): (input: Input) => Effect.Effect<Output, Error, never> {
+  const handler = handlers[method];
+  if (!handler) {
+    throw new Error(`Missing RPC handler for ${String(method)}`);
+  }
+  return handler as unknown as (input: Input) => Effect.Effect<Output, Error, never>;
+}
+
 const makeOrchestrationContext = (role: AuthenticatedSession["role"]) => {
   const dispatched: OrchestrationCommand[] = [];
   const ctx = {
@@ -84,6 +102,7 @@ const makeOrchestrationContext = (role: AuthenticatedSession["role"]) => {
       }),
     projectionSnapshotQuery: {
       getThreadShellById: () => Effect.succeed(Option.none()),
+      searchThreadMessages: () => Effect.succeed([]),
     },
     terminalManager: {
       close: () => Effect.void,
@@ -97,9 +116,12 @@ it.effect("allows owner sessions to dispatch orchestration commands", () =>
   Effect.gen(function* () {
     const { ctx, dispatched } = makeOrchestrationContext("owner");
     const handlers = makeOrchestrationHandlers(ctx);
-    const result = yield* handlers[ORCHESTRATION_WS_METHODS.dispatchCommand](dispatchCommand).pipe(
-      Effect.provide(normalizationLayer),
-    );
+    const dispatchHandler = getTestHandler<
+      ClientOrchestrationCommand,
+      { readonly sequence: number },
+      AuthRpcError | OrchestrationDispatchCommandError
+    >(handlers, ORCHESTRATION_WS_METHODS.dispatchCommand);
+    const result = yield* dispatchHandler(dispatchCommand).pipe(Effect.provide(normalizationLayer));
 
     expect(result).toEqual({ sequence: 7 });
     expect(dispatched).toHaveLength(1);
@@ -107,14 +129,67 @@ it.effect("allows owner sessions to dispatch orchestration commands", () =>
   }),
 );
 
+it.effect("routes orchestration message search through the projection query", () =>
+  Effect.gen(function* () {
+    const { ctx } = makeOrchestrationContext("owner");
+    let received: {
+      query: string;
+      projectId?: ProjectId | undefined;
+      limit: number;
+    } | null = null;
+    const searchResult = {
+      threadId: ThreadId.make("thread-search"),
+      messageId: MessageId.make("message-search"),
+      snippet: "authentication result",
+      timestamp: "2026-03-01T00:00:00.000Z",
+    };
+    const handlers = makeOrchestrationHandlers({
+      ...ctx,
+      projectionSnapshotQuery: {
+        ...ctx.projectionSnapshotQuery,
+        searchThreadMessages: (input) =>
+          Effect.sync(() => {
+            received = input;
+            return [searchResult];
+          }),
+      },
+    } as WsRpcContext);
+    const searchHandler = getTestHandler<
+      {
+        readonly query: string;
+        readonly projectId?: ProjectId | undefined;
+        readonly limit: number;
+      },
+      readonly (typeof searchResult)[],
+      OrchestrationGetSnapshotError
+    >(handlers, ORCHESTRATION_WS_METHODS.searchThreadMessages);
+
+    const result = yield* searchHandler({
+      query: "authentication",
+      projectId: ProjectId.make("project-search"),
+      limit: 500,
+    });
+
+    expect(received).toEqual({
+      query: "authentication",
+      projectId: ProjectId.make("project-search"),
+      limit: 50,
+    });
+    expect(result).toEqual([searchResult]);
+  }),
+);
+
 it.effect("rejects client sessions from orchestration dispatch", () =>
   Effect.gen(function* () {
     const { ctx, dispatched } = makeOrchestrationContext("client");
     const handlers = makeOrchestrationHandlers(ctx);
+    const dispatchHandler = getTestHandler<
+      ClientOrchestrationCommand,
+      { readonly sequence: number },
+      AuthRpcError
+    >(handlers, ORCHESTRATION_WS_METHODS.dispatchCommand);
     const error = yield* Effect.flip(
-      handlers[ORCHESTRATION_WS_METHODS.dispatchCommand](dispatchCommand).pipe(
-        Effect.provide(normalizationLayer),
-      ),
+      dispatchHandler(dispatchCommand).pipe(Effect.provide(normalizationLayer)),
     );
 
     if (error._tag !== "AuthRpcError") {

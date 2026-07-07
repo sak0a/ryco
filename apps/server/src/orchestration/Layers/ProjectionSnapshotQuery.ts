@@ -19,6 +19,7 @@ import {
   type OrchestrationProposedPlan,
   type OrchestrationProject,
   type OrchestrationSession,
+  type OrchestrationThreadMessageSearchResult,
   type OrchestrationThreadActivity,
   type OrchestrationThreadShell,
   type OrchestrationWorktreeShell,
@@ -128,9 +129,21 @@ const ThreadIdLookupInput = Schema.Struct({
 const WorktreeIdLookupInput = Schema.Struct({
   worktreeId: WorktreeId,
 });
+const ThreadMessageSearchQueryInput = Schema.Struct({
+  likePattern: Schema.String,
+  projectId: Schema.NullOr(ProjectId),
+  limit: NonNegativeInt,
+});
 const ProjectionProjectLookupRowSchema = ProjectionProjectDbRowSchema;
 const ProjectionThreadIdLookupRowSchema = Schema.Struct({
   threadId: ThreadId,
+});
+const ProjectionThreadMessageSearchRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  text: Schema.String,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
 });
 const ProjectionThreadCheckpointContextThreadRowSchema = Schema.Struct({
   threadId: ThreadId,
@@ -179,6 +192,29 @@ function computeSnapshotSequence(
   }
 
   return Number.isFinite(minSequence) ? minSequence : 0;
+}
+
+function escapeSqlLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+function buildMessageSearchSnippet(input: {
+  readonly text: string;
+  readonly query: string;
+  readonly maxLength?: number;
+}): string {
+  const maxLength = input.maxLength ?? 180;
+  const normalizedQuery = input.query.trim().toLowerCase();
+  const normalizedText = input.text.toLowerCase();
+  const matchIndex = normalizedQuery.length > 0 ? normalizedText.indexOf(normalizedQuery) : -1;
+  const contextLength = Math.floor(maxLength / 2);
+  const start =
+    matchIndex <= contextLength ? 0 : Math.max(0, matchIndex - Math.floor(contextLength / 2));
+  const end = Math.min(input.text.length, start + maxLength);
+  const snippet = input.text.slice(start, end).replace(/\s+/g, " ").trim();
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < input.text.length ? "..." : "";
+  return `${prefix}${snippet}${suffix}`;
 }
 
 function mapLatestTurn(
@@ -741,6 +777,32 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_thread_messages
         WHERE thread_id = ${threadId}
         ORDER BY created_at ASC, message_id ASC
+      `,
+  });
+
+  const searchThreadMessageRows = SqlSchema.findAll({
+    Request: ThreadMessageSearchQueryInput,
+    Result: ProjectionThreadMessageSearchRowSchema,
+    execute: ({ likePattern, projectId, limit }) =>
+      sql`
+        SELECT
+          messages.thread_id AS "threadId",
+          messages.message_id AS "messageId",
+          messages.text,
+          messages.created_at AS "createdAt",
+          messages.updated_at AS "updatedAt"
+        FROM projection_thread_messages AS messages
+        INNER JOIN projection_threads AS threads
+          ON threads.thread_id = messages.thread_id
+        INNER JOIN projection_projects AS projects
+          ON projects.project_id = threads.project_id
+        WHERE threads.deleted_at IS NULL
+          AND projects.deleted_at IS NULL
+          AND messages.role IN ('user', 'assistant')
+          AND (${projectId} IS NULL OR threads.project_id = ${projectId})
+          AND lower(messages.text) LIKE ${likePattern} ESCAPE '\\'
+        ORDER BY messages.created_at DESC, messages.message_id DESC
+        LIMIT ${limit}
       `,
   });
 
@@ -1897,6 +1959,36 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       );
     });
 
+  const searchThreadMessages: ProjectionSnapshotQueryShape["searchThreadMessages"] = (input) => {
+    const query = input.query.trim();
+    if (query.length === 0) {
+      return Effect.succeed([]);
+    }
+
+    const limit = Math.min(Math.max(1, input.limit), 50);
+    const likePattern = `%${escapeSqlLikePattern(query.toLowerCase())}%`;
+    return searchThreadMessageRows({
+      likePattern,
+      projectId: input.projectId ?? null,
+      limit,
+    }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.searchThreadMessages:query",
+          "ProjectionSnapshotQuery.searchThreadMessages:decodeRows",
+        ),
+      ),
+      Effect.map((rows): OrchestrationThreadMessageSearchResult[] =>
+        rows.map((row) => ({
+          threadId: row.threadId,
+          messageId: row.messageId,
+          snippet: buildMessageSearchSnippet({ text: row.text, query }),
+          timestamp: row.createdAt,
+        })),
+      ),
+    );
+  };
+
   return {
     getCommandReadModel,
     getSnapshot,
@@ -1910,6 +2002,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getThreadShellById,
     getWorktreeShellById,
     getThreadDetailById,
+    searchThreadMessages,
   } satisfies ProjectionSnapshotQueryShape;
 });
 

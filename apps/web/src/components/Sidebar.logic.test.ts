@@ -32,6 +32,7 @@ import {
   shouldClearThreadSelectionOnMouseDown,
   shouldQuerySidebarSourceControlCounts,
   sortProjectsForSidebar,
+  sortThreadsWithPinned,
   SIDEBAR_AUTO_ANIMATE_PROJECT_LIMIT,
   SIDEBAR_AUTO_ANIMATE_VISIBLE_THREAD_LIMIT,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
@@ -979,6 +980,43 @@ describe("getVisibleThreadsForProject", () => {
       threads.map((thread) => thread.id),
     );
     expect(result.hiddenThreads).toEqual([]);
+  });
+});
+
+describe("sortThreadsWithPinned", () => {
+  it("puts pinned threads first while preserving recency order within each group", () => {
+    const threads = [
+      makeThread({
+        id: ThreadId.make("thread-pinned-older"),
+        updatedAt: "2026-03-09T10:02:00.000Z",
+      }),
+      makeThread({
+        id: ThreadId.make("thread-unpinned-newer"),
+        updatedAt: "2026-03-09T10:05:00.000Z",
+      }),
+      makeThread({
+        id: ThreadId.make("thread-pinned-newer"),
+        updatedAt: "2026-03-09T10:06:00.000Z",
+      }),
+      makeThread({
+        id: ThreadId.make("thread-unpinned-older"),
+        updatedAt: "2026-03-09T10:01:00.000Z",
+      }),
+    ];
+
+    const sorted = sortThreadsWithPinned({
+      threads,
+      sortOrder: "updated_at",
+      pinnedThreadKeys: new Set(["thread-pinned-older", "thread-pinned-newer"]),
+      getThreadKey: (thread) => thread.id,
+    });
+
+    expect(sorted.map((thread) => thread.id)).toEqual([
+      ThreadId.make("thread-pinned-newer"),
+      ThreadId.make("thread-pinned-older"),
+      ThreadId.make("thread-unpinned-newer"),
+      ThreadId.make("thread-unpinned-older"),
+    ]);
   });
 });
 

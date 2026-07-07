@@ -27,6 +27,7 @@ import { CheckpointStore } from "../../checkpointing/Services/CheckpointStore.ts
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
+import { TEST_GIT_COMMIT_IDENTITY_CONFIG } from "../../vcs/testing/GitTestRepo.ts";
 import { ProjectAvatarStore } from "../../project/Services/ProjectAvatarStore.ts";
 import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryIdentityResolver.ts";
 import { CheckpointReactorLive } from "./CheckpointReactor.ts";
@@ -203,8 +204,9 @@ function runGit(cwd: string, args: ReadonlyArray<string>) {
 function createGitRepository() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-checkpoint-handler-"));
   runGit(cwd, ["init", "--initial-branch=main"]);
-  runGit(cwd, ["config", "user.email", "test@example.com"]);
-  runGit(cwd, ["config", "user.name", "Test User"]);
+  for (const [key, value] of TEST_GIT_COMMIT_IDENTITY_CONFIG) {
+    runGit(cwd, ["config", key, value]);
+  }
   fs.writeFileSync(path.join(cwd, "README.md"), "v1\n", "utf8");
   runGit(cwd, ["add", "."]);
   runGit(cwd, ["commit", "-m", "Initial"]);

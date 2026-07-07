@@ -88,6 +88,8 @@ import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationSearchThreadMessagesInput,
+  OrchestrationSearchThreadMessagesResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationReplayEventsInput,
@@ -490,6 +492,9 @@ export interface EnvironmentApi {
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;
+    searchThreadMessages: (
+      input: OrchestrationSearchThreadMessagesInput,
+    ) => Promise<OrchestrationSearchThreadMessagesResult>;
     replayEvents?: (
       input: OrchestrationReplayEventsInput,
     ) => Promise<OrchestrationReplayEventsResult>;

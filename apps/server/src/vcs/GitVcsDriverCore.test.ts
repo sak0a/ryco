@@ -8,6 +8,7 @@ import { GitCommandError } from "@ryco/contracts";
 import { ServerConfig } from "../config.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import { makeGitVcsDriverCore } from "./GitVcsDriverCore.ts";
+import { configureTestGitCommitIdentity } from "./testing/GitTestRepo.ts";
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "ryco-git-vcs-driver-test-",
@@ -66,8 +67,7 @@ const initRepoWithCommit = (
   Effect.gen(function* () {
     const driver = yield* GitVcsDriver.GitVcsDriver;
     yield* driver.initRepo({ cwd });
-    yield* git(cwd, ["config", "user.email", "test@test.com"]);
-    yield* git(cwd, ["config", "user.name", "Test"]);
+    yield* configureTestGitCommitIdentity(cwd, git);
     yield* writeTextFile(cwd, "README.md", "# test\n");
     yield* git(cwd, ["add", "."]);
     yield* git(cwd, ["commit", "-m", "initial commit"]);

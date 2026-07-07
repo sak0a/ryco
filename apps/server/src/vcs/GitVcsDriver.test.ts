@@ -7,6 +7,7 @@ import { GitCommandError } from "@ryco/contracts";
 import { ServerConfig } from "../config.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import * as VcsProcess from "./VcsProcess.ts";
+import { configureTestGitCommitIdentity } from "./testing/GitTestRepo.ts";
 import { runVcsDriverContractSuite } from "./testing/VcsDriverContractHarness.ts";
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
@@ -39,8 +40,7 @@ runVcsDriverContractSuite<GitVcsDriver.GitVcsDriver, GitContractError>({
     createRepo: (cwd) =>
       Effect.gen(function* () {
         yield* runGit(cwd, ["init"]);
-        yield* runGit(cwd, ["config", "user.email", "test@test.com"]);
-        yield* runGit(cwd, ["config", "user.name", "Test"]);
+        yield* configureTestGitCommitIdentity(cwd, runGit);
       }),
     writeFile: (cwd, relativePath, contents) =>
       Effect.gen(function* () {

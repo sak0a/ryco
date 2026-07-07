@@ -8,12 +8,44 @@ import {
   COMPOSER_INLINE_SKILL_CHIP_CLASS_NAME,
   SKILL_CHIP_ICON_SVG,
 } from "../composerInlineChip";
+import {
+  renderThreadMessageSearchHighlightedText,
+  type ThreadMessageSearchHighlightCursor,
+} from "./ThreadMessageSearchHighlight";
 
 const SKILL_TOKEN_REGEX = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s|$)/g;
 
 type InlineSkill = Pick<ServerProviderSkill, "name" | "displayName">;
 
-export function SkillInlineText(props: { text: string; skills: ReadonlyArray<InlineSkill> }) {
+export interface SkillInlineTextSearchHighlight {
+  query: string;
+  activeOccurrenceIndex: number | null;
+  cursor: ThreadMessageSearchHighlightCursor;
+  keyPrefix: string;
+}
+
+function renderInlineTextSegment(input: {
+  text: string;
+  start: number;
+  highlight: SkillInlineTextSearchHighlight | undefined;
+}): ReactNode {
+  if (!input.highlight) {
+    return input.text;
+  }
+  return renderThreadMessageSearchHighlightedText({
+    text: input.text,
+    query: input.highlight.query,
+    activeOccurrenceIndex: input.highlight.activeOccurrenceIndex,
+    cursor: input.highlight.cursor,
+    keyPrefix: `${input.highlight.keyPrefix}:${input.start}`,
+  });
+}
+
+export function SkillInlineText(props: {
+  text: string;
+  skills: ReadonlyArray<InlineSkill>;
+  searchHighlight?: SkillInlineTextSearchHighlight | undefined;
+}) {
   const nodes: ReactNode[] = [];
   let cursor = 0;
 
@@ -28,17 +60,37 @@ export function SkillInlineText(props: { text: string; skills: ReadonlyArray<Inl
     }
 
     if (start > cursor) {
-      nodes.push(props.text.slice(cursor, start));
+      nodes.push(
+        renderInlineTextSegment({
+          text: props.text.slice(cursor, start),
+          start: cursor,
+          highlight: props.searchHighlight,
+        }),
+      );
     }
     nodes.push(<SkillChip key={`${start}:${name}`} skill={skill} rawText={rawText} />);
     cursor = start + rawText.length;
   }
 
   if (cursor === 0) {
-    return <>{props.text}</>;
+    return (
+      <>
+        {renderInlineTextSegment({
+          text: props.text,
+          start: 0,
+          highlight: props.searchHighlight,
+        })}
+      </>
+    );
   }
   if (cursor < props.text.length) {
-    nodes.push(props.text.slice(cursor));
+    nodes.push(
+      renderInlineTextSegment({
+        text: props.text.slice(cursor),
+        start: cursor,
+        highlight: props.searchHighlight,
+      }),
+    );
   }
   return <>{nodes}</>;
 }
@@ -46,10 +98,11 @@ export function SkillInlineText(props: { text: string; skills: ReadonlyArray<Inl
 export function renderSkillInlineMarkdownChildren(
   children: ReactNode,
   skills: ReadonlyArray<InlineSkill>,
+  searchHighlight?: SkillInlineTextSearchHighlight | undefined,
 ): ReactNode {
   return Children.map(children, (child) => {
     if (typeof child === "string") {
-      return <SkillInlineText text={child} skills={skills} />;
+      return <SkillInlineText text={child} skills={skills} searchHighlight={searchHighlight} />;
     }
     if (!isValidElement<{ children?: ReactNode }>(child)) {
       return child;
@@ -63,7 +116,7 @@ export function renderSkillInlineMarkdownChildren(
     return cloneElement(
       child,
       undefined,
-      renderSkillInlineMarkdownChildren(child.props.children, skills),
+      renderSkillInlineMarkdownChildren(child.props.children, skills, searchHighlight),
     );
   });
 }

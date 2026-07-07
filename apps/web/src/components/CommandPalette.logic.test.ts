@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   EnvironmentId,
   type FilesystemBrowseEntry,
+  MessageId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -10,6 +11,7 @@ import type { Thread } from "../types";
 import {
   buildBrowseGroups,
   buildBrowseItemValue,
+  buildMessageSearchItems,
   buildThreadActionItems,
   filterBrowseEntries,
   filterCommandPaletteGroups,
@@ -199,6 +201,45 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
+  });
+});
+
+describe("buildMessageSearchItems", () => {
+  it("adds message search results to the Messages group with thread context", async () => {
+    const result = {
+      environmentId: LOCAL_ENVIRONMENT_ID,
+      threadId: ThreadId.make("thread-search-result"),
+      messageId: MessageId.make("message-search-result"),
+      snippet: "authentication flow matched in the agent response",
+      timestamp: "2026-03-24T12:00:00.000Z",
+    };
+    const runMessage = vi.fn(async () => undefined);
+    const messageSearchItems = buildMessageSearchItems({
+      searchResults: [result],
+      threadTitleById: new Map([[result.threadId, "Auth fix thread"]]),
+      projectTitleByThreadId: new Map([[result.threadId, "Project"]]),
+      icon: null,
+      runMessage,
+    });
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "authentication",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+      messageSearchItems,
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.value).toBe("messages-search");
+    const item = groups[0]?.items[0];
+    expect(item?.title).toBe("authentication flow matched in the agent response");
+    expect(item?.description).toBe("Auth fix thread · Project");
+
+    if (item?.kind !== "action") throw new Error("expected action item");
+    await item.run();
+    expect(runMessage).toHaveBeenCalledWith(result);
   });
 });
 
