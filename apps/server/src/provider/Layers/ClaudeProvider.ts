@@ -204,6 +204,21 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     }),
   },
   {
+    slug: "claude-sonnet-5",
+    name: "Claude Sonnet 5",
+    shortName: "Sonnet 5",
+    isCustom: false,
+    // Sonnet 5 is the first Sonnet-tier model with the full adaptive effort
+    // range (including xhigh/max) and a 1M context window. It does not support
+    // fast mode, which stays Opus-only.
+    capabilities: buildClaudeOpusCapabilities({
+      effortLevels: CLAUDE_OPUS_ADAPTIVE_EFFORT_LEVELS,
+      defaultEffort: "high",
+      supportsFastMode: false,
+      supportsContextWindow: true,
+    }),
+  },
+  {
     slug: "claude-sonnet-4-6",
     name: "Claude Sonnet 4.6",
     shortName: "Sonnet 4.6",

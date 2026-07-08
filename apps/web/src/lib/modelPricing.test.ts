@@ -24,7 +24,7 @@ describe("canonicalizeModel", () => {
 
   it("resolves real aliases to canonical slugs", () => {
     expect(canonicalizeModel("opus")).toBe("claude-opus-4-8");
-    expect(canonicalizeModel("sonnet")).toBe("claude-sonnet-4-6");
+    expect(canonicalizeModel("sonnet")).toBe("claude-sonnet-5");
   });
 
   it("uses provider-specific aliases before global canonical slugs", () => {
