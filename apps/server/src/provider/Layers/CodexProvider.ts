@@ -48,6 +48,7 @@ const REASONING_EFFORT_LABELS: Partial<
   high: "High",
   xhigh: "Extra High",
   max: "Max",
+  ultra: "Ultra",
 };
 
 function formatReasoningEffortLabel(

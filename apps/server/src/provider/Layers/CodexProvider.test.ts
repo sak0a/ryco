@@ -99,7 +99,7 @@ describe("parseCodexRateLimits", () => {
 });
 
 describe("parseCodexModelListResponse", () => {
-  it("maps GPT-5.6 max reasoning effort into selectable model capabilities", () => {
+  it("maps GPT-5.6 max and ultra reasoning efforts into selectable model capabilities", () => {
     const models = parseCodexModelListResponse({
       data: [
         {
@@ -117,6 +117,7 @@ describe("parseCodexModelListResponse", () => {
             { reasoningEffort: "high", description: "High reasoning" },
             { reasoningEffort: "xhigh", description: "Extra high reasoning" },
             { reasoningEffort: "max", description: "Maximum reasoning" },
+            { reasoningEffort: "ultra", description: "Ultra reasoning" },
           ],
         },
       ],
@@ -137,6 +138,7 @@ describe("parseCodexModelListResponse", () => {
               { id: "high", label: "High" },
               { id: "xhigh", label: "Extra High" },
               { id: "max", label: "Max", isDefault: true },
+              { id: "ultra", label: "Ultra" },
             ],
           },
         ],

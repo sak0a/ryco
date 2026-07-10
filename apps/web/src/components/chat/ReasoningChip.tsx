@@ -18,6 +18,7 @@ type LevelKey =
   | "high"
   | "xhigh"
   | "max"
+  | "ultra"
   | "ultracode"
   | "ultrathink";
 
@@ -29,6 +30,7 @@ const LEVEL_ABBREVIATION: Record<LevelKey, string> = {
   high: "High",
   xhigh: "XHi",
   max: "Max",
+  ultra: "Ultra",
   ultracode: "UCode",
   ultrathink: "Ultra",
 };
@@ -43,6 +45,8 @@ const LEVEL_TINT_CLASSES: Record<LevelKey, string> = {
   high: "bg-indigo-500/15 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300",
   xhigh: "bg-violet-500/15 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300",
   max: "bg-fuchsia-500/15 text-fuchsia-700 dark:bg-fuchsia-500/20 dark:text-fuchsia-300",
+  ultra:
+    "bg-gradient-to-br from-pink-500/20 to-purple-500/25 text-fuchsia-700 ring-1 ring-fuchsia-500/25 dark:text-fuchsia-300",
   ultracode:
     "bg-rose-500/15 text-rose-700 ring-1 ring-rose-500/25 dark:bg-rose-500/20 dark:text-rose-300",
   ultrathink:
@@ -58,6 +62,7 @@ function normalizeLevel(value: string | undefined): LevelKey {
     value === "high" ||
     value === "xhigh" ||
     value === "max" ||
+    value === "ultra" ||
     value === "ultracode" ||
     value === "ultrathink"
   ) {
@@ -85,12 +90,12 @@ export const ReasoningChip = memo(function ReasoningChip(props: ReasoningChipPro
       ? props.descriptor.currentValue
       : undefined;
   const level = normalizeLevel(effectiveValue);
-  const isUltra = level === "ultrathink";
+  const isUltra = level === "ultra" || level === "ultrathink";
   const abbreviation = LEVEL_ABBREVIATION[level];
 
   // Dot scale is derived from the model's actual options so the chip shows
-  // exactly as many dots as the model supports. Prompt-injected values
-  // (ultrathink) sit outside the linear scale — they get the sparkle.
+  // exactly as many dots as the model supports. Ultra variants get the sparkle
+  // treatment because they are outside the normal compact dot scale.
   const promptInjectedSet = new Set(props.descriptor.promptInjectedValues ?? []);
   const scaleOptions = props.descriptor.options.filter(
     (option) => !promptInjectedSet.has(option.id),

@@ -222,4 +222,41 @@ describe("ReasoningChip", () => {
       expect(text).not.toContain("Med");
     });
   });
+
+  it("renders the native Ultra level instead of falling back to Medium", async () => {
+    useUiStateStore.getState().setReasoningIndicatorStyle("text");
+    const gpt56Descriptor = {
+      id: "reasoningEffort",
+      label: "Reasoning",
+      type: "select" as const,
+      options: [
+        { id: "none", label: "None" },
+        { id: "low", label: "Low" },
+        { id: "medium", label: "Medium" },
+        { id: "high", label: "High" },
+        { id: "xhigh", label: "Extra High" },
+        { id: "max", label: "Max" },
+        { id: "ultra", label: "Ultra", isDefault: true },
+      ],
+      currentValue: "ultra",
+    } as const;
+    mounted = await render(
+      <ReasoningChip
+        descriptor={gpt56Descriptor}
+        descriptors={[gpt56Descriptor]}
+        prompt=""
+        primarySelectDescriptorId="reasoningEffort"
+        ultrathinkInBodyText={false}
+        ultrathinkPromptControlled={false}
+        onChangeDescriptors={vi.fn()}
+        onPromptChange={vi.fn()}
+      />,
+    );
+    await vi.waitFor(() => {
+      const button = document.querySelector("button");
+      const text = button?.textContent ?? "";
+      expect(text).toContain("Ultra");
+      expect(text).not.toContain("Med");
+    });
+  });
 });

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as CodexSchema from "./schema.ts";
 
 describe("Codex app-server schema compatibility", () => {
-  it("accepts max reasoning effort in model-list responses", () => {
+  it("accepts max and ultra reasoning efforts in model-list responses", () => {
     const decoded = Schema.decodeUnknownSync(CodexSchema.V2ModelListResponse)({
       data: [
         {
@@ -18,23 +18,24 @@ describe("Codex app-server schema compatibility", () => {
           supportedReasoningEfforts: [
             { reasoningEffort: "none", description: "No reasoning" },
             { reasoningEffort: "max", description: "Maximum reasoning" },
+            { reasoningEffort: "ultra", description: "Ultra reasoning" },
           ],
         },
       ],
     });
 
     expect(decoded.data[0]?.defaultReasoningEffort).toBe("max");
-    expect(decoded.data[0]?.supportedReasoningEfforts.at(-1)?.reasoningEffort).toBe("max");
+    expect(decoded.data[0]?.supportedReasoningEfforts.at(-1)?.reasoningEffort).toBe("ultra");
   });
 
-  it("accepts max reasoning effort in turn start payloads", () => {
+  it("accepts ultra reasoning effort in turn start payloads", () => {
     expect(
       Schema.decodeUnknownSync(CodexSchema.V2TurnStartParams)({
         threadId: "thread-1",
         input: [],
-        effort: "max",
+        effort: "ultra",
       }).effort,
-    ).toBe("max");
+    ).toBe("ultra");
   });
 
   it("accepts Codex 0.130 priority service tier in thread start payloads", () => {
