@@ -38,14 +38,27 @@ export interface CodexAppServerProviderSnapshot {
   readonly rateLimits: ServerProviderRateLimits | undefined;
 }
 
-const REASONING_EFFORT_LABELS: Record<CodexSchema.V2ModelListResponse__ReasoningEffort, string> = {
+const REASONING_EFFORT_LABELS: Partial<
+  Record<CodexSchema.V2ModelListResponse__ReasoningEffort, string>
+> = {
   none: "None",
   minimal: "Minimal",
   low: "Low",
   medium: "Medium",
   high: "High",
   xhigh: "Extra High",
+  max: "Max",
 };
+
+function formatReasoningEffortLabel(
+  reasoningEffort: CodexSchema.V2ModelListResponse__ReasoningEffort,
+): string {
+  const known = REASONING_EFFORT_LABELS[reasoningEffort];
+  if (known) {
+    return known;
+  }
+  return reasoningEffort.replace(/[_-]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
 
 function codexAccountAuthLabel(account: CodexSchema.V2GetAccountResponse["account"]) {
   if (!account) return undefined;
@@ -92,12 +105,12 @@ function mapCodexModelCapabilities(
     reasoningEffort === model.defaultReasoningEffort
       ? {
           id: reasoningEffort,
-          label: REASONING_EFFORT_LABELS[reasoningEffort],
+          label: formatReasoningEffortLabel(reasoningEffort),
           isDefault: true,
         }
       : {
           id: reasoningEffort,
-          label: REASONING_EFFORT_LABELS[reasoningEffort],
+          label: formatReasoningEffortLabel(reasoningEffort),
         },
   );
   const defaultReasoning = reasoningOptions.find((option) => option.isDefault)?.id;
@@ -135,7 +148,7 @@ const toDisplayName = (model: CodexSchema.V2ModelListResponse__Model): string =>
     .replace(/-([a-z])/g, (_, c) => "-" + c.toUpperCase());
 };
 
-function parseCodexModelListResponse(
+export function parseCodexModelListResponse(
   response: CodexSchema.V2ModelListResponse,
 ): ReadonlyArray<ServerProviderModel> {
   return response.data.map((model) => ({

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as CodexSchema from "effect-codex-app-server/schema";
 
-import { parseCodexRateLimits } from "./CodexProvider.ts";
+import { parseCodexModelListResponse, parseCodexRateLimits } from "./CodexProvider.ts";
 
 const baseResponse = (
   rateLimits: CodexSchema.V2GetAccountRateLimitsResponse__RateLimitSnapshot,
@@ -94,6 +94,78 @@ describe("parseCodexRateLimits", () => {
       ),
     ).toEqual({
       credits: { hasCredits: false, unlimited: true },
+    });
+  });
+});
+
+describe("parseCodexModelListResponse", () => {
+  it("maps GPT-5.6 max reasoning effort into selectable model capabilities", () => {
+    const models = parseCodexModelListResponse({
+      data: [
+        {
+          defaultReasoningEffort: "max",
+          description: "Frontier model for complex professional work",
+          displayName: "gpt-5.6-sol",
+          hidden: false,
+          id: "gpt-5.6-sol",
+          isDefault: true,
+          model: "gpt-5.6-sol",
+          supportedReasoningEfforts: [
+            { reasoningEffort: "none", description: "No reasoning" },
+            { reasoningEffort: "low", description: "Low reasoning" },
+            { reasoningEffort: "medium", description: "Medium reasoning" },
+            { reasoningEffort: "high", description: "High reasoning" },
+            { reasoningEffort: "xhigh", description: "Extra high reasoning" },
+            { reasoningEffort: "max", description: "Maximum reasoning" },
+          ],
+        },
+      ],
+    } satisfies CodexSchema.V2ModelListResponse);
+
+    expect(models[0]).toMatchObject({
+      slug: "gpt-5.6-sol",
+      name: "GPT-5.6-Sol",
+      capabilities: {
+        optionDescriptors: [
+          {
+            id: "reasoningEffort",
+            currentValue: "max",
+            options: [
+              { id: "none", label: "None" },
+              { id: "low", label: "Low" },
+              { id: "medium", label: "Medium" },
+              { id: "high", label: "High" },
+              { id: "xhigh", label: "Extra High" },
+              { id: "max", label: "Max", isDefault: true },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  it("formats unknown future reasoning efforts instead of dropping labels", () => {
+    const models = parseCodexModelListResponse({
+      data: [
+        {
+          defaultReasoningEffort: "ultra-deep",
+          description: "Future model",
+          displayName: "future-model",
+          hidden: false,
+          id: "future-model",
+          isDefault: false,
+          model: "future-model",
+          supportedReasoningEfforts: [
+            { reasoningEffort: "ultra-deep", description: "Future effort" },
+          ],
+        },
+      ],
+    } satisfies CodexSchema.V2ModelListResponse);
+
+    const descriptor = models[0]!.capabilities!.optionDescriptors![0];
+    expect(descriptor).toMatchObject({
+      currentValue: "ultra-deep",
+      options: [{ id: "ultra-deep", label: "Ultra Deep", isDefault: true }],
     });
   });
 });

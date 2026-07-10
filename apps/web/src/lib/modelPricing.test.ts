@@ -15,6 +15,9 @@ describe("canonicalizeModel", () => {
     // canonical (default) Codex model and must stay itself.
     expect(canonicalizeModel("gpt-5.4")).toBe("gpt-5.4");
     expect(canonicalizeModel("gpt-5.4-mini")).toBe("gpt-5.4-mini");
+    expect(canonicalizeModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+    expect(canonicalizeModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
+    expect(canonicalizeModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
     expect(canonicalizeModel("claude-opus-4-8")).toBe("claude-opus-4-8");
   });
 
@@ -23,6 +26,10 @@ describe("canonicalizeModel", () => {
   });
 
   it("resolves real aliases to canonical slugs", () => {
+    expect(canonicalizeModel("gpt-5.6")).toBe("gpt-5.6-sol");
+    expect(canonicalizeModel("sol")).toBe("gpt-5.6-sol");
+    expect(canonicalizeModel("terra")).toBe("gpt-5.6-terra");
+    expect(canonicalizeModel("luna")).toBe("gpt-5.6-luna");
     expect(canonicalizeModel("opus")).toBe("claude-opus-4-8");
     expect(canonicalizeModel("sonnet")).toBe("claude-sonnet-5");
   });
@@ -36,6 +43,13 @@ describe("canonicalizeModel", () => {
 
 describe("estimateCostUsd", () => {
   it("prices known models per-bucket", () => {
+    expect(
+      estimateCostUsd(
+        { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 1_000_000 },
+        "gpt-5.6-sol",
+      ),
+    ).toBeCloseTo(35, 5); // $5 input + $30 output
+
     const cost = estimateCostUsd(
       { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 1_000_000 },
       "gpt-5.4",
@@ -104,6 +118,21 @@ describe("estimateCostUsd", () => {
   });
 
   it("prices models across providers (incl. provider-prefixed slugs)", () => {
+    expect(getModelPrice("gpt-5.6-sol")).toEqual({
+      inputPer1M: 5,
+      cachedInputPer1M: 0.5,
+      outputPer1M: 30,
+    });
+    expect(getModelPrice("openai/gpt-5.6-terra")).toEqual({
+      inputPer1M: 2.5,
+      cachedInputPer1M: 0.25,
+      outputPer1M: 15,
+    });
+    expect(getModelPrice("gpt-5.6-luna")).toEqual({
+      inputPer1M: 1,
+      cachedInputPer1M: 0.1,
+      outputPer1M: 6,
+    });
     expect(getModelPrice("composer-2.5")).not.toBeNull();
     expect(getModelPrice("gemini-3-pro")).not.toBeNull();
     expect(getModelPrice("google/gemini-2.5-flash")).not.toBeNull();

@@ -738,23 +738,9 @@ export const ClientRequest__PluginsMigration = Schema.Struct({
   pluginNames: Schema.Array(Schema.String),
 });
 
-export type ClientRequest__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const ClientRequest__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type ClientRequest__ReasoningEffort = string;
+export const ClientRequest__ReasoningEffort = Schema.String.check(Schema.isNonEmpty()).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type ClientRequest__ReasoningItemContent =
@@ -2149,23 +2135,11 @@ export const ServerNotification__RateLimitWindow = Schema.Struct({
 export type ServerNotification__RealtimeConversationVersion = "v1" | "v2";
 export const ServerNotification__RealtimeConversationVersion = Schema.Literals(["v1", "v2"]);
 
-export type ServerNotification__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const ServerNotification__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type ServerNotification__ReasoningEffort = string;
+export const ServerNotification__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type ServerNotification__ReasoningSummaryPartAddedNotification = {
@@ -3068,23 +3042,11 @@ export const V2ConfigReadResponse__AskForApproval = Schema.Union(
 export type V2ConfigReadResponse__ForcedLoginMethod = "chatgpt" | "api";
 export const V2ConfigReadResponse__ForcedLoginMethod = Schema.Literals(["chatgpt", "api"]);
 
-export type V2ConfigReadResponse__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ConfigReadResponse__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ConfigReadResponse__ReasoningEffort = string;
+export const V2ConfigReadResponse__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ConfigReadResponse__ReasoningSummary = "auto" | "concise" | "detailed" | "none";
@@ -3813,23 +3775,11 @@ export const V2ItemCompletedNotification__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2ItemCompletedNotification__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ItemCompletedNotification__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ItemCompletedNotification__ReasoningEffort = string;
+export const V2ItemCompletedNotification__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ItemCompletedNotification__TextElement = {
@@ -4260,23 +4210,11 @@ export const V2ItemStartedNotification__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2ItemStartedNotification__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ItemStartedNotification__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ItemStartedNotification__ReasoningEffort = string;
+export const V2ItemStartedNotification__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ItemStartedNotification__TextElement = {
@@ -4490,23 +4428,11 @@ export const V2ModelListResponse__ModelUpgradeInfo = Schema.Struct({
   upgradeCopy: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
 });
 
-export type V2ModelListResponse__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ModelListResponse__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ModelListResponse__ReasoningEffort = string;
+export const V2ModelListResponse__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ModelReroutedNotification__ModelRerouteReason = "highRiskCyberActivity";
@@ -4963,23 +4889,11 @@ export const V2ReviewStartResponse__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2ReviewStartResponse__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ReviewStartResponse__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ReviewStartResponse__ReasoningEffort = string;
+export const V2ReviewStartResponse__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ReviewStartResponse__TextElement = {
@@ -5377,23 +5291,11 @@ export const V2ThreadForkResponse__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2ThreadForkResponse__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ThreadForkResponse__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ThreadForkResponse__ReasoningEffort = string;
+export const V2ThreadForkResponse__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ThreadForkResponse__ServiceTier = "fast" | "flex" | "priority";
@@ -5676,23 +5578,11 @@ export const V2ThreadListResponse__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2ThreadListResponse__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ThreadListResponse__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ThreadListResponse__ReasoningEffort = string;
+export const V2ThreadListResponse__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ThreadListResponse__TextElement = {
@@ -5988,23 +5878,11 @@ export const V2ThreadMetadataUpdateResponse__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2ThreadMetadataUpdateResponse__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ThreadMetadataUpdateResponse__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ThreadMetadataUpdateResponse__ReasoningEffort = string;
+export const V2ThreadMetadataUpdateResponse__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ThreadMetadataUpdateResponse__TextElement = {
@@ -6256,23 +6134,11 @@ export const V2ThreadReadResponse__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2ThreadReadResponse__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ThreadReadResponse__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ThreadReadResponse__ReasoningEffort = string;
+export const V2ThreadReadResponse__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ThreadReadResponse__TextElement = {
@@ -6784,23 +6650,11 @@ export const V2ThreadResumeResponse__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2ThreadResumeResponse__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ThreadResumeResponse__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ThreadResumeResponse__ReasoningEffort = string;
+export const V2ThreadResumeResponse__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ThreadResumeResponse__ServiceTier = "fast" | "flex" | "priority";
@@ -7056,23 +6910,11 @@ export const V2ThreadRollbackResponse__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2ThreadRollbackResponse__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ThreadRollbackResponse__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ThreadRollbackResponse__ReasoningEffort = string;
+export const V2ThreadRollbackResponse__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ThreadRollbackResponse__TextElement = {
@@ -7330,23 +7172,11 @@ export const V2ThreadStartedNotification__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2ThreadStartedNotification__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ThreadStartedNotification__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ThreadStartedNotification__ReasoningEffort = string;
+export const V2ThreadStartedNotification__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ThreadStartedNotification__TextElement = {
@@ -7686,23 +7516,11 @@ export const V2ThreadStartResponse__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2ThreadStartResponse__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ThreadStartResponse__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ThreadStartResponse__ReasoningEffort = string;
+export const V2ThreadStartResponse__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ThreadStartResponse__ServiceTier = "fast" | "flex" | "priority";
@@ -7975,23 +7793,11 @@ export const V2ThreadTurnsListResponse__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2ThreadTurnsListResponse__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ThreadTurnsListResponse__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ThreadTurnsListResponse__ReasoningEffort = string;
+export const V2ThreadTurnsListResponse__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ThreadTurnsListResponse__TextElement = {
@@ -8240,23 +8046,11 @@ export const V2ThreadUnarchiveResponse__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2ThreadUnarchiveResponse__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2ThreadUnarchiveResponse__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2ThreadUnarchiveResponse__ReasoningEffort = string;
+export const V2ThreadUnarchiveResponse__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2ThreadUnarchiveResponse__TextElement = {
@@ -8512,23 +8306,11 @@ export const V2TurnCompletedNotification__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2TurnCompletedNotification__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2TurnCompletedNotification__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2TurnCompletedNotification__ReasoningEffort = string;
+export const V2TurnCompletedNotification__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2TurnCompletedNotification__TextElement = {
@@ -8773,23 +8555,11 @@ export const V2TurnStartedNotification__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2TurnStartedNotification__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2TurnStartedNotification__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2TurnStartedNotification__ReasoningEffort = string;
+export const V2TurnStartedNotification__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2TurnStartedNotification__TextElement = {
@@ -8914,24 +8684,12 @@ export const V2TurnStartParams__ModeKind = Schema.Literals(["plan", "default"]).
 export type V2TurnStartParams__Personality = "none" | "friendly" | "pragmatic";
 export const V2TurnStartParams__Personality = Schema.Literals(["none", "friendly", "pragmatic"]);
 
-export type V2TurnStartParams__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2TurnStartParams__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
-});
+export type V2TurnStartParams__ReasoningEffort = string;
+export const V2TurnStartParams__ReasoningEffort = Schema.String.check(Schema.isNonEmpty()).annotate(
+  {
+    description: "A non-empty reasoning effort value advertised by the model.",
+  },
+);
 
 export type V2TurnStartParams__ReasoningSummary = "auto" | "concise" | "detailed" | "none";
 export const V2TurnStartParams__ReasoningSummary = Schema.Union(
@@ -9128,23 +8886,11 @@ export const V2TurnStartResponse__PatchChangeKind = Schema.Union(
   { mode: "oneOf" },
 );
 
-export type V2TurnStartResponse__ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
-export const V2TurnStartResponse__ReasoningEffort = Schema.Literals([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]).annotate({
-  description:
-    "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+export type V2TurnStartResponse__ReasoningEffort = string;
+export const V2TurnStartResponse__ReasoningEffort = Schema.String.check(
+  Schema.isNonEmpty(),
+).annotate({
+  description: "A non-empty reasoning effort value advertised by the model.",
 });
 
 export type V2TurnStartResponse__TextElement = {

@@ -207,7 +207,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             body: "",
           }),
           requireFastServiceTier: true,
-          requireReasoningEffort: "xhigh",
+          requireReasoningEffort: "max",
           stdinMustNotContain: "branch must be a short semantic git branch fragment",
         },
         (textGeneration) =>
@@ -217,7 +217,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             stagedSummary: "M README.md",
             stagedPatch: "diff --git a/README.md b/README.md",
             modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.4", [
-              { id: "reasoningEffort", value: "xhigh" },
+              { id: "reasoningEffort", value: "max" },
               { id: "fastMode", value: true },
             ]),
           }),

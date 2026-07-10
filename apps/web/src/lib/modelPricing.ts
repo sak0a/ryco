@@ -64,6 +64,9 @@ const FLAT_ALIASES: Record<string, string> = (() => {
  */
 export const MODEL_PRICES: Record<string, ModelPrice> = {
   // ── OpenAI / Codex ──
+  "gpt-5.6-sol": { inputPer1M: 5, cachedInputPer1M: 0.5, outputPer1M: 30 },
+  "gpt-5.6-terra": { inputPer1M: 2.5, cachedInputPer1M: 0.25, outputPer1M: 15 },
+  "gpt-5.6-luna": { inputPer1M: 1, cachedInputPer1M: 0.1, outputPer1M: 6 },
   "gpt-5.5": { inputPer1M: 5, cachedInputPer1M: 0.5, outputPer1M: 30 },
   "gpt-5.4": { inputPer1M: 2.5, cachedInputPer1M: 0.25, outputPer1M: 15 },
   "gpt-5.4-mini": { inputPer1M: 0.75, cachedInputPer1M: 0.075, outputPer1M: 4.5 },
