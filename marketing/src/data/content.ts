@@ -14,7 +14,7 @@ export const SITE = {
     "Ryco is a small, practical workspace for AI coding agents. It ships as a cross-platform desktop app and a local web CLI backed by an Effect/TypeScript server and a React/TanStack UI.",
   repo: "https://github.com/sak0a/ryco",
   releases: "https://github.com/sak0a/ryco/releases",
-  discord: "https://discord.gg/jn4EGJjrvv",
+  discord: "https://discord.com",
   npx: "npx ryco-cli",
   license: "MIT",
   company: "Ryco Inc.",
