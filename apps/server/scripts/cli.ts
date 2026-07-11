@@ -246,6 +246,15 @@ const publishCmd = Command.make(
         // Use: npm publish
         () =>
           Effect.gen(function* () {
+            yield* Effect.log("[cli] Running package smoke test...");
+            yield* runCommand(
+              ChildProcess.make(process.execPath, ["scripts/package-smoke.mjs"], {
+                cwd: serverDir,
+                stdout: "inherit",
+                stderr: "inherit",
+              }),
+            );
+
             const args = ["publish", "--access", config.access, "--tag", config.tag];
             if (config.provenance) args.push("--provenance");
             if (config.dryRun) args.push("--dry-run");
