@@ -33,4 +33,9 @@ const result = spawnSync("effect-language-service", ["patch", "--dir", dir], {
   shell: true,
 });
 
+if (result.error) {
+  console.error("[prepare] Failed to run effect-language-service:", result.error.message);
+  process.exit(1);
+}
+
 process.exit(result.status ?? 1);

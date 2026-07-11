@@ -26,7 +26,17 @@ const run = (project: string) =>
       cwd,
       stdio: "inherit",
     });
-    child.on("close", (status) => resolve({ project, status }));
+    let settled = false;
+    const finish = (status: number | null) => {
+      if (settled) return;
+      settled = true;
+      resolve({ project, status });
+    };
+    child.on("error", (error) => {
+      console.error(`[typecheck:effect] Failed to start tsc6 for ${project}:`, error.message);
+      finish(1);
+    });
+    child.on("close", (status) => finish(status));
   });
 
 const results = await Promise.all(projects.map(run));
