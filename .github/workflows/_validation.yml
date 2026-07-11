@@ -51,6 +51,9 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      - name: Effect typecheck (TS6)
+        run: bun run typecheck:effect
+
       - name: Test
         run: bun run test
 

@@ -22,6 +22,7 @@
       "@types/node": "^24.10.13",
       "tsdown": "^0.22.4",
       "typescript": "7.0.2",
+      "@typescript/typescript6": "^6.0.2",
       "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.24",
       "vite": "npm:@voidzero-dev/vite-plus-core@0.1.24",
       "vite-plus": "0.1.24"
@@ -40,6 +41,7 @@
     "build": "turbo run build",
     "build:desktop": "turbo run build --filter=@ryco/desktop --filter=ryco-cli",
     "typecheck": "turbo run typecheck",
+    "typecheck:effect": "node scripts/typecheck-effect.ts",
     "lint": "vp lint --report-unused-disable-directives",
     "test": "turbo run test",
     "test:desktop-smoke": "turbo run smoke-test --filter=@ryco/desktop",
@@ -63,6 +65,7 @@
   "devDependencies": {
     "@effect/language-service": "catalog:",
     "@types/node": "catalog:",
+    "@typescript/typescript6": "catalog:",
     "oxfmt": "^0.53.0",
     "oxlint": "^1.68.0",
     "turbo": "^2.3.3",

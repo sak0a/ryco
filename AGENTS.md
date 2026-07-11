@@ -5,6 +5,10 @@
 - All of `bun fmt`, `bun lint`, and `bun typecheck` must pass before considering tasks completed.
 - NEVER run `bun test`. Always use `bun run test` (runs Vitest).
 
+## TypeScript
+
+Daily typecheck uses **TS7** (`bun typecheck`). Effect-specific rules still run via patched **TS6** — use `bun run typecheck:effect` when touching Effect code (also enforced in CI). See [docs/typescript.md](docs/typescript.md) for why both coexist.
+
 ## Project Snapshot
 
 Ryco is a minimal web GUI for using coding agents including Codex, Claude, GitHub Copilot, OpenCode, and Cursor.
