@@ -74,7 +74,9 @@ requires a new major version.
 
 The node's registered identity determines signature verification semantics. Tickets, nonces, and
 signatures are opaque to the codec. Schema validation never verifies credentials or consumes a
-ticket.
+ticket. Hosted node authentication uses the existing nonce and signature fields with the exact
+HTTPS-preflight transcript documented in [Node identity primitives](./node-identity.md); this adds
+no relay frame or version change.
 
 ## Authentication handshakes
 
