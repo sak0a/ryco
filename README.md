@@ -139,6 +139,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
 - [Workspace layout](./.docs/workspace-layout.md)
 - [Provider architecture](./.docs/provider-architecture.md)
 - [Remote architecture](./.docs/remote-architecture.md)
+- [Node identity primitives](./docs/node-identity.md)
 - [Codex provider guide](./docs/providers/codex.md)
 - [Claude provider guide](./docs/providers/claude.md)
 - [Observability guide](./docs/observability.md)

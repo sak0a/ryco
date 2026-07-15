@@ -29,6 +29,7 @@ const { dir, label } = resolvePatchTarget();
 console.log(`[prepare] Patching ${label} for effect-language-service…`);
 
 const result = spawnSync("effect-language-service", ["patch", "--dir", dir], {
+  cwd: dir,
   stdio: "inherit",
   shell: true,
 });
