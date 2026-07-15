@@ -1,9 +1,15 @@
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
 import { createHash } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
-import { generateRelayFixtureCorpus, RELAY_FIXTURE_ROOT } from "./generate-relay-fixtures.ts";
+import {
+  generateRelayFixtureCorpus,
+  RELAY_FIXTURE_ROOT,
+  writeRelayFixtureCorpus,
+} from "./generate-relay-fixtures.ts";
 
 function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -18,6 +24,28 @@ async function committedFixturePaths(): Promise<readonly string[]> {
 }
 
 describe("canonical relay fixtures", () => {
+  it("removes obsolete fixture files without removing root documentation", async () => {
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "ryco-relay-fixtures-"));
+    try {
+      await mkdir(`${fixtureRoot}/valid`, { recursive: true });
+      await mkdir(`${fixtureRoot}/invalid`, { recursive: true });
+      await writeFile(`${fixtureRoot}/valid/obsolete.cbor`, Uint8Array.of(0));
+      await writeFile(`${fixtureRoot}/invalid/obsolete.cbor`, Uint8Array.of(0));
+      await writeFile(`${fixtureRoot}/README.md`, "preserve me\n", "utf8");
+
+      await writeRelayFixtureCorpus(fixtureRoot);
+
+      expect(await readdir(`${fixtureRoot}/valid`)).not.toContain("obsolete.cbor");
+      expect(await readdir(`${fixtureRoot}/invalid`)).not.toContain("obsolete.cbor");
+      expect(await readFile(`${fixtureRoot}/README.md`, "utf8")).toBe("preserve me\n");
+      expect(await readFile(`${fixtureRoot}/manifest.json`, "utf8")).toBe(
+        generateRelayFixtureCorpus().manifestJson,
+      );
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it("matches deterministic generation byte for byte", async () => {
     const generated = generateRelayFixtureCorpus();
     const expectedPaths = [...generated.files.keys()].toSorted();

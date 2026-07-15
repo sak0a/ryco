@@ -262,14 +262,15 @@ The stable validation codes are:
 
 Close reasons are also valid wire `error.code` values. Failure precedence is:
 
-1. `frame_too_large`
+1. `frame_too_large` for the absolute WebSocket-message limit, before decoding
 2. `invalid_encoding`
-3. `invalid_frame` for a missing or malformed version envelope
-4. `protocol_unsupported`
-5. `missing_discriminant`
-6. `unknown_frame_type`
-7. `invalid_limits`
-8. Other schema failures as `invalid_frame`
+3. `frame_too_large` for a canonical control/data frame or data payload over its class limit
+4. `invalid_frame` for a missing or malformed version envelope
+5. `protocol_unsupported`
+6. `missing_discriminant`
+7. `unknown_frame_type`
+8. `invalid_limits`
+9. Other schema failures as `invalid_frame`
 
 Failures may contain documented nonsecret metadata such as a supported version range. They must
 never contain input values, payload bytes, credentials, tickets, parser causes, stack traces, or

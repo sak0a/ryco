@@ -11,7 +11,7 @@ import {
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
 import { encode, rfc8949EncodeOptions } from "cborg";
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 export const RELAY_FIXTURE_ROOT = fileURLToPath(
@@ -451,14 +451,20 @@ export function generateRelayFixtureCorpus(): RelayFixtureCorpus {
   return { files, manifest, manifestJson: `${JSON.stringify(manifest, null, 2)}\n` };
 }
 
-export async function writeRelayFixtureCorpus(): Promise<void> {
+export async function writeRelayFixtureCorpus(
+  fixtureRoot: string = RELAY_FIXTURE_ROOT,
+): Promise<void> {
   const corpus = generateRelayFixtureCorpus();
-  await mkdir(`${RELAY_FIXTURE_ROOT}/valid`, { recursive: true });
-  await mkdir(`${RELAY_FIXTURE_ROOT}/invalid`, { recursive: true });
+  await Promise.all([
+    rm(`${fixtureRoot}/valid`, { recursive: true, force: true }),
+    rm(`${fixtureRoot}/invalid`, { recursive: true, force: true }),
+  ]);
+  await mkdir(`${fixtureRoot}/valid`, { recursive: true });
+  await mkdir(`${fixtureRoot}/invalid`, { recursive: true });
   for (const [relativePath, bytes] of corpus.files) {
-    await writeFile(`${RELAY_FIXTURE_ROOT}/${relativePath}`, bytes);
+    await writeFile(`${fixtureRoot}/${relativePath}`, bytes);
   }
-  await writeFile(`${RELAY_FIXTURE_ROOT}/manifest.json`, corpus.manifestJson, "utf8");
+  await writeFile(`${fixtureRoot}/manifest.json`, corpus.manifestJson, "utf8");
 }
 
 if (import.meta.main) {
