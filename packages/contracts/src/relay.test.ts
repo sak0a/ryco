@@ -1,0 +1,194 @@
+import { Schema } from "effect";
+import { describe, expect, it } from "vite-plus/test";
+
+import {
+  RELAY_CLOSE_REASONS,
+  RELAY_FRAME_TYPES,
+  RELAY_INITIAL_LIMITS,
+  RELAY_MAX_DATA_CHUNK_BYTES,
+  RelayChannelId,
+  RelayFrame,
+  RelayLimits,
+  RelayNodeId,
+} from "./relay.ts";
+
+const version = { protocolMajor: 1, protocolMinor: 1 } as const;
+const nodeId = `node_${"n".repeat(22)}`;
+const channelId = `ch_${"c".repeat(22)}`;
+
+const validFrames = [
+  {
+    type: "auth",
+    peer: "node",
+    ...version,
+    nodeId,
+    nonce: new Uint8Array(32).fill(1),
+    signature: new Uint8Array(64).fill(2),
+  },
+  {
+    type: "auth",
+    peer: "client",
+    ...version,
+    relayTicket: new Uint8Array(32).fill(3),
+  },
+  { type: "ready", ...version, limits: RELAY_INITIAL_LIMITS },
+  { type: "channel.open", ...version, channelId },
+  { type: "channel.accept", ...version, channelId },
+  {
+    type: "channel.reject",
+    ...version,
+    channelId,
+    reason: "rate_limited",
+    retryAfterMs: 5_000,
+  },
+  {
+    type: "data",
+    ...version,
+    channelId,
+    sequence: 7,
+    payload: Uint8Array.from([0, 0xff, 0x80, 0x7f]),
+  },
+  { type: "flow.pause", ...version, channelId },
+  { type: "flow.resume", ...version, channelId },
+  { type: "channel.close", ...version, channelId, reason: "server_draining" },
+  { type: "ping", ...version, nonce: new Uint8Array(8).fill(4) },
+  { type: "pong", ...version, nonce: new Uint8Array(8).fill(4) },
+  { type: "error", ...version, code: "rate_limited", fatal: false, retryAfterMs: 1_000 },
+] as const;
+
+describe("relay schemas", () => {
+  const decodeFrame = Schema.decodeUnknownSync(RelayFrame);
+
+  it("decodes both authentication handshakes and every frame class", () => {
+    const decoded = validFrames.map((frame) => decodeFrame(frame));
+
+    expect(decoded).toHaveLength(13);
+    expect(new Set(decoded.map((frame) => frame.type))).toEqual(new Set(RELAY_FRAME_TYPES));
+  });
+
+  it("keeps the stable close-reason set exact", () => {
+    expect(RELAY_CLOSE_REASONS).toEqual([
+      "authentication_required",
+      "authentication_failed",
+      "ticket_expired",
+      "ticket_consumed",
+      "node_offline",
+      "node_revoked",
+      "grant_revoked",
+      "protocol_unsupported",
+      "frame_too_large",
+      "slow_consumer",
+      "rate_limited",
+      "server_draining",
+      "internal_error",
+    ]);
+  });
+
+  it("ignores future optional fields on known structures", () => {
+    const decoded = decodeFrame({
+      type: "ready",
+      ...version,
+      futureCapability: true,
+      limits: { ...RELAY_INITIAL_LIMITS, futureLimit: 123 },
+    });
+
+    expect(decoded).toEqual({ type: "ready", ...version, limits: RELAY_INITIAL_LIMITS });
+    expect("futureCapability" in decoded).toBe(false);
+    if (decoded.type !== "ready") {
+      throw new Error("Expected ready frame");
+    }
+    expect("futureLimit" in decoded.limits).toBe(false);
+  });
+
+  it("rejects missing and unknown discriminants", () => {
+    expect(() => decodeFrame({ ...version })).toThrow();
+    expect(() => decodeFrame({ type: "future.frame", ...version })).toThrow();
+    expect(() => decodeFrame({ type: "auth", peer: "future", ...version })).toThrow();
+  });
+
+  it("enforces identifier syntax and bounds", () => {
+    const decodeNodeId = Schema.decodeUnknownSync(RelayNodeId);
+    const decodeChannelId = Schema.decodeUnknownSync(RelayChannelId);
+
+    expect(decodeNodeId(nodeId)).toBe(nodeId);
+    expect(decodeChannelId(channelId)).toBe(channelId);
+    expect(() => decodeNodeId(`node_${"n".repeat(21)}`)).toThrow();
+    expect(() => decodeNodeId(`node_${"n".repeat(44)}`)).toThrow();
+    expect(() => decodeNodeId("node_not+base64url!!!!!!!!")).toThrow();
+    expect(() => decodeChannelId(`ch_${"c".repeat(21)}`)).toThrow();
+    expect(() => decodeChannelId(`ch_${"c".repeat(23)}`)).toThrow();
+  });
+
+  it("requires native opaque bytes and enforces payload bounds", () => {
+    expect(() =>
+      decodeFrame({
+        type: "data",
+        ...version,
+        channelId,
+        sequence: 0,
+        payload: [0, 255],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeFrame({
+        type: "data",
+        ...version,
+        channelId,
+        sequence: 0,
+        payload: new Uint8Array(RELAY_MAX_DATA_CHUNK_BYTES + 1),
+      }),
+    ).toThrow();
+  });
+
+  it("rejects invalid negotiated-limit relationships", () => {
+    const decodeLimits = Schema.decodeUnknownSync(RelayLimits);
+
+    expect(decodeLimits(RELAY_INITIAL_LIMITS)).toEqual(RELAY_INITIAL_LIMITS);
+    expect(() =>
+      decodeLimits({
+        ...RELAY_INITIAL_LIMITS,
+        maxQueuedBytes: RELAY_INITIAL_LIMITS.maxDataChunkBytes,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeLimits({
+        ...RELAY_INITIAL_LIMITS,
+        heartbeatIntervalMs: 20_000,
+        deadConnectionTimeoutMs: 30_000,
+      }),
+    ).toThrow();
+  });
+
+  it("gates retryAfterMs on protocol minor version 1", () => {
+    expect(() =>
+      decodeFrame({
+        type: "channel.reject",
+        protocolMajor: 1,
+        protocolMinor: 0,
+        channelId,
+        reason: "rate_limited",
+        retryAfterMs: 1_000,
+      }),
+    ).toThrow();
+  });
+
+  it("requires deterministic metadata for unsupported-protocol error frames", () => {
+    expect(() =>
+      decodeFrame({
+        type: "error",
+        ...version,
+        code: "protocol_unsupported",
+        fatal: false,
+      }),
+    ).toThrow();
+
+    const decoded = decodeFrame({
+      type: "error",
+      ...version,
+      code: "protocol_unsupported",
+      fatal: true,
+      supported: { protocolMajor: 1, minimumMinor: 0, maximumMinor: 1 },
+    });
+    expect(decoded.type).toBe("error");
+  });
+});

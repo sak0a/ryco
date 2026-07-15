@@ -92,6 +92,10 @@
       "types": "./src/keybindings.ts",
       "import": "./src/keybindings.ts"
     },
+    "./relayCodec": {
+      "types": "./src/relayCodec.ts",
+      "import": "./src/relayCodec.ts"
+    },
     "./sourceControlContextFormatter": {
       "types": "./src/sourceControlContextFormatter.ts",
       "import": "./src/sourceControlContextFormatter.ts"
@@ -103,12 +107,14 @@
   },
   "dependencies": {
     "@ryco/contracts": "workspace:*",
+    "cborg": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
+    "fast-check": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
