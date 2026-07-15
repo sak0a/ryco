@@ -12,6 +12,7 @@
     "@effect/platform-node": "catalog:",
     "@ryco/contracts": "workspace:*",
     "@ryco/shared": "workspace:*",
+    "cborg": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {
