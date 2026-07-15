@@ -5,6 +5,7 @@ import type {
   HubKeyRotationStatus,
   HubKeyRotationTransport,
 } from "./HubKeyRotationClient.ts";
+import { fetchBoundedJson } from "./BoundedHttp.ts";
 
 export class HubKeyRotationHttpTransportError extends Error {
   readonly code = "rotation_transport_failed" as const;
@@ -16,48 +17,16 @@ export class HubKeyRotationHttpTransportError extends Error {
 }
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-const MAX_RESPONSE_BYTES = 16 * 1024;
 
 function transportError(): never {
   throw new HubKeyRotationHttpTransportError();
 }
 
-async function boundedJson(response: Response): Promise<Record<string, unknown>> {
-  const declared = response.headers.get("content-length");
-  if (declared !== null) {
-    const length = Number(declared);
-    if (!Number.isSafeInteger(length) || length < 0 || length > MAX_RESPONSE_BYTES) {
-      return transportError();
-    }
-  }
-  if (response.body === null) return transportError();
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const result = await reader.read();
-      if (result.done) break;
-      total += result.value.byteLength;
-      if (total > MAX_RESPONSE_BYTES) return transportError();
-      chunks.push(result.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  try {
-    const value = JSON.parse(
-      Buffer.concat(
-        chunks.map((chunk) => Buffer.from(chunk)),
-        total,
-      ).toString("utf8"),
-    ) as unknown;
-    if (typeof value !== "object" || value === null || Array.isArray(value))
-      return transportError();
-    return value as Record<string, unknown>;
-  } catch {
+function record(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return transportError();
   }
+  return value as Record<string, unknown>;
 }
 
 function parseStatus(value: Record<string, unknown>): HubKeyRotationStatus {
@@ -98,11 +67,13 @@ function parseChallenge(value: Record<string, unknown>): HubKeyRotationChallenge
 
 export function makeHubKeyRotationHttpTransport(
   fetchImplementation: FetchLike = fetch,
+  options: { readonly timeoutMs?: number } = {},
 ): HubKeyRotationTransport {
-  const post = async (hubOrigin: string, path: string, body: unknown): Promise<Response> => {
-    let response: Response;
-    try {
-      response = await fetchImplementation(`${canonicalizeHubOrigin(hubOrigin)}${path}`, {
+  const post = async (hubOrigin: string, path: string, body: unknown) => {
+    const response = await fetchBoundedJson(
+      fetchImplementation,
+      `${canonicalizeHubOrigin(hubOrigin)}${path}`,
+      {
         method: "POST",
         headers: { accept: "application/json", "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -110,46 +81,40 @@ export function makeHubKeyRotationHttpTransport(
         cache: "no-store",
         redirect: "error",
         referrerPolicy: "no-referrer",
-      });
-    } catch {
-      return transportError();
-    }
+      },
+      transportError,
+      options,
+    );
     if (!response.ok) return transportError();
-    return response;
+    return record(response.value);
   };
 
   return {
     begin: async (request) =>
       parseChallenge(
-        await boundedJson(
-          await post(request.hubOrigin, "/api/node/key-rotations", {
-            nodeId: request.nodeId,
-            oldActiveKeyId: request.oldActiveKeyId,
-            algorithm: request.newKey.algorithm,
-            publicKey: Buffer.from(request.newKey.publicKey).toString("base64url"),
-            ...(request.existingRotationRequestId === undefined
-              ? {}
-              : { rotationRequestId: request.existingRotationRequestId }),
-          }),
-        ),
+        await post(request.hubOrigin, "/api/node/key-rotations", {
+          nodeId: request.nodeId,
+          oldActiveKeyId: request.oldActiveKeyId,
+          algorithm: request.newKey.algorithm,
+          publicKey: Buffer.from(request.newKey.publicKey).toString("base64url"),
+          ...(request.existingRotationRequestId === undefined
+            ? {}
+            : { rotationRequestId: request.existingRotationRequestId }),
+        }),
       ),
     prove: async (request) =>
       parseStatus(
-        await boundedJson(
-          await post(request.hubOrigin, "/api/node/key-rotations/prove", {
-            rotationRequestId: request.rotationRequestId,
-            challenge: Buffer.from(request.challenge).toString("base64url"),
-            signature: Buffer.from(request.signature).toString("base64url"),
-          }),
-        ),
+        await post(request.hubOrigin, "/api/node/key-rotations/prove", {
+          rotationRequestId: request.rotationRequestId,
+          challenge: Buffer.from(request.challenge).toString("base64url"),
+          signature: Buffer.from(request.signature).toString("base64url"),
+        }),
       ),
     status: async (request) =>
       parseStatus(
-        await boundedJson(
-          await post(request.hubOrigin, "/api/node/key-rotations/status", {
-            rotationRequestId: request.rotationRequestId,
-          }),
-        ),
+        await post(request.hubOrigin, "/api/node/key-rotations/status", {
+          rotationRequestId: request.rotationRequestId,
+        }),
       ),
   };
 }

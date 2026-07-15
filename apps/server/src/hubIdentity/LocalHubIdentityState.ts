@@ -12,6 +12,7 @@ export interface PendingHubEnrollmentState {
   readonly createdAt: number;
   readonly expiresAt: number | null;
   readonly pollIntervalMs: number | null;
+  readonly cleanupRequested: boolean;
 }
 
 export interface ActiveHubNodeState {
@@ -19,6 +20,7 @@ export interface ActiveHubNodeState {
   readonly nodeId: string;
   readonly activeKeyId: string;
   readonly activeKeySecretName: string;
+  readonly cleanupPollingSecretName: string | null;
   readonly enrolledAt: number;
 }
 
@@ -64,7 +66,7 @@ export interface LocalHubIdentityStateStore {
 }
 
 const ENVIRONMENT_ID = /^env_[A-Za-z0-9_-]{22}$/;
-const NODE_ID = /^node_[A-Za-z0-9_-]{22}$/;
+const NODE_ID = /^node_[A-Za-z0-9_-]{22,43}$/;
 const NODE_KEY_ID = /^nkey_[A-Za-z0-9_-]{22}$/;
 const ROTATION_ID = /^nrot_[A-Za-z0-9_-]{22}$/;
 const SECRET_NAME = /^[a-z0-9][a-z0-9._-]{0,127}$/;
@@ -98,7 +100,8 @@ function parsePending(value: unknown): PendingHubEnrollmentState | null {
     (candidate.pollIntervalMs !== null &&
       (!Number.isSafeInteger(candidate.pollIntervalMs) ||
         Number(candidate.pollIntervalMs) < 1_000 ||
-        Number(candidate.pollIntervalMs) > 60_000))
+        Number(candidate.pollIntervalMs) > 60_000)) ||
+    (candidate.cleanupRequested !== undefined && typeof candidate.cleanupRequested !== "boolean")
   ) {
     return stateError("identity_state_corrupt");
   }
@@ -115,6 +118,7 @@ function parsePending(value: unknown): PendingHubEnrollmentState | null {
     createdAt: candidate.createdAt,
     expiresAt: candidate.expiresAt,
     pollIntervalMs: candidate.pollIntervalMs as number | null,
+    cleanupRequested: candidate.cleanupRequested ?? false,
   };
 }
 
@@ -128,6 +132,9 @@ function parseActive(value: unknown): ActiveHubNodeState | null {
     typeof candidate.activeKeyId !== "string" ||
     !NODE_KEY_ID.test(candidate.activeKeyId) ||
     !isSecretName(candidate.activeKeySecretName) ||
+    (candidate.cleanupPollingSecretName !== undefined &&
+      candidate.cleanupPollingSecretName !== null &&
+      !isSecretName(candidate.cleanupPollingSecretName)) ||
     !isTimestamp(candidate.enrolledAt)
   ) {
     return stateError("identity_state_corrupt");
@@ -143,6 +150,7 @@ function parseActive(value: unknown): ActiveHubNodeState | null {
     nodeId: candidate.nodeId,
     activeKeyId: candidate.activeKeyId,
     activeKeySecretName: candidate.activeKeySecretName,
+    cleanupPollingSecretName: candidate.cleanupPollingSecretName ?? null,
     enrolledAt: candidate.enrolledAt,
   };
 }
@@ -260,8 +268,11 @@ async function writeState(path: string, state: LocalHubIdentityState): Promise<v
     await rename(temporaryPath, path);
     if (process.platform !== "win32") await chmod(path, 0o600);
     const directory = await open(dirname(path), constants.O_RDONLY);
-    await directory.sync();
-    await directory.close();
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
   } catch (error: unknown) {
     await file?.close().catch(() => undefined);
     await rm(temporaryPath, { force: true }).catch(() => undefined);
@@ -302,16 +313,65 @@ export async function makeLocalHubIdentityStateStore(
   await assertStateDirectory(directory, true);
   const lockPath = `${statePath}.lock`;
 
+  const reclaimAbandonedLock = async (): Promise<boolean> => {
+    let initial;
+    try {
+      initial = await lstat(lockPath);
+      if (
+        !initial.isFile() ||
+        initial.isSymbolicLink() ||
+        initial.nlink !== 1 ||
+        initial.size < 2 ||
+        initial.size > 32 ||
+        (process.platform !== "win32" && (initial.mode & 0o777) !== 0o600)
+      ) {
+        return false;
+      }
+      const rawPid = (await readFile(lockPath, "utf8")).trim();
+      if (!/^[1-9][0-9]{0,19}$/.test(rawPid)) return false;
+      const pid = Number(rawPid);
+      if (!Number.isSafeInteger(pid)) return false;
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch (error: unknown) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ESRCH") return false;
+      }
+      const current = await lstat(lockPath);
+      if (current.dev !== initial.dev || current.ino !== initial.ino) return false;
+      await rm(lockPath);
+      return true;
+    } catch (error: unknown) {
+      return (error as NodeJS.ErrnoException).code === "ENOENT";
+    }
+  };
+
   const withLock = async <T>(operation: () => Promise<T>): Promise<T> => {
     let lock;
-    try {
-      lock = await open(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-        return stateError("identity_state_locked");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        lock = await open(
+          lockPath,
+          constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+          0o600,
+        );
+        break;
+      } catch (error: unknown) {
+        if (
+          (error as NodeJS.ErrnoException).code !== "EEXIST" ||
+          attempt !== 0 ||
+          !(await reclaimAbandonedLock())
+        ) {
+          return stateError(
+            (error as NodeJS.ErrnoException).code === "EEXIST"
+              ? "identity_state_locked"
+              : "identity_state_unavailable",
+          );
+        }
       }
-      return stateError("identity_state_unavailable");
     }
+    if (lock === undefined) return stateError("identity_state_locked");
     try {
       await lock.writeFile(`${process.pid}\n`);
       await lock.sync();
@@ -333,7 +393,8 @@ export async function makeLocalHubIdentityStateStore(
 
   const update: LocalHubIdentityStateStore["update"] = (change) =>
     withLock(async () => {
-      const current = (await readState(statePath)) ?? makeInitialState();
+      const current = await readState(statePath);
+      if (current === null) return stateError("identity_state_operation_failed");
       const proposed = parseState(change(current));
       if (
         proposed.environmentId !== current.environmentId ||

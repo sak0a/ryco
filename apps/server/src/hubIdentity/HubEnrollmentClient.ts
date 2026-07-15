@@ -95,7 +95,7 @@ export interface HubEnrollmentClientDependencies {
 }
 
 const DEVICE_CODE = /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
-const NODE_ID = /^node_[A-Za-z0-9_-]{22}$/;
+const NODE_ID = /^node_[A-Za-z0-9_-]{22,43}$/;
 const NODE_KEY_ID = /^nkey_[A-Za-z0-9_-]{22}$/;
 const MAX_POLL_ATTEMPTS = 120;
 
@@ -209,12 +209,42 @@ export function makeHubEnrollmentClient(
       ) {
         return clientError("enrollment_local_state_failed");
       }
+      return {
+        ...current,
+        revision: current.revision + 1,
+        pendingEnrollment: { ...current.pendingEnrollment, cleanupRequested: true },
+      };
+    });
+    await dependencies.secretStore.remove(pending.pollingSecretName);
+    await dependencies.signingIdentity.delete(pending.keySecretName);
+    await dependencies.stateStore.update((current) => {
+      if (
+        current.pendingEnrollment?.keySecretName !== pending.keySecretName ||
+        current.pendingEnrollment.pollingSecretName !== pending.pollingSecretName ||
+        !current.pendingEnrollment.cleanupRequested
+      ) {
+        return clientError("enrollment_local_state_failed");
+      }
       return { ...current, revision: current.revision + 1, pendingEnrollment: null };
     });
-    await Promise.allSettled([
-      dependencies.secretStore.remove(pending.pollingSecretName),
-      dependencies.signingIdentity.delete(pending.keySecretName),
-    ]);
+  };
+
+  const retryActiveCleanup = async (active: ActiveHubNodeState): Promise<void> => {
+    if (active.cleanupPollingSecretName === null) return;
+    await dependencies.secretStore.remove(active.cleanupPollingSecretName);
+    await dependencies.stateStore.update((current) => {
+      if (
+        current.activeNode?.nodeId !== active.nodeId ||
+        current.activeNode.cleanupPollingSecretName !== active.cleanupPollingSecretName
+      ) {
+        return clientError("enrollment_local_state_failed");
+      }
+      return {
+        ...current,
+        revision: current.revision + 1,
+        activeNode: { ...current.activeNode, cleanupPollingSecretName: null },
+      };
+    });
   };
 
   const start: HubEnrollmentClient["start"] = async (rawHubOrigin, rawMetadata) => {
@@ -241,6 +271,7 @@ export function makeHubEnrollmentClient(
       createdAt,
       expiresAt: null,
       pollIntervalMs: null,
+      cleanupRequested: false,
     };
     try {
       await dependencies.stateStore.update((current) => {
@@ -258,19 +289,24 @@ export function makeHubEnrollmentClient(
       throw error;
     }
 
+    let rawResponse: HubEnrollmentStartResponse | undefined;
     let response: HubEnrollmentStartResponse | undefined;
     try {
-      const validatedResponse = validateStartResponse(
-        await dependencies.transport.start({
-          hubOrigin,
-          environmentId: initial.environmentId,
-          publicKey,
-          ...metadata,
-        }),
-        now(),
-      );
-      response = validatedResponse;
-      await dependencies.secretStore.create(pollingSecretName, validatedResponse.pollingSecret);
+      rawResponse = await dependencies.transport.start({
+        hubOrigin,
+        environmentId: initial.environmentId,
+        publicKey,
+        ...metadata,
+      });
+      response = validateStartResponse(rawResponse, now());
+    } catch (error: unknown) {
+      rawResponse?.pollingSecret.fill(0);
+      await clearPending(pending).catch(() => undefined);
+      if (error instanceof HubEnrollmentClientError) throw error;
+      return clientError("enrollment_transport_failed");
+    }
+    try {
+      await dependencies.secretStore.create(pollingSecretName, response.pollingSecret);
       await dependencies.stateStore.update((current) => {
         if (current.pendingEnrollment?.keySecretName !== keySecretName) {
           return clientError("enrollment_local_state_failed");
@@ -280,17 +316,19 @@ export function makeHubEnrollmentClient(
           revision: current.revision + 1,
           pendingEnrollment: {
             ...pending,
-            expiresAt: validatedResponse.expiresAt,
-            pollIntervalMs: validatedResponse.pollIntervalMs,
+            expiresAt: response?.expiresAt ?? null,
+            pollIntervalMs: response?.pollIntervalMs ?? null,
           },
         };
       });
-    } catch (error: unknown) {
+    } catch {
       await clearPending(pending).catch(() => undefined);
-      if (error instanceof HubEnrollmentClientError) throw error;
-      return clientError("enrollment_transport_failed");
+      return clientError("enrollment_local_state_failed");
     } finally {
       response?.pollingSecret.fill(0);
+      if (rawResponse?.pollingSecret !== response?.pollingSecret) {
+        rawResponse?.pollingSecret.fill(0);
+      }
     }
     if (response === undefined) return clientError("enrollment_transport_failed");
     return {
@@ -311,6 +349,7 @@ export function makeHubEnrollmentClient(
     }
     const state = await dependencies.stateStore.readOrCreate();
     if (state.activeNode?.hubOrigin === hubOrigin) {
+      await retryActiveCleanup(state.activeNode).catch(() => undefined);
       return activePollResult(state.activeNode, state.environmentId);
     }
     const pending = state.pendingEnrollment;
@@ -322,8 +361,12 @@ export function makeHubEnrollmentClient(
     ) {
       return clientError("enrollment_not_resumable");
     }
+    if (pending.cleanupRequested) {
+      await clearPending(pending).catch(() => clientError("enrollment_local_state_failed"));
+      return { status: "unavailable" };
+    }
     if (now() >= pending.expiresAt) {
-      await clearPending(pending);
+      await clearPending(pending).catch(() => clientError("enrollment_local_state_failed"));
       return { status: "unavailable" };
     }
     const pollingSecret = await dependencies.secretStore.get(pending.pollingSecretName);
@@ -346,7 +389,7 @@ export function makeHubEnrollmentClient(
 
     if (response.status === "pending") return response;
     if (response.status === "unavailable") {
-      await clearPending(pending);
+      await clearPending(pending).catch(() => clientError("enrollment_local_state_failed"));
       return response;
     }
 
@@ -355,11 +398,17 @@ export function makeHubEnrollmentClient(
       nodeId: response.nodeId,
       activeKeyId: response.activeKeyId,
       activeKeySecretName: pending.keySecretName,
+      cleanupPollingSecretName: pending.pollingSecretName,
       enrolledAt: response.enrolledAt,
     };
-    await dependencies.stateStore.update((current) => {
-      if (current.pendingEnrollment?.keySecretName !== pending.keySecretName) {
-        if (current.activeNode?.nodeId === response.nodeId) return current;
+    const committed = await dependencies.stateStore.update((current) => {
+      if (
+        current.pendingEnrollment?.keySecretName !== pending.keySecretName ||
+        current.pendingEnrollment.cleanupRequested
+      ) {
+        if (current.activeNode?.nodeId === response.nodeId) {
+          return { ...current, revision: current.revision + 1 };
+        }
         return clientError("enrollment_local_state_failed");
       }
       return {
@@ -369,8 +418,9 @@ export function makeHubEnrollmentClient(
         activeNode,
       };
     });
-    await dependencies.secretStore.remove(pending.pollingSecretName).catch(() => undefined);
-    return response;
+    if (committed.activeNode === null) return clientError("enrollment_local_state_failed");
+    await retryActiveCleanup(committed.activeNode).catch(() => undefined);
+    return activePollResult(committed.activeNode, committed.environmentId);
   };
 
   const pollUntilTerminal: HubEnrollmentClient["pollUntilTerminal"] = async (hubOrigin) => {
@@ -392,7 +442,7 @@ export function makeHubEnrollmentClient(
     const state = await dependencies.stateStore.readOrCreate();
     const pending = state.pendingEnrollment;
     if (pending === null || pending.hubOrigin !== hubOrigin) return;
-    await clearPending(pending);
+    await clearPending(pending).catch(() => clientError("enrollment_local_state_failed"));
   };
 
   return { start, poll, pollUntilTerminal, cancel };

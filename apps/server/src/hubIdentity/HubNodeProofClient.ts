@@ -4,6 +4,7 @@ import {
 } from "@ryco/shared/nodeIdentity";
 import type { RelayNodeAuthHandshake } from "@ryco/contracts/relay";
 
+import { fetchBoundedJson } from "./BoundedHttp.ts";
 import type { LocalHubIdentityStateStore } from "./LocalHubIdentityState.ts";
 import type { NodeSigningIdentity } from "./NodeSigningIdentity.ts";
 
@@ -147,70 +148,34 @@ export function makeHubNodeProofClient(dependencies: {
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
-async function readBoundedResponseText(response: Response): Promise<string> {
-  if (response.body === null) return proofError();
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const result = await reader.read();
-      if (result.done) break;
-      total += result.value.byteLength;
-      if (total > 16 * 1024) return proofError();
-      chunks.push(result.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  return Buffer.concat(
-    chunks.map((chunk) => Buffer.from(chunk)),
-    total,
-  ).toString("utf8");
-}
-
 export function makeHubNodeChallengeHttpTransport(
   fetchImplementation: FetchLike = fetch,
+  options: { readonly timeoutMs?: number } = {},
 ): HubNodeChallengeTransport {
   return {
     request: async (input) => {
-      let response: Response;
-      try {
-        response = await fetchImplementation(
-          `${canonicalizeHubOrigin(input.hubOrigin)}/api/node/auth/challenges`,
-          {
-            method: "POST",
-            headers: { accept: "application/json", "content-type": "application/json" },
-            body: JSON.stringify({
-              nodeId: input.nodeId,
-              activeKeyId: input.activeKeyId,
-              protocolMajor: input.protocolMajor,
-              protocolMinor: input.protocolMinor,
-            }),
-            credentials: "omit",
-            cache: "no-store",
-            redirect: "error",
-            referrerPolicy: "no-referrer",
-          },
-        );
-      } catch {
-        return proofError();
-      }
-      const declaredHeader = response.headers.get("content-length");
-      if (declaredHeader !== null) {
-        const declared = Number(declaredHeader);
-        if (!Number.isSafeInteger(declared) || declared < 0 || declared > 16 * 1024) {
-          return proofError();
-        }
-      }
+      const response = await fetchBoundedJson(
+        fetchImplementation,
+        `${canonicalizeHubOrigin(input.hubOrigin)}/api/node/auth/challenges`,
+        {
+          method: "POST",
+          headers: { accept: "application/json", "content-type": "application/json" },
+          body: JSON.stringify({
+            nodeId: input.nodeId,
+            activeKeyId: input.activeKeyId,
+            protocolMajor: input.protocolMajor,
+            protocolMinor: input.protocolMinor,
+          }),
+          credentials: "omit",
+          cache: "no-store",
+          redirect: "error",
+          referrerPolicy: "no-referrer",
+        },
+        proofError,
+        options,
+      );
       if (!response.ok) return proofError();
-      let value: unknown;
-      try {
-        const text = await readBoundedResponseText(response);
-        value = JSON.parse(text) as unknown;
-      } catch {
-        return proofError();
-      }
+      const value = response.value;
       if (typeof value !== "object" || value === null) return proofError();
       const candidate = value as Record<string, unknown>;
       if (

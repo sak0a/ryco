@@ -58,6 +58,18 @@ describe("protected node secret stores", () => {
     });
   });
 
+  it("serializes concurrent OS-backed creators so one loses without overwrite", async () => {
+    const credentials = new MemoryCredentials();
+    const store = makeKeytarProtectedSecretStore("dev.ryco.node.concurrent", credentials);
+    const results = await Promise.allSettled([
+      store.create("node-key.fixture", Uint8Array.from([1])),
+      store.create("node-key.fixture", Uint8Array.from([2])),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(await store.get("node-key.fixture")).toEqual(Uint8Array.from([1]));
+  });
+
   it("requires explicit permission for the file fallback", async () => {
     const root = await mkdtemp(join(tmpdir(), "ryco-protected-store-denied-"));
     await expect(
@@ -82,6 +94,15 @@ describe("protected node secret stores", () => {
         explicitlyAllowed: true,
       });
       expect(await restarted.get("node-key.fixture")).toEqual(value);
+
+      await restarted.create("crash-recovery", Uint8Array.from([7, 8, 9]));
+      const installedPath = join(root, "crash-recovery.bin");
+      const siblingPath = join(root, "crash-recovery.bin.interrupted.tmp");
+      await link(installedPath, siblingPath);
+      expect((await lstat(installedPath)).nlink).toBe(2);
+      expect(await restarted.get("crash-recovery")).toEqual(Uint8Array.from([7, 8, 9]));
+      expect((await lstat(installedPath)).nlink).toBe(1);
+
       await restarted.remove("node-key.fixture");
       expect(await restarted.get("node-key.fixture")).toBeNull();
     },

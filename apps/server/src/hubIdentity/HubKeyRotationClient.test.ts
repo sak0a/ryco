@@ -74,6 +74,7 @@ async function harness(transport: HubKeyRotationTransport) {
       nodeId,
       activeKeyId: oldKeyId,
       activeKeySecretName: "node-key.active",
+      cleanupPollingSecretName: null,
       enrolledAt: now - 100_000,
     },
   }));

@@ -60,6 +60,38 @@ describe("Hub enrollment HTTP transport", () => {
     );
   });
 
+  it("requires the enrollment protocol marker on unavailable HTTP responses", async () => {
+    for (const status of [404, 410]) {
+      const transport = makeHubEnrollmentHttpTransport(async () =>
+        Response.json({ error: "generic_not_found" }, { status }),
+      );
+      await expect(
+        transport.poll({
+          hubOrigin: "https://hub.example.com",
+          pollingSecret: new Uint8Array(32),
+        }),
+      ).rejects.toMatchObject({ code: "enrollment_transport_failed" });
+    }
+  });
+
+  it("aborts a stalled request at the configured deadline", async () => {
+    const transport = makeHubEnrollmentHttpTransport(
+      async (_input, init) =>
+        await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+            once: true,
+          });
+        }),
+      { timeoutMs: 5 },
+    );
+    await expect(
+      transport.poll({
+        hubOrigin: "https://hub.example.com",
+        pollingSecret: new Uint8Array(32),
+      }),
+    ).rejects.toMatchObject({ code: "enrollment_transport_failed" });
+  });
+
   it("rejects oversized, malformed, and noncanonical bearer responses", async () => {
     const oversized = makeHubEnrollmentHttpTransport(
       async () => new Response("x", { headers: { "content-length": String(16 * 1024 + 1) } }),
@@ -83,6 +115,26 @@ describe("Hub enrollment HTTP transport", () => {
       malformed.poll({
         hubOrigin: "https://hub.example.com",
         pollingSecret: new Uint8Array(32),
+      }),
+    ).rejects.toMatchObject({ code: "enrollment_transport_failed" });
+
+    const noncanonicalBearer = makeHubEnrollmentHttpTransport(async () =>
+      Response.json({
+        deviceCode: "ABCD-EFGH",
+        pollingSecret: `${Buffer.from(new Uint8Array(32)).toString("base64url")}=`,
+        expiresAt: 1_784_160_600_000,
+        pollIntervalMs: 5_000,
+      }),
+    );
+    await expect(
+      noncanonicalBearer.start({
+        hubOrigin: "https://hub.example.com",
+        environmentId: "env_AAAAAAAAAAAAAAAAAAAAAA",
+        label: "Build node",
+        platformOs: "linux",
+        platformArch: "x64",
+        clientVersion: "0.1.8",
+        publicKey,
       }),
     ).rejects.toMatchObject({ code: "enrollment_transport_failed" });
   });

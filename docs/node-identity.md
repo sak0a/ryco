@@ -69,9 +69,15 @@ The protected-store adapters use:
 
 The file fallback is never automatic. Its directory is owned by the effective user with mode
 `0700`; each regular, non-symlinked, single-link key file is mode `0600`. Creation is exclusive,
-fsynced, and installed without replacing an existing key. Every read revalidates type, ownership,
-link count, mode, and size. Windows fails closed when its OS credential store is unavailable rather
-than offering a file fallback without a verified restrictive DACL.
+fsynced, and installed without replacing an existing key. An interrupted install's matching
+temporary hard link is removed on the next access before the link count is enforced. Every read
+revalidates type, ownership, link count, mode, and size. Windows fails closed when its OS credential
+store is unavailable rather than offering a file fallback without a verified restrictive DACL.
+
+OS credential APIs do not expose a portable atomic create-if-absent primitive. The adapters
+serialize same-process creates, and identity generation is additionally serialized by the local
+identity writer lock. Deployments must run only one Ryco process against a local identity state;
+competing processes are rejected by that lock rather than racing key creation.
 
 A missing, locked, unavailable, or corrupt protected store fails closed. An enrolled node never
 silently generates a replacement key. Protected-store material is machine/user scoped and is not a
@@ -93,7 +99,8 @@ The local identity state contains only:
 Polling secrets remain in the protected store, and challenges and signatures are never persisted.
 The JSON state file is bounded, validated on every read, written through a fsynced atomic rename,
 and guarded by an exclusive local writer lock. A corrupt, symlinked, hard-linked, oversized, or
-insecurely permissioned state file fails closed.
+insecurely permissioned state file fails closed. A lock owned by a live process is never reclaimed;
+a well-formed lock whose recorded PID no longer exists is reclaimed after its inode is rechecked.
 
 ## Enrollment client
 
@@ -104,7 +111,8 @@ The enrollment client:
 3. Receives a short human device code and an independent 32-byte polling secret.
 4. Stores only a protected-store reference in local JSON.
 5. Polls no faster than the server-provided bounded interval, for at most 120 attempts.
-6. Persists the approved NodeId and active key ID before deleting the polling secret.
+6. Persists the approved NodeId, active key ID, and retryable cleanup reference before deleting the
+   polling secret.
 
 Raw enrollment values are returned only from the start call. Local `cancel()` deletes pending key
 and polling custody; it deliberately does not create an unauthenticated server-side cancellation
@@ -115,8 +123,9 @@ allow the same ceremony to resume. If local approval processing commits but the 
 result, subsequent polling returns the persisted active identity without another network request.
 
 Native HTTPS transports omit ambient credentials, disable caching and redirects, send bounded JSON,
-and reject oversized or malformed responses. They do not create or operate a browser registration
-flow.
+enforce a 15-second request/read deadline, and reject oversized or malformed responses. A 404/410
+poll response is terminal only when it contains the enrollment protocol's bounded unavailable
+marker. They do not create or operate a browser registration flow.
 
 ## Rotation client
 

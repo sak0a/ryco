@@ -55,6 +55,7 @@ describe("Hub node proof client", () => {
         nodeId,
         activeKeyId: keyId,
         activeKeySecretName: "node-key.active",
+        cleanupPollingSecretName: null,
         enrolledAt: now - 10_000,
       },
     }));
@@ -113,7 +114,15 @@ describe("Hub node proof client", () => {
     const root = await mkdtemp(join(tmpdir(), "ryco-node-proof-version-"));
     const stateStore = await makeLocalHubIdentityStateStore(join(root, "identity.json"));
     const secretStore = memoryStore();
-    const signingIdentity = makeNodeSigningIdentity(secretStore);
+    const realSigningIdentity = makeNodeSigningIdentity(secretStore);
+    let signCalls = 0;
+    const signingIdentity = {
+      ...realSigningIdentity,
+      sign: async (...input: Parameters<typeof realSigningIdentity.sign>) => {
+        signCalls += 1;
+        return realSigningIdentity.sign(...input);
+      },
+    };
     await signingIdentity.generate("node-key.active");
     await stateStore.readOrCreate();
     await stateStore.update((state) => ({
@@ -124,6 +133,7 @@ describe("Hub node proof client", () => {
         nodeId,
         activeKeyId: keyId,
         activeKeySecretName: "node-key.active",
+        cleanupPollingSecretName: null,
         enrolledAt: now,
       },
     }));
@@ -144,6 +154,7 @@ describe("Hub node proof client", () => {
     await expect(
       client.createRelayAuthenticationFrame(hubOrigin, { protocolMajor: 1, protocolMinor: 1 }),
     ).rejects.toMatchObject({ code: "node_proof_failed" });
+    expect(signCalls).toBe(0);
   });
 
   it("uses a credential-free HTTP preflight", async () => {

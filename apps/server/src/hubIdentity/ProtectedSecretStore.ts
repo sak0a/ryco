@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, link, lstat, mkdir, open, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { chmod, link, lstat, mkdir, open, readdir, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 
 export type ProtectedSecretStoreBackend = "bun-secrets" | "keytar" | "permissioned-file";
 
@@ -54,6 +54,7 @@ interface KeytarApi {
 
 const SECRET_NAME = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const SERVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const osCreateLocks = new Map<string, Promise<void>>();
 
 function fail(code: ProtectedSecretStoreErrorCode): never {
   throw new ProtectedSecretStoreError(code);
@@ -90,6 +91,22 @@ function safeOperation<T>(operation: () => Promise<T>): Promise<T> {
   });
 }
 
+async function serializeOsCreate<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  const previous = osCreateLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  osCreateLocks.set(key, current);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (osCreateLocks.get(key) === current) osCreateLocks.delete(key);
+  }
+}
+
 export function makeBunProtectedSecretStore(
   service: string,
   secrets: BunSecretsApi,
@@ -106,10 +123,12 @@ export function makeBunProtectedSecretStore(
     create: (rawName, value) =>
       safeOperation(async () => {
         const name = validateSecretName(rawName);
-        if ((await secrets.get({ service: serviceName, name })) !== null) {
-          fail("protected_store_conflict");
-        }
-        await secrets.set({ service: serviceName, name, value: encodeSecret(value) });
+        await serializeOsCreate(`bun:${serviceName}:${name}`, async () => {
+          if ((await secrets.get({ service: serviceName, name })) !== null) {
+            fail("protected_store_conflict");
+          }
+          await secrets.set({ service: serviceName, name, value: encodeSecret(value) });
+        });
       }),
     remove: (rawName) =>
       safeOperation(async () => {
@@ -135,10 +154,12 @@ export function makeKeytarProtectedSecretStore(
     create: (rawName, value) =>
       safeOperation(async () => {
         const name = validateSecretName(rawName);
-        if ((await keytar.getPassword(serviceName, name)) !== null) {
-          fail("protected_store_conflict");
-        }
-        await keytar.setPassword(serviceName, name, encodeSecret(value));
+        await serializeOsCreate(`keytar:${serviceName}:${name}`, async () => {
+          if ((await keytar.getPassword(serviceName, name)) !== null) {
+            fail("protected_store_conflict");
+          }
+          await keytar.setPassword(serviceName, name, encodeSecret(value));
+        });
       }),
     remove: (rawName) =>
       safeOperation(async () => {
@@ -175,6 +196,30 @@ async function assertSecureFile(path: string): Promise<void> {
   }
 }
 
+async function recoverInstalledSecret(path: string): Promise<void> {
+  const target = await lstat(path);
+  if (target.nlink !== 2 || !target.isFile() || target.isSymbolicLink()) return;
+  const prefix = `${basename(path)}.`;
+  for (const entry of await readdir(dirname(path))) {
+    if (!entry.startsWith(prefix) || !entry.endsWith(".tmp")) continue;
+    const siblingPath = join(dirname(path), entry);
+    const sibling = await lstat(siblingPath);
+    if (
+      sibling.dev === target.dev &&
+      sibling.ino === target.ino &&
+      sibling.isFile() &&
+      !sibling.isSymbolicLink() &&
+      sibling.nlink === 2 &&
+      (sibling.mode & 0o777) === 0o600 &&
+      sibling.uid === target.uid
+    ) {
+      await rm(siblingPath);
+      await syncDirectory(dirname(path));
+      return;
+    }
+  }
+}
+
 async function syncDirectory(path: string): Promise<void> {
   const directory = await open(path, constants.O_RDONLY);
   try {
@@ -206,6 +251,7 @@ export async function makePermissionedFileSecretStore(
         const path = secretPath(rawName);
         let file;
         try {
+          await recoverInstalledSecret(path);
           await assertSecureFile(path);
           file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
         } catch (error: unknown) {
@@ -258,6 +304,7 @@ export async function makePermissionedFileSecretStore(
       safeOperation(async () => {
         const path = secretPath(rawName);
         try {
+          await recoverInstalledSecret(path);
           await assertSecureFile(path);
           await rm(path);
           await syncDirectory(dirname(path));

@@ -44,6 +44,7 @@ describe("local Hub identity state", () => {
         createdAt: 1_784_160_000_000,
         expiresAt: 1_784_160_600_000,
         pollIntervalMs: 5_000,
+        cleanupRequested: false,
       },
     }));
     expect(updated.environmentId).toBe(initial.environmentId);
@@ -82,6 +83,28 @@ describe("local Hub identity state", () => {
       status: "rejected",
       reason: { code: "identity_state_locked" },
     });
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "reclaims a well-formed lock left by a terminated process",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-stale-lock-"));
+      const path = join(root, "identity.json");
+      const store = await makeLocalHubIdentityStateStore(path);
+      await writeFile(`${path}.lock`, "2147483647\n", { mode: 0o600 });
+      expect((await store.readOrCreate()).environmentId).toMatch(/^env_/);
+    },
+  );
+
+  it("fails closed when state disappears before an update", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-missing-update-"));
+    const path = join(root, "identity.json");
+    const store = await makeLocalHubIdentityStateStore(path);
+    await store.readOrCreate();
+    await rm(path);
+    await expect(
+      store.update((current) => ({ ...current, revision: current.revision + 1 })),
+    ).rejects.toMatchObject({ code: "identity_state_operation_failed" });
   });
 
   it.runIf(process.platform !== "win32")(

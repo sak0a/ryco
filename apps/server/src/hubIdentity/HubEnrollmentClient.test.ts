@@ -13,11 +13,16 @@ import { makeLocalHubIdentityStateStore } from "./LocalHubIdentityState.ts";
 import { makeNodeSigningIdentity } from "./NodeSigningIdentity.ts";
 import type { ProtectedSecretStore } from "./ProtectedSecretStore.ts";
 
-function memorySecretStore(): ProtectedSecretStore & { readonly values: Map<string, Uint8Array> } {
+function memorySecretStore(): ProtectedSecretStore & {
+  readonly values: Map<string, Uint8Array>;
+  readonly removeFailures: Set<string>;
+} {
   const values = new Map<string, Uint8Array>();
+  const removeFailures = new Set<string>();
   return {
     backend: "permissioned-file",
     values,
+    removeFailures,
     get: async (name) => {
       const value = values.get(name);
       return value === undefined ? null : Uint8Array.from(value);
@@ -27,6 +32,7 @@ function memorySecretStore(): ProtectedSecretStore & { readonly values: Map<stri
       values.set(name, Uint8Array.from(value));
     },
     remove: async (name) => {
+      if (removeFailures.has(name)) throw new Error("injected removal failure");
       values.delete(name);
     },
   };
@@ -164,6 +170,29 @@ describe("Hub enrollment client", () => {
     });
   });
 
+  it("accepts the full canonical relay NodeId length range", async () => {
+    let environmentId = "";
+    const longNodeId = `node_${"A".repeat(43)}`;
+    const transport: HubEnrollmentTransport = {
+      start: async (request) => {
+        environmentId = request.environmentId;
+        return {
+          deviceCode: "ABCD-EFGH",
+          pollingSecret,
+          expiresAt: now + 600_000,
+          pollIntervalMs: 5_000,
+        };
+      },
+      poll: async () => ({ ...approved, nodeId: longNodeId, environmentId }),
+    };
+    const test = await harness(transport, { now: () => now });
+    await test.makeClient().start("https://hub.example.com", metadata);
+    expect(await test.makeClient().poll("https://hub.example.com")).toMatchObject({
+      status: "approved",
+      nodeId: longNodeId,
+    });
+  });
+
   it("cancels locally without creating a server cancellation path", async () => {
     const transport: HubEnrollmentTransport = {
       start: async () => ({
@@ -180,6 +209,62 @@ describe("Hub enrollment client", () => {
     expect(test.secretStore.values.size).toBe(2);
     await client.cancel("https://hub.example.com");
     expect(test.secretStore.values.size).toBe(0);
+    expect((await test.stateStore.readOrCreate()).pendingEnrollment).toBeNull();
+  });
+
+  it("retains retryable cleanup references across removal failure and restart", async () => {
+    let environmentId = "";
+    const transport: HubEnrollmentTransport = {
+      start: async (request) => {
+        environmentId = request.environmentId;
+        return {
+          deviceCode: "ABCD-EFGH",
+          pollingSecret,
+          expiresAt: now + 600_000,
+          pollIntervalMs: 5_000,
+        };
+      },
+      poll: async () => ({ ...approved, environmentId }),
+    };
+    const test = await harness(transport, { now: () => now });
+    const client = test.makeClient();
+    await client.start("https://hub.example.com", metadata);
+    const pending = (await test.stateStore.readOrCreate()).pendingEnrollment;
+    expect(pending).not.toBeNull();
+    test.secretStore.removeFailures.add(pending!.pollingSecretName);
+    expect(await client.poll("https://hub.example.com")).toMatchObject({ status: "approved" });
+    expect((await test.stateStore.readOrCreate()).activeNode?.cleanupPollingSecretName).toBe(
+      pending!.pollingSecretName,
+    );
+
+    test.secretStore.removeFailures.clear();
+    const resumed = test.makeClient();
+    expect(await resumed.poll("https://hub.example.com")).toMatchObject({ status: "approved" });
+    expect((await test.stateStore.readOrCreate()).activeNode?.cleanupPollingSecretName).toBeNull();
+    expect(test.secretStore.values.has(pending!.pollingSecretName)).toBe(false);
+  });
+
+  it("does not clear pending state until cancellation credentials are deleted", async () => {
+    const transport: HubEnrollmentTransport = {
+      start: async () => ({
+        deviceCode: "ABCD-EFGH",
+        pollingSecret,
+        expiresAt: now + 600_000,
+        pollIntervalMs: 5_000,
+      }),
+      poll: async () => ({ status: "pending", retryAfterMs: 5_000 }),
+    };
+    const test = await harness(transport, { now: () => now });
+    const client = test.makeClient();
+    await client.start("https://hub.example.com", metadata);
+    const pending = (await test.stateStore.readOrCreate()).pendingEnrollment!;
+    test.secretStore.removeFailures.add(pending.pollingSecretName);
+    await expect(client.cancel("https://hub.example.com")).rejects.toMatchObject({
+      code: "enrollment_local_state_failed",
+    });
+    expect((await test.stateStore.readOrCreate()).pendingEnrollment).not.toBeNull();
+    test.secretStore.removeFailures.clear();
+    await test.makeClient().cancel("https://hub.example.com");
     expect((await test.stateStore.readOrCreate()).pendingEnrollment).toBeNull();
   });
 

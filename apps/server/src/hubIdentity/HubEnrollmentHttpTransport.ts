@@ -6,6 +6,7 @@ import type {
   HubEnrollmentStartResponse,
   HubEnrollmentTransport,
 } from "./HubEnrollmentClient.ts";
+import { fetchBoundedJson } from "./BoundedHttp.ts";
 
 export class HubEnrollmentHttpTransportError extends Error {
   readonly code = "enrollment_transport_failed" as const;
@@ -16,7 +17,6 @@ export class HubEnrollmentHttpTransportError extends Error {
   }
 }
 
-const MAX_RESPONSE_BYTES = 16 * 1024;
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 function transportError(): never {
@@ -30,41 +30,7 @@ function decodeBase64Url32(value: unknown): Uint8Array {
   return Uint8Array.from(decoded);
 }
 
-async function readBoundedJson(response: Response): Promise<unknown> {
-  const declared = response.headers.get("content-length");
-  if (declared !== null) {
-    const length = Number(declared);
-    if (!Number.isSafeInteger(length) || length < 0 || length > MAX_RESPONSE_BYTES) {
-      return transportError();
-    }
-  }
-  if (response.body === null) return transportError();
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const result = await reader.read();
-      if (result.done) break;
-      total += result.value.byteLength;
-      if (total > MAX_RESPONSE_BYTES) return transportError();
-      chunks.push(result.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const body = Buffer.concat(
-    chunks.map((chunk) => Buffer.from(chunk)),
-    total,
-  ).toString("utf8");
-  try {
-    return JSON.parse(body) as unknown;
-  } catch {
-    return transportError();
-  }
-}
-
-function jsonRequest(body: unknown): Omit<RequestInit, "signal"> {
+function jsonRequest(body: unknown): RequestInit {
   return {
     method: "POST",
     headers: {
@@ -124,14 +90,10 @@ function parsePollResponse(value: unknown): HubEnrollmentPollResponse {
 
 export function makeHubEnrollmentHttpTransport(
   fetchImplementation: FetchLike = fetch,
+  options: { readonly timeoutMs?: number } = {},
 ): HubEnrollmentTransport {
-  const request = async (url: string, body: unknown): Promise<Response> => {
-    try {
-      return await fetchImplementation(url, jsonRequest(body));
-    } catch {
-      return transportError();
-    }
-  };
+  const request = (url: string, body: unknown) =>
+    fetchBoundedJson(fetchImplementation, url, jsonRequest(body), transportError, options);
 
   return {
     start: async (input: HubEnrollmentStartRequest) => {
@@ -146,16 +108,20 @@ export function makeHubEnrollmentHttpTransport(
         publicKey: Buffer.from(input.publicKey.publicKey).toString("base64url"),
       });
       if (!response.ok) return transportError();
-      return parseStartResponse(await readBoundedJson(response));
+      return parseStartResponse(response.value);
     },
     poll: async ({ hubOrigin: rawHubOrigin, pollingSecret }) => {
       const hubOrigin = canonicalizeHubOrigin(rawHubOrigin);
       const response = await request(`${hubOrigin}/api/node/enrollments/poll`, {
         pollingSecret: Buffer.from(pollingSecret).toString("base64url"),
       });
-      if (response.status === 404 || response.status === 410) return { status: "unavailable" };
+      if (response.status === 404 || response.status === 410) {
+        const candidate = response.value as { readonly error?: unknown };
+        if (candidate?.error === "enrollment_unavailable") return { status: "unavailable" };
+        return transportError();
+      }
       if (!response.ok) return transportError();
-      return parsePollResponse(await readBoundedJson(response));
+      return parsePollResponse(response.value);
     },
   };
 }
