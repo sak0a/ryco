@@ -1,9 +1,0 @@
-- generic [ref=e4]:
-    - paragraph [ref=e5]: Ryco (Dev)
-    - heading "Something went wrong." [level=1] [ref=e6]
-    - paragraph [ref=e7]: Unexpected token '<', "<!doctype "... is not valid JSON
-    - generic [ref=e8]:
-        - button "Try again" [ref=e9] [cursor=pointer]
-        - button "Reload app" [ref=e10] [cursor=pointer]
-    - group [ref=e11]:
-        - generic "Show error details" [ref=e12] [cursor=pointer]
