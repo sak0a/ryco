@@ -30,10 +30,14 @@ describe("Hub key rotation HTTP transport", () => {
       await transport.prove({
         hubOrigin: "https://hub.example.com",
         rotationRequestId: started.rotationRequestId,
+        challenge: started.challenge,
         signature: new Uint8Array(64).fill(0x22),
       }),
     ).toEqual({ status: "awaiting_owner" });
     expect(requests).toHaveLength(2);
+    expect(JSON.parse(String(requests[1]?.init?.body))).toMatchObject({
+      challenge: Buffer.from(started.challenge).toString("base64url"),
+    });
     for (const request of requests) {
       expect(request.init?.credentials).toBe("omit");
       expect(request.init?.cache).toBe("no-store");

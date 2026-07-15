@@ -85,6 +85,7 @@ async function harness(transport: HubKeyRotationTransport) {
 describe("Hub key rotation client", () => {
   it("proves with the old key, selects the activated new key, and deletes old custody after proof", async () => {
     let newPublicKey: Uint8Array | undefined;
+    let proofChallenge: Uint8Array | undefined;
     let proofSignature: Uint8Array | undefined;
     let status: HubKeyRotationStatus = { status: "awaiting_owner" };
     const transport: HubKeyRotationTransport = {
@@ -93,6 +94,7 @@ describe("Hub key rotation client", () => {
         return challenge();
       },
       prove: async (request) => {
+        proofChallenge = Uint8Array.from(request.challenge);
         proofSignature = Uint8Array.from(request.signature);
         return { status: "awaiting_owner" };
       },
@@ -125,6 +127,7 @@ describe("Hub key rotation client", () => {
         proofSignature ?? new Uint8Array(),
       ),
     ).toBe(true);
+    expect(proofChallenge).toEqual(challengeBytes);
     expect(await client.authenticationKey(hubOrigin)).toEqual({
       keyId: oldKeyId,
       secretName: "node-key.active",

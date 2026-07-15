@@ -138,6 +138,7 @@ export function makeHubKeyRotationHttpTransport(
         await boundedJson(
           await post(request.hubOrigin, "/api/node/key-rotations/prove", {
             rotationRequestId: request.rotationRequestId,
+            challenge: Buffer.from(request.challenge).toString("base64url"),
             signature: Buffer.from(request.signature).toString("base64url"),
           }),
         ),

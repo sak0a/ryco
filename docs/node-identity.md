@@ -146,6 +146,8 @@ activation the authentication selector tries the new key. The old key is deleted
 successful authentication with the new key. Rejected rotation deletes the staged key and retains
 the old key. A lost proof response is resumed through the persisted non-bearer rotation request ID;
 if proof was not committed, the client obtains a fresh challenge rather than persisting the old one.
+The proof request returns the in-memory challenge alongside the signature so the service can match
+only a stored digest and reconstruct the transcript without persisting raw challenge material.
 
 ## Canonical fixtures
 

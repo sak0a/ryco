@@ -35,6 +35,7 @@ export interface HubKeyRotationTransport {
   readonly prove: (request: {
     readonly hubOrigin: string;
     readonly rotationRequestId: string;
+    readonly challenge: Uint8Array;
     readonly signature: Uint8Array;
   }) => Promise<HubKeyRotationStatus>;
   readonly status: (request: {
@@ -211,6 +212,7 @@ export function makeHubKeyRotationClient(
         await dependencies.transport.prove({
           hubOrigin,
           rotationRequestId: challenge.rotationRequestId,
+          challenge: challenge.challenge,
           signature,
         }),
       );
