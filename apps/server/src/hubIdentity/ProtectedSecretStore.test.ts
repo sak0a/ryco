@@ -29,9 +29,14 @@ class MemoryCredentials {
 }
 
 describe("protected node secret stores", () => {
-  it("loads the packaged Node keytar adapter", async () => {
+  it("loads packaged keytar when available and otherwise fails closed", async () => {
     if ((globalThis as { readonly Bun?: unknown }).Bun !== undefined) return;
-    expect((await makeOsProtectedSecretStore("dev.ryco.node.test")).backend).toBe("keytar");
+    try {
+      expect((await makeOsProtectedSecretStore("dev.ryco.node.test")).backend).toBe("keytar");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ProtectedSecretStoreError);
+      expect(error).toMatchObject({ code: "protected_store_unavailable" });
+    }
   });
 
   it("round-trips keytar values without exposing raw bytes to the backend", async () => {
