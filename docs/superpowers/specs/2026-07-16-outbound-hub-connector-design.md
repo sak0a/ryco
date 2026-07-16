@@ -245,7 +245,7 @@ Operator action is required for:
 - wrong key, copied node ID, or proof replay rejection;
 - invalid or irrecoverable rotation state;
 - `connection_replaced`;
-- repeated deterministic canonical-frame violations;
+- a second deterministic canonical-frame violation before a stable connection interval;
 - terminal enrollment unavailability;
 - explicit revocation;
 - protocol incompatibility.
@@ -280,6 +280,11 @@ protocol maximum of 300 seconds. It never causes more than one timer.
 The attempt counter resets only after the connection remains continuously online for
 `stableConnectionMs`. A socket that reaches `ready` and immediately fails therefore retains its
 backoff history. Draining and replacement also do not reset history.
+
+The first deterministic canonical-frame violation tears down the connection and uses normal
+backoff. A second violation before a stable connection interval enters operator-required
+`degraded` instead of retrying. The stable interval resets this protocol-violation count with the
+ordinary attempt counter.
 
 Clock, timeout scheduling, cancellation, and randomness are injected. Tests can assert exact
 boundaries without sleeping or depending on real entropy.
