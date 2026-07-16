@@ -3,6 +3,8 @@ import { parsePersistedServerObservabilitySettings } from "@ryco/shared/serverSe
 import {
   AuthSessionId,
   CommandId,
+  HubConnectorStatus,
+  HubEnrollmentStartResult,
   OrchestrationReadModel,
   ProjectId,
   type ClientOrchestrationCommand,
@@ -612,7 +614,7 @@ const OrchestrationHttpErrorResponse = Schema.Struct({
   error: Schema.String,
 });
 
-const withProjectCliSessionToken = <A, E, R>(
+const withCliSessionToken = <A, E, R>(
   authControlPlane: AuthControlPlaneShape,
   run: (token: string) => Effect.Effect<A, E, R>,
 ) =>
@@ -770,7 +772,7 @@ const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecu
       return Option.none<{ readonly origin: string }>();
     }
 
-    const attempt = withProjectCliSessionToken(authControlPlane, (token) =>
+    const attempt = withCliSessionToken(authControlPlane, (token) =>
       fetchLiveOrchestrationSnapshot(runtimeState.value.origin, token).pipe(
         Effect.as({
           origin: runtimeState.value.origin,
@@ -811,7 +813,7 @@ const runProjectMutation = Effect.fn("runProjectMutation")(function* (
     const liveMode = yield* tryResolveLiveProjectExecutionMode(authControlPlane, config);
 
     if (Option.isSome(liveMode)) {
-      return yield* withProjectCliSessionToken(authControlPlane, (token) =>
+      return yield* withCliSessionToken(authControlPlane, (token) =>
         Effect.gen(function* () {
           const snapshot = yield* fetchLiveOrchestrationSnapshot(liveMode.value.origin, token);
           const output = yield* run({
@@ -850,6 +852,88 @@ const runProjectMutation = Effect.fn("runProjectMutation")(function* (
     ),
   );
 });
+
+const runHubCommand = Effect.fn("runHubCommand")(function* <A>(
+  flags: CliAuthLocationFlags,
+  run: (origin: string, bearerToken: string) => Effect.Effect<A, Error, HttpClient.HttpClient>,
+) {
+  const logLevel = yield* GlobalFlag.LogLevel;
+  const config = yield* resolveCliAuthConfig(flags, logLevel);
+  return yield* Effect.gen(function* () {
+    const runtimeState = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
+    if (Option.isNone(runtimeState)) {
+      return yield* Effect.fail(new Error("The Ryco server is not running."));
+    }
+    const authControlPlane = yield* AuthControlPlane;
+    return yield* withCliSessionToken(authControlPlane, (token) =>
+      run(runtimeState.value.origin, token),
+    );
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(AuthControlPlaneRuntimeLive, FetchHttpClient.layer).pipe(
+        Layer.provide(Layer.succeed(ServerConfig, config)),
+        Layer.provide(Layer.succeed(References.MinimumLogLevel, config.logLevel)),
+      ),
+    ),
+  );
+});
+
+const requestHubStatus = (origin: string, bearerToken: string) =>
+  runLiveServerRequest(
+    HttpClientRequest.get(`${origin}/api/hub/status`).pipe(
+      HttpClientRequest.acceptJson,
+      HttpClientRequest.bearerToken(bearerToken),
+    ),
+    HttpClientResponse.matchStatus({
+      "2xx": (response) => HttpClientResponse.schemaBodyJson(HubConnectorStatus)(response),
+      orElse: (response) =>
+        readErrorMessageFromResponse(response).pipe(
+          Effect.flatMap((message) => Effect.fail(new Error(message))),
+        ),
+    }),
+  );
+
+const requestHubEnrollment = (origin: string, bearerToken: string) =>
+  runLiveServerRequest(
+    HttpClientRequest.post(`${origin}/api/hub/enrollment`).pipe(
+      HttpClientRequest.acceptJson,
+      HttpClientRequest.bearerToken(bearerToken),
+    ),
+    HttpClientResponse.matchStatus({
+      "2xx": (response) => HttpClientResponse.schemaBodyJson(HubEnrollmentStartResult)(response),
+      orElse: (response) =>
+        readErrorMessageFromResponse(response).pipe(
+          Effect.flatMap((message) => Effect.fail(new Error(message))),
+        ),
+    }),
+  );
+
+const requestHubEnrollmentCancellation = (origin: string, bearerToken: string) =>
+  runLiveServerRequest(
+    HttpClientRequest.post(`${origin}/api/hub/enrollment/cancel`).pipe(
+      HttpClientRequest.acceptJson,
+      HttpClientRequest.bearerToken(bearerToken),
+    ),
+    HttpClientResponse.matchStatus({
+      "2xx": (response) => HttpClientResponse.schemaBodyJson(HubConnectorStatus)(response),
+      orElse: (response) =>
+        readErrorMessageFromResponse(response).pipe(
+          Effect.flatMap((message) => Effect.fail(new Error(message))),
+        ),
+    }),
+  );
+
+const formatHubStatus = (status: typeof HubConnectorStatus.Type, json: boolean): string => {
+  if (json) return JSON.stringify(status);
+  const details = [
+    `Hub connector: ${status.state}`,
+    status.failure === undefined ? undefined : `Failure: ${status.failure}`,
+    status.nextRetryAt === undefined ? undefined : `Next retry: ${status.nextRetryAt}`,
+    status.state === "online" ? `Active channels: ${status.activeChannels}` : undefined,
+    status.state === "online" ? `Queued bytes: ${status.queuedBytes}` : undefined,
+  ].filter((line): line is string => line !== undefined);
+  return details.join("\n");
+};
 
 const sharedServerLocationFlags = {
   baseDir: baseDirFlag,
@@ -1081,6 +1165,57 @@ const authCommand = Command.make("auth").pipe(
   Command.withSubcommands([pairingCommand, sessionCommand]),
 );
 
+const hubStatusCommand = Command.make("status", {
+  ...authLocationFlags,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription("Show bounded local Hub connector status."),
+  Command.withHandler((flags) =>
+    runHubCommand(flags, (origin, token) => requestHubStatus(origin, token)).pipe(
+      Effect.flatMap((status) => Console.log(formatHubStatus(status, flags.json))),
+    ),
+  ),
+);
+
+const hubEnrollCommand = Command.make("enroll", {
+  ...authLocationFlags,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription("Start device-code enrollment with the configured Hub."),
+  Command.withHandler((flags) =>
+    runHubCommand(flags, (origin, token) => requestHubEnrollment(origin, token)).pipe(
+      Effect.flatMap((result) =>
+        Console.log(
+          flags.json
+            ? JSON.stringify(result)
+            : [
+                `Device code: ${result.deviceCode}`,
+                `Expires: ${result.expiresAt}`,
+                "Approve this code in Hub. Ryco will continue polling in the background.",
+              ].join("\n"),
+        ),
+      ),
+    ),
+  ),
+);
+
+const hubCancelCommand = Command.make("cancel", {
+  ...authLocationFlags,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription("Cancel pending Hub enrollment and erase its local polling material."),
+  Command.withHandler((flags) =>
+    runHubCommand(flags, (origin, token) => requestHubEnrollmentCancellation(origin, token)).pipe(
+      Effect.flatMap((status) => Console.log(formatHubStatus(status, flags.json))),
+    ),
+  ),
+);
+
+const hubCommand = Command.make("hub").pipe(
+  Command.withDescription("Manage the outbound Hub connector through the local Ryco server."),
+  Command.withSubcommands([hubStatusCommand, hubEnrollCommand, hubCancelCommand]),
+);
+
 const projectAddCommand = Command.make("add", {
   ...projectLocationFlags,
   workspaceRoot: Argument.string("path").pipe(
@@ -1241,5 +1376,5 @@ const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe
 export const cli = Command.make("ryco", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the Ryco server."),
   Command.withHandler((flags) => runServerCommand(flags)),
-  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand]),
+  Command.withSubcommands([startCommand, serveCommand, authCommand, hubCommand, projectCommand]),
 );

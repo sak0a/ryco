@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   RELAY_INITIAL_LIMITS,
+  type RelayErrorFrame,
   type RelayFrame,
   type RelayNodeAuthHandshake,
 } from "@ryco/contracts/relay";
@@ -10,6 +11,7 @@ import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
 import type { HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
 import type { HubRelaySocket, HubRelaySocketEventMap } from "./HubRelayTransport.ts";
 import {
+  relayErrorKind,
   RelayConnectionError,
   RelayConnectionSession,
   type RelaySessionScheduler,
@@ -90,6 +92,21 @@ function identity(): HubIdentityRuntimeShape {
 }
 
 describe("RelayConnectionSession", () => {
+  it("maps canonical replacement, draining, revocation, and version errors", () => {
+    const frame = (code: RelayErrorFrame["code"]): RelayErrorFrame =>
+      ({
+        type: "error",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        code,
+        fatal: true,
+      }) as RelayErrorFrame;
+    expect(relayErrorKind(frame("connection_replaced"))).toBe("connection_replaced");
+    expect(relayErrorKind(frame("server_draining"))).toBe("server_draining");
+    expect(relayErrorKind(frame("node_revoked"))).toBe("revoked");
+    expect(relayErrorKind(frame("protocol_unsupported"))).toBe("version_incompatible");
+  });
+
   it("sends canonical auth first, accepts exact ready, and routes later binary frames", async () => {
     const socket = new FakeSocket();
     const routed: RelayFrame[] = [];
@@ -191,5 +208,69 @@ describe("RelayConnectionSession", () => {
     }
     expect(error).toMatchObject({ kind: "rate_limited", retryAfterMs: 30_000 });
     expect(String(error)).toBe("RelayConnectionError: Hub relay connection failed.");
+  });
+
+  it("does not open a socket when shutdown wins the proof-preflight race", async () => {
+    let releaseProof: ((frame: RelayNodeAuthHandshake) => void) | undefined;
+    const proof = new Promise<RelayNodeAuthHandshake>((resolve) => {
+      releaseProof = resolve;
+    });
+    const frame = {
+      type: "auth",
+      peer: "node",
+      protocolMajor: 1,
+      protocolMinor: 2,
+      nodeId: `node_${"A".repeat(22)}`,
+      nonce: new Uint8Array(32).fill(7),
+      signature: new Uint8Array(64).fill(8),
+    } as RelayNodeAuthHandshake;
+    let opens = 0;
+    const session = new RelayConnectionSession({
+      identity: { ...identity(), createRelayAuthenticationFrame: async () => proof },
+      transport: {
+        open: () => {
+          opens += 1;
+          return new FakeSocket();
+        },
+      },
+      hubOrigin: "https://relay.example",
+      onFrame: () => undefined,
+      onTerminal: () => undefined,
+    });
+    const authenticating = session.authenticate();
+    session.close();
+    releaseProof?.(frame);
+    await expect(authenticating).rejects.toMatchObject({ kind: "network" });
+    expect(opens).toBe(0);
+    expect(frame.nonce.every((byte) => byte === 0)).toBe(true);
+    expect(frame.signature.every((byte) => byte === 0)).toBe(true);
+  });
+
+  it("bounds proof failures without reflecting sensitive causes", async () => {
+    const canary = "PRIVATE-KEY-SIGNATURE-PAYLOAD-CANARY";
+    const session = new RelayConnectionSession({
+      identity: {
+        ...identity(),
+        createRelayAuthenticationFrame: async () => {
+          throw new Error(canary);
+        },
+      },
+      transport: {
+        open: () => {
+          throw new Error("socket must not open");
+        },
+      },
+      hubOrigin: "https://relay.example",
+      onFrame: () => undefined,
+      onTerminal: () => undefined,
+    });
+    let error: unknown;
+    try {
+      await session.authenticate();
+    } catch (cause) {
+      error = cause;
+    }
+    expect(String(error)).toBe("RelayConnectionError: Hub relay connection failed.");
+    expect(JSON.stringify(error)).not.toContain(canary);
   });
 });

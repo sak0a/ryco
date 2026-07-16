@@ -137,6 +137,11 @@ export class RelayConnectionSession {
     } catch {
       throw new RelayConnectionError("authentication_failed");
     }
+    if (this.#closed) {
+      auth.nonce.fill(0);
+      auth.signature.fill(0);
+      throw new RelayConnectionError("network");
+    }
     let authBytes: Uint8Array;
     try {
       authBytes = unwrapEncoded(auth);

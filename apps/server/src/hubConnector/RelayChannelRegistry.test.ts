@@ -9,7 +9,11 @@ import type {
 } from "@ryco/contracts/relay";
 import { decodeRelayFrame } from "@ryco/shared/relayCodec";
 
-import { RelayChannelRegistry, type RelayRpcChannelSession } from "./RelayChannelRegistry.ts";
+import {
+  RelayChannelProtocolError,
+  RelayChannelRegistry,
+  type RelayRpcChannelSession,
+} from "./RelayChannelRegistry.ts";
 import { RelaySendQueue } from "./RelaySendQueue.ts";
 
 const channelA = `ch_${"A".repeat(22)}` as RelayChannelId;
@@ -50,6 +54,7 @@ function harness() {
     bufferedAmount: 0,
     send: (bytes: Uint8Array) => sent.push(Uint8Array.from(bytes)),
   };
+  let fatalCalls = 0;
   const sendQueue = new RelaySendQueue(socket, limits);
   const received = new Map<string, Uint8Array[]>();
   const sessions = new Map<
@@ -84,8 +89,11 @@ function harness() {
         return session;
       },
     },
+    onFatal: () => {
+      fatalCalls += 1;
+    },
   });
-  return { registry, sendQueue, sent, received, sessions };
+  return { registry, sendQueue, sent, received, sessions, socket, fatalCalls: () => fatalCalls };
 }
 
 describe("RelayChannelRegistry", () => {
@@ -194,5 +202,85 @@ describe("RelayChannelRegistry", () => {
     expect(registry.size).toBe(0);
     expect([...sessions.values()].every((session) => session.closes === 1)).toBe(true);
     expect(sendQueue.queuedBytes).toBe(0);
+  });
+
+  it("reports inbound flow refresh demand until a drained channel resumes", async () => {
+    const { registry, sendQueue, sent, sessions } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+    sent.length = 0;
+    const session = sessions.get(channelA as string)!;
+    session.queued = 1_200;
+    await registry.handle({
+      type: "data",
+      ...version,
+      channelId: channelA,
+      sequence: 0 as never,
+      payload: Uint8Array.of(1),
+    });
+    expect(registry.needsFlowRefresh).toBe(true);
+    sendQueue.flush();
+    expect(decodeAll(sent).at(-1)?.type).toBe("flow.pause");
+
+    session.queued = 0;
+    await registry.refreshFlow();
+    expect(registry.needsFlowRefresh).toBe(false);
+    sendQueue.flush();
+    expect(decodeAll(sent).at(-1)?.type).toBe("flow.resume");
+  });
+
+  it("fails closed on unknown ownership and isolates negotiated or aggregate limit violations", async () => {
+    const { registry, sendQueue, sent, sessions } = harness();
+    await expect(
+      registry.handle({
+        type: "data",
+        ...version,
+        channelId: channelA,
+        sequence: 0 as never,
+        payload: Uint8Array.of(1),
+      }),
+    ).rejects.toBeInstanceOf(RelayChannelProtocolError);
+
+    await registry.handle(openFrame(channelA));
+    await registry.handle(openFrame(channelB));
+    sendQueue.flush();
+    sent.length = 0;
+    await registry.handle({
+      type: "data",
+      ...version,
+      channelId: channelA,
+      sequence: 0 as never,
+      payload: new Uint8Array(limits.maxDataChunkBytes + 1),
+    });
+    expect(registry.has(channelA)).toBe(false);
+    expect(registry.has(channelB)).toBe(true);
+
+    sessions.get(channelB as string)!.queued = limits.maxQueuedBytes - limits.maxControlFrameBytes;
+    await registry.handle({
+      type: "data",
+      ...version,
+      channelId: channelB,
+      sequence: 0 as never,
+      payload: Uint8Array.of(2),
+    });
+    expect(registry.has(channelB)).toBe(false);
+    sendQueue.flush();
+    expect(
+      decodeAll(sent).some(
+        (frame) => frame.type === "channel.close" && frame.reason === "transfer_limit",
+      ),
+    ).toBe(true);
+  });
+
+  it("closes a channel and signals fatal when outbound buffering cannot retain a close", async () => {
+    const { registry, sendQueue, sessions, socket, fatalCalls } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+    socket.bufferedAmount = limits.maxQueuedBytes;
+    expect(sessions.get(channelA as string)!.send(Uint8Array.of(9))).toBe(false);
+    for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+    expect(registry.has(channelA)).toBe(false);
+    expect(sessions.get(channelA as string)!.closes).toBe(1);
+    expect(fatalCalls()).toBe(1);
   });
 });

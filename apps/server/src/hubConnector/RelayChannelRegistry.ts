@@ -1,6 +1,8 @@
 import type {
   RelayChannelId,
   RelayChannelOpenFrame,
+  RelayCloseReason,
+  RelayControlFrame,
   RelayDataFrame,
   RelayEffectiveRole,
   RelayFrame,
@@ -36,10 +38,25 @@ interface ChannelEntry {
   closed: boolean;
 }
 
+export class RelayChannelProtocolError extends Error {
+  constructor() {
+    super("Relay channel protocol violation.");
+    this.name = "RelayChannelProtocolError";
+  }
+}
+
+export class RelayChannelQueueError extends Error {
+  constructor() {
+    super("Relay channel control queue is full.");
+    this.name = "RelayChannelQueueError";
+  }
+}
+
 export class RelayChannelRegistry {
   readonly #limits: RelayLimits;
   readonly #sendQueue: RelaySendQueue;
   readonly #factory: RelayChannelSessionFactory;
+  readonly #onFatal: () => void;
   readonly #channels = new Map<string, ChannelEntry>();
   readonly #preparing = new Set<string>();
   #stopping = false;
@@ -48,14 +65,23 @@ export class RelayChannelRegistry {
     readonly limits: RelayLimits;
     readonly sendQueue: RelaySendQueue;
     readonly factory: RelayChannelSessionFactory;
+    readonly onFatal?: () => void;
   }) {
     this.#limits = options.limits;
     this.#sendQueue = options.sendQueue;
     this.#factory = options.factory;
+    this.#onFatal = options.onFatal ?? (() => undefined);
   }
 
   get size(): number {
     return this.#channels.size;
+  }
+
+  get needsFlowRefresh(): boolean {
+    for (const entry of this.#channels.values()) {
+      if (entry.inboundPaused && !entry.closed) return true;
+    }
+    return false;
   }
 
   has(channelId: RelayChannelId): boolean {
@@ -71,10 +97,12 @@ export class RelayChannelRegistry {
         await this.#data(frame);
         return;
       case "flow.pause":
-        if (this.#channels.has(frame.channelId as string)) this.#sendQueue.pause(frame.channelId);
+        if (!this.#channels.has(frame.channelId as string)) throw new RelayChannelProtocolError();
+        this.#sendQueue.pause(frame.channelId);
         return;
       case "flow.resume":
-        if (this.#channels.has(frame.channelId as string)) this.#sendQueue.resume(frame.channelId);
+        if (!this.#channels.has(frame.channelId as string)) throw new RelayChannelProtocolError();
+        this.#sendQueue.resume(frame.channelId);
         return;
       case "channel.close":
         await this.closeChannel(frame.channelId);
@@ -91,7 +119,7 @@ export class RelayChannelRegistry {
       if ((await entry.session.queuedBytes()) <= lowWater) {
         entry.inboundPaused = false;
         entry.graceFrames = 0;
-        this.#sendQueue.enqueueControl({
+        this.#enqueueControl({
           type: "flow.resume",
           ...version,
           channelId: entry.channelId,
@@ -100,22 +128,29 @@ export class RelayChannelRegistry {
     }
   }
 
-  async closeChannel(channelId: RelayChannelId, reason?: "slow_consumer" | "protocol_unsupported") {
+  async closeChannel(channelId: RelayChannelId, reason?: RelayCloseReason) {
     const key = channelId as string;
     const entry = this.#channels.get(key);
     if (entry === undefined || entry.closed) return;
     entry.closed = true;
     this.#channels.delete(key);
     this.#sendQueue.removeChannel(channelId);
-    if (reason !== undefined) {
-      this.#sendQueue.enqueueControl({
-        type: "channel.close",
-        ...version,
-        channelId,
-        reason,
-      });
+    let controlError: RelayChannelQueueError | undefined;
+    try {
+      if (reason !== undefined) {
+        this.#enqueueControl({
+          type: "channel.close",
+          ...version,
+          channelId,
+          reason,
+        });
+      }
+    } catch (error: unknown) {
+      if (error instanceof RelayChannelQueueError) controlError = error;
+      else throw error;
     }
     await entry.session.close().catch(() => undefined);
+    if (controlError !== undefined) throw controlError;
   }
 
   async closeAll(): Promise<void> {
@@ -145,7 +180,7 @@ export class RelayChannelRegistry {
       this.#channels.has(key) ||
       this.#preparing.has(key);
     if (rejected) {
-      this.#sendQueue.enqueueControl({
+      this.#enqueueControl({
         type: "channel.reject",
         ...version,
         channelId: frame.channelId,
@@ -163,16 +198,22 @@ export class RelayChannelRegistry {
         effectiveRole: role,
         send: (bytes) => {
           if (entry === undefined || entry.closed || outputSequence > 0xffff_ffff) return false;
-          const accepted = this.#sendQueue.enqueueData({
-            type: "data",
-            ...version,
-            channelId: frame.channelId,
-            sequence: outputSequence as RelayDataFrame["sequence"],
-            payload: Uint8Array.from(bytes),
-          });
+          const accepted =
+            bytes.byteLength <= this.#limits.maxDataChunkBytes &&
+            this.#sendQueue.enqueueData({
+              type: "data",
+              ...version,
+              channelId: frame.channelId,
+              sequence: outputSequence as RelayDataFrame["sequence"],
+              payload: Uint8Array.from(bytes),
+            });
           if (accepted) {
             outputSequence += 1;
             entry.outboundSequence = outputSequence;
+          } else {
+            queueMicrotask(() => {
+              void this.closeChannel(frame.channelId, "slow_consumer").catch(this.#onFatal);
+            });
           }
           return accepted;
         },
@@ -192,13 +233,18 @@ export class RelayChannelRegistry {
         closed: false,
       };
       this.#channels.set(key, entry);
-      this.#sendQueue.enqueueControl({
+      this.#enqueueControl({
         type: "channel.accept",
         ...version,
         channelId: frame.channelId,
       });
-    } catch {
-      this.#sendQueue.enqueueControl({
+    } catch (error: unknown) {
+      if (error instanceof RelayChannelQueueError) {
+        this.#channels.delete(key);
+        await entry?.session.close().catch(() => undefined);
+        throw error;
+      }
+      this.#enqueueControl({
         type: "channel.reject",
         ...version,
         channelId: frame.channelId,
@@ -211,12 +257,16 @@ export class RelayChannelRegistry {
 
   async #data(frame: RelayDataFrame): Promise<void> {
     const entry = this.#channels.get(frame.channelId as string);
-    if (entry === undefined || entry.closed) return;
+    if (entry === undefined || entry.closed) throw new RelayChannelProtocolError();
     if (
       (frame.sequence as number) !== entry.inboundSequence ||
       entry.inboundSequence > 0xffff_ffff
     ) {
-      await this.closeChannel(frame.channelId, "protocol_unsupported");
+      await this.closeChannel(frame.channelId, "channel_rejected");
+      return;
+    }
+    if (frame.payload.byteLength > this.#limits.maxDataChunkBytes) {
+      await this.closeChannel(frame.channelId, "transfer_limit");
       return;
     }
     if (entry.inboundPaused) {
@@ -225,6 +275,18 @@ export class RelayChannelRegistry {
         await this.closeChannel(frame.channelId, "slow_consumer");
         return;
       }
+    }
+    const aggregateQueued = (
+      await Promise.all(
+        [...this.#channels.values()].map((channel) => channel.session.queuedBytes()),
+      )
+    ).reduce((total, value) => total + value, 0);
+    if (
+      aggregateQueued + frame.payload.byteLength >
+      this.#limits.maxQueuedBytes - this.#limits.maxControlFrameBytes
+    ) {
+      await this.closeChannel(frame.channelId, "slow_consumer");
+      return;
     }
     const accepted = await entry.session.receive(Uint8Array.from(frame.payload));
     if (!accepted) {
@@ -236,11 +298,15 @@ export class RelayChannelRegistry {
     if (!entry.inboundPaused && queuedBytes >= Math.floor(this.#channelBudget() * 0.75)) {
       entry.inboundPaused = true;
       entry.graceFrames = 0;
-      this.#sendQueue.enqueueControl({
+      this.#enqueueControl({
         type: "flow.pause",
         ...version,
         channelId: frame.channelId,
       });
     }
+  }
+
+  #enqueueControl(frame: RelayControlFrame): void {
+    if (!this.#sendQueue.enqueueControl(frame)) throw new RelayChannelQueueError();
   }
 }

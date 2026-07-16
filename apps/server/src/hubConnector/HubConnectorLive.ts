@@ -2,6 +2,7 @@ import { Context, Effect, Exit, Layer, Scope } from "effect";
 import { WsRpcGroup } from "@ryco/contracts";
 
 import { ServerConfig } from "../config.ts";
+import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import { makeRpcByteSession } from "../ws/RpcByteSession.ts";
 import { relayRpcPrincipal } from "../ws/RpcPrincipal.ts";
 import { makeServerWsRpcLayer } from "../ws.ts";
@@ -17,6 +18,8 @@ import type { RelayChannelSessionFactory, RelayRpcChannelSession } from "./Relay
 export interface HubConnectorServiceShape {
   readonly status: HubConnector["status"];
   readonly resume: HubConnector["resume"];
+  readonly enroll: HubConnector["enroll"];
+  readonly cancelEnrollment: HubConnector["cancelEnrollment"];
   readonly stop: HubConnector["stop"];
 }
 
@@ -46,9 +49,11 @@ export const HubConnectorLive = Layer.effect(
   HubConnectorService,
   Effect.gen(function* () {
     const config = yield* ServerConfig;
+    const environment = yield* ServerEnvironment;
+    const descriptor = yield* environment.getDescriptor;
     const runtimeContext = yield* Effect.context<never>();
     const runPromise = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-      Effect.runPromise(Effect.provideContext(effect, runtimeContext as Context.Context<R>));
+      Effect.runPromiseWith(runtimeContext as Context.Context<R>)(effect);
     const identity = config.hubConnector?.enabled
       ? yield* Effect.tryPromise({
           try: () =>
@@ -63,7 +68,7 @@ export const HubConnectorLive = Layer.effect(
 
     const channelFactory: RelayChannelSessionFactory = {
       open: async ({ channelId, effectiveRole, send }) => {
-        const scope = await Effect.runPromise(Scope.make("sequential"));
+        const scope = await runPromise(Scope.make("sequential"));
         try {
           const session = await runPromise(
             makeRpcByteSession(
@@ -82,7 +87,7 @@ export const HubConnectorLive = Layer.effect(
             close: () => runPromise(Scope.close(scope, Exit.void)),
           } satisfies RelayRpcChannelSession;
         } catch (error: unknown) {
-          await Effect.runPromise(Scope.close(scope, Exit.void));
+          await runPromise(Scope.close(scope, Exit.void));
           throw error;
         }
       },
@@ -102,6 +107,12 @@ export const HubConnectorLive = Layer.effect(
       identity,
       transport: makeHubRelayTransport(),
       channels: channelFactory,
+      enrollmentMetadata: {
+        label: descriptor.label,
+        platformOs: descriptor.platform.os,
+        platformArch: descriptor.platform.arch,
+        clientVersion: descriptor.serverVersion,
+      },
     });
     yield* Effect.acquireRelease(
       Effect.sync(() => {
@@ -113,6 +124,8 @@ export const HubConnectorLive = Layer.effect(
     return {
       status: () => connector.status(),
       resume: () => connector.resume(),
+      enroll: () => connector.enroll(),
+      cancelEnrollment: () => connector.cancelEnrollment(),
       stop: () => connector.stop(),
     } satisfies HubConnectorServiceShape;
   }),

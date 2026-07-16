@@ -31,14 +31,34 @@ describe("HubConnectorStateMachine", () => {
 });
 
 describe("classifyConnectorFailure", () => {
-  it("retries transient failures and stops terminal security failures", () => {
-    expect(classifyConnectorFailure("dns", 0)).toEqual({
-      action: "retry",
-      failure: "network_unavailable",
-    });
-    expect(classifyConnectorFailure("authentication_timeout", 0).action).toBe("retry");
-    expect(classifyConnectorFailure("authentication_failed", 0).action).toBe("operator");
-    expect(classifyConnectorFailure("connection_replaced", 0).action).toBe("operator");
+  it("classifies every transient failure for bounded automatic retry", () => {
+    const cases = [
+      ["dns", "network_unavailable"],
+      ["network", "network_unavailable"],
+      ["tls", "tls_unavailable"],
+      ["authentication_timeout", "authentication_timeout"],
+      ["server_draining", "server_draining"],
+      ["rate_limited", "rate_limited"],
+      ["heartbeat_timeout", "heartbeat_timeout"],
+      ["slow_consumer", "slow_consumer"],
+      ["internal_error", "internal_error"],
+    ] as const;
+    for (const [kind, failure] of cases) {
+      expect(classifyConnectorFailure(kind, 0)).toEqual({ action: "retry", failure });
+    }
+  });
+
+  it("stops every configuration, identity, authentication, and replacement failure", () => {
+    for (const kind of [
+      "configuration_invalid",
+      "identity_unavailable",
+      "identity_origin_mismatch",
+      "enrollment_unavailable",
+      "authentication_failed",
+      "connection_replaced",
+    ] as const) {
+      expect(classifyConnectorFailure(kind, 0)).toMatchObject({ action: "operator" });
+    }
     expect(classifyConnectorFailure("revoked", 0)).toMatchObject({
       action: "operator",
       terminalState: "revoked",

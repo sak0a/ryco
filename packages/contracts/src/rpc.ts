@@ -493,7 +493,7 @@ export const WsServerGetAdvertisedEndpointsRpc = Rpc.make(WS_METHODS.serverGetAd
 export const WsServerGetDiagnosticsMetricsRpc = Rpc.make(WS_METHODS.serverGetDiagnosticsMetrics, {
   payload: Schema.Struct({}),
   success: ServerLocalDiagnosticsMetrics,
-  error: Schema.Never,
+  error: AuthRpcError,
 });
 
 export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
@@ -513,7 +513,7 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
 export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvider, {
   payload: ServerProviderUpdateInput,
   success: ServerProviderUpdatedPayload,
-  error: ServerProviderUpdateError,
+  error: Schema.Union([ServerProviderUpdateError, AuthRpcError]),
 });
 
 export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
@@ -549,7 +549,7 @@ export const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscov
 export const WsServerListOpinionatedPluginsRpc = Rpc.make(WS_METHODS.serverListOpinionatedPlugins, {
   payload: Schema.Struct({}),
   success: OpinionatedPluginListResult,
-  error: OpinionatedPluginError,
+  error: Schema.Union([OpinionatedPluginError, AuthRpcError]),
 });
 
 export const WsServerCheckOpinionatedPluginsRpc = Rpc.make(
@@ -557,7 +557,7 @@ export const WsServerCheckOpinionatedPluginsRpc = Rpc.make(
   {
     payload: OpinionatedPluginCheckInput,
     success: OpinionatedPluginStatusResult,
-    error: OpinionatedPluginError,
+    error: Schema.Union([OpinionatedPluginError, AuthRpcError]),
   },
 );
 
@@ -566,50 +566,50 @@ export const WsServerInstallOpinionatedPluginRpc = Rpc.make(
   {
     payload: OpinionatedPluginInstallInput,
     success: OpinionatedPluginInstallResult,
-    error: OpinionatedPluginError,
+    error: Schema.Union([OpinionatedPluginError, AuthRpcError]),
   },
 );
 
 export const WsMcpListWorkspacesRpc = Rpc.make(WS_METHODS.mcpListWorkspaces, {
   payload: Schema.Struct({}),
   success: McpListWorkspacesResult,
-  error: McpSettingsError,
+  error: Schema.Union([McpSettingsError, AuthRpcError]),
 });
 
 export const WsMcpListServersRpc = Rpc.make(WS_METHODS.mcpListServers, {
   payload: McpListServersInput,
   success: McpListServersResult,
-  error: McpSettingsError,
+  error: Schema.Union([McpSettingsError, AuthRpcError]),
 });
 
 export const WsMcpUpsertServerRpc = Rpc.make(WS_METHODS.mcpUpsertServer, {
   payload: McpServerUpsertInput,
   success: McpListServersResult,
-  error: McpSettingsError,
+  error: Schema.Union([McpSettingsError, AuthRpcError]),
 });
 
 export const WsMcpSetServerEnabledRpc = Rpc.make(WS_METHODS.mcpSetServerEnabled, {
   payload: McpServerEnabledInput,
   success: McpListServersResult,
-  error: McpSettingsError,
+  error: Schema.Union([McpSettingsError, AuthRpcError]),
 });
 
 export const WsMcpRemoveServerRpc = Rpc.make(WS_METHODS.mcpRemoveServer, {
   payload: McpServerRemoveInput,
   success: McpListServersResult,
-  error: McpSettingsError,
+  error: Schema.Union([McpSettingsError, AuthRpcError]),
 });
 
 export const WsMcpReloadServersRpc = Rpc.make(WS_METHODS.mcpReloadServers, {
   payload: McpServersReloadInput,
   success: McpListServersResult,
-  error: McpSettingsError,
+  error: Schema.Union([McpSettingsError, AuthRpcError]),
 });
 
 export const WsMcpStartOauthLoginRpc = Rpc.make(WS_METHODS.mcpStartOauthLogin, {
   payload: McpOauthLoginInput,
   success: McpOauthLoginResult,
-  error: McpSettingsError,
+  error: Schema.Union([McpSettingsError, AuthRpcError]),
 });
 
 export const WsSourceControlLookupRepositoryRpc = Rpc.make(
@@ -835,43 +835,43 @@ export const WsTextGenerationGenerateBranchNameRpc = Rpc.make(
 export const WsAtlassianListConnectionsRpc = Rpc.make(WS_METHODS.atlassianListConnections, {
   payload: Schema.Struct({}),
   success: Schema.Array(AtlassianConnectionSummary),
-  error: AtlassianConnectionError,
+  error: Schema.Union([AtlassianConnectionError, AuthRpcError]),
 });
 
 export const WsAtlassianStartOAuthRpc = Rpc.make(WS_METHODS.atlassianStartOAuth, {
   payload: AtlassianStartOAuthInput,
   success: AtlassianStartOAuthResult,
-  error: AtlassianConnectionError,
+  error: Schema.Union([AtlassianConnectionError, AuthRpcError]),
 });
 
 export const WsAtlassianDisconnectRpc = Rpc.make(WS_METHODS.atlassianDisconnect, {
   payload: AtlassianDisconnectInput,
   success: EmptyRpcResult,
-  error: AtlassianConnectionError,
+  error: Schema.Union([AtlassianConnectionError, AuthRpcError]),
 });
 
 export const WsAtlassianRefreshRpc = Rpc.make(WS_METHODS.atlassianRefresh, {
   payload: AtlassianRefreshInput,
   success: AtlassianConnectionSummary,
-  error: AtlassianConnectionError,
+  error: Schema.Union([AtlassianConnectionError, AuthRpcError]),
 });
 
 export const WsAtlassianListResourcesRpc = Rpc.make(WS_METHODS.atlassianListResources, {
   payload: AtlassianListResourcesInput,
   success: Schema.Array(AtlassianResourceSummary),
-  error: AtlassianConnectionError,
+  error: Schema.Union([AtlassianConnectionError, AuthRpcError]),
 });
 
 export const WsAtlassianGetProjectLinkRpc = Rpc.make(WS_METHODS.atlassianGetProjectLink, {
   payload: AtlassianGetProjectLinkInput,
   success: Schema.NullOr(AtlassianProjectLink),
-  error: AtlassianConnectionError,
+  error: Schema.Union([AtlassianConnectionError, AuthRpcError]),
 });
 
 export const WsAtlassianSaveProjectLinkRpc = Rpc.make(WS_METHODS.atlassianSaveProjectLink, {
   payload: AtlassianSaveProjectLinkInput,
   success: AtlassianProjectLink,
-  error: AtlassianConnectionError,
+  error: Schema.Union([AtlassianConnectionError, AuthRpcError]),
 });
 
 export const WsAtlassianSaveManualBitbucketTokenRpc = Rpc.make(
@@ -879,14 +879,14 @@ export const WsAtlassianSaveManualBitbucketTokenRpc = Rpc.make(
   {
     payload: AtlassianSaveManualBitbucketTokenInput,
     success: AtlassianConnectionSummary,
-    error: AtlassianConnectionError,
+    error: Schema.Union([AtlassianConnectionError, AuthRpcError]),
   },
 );
 
 export const WsAtlassianSaveManualJiraTokenRpc = Rpc.make(WS_METHODS.atlassianSaveManualJiraToken, {
   payload: AtlassianSaveManualJiraTokenInput,
   success: AtlassianConnectionSummary,
-  error: AtlassianConnectionError,
+  error: Schema.Union([AtlassianConnectionError, AuthRpcError]),
 });
 
 export const WsWorkItemsListRpc = Rpc.make(WS_METHODS.workItemsList, {
@@ -916,19 +916,19 @@ export const WsWorkItemsGetRpc = Rpc.make(WS_METHODS.workItemsGet, {
 export const WsWorkItemsAddCommentRpc = Rpc.make(WS_METHODS.workItemsAddComment, {
   payload: WorkItemAddCommentInput,
   success: WorkItemDetail,
-  error: WorkItemProviderError,
+  error: Schema.Union([WorkItemProviderError, AuthRpcError]),
 });
 
 export const WsWorkItemsEditCommentRpc = Rpc.make(WS_METHODS.workItemsEditComment, {
   payload: WorkItemEditCommentInput,
   success: WorkItemDetail,
-  error: WorkItemProviderError,
+  error: Schema.Union([WorkItemProviderError, AuthRpcError]),
 });
 
 export const WsWorkItemsUpdateRpc = Rpc.make(WS_METHODS.workItemsUpdate, {
   payload: WorkItemUpdateInput,
   success: WorkItemDetail,
-  error: WorkItemProviderError,
+  error: Schema.Union([WorkItemProviderError, AuthRpcError]),
 });
 
 export const WsWorkItemsListTransitionsRpc = Rpc.make(WS_METHODS.workItemsListTransitions, {
@@ -940,7 +940,7 @@ export const WsWorkItemsListTransitionsRpc = Rpc.make(WS_METHODS.workItemsListTr
 export const WsWorkItemsTransitionRpc = Rpc.make(WS_METHODS.workItemsTransition, {
   payload: WorkItemTransitionInput,
   success: WorkItemDetail,
-  error: WorkItemProviderError,
+  error: Schema.Union([WorkItemProviderError, AuthRpcError]),
 });
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {

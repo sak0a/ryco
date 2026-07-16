@@ -55,6 +55,7 @@ import { AtlassianConnectionService } from "../atlassian/AtlassianConnectionServ
 import { JiraWorkItemService } from "../atlassian/JiraWorkItemService.ts";
 import { AdvertisedEndpointRegistry } from "../remote/Services/AdvertisedEndpointRegistry.ts";
 import { LocalDiagnosticsMetrics } from "../observability/Services/LocalDiagnosticsMetrics.ts";
+import { rpcAccessFor } from "./RpcAccessPolicy.ts";
 
 import { SOURCE_CONTROL_LINKED_REFRESH_DEBOUNCE_MS } from "./context/constants.ts";
 import { toGitManagerError } from "./context/gitErrors.ts";
@@ -82,38 +83,13 @@ function toDiagnosticsProviderProcess(provider: ServerProvider): DiagnosticsProv
   };
 }
 
-const ownerOnlyMethods = new Set<string>([
-  "server.getDiagnosticsMetrics",
-  "server.getDiagnosticsSnapshot",
-  "server.refreshProviders",
-  "server.updateProvider",
-  "server.upsertKeybinding",
-  "keybindings.replaceCustom",
-  "server.updateSettings",
-  "server.discoverSourceControl",
-  "server.listOpinionatedPlugins",
-  "server.checkOpinionatedPlugins",
-  "server.installOpinionatedPlugin",
-  "mcp.listWorkspaces",
-  "mcp.listServers",
-  "mcp.upsertServer",
-  "mcp.setServerEnabled",
-  "mcp.removeServer",
-  "mcp.reloadServers",
-  "mcp.startOauthLogin",
-  "atlassian.listConnections",
-  "atlassian.startOAuth",
-  "atlassian.disconnect",
-  "atlassian.refresh",
-  "atlassian.listResources",
-  "atlassian.getProjectLink",
-  "atlassian.saveProjectLink",
-  "atlassian.saveManualBitbucketToken",
-  "atlassian.saveManualJiraToken",
-]);
-
-const guardedMethodAccess = (method: string): WsRpcAccess =>
-  ownerOnlyMethods.has(method) ? "owner" : "operator";
+const guardedMethodAccess = (method: string): WsRpcAccess => {
+  const access = rpcAccessFor(method);
+  if (access === "viewer" || access === "authenticated" || access === "direct_owner") {
+    throw new Error("RPC method uses the wrong authorization guard.");
+  }
+  return access;
+};
 
 export const makeWsRpcContext = (principal: RpcPrincipal) =>
   Effect.gen(function* () {

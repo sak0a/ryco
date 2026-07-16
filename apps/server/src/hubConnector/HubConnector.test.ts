@@ -50,7 +50,7 @@ function encoded(frame: RelayFrame): Uint8Array {
   return result.value;
 }
 
-function identity(): HubIdentityRuntimeShape {
+function identity(overrides: Partial<HubIdentityRuntimeShape> = {}): HubIdentityRuntimeShape {
   return {
     backend: "keytar",
     readState: async () => ({
@@ -88,8 +88,16 @@ function identity(): HubIdentityRuntimeShape {
     stageKeyRotation: async () => ({ status: "awaiting_owner" }),
     resumeKeyRotation: async () => ({ status: "awaiting_owner" }),
     confirmAuthenticatedKey: async () => undefined,
+    ...overrides,
   };
 }
+
+const enrollmentMetadata = {
+  label: "Test node",
+  platformOs: "darwin" as const,
+  platformArch: "arm64" as const,
+  clientVersion: "0.1.8",
+};
 
 function scheduler() {
   let now = 1_000_000;
@@ -111,7 +119,7 @@ function scheduler() {
     now += milliseconds;
     const due = [...timers.entries()]
       .filter(([, timer]) => timer.due <= now)
-      .sort((left, right) => left[1].due - right[1].due);
+      .toSorted((left, right) => left[1].due - right[1].due);
     for (const [id, timer] of due) {
       timers.delete(id);
       timer.callback();
@@ -149,6 +157,7 @@ describe("HubConnector", () => {
           throw new Error("unused");
         },
       },
+      enrollmentMetadata,
     });
     await connector.start();
     expect(connector.status().state).toBe("disabled");
@@ -174,6 +183,7 @@ describe("HubConnector", () => {
           throw new Error("unused");
         },
       },
+      enrollmentMetadata,
       scheduler: clock.value,
     });
     const starting = connector.start();
@@ -224,6 +234,135 @@ describe("HubConnector", () => {
     expect([...sockets[0]!.listeners.values()].every((set) => set.size === 0)).toBe(true);
   });
 
+  it("times out a missing heartbeat and resets backoff only after stability", async () => {
+    const clock = scheduler();
+    const sockets: FakeSocket[] = [];
+    const connector = new HubConnector({
+      config: { ...enabledConfig, reconnectStableMs: 5_000 },
+      identity: identity(),
+      transport: {
+        open: () => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        },
+      },
+      channels: { open: async () => Promise.reject(new Error("unused")) },
+      enrollmentMetadata,
+      scheduler: clock.value,
+    });
+    const starting = connector.start();
+    await settle();
+    sockets[0]!.emit("open", {} as Event);
+    sockets[0]!.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await starting;
+
+    sockets[0]!.emit("close", {} as CloseEvent);
+    await settle();
+    expect(connector.status().reconnectAttempt).toBe(0);
+    await clock.advance(1_000);
+    await settle();
+    sockets[1]!.emit("open", {} as Event);
+    sockets[1]!.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await settle();
+    await clock.advance(5_000);
+    sockets[1]!.emit("close", {} as CloseEvent);
+    await settle();
+    expect(connector.status()).toMatchObject({
+      state: "degraded",
+      failure: "network_unavailable",
+      reconnectAttempt: 0,
+    });
+
+    await clock.advance(1_000);
+    await settle();
+    sockets[2]!.emit("open", {} as Event);
+    sockets[2]!.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await settle();
+    await clock.advance(RELAY_INITIAL_LIMITS.deadConnectionTimeoutMs);
+    await settle();
+    expect(connector.status()).toMatchObject({
+      state: "degraded",
+      failure: "heartbeat_timeout",
+    });
+    await connector.stop();
+    expect(clock.timers.size).toBe(0);
+  });
+
+  it("confirms an activated staged key only after the replacement key authenticates", async () => {
+    const socket = new FakeSocket();
+    const confirmed: string[] = [];
+    const activeState = {
+      version: 1 as const,
+      revision: 2,
+      environmentId: `env_${"E".repeat(22)}`,
+      pendingEnrollment: null,
+      activeNode: {
+        hubOrigin: "https://relay.example",
+        nodeId: `node_${"N".repeat(22)}`,
+        activeKeyId: `nkey_${"K".repeat(22)}`,
+        activeKeySecretName: "node-key.old",
+        cleanupPollingSecretName: null,
+        enrolledAt: 1,
+      },
+      stagedRotation: {
+        hubOrigin: "https://relay.example",
+        rotationRequestId: `rot_${"R".repeat(22)}`,
+        newKeyId: `nkey_${"Q".repeat(22)}`,
+        newKeySecretName: "node-key.new",
+        stagedAt: 2,
+        activatedAt: 3,
+      },
+    };
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        readState: async () => activeState,
+        confirmAuthenticatedKey: async (_origin, keyId) => {
+          confirmed.push(keyId);
+        },
+      }),
+      transport: { open: () => socket },
+      channels: { open: async () => Promise.reject(new Error("unused")) },
+      enrollmentMetadata,
+    });
+    const starting = connector.start();
+    await settle();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await starting;
+    expect(confirmed).toEqual([activeState.stagedRotation.newKeyId]);
+    await connector.stop();
+  });
+
   it("requires operator action for fresh-proof authentication failure", async () => {
     const socket = new FakeSocket();
     const connector = new HubConnector({
@@ -235,6 +374,7 @@ describe("HubConnector", () => {
           throw new Error("unused");
         },
       },
+      enrollmentMetadata,
     });
     const starting = connector.start();
     await settle();
@@ -255,5 +395,333 @@ describe("HubConnector", () => {
       failure: "authentication_failed",
     });
     await connector.stop();
+  });
+
+  it("revalidates identity origin before an operator-triggered resume", async () => {
+    const clock = scheduler();
+    const socket = new FakeSocket();
+    let changedOrigin = false;
+    const activeIdentity = identity();
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: {
+        ...activeIdentity,
+        readState: async () => {
+          const state = await activeIdentity.readState();
+          return changedOrigin && state.activeNode !== null
+            ? {
+                ...state,
+                activeNode: { ...state.activeNode, hubOrigin: "https://other.example" },
+              }
+            : state;
+        },
+      },
+      transport: { open: () => socket },
+      channels: { open: async () => Promise.reject(new Error("unused")) },
+      enrollmentMetadata,
+      scheduler: clock.value,
+    });
+    const starting = connector.start();
+    await settle();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await starting;
+    socket.emit("close", {} as CloseEvent);
+    await settle();
+
+    changedOrigin = true;
+    await connector.resume();
+    expect(connector.status()).toMatchObject({
+      state: "degraded",
+      degradedMode: "operator_action_required",
+      failure: "identity_origin_mismatch",
+    });
+    expect(clock.timers.size).toBe(0);
+    await connector.stop();
+  });
+
+  it("starts enrollment, polls approval, and authenticates without exposing polling material", async () => {
+    const clock = scheduler();
+    const socket = new FakeSocket();
+    let pending = false;
+    let polls = 0;
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        readState: async () => ({
+          version: 1,
+          revision: 1,
+          environmentId: `env_${"E".repeat(22)}`,
+          pendingEnrollment: pending
+            ? {
+                hubOrigin: "https://relay.example",
+                keySecretName: "node-key.fixture",
+                pollingSecretName: "enrollment-poll.fixture",
+                createdAt: 1,
+                expiresAt: 2_000_000,
+                pollIntervalMs: 1_000,
+                cleanupRequested: false,
+              }
+            : null,
+          activeNode: null,
+          stagedRotation: null,
+        }),
+        startEnrollment: async () => {
+          pending = true;
+          return {
+            deviceCode: "ABCD-EFGH",
+            expiresAt: 2_000_000,
+            pollIntervalMs: 1_000,
+            environmentId: `env_${"E".repeat(22)}`,
+            publicKey: {
+              algorithm: "ed25519",
+              publicKey: new Uint8Array(32),
+              fingerprint: new Uint8Array(32),
+            },
+          };
+        },
+        pollEnrollment: async () => {
+          polls += 1;
+          if (polls === 1) return { status: "pending", retryAfterMs: 1_000 };
+          return {
+            status: "approved",
+            nodeId: `node_${"N".repeat(22)}`,
+            environmentId: `env_${"E".repeat(22)}`,
+            activeKeyId: `nkey_${"K".repeat(22)}`,
+            enrolledAt: 1,
+          };
+        },
+      }),
+      transport: { open: () => socket },
+      channels: {
+        open: async () => {
+          throw new Error("unused");
+        },
+      },
+      enrollmentMetadata,
+      scheduler: clock.value,
+    });
+    await connector.start();
+    const started = await connector.enroll();
+    expect(started).toMatchObject({
+      deviceCode: "ABCD-EFGH",
+      pollIntervalMs: 1_000,
+      status: { state: "awaiting_approval" },
+    });
+    expect(Object.keys(started).toSorted()).toEqual([
+      "deviceCode",
+      "expiresAt",
+      "pollIntervalMs",
+      "status",
+    ]);
+
+    await clock.advance(1_000);
+    expect(connector.status().state).toBe("awaiting_approval");
+    await clock.advance(1_000);
+    await settle();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await settle();
+    expect(connector.status().state).toBe("online");
+    await connector.stop();
+  });
+
+  it("resumes pending enrollment after restart and cancels without leaving a poll timer", async () => {
+    const clock = scheduler();
+    let cancelled = 0;
+    let polls = 0;
+    const pendingState = {
+      version: 1 as const,
+      revision: 1,
+      environmentId: `env_${"E".repeat(22)}`,
+      pendingEnrollment: {
+        hubOrigin: "https://relay.example",
+        keySecretName: "node-key.fixture",
+        pollingSecretName: "enrollment-poll.fixture",
+        createdAt: 1,
+        expiresAt: 2_000_000,
+        pollIntervalMs: 1_000,
+        cleanupRequested: false,
+      },
+      activeNode: null,
+      stagedRotation: null,
+    };
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        readState: async () => pendingState,
+        pollEnrollment: async () => {
+          polls += 1;
+          return { status: "pending", retryAfterMs: 1_000 };
+        },
+        cancelEnrollment: async () => {
+          cancelled += 1;
+        },
+      }),
+      transport: { open: () => new FakeSocket() },
+      channels: {
+        open: async () => {
+          throw new Error("unused");
+        },
+      },
+      enrollmentMetadata,
+      scheduler: clock.value,
+    });
+    await connector.start();
+    expect(connector.status().state).toBe("awaiting_approval");
+    await clock.advance(0);
+    expect(polls).toBe(1);
+    await connector.cancelEnrollment();
+    expect(cancelled).toBe(1);
+    expect(connector.status().state).toBe("enrolling");
+    expect(clock.timers.size).toBe(0);
+    await connector.stop();
+  });
+
+  it("fails closed when local enrollment cancellation cannot erase custody", async () => {
+    const clock = scheduler();
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        readState: async () => ({
+          version: 1,
+          revision: 1,
+          environmentId: `env_${"E".repeat(22)}`,
+          pendingEnrollment: {
+            hubOrigin: "https://relay.example",
+            keySecretName: "node-key.fixture",
+            pollingSecretName: "enrollment-poll.fixture",
+            createdAt: 1,
+            expiresAt: 2_000_000,
+            pollIntervalMs: 1_000,
+            cleanupRequested: false,
+          },
+          activeNode: null,
+          stagedRotation: null,
+        }),
+        cancelEnrollment: async () => Promise.reject(new Error("custody unavailable")),
+      }),
+      transport: { open: () => new FakeSocket() },
+      channels: { open: async () => Promise.reject(new Error("unused")) },
+      enrollmentMetadata,
+      scheduler: clock.value,
+    });
+    await connector.start();
+    await expect(connector.cancelEnrollment()).rejects.toThrow(
+      "Hub enrollment could not be cancelled.",
+    );
+    expect(connector.status()).toMatchObject({
+      state: "degraded",
+      degradedMode: "operator_action_required",
+      failure: "enrollment_unavailable",
+    });
+    expect(clock.timers.size).toBe(0);
+    await connector.stop();
+  });
+
+  it("stops polling and requires operator action after enrollment denial or expiry", async () => {
+    const clock = scheduler();
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        readState: async () => ({
+          version: 1,
+          revision: 1,
+          environmentId: `env_${"E".repeat(22)}`,
+          pendingEnrollment: {
+            hubOrigin: "https://relay.example",
+            keySecretName: "node-key.fixture",
+            pollingSecretName: "enrollment-poll.fixture",
+            createdAt: 1,
+            expiresAt: 2_000_000,
+            pollIntervalMs: 1_000,
+            cleanupRequested: false,
+          },
+          activeNode: null,
+          stagedRotation: null,
+        }),
+        pollEnrollment: async () => ({ status: "unavailable" }),
+      }),
+      transport: { open: () => new FakeSocket() },
+      channels: {
+        open: async () => {
+          throw new Error("unused");
+        },
+      },
+      enrollmentMetadata,
+      scheduler: clock.value,
+    });
+    await connector.start();
+    await clock.advance(0);
+    expect(connector.status()).toMatchObject({
+      state: "degraded",
+      degradedMode: "operator_action_required",
+      failure: "enrollment_unavailable",
+    });
+    expect(clock.timers.size).toBe(0);
+    await connector.stop();
+  });
+
+  it("ignores an enrollment start that completes after shutdown", async () => {
+    let finishEnrollment:
+      | ((result: Awaited<ReturnType<HubIdentityRuntimeShape["startEnrollment"]>>) => void)
+      | undefined;
+    const pendingStart = new Promise<
+      Awaited<ReturnType<HubIdentityRuntimeShape["startEnrollment"]>>
+    >((resolve) => {
+      finishEnrollment = resolve;
+    });
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        readState: async () => ({
+          version: 1,
+          revision: 1,
+          environmentId: `env_${"E".repeat(22)}`,
+          pendingEnrollment: null,
+          activeNode: null,
+          stagedRotation: null,
+        }),
+        startEnrollment: async () => pendingStart,
+      }),
+      transport: { open: () => new FakeSocket() },
+      channels: {
+        open: async () => {
+          throw new Error("unused");
+        },
+      },
+      enrollmentMetadata,
+    });
+    await connector.start();
+    const enrolling = connector.enroll();
+    await settle();
+    await connector.stop();
+    finishEnrollment?.({
+      deviceCode: "ABCD-EFGH",
+      expiresAt: 2_000_000,
+      pollIntervalMs: 1_000,
+      environmentId: `env_${"E".repeat(22)}`,
+      publicKey: {
+        algorithm: "ed25519",
+        publicKey: new Uint8Array(32),
+        fingerprint: new Uint8Array(32),
+      },
+    });
+    await expect(enrolling).rejects.toThrow("superseded");
+    expect(connector.status().state).toBe("disabled");
   });
 });

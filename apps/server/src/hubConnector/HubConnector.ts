@@ -1,7 +1,8 @@
-import type { HubConnectorStatus } from "@ryco/contracts";
+import type { HubConnectorStatus, HubEnrollmentStartResult } from "@ryco/contracts";
 import type { RelayErrorFrame, RelayFrame } from "@ryco/contracts/relay";
 
 import type { HubConnectorConfig } from "../config.ts";
+import type { HubEnrollmentMetadata } from "../hubIdentity/HubEnrollmentClient.ts";
 import {
   classifyConnectorFailure,
   type ConnectorFailureKind,
@@ -15,7 +16,11 @@ import {
   RelayConnectionSession,
   type RelaySessionScheduler,
 } from "./RelayConnectionSession.ts";
-import { RelayChannelRegistry, type RelayChannelSessionFactory } from "./RelayChannelRegistry.ts";
+import {
+  RelayChannelProtocolError,
+  RelayChannelRegistry,
+  type RelayChannelSessionFactory,
+} from "./RelayChannelRegistry.ts";
 import { reconnectDelay } from "./ReconnectPolicy.ts";
 import { RelaySendQueue } from "./RelaySendQueue.ts";
 
@@ -36,6 +41,7 @@ export class HubConnector {
   readonly #identity: HubIdentityRuntimeShape;
   readonly #transport: HubRelayTransport;
   readonly #channels: RelayChannelSessionFactory;
+  readonly #enrollmentMetadata: HubEnrollmentMetadata;
   readonly #scheduler: HubConnectorScheduler;
   readonly #state: HubConnectorStateMachine;
   #attempt = 0;
@@ -47,6 +53,7 @@ export class HubConnector {
   #sendQueue: RelaySendQueue | undefined;
   #registry: RelayChannelRegistry | undefined;
   #retryTimer: unknown;
+  #enrollmentTimer: unknown;
   #stableTimer: unknown;
   #heartbeatTimer: unknown;
   #drainTimer: unknown;
@@ -57,12 +64,14 @@ export class HubConnector {
     readonly identity: HubIdentityRuntimeShape;
     readonly transport: HubRelayTransport;
     readonly channels: RelayChannelSessionFactory;
+    readonly enrollmentMetadata: HubEnrollmentMetadata;
     readonly scheduler?: HubConnectorScheduler;
   }) {
     this.#config = options.config;
     this.#identity = options.identity;
     this.#transport = options.transport;
     this.#channels = options.channels;
+    this.#enrollmentMetadata = options.enrollmentMetadata;
     this.#scheduler = options.scheduler ?? defaultScheduler;
     this.#state = new HubConnectorStateMachine(this.#scheduler.now);
   }
@@ -74,6 +83,7 @@ export class HubConnector {
   async start(): Promise<void> {
     if (this.#started || this.#stopping) return;
     this.#started = true;
+    const generation = this.#state.generation;
     if (!this.#config.enabled) return;
     if (this.#config.configurationIssue !== undefined || this.#config.origin === undefined) {
       this.#state.transition("degraded", {
@@ -86,16 +96,19 @@ export class HubConnector {
     try {
       identity = await this.#identity.readState();
     } catch {
+      if (!this.#state.isCurrent(generation) || this.#stopping) return;
       this.#state.transition("degraded", {
         degradedMode: "operator_action_required",
         failure: "identity_unavailable",
       });
       return;
     }
+    if (!this.#state.isCurrent(generation) || this.#stopping) return;
     if (identity.activeNode === null) {
       this.#state.transition(
         identity.pendingEnrollment === null ? "enrolling" : "awaiting_approval",
       );
+      if (identity.pendingEnrollment !== null) this.#scheduleEnrollmentPoll(0);
       return;
     }
     if (identity.activeNode.hubOrigin !== this.#config.origin) {
@@ -110,8 +123,111 @@ export class HubConnector {
 
   async resume(): Promise<void> {
     if (!this.#started || this.#stopping || !this.#config.enabled) return;
+    if (this.#state.snapshot().state === "revoked") return;
     this.#clearTimer("retry");
+    if (this.#config.configurationIssue !== undefined || this.#config.origin === undefined) {
+      this.#state.transition("degraded", {
+        degradedMode: "operator_action_required",
+        failure: "configuration_invalid",
+      });
+      return;
+    }
+    const generation = this.#state.generation;
+    const identity = await this.#identity.readState().catch(() => undefined);
+    if (!this.#state.isCurrent(generation) || this.#stopping) return;
+    if (identity === undefined) {
+      this.#state.transition("degraded", {
+        degradedMode: "operator_action_required",
+        failure: "identity_unavailable",
+      });
+      return;
+    }
+    if (identity.activeNode === null) {
+      if (identity.pendingEnrollment === null) {
+        this.#state.transition("enrolling");
+      } else {
+        this.#state.transition("awaiting_approval");
+        this.#scheduleEnrollmentPoll(0);
+      }
+      return;
+    }
+    if (identity.activeNode.hubOrigin !== this.#config.origin) {
+      this.#state.transition("degraded", {
+        degradedMode: "operator_action_required",
+        failure: "identity_origin_mismatch",
+      });
+      return;
+    }
     await this.#connect();
+  }
+
+  async enroll(): Promise<HubEnrollmentStartResult> {
+    const origin = this.#enrollmentOrigin();
+    const initialGeneration = this.#state.generation;
+    const state = await this.#identity.readState();
+    if (!this.#state.isCurrent(initialGeneration) || this.#stopping) {
+      throw new Error("Hub enrollment start was superseded.");
+    }
+    if (state.activeNode !== null || state.pendingEnrollment !== null) {
+      throw new Error("Hub enrollment cannot be started in the current state.");
+    }
+    const generation = this.#state.invalidateGeneration();
+    this.#clearAllTimers();
+    this.#state.transition("enrolling");
+    try {
+      const started = await this.#identity.startEnrollment(origin, this.#enrollmentMetadata);
+      if (!this.#state.isCurrent(generation) || this.#stopping) {
+        throw new Error("Hub enrollment start was superseded.");
+      }
+      this.#state.transition("awaiting_approval");
+      this.#scheduleEnrollmentPoll(started.pollIntervalMs);
+      return {
+        status: this.status(),
+        deviceCode: started.deviceCode,
+        expiresAt: new Date(started.expiresAt).toISOString(),
+        pollIntervalMs: started.pollIntervalMs,
+      };
+    } catch {
+      if (!this.#state.isCurrent(generation) || this.#stopping) {
+        throw new Error("Hub enrollment start was superseded.");
+      }
+      this.#state.transition("degraded", {
+        degradedMode: "operator_action_required",
+        failure: "enrollment_unavailable",
+      });
+      throw new Error("Hub enrollment could not be started.");
+    }
+  }
+
+  async cancelEnrollment(): Promise<HubConnectorStatus> {
+    const origin = this.#enrollmentOrigin();
+    const initialGeneration = this.#state.generation;
+    const identity = await this.#identity.readState();
+    if (!this.#state.isCurrent(initialGeneration) || this.#stopping) {
+      throw new Error("Hub enrollment cancellation was superseded.");
+    }
+    if (identity.activeNode !== null || identity.pendingEnrollment === null) {
+      throw new Error("Hub enrollment cannot be cancelled in the current state.");
+    }
+    const generation = this.#state.invalidateGeneration();
+    this.#clearTimer("enrollment");
+    try {
+      await this.#identity.cancelEnrollment(origin);
+    } catch {
+      if (!this.#state.isCurrent(generation) || this.#stopping) {
+        throw new Error("Hub enrollment cancellation was superseded.");
+      }
+      this.#state.transition("degraded", {
+        degradedMode: "operator_action_required",
+        failure: "enrollment_unavailable",
+      });
+      throw new Error("Hub enrollment could not be cancelled.");
+    }
+    if (!this.#state.isCurrent(generation) || this.#stopping) {
+      throw new Error("Hub enrollment cancellation was superseded.");
+    }
+    this.#state.transition("enrolling");
+    return this.status();
   }
 
   async stop(): Promise<void> {
@@ -148,7 +264,12 @@ export class HubConnector {
       onFrame: (frame) => {
         this.#frameChain = this.#frameChain
           .then(() => this.#handleFrame(generation, frame))
-          .catch(() => this.#handleFailure(generation, "internal_error"));
+          .catch((error: unknown) =>
+            this.#handleFailure(
+              generation,
+              error instanceof RelayChannelProtocolError ? "protocol_invalid" : "internal_error",
+            ),
+          );
       },
       onTerminal: (error) => {
         void this.#handleFailure(generation, error.kind, error.retryAfterMs);
@@ -164,11 +285,27 @@ export class HubConnector {
       }
       const socket = session.socket;
       if (socket === undefined) throw new RelayConnectionError("internal_error");
+      try {
+        const authenticatedState = await this.#identity.readState();
+        const rotation = authenticatedState.stagedRotation;
+        if (rotation?.hubOrigin === origin && rotation.activatedAt !== null) {
+          await this.#identity.confirmAuthenticatedKey(origin, rotation.newKeyId);
+        }
+      } catch {
+        throw new RelayConnectionError("authentication_failed");
+      }
+      if (!this.#state.isCurrent(generation) || this.#stopping) {
+        session.close();
+        return;
+      }
       const sendQueue = new RelaySendQueue(socket, ready.limits);
       const registry = new RelayChannelRegistry({
         limits: ready.limits,
         sendQueue,
         factory: this.#channels,
+        onFatal: () => {
+          void this.#handleFailure(generation, "internal_error");
+        },
       });
       this.#sendQueue = sendQueue;
       this.#registry = registry;
@@ -183,6 +320,76 @@ export class HubConnector {
     } finally {
       this.#connecting = false;
     }
+  }
+
+  #enrollmentOrigin(): string {
+    if (
+      !this.#started ||
+      this.#stopping ||
+      !this.#config.enabled ||
+      this.#config.configurationIssue !== undefined ||
+      this.#config.origin === undefined
+    ) {
+      throw new Error("Hub enrollment is unavailable.");
+    }
+    return this.#config.origin;
+  }
+
+  #scheduleEnrollmentPoll(milliseconds: number): void {
+    this.#clearTimer("enrollment");
+    const generation = this.#state.generation;
+    this.#enrollmentTimer = this.#scheduler.setTimeout(() => {
+      this.#enrollmentTimer = undefined;
+      void this.#pollEnrollment(generation);
+    }, milliseconds);
+  }
+
+  async #pollEnrollment(generation: number): Promise<void> {
+    if (!this.#state.isCurrent(generation) || this.#stopping) return;
+    const origin = this.#config.origin;
+    if (origin === undefined) return;
+    let result;
+    try {
+      result = await this.#identity.pollEnrollment(origin);
+    } catch {
+      if (!this.#state.isCurrent(generation) || this.#stopping) return;
+      const decision = reconnectDelay(
+        {
+          baseDelayMs: this.#config.reconnectBaseMs,
+          maxDelayMs: this.#config.reconnectMaxMs,
+          jitterRatio: this.#config.reconnectJitterRatio,
+        },
+        this.#attempt,
+        this.#scheduler.random(),
+      );
+      this.#attempt += 1;
+      this.#state.transition("degraded", {
+        degradedMode: "backing_off",
+        failure: "network_unavailable",
+        reconnectAttempt: decision.attempt,
+        nextRetryAt: new Date(this.#scheduler.now() + decision.delayMs).toISOString(),
+      });
+      this.#scheduleEnrollmentPoll(decision.delayMs);
+      return;
+    }
+    if (!this.#state.isCurrent(generation) || this.#stopping) return;
+    if (result.status === "pending") {
+      this.#attempt = 0;
+      if (this.#state.snapshot().state !== "awaiting_approval") {
+        this.#state.transition("awaiting_approval");
+      }
+      this.#scheduleEnrollmentPoll(result.retryAfterMs);
+      return;
+    }
+    if (result.status === "unavailable") {
+      this.#state.transition("degraded", {
+        degradedMode: "operator_action_required",
+        failure: "enrollment_unavailable",
+      });
+      return;
+    }
+    this.#attempt = 0;
+    await this.#connect();
   }
 
   async #handleFrame(generation: number, frame: RelayFrame): Promise<void> {
@@ -300,28 +507,38 @@ export class HubConnector {
     if (
       this.#drainTimer !== undefined ||
       ((this.#sendQueue?.queuedBytes ?? 0) === 0 &&
-        (this.#session?.socket?.bufferedAmount ?? 0) === 0)
+        (this.#session?.socket?.bufferedAmount ?? 0) === 0 &&
+        this.#registry?.needsFlowRefresh !== true)
     ) {
       return;
     }
     this.#drainTimer = this.#scheduler.setTimeout(() => {
       this.#drainTimer = undefined;
       if (!this.#state.isCurrent(generation) || this.#stopping) return;
-      void this.#registry?.refreshFlow().then(() => this.#flushAndScheduleDrain(generation));
+      const registry = this.#registry;
+      if (registry !== undefined) {
+        void registry
+          .refreshFlow()
+          .then(() => this.#flushAndScheduleDrain(generation))
+          .catch(() => this.#handleFailure(generation, "internal_error"));
+      }
     }, 10);
   }
 
-  #clearTimer(kind: "retry" | "stable" | "heartbeat" | "drain"): void {
+  #clearTimer(kind: "retry" | "enrollment" | "stable" | "heartbeat" | "drain"): void {
     const current =
       kind === "retry"
         ? this.#retryTimer
-        : kind === "stable"
-          ? this.#stableTimer
-          : kind === "heartbeat"
-            ? this.#heartbeatTimer
-            : this.#drainTimer;
+        : kind === "enrollment"
+          ? this.#enrollmentTimer
+          : kind === "stable"
+            ? this.#stableTimer
+            : kind === "heartbeat"
+              ? this.#heartbeatTimer
+              : this.#drainTimer;
     if (current !== undefined) this.#scheduler.clearTimeout(current);
     if (kind === "retry") this.#retryTimer = undefined;
+    else if (kind === "enrollment") this.#enrollmentTimer = undefined;
     else if (kind === "stable") this.#stableTimer = undefined;
     else if (kind === "heartbeat") this.#heartbeatTimer = undefined;
     else this.#drainTimer = undefined;
@@ -329,6 +546,7 @@ export class HubConnector {
 
   #clearAllTimers(): void {
     this.#clearTimer("retry");
+    this.#clearTimer("enrollment");
     this.#clearTimer("stable");
     this.#clearTimer("heartbeat");
     this.#clearTimer("drain");
