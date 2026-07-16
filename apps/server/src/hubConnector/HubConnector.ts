@@ -285,19 +285,6 @@ export class HubConnector {
       }
       const socket = session.socket;
       if (socket === undefined) throw new RelayConnectionError("internal_error");
-      try {
-        const authenticatedState = await this.#identity.readState();
-        const rotation = authenticatedState.stagedRotation;
-        if (rotation?.hubOrigin === origin && rotation.activatedAt !== null) {
-          await this.#identity.confirmAuthenticatedKey(origin, rotation.newKeyId);
-        }
-      } catch {
-        throw new RelayConnectionError("authentication_failed");
-      }
-      if (!this.#state.isCurrent(generation) || this.#stopping) {
-        session.close();
-        return;
-      }
       const sendQueue = new RelaySendQueue(socket, ready.limits);
       const registry = new RelayChannelRegistry({
         limits: ready.limits,
@@ -314,7 +301,20 @@ export class HubConnector {
       });
       this.#sendQueue = sendQueue;
       this.#registry = registry;
-      this.#state.online();
+      try {
+        const authenticatedState = await this.#identity.readState();
+        const rotation = authenticatedState.stagedRotation;
+        if (rotation?.hubOrigin === origin && rotation.activatedAt !== null) {
+          await this.#identity.confirmAuthenticatedKey(origin, rotation.newKeyId);
+        }
+      } catch {
+        throw new RelayConnectionError("authentication_failed");
+      }
+      if (!this.#state.isCurrent(generation) || this.#stopping) {
+        session.close();
+        return;
+      }
+      this.#state.online(registry.size, sendQueue.ownedBytes);
       this.#scheduleStableReset(generation);
       this.#scheduleHeartbeatTimeout(generation, ready.limits.deadConnectionTimeoutMs);
     } catch (error: unknown) {
@@ -422,8 +422,18 @@ export class HubConnector {
         frame.retryAfterMs,
       );
       return;
+    } else if (
+      frame.type === "channel.open" ||
+      frame.type === "data" ||
+      frame.type === "flow.pause" ||
+      frame.type === "flow.resume" ||
+      frame.type === "channel.close"
+    ) {
+      const registry = this.#registry;
+      if (registry === undefined) throw new RelayChannelProtocolError();
+      await registry.handle(frame);
     } else {
-      await this.#registry?.handle(frame);
+      throw new RelayChannelProtocolError();
     }
     this.#flushAndScheduleDrain(generation);
     this.#state.updateOnlineMetrics(this.#registry?.size ?? 0, this.#sendQueue?.ownedBytes ?? 0);

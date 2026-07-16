@@ -296,6 +296,108 @@ describe("HubConnector", () => {
     await connector.stop();
   });
 
+  it("handles a channel opened immediately after ready while identity confirmation is pending", async () => {
+    const socket = new FakeSocket();
+    const channelId = `ch_${"I".repeat(22)}` as RelayChannelId;
+    const activeIdentity = identity();
+    let readCalls = 0;
+    let releaseIdentityRead: (() => void) | undefined;
+    const identityRead = new Promise<void>((resolve) => {
+      releaseIdentityRead = resolve;
+    });
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: {
+        ...activeIdentity,
+        readState: async () => {
+          readCalls += 1;
+          if (readCalls > 1) await identityRead;
+          return activeIdentity.readState();
+        },
+      },
+      transport: { open: () => socket },
+      channels: {
+        open: async () => ({
+          receive: async () => true,
+          queuedBytes: async () => 0,
+          close: async () => undefined,
+        }),
+      },
+      enrollmentMetadata,
+    });
+    const starting = connector.start();
+    await settle();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await Promise.resolve();
+    socket.emit("message", {
+      data: encoded({
+        type: "channel.open",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "operator",
+      }),
+    } as MessageEvent);
+    await settle();
+
+    expect(connector.status().state).toBe("authenticating");
+    expect(decodeRelayFrame(socket.sent.at(-1)!)).toMatchObject({
+      ok: true,
+      value: { type: "channel.accept", channelId },
+    });
+
+    releaseIdentityRead?.();
+    await starting;
+    expect(connector.status()).toMatchObject({ state: "online", activeChannels: 1 });
+    await connector.stop();
+  });
+
+  it("fails closed on a directionally inappropriate post-authentication frame", async () => {
+    const socket = new FakeSocket();
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity(),
+      transport: { open: () => socket },
+      channels: { open: async () => Promise.reject(new Error("unused")) },
+      enrollmentMetadata,
+    });
+    const starting = connector.start();
+    await settle();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await starting;
+
+    socket.emit("message", {
+      data: encoded({
+        type: "pong",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        nonce: new Uint8Array(8).fill(3),
+      }),
+    } as MessageEvent);
+    await settle();
+
+    expect(socket.closeCalls).toBe(1);
+    expect(connector.status()).toMatchObject({ state: "degraded", failure: "protocol_invalid" });
+    await connector.stop();
+  });
+
   it("times out a missing heartbeat and resets backoff only after stability", async () => {
     const clock = scheduler();
     const sockets: FakeSocket[] = [];
