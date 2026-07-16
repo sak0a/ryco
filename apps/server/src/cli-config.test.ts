@@ -5,8 +5,49 @@ import { ConfigProvider, Effect, FileSystem, Layer, Option, Path } from "effect"
 
 import { NetService } from "@ryco/shared/Net";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { deriveServerPaths } from "./config.ts";
+import {
+  DEFAULT_HUB_CONNECTOR_CONFIG,
+  deriveServerPaths,
+  resolveHubConnectorConfig,
+} from "./config.ts";
 import { resolveServerConfig } from "./cli.ts";
+
+it("resolves bounded connector defaults and invalid enabled configuration without reflecting input", () => {
+  expect(resolveHubConnectorConfig({})).toEqual(DEFAULT_HUB_CONNECTOR_CONFIG);
+  expect(
+    resolveHubConnectorConfig({
+      enabled: "true",
+      origin: "https://relay.example",
+      reconnectBaseMs: "250",
+      reconnectMaxMs: "300000",
+      reconnectStableMs: "5000",
+      reconnectJitterRatio: "0.5",
+      allowFileSecretStore: "true",
+    }),
+  ).toEqual({
+    enabled: true,
+    origin: "https://relay.example",
+    reconnectBaseMs: 250,
+    reconnectMaxMs: 300_000,
+    reconnectStableMs: 5_000,
+    reconnectJitterRatio: 0.5,
+    allowFileSecretStore: true,
+    configurationIssue: undefined,
+  });
+
+  const invalid = resolveHubConnectorConfig({
+    enabled: "true",
+    origin: "https://credential:sensitive@relay.example/path?token=sensitive",
+    reconnectBaseMs: "0",
+    reconnectMaxMs: "not-a-number",
+  });
+  expect(invalid).toEqual({
+    ...DEFAULT_HUB_CONNECTOR_CONFIG,
+    enabled: true,
+    configurationIssue: "configuration_invalid",
+  });
+  expect(JSON.stringify(invalid)).not.toContain("sensitive");
+});
 
 it.layer(NodeServices.layer)("cli config resolution", (it) => {
   const defaultObservabilityConfig = {
@@ -20,6 +61,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     otlpExportIntervalMs: 10_000,
     otlpServiceName: "ryco-server",
   } as const;
+  const defaultConnectorConfig = { hubConnector: DEFAULT_HUB_CONNECTOR_CONFIG } as const;
 
   const openBootstrapFd = Effect.fn(function* (payload: Record<string, unknown>) {
     const fs = yield* FileSystem.FileSystem;
@@ -76,6 +118,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Warn",
         ...defaultObservabilityConfig,
+        ...defaultConnectorConfig,
         mode: "desktop",
         port: 4001,
         cwd: process.cwd(),
@@ -142,6 +185,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Debug",
         ...defaultObservabilityConfig,
+        ...defaultConnectorConfig,
         mode: "web",
         port: 8788,
         cwd: process.cwd(),
@@ -211,6 +255,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Info",
         ...defaultObservabilityConfig,
+        ...defaultConnectorConfig,
         mode: "web",
         port: 8788,
         cwd: process.cwd(),
@@ -284,6 +329,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Info",
         ...defaultObservabilityConfig,
+        ...defaultConnectorConfig,
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
         mode: "desktop",
@@ -412,6 +458,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Debug",
         ...defaultObservabilityConfig,
+        ...defaultConnectorConfig,
         mode: "web",
         port: 8788,
         cwd: process.cwd(),
@@ -478,6 +525,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Info",
         ...defaultObservabilityConfig,
+        ...defaultConnectorConfig,
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
         mode: "desktop",
@@ -543,6 +591,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Info",
         ...defaultObservabilityConfig,
+        ...defaultConnectorConfig,
         mode: "web",
         port: 3773,
         cwd: process.cwd(),

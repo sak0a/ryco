@@ -33,6 +33,7 @@ import {
 
 import {
   DEFAULT_PORT,
+  resolveHubConnectorConfig,
   deriveServerPaths,
   ensureServerDirectories,
   resolveStaticDir,
@@ -191,6 +192,34 @@ const EnvServerConfig = Config.all({
     Config.map(Option.getOrUndefined),
   ),
   tailscaleServePort: Config.port("RYCO_TAILSCALE_SERVE_PORT").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  hubConnectorEnabled: Config.string("RYCO_HUB_CONNECTOR_ENABLED").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  hubOrigin: Config.string("RYCO_HUB_ORIGIN").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  hubReconnectBaseMs: Config.string("RYCO_HUB_RECONNECT_BASE_MS").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  hubReconnectMaxMs: Config.string("RYCO_HUB_RECONNECT_MAX_MS").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  hubReconnectStableMs: Config.string("RYCO_HUB_RECONNECT_STABLE_MS").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  hubReconnectJitterRatio: Config.string("RYCO_HUB_RECONNECT_JITTER_RATIO").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  hubAllowFileSecretStore: Config.string("RYCO_HUB_ALLOW_FILE_SECRET_STORE").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
@@ -392,6 +421,15 @@ export const resolveServerConfig = (
       () => (mode === "desktop" ? "127.0.0.1" : undefined),
     );
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
+    const hubConnector = resolveHubConnectorConfig({
+      enabled: env.hubConnectorEnabled,
+      origin: env.hubOrigin,
+      reconnectBaseMs: env.hubReconnectBaseMs,
+      reconnectMaxMs: env.hubReconnectMaxMs,
+      reconnectStableMs: env.hubReconnectStableMs,
+      reconnectJitterRatio: env.hubReconnectJitterRatio,
+      allowFileSecretStore: env.hubAllowFileSecretStore,
+    });
 
     const config: ServerConfigShape = {
       logLevel,
@@ -426,6 +464,7 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      hubConnector,
     };
 
     return config;

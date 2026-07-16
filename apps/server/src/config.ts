@@ -7,6 +7,7 @@
  * @module ServerConfig
  */
 import { Effect, FileSystem, Layer, LogLevel, Path, Schema, Context } from "effect";
+import { canonicalizeHubOrigin } from "@ryco/shared/nodeIdentity";
 
 export const DEFAULT_PORT = 3773;
 
@@ -36,7 +37,106 @@ export interface ServerDerivedPaths {
   readonly anonymousIdPath: string;
   readonly environmentIdPath: string;
   readonly serverRuntimeStatePath: string;
+  readonly hubIdentityStatePath: string;
   readonly secretsDir: string;
+}
+
+export interface HubConnectorConfig {
+  readonly enabled: boolean;
+  readonly origin: string | undefined;
+  readonly reconnectBaseMs: number;
+  readonly reconnectMaxMs: number;
+  readonly reconnectStableMs: number;
+  readonly reconnectJitterRatio: number;
+  readonly allowFileSecretStore: boolean;
+  readonly configurationIssue: "configuration_invalid" | undefined;
+}
+
+export const DEFAULT_HUB_CONNECTOR_CONFIG: HubConnectorConfig = {
+  enabled: false,
+  origin: undefined,
+  reconnectBaseMs: 1_000,
+  reconnectMaxMs: 60_000,
+  reconnectStableMs: 60_000,
+  reconnectJitterRatio: 0.2,
+  allowFileSecretStore: false,
+  configurationIssue: undefined,
+};
+
+interface RawHubConnectorConfig {
+  readonly enabled?: string | undefined;
+  readonly origin?: string | undefined;
+  readonly reconnectBaseMs?: string | undefined;
+  readonly reconnectMaxMs?: string | undefined;
+  readonly reconnectStableMs?: string | undefined;
+  readonly reconnectJitterRatio?: string | undefined;
+  readonly allowFileSecretStore?: string | undefined;
+}
+
+const parseBoolean = (value: string | undefined, fallback: boolean): boolean | undefined => {
+  if (value === undefined) return fallback;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return undefined;
+};
+
+const parseInteger = (
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number | undefined => {
+  if (value === undefined) return fallback;
+  if (!/^(0|[1-9][0-9]*)$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
+    : undefined;
+};
+
+const parseRatio = (value: string | undefined, fallback: number): number | undefined => {
+  if (value === undefined) return fallback;
+  if (value.trim() !== value || value.length === 0) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 0.5 ? parsed : undefined;
+};
+
+export function resolveHubConnectorConfig(raw: RawHubConnectorConfig): HubConnectorConfig {
+  const enabled = parseBoolean(raw.enabled, false);
+  if (enabled === false) return DEFAULT_HUB_CONNECTOR_CONFIG;
+
+  const reconnectBaseMs = parseInteger(raw.reconnectBaseMs, 1_000, 250, 60_000);
+  const reconnectMaxMs = parseInteger(raw.reconnectMaxMs, 60_000, 250, 300_000);
+  const reconnectStableMs = parseInteger(raw.reconnectStableMs, 60_000, 5_000, 600_000);
+  const reconnectJitterRatio = parseRatio(raw.reconnectJitterRatio, 0.2);
+  const allowFileSecretStore = parseBoolean(raw.allowFileSecretStore, false);
+  let origin: string | undefined;
+  try {
+    origin = raw.origin === undefined ? undefined : canonicalizeHubOrigin(raw.origin);
+  } catch {
+    origin = undefined;
+  }
+
+  const invalid =
+    enabled !== true ||
+    origin === undefined ||
+    reconnectBaseMs === undefined ||
+    reconnectMaxMs === undefined ||
+    reconnectMaxMs < reconnectBaseMs ||
+    reconnectStableMs === undefined ||
+    reconnectJitterRatio === undefined ||
+    allowFileSecretStore === undefined;
+
+  return {
+    enabled: true,
+    origin,
+    reconnectBaseMs: reconnectBaseMs ?? DEFAULT_HUB_CONNECTOR_CONFIG.reconnectBaseMs,
+    reconnectMaxMs: reconnectMaxMs ?? DEFAULT_HUB_CONNECTOR_CONFIG.reconnectMaxMs,
+    reconnectStableMs: reconnectStableMs ?? DEFAULT_HUB_CONNECTOR_CONFIG.reconnectStableMs,
+    reconnectJitterRatio: reconnectJitterRatio ?? DEFAULT_HUB_CONNECTOR_CONFIG.reconnectJitterRatio,
+    allowFileSecretStore: allowFileSecretStore ?? DEFAULT_HUB_CONNECTOR_CONFIG.allowFileSecretStore,
+    configurationIssue: invalid ? "configuration_invalid" : undefined,
+  };
 }
 
 /**
@@ -67,6 +167,7 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly logWebSocketEvents: boolean;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
+  readonly hubConnector?: HubConnectorConfig;
 }
 
 export const deriveServerPaths = Effect.fn(function* (
@@ -97,6 +198,7 @@ export const deriveServerPaths = Effect.fn(function* (
     anonymousIdPath: join(stateDir, "anonymous-id"),
     environmentIdPath: join(stateDir, "environment-id"),
     serverRuntimeStatePath: join(stateDir, "server-runtime.json"),
+    hubIdentityStatePath: join(stateDir, "hub-identity.json"),
     secretsDir: join(stateDir, "secrets"),
   };
 });
@@ -116,6 +218,7 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
     derivedPaths.providerStatusCacheDir,
     path.dirname(derivedPaths.anonymousIdPath),
     path.dirname(derivedPaths.serverRuntimeStatePath),
+    path.dirname(derivedPaths.hubIdentityStatePath),
   ];
 
   yield* Effect.all(
@@ -163,6 +266,7 @@ export class ServerConfig extends Context.Service<ServerConfig, ServerConfigShap
           logWebSocketEvents: false,
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
+          hubConnector: DEFAULT_HUB_CONNECTOR_CONFIG,
           port: 0,
           host: undefined,
           desktopBootstrapToken: undefined,
