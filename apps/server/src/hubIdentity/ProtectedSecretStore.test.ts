@@ -9,6 +9,7 @@ import {
   makeKeytarProtectedSecretStore,
   makeOsProtectedSecretStore,
   makePermissionedFileSecretStore,
+  makeProtectedSecretStore,
   ProtectedSecretStoreError,
 } from "./ProtectedSecretStore.ts";
 
@@ -81,6 +82,30 @@ describe("protected node secret stores", () => {
       makePermissionedFileSecretStore(root, { explicitlyAllowed: false }),
     ).rejects.toMatchObject({ code: "protected_store_unavailable" });
   });
+
+  it.runIf(process.platform !== "win32")(
+    "uses the permissioned fallback only after an explicit OS-store unavailability",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "ryco-protected-store-selected-"));
+      const unavailable = () =>
+        Promise.reject(new ProtectedSecretStoreError("protected_store_unavailable"));
+      await expect(
+        makeProtectedSecretStore({
+          service: "dev.ryco.node",
+          fileRoot: root,
+          allowFileFallback: false,
+          makeOsStore: unavailable,
+        }),
+      ).rejects.toMatchObject({ code: "protected_store_unavailable" });
+      const selected = await makeProtectedSecretStore({
+        service: "dev.ryco.node",
+        fileRoot: root,
+        allowFileFallback: true,
+        makeOsStore: unavailable,
+      });
+      expect(selected.backend).toBe("permissioned-file");
+    },
+  );
 
   it.runIf(process.platform !== "win32")(
     "creates permissioned files, survives restart, and deletes cleanly",

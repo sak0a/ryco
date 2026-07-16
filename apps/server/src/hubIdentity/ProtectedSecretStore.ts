@@ -329,3 +329,23 @@ export async function makeOsProtectedSecretStore(service: string): Promise<Prote
     return fail("protected_store_unavailable");
   }
 }
+
+export async function makeProtectedSecretStore(options: {
+  readonly service: string;
+  readonly fileRoot: string;
+  readonly allowFileFallback: boolean;
+  readonly makeOsStore?: (service: string) => Promise<ProtectedSecretStore>;
+}): Promise<ProtectedSecretStore> {
+  try {
+    return await (options.makeOsStore ?? makeOsProtectedSecretStore)(options.service);
+  } catch (error: unknown) {
+    if (
+      !options.allowFileFallback ||
+      !(error instanceof ProtectedSecretStoreError) ||
+      error.code !== "protected_store_unavailable"
+    ) {
+      throw error;
+    }
+  }
+  return makePermissionedFileSecretStore(options.fileRoot, { explicitlyAllowed: true });
+}
