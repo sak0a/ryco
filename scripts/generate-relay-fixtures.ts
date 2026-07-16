@@ -155,21 +155,23 @@ function buildFixtureSources(): readonly FixtureSource[] {
       ...version,
       limits: RELAY_INITIAL_LIMITS,
     }),
-    validFixture("channel-open", "Valid channel.open frame", {
+    validFixture("channel-open", "Valid protocol 1.2 authorized channel.open frame", {
       type: "channel.open",
       ...version,
       channelId,
+      capability: "ryco.rpc",
+      effectiveRole: "operator",
     }),
     validFixture("channel-accept", "Valid channel.accept frame", {
       type: "channel.accept",
       ...version,
       channelId,
     }),
-    validFixture("channel-reject", "Valid channel.reject frame with v1.1 retry metadata", {
+    validFixture("channel-reject", "Valid protocol 1.2 channel rejection", {
       type: "channel.reject",
       ...version,
       channelId,
-      reason: "rate_limited",
+      reason: "channel_rejected",
       retryAfterMs: 5_000,
     }),
     validFixture("data", "Valid opaque binary data frame", {
@@ -189,11 +191,11 @@ function buildFixtureSources(): readonly FixtureSource[] {
       ...version,
       channelId,
     }),
-    validFixture("channel-close", "Valid channel.close frame", {
+    validFixture("channel-close", "Valid protocol 1.2 revoked channel close", {
       type: "channel.close",
       ...version,
       channelId,
-      reason: "server_draining",
+      reason: "revoked",
     }),
     validFixture("ping", "Valid heartbeat ping frame", {
       type: "ping",
@@ -210,7 +212,11 @@ function buildFixtureSources(): readonly FixtureSource[] {
       ...version,
       code: "protocol_unsupported",
       fatal: true,
-      supported: { protocolMajor: 1, minimumMinor: 0, maximumMinor: 1 },
+      supported: {
+        protocolMajor: RELAY_PROTOCOL_MAJOR,
+        minimumMinor: RELAY_PROTOCOL_MINIMUM_MINOR,
+        maximumMinor: RELAY_PROTOCOL_MINOR,
+      },
     }),
     {
       path: "valid/older-minor-channel-open.cbor",
@@ -223,6 +229,16 @@ function buildFixtureSources(): readonly FixtureSource[] {
       }),
     },
     {
+      path: "valid/older-minor-one-channel-open.cbor",
+      purpose: "Compatible protocol 1.1 channel without authorization metadata",
+      bytes: encodeFrame({
+        type: "channel.open",
+        protocolMajor: 1,
+        protocolMinor: 1,
+        channelId,
+      }),
+    },
+    {
       path: "valid/future-optional-channel-open.cbor",
       purpose: "Known frame with a canonical future optional field",
       bytes: encodeRaw({
@@ -230,6 +246,8 @@ function buildFixtureSources(): readonly FixtureSource[] {
         protocolMajor: 1,
         protocolMinor: 7,
         channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "owner",
         futureCapability: { enabled: true, generation: 2 },
       }),
     },
@@ -300,13 +318,51 @@ function buildFixtureSources(): readonly FixtureSource[] {
         type: "channel.open",
         ...version,
         channelId: `ch_${"c".repeat(23)}`,
+        capability: "ryco.rpc",
+        effectiveRole: "operator",
       }),
       expectedError: "invalid_frame",
     },
     {
       path: "invalid/missing-required-field.cbor",
       purpose: "channel.open frame missing channelId",
-      bytes: encodeRaw({ type: "channel.open", ...version }),
+      bytes: encodeRaw({
+        type: "channel.open",
+        ...version,
+        capability: "ryco.rpc",
+        effectiveRole: "operator",
+      }),
+      expectedError: "invalid_frame",
+    },
+    {
+      path: "invalid/missing-channel-authorization.cbor",
+      purpose: "Protocol 1.2 channel.open without required authorization metadata",
+      bytes: encodeRaw({ type: "channel.open", ...version, channelId }),
+      expectedError: "invalid_frame",
+    },
+    {
+      path: "invalid/channel-authorization-on-minor-one.cbor",
+      purpose: "Protocol 1.1 channel.open using protocol 1.2 authorization metadata",
+      bytes: encodeRaw({
+        type: "channel.open",
+        protocolMajor: 1,
+        protocolMinor: 1,
+        channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "operator",
+      }),
+      expectedError: "invalid_frame",
+    },
+    {
+      path: "invalid/minor-two-close-reason-on-minor-one.cbor",
+      purpose: "Protocol 1.1 channel.close using a protocol 1.2 close reason",
+      bytes: encodeRaw({
+        type: "channel.close",
+        protocolMajor: 1,
+        protocolMinor: 1,
+        channelId,
+        reason: "revoked",
+      }),
       expectedError: "invalid_frame",
     },
     {

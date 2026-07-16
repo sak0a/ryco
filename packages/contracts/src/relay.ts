@@ -1,8 +1,9 @@
 import { Schema } from "effect";
 
 export const RELAY_PROTOCOL_MAJOR = 1 as const;
-export const RELAY_PROTOCOL_MINOR = 1 as const;
+export const RELAY_PROTOCOL_MINOR = 2 as const;
 export const RELAY_PROTOCOL_MINIMUM_MINOR = 0 as const;
+export const RELAY_AUTHORIZED_CHANNEL_MINOR = 2 as const;
 
 export const RELAY_MAX_CONTROL_FRAME_BYTES = 256 * 1_024;
 export const RELAY_MAX_DATA_CHUNK_BYTES = 256 * 1_024;
@@ -38,6 +39,21 @@ export const RELAY_CLOSE_REASONS = [
   "rate_limited",
   "server_draining",
   "internal_error",
+  "authentication_timeout",
+  "authorization_failed",
+  "channel_rejected",
+  "connection_replaced",
+  "transfer_limit",
+  "revoked",
+] as const;
+
+export const RELAY_MINOR_2_CLOSE_REASONS = [
+  "authentication_timeout",
+  "authorization_failed",
+  "channel_rejected",
+  "connection_replaced",
+  "transfer_limit",
+  "revoked",
 ] as const;
 
 export const RELAY_FRAME_TYPES = [
@@ -93,6 +109,12 @@ export type RelayFrameType = typeof RelayFrameType.Type;
 
 export const RelayCloseReason = Schema.Literals(RELAY_CLOSE_REASONS);
 export type RelayCloseReason = typeof RelayCloseReason.Type;
+
+export const RelayCapability = Schema.Literal("ryco.rpc");
+export type RelayCapability = typeof RelayCapability.Type;
+
+export const RelayEffectiveRole = Schema.Literals(["viewer", "operator", "owner"]);
+export type RelayEffectiveRole = typeof RelayEffectiveRole.Type;
 
 export const RelayProtocolErrorCode = Schema.Literals(RELAY_PROTOCOL_ERROR_CODES);
 export type RelayProtocolErrorCode = typeof RelayProtocolErrorCode.Type;
@@ -187,6 +209,33 @@ const minorVersionSupportsRetryAfter = (input: {
     ? undefined
     : "retryAfterMs requires protocol minor version 1 or newer";
 
+const minor2CloseReasons = new Set<string>(RELAY_MINOR_2_CLOSE_REASONS);
+
+const minorVersionSupportsCloseReason = (
+  protocolMinor: number,
+  reason: RelayProtocolErrorCode | RelayCloseReason | undefined,
+) =>
+  reason === undefined || !minor2CloseReasons.has(reason) || protocolMinor >= 2
+    ? undefined
+    : "close reason requires protocol minor version 2 or newer";
+
+const minorVersionSupportsAuthorizedChannel = (input: {
+  readonly protocolMinor: number;
+  readonly capability?: RelayCapability | undefined;
+  readonly effectiveRole?: RelayEffectiveRole | undefined;
+}) => {
+  const hasCapability = input.capability !== undefined;
+  const hasEffectiveRole = input.effectiveRole !== undefined;
+  if (input.protocolMinor >= RELAY_AUTHORIZED_CHANNEL_MINOR) {
+    return hasCapability && hasEffectiveRole
+      ? undefined
+      : "protocol minor version 2 or newer requires channel authorization metadata";
+  }
+  return !hasCapability && !hasEffectiveRole
+    ? undefined
+    : "channel authorization metadata requires protocol minor version 2 or newer";
+};
+
 export const RelayNodeAuthHandshake = Schema.Struct({
   type: Schema.Literal("auth"),
   peer: Schema.Literal("node"),
@@ -219,7 +268,9 @@ export const RelayChannelOpenFrame = Schema.Struct({
   type: Schema.Literal("channel.open"),
   ...ProtocolFields,
   channelId: RelayChannelId,
-});
+  capability: Schema.optionalKey(RelayCapability),
+  effectiveRole: Schema.optionalKey(RelayEffectiveRole),
+}).check(Schema.makeFilter(minorVersionSupportsAuthorizedChannel));
 export type RelayChannelOpenFrame = typeof RelayChannelOpenFrame.Type;
 
 export const RelayChannelAcceptFrame = Schema.Struct({
@@ -235,7 +286,13 @@ export const RelayChannelRejectFrame = Schema.Struct({
   channelId: RelayChannelId,
   reason: RelayCloseReason,
   retryAfterMs: Schema.optionalKey(RetryAfterMs),
-}).check(Schema.makeFilter(minorVersionSupportsRetryAfter));
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      minorVersionSupportsRetryAfter(input) ??
+      minorVersionSupportsCloseReason(input.protocolMinor, input.reason),
+  ),
+);
 export type RelayChannelRejectFrame = typeof RelayChannelRejectFrame.Type;
 
 export const RelayDataFrame = Schema.Struct({
@@ -266,7 +323,9 @@ export const RelayChannelCloseFrame = Schema.Struct({
   ...ProtocolFields,
   channelId: RelayChannelId,
   reason: Schema.optionalKey(RelayCloseReason),
-});
+}).check(
+  Schema.makeFilter((input) => minorVersionSupportsCloseReason(input.protocolMinor, input.reason)),
+);
 export type RelayChannelCloseFrame = typeof RelayChannelCloseFrame.Type;
 
 export const RelayPingFrame = Schema.Struct({
@@ -314,6 +373,10 @@ export const RelayErrorFrame = Schema.Struct({
     const retryAfterIssue = minorVersionSupportsRetryAfter(input);
     if (retryAfterIssue !== undefined) {
       return retryAfterIssue;
+    }
+    const closeReasonIssue = minorVersionSupportsCloseReason(input.protocolMinor, input.code);
+    if (closeReasonIssue !== undefined) {
+      return closeReasonIssue;
     }
     if (input.code === "protocol_unsupported") {
       if (!input.fatal) {

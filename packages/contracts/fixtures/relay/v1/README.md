@@ -24,8 +24,9 @@ timestamps or randomness. Tests generate the complete corpus in memory and compa
 byte with the committed files. They never update fixtures automatically.
 
 Review every manifest digest and binary change before committing. Compatible minor versions may
-add only optional fields. Breaking shape or semantic changes require a new protocol major and a
-new fixture directory.
+add optional fields or fields that become required only after both peers negotiate that minor.
+Breaking meaning or an incompatible frame class requires a new protocol major and a new fixture
+directory.
 
 Consumers must verify the pinned Ryco version or commit and the manifest digests. Copying these
 files into another repository without immutable provenance and integrity verification is not a

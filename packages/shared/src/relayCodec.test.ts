@@ -16,7 +16,7 @@ import {
 } from "./relayCodec.ts";
 
 const PROPERTY_SEED = 0x5259_434f;
-const version = { protocolMajor: 1, protocolMinor: 1 } as const;
+const version = { protocolMajor: 1, protocolMinor: 2 } as const;
 const nodeId = `node_${"n".repeat(22)}`;
 const channelId = `ch_${"c".repeat(22)}`;
 const heartbeatNonce = Uint8Array.from([0, 1, 2, 3, 4, 5, 6, 7]);
@@ -37,7 +37,13 @@ const validFrames = [
     relayTicket: new Uint8Array(32).fill(0x33),
   },
   { type: "ready", ...version, limits: RELAY_INITIAL_LIMITS },
-  { type: "channel.open", ...version, channelId },
+  {
+    type: "channel.open",
+    ...version,
+    channelId,
+    capability: "ryco.rpc",
+    effectiveRole: "operator",
+  },
   { type: "channel.accept", ...version, channelId },
   {
     type: "channel.reject",
@@ -81,6 +87,10 @@ describe("relay codec", () => {
   });
 
   it("negotiates current, older compatible, and future compatible minor versions", () => {
+    expect(unwrap(negotiateRelayVersion({ protocolMajor: 1, protocolMinor: 2 }))).toEqual({
+      protocolMajor: 1,
+      protocolMinor: 2,
+    });
     expect(unwrap(negotiateRelayVersion({ protocolMajor: 1, protocolMinor: 1 }))).toEqual({
       protocolMajor: 1,
       protocolMinor: 1,
@@ -91,7 +101,7 @@ describe("relay codec", () => {
     });
     expect(unwrap(negotiateRelayVersion({ protocolMajor: 1, protocolMinor: 17 }))).toEqual({
       protocolMajor: 1,
-      protocolMinor: 1,
+      protocolMinor: 2,
     });
 
     const unsupported = negotiateRelayVersion({ protocolMajor: 2, protocolMinor: 0 });
@@ -99,7 +109,7 @@ describe("relay codec", () => {
       ok: false,
       error: {
         code: "protocol_unsupported",
-        supported: { protocolMajor: 1, minimumMinor: 0, maximumMinor: 1 },
+        supported: { protocolMajor: 1, minimumMinor: 0, maximumMinor: 2 },
       },
     });
     expect(makeProtocolUnsupportedErrorFrame()).toMatchObject({
@@ -123,6 +133,8 @@ describe("relay codec", () => {
         protocolMajor: 1,
         protocolMinor: 7,
         channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "owner",
         futureCapability: { enabled: true, generation: 2 },
       },
       rfc8949EncodeOptions,
@@ -134,6 +146,8 @@ describe("relay codec", () => {
       protocolMajor: 1,
       protocolMinor: 7,
       channelId,
+      capability: "ryco.rpc",
+      effectiveRole: "owner",
     });
     expect("futureCapability" in decoded).toBe(false);
   });
@@ -336,6 +350,8 @@ describe("relay codec deterministic properties", () => {
             type: "channel.open",
             ...version,
             channelId,
+            capability: "ryco.rpc",
+            effectiveRole: "viewer",
             [`future${generation}`]: generation,
           },
           rfc8949EncodeOptions,
