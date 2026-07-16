@@ -15,4 +15,10 @@ describe("RPC access policy", () => {
       "no explicit access classification",
     );
   });
+
+  it("preserves owner-only statistics and legacy message-search boundaries", () => {
+    expect(rpcAccessFor(WS_METHODS.serverGetStatistics)).toBe("owner");
+    expect(rpcAccessFor(WS_METHODS.searchThreadMessages)).toBe("owner");
+    expect(rpcAccessFor(ORCHESTRATION_WS_METHODS.searchThreadMessages)).toBe("viewer");
+  });
 });

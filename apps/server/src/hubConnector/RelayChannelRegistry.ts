@@ -57,6 +57,7 @@ export class RelayChannelRegistry {
   readonly #sendQueue: RelaySendQueue;
   readonly #factory: RelayChannelSessionFactory;
   readonly #onFatal: () => void;
+  readonly #onOutboundReady: () => void;
   readonly #channels = new Map<string, ChannelEntry>();
   readonly #preparing = new Set<string>();
   #stopping = false;
@@ -66,11 +67,13 @@ export class RelayChannelRegistry {
     readonly sendQueue: RelaySendQueue;
     readonly factory: RelayChannelSessionFactory;
     readonly onFatal?: () => void;
+    readonly onOutboundReady?: () => void;
   }) {
     this.#limits = options.limits;
     this.#sendQueue = options.sendQueue;
     this.#factory = options.factory;
     this.#onFatal = options.onFatal ?? (() => undefined);
+    this.#onOutboundReady = options.onOutboundReady ?? (() => undefined);
   }
 
   get size(): number {
@@ -210,6 +213,7 @@ export class RelayChannelRegistry {
           if (accepted) {
             outputSequence += 1;
             entry.outboundSequence = outputSequence;
+            this.#onOutboundReady();
           } else {
             queueMicrotask(() => {
               void this.closeChannel(frame.channelId, "slow_consumer").catch(this.#onFatal);
@@ -308,5 +312,6 @@ export class RelayChannelRegistry {
 
   #enqueueControl(frame: RelayControlFrame): void {
     if (!this.#sendQueue.enqueueControl(frame)) throw new RelayChannelQueueError();
+    this.#onOutboundReady();
   }
 }

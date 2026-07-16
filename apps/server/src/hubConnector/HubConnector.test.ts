@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   RELAY_INITIAL_LIMITS,
+  type RelayChannelId,
   type RelayFrame,
   type RelayNodeAuthHandshake,
 } from "@ryco/contracts/relay";
@@ -232,6 +233,67 @@ describe("HubConnector", () => {
     expect(connector.status().state).toBe("disabled");
     expect(clock.timers.size).toBe(0);
     expect([...sockets[0]!.listeners.values()].every((set) => set.size === 0)).toBe(true);
+  });
+
+  it("flushes asynchronous channel output without waiting for another inbound frame", async () => {
+    const socket = new FakeSocket();
+    const channelId = `ch_${"W".repeat(22)}` as RelayChannelId;
+    let sendChannelBytes: ((bytes: Uint8Array) => boolean) | undefined;
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity(),
+      transport: { open: () => socket },
+      channels: {
+        open: async ({ send }) => {
+          sendChannelBytes = send;
+          return {
+            receive: async () => true,
+            queuedBytes: async () => 0,
+            close: async () => undefined,
+          };
+        },
+      },
+      enrollmentMetadata,
+    });
+    const starting = connector.start();
+    await settle();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await starting;
+    socket.emit("message", {
+      data: encoded({
+        type: "channel.open",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "operator",
+      }),
+    } as MessageEvent);
+    await settle();
+    expect(decodeRelayFrame(socket.sent.at(-1)!)).toMatchObject({
+      ok: true,
+      value: { type: "channel.accept", channelId },
+    });
+
+    expect(sendChannelBytes?.(Uint8Array.of(0, 255, 7))).toBe(true);
+    await Promise.resolve();
+    const output = decodeRelayFrame(socket.sent.at(-1)!);
+    expect(output).toMatchObject({
+      ok: true,
+      value: { type: "data", channelId, sequence: 0 },
+    });
+    expect(output.ok && output.value.type === "data" && output.value.payload).toEqual(
+      Uint8Array.of(0, 255, 7),
+    );
+    await connector.stop();
   });
 
   it("times out a missing heartbeat and resets backoff only after stability", async () => {

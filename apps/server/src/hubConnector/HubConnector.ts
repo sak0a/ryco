@@ -306,6 +306,11 @@ export class HubConnector {
         onFatal: () => {
           void this.#handleFailure(generation, "internal_error");
         },
+        onOutboundReady: () => {
+          if (!this.#state.isCurrent(generation) || this.#stopping) return;
+          this.#flushAndScheduleDrain(generation);
+          this.#state.updateOnlineMetrics(registry.size, sendQueue.ownedBytes);
+        },
       });
       this.#sendQueue = sendQueue;
       this.#registry = registry;

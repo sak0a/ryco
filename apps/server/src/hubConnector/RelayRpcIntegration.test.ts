@@ -69,6 +69,7 @@ describe("relay RPC integration", () => {
     const registry = new RelayChannelRegistry({
       limits,
       sendQueue,
+      onOutboundReady: () => sendQueue.flush(),
       factory: {
         open: async ({ send }) => {
           const scope = await Effect.runPromise(Scope.make("sequential"));
@@ -109,10 +110,9 @@ describe("relay RPC integration", () => {
       sequence: 0 as never,
       payload: request,
     });
-    for (let turn = 0; turn < 100 && sendQueue.queuedBytes === 0; turn += 1) {
+    for (let turn = 0; turn < 100 && sent.length < 2; turn += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    sendQueue.flush();
     const responseFrame = decode(sent.at(-1)!);
     expect(responseFrame.type).toBe("data");
     if (responseFrame.type !== "data") throw new Error("expected relay data response");
