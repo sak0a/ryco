@@ -33,6 +33,8 @@ import {
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
+import { hubConnectorRoutesLayer } from "./hubConnector/http.ts";
+import { HubConnectorService } from "./hubConnector/HubConnectorLive.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
@@ -144,6 +146,68 @@ const withLiveProjectCliServer = <A, E, R>(baseDir: string, run: () => Effect.Ef
             config,
             port: address.port,
           }),
+        });
+        return yield* run();
+      }).pipe(Effect.provide(Layer.mergeAll(appLayer, NodeServices.layer))),
+    );
+  });
+
+const withLiveHubCliServer = <A, E, R>(baseDir: string, run: () => Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const config = yield* makeCliTestServerConfig(baseDir);
+    const waitingStatus = {
+      state: "awaiting_approval" as const,
+      transitionedAt: "1970-01-01T00:00:00.000Z",
+      activeChannels: 0,
+      queuedBytes: 0,
+    };
+    const appLayer = HttpRouter.serve(hubConnectorRoutesLayer, {
+      disableListenLog: true,
+      disableLogger: true,
+    }).pipe(
+      Layer.provide(
+        Layer.succeed(HubConnectorService, {
+          status: () => waitingStatus,
+          resume: async () => undefined,
+          enroll: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 1_100));
+            return {
+              status: waitingStatus,
+              deviceCode: "ABCD-EFGH",
+              expiresAt: "1970-01-01T00:10:00.000Z",
+              pollIntervalMs: 5_000,
+            };
+          },
+          cancelEnrollment: async () => ({ ...waitingStatus, state: "enrolling" as const }),
+          stop: async () => undefined,
+        }),
+      ),
+      Layer.provideMerge(
+        ServerAuthLive.pipe(
+          Layer.provideMerge(SqlitePersistenceLayerLive),
+          Layer.provide(ServerSecretStoreLive),
+        ),
+      ),
+      Layer.provideMerge(
+        NodeHttpServer.layer(NodeHttp.createServer, {
+          host: "127.0.0.1",
+          port: 0,
+        }),
+      ),
+      Layer.provideMerge(NodeServices.layer),
+      Layer.provide(Layer.succeed(ServerConfig, config)),
+    );
+
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        const server = yield* HttpServer.HttpServer;
+        const address = server.address;
+        if (typeof address === "string" || !("port" in address)) {
+          assert.fail(`Expected TCP address, got ${address}`);
+        }
+        yield* persistServerRuntimeState({
+          path: config.serverRuntimeStatePath,
+          state: makePersistedServerRuntimeState({ config, port: address.port }),
         });
         return yield* run();
       }).pipe(Effect.provide(Layer.mergeAll(appLayer, NodeServices.layer))),
@@ -324,6 +388,37 @@ it.layer(NodeServices.layer)("cli log-level parsing", (it) => {
           );
           assert.isTrue(addedProject !== undefined);
           assert.equal(addedProject?.title, "Live Project");
+        }),
+      );
+    }),
+  );
+
+  it.effect("uses ephemeral local authorization for Hub status, enrollment, and cancellation", () =>
+    Effect.gen(function* () {
+      const baseDir = mkdtempSync(join(tmpdir(), "ryco-cli-hub-live-test-"));
+      yield* withLiveHubCliServer(baseDir, () =>
+        Effect.gen(function* () {
+          const statusOutput = yield* captureStdout(
+            runCli(["hub", "status", "--base-dir", baseDir, "--json"]),
+          );
+          const status = JSON.parse(statusOutput.output) as { readonly state?: string };
+          assert.equal(status.state, "awaiting_approval");
+
+          const enrollmentOutput = yield* captureStdout(
+            runCli(["hub", "enroll", "--base-dir", baseDir, "--json"]),
+          );
+          const enrollment = JSON.parse(enrollmentOutput.output) as {
+            readonly deviceCode?: string;
+          };
+          assert.equal(enrollment.deviceCode, "ABCD-EFGH");
+
+          const cancellationOutput = yield* captureStdout(
+            runCli(["hub", "cancel", "--base-dir", baseDir, "--json"]),
+          );
+          const cancellation = JSON.parse(cancellationOutput.output) as {
+            readonly state?: string;
+          };
+          assert.equal(cancellation.state, "enrolling");
         }),
       );
     }),

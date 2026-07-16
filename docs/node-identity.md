@@ -2,8 +2,9 @@
 
 Ryco provides reusable primitives for a node to create and protect a local signing identity,
 enroll that public identity with an HTTPS service, prove possession of its private key, and rotate
-the key safely. These modules do not implement an outbound connector, relay channel bridge,
-account policy, grants, or service-side administration.
+the key safely. The [outbound Hub connector](./hub-connector.md) composes these public primitives
+with the canonical relay protocol. The identity modules themselves do not implement relay channel
+bridging, account policy, grants, or service-side administration.
 
 ## Cryptography and identifiers
 

@@ -16,6 +16,8 @@ import {
 import { ProjectAvatarStoreLive } from "./project/Layers/ProjectAvatarStore.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
+import { HubConnectorLive } from "./hubConnector/HubConnectorLive.ts";
+import { hubConnectorRoutesLayer } from "./hubConnector/http.ts";
 import { OpenLive } from "./open.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
@@ -362,6 +364,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   legacyServerEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
+  hubConnectorRoutesLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));
 
 export const makeServerLayer = Layer.unwrap(
@@ -453,7 +456,7 @@ export const makeServerLayer = Layer.unwrap(
     const serverApplicationLayer = Layer.mergeAll(
       HttpRouter.serve(makeRoutesLayer, {
         disableLogger: !config.logWebSocketEvents,
-      }),
+      }).pipe(Layer.provide(HubConnectorLive)),
       httpListeningLayer,
       runtimeStateLayer,
       tailscaleServeLayer,

@@ -21,7 +21,7 @@ import {
 export const makeProviderHandlers = (ctx: WsRpcContext) => {
   const {
     ownerEffect,
-    ownerStreamEffect,
+    directOwnerStreamEffect,
     providerRegistry,
     providerMaintenanceRunner,
     keybindings,
@@ -53,9 +53,11 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
         "rpc.aggregate": "server",
       }),
     [WS_METHODS.serverGetDiagnosticsMetrics]: (_input) =>
-      observeRpcEffect(WS_METHODS.serverGetDiagnosticsMetrics, loadDiagnosticsMetrics, {
-        "rpc.aggregate": "server",
-      }),
+      observeRpcEffect(
+        WS_METHODS.serverGetDiagnosticsMetrics,
+        ownerEffect(WS_METHODS.serverGetDiagnosticsMetrics, loadDiagnosticsMetrics),
+        { "rpc.aggregate": "server" },
+      ),
     [WS_METHODS.serverGetDiagnosticsSnapshot]: (_input) =>
       observeRpcEffect(
         WS_METHODS.serverGetDiagnosticsSnapshot,
@@ -79,7 +81,10 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
     [WS_METHODS.serverUpdateProvider]: (input) =>
       observeRpcEffect(
         WS_METHODS.serverUpdateProvider,
-        providerMaintenanceRunner.updateProvider(input),
+        ownerEffect(
+          WS_METHODS.serverUpdateProvider,
+          providerMaintenanceRunner.updateProvider(input),
+        ),
         {
           "rpc.aggregate": "server",
         },
@@ -138,7 +143,10 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
     [WS_METHODS.serverListOpinionatedPlugins]: (_input) =>
       observeRpcEffect(
         WS_METHODS.serverListOpinionatedPlugins,
-        Effect.sync(() => listOpinionatedPlugins()),
+        ownerEffect(
+          WS_METHODS.serverListOpinionatedPlugins,
+          Effect.sync(() => listOpinionatedPlugins()),
+        ),
         {
           "rpc.aggregate": "server",
         },
@@ -146,21 +154,24 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
     [WS_METHODS.serverCheckOpinionatedPlugins]: (input) =>
       observeRpcEffect(
         WS_METHODS.serverCheckOpinionatedPlugins,
-        Effect.gen(function* () {
-          const settings = yield* serverSettings.getSettings.pipe(
-            Effect.mapError(toOpinionatedPluginRpcError),
-          );
-          const providers = yield* providerRegistry.getProviders;
-          return yield* Effect.tryPromise({
-            try: () =>
-              checkOpinionatedPlugins({
-                settings,
-                providers,
-                ...(input.pluginId ? { pluginId: input.pluginId } : {}),
-              }),
-            catch: toOpinionatedPluginRpcError,
-          });
-        }),
+        ownerEffect(
+          WS_METHODS.serverCheckOpinionatedPlugins,
+          Effect.gen(function* () {
+            const settings = yield* serverSettings.getSettings.pipe(
+              Effect.mapError(toOpinionatedPluginRpcError),
+            );
+            const providers = yield* providerRegistry.getProviders;
+            return yield* Effect.tryPromise({
+              try: () =>
+                checkOpinionatedPlugins({
+                  settings,
+                  providers,
+                  ...(input.pluginId ? { pluginId: input.pluginId } : {}),
+                }),
+              catch: toOpinionatedPluginRpcError,
+            });
+          }),
+        ),
         {
           "rpc.aggregate": "server",
         },
@@ -168,56 +179,73 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
     [WS_METHODS.serverInstallOpinionatedPlugin]: (input) =>
       observeRpcEffect(
         WS_METHODS.serverInstallOpinionatedPlugin,
-        Effect.gen(function* () {
-          const settings = yield* serverSettings.getSettings.pipe(
-            Effect.mapError(toOpinionatedPluginRpcError),
-          );
-          const providers = yield* providerRegistry.getProviders;
-          const result = yield* Effect.tryPromise({
-            try: () =>
-              installOpinionatedPlugin({
-                request: input,
-                settings,
-                providers,
-                cwd: config.cwd,
-              }),
-            catch: toOpinionatedPluginRpcError,
-          });
-          yield* providerRegistry.refresh().pipe(Effect.ignore);
-          return result;
-        }),
+        ownerEffect(
+          WS_METHODS.serverInstallOpinionatedPlugin,
+          Effect.gen(function* () {
+            const settings = yield* serverSettings.getSettings.pipe(
+              Effect.mapError(toOpinionatedPluginRpcError),
+            );
+            const providers = yield* providerRegistry.getProviders;
+            const result = yield* Effect.tryPromise({
+              try: () =>
+                installOpinionatedPlugin({
+                  request: input,
+                  settings,
+                  providers,
+                  cwd: config.cwd,
+                }),
+              catch: toOpinionatedPluginRpcError,
+            });
+            yield* providerRegistry.refresh().pipe(Effect.ignore);
+            return result;
+          }),
+        ),
         {
           "rpc.aggregate": "server",
         },
       ),
     [WS_METHODS.mcpListWorkspaces]: (_input) =>
-      observeRpcEffect(WS_METHODS.mcpListWorkspaces, codexMcp.listWorkspaces, {
-        "rpc.aggregate": "mcp",
-      }),
+      observeRpcEffect(
+        WS_METHODS.mcpListWorkspaces,
+        ownerEffect(WS_METHODS.mcpListWorkspaces, codexMcp.listWorkspaces),
+        { "rpc.aggregate": "mcp" },
+      ),
     [WS_METHODS.mcpListServers]: (input) =>
-      observeRpcEffect(WS_METHODS.mcpListServers, codexMcp.listServers(input), {
-        "rpc.aggregate": "mcp",
-      }),
+      observeRpcEffect(
+        WS_METHODS.mcpListServers,
+        ownerEffect(WS_METHODS.mcpListServers, codexMcp.listServers(input)),
+        { "rpc.aggregate": "mcp" },
+      ),
     [WS_METHODS.mcpUpsertServer]: (input) =>
-      observeRpcEffect(WS_METHODS.mcpUpsertServer, codexMcp.upsertServer(input), {
-        "rpc.aggregate": "mcp",
-      }),
+      observeRpcEffect(
+        WS_METHODS.mcpUpsertServer,
+        ownerEffect(WS_METHODS.mcpUpsertServer, codexMcp.upsertServer(input)),
+        { "rpc.aggregate": "mcp" },
+      ),
     [WS_METHODS.mcpSetServerEnabled]: (input) =>
-      observeRpcEffect(WS_METHODS.mcpSetServerEnabled, codexMcp.setServerEnabled(input), {
-        "rpc.aggregate": "mcp",
-      }),
+      observeRpcEffect(
+        WS_METHODS.mcpSetServerEnabled,
+        ownerEffect(WS_METHODS.mcpSetServerEnabled, codexMcp.setServerEnabled(input)),
+        { "rpc.aggregate": "mcp" },
+      ),
     [WS_METHODS.mcpRemoveServer]: (input) =>
-      observeRpcEffect(WS_METHODS.mcpRemoveServer, codexMcp.removeServer(input), {
-        "rpc.aggregate": "mcp",
-      }),
+      observeRpcEffect(
+        WS_METHODS.mcpRemoveServer,
+        ownerEffect(WS_METHODS.mcpRemoveServer, codexMcp.removeServer(input)),
+        { "rpc.aggregate": "mcp" },
+      ),
     [WS_METHODS.mcpReloadServers]: (input) =>
-      observeRpcEffect(WS_METHODS.mcpReloadServers, codexMcp.reloadServers(input), {
-        "rpc.aggregate": "mcp",
-      }),
+      observeRpcEffect(
+        WS_METHODS.mcpReloadServers,
+        ownerEffect(WS_METHODS.mcpReloadServers, codexMcp.reloadServers(input)),
+        { "rpc.aggregate": "mcp" },
+      ),
     [WS_METHODS.mcpStartOauthLogin]: (input) =>
-      observeRpcEffect(WS_METHODS.mcpStartOauthLogin, codexMcp.startOauthLogin(input), {
-        "rpc.aggregate": "mcp",
-      }),
+      observeRpcEffect(
+        WS_METHODS.mcpStartOauthLogin,
+        ownerEffect(WS_METHODS.mcpStartOauthLogin, codexMcp.startOauthLogin(input)),
+        { "rpc.aggregate": "mcp" },
+      ),
     [WS_METHODS.textGenerationGenerateIssueContent]: (input) =>
       observeRpcEffect(
         WS_METHODS.textGenerationGenerateIssueContent,
@@ -290,41 +318,59 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
         },
       ),
     [WS_METHODS.atlassianListConnections]: (_input) =>
-      observeRpcEffect(WS_METHODS.atlassianListConnections, atlassian.listConnections, {
-        "rpc.aggregate": "atlassian",
-      }),
+      observeRpcEffect(
+        WS_METHODS.atlassianListConnections,
+        ownerEffect(WS_METHODS.atlassianListConnections, atlassian.listConnections),
+        { "rpc.aggregate": "atlassian" },
+      ),
     [WS_METHODS.atlassianStartOAuth]: (input) =>
-      observeRpcEffect(WS_METHODS.atlassianStartOAuth, atlassian.startOAuth(input), {
-        "rpc.aggregate": "atlassian",
-      }),
+      observeRpcEffect(
+        WS_METHODS.atlassianStartOAuth,
+        ownerEffect(WS_METHODS.atlassianStartOAuth, atlassian.startOAuth(input)),
+        { "rpc.aggregate": "atlassian" },
+      ),
     [WS_METHODS.atlassianDisconnect]: (input) =>
       observeRpcEffect(
         WS_METHODS.atlassianDisconnect,
-        atlassian.disconnect(input).pipe(Effect.as({})),
+        ownerEffect(
+          WS_METHODS.atlassianDisconnect,
+          atlassian.disconnect(input).pipe(Effect.as({})),
+        ),
         {
           "rpc.aggregate": "atlassian",
         },
       ),
     [WS_METHODS.atlassianRefresh]: (input) =>
-      observeRpcEffect(WS_METHODS.atlassianRefresh, atlassian.refresh(input), {
-        "rpc.aggregate": "atlassian",
-      }),
+      observeRpcEffect(
+        WS_METHODS.atlassianRefresh,
+        ownerEffect(WS_METHODS.atlassianRefresh, atlassian.refresh(input)),
+        { "rpc.aggregate": "atlassian" },
+      ),
     [WS_METHODS.atlassianListResources]: (input) =>
-      observeRpcEffect(WS_METHODS.atlassianListResources, atlassian.listResources(input), {
-        "rpc.aggregate": "atlassian",
-      }),
+      observeRpcEffect(
+        WS_METHODS.atlassianListResources,
+        ownerEffect(WS_METHODS.atlassianListResources, atlassian.listResources(input)),
+        { "rpc.aggregate": "atlassian" },
+      ),
     [WS_METHODS.atlassianGetProjectLink]: (input) =>
-      observeRpcEffect(WS_METHODS.atlassianGetProjectLink, atlassian.getProjectLink(input), {
-        "rpc.aggregate": "atlassian",
-      }),
+      observeRpcEffect(
+        WS_METHODS.atlassianGetProjectLink,
+        ownerEffect(WS_METHODS.atlassianGetProjectLink, atlassian.getProjectLink(input)),
+        { "rpc.aggregate": "atlassian" },
+      ),
     [WS_METHODS.atlassianSaveProjectLink]: (input) =>
-      observeRpcEffect(WS_METHODS.atlassianSaveProjectLink, atlassian.saveProjectLink(input), {
-        "rpc.aggregate": "atlassian",
-      }),
+      observeRpcEffect(
+        WS_METHODS.atlassianSaveProjectLink,
+        ownerEffect(WS_METHODS.atlassianSaveProjectLink, atlassian.saveProjectLink(input)),
+        { "rpc.aggregate": "atlassian" },
+      ),
     [WS_METHODS.atlassianSaveManualBitbucketToken]: (input) =>
       observeRpcEffect(
         WS_METHODS.atlassianSaveManualBitbucketToken,
-        atlassian.saveManualBitbucketToken(input),
+        ownerEffect(
+          WS_METHODS.atlassianSaveManualBitbucketToken,
+          atlassian.saveManualBitbucketToken(input),
+        ),
         {
           "rpc.aggregate": "atlassian",
         },
@@ -332,7 +378,7 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
     [WS_METHODS.atlassianSaveManualJiraToken]: (input) =>
       observeRpcEffect(
         WS_METHODS.atlassianSaveManualJiraToken,
-        atlassian.saveManualJiraToken(input),
+        ownerEffect(WS_METHODS.atlassianSaveManualJiraToken, atlassian.saveManualJiraToken(input)),
         {
           "rpc.aggregate": "atlassian",
         },
@@ -354,25 +400,33 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
         "rpc.aggregate": "work-items",
       }),
     [WS_METHODS.workItemsAddComment]: (input) =>
-      observeRpcEffect(WS_METHODS.workItemsAddComment, workItems.addComment(input), {
-        "rpc.aggregate": "work-items",
-      }),
+      observeRpcEffect(
+        WS_METHODS.workItemsAddComment,
+        ownerEffect(WS_METHODS.workItemsAddComment, workItems.addComment(input)),
+        { "rpc.aggregate": "work-items" },
+      ),
     [WS_METHODS.workItemsEditComment]: (input) =>
-      observeRpcEffect(WS_METHODS.workItemsEditComment, workItems.editComment(input), {
-        "rpc.aggregate": "work-items",
-      }),
+      observeRpcEffect(
+        WS_METHODS.workItemsEditComment,
+        ownerEffect(WS_METHODS.workItemsEditComment, workItems.editComment(input)),
+        { "rpc.aggregate": "work-items" },
+      ),
     [WS_METHODS.workItemsUpdate]: (input) =>
-      observeRpcEffect(WS_METHODS.workItemsUpdate, workItems.update(input), {
-        "rpc.aggregate": "work-items",
-      }),
+      observeRpcEffect(
+        WS_METHODS.workItemsUpdate,
+        ownerEffect(WS_METHODS.workItemsUpdate, workItems.update(input)),
+        { "rpc.aggregate": "work-items" },
+      ),
     [WS_METHODS.workItemsListTransitions]: (input) =>
       observeRpcEffect(WS_METHODS.workItemsListTransitions, workItems.listTransitions(input), {
         "rpc.aggregate": "work-items",
       }),
     [WS_METHODS.workItemsTransition]: (input) =>
-      observeRpcEffect(WS_METHODS.workItemsTransition, workItems.transition(input), {
-        "rpc.aggregate": "work-items",
-      }),
+      observeRpcEffect(
+        WS_METHODS.workItemsTransition,
+        ownerEffect(WS_METHODS.workItemsTransition, workItems.transition(input)),
+        { "rpc.aggregate": "work-items" },
+      ),
     [WS_METHODS.subscribeServerConfig]: (_input) =>
       observeRpcStreamEffect(
         WS_METHODS.subscribeServerConfig,
@@ -442,7 +496,7 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
     [WS_METHODS.subscribeAuthAccess]: (_input) =>
       observeRpcStreamEffect(
         WS_METHODS.subscribeAuthAccess,
-        ownerStreamEffect(
+        directOwnerStreamEffect(
           WS_METHODS.subscribeAuthAccess,
           Effect.gen(function* () {
             const initialSnapshot = yield* loadAuthAccessSnapshot();

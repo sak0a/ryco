@@ -122,6 +122,7 @@ const makeDiagnosticsConfig = (tempDir: string): ServerConfigShape => {
     anonymousIdPath: path.join(tempDir, "anonymous-id"),
     environmentIdPath: path.join(tempDir, "environment-id"),
     serverRuntimeStatePath: path.join(tempDir, "server-runtime.json"),
+    hubIdentityStatePath: path.join(tempDir, "hub-identity.json"),
     secretsDir: path.join(tempDir, "secrets"),
   } satisfies ServerConfigShape;
   fs.writeFileSync(config.serverTracePath, "");

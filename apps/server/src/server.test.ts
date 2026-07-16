@@ -140,6 +140,10 @@ import {
   type JiraWorkItemServiceShape,
 } from "./atlassian/JiraWorkItemService.ts";
 import { TextGeneration, type TextGenerationShape } from "./textGeneration/TextGeneration.ts";
+import {
+  HubConnectorService,
+  type HubConnectorServiceShape,
+} from "./hubConnector/HubConnectorLive.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -439,6 +443,7 @@ const buildAppUnderTest = (options?: {
     jiraWorkItemService?: Partial<JiraWorkItemServiceShape>;
     textGeneration?: Partial<TextGenerationShape>;
     diagnostics?: Partial<DiagnosticsShape>;
+    hubConnector?: Partial<HubConnectorServiceShape>;
   };
 }) =>
   Effect.gen(function* () {
@@ -609,14 +614,33 @@ const buildAppUnderTest = (options?: {
       disableLogger: true,
     }).pipe(
       Layer.provide(
-        Layer.mock(Keybindings)({
-          loadConfigState: Effect.succeed({
-            keybindings: [],
-            issues: [],
+        Layer.mergeAll(
+          Layer.succeed(HubConnectorService, {
+            status: () => ({
+              state: "disabled",
+              transitionedAt: TEST_EPOCH.toString(),
+              activeChannels: 0,
+              queuedBytes: 0,
+            }),
+            resume: async () => undefined,
+            enroll: async () => {
+              throw new Error("not implemented in test");
+            },
+            cancelEnrollment: async () => {
+              throw new Error("not implemented in test");
+            },
+            stop: async () => undefined,
+            ...options?.layers?.hubConnector,
           }),
-          streamChanges: Stream.empty,
-          ...options?.layers?.keybindings,
-        }),
+          Layer.mock(Keybindings)({
+            loadConfigState: Effect.succeed({
+              keybindings: [],
+              issues: [],
+            }),
+            streamChanges: Stream.empty,
+            ...options?.layers?.keybindings,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ProviderRegistry)({
@@ -1344,6 +1368,77 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(sessionBody.authenticated, true);
         assert.equal(sessionBody.sessionMethod, "bearer-session-token");
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("keeps Hub status and enrollment controls on the authenticated local listener", () =>
+    Effect.gen(function* () {
+      let enrollCalls = 0;
+      let cancelCalls = 0;
+      const status = {
+        state: "awaiting_approval" as const,
+        transitionedAt: "1970-01-01T00:00:00.000Z",
+        activeChannels: 0,
+        queuedBytes: 0,
+      };
+      yield* buildAppUnderTest({
+        layers: {
+          hubConnector: {
+            status: () => status,
+            enroll: async () => {
+              enrollCalls += 1;
+              return {
+                status,
+                deviceCode: "ABCD-EFGH",
+                expiresAt: "1970-01-01T00:10:00.000Z",
+                pollIntervalMs: 5_000,
+              };
+            },
+            cancelEnrollment: async () => {
+              cancelCalls += 1;
+              return { ...status, state: "enrolling" as const };
+            },
+          },
+        },
+      });
+
+      const statusUrl = yield* getHttpServerUrl("/api/hub/status");
+      const enrollmentUrl = yield* getHttpServerUrl("/api/hub/enrollment");
+      const cancellationUrl = yield* getHttpServerUrl("/api/hub/enrollment/cancel");
+      const unauthorized = yield* Effect.promise(() => fetch(statusUrl));
+      assert.equal(unauthorized.status, 401);
+
+      const bearerToken = yield* getAuthenticatedBearerSessionToken();
+      const authorization = `Bearer ${bearerToken}`;
+      const statusResponse = yield* Effect.promise(() =>
+        fetch(statusUrl, {
+          headers: { authorization },
+        }),
+      );
+      assert.equal(statusResponse.status, 200);
+      assert.deepEqual(yield* Effect.promise(() => statusResponse.json()), status);
+
+      const enrollmentResponse = yield* Effect.promise(() =>
+        fetch(enrollmentUrl, {
+          method: "POST",
+          headers: { authorization },
+        }),
+      );
+      const enrollmentBody = (yield* Effect.promise(() => enrollmentResponse.json())) as {
+        readonly deviceCode?: string;
+      };
+      assert.equal(enrollmentResponse.status, 201);
+      assert.equal(enrollmentBody.deviceCode, "ABCD-EFGH");
+      assert.equal(enrollCalls, 1);
+
+      const cancelResponse = yield* Effect.promise(() =>
+        fetch(cancellationUrl, {
+          method: "POST",
+          headers: { authorization },
+        }),
+      );
+      assert.equal(cancelResponse.status, 200);
+      assert.equal(cancelCalls, 1);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("issues short-lived websocket tokens for authenticated bearer sessions", () =>
