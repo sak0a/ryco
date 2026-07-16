@@ -22,6 +22,7 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
   const {
     ownerEffect,
     ownerStreamEffect,
+    directOwnerStreamEffect,
     providerRegistry,
     providerMaintenanceRunner,
     keybindings,
@@ -442,7 +443,7 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
     [WS_METHODS.subscribeAuthAccess]: (_input) =>
       observeRpcStreamEffect(
         WS_METHODS.subscribeAuthAccess,
-        ownerStreamEffect(
+        directOwnerStreamEffect(
           WS_METHODS.subscribeAuthAccess,
           Effect.gen(function* () {
             const initialSnapshot = yield* loadAuthAccessSnapshot();

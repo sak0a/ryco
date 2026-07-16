@@ -1,5 +1,6 @@
 import { Cause, Effect, Option, Schema, Stream } from "effect";
 import {
+  AuthSessionId,
   CommandId,
   type DiagnosticsProviderProcess,
   EventId,
@@ -39,7 +40,7 @@ import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScript
 import { RepositoryIdentityResolver } from "../project/Services/RepositoryIdentityResolver.ts";
 import { resolveWorktreeCheckoutPath } from "../project/worktreeCheckoutPaths.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
-import { ServerAuth, type AuthenticatedSession } from "../auth/Services/ServerAuth.ts";
+import { ServerAuth } from "../auth/Services/ServerAuth.ts";
 import { ProjectionWorktreeRepository } from "../persistence/Services/ProjectionWorktrees.ts";
 import { refreshWorktreeSourceControlState } from "../sourceControl/refreshWorktreeSourceControlState.ts";
 import * as SourceControlDiscoveryLayer from "../sourceControl/SourceControlDiscovery.ts";
@@ -48,7 +49,8 @@ import type { SourceControlProviderShape } from "../sourceControl/SourceControlP
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import { BootstrapCredentialService } from "../auth/Services/BootstrapCredentialService.ts";
 import { SessionCredentialService } from "../auth/Services/SessionCredentialService.ts";
-import { authorizeWsRpc, type WsRpcAccess } from "../auth/wsAuthorization.ts";
+import { authorizeRpcPrincipal, type WsRpcAccess } from "../auth/wsAuthorization.ts";
+import type { RpcPrincipal } from "./RpcPrincipal.ts";
 import { AtlassianConnectionService } from "../atlassian/AtlassianConnectionService.ts";
 import { JiraWorkItemService } from "../atlassian/JiraWorkItemService.ts";
 import { AdvertisedEndpointRegistry } from "../remote/Services/AdvertisedEndpointRegistry.ts";
@@ -80,9 +82,43 @@ function toDiagnosticsProviderProcess(provider: ServerProvider): DiagnosticsProv
   };
 }
 
-export const makeWsRpcContext = (session: AuthenticatedSession) =>
+const ownerOnlyMethods = new Set<string>([
+  "server.getDiagnosticsMetrics",
+  "server.getDiagnosticsSnapshot",
+  "server.refreshProviders",
+  "server.updateProvider",
+  "server.upsertKeybinding",
+  "keybindings.replaceCustom",
+  "server.updateSettings",
+  "server.discoverSourceControl",
+  "server.listOpinionatedPlugins",
+  "server.checkOpinionatedPlugins",
+  "server.installOpinionatedPlugin",
+  "mcp.listWorkspaces",
+  "mcp.listServers",
+  "mcp.upsertServer",
+  "mcp.setServerEnabled",
+  "mcp.removeServer",
+  "mcp.reloadServers",
+  "mcp.startOauthLogin",
+  "atlassian.listConnections",
+  "atlassian.startOAuth",
+  "atlassian.disconnect",
+  "atlassian.refresh",
+  "atlassian.listResources",
+  "atlassian.getProjectLink",
+  "atlassian.saveProjectLink",
+  "atlassian.saveManualBitbucketToken",
+  "atlassian.saveManualJiraToken",
+]);
+
+const guardedMethodAccess = (method: string): WsRpcAccess =>
+  ownerOnlyMethods.has(method) ? "owner" : "operator";
+
+export const makeWsRpcContext = (principal: RpcPrincipal) =>
   Effect.gen(function* () {
-    const currentSessionId = session.sessionId;
+    const currentSessionId =
+      principal.directSessionId ?? AuthSessionId.make(`relay-scope-${principal.scopeId}`);
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const statisticsQuery = yield* StatisticsQuery;
     const orchestrationEngine = yield* OrchestrationEngineService;
@@ -123,7 +159,7 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
     const linkedSourceControlRefreshAtByProject = new Map<string, number>();
 
     const authorize = (access: WsRpcAccess, method: string) =>
-      authorizeWsRpc(session, access, method);
+      authorizeRpcPrincipal(principal, access, method);
 
     const withAccess = <A, E, R>(
       access: WsRpcAccess,
@@ -132,7 +168,7 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
     ) => authorize(access, method).pipe(Effect.andThen(effect));
 
     const ownerEffect = <A, E, R>(method: string, effect: Effect.Effect<A, E, R>) =>
-      withAccess("owner", method, effect);
+      withAccess(guardedMethodAccess(method), method, effect);
 
     const refreshLinkedWorktreeSourceControlStates = (input: {
       readonly cwd: string;
@@ -218,10 +254,15 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
     const ownerStreamEffect = <A, E, R>(
       method: string,
       effect: Effect.Effect<Stream.Stream<A, E, R>, E, R>,
-    ) => withAccess("owner", method, effect);
+    ) => withAccess(guardedMethodAccess(method), method, effect);
 
     const ownerStream = <A, E, R>(method: string, stream: Stream.Stream<A, E, R>) =>
-      Stream.unwrap(authorize("owner", method).pipe(Effect.as(stream)));
+      Stream.unwrap(authorize(guardedMethodAccess(method), method).pipe(Effect.as(stream)));
+
+    const directOwnerStreamEffect = <A, E, R>(
+      method: string,
+      effect: Effect.Effect<Stream.Stream<A, E, R>, E, R>,
+    ) => withAccess("direct_owner", method, effect);
 
     const loadAuthAccessSnapshot = () =>
       Effect.all({
@@ -644,6 +685,7 @@ export const makeWsRpcContext = (session: AuthenticatedSession) =>
       ownerEffect,
       ownerStream,
       ownerStreamEffect,
+      directOwnerStreamEffect,
       serverCommandId,
       refreshGitStatus,
       toGitManagerError,

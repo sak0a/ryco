@@ -21,7 +21,7 @@ import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as VcsProcess from "./vcs/VcsProcess.ts";
 import { respondToAuthError } from "./auth/http.ts";
 import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
-import { makeWsRpcLayer } from "./ws/index.ts";
+import { makeDirectWsRpcLayer } from "./ws/index.ts";
 
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.succeed(
@@ -41,7 +41,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           },
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(session).pipe(
+            makeDirectWsRpcLayer(session).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(
