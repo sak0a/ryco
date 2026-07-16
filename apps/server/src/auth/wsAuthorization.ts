@@ -30,9 +30,11 @@ export function authorizeRpcPrincipal(
     const message =
       required === "owner"
         ? `Only owner sessions can call ${method}.`
-        : required === "direct_owner"
-          ? `Only direct owner sessions can call ${method}.`
-          : `${required[0]!.toUpperCase()}${required.slice(1)} sessions are required to call ${method}.`;
+        : required === "operator" && principal.transport === "direct"
+          ? `Only owner sessions can call ${method}.`
+          : required === "direct_owner"
+            ? `Only direct owner sessions can call ${method}.`
+            : `${required[0]!.toUpperCase()}${required.slice(1)} sessions are required to call ${method}.`;
     return Effect.fail(
       new AuthRpcError({
         message,

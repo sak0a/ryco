@@ -183,4 +183,10 @@ export class HubConnectorStateMachine {
       queuedBytes,
     });
   }
+
+  updateOnlineMetrics(activeChannels: number, queuedBytes: number): HubConnectorStatus {
+    if (this.#status.state !== "online") return this.snapshot();
+    this.#status = { ...this.#status, activeChannels, queuedBytes };
+    return this.snapshot();
+  }
 }

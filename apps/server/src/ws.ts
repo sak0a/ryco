@@ -21,7 +21,37 @@ import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as VcsProcess from "./vcs/VcsProcess.ts";
 import { respondToAuthError } from "./auth/http.ts";
 import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
-import { makeDirectWsRpcLayer } from "./ws/index.ts";
+import { makeWsRpcLayer } from "./ws/index.ts";
+import { directRpcPrincipal, type RpcPrincipal } from "./ws/RpcPrincipal.ts";
+
+export const makeServerWsRpcLayer = (principal: RpcPrincipal) =>
+  makeWsRpcLayer(principal).pipe(
+    Layer.provideMerge(RpcSerialization.layerJson),
+    Layer.provide(ProviderMaintenanceRunner.layer),
+    Layer.provide(
+      SourceControlDiscoveryLayer.layer.pipe(
+        Layer.provide(
+          SourceControlProviderRegistry.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                AzureDevOpsCli.layer,
+                BitbucketApi.layer,
+                ForgejoApi.layer,
+                GitHubCli.layer,
+                GitLabCli.layer,
+              ),
+            ),
+            Layer.provideMerge(AtlassianConnectionRepositoryLive),
+            Layer.provideMerge(SqlitePersistenceLayerLive),
+            Layer.provide(ServerSecretStoreLive),
+            Layer.provideMerge(GitVcsDriver.layer),
+            Layer.provide(VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer))),
+          ),
+        ),
+        Layer.provide(VcsProcess.layer),
+      ),
+    ),
+  );
 
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.succeed(
@@ -39,39 +69,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
             "rpc.transport": "websocket",
             "rpc.system": "effect-rpc",
           },
-        }).pipe(
-          Effect.provide(
-            makeDirectWsRpcLayer(session).pipe(
-              Layer.provideMerge(RpcSerialization.layerJson),
-              Layer.provide(ProviderMaintenanceRunner.layer),
-              Layer.provide(
-                SourceControlDiscoveryLayer.layer.pipe(
-                  Layer.provide(
-                    SourceControlProviderRegistry.layer.pipe(
-                      Layer.provide(
-                        Layer.mergeAll(
-                          AzureDevOpsCli.layer,
-                          BitbucketApi.layer,
-                          ForgejoApi.layer,
-                          GitHubCli.layer,
-                          GitLabCli.layer,
-                        ),
-                      ),
-                      Layer.provideMerge(AtlassianConnectionRepositoryLive),
-                      Layer.provideMerge(SqlitePersistenceLayerLive),
-                      Layer.provide(ServerSecretStoreLive),
-                      Layer.provideMerge(GitVcsDriver.layer),
-                      Layer.provide(
-                        VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer)),
-                      ),
-                    ),
-                  ),
-                  Layer.provide(VcsProcess.layer),
-                ),
-              ),
-            ),
-          ),
-        );
+        }).pipe(Effect.provide(makeServerWsRpcLayer(directRpcPrincipal(session))));
         return yield* Effect.acquireUseRelease(
           sessions.markConnected(session.sessionId),
           () => rpcWebSocketHttpEffect,

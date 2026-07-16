@@ -46,7 +46,7 @@ function unwrapEncoded(frame: RelayFrame): Uint8Array {
   return result.value;
 }
 
-function errorKind(frame: RelayErrorFrame): ConnectorFailureKind {
+export function relayErrorKind(frame: RelayErrorFrame): ConnectorFailureKind {
   switch (frame.code) {
     case "authentication_timeout":
       return "authentication_timeout";
@@ -90,6 +90,7 @@ export class RelayConnectionSession {
   #socket: HubRelaySocket | undefined;
   #ready: RelayReadyFrame | undefined;
   #timer: unknown;
+  #pendingAuthBytes: Uint8Array | undefined;
   #settled = false;
   #closed = false;
   #listeners:
@@ -145,6 +146,7 @@ export class RelayConnectionSession {
     }
 
     return new Promise<RelayReadyFrame>((resolve, reject) => {
+      this.#pendingAuthBytes = authBytes;
       let socket: HubRelaySocket;
       try {
         socket = this.#transport.open(relayWebSocketUrl(this.#hubOrigin));
@@ -156,6 +158,7 @@ export class RelayConnectionSession {
       this.#socket = socket;
 
       const fail = (error: RelayConnectionError) => {
+        this.#clearPendingAuthentication();
         if (!this.#settled) {
           this.#settled = true;
           reject(error);
@@ -169,11 +172,10 @@ export class RelayConnectionSession {
         try {
           socket.send(authBytes);
         } catch {
-          authBytes.fill(0);
           fail(new RelayConnectionError("network"));
           return;
         }
-        authBytes.fill(0);
+        this.#clearPendingAuthentication();
         this.#timer = this.#scheduler.setTimeout(
           () => fail(new RelayConnectionError("authentication_timeout")),
           RELAY_AUTHENTICATION_DEADLINE_MS,
@@ -204,7 +206,7 @@ export class RelayConnectionSession {
         const frame = decoded.value;
         if (this.#ready === undefined) {
           if (frame.type === "error") {
-            fail(new RelayConnectionError(errorKind(frame), frame.retryAfterMs));
+            fail(new RelayConnectionError(relayErrorKind(frame), frame.retryAfterMs));
             return;
           }
           if (
@@ -264,6 +266,7 @@ export class RelayConnectionSession {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#clearPendingAuthentication();
     if (this.#timer !== undefined) this.#scheduler.clearTimeout(this.#timer);
     this.#timer = undefined;
     this.#disposeListeners();
@@ -285,5 +288,10 @@ export class RelayConnectionSession {
       );
     }
     this.#listeners = undefined;
+  }
+
+  #clearPendingAuthentication(): void {
+    this.#pendingAuthBytes?.fill(0);
+    this.#pendingAuthBytes = undefined;
   }
 }
