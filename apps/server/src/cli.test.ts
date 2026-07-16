@@ -169,12 +169,15 @@ const withLiveHubCliServer = <A, E, R>(baseDir: string, run: () => Effect.Effect
         Layer.succeed(HubConnectorService, {
           status: () => waitingStatus,
           resume: async () => undefined,
-          enroll: async () => ({
-            status: waitingStatus,
-            deviceCode: "ABCD-EFGH",
-            expiresAt: "1970-01-01T00:10:00.000Z",
-            pollIntervalMs: 5_000,
-          }),
+          enroll: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 1_100));
+            return {
+              status: waitingStatus,
+              deviceCode: "ABCD-EFGH",
+              expiresAt: "1970-01-01T00:10:00.000Z",
+              pollIntervalMs: 5_000,
+            };
+          },
           cancelEnrollment: async () => ({ ...waitingStatus, state: "enrolling" as const }),
           stop: async () => undefined,
         }),

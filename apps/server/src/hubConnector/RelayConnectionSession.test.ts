@@ -143,7 +143,46 @@ describe("RelayConnectionSession", () => {
     socket.emit("message", { data: encoded(ping) } as MessageEvent);
     expect(routed).toHaveLength(1);
     expect(routed[0]).toMatchObject({ type: "ping" });
+    expect(routed[0]?.type === "ping" && routed[0].nonce).toEqual(new Uint8Array(8).fill(7));
     expect(terminal).toHaveLength(0);
+  });
+
+  it("preserves opaque data bytes after wiping the transport buffer", async () => {
+    const socket = new FakeSocket();
+    const routed: RelayFrame[] = [];
+    const session = new RelayConnectionSession({
+      identity: identity(),
+      transport: { open: () => socket },
+      hubOrigin: "https://relay.example",
+      onFrame: (frame) => routed.push(frame),
+      onTerminal: () => undefined,
+    });
+    const authenticating = session.authenticate();
+    await Promise.resolve();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await authenticating;
+
+    socket.emit("message", {
+      data: encoded({
+        type: "data",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        channelId: `ch_${"D".repeat(22)}` as never,
+        sequence: 0 as never,
+        payload: Uint8Array.of(0, 255, 128, 7),
+      }),
+    } as MessageEvent);
+
+    expect(routed).toHaveLength(1);
+    expect(routed[0]?.type === "data" && routed[0].payload).toEqual(Uint8Array.of(0, 255, 128, 7));
   });
 
   it("enforces the five-second authentication timeout and removes every listener", async () => {

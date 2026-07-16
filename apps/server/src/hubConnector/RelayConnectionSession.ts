@@ -80,6 +80,26 @@ function binaryMessage(data: unknown): Uint8Array | undefined {
   return undefined;
 }
 
+function detachRelayFrameBytes(frame: RelayFrame): RelayFrame {
+  switch (frame.type) {
+    case "auth":
+      return frame.peer === "node"
+        ? {
+            ...frame,
+            nonce: Uint8Array.from(frame.nonce),
+            signature: Uint8Array.from(frame.signature),
+          }
+        : { ...frame, relayTicket: Uint8Array.from(frame.relayTicket) };
+    case "data":
+      return { ...frame, payload: Uint8Array.from(frame.payload) };
+    case "ping":
+    case "pong":
+      return { ...frame, nonce: Uint8Array.from(frame.nonce) };
+    default:
+      return frame;
+  }
+}
+
 export class RelayConnectionSession {
   readonly #identity: HubIdentityRuntimeShape;
   readonly #transport: HubRelayTransport;
@@ -203,12 +223,13 @@ export class RelayConnectionSession {
                 },
               },
         );
-        bytes.fill(0);
         if (!decoded.ok) {
+          bytes.fill(0);
           fail(new RelayConnectionError("protocol_invalid"));
           return;
         }
-        const frame = decoded.value;
+        const frame = detachRelayFrameBytes(decoded.value);
+        bytes.fill(0);
         if (this.#ready === undefined) {
           if (frame.type === "error") {
             fail(new RelayConnectionError(relayErrorKind(frame), frame.retryAfterMs));

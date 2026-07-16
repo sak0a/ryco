@@ -610,6 +610,7 @@ const ProjectCliRuntimeLive = Layer.mergeAll(
 );
 
 const PROJECT_CLI_LIVE_SERVER_TIMEOUT = Duration.seconds(1);
+const HUB_CLI_LIVE_SERVER_TIMEOUT = Duration.seconds(15);
 const OrchestrationHttpErrorResponse = Schema.Struct({
   error: Schema.String,
 });
@@ -627,18 +628,16 @@ const withCliSessionToken = <A, E, R>(
     (issued) => authControlPlane.revokeSession(issued.sessionId).pipe(Effect.ignore({ log: true })),
   );
 
-const withProjectCliLiveServerTimeout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  effect.pipe(Effect.timeout(PROJECT_CLI_LIVE_SERVER_TIMEOUT));
-
 const runLiveServerRequest = <A, E extends Error, R>(
   request: HttpClientRequest.HttpClientRequest,
   handle: (response: HttpClientResponse.HttpClientResponse) => Effect.Effect<A, E, R>,
+  timeout = PROJECT_CLI_LIVE_SERVER_TIMEOUT,
 ) =>
   Effect.gen(function* () {
     const httpClient = yield* HttpClient.HttpClient;
     const response = yield* httpClient.execute(request);
     return yield* handle(response);
-  }).pipe(withProjectCliLiveServerTimeout);
+  }).pipe(Effect.timeout(timeout));
 
 const decodeOrchestrationReadModelResponse = (response: HttpClientResponse.HttpClientResponse) =>
   HttpClientResponse.schemaBodyJson(OrchestrationReadModel)(response);
@@ -891,6 +890,7 @@ const requestHubStatus = (origin: string, bearerToken: string) =>
           Effect.flatMap((message) => Effect.fail(new Error(message))),
         ),
     }),
+    HUB_CLI_LIVE_SERVER_TIMEOUT,
   );
 
 const requestHubEnrollment = (origin: string, bearerToken: string) =>
@@ -906,6 +906,7 @@ const requestHubEnrollment = (origin: string, bearerToken: string) =>
           Effect.flatMap((message) => Effect.fail(new Error(message))),
         ),
     }),
+    HUB_CLI_LIVE_SERVER_TIMEOUT,
   );
 
 const requestHubEnrollmentCancellation = (origin: string, bearerToken: string) =>
@@ -921,6 +922,7 @@ const requestHubEnrollmentCancellation = (origin: string, bearerToken: string) =
           Effect.flatMap((message) => Effect.fail(new Error(message))),
         ),
     }),
+    HUB_CLI_LIVE_SERVER_TIMEOUT,
   );
 
 const formatHubStatus = (status: typeof HubConnectorStatus.Type, json: boolean): string => {
