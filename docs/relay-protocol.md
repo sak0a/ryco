@@ -1,4 +1,4 @@
-# Ryco relay protocol 1.1
+# Ryco relay protocol 1.2
 
 ## Scope
 
@@ -43,22 +43,26 @@ Every handshake and frame contains:
 | `protocolMajor` | unsigned 16-bit integer   | Compatibility-breaking version        |
 | `protocolMinor` | unsigned 16-bit integer   | Backward-compatible extension version |
 
-The current version is `1.1`; the minimum compatible version is `1.0`. Version 1.1 adds only the
-optional `retryAfterMs` field on `channel.reject` and `error`.
+The current version is `1.2`; the minimum compatible version is `1.0`. Version 1.1 adds the
+optional `retryAfterMs` field on `channel.reject` and `error`. Version 1.2 adds negotiated channel
+authorization metadata and bounded lifecycle close reasons.
 
-For a peer using major version 1, the negotiated minor is the smaller of the peer's minor and 1.
+For a peer using major version 1, the negotiated minor is the smaller of the peer's minor and 2.
 The relay returns that version in `ready`. Every later frame on the connection must carry the exact
-negotiated version. `retryAfterMs` is invalid when the frame declares minor version 0.
+negotiated version. `retryAfterMs` is invalid when the frame declares minor version 0. The
+`channel.open` authorization fields and the new 1.2 close reasons are invalid below minor 2.
 
 An implementation receiving an unsupported major returns a fatal `error` frame with code
 `protocol_unsupported`, its supported version range, and then closes the connection. It must not
 attempt to translate opaque data between major versions.
 
-Within a major version, new fields must be optional. An older implementation ignores unknown
-canonical fields on a recognized structure after counting their bytes toward the encoded-size
-limit. Missing or malformed known required fields, unknown `type` values, and unknown `auth.peer`
-values are rejected. A new required field, changed field meaning, or incompatible frame class
-requires a new major version.
+Within a major version, fields introduced by a new minor may become required only after both peers
+negotiate that minor. An older peer negotiates an older minor and never receives the conditional
+field. Outside an established connection, an older implementation ignores unknown canonical
+fields on a recognized structure after counting their bytes toward the encoded-size limit.
+Missing or malformed fields required by the frame's declared minor, version-inappropriate known
+fields, unknown `type` values, and unknown `auth.peer` values are rejected. Changing a field's
+meaning or adding an incompatible frame class requires a new major version.
 
 ## Identifiers and binary material
 
@@ -159,7 +163,7 @@ All fields listed without “optional” are required.
 | ---------------- | -------------------------------------------------------------- | -------------------------------------- |
 | `auth`           | `peer` plus the node or client handshake fields                | Authenticate the connection            |
 | `ready`          | `limits`                                                       | Confirm negotiated version and limits  |
-| `channel.open`   | `channelId`                                                    | Announce an authorized logical channel |
+| `channel.open`   | `channelId`; on 1.2+, `capability`, `effectiveRole`            | Announce an authorized logical channel |
 | `channel.accept` | `channelId`                                                    | Accept a logical channel               |
 | `channel.reject` | `channelId`, `reason`, optional `retryAfterMs`                 | Reject a logical channel               |
 | `data`           | `channelId`, `sequence`, `payload`                             | Carry opaque bytes                     |
@@ -173,6 +177,25 @@ All fields listed without “optional” are required.
 An omitted `channel.close.reason` is an orderly close. When present, it must be one of the stable
 close reasons. `retryAfterMs` is an integer from 0 through 300,000 and is available only in protocol
 minor 1 or newer.
+
+Protocol 1.2 `channel.open` requires both authorization fields:
+
+```text
+{
+  type: "channel.open",
+  protocolMajor: 1,
+  protocolMinor: 2,
+  channelId,
+  capability: "ryco.rpc",
+  effectiveRole: "viewer" | "operator" | "owner"
+}
+```
+
+`capability` identifies the bounded application surface authorized for the logical channel.
+`ryco.rpc` is the only initial capability. `effectiveRole` is the authorizing deployment's
+least-privilege result and lets the receiving execution node enforce role policy without decoding
+opaque relay data or trusting browser state. Both fields are absent on protocol 1.0 and 1.1 and
+required on protocol 1.2 or newer.
 
 A `protocol_unsupported` error is fatal and must include:
 
@@ -248,6 +271,15 @@ The stable close-reason set is exactly:
 - `rate_limited`
 - `server_draining`
 - `internal_error`
+- `authentication_timeout` (protocol 1.2+)
+- `authorization_failed` (protocol 1.2+)
+- `channel_rejected` (protocol 1.2+)
+- `connection_replaced` (protocol 1.2+)
+- `transfer_limit` (protocol 1.2+)
+- `revoked` (protocol 1.2+)
+
+The reasons marked protocol 1.2+ are invalid on `channel.reject`, `channel.close`, or `error`
+frames declaring minor 0 or 1. Existing reasons retain their original meaning and availability.
 
 ## Deterministic validation errors
 

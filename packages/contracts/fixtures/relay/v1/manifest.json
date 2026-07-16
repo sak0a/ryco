@@ -3,15 +3,25 @@
   "encoding": "deterministic-cbor-rfc8949",
   "protocol": {
     "major": 1,
-    "currentMinor": 1,
+    "currentMinor": 2,
     "minimumMinor": 0
   },
   "fixtures": [
     {
+      "path": "invalid/channel-authorization-on-minor-one.cbor",
+      "purpose": "Protocol 1.1 channel.open using protocol 1.2 authorization metadata",
+      "encodedBytes": 129,
+      "sha256": "5d746394952aa7192acc3f877c16ba7398b75ec8d34c928ac2faf208ebad7a7a",
+      "expected": {
+        "status": "error",
+        "code": "invalid_frame"
+      }
+    },
+    {
       "path": "invalid/invalid-binary-payload.cbor",
       "purpose": "Data payload encoded as text instead of a CBOR byte string",
       "encodedBytes": 107,
-      "sha256": "f0fb475600ba72630a84ba1c343c4907fc158cef7d9ec3b1037dd32af8d1c4ee",
+      "sha256": "84740ee6df2576f1c145930b88cd3f44e15160256d3e007bd86a47c720feb0c6",
       "expected": {
         "status": "error",
         "code": "invalid_frame"
@@ -21,7 +31,7 @@
       "path": "invalid/invalid-client-ticket.cbor",
       "purpose": "Client authentication with text ticket material",
       "encodedBytes": 96,
-      "sha256": "1dd4c66242eab52c70d48e5f150227e80e35f4e4c9405d146d8a44271d2e6c7d",
+      "sha256": "7f6578dcff6026345caf0ca233ced598b264a891eccc3eab20693ff2fa06c4b8",
       "expected": {
         "status": "error",
         "code": "invalid_frame"
@@ -31,7 +41,7 @@
       "path": "invalid/invalid-limits-range.cbor",
       "purpose": "Ready frame with zero simultaneous channels",
       "encodedBytes": 211,
-      "sha256": "02c5c22e6205a890c82ad633af10c2d7a146dc0e38bd27544f423967d5cbbc85",
+      "sha256": "12598a26f91235e0a35d08ccc139d5148aa8f6ca0a8858a499b113ca0713d00c",
       "expected": {
         "status": "error",
         "code": "invalid_limits"
@@ -41,7 +51,7 @@
       "path": "invalid/invalid-limits-relation.cbor",
       "purpose": "Ready frame with a queue smaller than one maximum data frame",
       "encodedBytes": 211,
-      "sha256": "8f1be800d0962fde58ab7ff80931eaefb87cff04c4d61e162494b7c40a9031a2",
+      "sha256": "6687752ca4dcd455f73b16b05468be16cab28bccdc1ea5870d5470c324d9a036",
       "expected": {
         "status": "error",
         "code": "invalid_limits"
@@ -61,7 +71,27 @@
       "path": "invalid/malformed-node-id.cbor",
       "purpose": "Node authentication with malformed node identifier",
       "encodedBytes": 198,
-      "sha256": "6b09c6fe53c48d1927eaacae91f560014b478c9d95f44ea413eb6eb867160bba",
+      "sha256": "2c52ad46748e3aaa722edc80f5c383a38c8cdaf0e45b16b015bd2139fdef6525",
+      "expected": {
+        "status": "error",
+        "code": "invalid_frame"
+      }
+    },
+    {
+      "path": "invalid/minor-two-close-reason-on-minor-one.cbor",
+      "purpose": "Protocol 1.1 channel.close using a protocol 1.2 close reason",
+      "encodedBytes": 102,
+      "sha256": "285235271346c2b23c1f75e6bb9a1d9c1b75862091d41581e2985acb7fa84802",
+      "expected": {
+        "status": "error",
+        "code": "invalid_frame"
+      }
+    },
+    {
+      "path": "invalid/missing-channel-authorization.cbor",
+      "purpose": "Protocol 1.2 channel.open without required authorization metadata",
+      "encodedBytes": 86,
+      "sha256": "ed41da4ce3dbe2a3b5360013da976b0c5536e0008a01ce7b3f81e497cf5ba8d3",
       "expected": {
         "status": "error",
         "code": "invalid_frame"
@@ -71,7 +101,7 @@
       "path": "invalid/missing-discriminant.cbor",
       "purpose": "Envelope without a type discriminant",
       "encodedBytes": 31,
-      "sha256": "8d97cb61f3ee46cbdc78e00f8270a9075395f06b32c5f6356bf997c58965be12",
+      "sha256": "ef46a3cc28ec6dbc61700e0868b5eb3aadd595ca68bee0099ddbb3ab60bea168",
       "expected": {
         "status": "error",
         "code": "missing_discriminant"
@@ -80,8 +110,8 @@
     {
       "path": "invalid/missing-required-field.cbor",
       "purpose": "channel.open frame missing channelId",
-      "encodedBytes": 49,
-      "sha256": "c4549f5d6715697d83e677b9eb351c26d010efb87fb7aa595f1b3b5401d09284",
+      "encodedBytes": 92,
+      "sha256": "eea78447ee0e9ebfe9cf76a0beef6243193c509a89a4f5375f3b16c92544d355",
       "expected": {
         "status": "error",
         "code": "invalid_frame"
@@ -101,7 +131,7 @@
       "path": "invalid/oversized-absolute-frame.cbor",
       "purpose": "Frame larger than the absolute 257 KiB message limit",
       "encodedBytes": 263240,
-      "sha256": "dd0e33dffc0ab3c333245e25d9f851a02a82c35d28792ea9e4e1657c9d3289e7",
+      "sha256": "e52ce08da2ab28ebbeadf327312bed7d056b1383ef1f17b191aafdb8138eb231",
       "expected": {
         "status": "error",
         "code": "frame_too_large"
@@ -110,8 +140,8 @@
     {
       "path": "invalid/oversized-channel-id.cbor",
       "purpose": "Channel identifier longer than the explicit bound",
-      "encodedBytes": 87,
-      "sha256": "dea54222a83f013b80ed7d4a14ff8f8fac2821f3ece7e79b11de3e7d8d4c40f4",
+      "encodedBytes": 130,
+      "sha256": "e14551a2d4d0d846986f48bba7811dd8151042a83fab06cba3b8e135aa2406f3",
       "expected": {
         "status": "error",
         "code": "invalid_frame"
@@ -121,7 +151,7 @@
       "path": "invalid/oversized-control-frame.cbor",
       "purpose": "Control frame larger than the 256 KiB encoded limit",
       "encodedBytes": 262216,
-      "sha256": "37f66c004e94869cc8d38e573a6d10d12ea5da8f149edc045ff2dbe18d60433b",
+      "sha256": "8914d3a16d161d9a911abbace37b4fd6bf1ed281122323cf8651ff2bf90fc0e8",
       "expected": {
         "status": "error",
         "code": "frame_too_large"
@@ -131,7 +161,7 @@
       "path": "invalid/oversized-data-payload.cbor",
       "purpose": "Data payload one byte larger than the 256 KiB chunk limit",
       "encodedBytes": 262246,
-      "sha256": "9a03de0e8903f9e2f091be77ec48c331c438b5ae3722bef5a445cabd79953046",
+      "sha256": "5aa55c954d4f0e25bb2d4178b21d7472d4e6eeb113d5de26e42131a1b3a234da",
       "expected": {
         "status": "error",
         "code": "frame_too_large"
@@ -151,7 +181,7 @@
       "path": "invalid/trailing-byte.cbor",
       "purpose": "Canonical frame followed by a second CBOR item",
       "encodedBytes": 57,
-      "sha256": "17f7f2b835fce9c20a20c55ef13d79b31c8e4e2224f4be2903acf474654a99a8",
+      "sha256": "bc4de1de436e6d2c2045a779ce85e37511c17efaa8ef274a66500fec1b4421e3",
       "expected": {
         "status": "error",
         "code": "invalid_encoding"
@@ -171,7 +201,7 @@
       "path": "invalid/unknown-frame-type.cbor",
       "purpose": "Envelope with an unknown frame discriminant",
       "encodedBytes": 49,
-      "sha256": "5b63b9c2fdad705d1f940d3008f0412e5d370eaac6b23e6c7a6279b6829b6ae6",
+      "sha256": "eafd9dadc8e46d46ffd3efc7e37376708ac651545d67cffddd3c19751aaf4e9f",
       "expected": {
         "status": "error",
         "code": "unknown_frame_type"
@@ -191,13 +221,13 @@
       "path": "valid/auth-client.cbor",
       "purpose": "Valid client relay-ticket authentication handshake",
       "encodedBytes": 99,
-      "sha256": "fcffb4879de1c0fade2a47e8d304032935189d35465474261fb5d415c5a6d873",
+      "sha256": "927cbb1c4ef31c8354a6eeebf2ce3477aa795c3a8fe726d317cd0cf60d48fd8f",
       "expected": {
         "status": "success",
         "value": {
           "peer": "client",
           "protocolMajor": 1,
-          "protocolMinor": 1,
+          "protocolMinor": 2,
           "relayTicket": {
             "$bytes": "3333333333333333333333333333333333333333333333333333333333333333"
           },
@@ -209,7 +239,7 @@
       "path": "valid/auth-node.cbor",
       "purpose": "Valid node authentication handshake",
       "encodedBytes": 203,
-      "sha256": "a7db91e009eead54bd515441461463d04253f4eb58410375bf7205ca75f92024",
+      "sha256": "b50b666607974872c1587b2fcd1baf41feb3e4185535b54ef0e945846aec00ef",
       "expected": {
         "status": "success",
         "value": {
@@ -219,7 +249,7 @@
           },
           "peer": "node",
           "protocolMajor": 1,
-          "protocolMinor": 1,
+          "protocolMinor": 2,
           "signature": {
             "$bytes": "22222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222"
           },
@@ -231,60 +261,62 @@
       "path": "valid/channel-accept.cbor",
       "purpose": "Valid channel.accept frame",
       "encodedBytes": 88,
-      "sha256": "27c2283577b44b6fe221b62dc308f01af8309d893a7bae7bde151c2b8683322f",
+      "sha256": "55f47381db8b7c9bba5330464d17859e6a21abf263f47a1a020a7db83c1cdbc9",
       "expected": {
         "status": "success",
         "value": {
           "channelId": "ch_cccccccccccccccccccccc",
           "protocolMajor": 1,
-          "protocolMinor": 1,
+          "protocolMinor": 2,
           "type": "channel.accept"
         }
       }
     },
     {
       "path": "valid/channel-close.cbor",
-      "purpose": "Valid channel.close frame",
-      "encodedBytes": 110,
-      "sha256": "400e66a808c26d217bd6b215f37b39ebe4fbc8eb767e0d1f7745026ba5fc11ea",
+      "purpose": "Valid protocol 1.2 revoked channel close",
+      "encodedBytes": 102,
+      "sha256": "27667ba424eae5c2e9b8f1d777bebe2f24bc4e522d179ffb65c835bd6c54c964",
       "expected": {
         "status": "success",
         "value": {
           "channelId": "ch_cccccccccccccccccccccc",
           "protocolMajor": 1,
-          "protocolMinor": 1,
-          "reason": "server_draining",
+          "protocolMinor": 2,
+          "reason": "revoked",
           "type": "channel.close"
         }
       }
     },
     {
       "path": "valid/channel-open.cbor",
-      "purpose": "Valid channel.open frame",
-      "encodedBytes": 86,
-      "sha256": "6356348b29d825dc3364e2cdcaaab682ff6e0754dec7ffb9c38a099293e3d6b2",
+      "purpose": "Valid protocol 1.2 authorized channel.open frame",
+      "encodedBytes": 129,
+      "sha256": "e4852f9a857f69c5208192c3dac1f9339b2eee9c4fecfa91f856f56f295a7d17",
       "expected": {
         "status": "success",
         "value": {
+          "capability": "ryco.rpc",
           "channelId": "ch_cccccccccccccccccccccc",
+          "effectiveRole": "operator",
           "protocolMajor": 1,
-          "protocolMinor": 1,
+          "protocolMinor": 2,
           "type": "channel.open"
         }
       }
     },
     {
       "path": "valid/channel-reject.cbor",
-      "purpose": "Valid channel.reject frame with v1.1 retry metadata",
-      "encodedBytes": 124,
-      "sha256": "7d376b6a258b03879f9fffe2299d2397b03391d044d7cdbd629cd61adb80ed5b",
+      "purpose": "Valid protocol 1.2 channel rejection",
+      "encodedBytes": 128,
+      "sha256": "1a30024031ba70bb33f49be7ee4c6adacc894f447f5c4ddf7481822994bc0f1f",
       "expected": {
         "status": "success",
         "value": {
           "channelId": "ch_cccccccccccccccccccccc",
           "protocolMajor": 1,
-          "protocolMinor": 1,
-          "reason": "rate_limited",
+          "protocolMinor": 2,
+          "reason": "channel_rejected",
           "retryAfterMs": 5000,
           "type": "channel.reject"
         }
@@ -294,7 +326,7 @@
       "path": "valid/data.cbor",
       "purpose": "Valid opaque binary data frame",
       "encodedBytes": 104,
-      "sha256": "8c8c82de99da7f35087d21de35f6bb71f55956dd58af68f67b06895e70e25a2f",
+      "sha256": "c76b503effa6cba3a99359edef536765fddaf644dbaeed8e90db16dee383a81f",
       "expected": {
         "status": "success",
         "value": {
@@ -303,7 +335,7 @@
             "$bytes": "00ff807f525043"
           },
           "protocolMajor": 1,
-          "protocolMinor": 1,
+          "protocolMinor": 2,
           "sequence": 7,
           "type": "data"
         }
@@ -313,16 +345,16 @@
       "path": "valid/error.cbor",
       "purpose": "Valid upgrade-facing protocol error frame",
       "encodedBytes": 129,
-      "sha256": "520749d049d7a8d207e8734dd7a839f7a7cf6782f6cbfcb06765c25acf7e8b25",
+      "sha256": "e100dcabe16e579fb882b841dbc77a4c8cc5673108478cfc06e31707fcaf3f8a",
       "expected": {
         "status": "success",
         "value": {
           "code": "protocol_unsupported",
           "fatal": true,
           "protocolMajor": 1,
-          "protocolMinor": 1,
+          "protocolMinor": 2,
           "supported": {
-            "maximumMinor": 1,
+            "maximumMinor": 2,
             "minimumMinor": 0,
             "protocolMajor": 1
           },
@@ -334,13 +366,13 @@
       "path": "valid/flow-pause.cbor",
       "purpose": "Valid flow.pause frame",
       "encodedBytes": 84,
-      "sha256": "4897091d4b00ac2554aa85796e116aff40b7a66128f281af337fb22bcc257d4d",
+      "sha256": "f758b44ec8ded429c3db36d43e5db0126869fda571beb94db292e363b18f0cdc",
       "expected": {
         "status": "success",
         "value": {
           "channelId": "ch_cccccccccccccccccccccc",
           "protocolMajor": 1,
-          "protocolMinor": 1,
+          "protocolMinor": 2,
           "type": "flow.pause"
         }
       }
@@ -349,13 +381,13 @@
       "path": "valid/flow-resume.cbor",
       "purpose": "Valid flow.resume frame",
       "encodedBytes": 85,
-      "sha256": "db6ba88add0f407105cc21fcf4e651e639d05bc0ac4e7c4a7657180c15787178",
+      "sha256": "35384c077fe096d62ab97cef4ff73998de8a18b370b1667844231d24b1f564c2",
       "expected": {
         "status": "success",
         "value": {
           "channelId": "ch_cccccccccccccccccccccc",
           "protocolMajor": 1,
-          "protocolMinor": 1,
+          "protocolMinor": 2,
           "type": "flow.resume"
         }
       }
@@ -363,12 +395,14 @@
     {
       "path": "valid/future-optional-channel-open.cbor",
       "purpose": "Known frame with a canonical future optional field",
-      "encodedBytes": 125,
-      "sha256": "a80b80aa13c3e724ea7e29986ba252806f47506f4859622ce986e688786e7518",
+      "encodedBytes": 165,
+      "sha256": "abb17dcdbda9555f356f8d44c9c915668bd2e78238e7ad1dbea6e488b3d43414",
       "expected": {
         "status": "success",
         "value": {
+          "capability": "ryco.rpc",
           "channelId": "ch_cccccccccccccccccccccc",
+          "effectiveRole": "owner",
           "protocolMajor": 1,
           "protocolMinor": 7,
           "type": "channel.open"
@@ -391,10 +425,25 @@
       }
     },
     {
+      "path": "valid/older-minor-one-channel-open.cbor",
+      "purpose": "Compatible protocol 1.1 channel without authorization metadata",
+      "encodedBytes": 86,
+      "sha256": "6356348b29d825dc3364e2cdcaaab682ff6e0754dec7ffb9c38a099293e3d6b2",
+      "expected": {
+        "status": "success",
+        "value": {
+          "channelId": "ch_cccccccccccccccccccccc",
+          "protocolMajor": 1,
+          "protocolMinor": 1,
+          "type": "channel.open"
+        }
+      }
+    },
+    {
       "path": "valid/ping.cbor",
       "purpose": "Valid heartbeat ping frame",
       "encodedBytes": 56,
-      "sha256": "dcf0a86fcc6cc1ec7ac80d252aeb9f6a535173234f6fb131907b409e1256f4bb",
+      "sha256": "539986b4305ce29914298babf3193dbf90dce22bea594072ea2a6955681ad4db",
       "expected": {
         "status": "success",
         "value": {
@@ -402,7 +451,7 @@
             "$bytes": "0001020304050607"
           },
           "protocolMajor": 1,
-          "protocolMinor": 1,
+          "protocolMinor": 2,
           "type": "ping"
         }
       }
@@ -411,7 +460,7 @@
       "path": "valid/pong.cbor",
       "purpose": "Valid heartbeat pong frame",
       "encodedBytes": 56,
-      "sha256": "aa51eafd360b405741bee35b47c0ef7acd3fdfeaf70b0a4f7d9d5ae33cd27b0e",
+      "sha256": "f6ed675fb4a2daf68e01bad7e6e667431851dfae904e5fcb26b959b6066f5d30",
       "expected": {
         "status": "success",
         "value": {
@@ -419,7 +468,7 @@
             "$bytes": "0001020304050607"
           },
           "protocolMajor": 1,
-          "protocolMinor": 1,
+          "protocolMinor": 2,
           "type": "pong"
         }
       }
@@ -428,7 +477,7 @@
       "path": "valid/ready.cbor",
       "purpose": "Valid ready frame with initial negotiated limits",
       "encodedBytes": 211,
-      "sha256": "1061d9e00606e73950a71d59ce4ab76f864a7b34eb576c9ee2bcd20db411eb38",
+      "sha256": "0298d87d578ba1c84c04aba6e639949e95fae5c57f59bc89a8a145bb3e52cd22",
       "expected": {
         "status": "success",
         "value": {
@@ -442,7 +491,7 @@
             "maxQueuedBytes": 8388608
           },
           "protocolMajor": 1,
-          "protocolMinor": 1,
+          "protocolMinor": 2,
           "type": "ready"
         }
       }

@@ -12,7 +12,7 @@ import {
   RelayNodeId,
 } from "./relay.ts";
 
-const version = { protocolMajor: 1, protocolMinor: 1 } as const;
+const version = { protocolMajor: 1, protocolMinor: 2 } as const;
 const nodeId = `node_${"n".repeat(22)}`;
 const channelId = `ch_${"c".repeat(22)}`;
 
@@ -32,7 +32,13 @@ const validFrames = [
     relayTicket: new Uint8Array(32).fill(3),
   },
   { type: "ready", ...version, limits: RELAY_INITIAL_LIMITS },
-  { type: "channel.open", ...version, channelId },
+  {
+    type: "channel.open",
+    ...version,
+    channelId,
+    capability: "ryco.rpc",
+    effectiveRole: "operator",
+  },
   { type: "channel.accept", ...version, channelId },
   {
     type: "channel.reject",
@@ -81,6 +87,12 @@ describe("relay schemas", () => {
       "rate_limited",
       "server_draining",
       "internal_error",
+      "authentication_timeout",
+      "authorization_failed",
+      "channel_rejected",
+      "connection_replaced",
+      "transfer_limit",
+      "revoked",
     ]);
   });
 
@@ -172,6 +184,112 @@ describe("relay schemas", () => {
     ).toThrow();
   });
 
+  it("requires authorized channel metadata on protocol minor version 2", () => {
+    expect(
+      decodeFrame({
+        type: "channel.open",
+        ...version,
+        channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "viewer",
+      }),
+    ).toEqual({
+      type: "channel.open",
+      ...version,
+      channelId,
+      capability: "ryco.rpc",
+      effectiveRole: "viewer",
+    });
+    expect(() => decodeFrame({ type: "channel.open", ...version, channelId })).toThrow();
+    expect(() =>
+      decodeFrame({
+        type: "channel.open",
+        ...version,
+        channelId,
+        capability: "future.capability",
+        effectiveRole: "viewer",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeFrame({
+        type: "channel.open",
+        ...version,
+        channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "administrator",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeFrame({
+        type: "channel.open",
+        protocolMajor: 1,
+        protocolMinor: 1,
+        channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "operator",
+      }),
+    ).toThrow();
+    expect(
+      decodeFrame({
+        type: "channel.open",
+        protocolMajor: 1,
+        protocolMinor: 1,
+        channelId,
+      }),
+    ).toEqual({
+      type: "channel.open",
+      protocolMajor: 1,
+      protocolMinor: 1,
+      channelId,
+    });
+  });
+
+  it("gates protocol minor version 2 close reasons", () => {
+    expect(
+      decodeFrame({
+        type: "channel.close",
+        ...version,
+        channelId,
+        reason: "revoked",
+      }),
+    ).toMatchObject({ reason: "revoked" });
+    expect(
+      decodeFrame({
+        type: "error",
+        ...version,
+        code: "authentication_timeout",
+        fatal: true,
+      }),
+    ).toMatchObject({ code: "authentication_timeout" });
+    expect(() =>
+      decodeFrame({
+        type: "channel.close",
+        protocolMajor: 1,
+        protocolMinor: 1,
+        channelId,
+        reason: "revoked",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeFrame({
+        type: "channel.reject",
+        protocolMajor: 1,
+        protocolMinor: 1,
+        channelId,
+        reason: "channel_rejected",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeFrame({
+        type: "error",
+        protocolMajor: 1,
+        protocolMinor: 1,
+        code: "authentication_timeout",
+        fatal: true,
+      }),
+    ).toThrow();
+  });
+
   it("requires deterministic metadata for unsupported-protocol error frames", () => {
     expect(() =>
       decodeFrame({
@@ -187,7 +305,7 @@ describe("relay schemas", () => {
       ...version,
       code: "protocol_unsupported",
       fatal: true,
-      supported: { protocolMajor: 1, minimumMinor: 0, maximumMinor: 1 },
+      supported: { protocolMajor: 1, minimumMinor: 0, maximumMinor: 2 },
     });
     expect(decoded.type).toBe("error");
   });
