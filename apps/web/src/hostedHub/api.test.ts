@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+const { createPasskeyRegistration } = vi.hoisted(() => ({
+  createPasskeyRegistration: vi.fn(),
+}));
+vi.mock("./webauthn", () => ({
+  createPasskeyRegistration,
+  getPasskeyAuthentication: vi.fn(),
+}));
+
 import { HostedHubApi, HostedHubApiError } from "./api";
 
 const originalFetch = globalThis.fetch;
@@ -46,6 +54,50 @@ afterEach(() => {
 });
 
 describe("HostedHubApi", () => {
+  it("uses the existing same-origin first-owner WebAuthn registration endpoints", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    createPasskeyRegistration.mockResolvedValue({ id: "passkey-response-canary" });
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      return requests.length === 1
+        ? response({ options: { challenge: "challenge-sensitive-canary" } })
+        : response({ ...session, recoveryCodes: ["recovery-sensitive-canary"] }, 201);
+    });
+
+    const api = new HostedHubApi();
+    const result = await api.bootstrapOwner({
+      credential: "bootstrap-sensitive-canary",
+      displayName: "Ada",
+      passkeyLabel: "Primary",
+    });
+
+    expect(requests.map(({ input }) => input)).toEqual([
+      "/api/auth/bootstrap/registration/options",
+      "/api/auth/bootstrap/registration/verify",
+    ]);
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
+      credential: "bootstrap-sensitive-canary",
+      displayName: "Ada",
+      passkeyLabel: "Primary",
+    });
+    expect(createPasskeyRegistration).toHaveBeenCalledWith(
+      { challenge: "challenge-sensitive-canary" },
+      undefined,
+    );
+    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({
+      response: { id: "passkey-response-canary" },
+    });
+    expect(requests[0]?.init).toMatchObject({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    expect(result.recoveryCodes).toEqual(["recovery-sensitive-canary"]);
+    expect(requests.map(({ input }) => String(input)).join(" ")).not.toContain(
+      "bootstrap-sensitive-canary",
+    );
+  });
+
   it("uses same-origin no-store cookie requests and session-bound CSRF", async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

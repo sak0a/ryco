@@ -140,7 +140,45 @@ describe("hosted account state", () => {
   });
 });
 
-describe("hosted invitation and directory state", () => {
+describe("hosted registration and directory state", () => {
+  it("bootstraps the first owner and keeps credentials out of state", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(hostedHubApi, "bootstrapOwner").mockResolvedValue({
+      ...sessionResponse,
+      recoveryCodes: ["recovery-sensitive-canary"],
+    });
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([]);
+
+    await hostedHubController.bootstrapOwner({
+      credential: "bootstrap-sensitive-canary",
+      displayName: "Ada",
+      passkeyLabel: "Primary",
+    });
+
+    expect(useHostedHubStore.getState()).toMatchObject({
+      accountStatus: "authenticated",
+      recoveryCodes: ["recovery-sensitive-canary"],
+    });
+    expect(JSON.stringify(useHostedHubStore.getState())).not.toContain(
+      "bootstrap-sensitive-canary",
+    );
+  });
+
+  it("handles unavailable owner bootstrap without reflecting the credential", async () => {
+    vi.spyOn(hostedHubApi, "bootstrapOwner").mockRejectedValue(
+      new HostedHubApiError("registration_unavailable", 409),
+    );
+
+    await hostedHubController.bootstrapOwner({
+      credential: "bootstrap-sensitive-canary",
+      displayName: "Ada",
+      passkeyLabel: null,
+    });
+
+    expect(useHostedHubStore.getState()).toMatchObject({ accountStatus: "signed-out" });
+    expect(useHostedHubStore.getState().errorMessage).not.toContain("bootstrap-sensitive-canary");
+  });
+
   it("redeems an invitation and keeps one-time recovery codes only in memory", async () => {
     vi.useFakeTimers();
     vi.spyOn(hostedHubApi, "redeemInvitation").mockResolvedValue({

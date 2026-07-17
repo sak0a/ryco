@@ -69,7 +69,7 @@ afterEach(async () => {
 });
 
 describe("HostedHubRoot accessibility and responsive flows", () => {
-  it("provides keyboard-labelled passkey and invitation controls with focus management", async () => {
+  it("provides keyboard-labelled authentication and registration controls with focus management", async () => {
     mounted = await render(<HostedHubRoot />);
     await expect
       .element(page.getByRole("heading", { name: "Connect to your Ryco nodes" }))
@@ -78,11 +78,41 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
 
     await page.getByRole("button", { name: "Redeem invitation" }).click();
     await expect.element(page.getByLabelText("Invitation code")).toBeVisible();
+    await expect
+      .element(page.getByLabelText("Invitation code"))
+      .toHaveAttribute("type", "password");
     await expect.element(page.getByLabelText("Display name")).toBeVisible();
     await expect.element(page.getByLabelText(/Passkey label/)).toBeVisible();
+    await expect.element(page.getByLabelText("Invitation code")).toHaveFocus();
+
+    await page.getByRole("button", { name: "Back" }).click();
+    await page.getByRole("button", { name: "Set up first owner" }).click();
+    await expect.element(page.getByLabelText("Bootstrap credential")).toBeVisible();
     await expect
-      .element(page.getByRole("heading", { name: "Connect to your Ryco nodes" }))
-      .toHaveFocus();
+      .element(page.getByLabelText("Bootstrap credential"))
+      .toHaveAttribute("type", "password");
+    await expect.element(page.getByLabelText("Bootstrap credential")).toHaveFocus();
+  });
+
+  it("submits first-owner bootstrap without retaining its credential in the form", async () => {
+    const bootstrapOwner = vi.spyOn(hostedHubController, "bootstrapOwner").mockResolvedValue();
+    mounted = await render(<HostedHubRoot />);
+
+    await page.getByRole("button", { name: "Set up first owner" }).click();
+    await page.getByLabelText("Bootstrap credential").fill("bootstrap-sensitive-browser-canary");
+    await page.getByLabelText("Display name").fill("Ada");
+    await page.getByLabelText(/Passkey label/).fill("Primary");
+    await page.getByRole("button", { name: "Create owner and passkey" }).click();
+
+    expect(bootstrapOwner).toHaveBeenCalledWith({
+      credential: "bootstrap-sensitive-browser-canary",
+      displayName: "Ada",
+      passkeyLabel: "Primary",
+    });
+    await expect.element(page.getByLabelText("Bootstrap credential")).toHaveValue("");
+    expect(JSON.stringify(localStorage)).not.toContain("bootstrap-sensitive-browser-canary");
+    expect(JSON.stringify(sessionStorage)).not.toContain("bootstrap-sensitive-browser-canary");
+    expect(location.href).not.toContain("bootstrap-sensitive-browser-canary");
   });
 
   it("announces session expiry without exposing prior account or session state", async () => {

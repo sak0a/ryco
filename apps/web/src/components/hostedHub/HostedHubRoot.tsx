@@ -10,7 +10,7 @@ import {
   WifiIcon,
   WifiOffIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type RefObject } from "react";
 
 import { RootAppShell } from "../RootAppShell";
 import { Button } from "../ui/button";
@@ -102,10 +102,14 @@ function Surface({ children }: { readonly children: React.ReactNode }) {
 function HostedAuthenticationSurface() {
   const status = useHostedHubStore((state) => state.accountStatus);
   const error = useHostedHubStore((state) => state.errorMessage);
-  const [invitationOpen, setInvitationOpen] = useState(false);
+  const [registrationMode, setRegistrationMode] = useState<"invitation" | "bootstrap" | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const registrationInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => headingRef.current?.focus(), [invitationOpen]);
+  useEffect(() => {
+    if (registrationMode) registrationInputRef.current?.focus();
+    else headingRef.current?.focus();
+  }, [registrationMode]);
 
   return (
     <Surface>
@@ -130,10 +134,14 @@ function HostedAuthenticationSurface() {
           {error}
         </p>
       ) : null}
-      {invitationOpen ? (
-        <InvitationForm onBack={() => setInvitationOpen(false)} />
+      {registrationMode ? (
+        <RegistrationForm
+          mode={registrationMode}
+          credentialRef={registrationInputRef}
+          onBack={() => setRegistrationMode(null)}
+        />
       ) : (
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+        <div className="mt-6 flex flex-col gap-3">
           <Button
             size="lg"
             disabled={status === "authenticating" || status === "signing-out"}
@@ -151,9 +159,14 @@ function HostedAuthenticationSurface() {
               Cancel
             </Button>
           ) : (
-            <Button variant="outline" size="lg" onClick={() => setInvitationOpen(true)}>
-              Redeem invitation
-            </Button>
+            <>
+              <Button variant="outline" size="lg" onClick={() => setRegistrationMode("invitation")}>
+                Redeem invitation
+              </Button>
+              <Button variant="outline" size="lg" onClick={() => setRegistrationMode("bootstrap")}>
+                Set up first owner
+              </Button>
+            </>
           )}
         </div>
       )}
@@ -173,35 +186,55 @@ function HostedAuthenticationSurface() {
   );
 }
 
-function InvitationForm({ onBack }: { readonly onBack: () => void }) {
+function RegistrationForm({
+  mode,
+  credentialRef,
+  onBack,
+}: {
+  readonly mode: "invitation" | "bootstrap";
+  readonly credentialRef: RefObject<HTMLInputElement | null>;
+  readonly onBack: () => void;
+}) {
   const status = useHostedHubStore((state) => state.accountStatus);
-  const [secret, setSecret] = useState("");
+  const [credential, setCredential] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [passkeyLabel, setPasskeyLabel] = useState("");
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const invitationSecret = secret;
-    setSecret("");
-    await hostedHubController.redeemInvitation({
-      secret: invitationSecret,
+    const registrationCredential = credential;
+    setCredential("");
+    const registrationInput = {
       displayName: displayName.trim(),
       passkeyLabel: passkeyLabel.trim() || null,
-    });
+    };
+    if (mode === "invitation") {
+      await hostedHubController.redeemInvitation({
+        secret: registrationCredential,
+        ...registrationInput,
+      });
+    } else {
+      await hostedHubController.bootstrapOwner({
+        credential: registrationCredential,
+        ...registrationInput,
+      });
+    }
   };
 
   return (
     <form className="mt-6 space-y-4" onSubmit={(event) => void submit(event)} autoComplete="off">
       <div>
-        <label htmlFor="hub-invitation" className="text-sm font-medium">
-          Invitation code
+        <label htmlFor="hub-registration-credential" className="text-sm font-medium">
+          {mode === "invitation" ? "Invitation code" : "Bootstrap credential"}
         </label>
         <input
-          id="hub-invitation"
+          ref={credentialRef}
+          id="hub-registration-credential"
+          type="password"
           required
           maxLength={128}
-          value={secret}
-          onChange={(event) => setSecret(event.currentTarget.value)}
+          value={credential}
+          onChange={(event) => setCredential(event.currentTarget.value)}
           className="mt-1 h-10 w-full rounded-lg border border-input bg-background px-3 outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>
@@ -232,7 +265,7 @@ function InvitationForm({ onBack }: { readonly onBack: () => void }) {
       </div>
       <div className="flex flex-wrap gap-2">
         <Button type="submit" disabled={status === "authenticating"}>
-          Create account and passkey
+          {mode === "invitation" ? "Create account and passkey" : "Create owner and passkey"}
         </Button>
         <Button
           type="button"

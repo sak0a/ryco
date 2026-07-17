@@ -21,6 +21,9 @@ export default mergeConfig(
     },
     test: {
       include: ["src/components/**/*.browser.tsx"],
+      // Browser files share a constrained Chromium process in CI. Serializing
+      // them avoids scheduler-driven timing failures in interaction tests.
+      fileParallelism: false,
       browser: {
         enabled: true,
         provider: playwright(),

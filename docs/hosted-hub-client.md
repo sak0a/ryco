@@ -41,14 +41,17 @@ For local development, set `VITE_WS_URL` to the local Hub backend as well as
 Host. Configure the Hub public origin/RP ID for that exact local browser origin. Do not use this
 proxy arrangement to bypass production origin policy.
 
-## Authentication and invitation redemption
+## Authentication and registration
 
 Sign-in uses the existing Hub passkey options and verification endpoints. The client converts the
 Hub's JSON WebAuthn options into the browser API and returns the standard WebAuthn response shape.
 It does not create a bearer token or alternate transcript. Invitation redemption uses the existing
-closed-invitation registration ceremony. Invitation secrets are submitted in an HTTPS request body,
-cleared from the form immediately, and never added to a URL or browser storage. One-time recovery
-codes are memory-only and are cleared when dismissed.
+closed-invitation registration ceremony. A new Hub's first owner can explicitly select the bootstrap
+flow and use the operator-provided bootstrap credential with the existing credential-gated WebAuthn
+registration endpoints. The server remains authoritative for whether bootstrap is available; the
+client does not probe or publish account state. Invitation secrets and bootstrap credentials are
+submitted in an HTTPS request body, cleared from the form immediately, and never added to a URL or
+browser storage. One-time recovery codes are memory-only and are cleared when dismissed.
 
 Only the CSRF value is readable by client code, and it is kept in memory. Sign-out uses the existing
 session-bound logout endpoint. A `401` or `session_invalid` result clears account, role, node,
