@@ -6,3 +6,13 @@
 export const isElectron =
   typeof window !== "undefined" &&
   (window.desktopBridge !== undefined || window.nativeApi !== undefined);
+
+export type RycoClientMode = "standard" | "hosted-hub";
+
+export function readRycoClientMode(): RycoClientMode {
+  return import.meta.env.VITE_RYCO_CLIENT_MODE === "hosted-hub" ? "hosted-hub" : "standard";
+}
+
+export function isHostedHubMode(): boolean {
+  return readRycoClientMode() === "hosted-hub";
+}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ModelSelection } from "@ryco/contracts";
 import { newCommandId } from "../../../lib/utils";
+import { isHostedHubMode } from "../../../env";
 import { readEnvironmentApi } from "../../../environmentApi";
 import { readLocalApi } from "../../../localApi";
 import { resolveEnvironmentHttpUrl } from "../../../environments/runtime";
@@ -204,6 +205,13 @@ export function useSidebarProjectSettingsDialog() {
     async (file: File) => {
       const initiating = projectSettingsTarget;
       if (!initiating) return;
+      if (isHostedHubMode()) {
+        toastManager.add({
+          type: "warning",
+          title: "Project image upload is unavailable in hosted mode.",
+        });
+        return;
+      }
       const api = readEnvironmentApi(initiating.environmentId);
       if (!api) return;
       const httpUrl = resolveEnvironmentHttpUrl({
@@ -305,6 +313,9 @@ export function useSidebarProjectSettingsDialog() {
     projectSettingsCustomAvatarContentHash,
     projectSettingsPreferredRemoteName,
     projectSettingsDefaultModelSelection,
+    projectAvatarUploadUnavailableReason: isHostedHubMode()
+      ? "Project image upload is unavailable in hosted mode because node HTTP routes are not relayed."
+      : null,
     setProjectSettingsTitle,
     setProjectSettingsWorkspaceRoot,
     setProjectSettingsCustomSystemPrompt,

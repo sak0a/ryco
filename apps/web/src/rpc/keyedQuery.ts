@@ -50,7 +50,18 @@ export interface KeyedQueryRegistry<TState> {
   runController(controller: KeyedQueryControllerBase & Record<string, unknown>): Promise<void>;
   schedulePoll(controller: KeyedQueryControllerBase & Record<string, unknown>): void;
   clearPollTimer(controller: KeyedQueryControllerBase & Record<string, unknown>): void;
+  clearEnvironment(environmentId: EnvironmentId): void;
   resetForTests(): void;
+}
+
+interface KeyedQueryEnvironmentCleanup {
+  clearEnvironment(environmentId: EnvironmentId): void;
+}
+
+const keyedQueryEnvironmentCleanups = new Set<KeyedQueryEnvironmentCleanup>();
+
+export function clearKeyedQueriesForEnvironment(environmentId: EnvironmentId): void {
+  for (const cleanup of keyedQueryEnvironmentCleanups) cleanup.clearEnvironment(environmentId);
 }
 
 export function createKeyedQueryRegistry<TState>(
@@ -159,7 +170,28 @@ export function createKeyedQueryRegistry<TState>(
     knownStateKeys.clear();
   }
 
-  return {
+  function clearEnvironment(environmentId: EnvironmentId): void {
+    const removedKeys = new Set<string>();
+    for (const [compositeKey, controller] of controllers) {
+      if (controller.environmentId !== environmentId) continue;
+      clearControllerPollTimer(controller);
+      controller.fetchToken += 1;
+      controllers.delete(compositeKey);
+      removedKeys.add(compositeKey);
+    }
+    for (const compositeKey of knownStateKeys) {
+      if (
+        !removedKeys.has(compositeKey) &&
+        !compositeKey.startsWith(`${environmentId}${KEY_SEP}`)
+      ) {
+        continue;
+      }
+      appAtomRegistry.set(queryStateAtom(compositeKey), config.initialState);
+      knownStateKeys.delete(compositeKey);
+    }
+  }
+
+  const registry: KeyedQueryRegistry<TState> = {
     KEY_SEP,
     knownStateKeys,
     controllers,
@@ -171,8 +203,11 @@ export function createKeyedQueryRegistry<TState>(
     runController,
     schedulePoll: scheduleControllerPoll,
     clearPollTimer: clearControllerPollTimer,
+    clearEnvironment,
     resetForTests,
   };
+  keyedQueryEnvironmentCleanups.add(registry);
+  return registry;
 }
 
 interface KeyedQueryDefinition<TInput, TData, TControllerFields extends Record<string, unknown>> {

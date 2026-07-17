@@ -2,6 +2,7 @@ import type { EnvironmentId, ProjectId } from "@ryco/contracts";
 import { FolderIcon } from "lucide-react";
 import { useState } from "react";
 import { resolveEnvironmentHttpUrl } from "../environments/runtime";
+import { isHostedHubMode } from "../env";
 import { cn } from "../lib/utils";
 
 const loadedProjectFaviconSrcs = new Set<string>();
@@ -15,6 +16,7 @@ export function ProjectFavicon(input: {
   fillContainer?: boolean;
 }) {
   const src = (() => {
+    if (isHostedHubMode()) return null;
     try {
       if (input.customAvatarContentHash && input.projectId) {
         return resolveEnvironmentHttpUrl({

@@ -74,6 +74,9 @@ import {
 } from "../../logicalProject";
 import { getClientSettings } from "~/hooks/useSettings";
 import { markStartupPhase, measureStartupPhase } from "~/perf/startupInstrumentation";
+import { isHostedHubMode } from "~/env";
+import { markHostedSessionReady, markHostedSessionReplaying } from "~/hostedHub/state";
+import { getHostedRelayAttemptFactory } from "~/hostedHub/transport";
 import {
   orderSavedEnvironmentConnectionQueue,
   runSavedEnvironmentConnectionQueue,
@@ -1152,6 +1155,7 @@ function createEnvironmentConnectionHandlers() {
         markPrimaryShellSnapshotApplied();
       }
       markAppliedProjectionSnapshot(environmentId, snapshot);
+      if (isHostedHubMode()) markHostedSessionReady(environmentId);
       reconcileThreadDetailSubscriptionsForEnvironment(
         environmentId,
         snapshot.threads.map((thread) => thread.id),
@@ -1187,6 +1191,21 @@ function createPrimaryEnvironmentClient(
     );
   }
   const connectionLabel = knownEnvironment?.label ?? null;
+
+  if (isHostedHubMode()) {
+    const attemptFactory = getHostedRelayAttemptFactory();
+    const hostedHandlers = attemptFactory.lifecycleHandlers();
+    return createWsRpcClient(
+      new WsTransport(() => attemptFactory.nextUrl(), {
+        ...hostedHandlers,
+        getConnectionLabel: () => connectionLabel,
+        onOpen: () => {
+          hostedHandlers.onOpen?.();
+          markStartupPhase("primary-ws-open");
+        },
+      }),
+    );
+  }
 
   return createWsRpcClient(
     new WsTransport(
@@ -1351,6 +1370,12 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
       kind: "primary",
       knownEnvironment,
       client: createPrimaryEnvironmentClient(knownEnvironment),
+      ...(isHostedHubMode()
+        ? {
+            onResubscribe: (environmentId: EnvironmentId) =>
+              markHostedSessionReplaying(environmentId),
+          }
+        : {}),
       ...createEnvironmentConnectionHandlers(),
     }),
   );
@@ -1358,6 +1383,15 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
 
 function maybeCreatePrimaryEnvironmentConnection(): EnvironmentConnection | null {
   return getPrimaryKnownEnvironment()?.environmentId ? createPrimaryEnvironmentConnection() : null;
+}
+
+export async function disconnectPrimaryEnvironment(): Promise<void> {
+  const connection = [...environmentConnections.values()].find((entry) => entry.kind === "primary");
+  if (connection) await removeConnection(connection.environmentId).catch(() => false);
+}
+
+export function connectPrimaryEnvironment(): EnvironmentConnection | null {
+  return maybeCreatePrimaryEnvironmentConnection();
 }
 
 async function ensureSavedEnvironmentConnection(
@@ -1843,20 +1877,23 @@ export function startEnvironmentConnectionService(): () => void {
       trailing: true,
     },
   );
+  const hostedMode = isHostedHubMode();
   const requestSavedEnvironmentSync = createSavedEnvironmentSyncScheduler();
 
   maybeCreatePrimaryEnvironmentConnection();
 
-  const unsubscribeSavedEnvironments = useSavedEnvironmentRegistryStore.subscribe(() => {
-    if (!hasSavedEnvironmentRegistryHydrated()) {
-      return;
-    }
-    void requestSavedEnvironmentSync();
-  });
+  const unsubscribeSavedEnvironments = hostedMode
+    ? NOOP
+    : useSavedEnvironmentRegistryStore.subscribe(() => {
+        if (!hasSavedEnvironmentRegistryHydrated()) return;
+        void requestSavedEnvironmentSync();
+      });
 
-  void waitForSavedEnvironmentRegistryHydration()
-    .then(() => requestSavedEnvironmentSync())
-    .catch(() => undefined);
+  if (!hostedMode) {
+    void waitForSavedEnvironmentRegistryHydration()
+      .then(() => requestSavedEnvironmentSync())
+      .catch(() => undefined);
+  }
 
   const unsubscribeBrowserResumeReconnects = subscribeBrowserResumeReconnects();
 

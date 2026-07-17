@@ -11,9 +11,15 @@ import { APP_DISPLAY_NAME } from "../branding";
 import { AppBootLoadingSurface } from "../components/AppBootLoadingSurface";
 import { Button } from "../components/ui/button";
 import { markStartupPhase, measureStartupPhase } from "../perf/startupInstrumentation";
+import { isHostedHubMode } from "../env";
 
 const RootAppShell = lazy(() =>
   import("../components/RootAppShell").then((module) => ({ default: module.RootAppShell })),
+);
+const HostedHubRoot = lazy(() =>
+  import("../components/hostedHub/HostedHubRoot").then((module) => ({
+    default: module.HostedHubRoot,
+  })),
 );
 
 export type RootAuthGateState =
@@ -24,7 +30,8 @@ export type RootAuthGateState =
       errorMessage?: string;
     }
   | { status: "hosted-pairing" }
-  | { status: "hosted-static" };
+  | { status: "hosted-static" }
+  | { status: "hosted-hub" };
 
 export interface RootBeforeLoadContext {
   readonly authGateState: RootAuthGateState;
@@ -65,7 +72,8 @@ function resolveRootBeforeLoadContext(
   ).then((context) => {
     if (
       context.authGateState.status === "authenticated" ||
-      context.authGateState.status === "hosted-static"
+      context.authGateState.status === "hosted-static" ||
+      context.authGateState.status === "hosted-hub"
     ) {
       cachedReadyRootContext = context;
     }
@@ -87,6 +95,14 @@ function resolveRootBeforeLoadContext(
 
 async function resolveRootBeforeLoadContextAsync(pathname: string): Promise<RootBeforeLoadContext> {
   const currentUrl = new URL(window.location.href);
+  if (isHostedHubMode()) {
+    const { installHostedConsoleBoundary } = await import("../hostedHub/logging");
+    installHostedConsoleBoundary();
+    const { hostedHubController } = await import("../hostedHub/state");
+    await hostedHubController.bootstrap();
+    markStartupPhase("root-before-load-ready");
+    return { authGateState: { status: "hosted-hub" } };
+  }
   const { hasHostedPairingRequest, isHostedStaticApp } = await import("../hostedPairing");
 
   if (pathname === "/pair" && hasHostedPairingRequest(currentUrl)) {
@@ -153,6 +169,14 @@ function RootRouteView() {
     return <Outlet />;
   }
 
+  if (authGateState.status === "hosted-hub") {
+    return (
+      <Suspense fallback={<AppBootLoadingSurface />}>
+        <HostedHubRoot />
+      </Suspense>
+    );
+  }
+
   if (authGateState.status !== "authenticated" && authGateState.status !== "hosted-static") {
     return <Outlet />;
   }
@@ -165,7 +189,10 @@ function RootRouteView() {
 }
 
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
-  const message = errorMessage(error);
+  const hosted = isHostedHubMode();
+  const message = hosted
+    ? "The hosted client could not continue. Retry or reload the app."
+    : errorMessage(error);
   const details = errorDetails(error);
 
   return (
@@ -193,15 +220,17 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
           </Button>
         </div>
 
-        <details className="group mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
-          <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground">
-            <span className="group-open:hidden">Show error details</span>
-            <span className="hidden group-open:inline">Hide error details</span>
-          </summary>
-          <pre className="max-h-56 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs text-foreground/85">
-            {details}
-          </pre>
-        </details>
+        {!hosted ? (
+          <details className="group mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
+            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground">
+              <span className="group-open:hidden">Show error details</span>
+              <span className="hidden group-open:inline">Hide error details</span>
+            </summary>
+            <pre className="max-h-56 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs text-foreground/85">
+              {details}
+            </pre>
+          </details>
+        ) : null}
       </section>
     </div>
   );

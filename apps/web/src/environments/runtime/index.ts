@@ -16,8 +16,10 @@ export {
 
 export {
   addSavedEnvironment,
+  connectPrimaryEnvironment,
   connectDesktopSshEnvironment,
   disconnectSavedEnvironment,
+  disconnectPrimaryEnvironment,
   ensureEnvironmentConnectionBootstrapped,
   getPrimaryEnvironmentConnection,
   readEnvironmentConnection,

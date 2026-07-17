@@ -3,6 +3,8 @@
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime";
 import {
   DEFAULT_MODEL,
+  ORCHESTRATION_WS_METHODS,
+  WS_METHODS,
   type EnvironmentId,
   type FilesystemBrowseResult,
   type ProjectId,
@@ -119,6 +121,7 @@ import { Kbd, KbdGroup } from "./ui/kbd";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useComposerHandleContext } from "../composerHandleContext";
+import { useHostedRpcCapability } from "../hostedHub/capabilities";
 import { useSettingsDialogStore } from "../settingsDialogStore";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
@@ -372,6 +375,8 @@ export function CommandPaletteDialog() {
 }
 
 function OpenCommandPaletteDialog() {
+  const dispatchCapability = useHostedRpcCapability(ORCHESTRATION_WS_METHODS.dispatchCommand);
+  const addProjectCapability = useHostedRpcCapability(WS_METHODS.projectsAdd);
   const navigate = useNavigate();
   const setOpen = useCommandPaletteStore((store) => store.setOpen);
   const openIntent = useCommandPaletteStore((store) => store.openIntent);
@@ -1006,6 +1011,16 @@ function OpenCommandPaletteDialog() {
   );
 
   const openAddProjectFlow = useCallback(() => {
+    if (!addProjectCapability.allowed) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Unable to add project",
+          description: addProjectCapability.reason ?? "This action is unavailable.",
+        }),
+      );
+      return;
+    }
     if (addProjectEnvironmentOptions.length > 1) {
       pushPaletteView({
         addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
@@ -1028,6 +1043,8 @@ function OpenCommandPaletteDialog() {
 
     void startAddProjectSourceSelection(environmentId);
   }, [
+    addProjectCapability.allowed,
+    addProjectCapability.reason,
     addProjectEnvironmentGroups,
     addProjectEnvironmentOptions.length,
     defaultAddProjectEnvironmentId,
@@ -1061,6 +1078,8 @@ function OpenCommandPaletteDialog() {
         ),
         icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "chat.new",
+        ...(dispatchCapability.reason ? { description: dispatchCapability.reason } : {}),
+        disabled: !dispatchCapability.allowed,
         run: async () => {
           await startNewThreadFromContext({
             activeDraftThread,
@@ -1081,6 +1100,8 @@ function OpenCommandPaletteDialog() {
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
+      ...(dispatchCapability.reason ? { description: dispatchCapability.reason } : {}),
+      disabled: !dispatchCapability.allowed,
     });
   }
 
@@ -1108,6 +1129,8 @@ function OpenCommandPaletteDialog() {
       "environment",
     ],
     title: "Add project",
+    ...(addProjectCapability.reason ? { description: addProjectCapability.reason } : {}),
+    disabled: !addProjectCapability.allowed,
     icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
     keepOpen: true,
     run: async () => {

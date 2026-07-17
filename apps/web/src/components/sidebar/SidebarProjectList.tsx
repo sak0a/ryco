@@ -28,11 +28,13 @@ import {
 } from "@dnd-kit/sortable";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
-import type {
-  SidebarProjectGroupingMode,
-  SidebarProjectSortOrder,
-  SidebarThreadSortOrder,
+import {
+  WS_METHODS,
+  type SidebarProjectGroupingMode,
+  type SidebarProjectSortOrder,
+  type SidebarThreadSortOrder,
 } from "@ryco/contracts";
+import { useHostedRpcCapability } from "../../hostedHub/capabilities";
 import { hasNoShortcutModifiers } from "../../keybindings";
 import { projectTreeItemId, useUiStateStore } from "../../uiStateStore";
 import type { useUpdateSettings } from "~/hooks/useSettings";
@@ -387,6 +389,7 @@ export const SidebarProjectsContent = memo(function SidebarProjectsContent(
     | null
   >(null);
   const [folderNameDraft, setFolderNameDraft] = useState("");
+  const addProjectCapability = useHostedRpcCapability(WS_METHODS.projectsAdd);
   const openCreateFolderDialog = useCallback(
     (input: { initialProjectKeys?: readonly string[]; initialName?: string } = {}) => {
       const initialName = input.initialName ?? "";
@@ -544,18 +547,33 @@ export const SidebarProjectsContent = memo(function SidebarProjectsContent(
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <button
-                      type="button"
-                      aria-label="Add project"
-                      data-testid="sidebar-add-project-trigger"
-                      className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
-                      onClick={openAddProject}
-                    />
+                    <span
+                      className="inline-flex"
+                      tabIndex={addProjectCapability.allowed ? undefined : 0}
+                      aria-label={
+                        addProjectCapability.allowed
+                          ? undefined
+                          : (addProjectCapability.reason ?? "Add project is unavailable")
+                      }
+                    >
+                      <button
+                        type="button"
+                        aria-label="Add project"
+                        data-testid="sidebar-add-project-trigger"
+                        className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={!addProjectCapability.allowed}
+                        onClick={openAddProject}
+                      >
+                        <PlusIcon className="size-3.5" />
+                      </button>
+                    </span>
                   }
-                >
-                  <PlusIcon className="size-3.5" />
-                </TooltipTrigger>
-                <TooltipPopup side="right">Add project</TooltipPopup>
+                />
+                <TooltipPopup side="right">
+                  {addProjectCapability.allowed
+                    ? "Add project"
+                    : (addProjectCapability.reason ?? "Add project is unavailable")}
+                </TooltipPopup>
               </Tooltip>
             </div>
           </div>

@@ -1,5 +1,10 @@
-import { type ApprovalRequestId, type ProviderApprovalDecision } from "@ryco/contracts";
+import {
+  ORCHESTRATION_WS_METHODS,
+  type ApprovalRequestId,
+  type ProviderApprovalDecision,
+} from "@ryco/contracts";
 import { memo } from "react";
+import { useHostedRpcCapability } from "../../hostedHub/capabilities";
 import { Button } from "../ui/button";
 
 interface ComposerPendingApprovalActionsProps {
@@ -16,12 +21,15 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
   isResponding,
   onRespondToApproval,
 }: ComposerPendingApprovalActionsProps) {
+  const capability = useHostedRpcCapability(ORCHESTRATION_WS_METHODS.dispatchCommand);
+  const disabled = isResponding || !capability.allowed;
   return (
     <>
       <Button
         size="sm"
         variant="ghost"
-        disabled={isResponding}
+        disabled={disabled}
+        title={capability.reason ?? undefined}
         onClick={() => void onRespondToApproval(requestId, "cancel")}
       >
         Cancel turn
@@ -29,7 +37,8 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
       <Button
         size="sm"
         variant="destructive-outline"
-        disabled={isResponding}
+        disabled={disabled}
+        title={capability.reason ?? undefined}
         onClick={() => void onRespondToApproval(requestId, "decline")}
       >
         Decline
@@ -37,7 +46,8 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
       <Button
         size="sm"
         variant="outline"
-        disabled={isResponding}
+        disabled={disabled}
+        title={capability.reason ?? undefined}
         onClick={() => void onRespondToApproval(requestId, "acceptForSession")}
       >
         Always allow this session
@@ -45,7 +55,8 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
       <Button
         size="sm"
         variant="default"
-        disabled={isResponding}
+        disabled={disabled}
+        title={capability.reason ?? undefined}
         onClick={() => void onRespondToApproval(requestId, "accept")}
       >
         Approve once

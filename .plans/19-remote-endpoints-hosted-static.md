@@ -1,5 +1,11 @@
 # Remote Endpoints and Hosted Static App Plan
 
+> Status note (2026-07-17): the shared web client now also has an explicit same-origin
+> `hosted-hub` mode with passkey authentication, authorized directory selection, and canonical
+> ticket-authenticated relay transport. That mode is documented in
+> `docs/hosted-hub-client.md`. It complements, and does not replace, the bearer-authenticated
+> cross-origin hosted-static pairing flow described by this plan.
+
 ## Purpose
 
 Make remote access feel first-class while keeping the free DIY path open.
@@ -347,4 +353,3 @@ Each implementation PR should run:
 - `bun typecheck`
 - focused tests for changed backend/web behavior
 - backend tests for any server-side endpoint discovery or auth changes using `bun run test`, never `bun test`
-

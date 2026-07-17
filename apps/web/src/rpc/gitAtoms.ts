@@ -688,7 +688,7 @@ function unwatchResolvePullRequest(key: string): void {
 // Test helpers
 // ---------------------------------------------------------------------------
 
-export function resetGitAtomsForTests(): void {
+export function clearGitAtomState(): void {
   for (const controller of branchesControllers.values()) {
     controller.invalidationUnsub();
     if (controller.focusListener && typeof window !== "undefined") {
@@ -717,3 +717,5 @@ export function resetGitAtomsForTests(): void {
   }
   knownMutationTrackingKeys.clear();
 }
+
+export const resetGitAtomsForTests = clearGitAtomState;

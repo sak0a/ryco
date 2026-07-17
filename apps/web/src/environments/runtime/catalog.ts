@@ -8,6 +8,7 @@ import type {
 } from "@ryco/contracts";
 import { create } from "zustand";
 
+import { isHostedHubMode } from "../../env";
 import { ensureLocalApi } from "../../localApi";
 import { getPrimaryKnownEnvironment } from "../primary";
 
@@ -201,6 +202,9 @@ export function getSavedEnvironmentRecord(
 }
 
 export function getEnvironmentHttpBaseUrl(environmentId: EnvironmentId): string | null {
+  if (isHostedHubMode()) {
+    return null;
+  }
   const primaryEnvironment = getPrimaryKnownEnvironment();
   if (primaryEnvironment?.environmentId === environmentId) {
     return getKnownEnvironmentHttpBaseUrl(primaryEnvironment);

@@ -1,5 +1,6 @@
 import type { DesktopEnvironmentBootstrap } from "@ryco/contracts";
 import type { KnownEnvironment } from "@ryco/client-runtime";
+import { isHostedHubMode } from "../../env";
 
 export interface PrimaryEnvironmentTarget {
   readonly source: KnownEnvironment["source"];
@@ -136,6 +137,9 @@ export function resolvePrimaryEnvironmentHttpUrl(
   pathname: string,
   searchParams?: Record<string, string>,
 ): string {
+  if (isHostedHubMode()) {
+    throw new Error("Node HTTP routes are unavailable in hosted Hub mode.");
+  }
   const primaryTarget = readPrimaryEnvironmentTarget();
   if (!primaryTarget) {
     throw new Error("Unable to resolve the primary environment HTTP base URL.");
@@ -150,6 +154,15 @@ export function resolvePrimaryEnvironmentHttpUrl(
 }
 
 export function readPrimaryEnvironmentTarget(): PrimaryEnvironmentTarget | null {
+  if (isHostedHubMode()) {
+    const httpBaseUrl = normalizeBaseUrl(window.location.origin);
+    const wsBaseUrl = new URL(httpBaseUrl);
+    wsBaseUrl.protocol = wsBaseUrl.protocol === "https:" ? "wss:" : "ws:";
+    return {
+      source: "hub-hosted",
+      target: { httpBaseUrl, wsBaseUrl: wsBaseUrl.toString() },
+    };
+  }
   return (
     resolveDesktopPrimaryTarget() ??
     resolveConfiguredPrimaryTarget() ??

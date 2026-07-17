@@ -100,6 +100,10 @@
       "types": "./src/nodeIdentity.ts",
       "import": "./src/nodeIdentity.ts"
     },
+    "./rpcAccessPolicy": {
+      "types": "./src/rpcAccessPolicy.ts",
+      "import": "./src/rpcAccessPolicy.ts"
+    },
     "./sourceControlContextFormatter": {
       "types": "./src/sourceControlContextFormatter.ts",
       "import": "./src/sourceControlContextFormatter.ts"
