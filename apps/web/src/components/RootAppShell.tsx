@@ -24,7 +24,6 @@ import {
 import {
   getServerConfigUpdatedNotification,
   ServerConfigUpdatedNotification,
-  startServerStateSync,
   useServerConfig,
   useServerConfigUpdatedSubscription,
   useServerWelcomeSubscription,
@@ -33,7 +32,6 @@ import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import {
   ensureEnvironmentConnectionBootstrapped,
-  getPrimaryEnvironmentConnection,
   listSavedEnvironmentRecords,
   startEnvironmentConnectionService,
   useSavedEnvironmentRegistryStore,
@@ -43,6 +41,7 @@ import {
   getPrimaryKnownEnvironment,
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
+import { ServerStateBootstrap } from "./ServerStateBootstrap";
 
 export interface RootAppShellProps {
   readonly authGateState: {
@@ -110,18 +109,6 @@ function HostedStaticEnvironmentBootstrap() {
 
     useStore.getState().setActiveEnvironmentId(firstSavedEnvironment.environmentId);
   }, [savedEnvironmentCount]);
-
-  return null;
-}
-
-function ServerStateBootstrap() {
-  useEffect(() => {
-    if (!getPrimaryKnownEnvironment()) {
-      return;
-    }
-
-    return startServerStateSync(getPrimaryEnvironmentConnection().client.server);
-  }, []);
 
   return null;
 }
