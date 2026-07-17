@@ -1,6 +1,8 @@
 import { Debouncer } from "@tanstack/react-pacer";
 import { create } from "zustand";
 
+import { isHostedHubMode } from "./env";
+
 export const PERSISTED_STATE_KEY = "ryco:ui-state:v1";
 const LEGACY_PERSISTED_STATE_KEYS = [
   "ryco:renderer-state:v8",
@@ -409,7 +411,7 @@ function removeProjectKeysFromAllFolders(
 }
 
 function readPersistedState(): UiState {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || isHostedHubMode()) {
     return initialState;
   }
   try {
@@ -516,7 +518,7 @@ export function hydratePersistedProjectState(parsed: PersistedUiState): void {
 }
 
 export function persistState(state: UiState): void {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || isHostedHubMode()) {
     return;
   }
   try {

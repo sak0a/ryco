@@ -10,6 +10,7 @@ import { type ScopedThreadRef, type TerminalEvent } from "@ryco/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { resolveStorage } from "./lib/storage";
+import { isHostedHubMode } from "./env";
 import {
   isWebPerfProfileEnabled,
   readWebPerfNow,
@@ -68,7 +69,9 @@ export function migratePersistedTerminalStateStoreState(
 }
 
 function createTerminalStateStorage() {
-  return resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined);
+  return resolveStorage(
+    typeof window !== "undefined" && !isHostedHubMode() ? window.localStorage : undefined,
+  );
 }
 
 function normalizeTerminalIds(terminalIds: string[]): string[] {

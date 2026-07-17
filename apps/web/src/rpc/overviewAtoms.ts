@@ -716,7 +716,7 @@ export function selectOverviewWorkflowRunJobs(
 // Test helpers
 // ---------------------------------------------------------------------------
 
-export function resetOverviewAtomsForTests(): void {
+export function clearOverviewAtomState(): void {
   for (const controller of queryControllers.values()) {
     clearQueryTimer(controller);
     controller.invalidationUnsub();
@@ -738,3 +738,5 @@ export function resetOverviewAtomsForTests(): void {
   }
   knownWorkflowRunJobsKeys.clear();
 }
+
+export const resetOverviewAtomsForTests = clearOverviewAtomState;

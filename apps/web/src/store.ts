@@ -40,6 +40,7 @@ import {
   type TurnDiffSummary,
 } from "./types";
 import { resolveEnvironmentHttpUrl } from "./environments/runtime";
+import { isHostedHubMode } from "./env";
 import { sanitizeThreadErrorMessage } from "./rpc/transportError";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
 import {
@@ -187,10 +188,14 @@ function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage)
     name: attachment.name,
     mimeType: attachment.mimeType,
     sizeBytes: attachment.sizeBytes,
-    previewUrl: resolveEnvironmentHttpUrl({
-      environmentId,
-      pathname: attachmentPreviewRoutePath(attachment.id),
-    }),
+    ...(isHostedHubMode()
+      ? {}
+      : {
+          previewUrl: resolveEnvironmentHttpUrl({
+            environmentId,
+            pathname: attachmentPreviewRoutePath(attachment.id),
+          }),
+        }),
   }));
 
   return {

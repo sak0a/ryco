@@ -29,6 +29,7 @@ import { createModelSelection, normalizeModelSlug } from "@ryco/shared/model";
 import { getLocalStorageItem } from "./hooks/useLocalStorage";
 import { DEFAULT_AGENT_TOKEN_MODE, DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE } from "./types";
 import { ensureInlineTerminalContextPlaceholders } from "./lib/terminalContext";
+import { isHostedHubMode } from "./env";
 import { createDebouncedStorage, createMemoryStorage } from "./lib/storage";
 import type {
   ComposerDraftStoreState,
@@ -49,7 +50,7 @@ export type DraftThreadEnvMode = typeof DraftThreadEnvModeSchema.Type;
 const COMPOSER_PERSIST_DEBOUNCE_MS = 300;
 
 export const composerDebouncedStorage = createDebouncedStorage(
-  typeof localStorage !== "undefined" ? localStorage : createMemoryStorage(),
+  typeof localStorage !== "undefined" && !isHostedHubMode() ? localStorage : createMemoryStorage(),
   COMPOSER_PERSIST_DEBOUNCE_MS,
 );
 

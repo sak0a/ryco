@@ -43,6 +43,7 @@ interface EnvironmentConnectionInput extends OrchestrationHandlers {
   readonly refreshMetadata?: () => Promise<void>;
   readonly onConfigSnapshot?: (config: ServerConfig) => void;
   readonly onWelcome?: (payload: ServerLifecycleWelcomePayload) => void;
+  readonly onResubscribe?: (environmentId: EnvironmentId) => void;
 }
 
 function createBootstrapGate() {
@@ -145,6 +146,7 @@ export function createEnvironmentConnection(
           return;
         }
         bootstrapGate.reset();
+        input.onResubscribe?.(environmentId);
       },
     },
   );

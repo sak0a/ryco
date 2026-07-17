@@ -1,5 +1,6 @@
 import type { DesktopEnvironmentBootstrap } from "@ryco/contracts";
 import type { KnownEnvironment } from "@ryco/client-runtime";
+import { isHostedHubMode } from "../../env";
 
 export interface PrimaryEnvironmentTarget {
   readonly source: KnownEnvironment["source"];
@@ -150,6 +151,15 @@ export function resolvePrimaryEnvironmentHttpUrl(
 }
 
 export function readPrimaryEnvironmentTarget(): PrimaryEnvironmentTarget | null {
+  if (isHostedHubMode()) {
+    const httpBaseUrl = normalizeBaseUrl(window.location.origin);
+    const wsBaseUrl = new URL(httpBaseUrl);
+    wsBaseUrl.protocol = wsBaseUrl.protocol === "https:" ? "wss:" : "ws:";
+    return {
+      source: "hub-hosted",
+      target: { httpBaseUrl, wsBaseUrl: wsBaseUrl.toString() },
+    };
+  }
   return (
     resolveDesktopPrimaryTarget() ??
     resolveConfiguredPrimaryTarget() ??

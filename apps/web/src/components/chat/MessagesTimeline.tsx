@@ -478,7 +478,12 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                               </button>
                             ) : (
                               <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                                {image.name}
+                                <span>
+                                  {image.name}
+                                  <span className="mt-1 block">
+                                    Preview unavailable on this connection.
+                                  </span>
+                                </span>
                               </div>
                             )}
                           </div>

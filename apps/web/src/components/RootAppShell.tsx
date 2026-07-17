@@ -1,4 +1,4 @@
-import { type ServerLifecycleWelcomePayload } from "@ryco/contracts";
+import { type ServerLifecycleWelcomePayload, WS_METHODS } from "@ryco/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime";
 import { Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
@@ -16,6 +16,7 @@ import { AnchoredToastProvider, stackedThreadToast, ToastProvider, toastManager 
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { readLocalApi } from "../localApi";
 import { useSettings } from "../hooks/useSettings";
+import { useHostedRpcCapability } from "../hostedHub/capabilities";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
@@ -45,12 +46,13 @@ import {
 
 export interface RootAppShellProps {
   readonly authGateState: {
-    readonly status: "authenticated" | "hosted-static";
+    readonly status: "authenticated" | "hosted-static" | "hosted-hub";
   };
 }
 
 export function RootAppShell({ authGateState }: RootAppShellProps) {
-  const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
+  const primaryEnvironmentAuthenticated = authGateState.status !== "hosted-static";
+  const localTracingAllowed = authGateState.status === "authenticated";
   const appShell = (
     <CommandPalette>
       <AppSidebarLayout>
@@ -62,13 +64,13 @@ export function RootAppShell({ authGateState }: RootAppShellProps) {
   return (
     <ToastProvider>
       <AnchoredToastProvider>
-        {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
+        {localTracingAllowed ? <AuthenticatedTracingBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
         <EnvironmentConnectionManagerBootstrap />
         <SshPasswordPromptDialog />
         {authGateState.status === "hosted-static" ? <HostedStaticEnvironmentBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
-        {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
+        {primaryEnvironmentAuthenticated ? <RoleAwareProviderUpdateLaunchNotification /> : null}
         {primaryEnvironmentAuthenticated ? <WebSocketConnectionCoordinator /> : null}
         {primaryEnvironmentAuthenticated ? <SlowRpcAckToastCoordinator /> : null}
         {primaryEnvironmentAuthenticated ? (
@@ -79,6 +81,11 @@ export function RootAppShell({ authGateState }: RootAppShellProps) {
       </AnchoredToastProvider>
     </ToastProvider>
   );
+}
+
+function RoleAwareProviderUpdateLaunchNotification() {
+  const capability = useHostedRpcCapability(WS_METHODS.serverUpdateProvider);
+  return capability.allowed ? <ProviderUpdateLaunchNotification /> : null;
 }
 
 function HostedStaticEnvironmentBootstrap() {

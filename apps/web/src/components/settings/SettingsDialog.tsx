@@ -1,5 +1,5 @@
 // apps/web/src/components/settings/SettingsDialog.tsx
-import { lazy, Suspense, useCallback, useState, type ComponentType } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType } from "react";
 import {
   ActivityIcon,
   ArchiveIcon,
@@ -21,6 +21,8 @@ import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ScrollArea } from "../ui/scroll-area";
 import { ArchivedThreadsPanel, GeneralSettingsPanel, useSettingsRestore } from "./SettingsPanels";
+import { isHostedHubMode } from "../../env";
+import { useHostedHubStore } from "../../hostedHub/state";
 
 interface NavItem {
   id: SettingsSectionId;
@@ -41,6 +43,27 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { id: "statistics", label: "Statistics", icon: BarChart3Icon },
   { id: "archived", label: "Archive", icon: ArchiveIcon },
 ];
+
+const HOSTED_OWNER_SECTIONS = new Set<SettingsSectionId>([
+  "general",
+  "providers",
+  "opinionated-plugins",
+  "mcp-servers",
+  "keybindings",
+  "source-control",
+  "diagnostics",
+  "statistics",
+]);
+
+export function hostedSettingsSectionAllowed(
+  section: SettingsSectionId,
+  role: "viewer" | "operator" | "owner" | null,
+): boolean {
+  if (section === "connections") return false;
+  if (section === "appearance") return true;
+  if (section === "archived") return role !== null;
+  return role === "owner" && HOSTED_OWNER_SECTIONS.has(section);
+}
 
 const SECTIONS_WITH_RESTORE: ReadonlySet<SettingsSectionId> = new Set([
   "general",
@@ -128,16 +151,33 @@ export function SettingsDialog() {
   const section = useSettingsDialogStore((s) => s.section);
   const closeSettings = useSettingsDialogStore((s) => s.closeSettings);
   const setSection = useSettingsDialogStore((s) => s.setSection);
+  const hostedRole = useHostedHubStore((state) => state.effectiveRole);
+  const hostedDirectoryStatus = useHostedHubStore((state) => state.directoryStatus);
+  const hostedTransportStatus = useHostedHubStore((state) => state.transportStatus);
+  const hosted = isHostedHubMode();
+  const roleFresh = hostedDirectoryStatus === "ready" && hostedTransportStatus === "online";
+  const visibleNavItems = hosted
+    ? NAV_ITEMS.filter((item) =>
+        hostedSettingsSectionAllowed(item.id, roleFresh ? hostedRole : null),
+      )
+    : NAV_ITEMS;
+  const effectiveSection = visibleNavItems.some((item) => item.id === section)
+    ? section
+    : (visibleNavItems[0]?.id ?? "appearance");
+
+  useEffect(() => {
+    if (open && section !== effectiveSection) setSection(effectiveSection);
+  }, [effectiveSection, open, section, setSection]);
 
   const [restoreSignal, setRestoreSignal] = useState(0);
   const handleRestored = useCallback(() => {
     setRestoreSignal((v) => v + 1);
   }, []);
 
-  const showRestore = SECTIONS_WITH_RESTORE.has(section);
+  const showRestore = SECTIONS_WITH_RESTORE.has(effectiveSection);
   const activeSectionIndex = Math.max(
     0,
-    NAV_ITEMS.findIndex((item) => item.id === section),
+    visibleNavItems.findIndex((item) => item.id === effectiveSection),
   );
 
   return (
@@ -167,9 +207,9 @@ export function SettingsDialog() {
               style={{ transform: `translateY(${activeSectionIndex * 2.5}rem)` }}
               aria-hidden
             />
-            {NAV_ITEMS.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
-              const isActive = section === item.id;
+              const isActive = effectiveSection === item.id;
               return (
                 <button
                   key={item.id}
@@ -198,7 +238,7 @@ export function SettingsDialog() {
 
           <ScrollArea className="min-h-0 flex-1 min-w-0">
             <div key={restoreSignal} className="flex flex-col">
-              <SectionPanel section={section} />
+              <SectionPanel section={effectiveSection} />
             </div>
           </ScrollArea>
         </div>

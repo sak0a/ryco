@@ -15,6 +15,8 @@ import {
   ProviderDriverKind,
   RuntimeMode,
   AgentTokenMode,
+  ORCHESTRATION_WS_METHODS,
+  WS_METHODS,
 } from "@ryco/contracts";
 import {
   parseScopedThreadKey,
@@ -205,6 +207,7 @@ import {
 } from "~/rpc/serverState";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
+import { useHostedRpcCapability } from "../hostedHub/capabilities";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
@@ -383,6 +386,8 @@ function shouldIgnoreThreadMessageSearchShortcut(
 
 export default function ChatView(props: ChatViewProps) {
   usePerfMark("ChatView");
+  const dispatchCapability = useHostedRpcCapability(ORCHESTRATION_WS_METHODS.dispatchCommand);
+  const terminalCapability = useHostedRpcCapability(WS_METHODS.terminalOpen);
   const {
     environmentId,
     threadId,
@@ -1152,6 +1157,15 @@ export default function ChatView(props: ChatViewProps) {
   ]);
   const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
     const items: ComposerBannerStackItem[] = [];
+    if (dispatchCapability.hosted && !dispatchCapability.allowed) {
+      items.push({
+        id: "hosted-dispatch-unavailable",
+        variant: "warning",
+        icon: <TriangleAlertIcon />,
+        title: "Read-only hosted session",
+        description: dispatchCapability.reason ?? "Commands are unavailable on this connection.",
+      });
+    }
     if (activeEnvironmentUnavailableState) {
       items.push({
         id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
@@ -1215,6 +1229,9 @@ export default function ChatView(props: ChatViewProps) {
     }
     return items;
   }, [
+    dispatchCapability.allowed,
+    dispatchCapability.hosted,
+    dispatchCapability.reason,
     activeEnvironmentUnavailableState,
     handleReconnectActiveEnvironment,
     openSettings,
@@ -3241,7 +3258,7 @@ export default function ChatView(props: ChatViewProps) {
                   isLocalDraftThread={isLocalDraftThread}
                   phase={phase}
                   isConnecting={isConnecting}
-                  isSendBusy={isSendBusy}
+                  isSendBusy={isSendBusy || !dispatchCapability.allowed}
                   isPreparingWorktree={isPreparingWorktree}
                   environmentUnavailable={activeEnvironmentUnavailableState}
                   activePendingApproval={activePendingApproval}
@@ -3320,7 +3337,7 @@ export default function ChatView(props: ChatViewProps) {
                   : {})}
                 {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
                 availableEnvironments={logicalProjectEnvironments}
-                terminalAvailable={activeProject !== undefined}
+                terminalAvailable={activeProject !== undefined && terminalCapability.allowed}
                 terminalOpen={terminalState.terminalOpen}
                 terminalToggleShortcutLabel={terminalToggleShortcutLabel}
                 onToggleTerminal={toggleTerminalVisibility}
@@ -3405,7 +3422,11 @@ export default function ChatView(props: ChatViewProps) {
           key={mountedThreadKey}
           threadRef={mountedThreadRef}
           threadId={mountedThreadRef.threadId}
-          visible={mountedThreadKey === activeThreadKey && terminalState.terminalOpen}
+          visible={
+            mountedThreadKey === activeThreadKey &&
+            terminalState.terminalOpen &&
+            terminalCapability.allowed
+          }
           launchContext={
             mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
           }

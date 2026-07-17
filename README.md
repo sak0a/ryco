@@ -64,6 +64,7 @@ It ships as a cross-platform desktop app (macOS, Linux, Windows) and as a local 
 - **Source-control and work-item providers** — GitHub, GitLab, Forgejo/Codeberg, Azure DevOps, Bitbucket, plus Jira project/work-item workflows. See [docs/source-control-providers.md](./docs/source-control-providers.md)
 - **Remote environments** — saved HTTP/WebSocket environments, pairing links/sessions, SSH utilities, and Tailscale endpoint/Serve helpers
 - **Outbound Hub connector** — optional device-enrolled relay access for nodes behind NAT/CGNAT, with one bounded outbound WebSocket and no additional listener. See [docs/hub-connector.md](./docs/hub-connector.md)
+- **Hosted Hub client** — explicit same-origin passkey sign-in, authorized node selection, and ticket-authenticated relay transport reusing the standard Ryco session UI. See [docs/hosted-hub-client.md](./docs/hosted-hub-client.md)
 - **Auto-updates** — `electron-updater` with in-app update notifications in the sidebar
 - **Observability** — local trace files, provider event logs, and optional OTLP trace/metric export. See [docs/observability.md](./docs/observability.md)
 
@@ -142,6 +143,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
 - [Remote architecture](./.docs/remote-architecture.md)
 - [Node identity primitives](./docs/node-identity.md)
 - [Outbound Hub connector](./docs/hub-connector.md)
+- [Hosted Hub client](./docs/hosted-hub-client.md)
 - [Codex provider guide](./docs/providers/codex.md)
 - [Claude provider guide](./docs/providers/claude.md)
 - [Observability guide](./docs/observability.md)

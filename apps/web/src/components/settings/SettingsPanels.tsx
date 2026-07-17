@@ -1,6 +1,7 @@
 import { ArchiveIcon, ArchiveX } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import {
+  ORCHESTRATION_WS_METHODS,
   type DesktopUpdateChannel,
   EDITORS,
   type EditorId,
@@ -22,6 +23,7 @@ import {
 } from "../../components/desktopUpdate.logic";
 import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
 import { isElectron } from "../../env";
+import { useHostedRpcCapability } from "../../hostedHub/capabilities";
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
@@ -966,6 +968,7 @@ export function GeneralSettingsPanel() {
 }
 
 export function ArchivedThreadsPanel() {
+  const mutationCapability = useHostedRpcCapability(ORCHESTRATION_WS_METHODS.dispatchCommand);
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const threads = useStore(useShallow(selectThreadShellsAcrossEnvironments));
   const { unarchiveThread, confirmAndDeleteThread } = useThreadActions();
@@ -986,6 +989,16 @@ export function ArchivedThreadsPanel() {
 
   const handleArchivedThreadContextMenu = useCallback(
     async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
+      if (!mutationCapability.allowed) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Archived thread is read-only",
+            description: mutationCapability.reason ?? "This action is unavailable.",
+          }),
+        );
+        return;
+      }
       const api = readLocalApi();
       if (!api) return;
       const clicked = await api.contextMenu.show(
@@ -1015,7 +1028,12 @@ export function ArchivedThreadsPanel() {
         await confirmAndDeleteThread(threadRef);
       }
     },
-    [confirmAndDeleteThread, unarchiveThread],
+    [
+      confirmAndDeleteThread,
+      mutationCapability.allowed,
+      mutationCapability.reason,
+      unarchiveThread,
+    ],
   );
 
   return (
@@ -1074,6 +1092,8 @@ export function ArchivedThreadsPanel() {
                   variant="outline"
                   size="sm"
                   className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                  disabled={!mutationCapability.allowed}
+                  title={mutationCapability.reason ?? undefined}
                   onClick={() =>
                     void unarchiveThread(scopeThreadRef(thread.environmentId, thread.id)).catch(
                       (error) => {

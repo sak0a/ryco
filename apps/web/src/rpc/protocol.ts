@@ -53,6 +53,16 @@ export interface WsProtocolLifecycleHandlers {
     details: { readonly code: number; readonly reason: string },
     context: WsProtocolCloseContext,
   ) => void;
+  readonly webSocketConstructor?: (
+    url: string,
+    protocols?: string | ReadonlyArray<string>,
+  ) => globalThis.WebSocket;
+  readonly retryTransientErrors?: boolean;
+  readonly reconnectMaxRetries?: number;
+  readonly getReconnectDelayMs?: (retryCount: number) => number;
+  readonly preserveSocketPath?: boolean;
+  readonly shouldReconnect?: () => boolean;
+  readonly authorizeRequest?: (info: { readonly tag: string; readonly stream: boolean }) => boolean;
 }
 
 export const makeWsRpcProtocolClient = RpcClient.make(WsRpcGroup);
@@ -68,13 +78,13 @@ function formatSocketErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function resolveWsRpcSocketUrl(rawUrl: string): string {
+function resolveWsRpcSocketUrl(rawUrl: string, preservePath = false): string {
   const resolved = new URL(rawUrl);
   if (resolved.protocol !== "ws:" && resolved.protocol !== "wss:") {
     throw new Error(`Unsupported websocket transport URL protocol: ${resolved.protocol}`);
   }
 
-  resolved.pathname = "/ws";
+  if (!preservePath) resolved.pathname = "/ws";
   return resolved.toString();
 }
 
@@ -161,7 +171,7 @@ export function createWsRpcProtocolLayer(
   const resolvedUrl =
     typeof url === "function"
       ? Effect.promise(() => url()).pipe(
-          Effect.map((rawUrl) => resolveWsRpcSocketUrl(rawUrl)),
+          Effect.map((rawUrl) => resolveWsRpcSocketUrl(rawUrl, handlers?.preserveSocketPath)),
           Effect.tapError((error) =>
             Effect.sync(() => {
               lifecycle.onError(formatSocketErrorMessage(error));
@@ -169,13 +179,15 @@ export function createWsRpcProtocolLayer(
           ),
           Effect.orDie,
         )
-      : resolveWsRpcSocketUrl(url);
+      : resolveWsRpcSocketUrl(url, handlers?.preserveSocketPath);
 
   const trackingWebSocketConstructorLayer = Layer.succeed(
     Socket.WebSocketConstructor,
     (socketUrl, protocols) => {
       lifecycle.onAttempt(socketUrl);
-      const socket = new globalThis.WebSocket(socketUrl, protocols);
+      const socket = handlers?.webSocketConstructor
+        ? handlers.webSocketConstructor(socketUrl, protocols)
+        : new globalThis.WebSocket(socketUrl, protocols);
 
       socket.addEventListener(
         "open",
@@ -213,15 +225,23 @@ export function createWsRpcProtocolLayer(
   const socketLayer = Socket.layerWebSocket(resolvedUrl).pipe(
     Layer.provide(trackingWebSocketConstructorLayer),
   );
-  const retryPolicy = Schedule.addDelay(Schedule.recurs(WS_RECONNECT_MAX_RETRIES), (retryCount) =>
-    Effect.succeed(Duration.millis(getWsReconnectDelayMsForRetry(retryCount) ?? 0)),
-  );
+  const retryPolicy = Schedule.addDelay(
+    Schedule.recurs(handlers?.reconnectMaxRetries ?? WS_RECONNECT_MAX_RETRIES),
+    (retryCount) =>
+      Effect.succeed(
+        Duration.millis(
+          handlers?.getReconnectDelayMs?.(retryCount) ??
+            getWsReconnectDelayMsForRetry(retryCount) ??
+            0,
+        ),
+      ),
+  ).pipe(Schedule.while(() => handlers?.shouldReconnect?.() ?? true));
   const protocolLayer = Layer.effect(
     RpcClient.Protocol,
     Effect.map(
       RpcClient.makeProtocolSocket({
         retryPolicy,
-        retryTransientErrors: true,
+        retryTransientErrors: handlers?.retryTransientErrors ?? true,
       }),
       (protocol) => ({
         ...protocol,
@@ -242,6 +262,9 @@ export function createWsRpcProtocolLayer(
         Effect.sync(() => {
           if (!lifecycle.isActive()) {
             return;
+          }
+          if (handlers?.authorizeRequest && !handlers.authorizeRequest(info)) {
+            throw new Error("This action is unavailable for the current hosted role.");
           }
           handlers?.onRequestStart?.({
             id: String(info.id),

@@ -599,7 +599,7 @@ export function prefetchFilesystemBrowse(input: FilesystemBrowseInput): void {
   requestFilesystemBrowse(input);
 }
 
-export function resetProjectAtomsForTests(): void {
+export function clearProjectAtomState(): void {
   for (const key of knownScopeKeys) {
     appAtomRegistry.set(projectSearchEntriesStateAtom(key), INITIAL_PROJECT_SEARCH_ENTRIES_STATE);
   }
@@ -614,3 +614,5 @@ export function resetProjectAtomsForTests(): void {
   }
   knownBrowseKeys.clear();
 }
+
+export const resetProjectAtomsForTests = clearProjectAtomState;

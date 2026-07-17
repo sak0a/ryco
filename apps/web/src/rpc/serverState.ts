@@ -210,6 +210,14 @@ export function resetServerStateForTests() {
   nextServerConfigUpdatedNotificationId = 1;
 }
 
+export function clearServerState(): void {
+  appAtomRegistry.set(welcomeAtom, null);
+  appAtomRegistry.set(serverConfigAtom, null);
+  appAtomRegistry.set(serverConfigUpdatedAtom, null);
+  appAtomRegistry.set(providersUpdatedAtom, null);
+  nextServerConfigUpdatedNotificationId = 1;
+}
+
 let nextServerConfigUpdatedNotificationId = 1;
 
 function resolveServerConfig(config: ServerConfig): void {

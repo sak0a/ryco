@@ -333,7 +333,7 @@ export function invalidateAllCheckpointDiffs(): void {
   }
 }
 
-export function resetCheckpointDiffStateForTests(): void {
+export function clearCheckpointDiffState(): void {
   for (const entry of checkpointDiffEntries.values()) {
     entry.generation += 1;
   }
@@ -344,3 +344,5 @@ export function resetCheckpointDiffStateForTests(): void {
   }
   knownCheckpointDiffKeys.clear();
 }
+
+export const resetCheckpointDiffStateForTests = clearCheckpointDiffState;
