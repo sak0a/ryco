@@ -23,6 +23,8 @@ export function HostedHubRoot() {
   const selectedNode = useHostedHubStore((state) => state.selectedNode);
   const recoveryCodes = useHostedHubStore((state) => state.recoveryCodes);
   const transportStatus = useHostedHubStore((state) => state.transportStatus);
+  const sessionEstablished = useHostedHubStore((state) => state.sessionEstablished);
+  const errorMessage = useHostedHubStore((state) => state.errorMessage);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -37,13 +39,41 @@ export function HostedHubRoot() {
   if (accountStatus !== "authenticated") return <HostedAuthenticationSurface />;
   if (recoveryCodes.length > 0) return <RecoveryCodesSurface />;
   if (!selectedNode) return <HostedNodeDirectory />;
-  if (transportStatus === "idle") return <HostedNodeStartingSurface node={selectedNode} />;
+  if (transportStatus === "terminal-failure") {
+    return (
+      <>
+        <HostedNodeFailureSurface node={selectedNode} message={errorMessage} />
+        <HostedNodeMenu />
+      </>
+    );
+  }
+  if (!sessionEstablished) {
+    return <HostedNodeStartingSurface node={selectedNode} />;
+  }
 
   return (
     <>
       <RootAppShell authGateState={{ status: "hosted-hub" }} />
       <HostedNodeMenu />
     </>
+  );
+}
+
+function HostedNodeFailureSurface({
+  node,
+  message,
+}: {
+  readonly node: HostedHubNode;
+  readonly message: string | null;
+}) {
+  return (
+    <Surface>
+      <AlertTriangleIcon aria-hidden className="size-8 text-destructive" />
+      <h1 className="mt-4 text-2xl font-semibold">Unable to connect to {node.label}</h1>
+      <p role="alert" className="mt-2 text-sm text-muted-foreground">
+        {message ?? "The relay session could not be established. Choose another node or retry."}
+      </p>
+    </Surface>
   );
 }
 

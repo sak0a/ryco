@@ -1,6 +1,7 @@
 type ConsoleMethod = "debug" | "error" | "info" | "log" | "warn";
 
 let installed = false;
+let originals: Record<ConsoleMethod, (...args: ReadonlyArray<unknown>) => void> | null = null;
 
 /**
  * Hosted pages must never forward node payloads or authentication material to
@@ -11,17 +12,24 @@ let installed = false;
 export function installHostedConsoleBoundary(): void {
   if (installed || typeof console === "undefined") return;
   installed = true;
-  for (const method of [
+  const methods = [
     "debug",
     "error",
     "info",
     "log",
     "warn",
-  ] as const satisfies ReadonlyArray<ConsoleMethod>) {
+  ] as const satisfies ReadonlyArray<ConsoleMethod>;
+  originals = Object.fromEntries(methods.map((method) => [method, console[method]])) as Record<
+    ConsoleMethod,
+    (...args: ReadonlyArray<unknown>) => void
+  >;
+  for (const method of methods) {
     console[method] = () => undefined;
   }
 }
 
 export function resetHostedConsoleBoundaryForTests(): void {
+  if (originals) Object.assign(console, originals);
+  originals = null;
   installed = false;
 }

@@ -130,7 +130,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     expect(location.href).not.toContain("recovery-sensitive-browser-canary");
   });
 
-  it("announces relay startup before mounting the node session UI", async () => {
+  it("keeps the node session UI unmounted until the initial snapshot is ready", async () => {
     const selectedNode = node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator");
     useHostedHubStore.setState({
       accountStatus: "authenticated",
@@ -139,13 +139,35 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
       directoryStatus: "ready",
       nodes: [selectedNode],
       selectedNode,
-      transportStatus: "idle",
+      transportStatus: "online",
+      sessionEstablished: false,
     });
     mounted = await render(<HostedHubRoot />);
     await expect
       .element(page.getByRole("heading", { name: `Connecting to ${selectedNode.label}` }))
       .toBeVisible();
     await expect.element(page.getByRole("status")).toHaveTextContent(/synchronizing Ryco state/);
+  });
+
+  it("shows a labelled relay failure without mounting the node session UI", async () => {
+    const selectedNode = node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator");
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account,
+      session,
+      directoryStatus: "ready",
+      nodes: [selectedNode],
+      selectedNode,
+      transportStatus: "terminal-failure",
+      errorMessage: "The relay authentication attempt expired or was rejected.",
+    });
+    mounted = await render(<HostedHubRoot />);
+    await expect
+      .element(page.getByRole("heading", { name: `Unable to connect to ${selectedNode.label}` }))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("alert"))
+      .toHaveTextContent(/authentication attempt expired/);
   });
 
   it("starts sign-in and node selection from keyboard-operable controls", async () => {

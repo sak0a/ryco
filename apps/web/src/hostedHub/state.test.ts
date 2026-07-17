@@ -2,8 +2,12 @@ import type { HostedHubNode, HostedHubSessionResponse } from "./types";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId } from "@ryco/contracts";
 
-const activateHostedNode = vi.fn(async () => undefined);
-const deactivateHostedNode = vi.fn(async () => undefined);
+const originalDocument = globalThis.document;
+
+const { activateHostedNode, deactivateHostedNode } = vi.hoisted(() => ({
+  activateHostedNode: vi.fn(async () => undefined),
+  deactivateHostedNode: vi.fn(async () => undefined),
+}));
 vi.mock("./environment", () => ({ activateHostedNode, deactivateHostedNode }));
 
 import { hostedHubApi, HostedHubApiError } from "./api";
@@ -57,6 +61,7 @@ afterEach(() => {
   deactivateHostedNode.mockClear();
   vi.restoreAllMocks();
   vi.useRealTimers();
+  Object.defineProperty(globalThis, "document", { configurable: true, value: originalDocument });
 });
 
 describe("hosted account state", () => {
@@ -268,6 +273,40 @@ describe("hosted invitation and directory state", () => {
       effectiveRole: null,
       selectedNode: selected,
     });
+  });
+
+  it("refreshes the directory when a hidden tab becomes visible", async () => {
+    vi.useFakeTimers();
+    const listeners = new Set<() => void>();
+    let visibilityState: "hidden" | "visible" = "hidden";
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: {
+        get visibilityState() {
+          return visibilityState;
+        },
+        addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+      },
+    });
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+    });
+    const listNodes = vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([]);
+
+    await hostedHubController.refreshDirectory();
+    expect(listNodes).toHaveBeenCalledOnce();
+    expect(listeners).toHaveLength(1);
+
+    visibilityState = "visible";
+    for (const listener of listeners) listener();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(listNodes).toHaveBeenCalledTimes(2);
+    Object.defineProperty(globalThis, "document", { configurable: true, value: originalDocument });
   });
 
   it("switches nodes through the ordered environment teardown boundary", async () => {

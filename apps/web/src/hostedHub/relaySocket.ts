@@ -105,9 +105,13 @@ function binaryMessage(value: unknown): Uint8Array | null {
 }
 
 function binaryMessageByteLength(value: unknown): number | null {
-  if (value instanceof ArrayBuffer || value instanceof SharedArrayBuffer) return value.byteLength;
+  if (value instanceof ArrayBuffer || isSharedArrayBuffer(value)) return value.byteLength;
   if (ArrayBuffer.isView(value)) return value.byteLength;
   return null;
+}
+
+function isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer {
+  return typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer;
 }
 
 function ownedBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -154,6 +158,7 @@ export class HostedRelayRpcWebSocket extends EventTarget {
   #failureReported = false;
   #authenticationTimer: ReturnType<typeof setTimeout> | null = null;
   #flushTimer: ReturnType<typeof setTimeout> | null = null;
+  #authenticationBytes: Uint8Array | null = null;
 
   constructor(options: HostedRelaySocketOptions) {
     super();
@@ -163,7 +168,6 @@ export class HostedRelayRpcWebSocket extends EventTarget {
       throw new Error("Relay attempt is no longer valid.");
     }
     const ticket = decodeBase64Url(options.ticket);
-    let authenticationBytes: Uint8Array;
     try {
       const encoded = encodeRelayFrame({
         type: "auth",
@@ -172,20 +176,30 @@ export class HostedRelayRpcWebSocket extends EventTarget {
         relayTicket: ticket,
       });
       if (!encoded.ok) throw new Error("Relay authentication could not be encoded.");
-      authenticationBytes = encoded.value;
+      this.#authenticationBytes = encoded.value;
     } finally {
       ticket.fill(0);
     }
     this.#callbacks.onTransportStatus("connecting");
-    this.#socket = (options.createSocket ?? ((url) => new WebSocket(url)))(options.url);
+    try {
+      this.#socket = (options.createSocket ?? ((url) => new WebSocket(url)))(options.url);
+    } catch (error) {
+      this.#clearAuthenticationBytes();
+      throw error;
+    }
     this.#socket.binaryType = "arraybuffer";
     this.#socket.addEventListener("open", () => {
       if (this.#closed) return;
       this.#callbacks.onTransportStatus("authenticating");
+      const authenticationBytes = this.#authenticationBytes;
+      if (!authenticationBytes) {
+        this.#fail(relayFailure("authentication_failed"));
+        return;
+      }
       try {
         this.#socket.send(ownedBuffer(authenticationBytes));
       } finally {
-        authenticationBytes.fill(0);
+        this.#clearAuthenticationBytes();
       }
       this.#authenticationTimer = setTimeout(
         () => this.#fail(relayFailure("authentication_timeout")),
@@ -218,7 +232,7 @@ export class HostedRelayRpcWebSocket extends EventTarget {
     const payload =
       typeof data === "string"
         ? new TextEncoder().encode(data)
-        : data instanceof ArrayBuffer || data instanceof SharedArrayBuffer
+        : data instanceof ArrayBuffer || isSharedArrayBuffer(data)
           ? Uint8Array.from(new Uint8Array(data))
           : Uint8Array.from(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
     const limits = this.#limits;
@@ -480,6 +494,7 @@ export class HostedRelayRpcWebSocket extends EventTarget {
     if (this.#flushTimer) clearTimeout(this.#flushTimer);
     this.#authenticationTimer = null;
     this.#flushTimer = null;
+    this.#clearAuthenticationBytes();
     for (const item of this.#outboundQueue) item.bytes.fill(0);
     for (const item of this.#inboundQueue) item.fill(0);
     this.#outboundQueue = [];
@@ -494,6 +509,11 @@ export class HostedRelayRpcWebSocket extends EventTarget {
       // The underlying socket may already be closed.
     }
     this.#emit("close", new CloseEvent("close", { code, reason, wasClean: code === 1000 }));
+  }
+
+  #clearAuthenticationBytes(): void {
+    this.#authenticationBytes?.fill(0);
+    this.#authenticationBytes = null;
   }
 
   #emit(type: "open" | "message" | "error" | "close", event: Event): void {

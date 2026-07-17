@@ -230,7 +230,7 @@ export class HostedHubApi {
     });
     if (
       typeof result.ticket !== "string" ||
-      typeof result.expiresAt !== "number" ||
+      !Number.isSafeInteger(result.expiresAt) ||
       result.protocolMajor !== 1 ||
       result.protocolMinor !== 2
     ) {
@@ -254,13 +254,13 @@ export class HostedHubApi {
       typeof account.id !== "string" ||
       typeof account.displayName !== "string" ||
       !roleValue(account.role) ||
-      typeof account.createdAt !== "number" ||
+      !Number.isSafeInteger(account.createdAt) ||
       !nullableNumber(account.disabledAt) ||
       typeof session.id !== "string" ||
       typeof session.accountId !== "string" ||
-      typeof session.createdAt !== "number" ||
-      typeof session.expiresAt !== "number" ||
-      typeof session.lastSeenAt !== "number" ||
+      !Number.isSafeInteger(session.createdAt) ||
+      !Number.isSafeInteger(session.expiresAt) ||
+      !Number.isSafeInteger(session.lastSeenAt) ||
       !nullableNumber(session.revokedAt) ||
       (session.revocationReasonCode !== null && typeof session.revocationReasonCode !== "string") ||
       (recoveryCodes !== undefined &&

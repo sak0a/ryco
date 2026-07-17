@@ -24,11 +24,12 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
   const capability = useHostedRpcCapability(ORCHESTRATION_WS_METHODS.dispatchCommand);
   const disabled = isResponding || !capability.allowed;
   return (
-    <span className="contents" title={capability.reason ?? undefined}>
+    <>
       <Button
         size="sm"
         variant="ghost"
         disabled={disabled}
+        title={capability.reason ?? undefined}
         onClick={() => void onRespondToApproval(requestId, "cancel")}
       >
         Cancel turn
@@ -37,6 +38,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
         size="sm"
         variant="destructive-outline"
         disabled={disabled}
+        title={capability.reason ?? undefined}
         onClick={() => void onRespondToApproval(requestId, "decline")}
       >
         Decline
@@ -45,6 +47,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
         size="sm"
         variant="outline"
         disabled={disabled}
+        title={capability.reason ?? undefined}
         onClick={() => void onRespondToApproval(requestId, "acceptForSession")}
       >
         Always allow this session
@@ -53,10 +56,11 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
         size="sm"
         variant="default"
         disabled={disabled}
+        title={capability.reason ?? undefined}
         onClick={() => void onRespondToApproval(requestId, "accept")}
       >
         Approve once
       </Button>
-    </span>
+    </>
   );
 });

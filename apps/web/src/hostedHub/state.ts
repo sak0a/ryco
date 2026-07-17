@@ -25,6 +25,7 @@ interface HostedHubState {
   readonly effectiveRole: RelayEffectiveRole | null;
   readonly transportStatus: HostedRelayTransportStatus;
   readonly sessionStatus: HostedRycoSessionStatus;
+  readonly sessionEstablished: boolean;
   readonly sessionRecoveredAfterUnknown: boolean;
   readonly recoveryCodes: ReadonlyArray<string>;
   readonly errorMessage: string | null;
@@ -42,6 +43,7 @@ const initialState: HostedHubState = {
   effectiveRole: null,
   transportStatus: "idle",
   sessionStatus: "closed",
+  sessionEstablished: false,
   sessionRecoveredAfterUnknown: false,
   recoveryCodes: [],
   errorMessage: null,
@@ -77,6 +79,7 @@ class HostedHubController {
   #directoryTimer: ReturnType<typeof setTimeout> | null = null;
   #directoryRetry = 0;
   #directoryOperation: AbortController | null = null;
+  #directoryVisibilityListener: (() => void) | null = null;
   #directoryPromise: Promise<void> | null = null;
   #bootstrapPromise: Promise<void> | null = null;
 
@@ -321,6 +324,7 @@ class HostedHubController {
       effectiveRole: node.effectiveRole,
       transportStatus: "idle",
       sessionStatus: "synchronizing",
+      sessionEstablished: false,
       sessionRecoveredAfterUnknown: false,
       errorMessage: null,
       generation,
@@ -392,10 +396,14 @@ class HostedHubController {
     const state = useHostedHubStore.getState();
     if (state.selectedNode?.environmentId !== environmentId) return;
     if (state.sessionStatus === "delivery-unknown") {
-      patchState({ sessionRecoveredAfterUnknown: true });
+      patchState({ sessionEstablished: true, sessionRecoveredAfterUnknown: true });
       return;
     }
-    patchState({ sessionStatus: "ready", sessionRecoveredAfterUnknown: false });
+    patchState({
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      sessionRecoveredAfterUnknown: false,
+    });
   }
 
   markSessionReplaying(environmentId: EnvironmentId): void {
@@ -423,13 +431,26 @@ class HostedHubController {
 
   #scheduleDirectory(delay: number): void {
     this.#clearDirectoryTimer();
-    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      const onVisibilityChange = () => {
+        if (document.visibilityState !== "visible") return;
+        this.#clearDirectoryTimer();
+        void this.refreshDirectory();
+      };
+      this.#directoryVisibilityListener = onVisibilityChange;
+      document.addEventListener("visibilitychange", onVisibilityChange, { once: true });
+      return;
+    }
     this.#directoryTimer = setTimeout(() => void this.refreshDirectory(), delay);
   }
 
   #clearDirectoryTimer(): void {
     if (this.#directoryTimer) clearTimeout(this.#directoryTimer);
     this.#directoryTimer = null;
+    if (this.#directoryVisibilityListener && typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.#directoryVisibilityListener);
+    }
+    this.#directoryVisibilityListener = null;
   }
 
   async #deactivateSelection(environmentId: EnvironmentId, generation: number): Promise<void> {
@@ -440,6 +461,7 @@ class HostedHubController {
       selectedNode: null,
       transportStatus: "idle",
       sessionStatus: "closed",
+      sessionEstablished: false,
       sessionRecoveredAfterUnknown: false,
     });
   }

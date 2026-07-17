@@ -107,10 +107,31 @@ describe("hosted passkey authentication", () => {
       value: { credentials: { get } },
     });
     await expect(getPasskeyAuthentication({ challenge: "%%%" })).rejects.toThrow(
-      "Invalid encoded material",
+      "Invalid passkey options.",
     );
     expect(get).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { challenge: encodeBase64Url(new Uint8Array([1])), allowCredentials: {} },
+    {
+      challenge: encodeBase64Url(new Uint8Array([1])),
+      allowCredentials: [{ id: encodeBase64Url(new Uint8Array([2])), type: "password" }],
+    },
+    { challenge: encodeBase64Url(new Uint8Array([1])), timeout: -1 },
+  ])(
+    "rejects malformed authentication option shapes before opening a ceremony",
+    async (options) => {
+      const get = vi.fn();
+      Object.defineProperty(globalThis, "navigator", {
+        configurable: true,
+        value: { credentials: { get } },
+      });
+
+      await expect(getPasskeyAuthentication(options)).rejects.toThrow("Invalid passkey options.");
+      expect(get).not.toHaveBeenCalled();
+    },
+  );
 
   it("uses the Hub registration ceremony and returns its existing transcript shape", async () => {
     const create = vi.fn(
@@ -167,5 +188,30 @@ describe("hosted passkey authentication", () => {
         operation.signal,
       ),
     ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it.each([
+    {
+      challenge: encodeBase64Url(new Uint8Array([1])),
+      rp: { name: "Ryco Hub" },
+      user: { id: encodeBase64Url(new Uint8Array([2])), name: "ada", displayName: "Ada" },
+      pubKeyCredParams: {},
+    },
+    {
+      challenge: encodeBase64Url(new Uint8Array([1])),
+      rp: { name: "Ryco Hub" },
+      user: { id: encodeBase64Url(new Uint8Array([2])), name: "ada", displayName: "Ada" },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+      excludeCredentials: { id: "not-an-array" },
+    },
+  ])("rejects malformed registration option shapes before opening a ceremony", async (options) => {
+    const create = vi.fn();
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: { credentials: { create } },
+    });
+
+    await expect(createPasskeyRegistration(options)).rejects.toThrow("Invalid passkey options.");
+    expect(create).not.toHaveBeenCalled();
   });
 });

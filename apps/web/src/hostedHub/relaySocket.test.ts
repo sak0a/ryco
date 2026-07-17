@@ -65,6 +65,7 @@ class MockSocket {
 
 const originalWindow = globalThis.window;
 const originalWebSocket = globalThis.WebSocket;
+const originalSharedArrayBuffer = globalThis.SharedArrayBuffer;
 const sockets: MockSocket[] = [];
 
 function callbacks() {
@@ -119,6 +120,10 @@ afterEach(() => {
   vi.useRealTimers();
   Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
   globalThis.WebSocket = originalWebSocket;
+  Object.defineProperty(globalThis, "SharedArrayBuffer", {
+    configurable: true,
+    value: originalSharedArrayBuffer,
+  });
   vi.restoreAllMocks();
 });
 
@@ -165,6 +170,16 @@ describe("HostedRelayRpcWebSocket", () => {
     expect(socket.sent).toHaveLength(sentBefore + 1);
   });
 
+  it("forwards typed-array payloads when SharedArrayBuffer is unavailable", () => {
+    Object.defineProperty(globalThis, "SharedArrayBuffer", {
+      configurable: true,
+      value: undefined,
+    });
+    const { client, socket } = create();
+    authenticate(socket);
+    expect(() => client.send(new Uint8Array([1, 2, 3]))).not.toThrow();
+  });
+
   it("responds to canonical heartbeat pings", () => {
     const { socket } = create();
     authenticate(socket);
@@ -182,6 +197,13 @@ describe("HostedRelayRpcWebSocket", () => {
     expect(handlers.onFailure).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "authentication" }),
     );
+  });
+
+  it("does not retain or send the authentication frame after a pre-open close", () => {
+    const { client, socket } = create();
+    client.close();
+    socket.open();
+    expect(socket.sent).toEqual([]);
   });
 
   it("keeps tabs independent and rejects duplicate inbound sequences", async () => {

@@ -166,8 +166,9 @@ export function SettingsDialog() {
     : (visibleNavItems[0]?.id ?? "appearance");
 
   useEffect(() => {
+    if (hosted && !roleFresh) return;
     if (open && section !== effectiveSection) setSection(effectiveSection);
-  }, [effectiveSection, open, section, setSection]);
+  }, [effectiveSection, hosted, open, roleFresh, section, setSection]);
 
   const [restoreSignal, setRestoreSignal] = useState(0);
   const handleRestored = useCallback(() => {

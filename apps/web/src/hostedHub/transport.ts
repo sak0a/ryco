@@ -56,6 +56,7 @@ export class HostedRelayAttemptFactory {
   readonly #pendingRequests = new Set<string>();
   #pendingTicket: PendingTicket | null = null;
   #lastRetryAfterMs: number | undefined;
+  #activeGeneration: number | null = null;
 
   async nextUrl(): Promise<string> {
     const state = useHostedHubStore.getState();
@@ -114,12 +115,18 @@ export class HostedRelayAttemptFactory {
         hostedHubController.failure(generation, failure);
       },
     };
-    return new HostedRelayRpcWebSocket({
-      url,
-      ticket,
-      ticketExpiresAt,
-      callbacks,
-    }) as unknown as WebSocket;
+    this.#activeGeneration = generation;
+    try {
+      return new HostedRelayRpcWebSocket({
+        url,
+        ticket,
+        ticketExpiresAt,
+        callbacks,
+      }) as unknown as WebSocket;
+    } catch (error) {
+      if (this.#activeGeneration === generation) this.#activeGeneration = null;
+      throw error;
+    }
   }
 
   lifecycleHandlers(): WsProtocolLifecycleHandlers {
@@ -131,6 +138,7 @@ export class HostedRelayAttemptFactory {
       shouldReconnect: () => {
         const state = useHostedHubStore.getState();
         return (
+          this.#activeGeneration === state.generation &&
           state.accountStatus === "authenticated" &&
           state.selectedNode !== null &&
           state.transportStatus !== "terminal-failure"
@@ -147,14 +155,16 @@ export class HostedRelayAttemptFactory {
       getReconnectDelayMs: () => {
         const delay = this.#reconnect.nextDelay(this.#lastRetryAfterMs);
         this.#lastRetryAfterMs = undefined;
-        const generation = useHostedHubStore.getState().generation;
-        hostedHubController.transportStatus(generation, "reconnecting");
+        if (this.#activeGeneration !== null) {
+          hostedHubController.transportStatus(this.#activeGeneration, "reconnecting");
+        }
         return delay;
       },
       onOpen: () => this.#reconnect.opened(),
       onClose: (_details, context) => {
         if (context.intentional) return;
-        const generation = useHostedHubStore.getState().generation;
+        const generation = this.#activeGeneration;
+        if (generation === null) return;
         this.#reconnect.closed();
         hostedHubController.connectionClosed(generation);
       },
@@ -171,6 +181,7 @@ export class HostedRelayAttemptFactory {
     this.#pendingTicket = null;
     this.#pendingRequests.clear();
     this.#lastRetryAfterMs = undefined;
+    this.#activeGeneration = null;
     this.#reconnect.reset();
   }
 }

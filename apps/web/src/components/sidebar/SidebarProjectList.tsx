@@ -547,18 +547,28 @@ export const SidebarProjectsContent = memo(function SidebarProjectsContent(
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <button
-                      type="button"
-                      aria-label="Add project"
-                      data-testid="sidebar-add-project-trigger"
-                      className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={!addProjectCapability.allowed}
-                      onClick={openAddProject}
-                    />
+                    <span
+                      className="inline-flex"
+                      tabIndex={addProjectCapability.allowed ? undefined : 0}
+                      aria-label={
+                        addProjectCapability.allowed
+                          ? undefined
+                          : (addProjectCapability.reason ?? "Add project is unavailable")
+                      }
+                    >
+                      <button
+                        type="button"
+                        aria-label="Add project"
+                        data-testid="sidebar-add-project-trigger"
+                        className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={!addProjectCapability.allowed}
+                        onClick={openAddProject}
+                      >
+                        <PlusIcon className="size-3.5" />
+                      </button>
+                    </span>
                   }
-                >
-                  <PlusIcon className="size-3.5" />
-                </TooltipTrigger>
+                />
                 <TooltipPopup side="right">
                   {addProjectCapability.allowed
                     ? "Add project"

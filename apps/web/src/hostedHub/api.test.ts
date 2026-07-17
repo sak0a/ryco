@@ -117,6 +117,28 @@ describe("HostedHubApi", () => {
     });
   });
 
+  it("rejects unsafe session and relay timestamps", async () => {
+    const api = new HostedHubApi();
+    globalThis.fetch = vi.fn(async () =>
+      response({ ...session, account: { ...session.account, createdAt: 1.5 } }),
+    );
+    await expect(api.restoreSession()).rejects.toMatchObject({ code: "invalid_response" });
+
+    globalThis.fetch = vi.fn(async () => response(session));
+    await api.restoreSession();
+    globalThis.fetch = vi.fn(async () =>
+      response({
+        ticket: "ticket",
+        expiresAt: Number.POSITIVE_INFINITY,
+        protocolMajor: 1,
+        protocolMinor: 2,
+      }),
+    );
+    await expect(api.issueRelayTicket("node_aaaaaaaaaaaaaaaaaaaaaa")).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+  });
+
   it("accepts the bounded directory contract and discards unexpected metadata", async () => {
     const api = new HostedHubApi();
     globalThis.fetch = vi.fn(async () => response(session));

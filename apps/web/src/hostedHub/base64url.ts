@@ -10,7 +10,7 @@ export function decodeBase64Url(value: string): Uint8Array<ArrayBuffer> {
   } catch {
     throw new Error("Invalid encoded material.");
   }
-  const output = new Uint8Array(new ArrayBuffer(decoded.length));
+  const output = new Uint8Array(decoded.length);
   for (let index = 0; index < decoded.length; index += 1) {
     output[index] = decoded.charCodeAt(index);
   }
