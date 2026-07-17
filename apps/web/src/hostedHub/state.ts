@@ -8,6 +8,7 @@ import type {
   HostedHubAccount,
   HostedHubNode,
   HostedHubSession,
+  HostedHubSessionResponse,
   HostedRelayFailure,
   HostedRelayTransportStatus,
   HostedRycoSessionStatus,
@@ -142,10 +143,24 @@ class HostedHubController {
     readonly displayName: string;
     readonly passkeyLabel: string | null;
   }): Promise<void> {
+    return this.#registerAccount((signal) => hostedHubApi.redeemInvitation(input, signal));
+  }
+
+  async bootstrapOwner(input: {
+    readonly credential: string;
+    readonly displayName: string;
+    readonly passkeyLabel: string | null;
+  }): Promise<void> {
+    return this.#registerAccount((signal) => hostedHubApi.bootstrapOwner(input, signal));
+  }
+
+  async #registerAccount(
+    register: (signal: AbortSignal) => Promise<HostedHubSessionResponse>,
+  ): Promise<void> {
     const operation = this.#replaceOperation();
     patchState({ accountStatus: "authenticating", errorMessage: null, recoveryCodes: [] });
     try {
-      const result = await hostedHubApi.redeemInvitation(input, operation.signal);
+      const result = await register(operation.signal);
       patchState({
         accountStatus: "authenticated",
         account: result.account,

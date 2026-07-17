@@ -138,14 +138,44 @@ export class HostedHubApi {
     },
     signal?: AbortSignal,
   ): Promise<HostedHubSessionResponse> {
-    const options = await this.#request("/api/auth/invitations/registration/options", {
+    return this.#registerPasskey(
+      "/api/auth/invitations/registration/options",
+      "/api/auth/invitations/registration/verify",
+      input,
+      signal,
+    );
+  }
+
+  async bootstrapOwner(
+    input: {
+      readonly credential: string;
+      readonly displayName: string;
+      readonly passkeyLabel: string | null;
+    },
+    signal?: AbortSignal,
+  ): Promise<HostedHubSessionResponse> {
+    return this.#registerPasskey(
+      "/api/auth/bootstrap/registration/options",
+      "/api/auth/bootstrap/registration/verify",
+      input,
+      signal,
+    );
+  }
+
+  async #registerPasskey(
+    optionsPath: string,
+    verifyPath: string,
+    input: unknown,
+    signal?: AbortSignal,
+  ): Promise<HostedHubSessionResponse> {
+    const options = await this.#request(optionsPath, {
       method: "POST",
       body: input,
       ...(signal ? { signal } : {}),
     });
     const response = await createPasskeyRegistration(options.options, signal);
     const result = this.#sessionResponse(
-      await this.#request("/api/auth/invitations/registration/verify", {
+      await this.#request(verifyPath, {
         method: "POST",
         body: { response },
         ...(signal ? { signal } : {}),
