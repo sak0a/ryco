@@ -78,6 +78,9 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
 
     await page.getByRole("button", { name: "Redeem invitation" }).click();
     await expect.element(page.getByLabelText("Invitation code")).toBeVisible();
+    await expect
+      .element(page.getByLabelText("Invitation code"))
+      .toHaveAttribute("type", "password");
     await expect.element(page.getByLabelText("Display name")).toBeVisible();
     await expect.element(page.getByLabelText(/Passkey label/)).toBeVisible();
     await expect.element(page.getByLabelText("Invitation code")).toHaveFocus();
@@ -85,6 +88,9 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     await page.getByRole("button", { name: "Back" }).click();
     await page.getByRole("button", { name: "Set up first owner" }).click();
     await expect.element(page.getByLabelText("Bootstrap credential")).toBeVisible();
+    await expect
+      .element(page.getByLabelText("Bootstrap credential"))
+      .toHaveAttribute("type", "password");
     await expect.element(page.getByLabelText("Bootstrap credential")).toHaveFocus();
   });
 

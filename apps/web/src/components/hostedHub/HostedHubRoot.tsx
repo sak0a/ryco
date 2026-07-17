@@ -230,6 +230,7 @@ function RegistrationForm({
         <input
           ref={credentialRef}
           id="hub-registration-credential"
+          type="password"
           required
           maxLength={128}
           value={credential}
