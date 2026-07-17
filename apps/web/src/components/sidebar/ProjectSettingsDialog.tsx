@@ -100,6 +100,7 @@ export interface ProjectSettingsDialogProps {
   // General section
   title: string;
   customAvatarContentHash: string | null;
+  projectAvatarUploadUnavailableReason: string | null;
   preferredRemoteName: string | null;
   // Location section
   workspaceRoot: string;
@@ -128,6 +129,7 @@ function ProjectSettingsGeneralSection(props: {
   target: SidebarProjectGroupMember;
   title: string;
   customAvatarContentHash: string | null;
+  projectAvatarUploadUnavailableReason: string | null;
   preferredRemoteName: string | null;
   onTitleChange: (value: string) => void;
   onPreferredRemoteChange: (value: string | null) => void;
@@ -144,7 +146,9 @@ function ProjectSettingsGeneralSection(props: {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const triggerUpload = () => fileInputRef.current?.click();
+  const triggerUpload = () => {
+    if (!props.projectAvatarUploadUnavailableReason) fileInputRef.current?.click();
+  };
   const handleFile = async (file: File) => {
     setUploading(true);
     try {
@@ -174,12 +178,20 @@ function ProjectSettingsGeneralSection(props: {
         <div className="min-w-0 flex-1 space-y-1.5">
           <div className="text-xs font-medium text-foreground">Project image</div>
           <p className="text-[11px] text-muted-foreground">
-            {props.customAvatarContentHash
-              ? "PNG, JPG, or WebP · up to 2 MB"
-              : "Using auto-detected favicon · upload to override"}
+            {props.projectAvatarUploadUnavailableReason
+              ? props.projectAvatarUploadUnavailableReason
+              : props.customAvatarContentHash
+                ? "PNG, JPG, or WebP · up to 2 MB"
+                : "Using auto-detected favicon · upload to override"}
           </p>
           <div className="flex gap-2 pt-1">
-            <Button size="xs" variant="outline" onClick={triggerUpload} disabled={uploading}>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={triggerUpload}
+              disabled={uploading || props.projectAvatarUploadUnavailableReason !== null}
+              title={props.projectAvatarUploadUnavailableReason ?? undefined}
+            >
               Upload
             </Button>
             <Button
@@ -196,6 +208,7 @@ function ProjectSettingsGeneralSection(props: {
             type="file"
             accept="image/png,image/jpeg,image/webp"
             className="hidden"
+            disabled={props.projectAvatarUploadUnavailableReason !== null}
             onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) void handleFile(file);
@@ -1116,6 +1129,7 @@ export function ProjectSettingsDialog(props: ProjectSettingsDialogProps) {
                   target={target}
                   title={props.title}
                   customAvatarContentHash={props.customAvatarContentHash}
+                  projectAvatarUploadUnavailableReason={props.projectAvatarUploadUnavailableReason}
                   preferredRemoteName={props.preferredRemoteName}
                   onTitleChange={props.onTitleChange}
                   onPreferredRemoteChange={props.onPreferredRemoteChange}

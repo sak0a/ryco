@@ -656,6 +656,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
         target={settingsDialog.projectSettingsTarget}
         title={settingsDialog.projectSettingsTitle}
         customAvatarContentHash={settingsDialog.projectSettingsCustomAvatarContentHash}
+        projectAvatarUploadUnavailableReason={settingsDialog.projectAvatarUploadUnavailableReason}
         preferredRemoteName={settingsDialog.projectSettingsPreferredRemoteName}
         workspaceRoot={settingsDialog.projectSettingsWorkspaceRoot}
         customSystemPrompt={settingsDialog.projectSettingsCustomSystemPrompt}

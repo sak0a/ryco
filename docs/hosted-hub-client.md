@@ -151,6 +151,9 @@ Hosted mode keeps the shared feature UI and uses the selected node's RPC capabil
 - browser downloads and clipboard actions use normal browser APIs;
 - historical attachment preview URLs are not sent to Hub because node HTTP paths are not a relay
   transport; the attachment name remains visible with an explicit preview-unavailable explanation;
+- auto-detected project favicons and project-image upload/preview are disabled with an explanation
+  because those legacy node HTTP routes are not relayed; removing an existing image remains an
+  authorized RPC operation;
 - desktop updater controls, native file dialogs, native notifications, deep-link pairing, local
   project discovery, desktop IPC, and editor/Finder launch affordances remain desktop-only;
 - no local filesystem path or desktop bridge is exposed to the hosted page.

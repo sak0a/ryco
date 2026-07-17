@@ -137,6 +137,9 @@ export function resolvePrimaryEnvironmentHttpUrl(
   pathname: string,
   searchParams?: Record<string, string>,
 ): string {
+  if (isHostedHubMode()) {
+    throw new Error("Node HTTP routes are unavailable in hosted Hub mode.");
+  }
   const primaryTarget = readPrimaryEnvironmentTarget();
   if (!primaryTarget) {
     throw new Error("Unable to resolve the primary environment HTTP base URL.");
