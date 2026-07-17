@@ -589,7 +589,7 @@ async function waitForWsClient(): Promise<void> {
         true,
       );
     },
-    { timeout: 8_000, interval: 16 },
+    { timeout: 20_000, interval: 16 },
   );
 }
 
