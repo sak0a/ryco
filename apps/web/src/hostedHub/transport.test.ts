@@ -63,6 +63,8 @@ beforeEach(() => {
     selectedNode,
     generation: 4,
     directoryStatus: "ready",
+    effectiveRole: selectedNode.effectiveRole,
+    transportStatus: "idle",
   });
 });
 
@@ -94,6 +96,25 @@ describe("HostedRelayAttemptFactory", () => {
       kind: "network",
       retryable: true,
     });
+  });
+
+  it("authorizes bootstrap subscriptions from a fresh directory role before socket open", () => {
+    const lifecycle = new HostedRelayAttemptFactory().lifecycleHandlers();
+
+    expect(
+      lifecycle.authorizeRequest?.({
+        tag: ORCHESTRATION_WS_METHODS.subscribeShell,
+        stream: true,
+      }),
+    ).toBe(true);
+
+    useHostedHubStore.setState({ directoryStatus: "stale" });
+    expect(
+      lifecycle.authorizeRequest?.({
+        tag: ORCHESTRATION_WS_METHODS.subscribeShell,
+        stream: true,
+      }),
+    ).toBe(false);
   });
   it("requests and consumes one memory-only ticket per connection attempt", async () => {
     const ticket = encodeBase64Url(new Uint8Array(32).fill(9));

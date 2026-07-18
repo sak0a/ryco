@@ -76,6 +76,8 @@ function isSessionFailure(error: unknown): boolean {
 
 const DIRECTORY_REFRESH_MS = 20_000;
 const DIRECTORY_RETRY_MAX_MS = 60_000;
+const HOSTED_SESSION_SYNC_DEADLINE_MS = 30_000;
+export const HOSTED_SESSION_SYNC_FAILURE_MESSAGE = "Ryco state could not be synchronized.";
 
 class HostedHubController {
   #operation: AbortController | null = null;
@@ -85,6 +87,8 @@ class HostedHubController {
   #directoryVisibilityListener: (() => void) | null = null;
   #directoryPromise: Promise<void> | null = null;
   #bootstrapPromise: Promise<void> | null = null;
+  #sessionSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  #retrySelectedNodePromise: Promise<void> | null = null;
 
   bootstrap(): Promise<void> {
     if (this.#bootstrapPromise) return this.#bootstrapPromise;
@@ -203,6 +207,8 @@ class HostedHubController {
     this.#directoryOperation = null;
     this.#directoryPromise = null;
     this.#bootstrapPromise = null;
+    this.#clearSessionSyncTimer();
+    this.#retrySelectedNodePromise = null;
     hostedHubApi.clearSessionMaterial();
     useHostedHubStore.setState(initialState, true);
   }
@@ -230,6 +236,7 @@ class HostedHubController {
 
   async clearAccount(status: "signed-out" | "session-expired"): Promise<void> {
     this.#clearDirectoryTimer();
+    this.#clearSessionSyncTimer();
     this.#directoryOperation?.abort();
     this.#directoryOperation = null;
     this.#directoryPromise = null;
@@ -352,8 +359,54 @@ class HostedHubController {
       errorMessage: null,
       generation,
     });
+    this.#startSessionSyncTimer(generation);
     const { activateHostedNode } = await import("./environment");
-    await activateHostedNode(node, state.selectedNode?.environmentId ?? null);
+    try {
+      await activateHostedNode(node, state.selectedNode?.environmentId ?? null);
+    } catch {
+      this.#failSessionSync(generation);
+    }
+  }
+
+  retrySelectedNode(): Promise<void> {
+    if (this.#retrySelectedNodePromise) return this.#retrySelectedNodePromise;
+    const promise = this.#retrySelectedNode().finally(() => {
+      if (this.#retrySelectedNodePromise === promise) this.#retrySelectedNodePromise = null;
+    });
+    this.#retrySelectedNodePromise = promise;
+    return promise;
+  }
+
+  async #retrySelectedNode(): Promise<void> {
+    const state = useHostedHubStore.getState();
+    const node = state.selectedNode;
+    if (
+      !node ||
+      node.revokedAt !== null ||
+      state.accountStatus !== "authenticated" ||
+      state.directoryStatus !== "ready"
+    ) {
+      return;
+    }
+    const generation = state.generation + 1;
+    this.#clearSessionSyncTimer();
+    patchState({
+      selectionStatus: node.presence.online ? "online" : "offline",
+      effectiveRole: node.effectiveRole,
+      transportStatus: "idle",
+      sessionStatus: "synchronizing",
+      sessionEstablished: false,
+      sessionRecoveredAfterUnknown: false,
+      errorMessage: null,
+      generation,
+    });
+    this.#startSessionSyncTimer(generation);
+    const { activateHostedNode } = await import("./environment");
+    try {
+      await activateHostedNode(node, node.environmentId);
+    } catch {
+      this.#failSessionSync(generation);
+    }
   }
 
   transportStatus(generation: number, status: HostedRelayTransportStatus): void {
@@ -390,6 +443,7 @@ class HostedHubController {
             : state.selectedNode?.presence.online
               ? state.selectionStatus
               : "offline";
+    if (!failure.retryable) this.#clearSessionSyncTimer();
     patchState({
       selectionStatus,
       effectiveRole: failure.retryable ? state.effectiveRole : null,
@@ -418,6 +472,7 @@ class HostedHubController {
   markSessionReady(environmentId: EnvironmentId): void {
     const state = useHostedHubStore.getState();
     if (state.selectedNode?.environmentId !== environmentId) return;
+    this.#clearSessionSyncTimer();
     if (state.sessionStatus === "delivery-unknown") {
       patchState({ sessionEstablished: true, sessionRecoveredAfterUnknown: true });
       return;
@@ -437,6 +492,16 @@ class HostedHubController {
       return;
     }
     patchState({ sessionStatus: "replaying" });
+  }
+
+  reportShellSnapshotFailure(environmentId: EnvironmentId): void {
+    const state = useHostedHubStore.getState();
+    if (state.selectedNode?.environmentId !== environmentId) return;
+    if (state.sessionEstablished) {
+      console.warn("hosted_snapshot_reconciliation_failed");
+      return;
+    }
+    this.#failSessionSync(state.generation);
   }
 
   acknowledgeDeliveryUnknown(): void {
@@ -476,7 +541,36 @@ class HostedHubController {
     this.#directoryVisibilityListener = null;
   }
 
+  #startSessionSyncTimer(generation: number): void {
+    this.#clearSessionSyncTimer();
+    const state = useHostedHubStore.getState();
+    if (state.generation !== generation || state.sessionEstablished) return;
+    this.#sessionSyncTimer = setTimeout(
+      () => this.#failSessionSync(generation),
+      HOSTED_SESSION_SYNC_DEADLINE_MS,
+    );
+  }
+
+  #clearSessionSyncTimer(): void {
+    if (this.#sessionSyncTimer) clearTimeout(this.#sessionSyncTimer);
+    this.#sessionSyncTimer = null;
+  }
+
+  #failSessionSync(generation: number): void {
+    const state = useHostedHubStore.getState();
+    if (state.generation !== generation || state.sessionEstablished) return;
+    this.#clearSessionSyncTimer();
+    patchState({
+      transportStatus: "terminal-failure",
+      sessionStatus: "stale",
+      sessionEstablished: false,
+      sessionRecoveredAfterUnknown: false,
+      errorMessage: HOSTED_SESSION_SYNC_FAILURE_MESSAGE,
+    });
+  }
+
   async #deactivateSelection(environmentId: EnvironmentId, generation: number): Promise<void> {
+    this.#clearSessionSyncTimer();
     const { deactivateHostedNode } = await import("./environment");
     await deactivateHostedNode(environmentId);
     if (useHostedHubStore.getState().generation !== generation) return;
@@ -523,4 +617,8 @@ export function markHostedSessionReady(environmentId: EnvironmentId): void {
 
 export function markHostedSessionReplaying(environmentId: EnvironmentId): void {
   hostedHubController.markSessionReplaying(environmentId);
+}
+
+export function reportHostedShellSnapshotFailure(environmentId: EnvironmentId): void {
+  hostedHubController.reportShellSnapshotFailure(environmentId);
 }

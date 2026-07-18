@@ -75,7 +75,11 @@ import {
 import { getClientSettings } from "~/hooks/useSettings";
 import { markStartupPhase, measureStartupPhase } from "~/perf/startupInstrumentation";
 import { isHostedHubMode } from "~/env";
-import { markHostedSessionReady, markHostedSessionReplaying } from "~/hostedHub/state";
+import {
+  markHostedSessionReady,
+  markHostedSessionReplaying,
+  reportHostedShellSnapshotFailure,
+} from "~/hostedHub/state";
 import { getHostedRelayAttemptFactory } from "~/hostedHub/transport";
 import {
   orderSavedEnvironmentConnectionQueue,
@@ -276,11 +280,27 @@ export function shouldApplyProjectionSnapshot(input: {
   } | null;
   readonly next: Pick<OrchestrationShellSnapshot, "snapshotSequence" | "updatedAt">;
 }): boolean {
+  return classifyProjectionSnapshot(input) === "newer";
+}
+
+export function classifyProjectionSnapshot(input: {
+  readonly current: {
+    readonly sequence: number;
+    readonly updatedAt: string | null;
+  } | null;
+  readonly next: Pick<OrchestrationShellSnapshot, "snapshotSequence" | "updatedAt">;
+}): "newer" | "current" | "stale" {
   if (input.current === null) {
-    return true;
+    return "newer";
   }
 
-  return compareAppliedProjectionVersion(input.current, toAppliedProjectionVersion(input.next)) < 0;
+  const comparison = compareAppliedProjectionVersion(
+    input.current,
+    toAppliedProjectionVersion(input.next),
+  );
+  if (comparison < 0) return "newer";
+  if (comparison === 0) return "current";
+  return "stale";
 }
 
 export function shouldApplyProjectionEvent(input: {
@@ -1129,12 +1149,15 @@ function createEnvironmentConnectionHandlers() {
       if (environmentId === primaryEnvironmentId) {
         markStartupPhase("primary-shell-snapshot-received");
       }
-      if (
-        !shouldApplyProjectionSnapshot({
-          current: readLastAppliedProjectionVersion(environmentId),
-          next: snapshot,
-        })
-      ) {
+      const snapshotClassification = classifyProjectionSnapshot({
+        current: readLastAppliedProjectionVersion(environmentId),
+        next: snapshot,
+      });
+      if (snapshotClassification === "current") {
+        if (isHostedHubMode()) markHostedSessionReady(environmentId);
+        return;
+      }
+      if (snapshotClassification === "stale") {
         return;
       }
 
@@ -1374,6 +1397,8 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
         ? {
             onResubscribe: (environmentId: EnvironmentId) =>
               markHostedSessionReplaying(environmentId),
+            onShellError: (environmentId: EnvironmentId) =>
+              reportHostedShellSnapshotFailure(environmentId),
           }
         : {}),
       ...createEnvironmentConnectionHandlers(),

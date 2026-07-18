@@ -15,7 +15,11 @@ import { useEffect, useRef, useState, type FormEvent, type RefObject } from "rea
 import { RootAppShell } from "../RootAppShell";
 import { Button } from "../ui/button";
 import { APP_DISPLAY_NAME } from "../../branding";
-import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import {
+  HOSTED_SESSION_SYNC_FAILURE_MESSAGE,
+  hostedHubController,
+  useHostedHubStore,
+} from "../../hostedHub/state";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedNodeEnrollmentFlow } from "./HostedNodeEnrollment";
 
@@ -74,6 +78,11 @@ function HostedNodeFailureSurface({
       <p role="alert" className="mt-2 text-sm text-muted-foreground">
         {message ?? "The relay session could not be established. Choose another node or retry."}
       </p>
+      {message === HOSTED_SESSION_SYNC_FAILURE_MESSAGE ? (
+        <Button className="mt-5" onClick={() => void hostedHubController.retrySelectedNode()}>
+          <RefreshCwIcon aria-hidden /> Retry
+        </Button>
+      ) : null}
     </Surface>
   );
 }

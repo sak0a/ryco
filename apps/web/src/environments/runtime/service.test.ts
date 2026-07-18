@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  classifyProjectionSnapshot,
   shouldApplyProjectionEvent,
   shouldApplyProjectionSnapshot,
   shouldApplyTerminalEvent,
@@ -100,6 +101,21 @@ describe("shouldApplyProjectionSnapshot", () => {
         },
       }),
     ).toBe(true);
+  });
+
+  it("classifies an unchanged replay snapshot as current", () => {
+    expect(
+      classifyProjectionSnapshot({
+        current: {
+          sequence: 5,
+          updatedAt: "2026-04-22T10:05:00.000Z",
+        },
+        next: {
+          snapshotSequence: 5,
+          updatedAt: "2026-04-22T10:05:00.000Z",
+        },
+      }),
+    ).toBe("current");
   });
 });
 

@@ -146,11 +146,7 @@ export class HostedRelayAttemptFactory {
       },
       authorizeRequest: (info) => {
         const state = useHostedHubStore.getState();
-        return hostedRoleAllows(
-          state.effectiveRole,
-          info.tag,
-          state.directoryStatus === "ready" && state.transportStatus === "online",
-        );
+        return hostedRoleAllows(state.effectiveRole, info.tag, state.directoryStatus === "ready");
       },
       getReconnectDelayMs: () => {
         const delay = this.#reconnect.nextDelay(this.#lastRetryAfterMs);

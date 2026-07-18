@@ -10,6 +10,7 @@ function createTestClient() {
   const terminalListeners = new Set<(event: any) => void>();
   const shellListeners = new Set<(event: any) => void>();
   let shellResubscribe: (() => void) | undefined;
+  let shellError: (() => void) | undefined;
 
   const client = {
     dispose: vi.fn(async () => undefined),
@@ -41,9 +42,13 @@ function createTestClient() {
       getTurnDiff: vi.fn(async () => undefined),
       getFullThreadDiff: vi.fn(async () => undefined),
       subscribeShell: vi.fn(
-        (listener: (event: any) => void, options?: { onResubscribe?: () => void }) => {
+        (
+          listener: (event: any) => void,
+          options?: { onResubscribe?: () => void; onError?: () => void },
+        ) => {
           shellListeners.add(listener);
           shellResubscribe = options?.onResubscribe;
+          shellError = options?.onError;
           queueMicrotask(() => {
             listener({
               kind: "snapshot",
@@ -59,6 +64,9 @@ function createTestClient() {
             shellListeners.delete(listener);
             if (shellResubscribe === options?.onResubscribe) {
               shellResubscribe = undefined;
+            }
+            if (shellError === options?.onError) {
+              shellError = undefined;
             }
           };
         },
@@ -136,6 +144,7 @@ function createTestClient() {
         });
       }
     },
+    emitShellError: () => shellError?.(),
   };
 }
 
@@ -169,6 +178,41 @@ describe("createEnvironmentConnection", () => {
       expect.objectContaining({ snapshotSequence: 1 }),
       environmentId,
     );
+
+    await connection.dispose();
+  });
+
+  it("reports shell subscription failures without exposing the underlying error", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client, emitShellError } = createTestClient();
+    const onShellError = vi.fn();
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot: vi.fn(),
+      applyTerminalEvent: vi.fn(),
+      onShellError,
+    });
+
+    emitShellError();
+
+    await expect(connection.ensureBootstrapped()).rejects.toThrow(
+      "Shell snapshot synchronization failed.",
+    );
+    expect(onShellError).toHaveBeenCalledWith(environmentId);
+    expect(onShellError.mock.calls[0]).toHaveLength(1);
 
     await connection.dispose();
   });

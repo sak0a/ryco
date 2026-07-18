@@ -209,6 +209,27 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     await expect
       .element(page.getByRole("alert"))
       .toHaveTextContent(/authentication attempt expired/);
+    await expect.element(page.getByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  it("retries bounded synchronization failures from the selected node", async () => {
+    const selectedNode = node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator");
+    const retry = vi.spyOn(hostedHubController, "retrySelectedNode").mockResolvedValue();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account,
+      session,
+      directoryStatus: "ready",
+      nodes: [selectedNode],
+      selectedNode,
+      transportStatus: "terminal-failure",
+      errorMessage: "Ryco state could not be synchronized.",
+    });
+
+    mounted = await render(<HostedHubRoot />);
+    await page.getByRole("button", { name: "Retry" }).click();
+
+    expect(retry).toHaveBeenCalledOnce();
   });
 
   it("starts sign-in and node selection from keyboard-operable controls", async () => {
