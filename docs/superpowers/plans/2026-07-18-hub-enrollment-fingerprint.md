@@ -16,7 +16,7 @@
 1. Add a reusable schema for `SHA256:` followed by exactly 43 base64url characters.
 2. Make `fingerprint` required in `HubEnrollmentStartResult`.
 3. Add acceptance and rejection tests for prefix, alphabet, padding, and length.
-4. Run `bun run test packages/contracts/src/hubConnector.test.ts`.
+4. Run `bun run --cwd packages/contracts test src/hubConnector.test.ts`.
 
 ## Task 2: Return the generated identity fingerprint
 
@@ -31,7 +31,7 @@
 3. Add the field to the exact result-key assertion.
 4. Prove malformed internal fingerprint bytes fail through the existing bounded enrollment failure path.
 5. Prove responses exclude raw public keys, protected-store references, polling secrets, origins, and paths.
-6. Run the focused connector and HTTP tests with `bun run test`.
+6. Run focused tests with `bun run --cwd apps/server test <test-files>`.
 
 ## Task 3: Render both CLI formats
 
@@ -44,7 +44,7 @@
 2. Preserve schema-validated JSON serialization with the identical `fingerprint` field.
 3. Add human and JSON output assertions.
 4. Verify no polling secret, raw key, origin, or path enters either output.
-5. Run `bun run test apps/server/src/cli.test.ts`.
+5. Run `bun run --cwd apps/server test src/cli.test.ts`.
 
 ## Task 4: Document the verification step
 

@@ -1389,6 +1389,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               return {
                 status,
                 deviceCode: "ABCD-EFGH",
+                fingerprint: `SHA256:${"A".repeat(43)}`,
                 expiresAt: "1970-01-01T00:10:00.000Z",
                 pollIntervalMs: 5_000,
               };
@@ -1425,9 +1426,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
       const enrollmentBody = (yield* Effect.promise(() => enrollmentResponse.json())) as {
         readonly deviceCode?: string;
+        readonly fingerprint?: string;
       };
       assert.equal(enrollmentResponse.status, 201);
       assert.equal(enrollmentBody.deviceCode, "ABCD-EFGH");
+      assert.equal(enrollmentBody.fingerprint, `SHA256:${"A".repeat(43)}`);
+      assert.notProperty(enrollmentBody, "publicKey");
+      assert.notProperty(enrollmentBody, "pollingSecret");
       assert.equal(enrollCalls, 1);
 
       const cancelResponse = yield* Effect.promise(() =>

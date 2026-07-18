@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { Schema } from "effect";
 
 import { RELAY_MAX_QUEUED_BYTES } from "./relay.ts";
-import { HubConnectorStatus } from "./hubConnector.ts";
+import { HubConnectorStatus, HubEnrollmentStartResult } from "./hubConnector.ts";
 
 const decode = Schema.decodeUnknownSync(HubConnectorStatus);
 
@@ -69,5 +69,33 @@ describe("HubConnectorStatus", () => {
       expect(JSON.stringify(decoded)).not.toContain("sensitive");
     }
     expect(() => decode({ ...disabled, failure: "sensitive-failure" })).toThrow();
+  });
+});
+
+describe("HubEnrollmentStartResult", () => {
+  const decodeEnrollment = Schema.decodeUnknownSync(HubEnrollmentStartResult);
+  const fingerprint = `SHA256:${"A".repeat(43)}`;
+  const enrollment = {
+    status: { ...disabled, state: "awaiting_approval" },
+    deviceCode: "ABCD-EFGH",
+    fingerprint,
+    expiresAt: "2026-07-16T00:05:00.000Z",
+    pollIntervalMs: 1_000,
+  } as const;
+
+  it("accepts the canonical SHA-256 public-key fingerprint", () => {
+    expect(decodeEnrollment(enrollment)).toEqual(enrollment);
+  });
+
+  it("rejects non-canonical fingerprint prefixes, alphabets, padding, and lengths", () => {
+    for (const invalid of [
+      `sha256:${"A".repeat(43)}`,
+      `SHA256:${"+".repeat(43)}`,
+      `SHA256:${"A".repeat(42)}=`,
+      `SHA256:${"A".repeat(42)}`,
+      `SHA256:${"A".repeat(44)}`,
+    ]) {
+      expect(() => decodeEnrollment({ ...enrollment, fingerprint: invalid })).toThrow();
+    }
   });
 });

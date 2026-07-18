@@ -1,5 +1,6 @@
 import type { HubConnectorStatus, HubEnrollmentStartResult } from "@ryco/contracts";
 import type { RelayErrorFrame, RelayFrame } from "@ryco/contracts/relay";
+import { formatNodePublicKeyFingerprint } from "@ryco/shared/nodeIdentity";
 
 import type { HubConnectorConfig } from "../config.ts";
 import type { HubEnrollmentMetadata } from "../hubIdentity/HubEnrollmentClient.ts";
@@ -184,6 +185,7 @@ export class HubConnector {
       return {
         status: this.status(),
         deviceCode: started.deviceCode,
+        fingerprint: formatNodePublicKeyFingerprint(started.publicKey.fingerprint),
         expiresAt: new Date(started.expiresAt).toISOString(),
         pollIntervalMs: started.pollIntervalMs,
       };

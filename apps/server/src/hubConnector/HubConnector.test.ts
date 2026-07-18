@@ -676,12 +676,14 @@ describe("HubConnector", () => {
     const started = await connector.enroll();
     expect(started).toMatchObject({
       deviceCode: "ABCD-EFGH",
+      fingerprint: `SHA256:${"A".repeat(43)}`,
       pollIntervalMs: 1_000,
       status: { state: "awaiting_approval" },
     });
     expect(Object.keys(started).toSorted()).toEqual([
       "deviceCode",
       "expiresAt",
+      "fingerprint",
       "pollIntervalMs",
       "status",
     ]);
@@ -701,6 +703,44 @@ describe("HubConnector", () => {
     } as MessageEvent);
     await settle();
     expect(connector.status().state).toBe("online");
+    await connector.stop();
+  });
+
+  it("fails enrollment closed when the generated fingerprint is malformed", async () => {
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        readState: async () => ({
+          version: 1,
+          revision: 1,
+          environmentId: `env_${"E".repeat(22)}`,
+          pendingEnrollment: null,
+          activeNode: null,
+          stagedRotation: null,
+        }),
+        startEnrollment: async () => ({
+          deviceCode: "ABCD-EFGH",
+          expiresAt: 2_000_000,
+          pollIntervalMs: 1_000,
+          environmentId: `env_${"E".repeat(22)}`,
+          publicKey: {
+            algorithm: "ed25519",
+            publicKey: new Uint8Array(32),
+            fingerprint: new Uint8Array(31),
+          },
+        }),
+      }),
+      transport: { open: () => new FakeSocket() },
+      channels: { open: async () => Promise.reject(new Error("unused")) },
+      enrollmentMetadata,
+    });
+    await connector.start();
+    await expect(connector.enroll()).rejects.toThrow("Hub enrollment could not be started.");
+    expect(connector.status()).toMatchObject({
+      state: "degraded",
+      degradedMode: "operator_action_required",
+      failure: "enrollment_unavailable",
+    });
     await connector.stop();
   });
 

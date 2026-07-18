@@ -93,9 +93,15 @@ export const HubConnectorStatus = Schema.Struct({
 );
 export type HubConnectorStatus = typeof HubConnectorStatus.Type;
 
+export const HubNodePublicKeyFingerprint = Schema.String.check(
+  Schema.isPattern(/^SHA256:[A-Za-z0-9_-]{43}$/),
+);
+export type HubNodePublicKeyFingerprint = typeof HubNodePublicKeyFingerprint.Type;
+
 export const HubEnrollmentStartResult = Schema.Struct({
   status: HubConnectorStatus,
   deviceCode: Schema.String.check(Schema.isPattern(/^[A-Z0-9-]{4,32}$/)),
+  fingerprint: HubNodePublicKeyFingerprint,
   expiresAt: IsoDateTime,
   pollIntervalMs: NonNegativeInt.check(Schema.isBetween({ minimum: 1_000, maximum: 60_000 })),
 });
