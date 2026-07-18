@@ -46,10 +46,12 @@ short-lived owner credential from the local auth control plane, uses it only in 
 header to the existing local server, and revokes it after the operation. That credential is never a
 Hub credential and never enters a Hub WebSocket.
 
-`hub enroll` prints a short device code and expiry. Approval polling continues inside the running
-server and resumes from protected local state after restart. `hub cancel` stops a pending ceremony
-and deletes its local key and polling-secret custody. Denial or expiry requires starting a new
-ceremony.
+`hub enroll` prints a short device code, the canonical `SHA256:<base64url>` public-key fingerprint,
+and expiry. `--json` returns the same bounded fingerprint field. Compare that node-side fingerprint
+exactly with the Hub approval screen before approving. Deny and investigate any mismatch; never
+approve by device code alone. Approval polling continues inside the running server and resumes from
+protected local state after restart. `hub cancel` stops a pending ceremony and deletes its local key
+and polling-secret custody. Denial or expiry requires starting a new ceremony.
 
 The node creates its Ed25519 key locally. Private keys and enrollment polling secrets live in the
 platform protected store described in [Node identity primitives](./node-identity.md). Local JSON

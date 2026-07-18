@@ -1,5 +1,6 @@
 import type { HubConnectorStatus, HubEnrollmentStartResult } from "@ryco/contracts";
 import type { RelayErrorFrame, RelayFrame } from "@ryco/contracts/relay";
+import { formatNodePublicKeyFingerprint } from "@ryco/shared/nodeIdentity";
 
 import type { HubConnectorConfig } from "../config.ts";
 import type { HubEnrollmentMetadata } from "../hubIdentity/HubEnrollmentClient.ts";
@@ -174,20 +175,29 @@ export class HubConnector {
     const generation = this.#state.invalidateGeneration();
     this.#clearAllTimers();
     this.#state.transition("enrolling");
+    let enrollmentStarted = false;
     try {
       const started = await this.#identity.startEnrollment(origin, this.#enrollmentMetadata);
+      enrollmentStarted = true;
       if (!this.#state.isCurrent(generation) || this.#stopping) {
         throw new Error("Hub enrollment start was superseded.");
       }
+      const fingerprint = formatNodePublicKeyFingerprint(started.publicKey.fingerprint);
+      const expiresAt = new Date(started.expiresAt).toISOString();
       this.#state.transition("awaiting_approval");
       this.#scheduleEnrollmentPoll(started.pollIntervalMs);
       return {
         status: this.status(),
         deviceCode: started.deviceCode,
-        expiresAt: new Date(started.expiresAt).toISOString(),
+        fingerprint,
+        expiresAt,
         pollIntervalMs: started.pollIntervalMs,
       };
     } catch {
+      if (enrollmentStarted) {
+        this.#clearTimer("enrollment");
+        await this.#identity.cancelEnrollment(origin).catch(() => undefined);
+      }
       if (!this.#state.isCurrent(generation) || this.#stopping) {
         throw new Error("Hub enrollment start was superseded.");
       }

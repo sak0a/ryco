@@ -1192,8 +1192,9 @@ const hubEnrollCommand = Command.make("enroll", {
             ? JSON.stringify(result)
             : [
                 `Device code: ${result.deviceCode}`,
+                `Fingerprint: ${result.fingerprint}`,
                 `Expires: ${result.expiresAt}`,
-                "Approve this code in Hub. Ryco will continue polling in the background.",
+                "Compare this fingerprint in Hub before approving. Ryco will continue polling in the background.",
               ].join("\n"),
         ),
       ),
