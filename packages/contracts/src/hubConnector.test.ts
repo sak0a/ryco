@@ -92,6 +92,7 @@ describe("HubEnrollmentStartResult", () => {
       `sha256:${"A".repeat(43)}`,
       `SHA256:${"+".repeat(43)}`,
       `SHA256:${"A".repeat(42)}=`,
+      `SHA256:${"A".repeat(42)}B`,
       `SHA256:${"A".repeat(42)}`,
       `SHA256:${"A".repeat(44)}`,
     ]) {

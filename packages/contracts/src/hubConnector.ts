@@ -94,7 +94,7 @@ export const HubConnectorStatus = Schema.Struct({
 export type HubConnectorStatus = typeof HubConnectorStatus.Type;
 
 export const HubNodePublicKeyFingerprint = Schema.String.check(
-  Schema.isPattern(/^SHA256:[A-Za-z0-9_-]{43}$/),
+  Schema.isPattern(/^SHA256:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
 );
 export type HubNodePublicKeyFingerprint = typeof HubNodePublicKeyFingerprint.Type;
 

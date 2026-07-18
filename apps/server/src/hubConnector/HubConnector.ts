@@ -180,13 +180,15 @@ export class HubConnector {
       if (!this.#state.isCurrent(generation) || this.#stopping) {
         throw new Error("Hub enrollment start was superseded.");
       }
+      const fingerprint = formatNodePublicKeyFingerprint(started.publicKey.fingerprint);
+      const expiresAt = new Date(started.expiresAt).toISOString();
       this.#state.transition("awaiting_approval");
       this.#scheduleEnrollmentPoll(started.pollIntervalMs);
       return {
         status: this.status(),
         deviceCode: started.deviceCode,
-        fingerprint: formatNodePublicKeyFingerprint(started.publicKey.fingerprint),
-        expiresAt: new Date(started.expiresAt).toISOString(),
+        fingerprint,
+        expiresAt,
         pollIntervalMs: started.pollIntervalMs,
       };
     } catch {
