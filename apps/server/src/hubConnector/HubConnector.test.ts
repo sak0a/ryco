@@ -708,6 +708,7 @@ describe("HubConnector", () => {
 
   it("fails enrollment closed when the generated fingerprint is malformed", async () => {
     const clock = scheduler();
+    let cancellations = 0;
     let polls = 0;
     const connector = new HubConnector({
       config: enabledConfig,
@@ -735,6 +736,9 @@ describe("HubConnector", () => {
           polls += 1;
           return { status: "pending", retryAfterMs: 1_000 };
         },
+        cancelEnrollment: async () => {
+          cancellations += 1;
+        },
       }),
       transport: { open: () => new FakeSocket() },
       channels: { open: async () => Promise.reject(new Error("unused")) },
@@ -750,6 +754,7 @@ describe("HubConnector", () => {
     });
     expect(clock.timers.size).toBe(0);
     await clock.advance(1_000);
+    expect(cancellations).toBe(1);
     expect(polls).toBe(0);
     await connector.stop();
   });

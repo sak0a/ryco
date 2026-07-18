@@ -175,8 +175,10 @@ export class HubConnector {
     const generation = this.#state.invalidateGeneration();
     this.#clearAllTimers();
     this.#state.transition("enrolling");
+    let enrollmentStarted = false;
     try {
       const started = await this.#identity.startEnrollment(origin, this.#enrollmentMetadata);
+      enrollmentStarted = true;
       if (!this.#state.isCurrent(generation) || this.#stopping) {
         throw new Error("Hub enrollment start was superseded.");
       }
@@ -192,6 +194,10 @@ export class HubConnector {
         pollIntervalMs: started.pollIntervalMs,
       };
     } catch {
+      if (enrollmentStarted) {
+        this.#clearTimer("enrollment");
+        await this.#identity.cancelEnrollment(origin).catch(() => undefined);
+      }
       if (!this.#state.isCurrent(generation) || this.#stopping) {
         throw new Error("Hub enrollment start was superseded.");
       }
