@@ -65,6 +65,7 @@ export class HostedRelayAttemptFactory {
       throw new Error("No authorized hosted node is selected.");
     }
     const generation = state.generation;
+    this.#activeGeneration = generation;
     hostedHubController.transportStatus(generation, "requesting-ticket");
     this.#pendingTicket = null;
     try {

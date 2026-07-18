@@ -197,6 +197,107 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("retries async websocket url providers without reflecting rejection details", async () => {
+    let attempt = 0;
+    const provider = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 1) {
+        throw new Error("sensitive-provider-canary");
+      }
+      return "wss://remote.example.com/?wsToken=fresh";
+    });
+    const onError = vi.fn();
+    const transport = createTransport(provider, {
+      getReconnectDelayMs: () => 0,
+      onError,
+      reconnectMaxRetries: 1,
+    });
+
+    await waitFor(() => {
+      expect(provider).toHaveBeenCalledTimes(2);
+      expect(sockets).toHaveLength(1);
+    });
+
+    expect(getSocket().url).toBe("wss://remote.example.com/ws?wsToken=fresh");
+    expect(onError).toHaveBeenCalledWith("Unable to prepare the Ryco server WebSocket connection.");
+    expect(JSON.stringify(onError.mock.calls)).not.toContain("sensitive-provider-canary");
+    await transport.dispose();
+  });
+
+  it("recovers when a reconnect url provider rejects before returning a fresh url", async () => {
+    let attempt = 0;
+    const provider = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 2) {
+        throw new Error("relay ticket temporarily unavailable");
+      }
+      return `wss://remote.example.com/?attempt=${attempt}`;
+    });
+    const transport = createTransport(provider, {
+      getReconnectDelayMs: () => 0,
+      reconnectMaxRetries: 3,
+    });
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    const firstSocket = getSocket();
+    expect(firstSocket.url).toBe("wss://remote.example.com/ws?attempt=1");
+    firstSocket.open();
+    firstSocket.close(1012, "service restart");
+
+    await waitFor(() => {
+      expect(provider).toHaveBeenCalledTimes(3);
+      expect(sockets).toHaveLength(2);
+    });
+
+    expect(getSocket().url).toBe("wss://remote.example.com/ws?attempt=3");
+    await transport.dispose();
+  });
+
+  it("stops async url provider retries when reconnect is no longer allowed", async () => {
+    let reconnectAllowed = true;
+    const provider = vi.fn(async () => {
+      throw new Error("terminal provider failure");
+    });
+    const transport = createTransport(provider, {
+      getReconnectDelayMs: () => 0,
+      onError: () => {
+        reconnectAllowed = false;
+      },
+      reconnectMaxRetries: 3,
+      shouldReconnect: () => reconnectAllowed,
+    });
+
+    await waitFor(() => {
+      expect(provider).toHaveBeenCalledOnce();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(provider).toHaveBeenCalledOnce();
+    expect(sockets).toHaveLength(0);
+    await transport.dispose();
+  });
+
+  it("cancels an async url provider retry when disposed during backoff", async () => {
+    const provider = vi.fn(async () => {
+      throw new Error("temporary provider failure");
+    });
+    const transport = createTransport(provider, {
+      getReconnectDelayMs: () => 25,
+      reconnectMaxRetries: 3,
+    });
+
+    await waitFor(() => {
+      expect(provider).toHaveBeenCalledOnce();
+    });
+    await transport.dispose();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(provider).toHaveBeenCalledOnce();
+    expect(sockets).toHaveLength(0);
+  });
+
   it("tracks initial connection failures for the app error state", async () => {
     const transport = createTransport("ws://localhost:3020");
 
