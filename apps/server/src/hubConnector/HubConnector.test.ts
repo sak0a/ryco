@@ -9,7 +9,7 @@ import {
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
 
 import { DEFAULT_HUB_CONNECTOR_CONFIG, type HubConnectorConfig } from "../config.ts";
-import type { HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
+import { HubRelayAuthenticationError, type HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
 import type { HubRelaySocket, HubRelaySocketEventMap } from "./HubRelayTransport.ts";
 import { HubConnector, type HubConnectorScheduler } from "./HubConnector.ts";
 
@@ -233,6 +233,71 @@ describe("HubConnector", () => {
     expect(connector.status().state).toBe("disabled");
     expect(clock.timers.size).toBe(0);
     expect([...sockets[0]!.listeners.values()].every((set) => set.size === 0)).toBe(true);
+  });
+
+  it("retries a transient proof preflight with fresh material and one timer", async () => {
+    const clock = scheduler();
+    const activeIdentity = identity();
+    const sockets: FakeSocket[] = [];
+    let proofAttempts = 0;
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: {
+        ...activeIdentity,
+        createRelayAuthenticationFrame: async (...input) => {
+          proofAttempts += 1;
+          if (proofAttempts === 1) throw new HubRelayAuthenticationError("server_draining");
+          const frame = await activeIdentity.createRelayAuthenticationFrame(...input);
+          if (frame.peer !== "node") throw new Error("unexpected authentication peer");
+          return { ...frame, nonce: new Uint8Array(32).fill(proofAttempts) };
+        },
+      },
+      transport: {
+        open: () => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        },
+      },
+      channels: { open: async () => Promise.reject(new Error("unused")) },
+      enrollmentMetadata,
+      scheduler: clock.value,
+    });
+
+    const starting = connector.start();
+    await settle();
+    expect(connector.status()).toMatchObject({
+      state: "degraded",
+      degradedMode: "backing_off",
+      failure: "server_draining",
+    });
+    expect(proofAttempts).toBe(1);
+    expect(sockets).toHaveLength(0);
+    expect(clock.timers.size).toBe(1);
+
+    await clock.advance(1_000);
+    await settle();
+    expect(proofAttempts).toBe(2);
+    expect(sockets).toHaveLength(1);
+    sockets[0]!.emit("open", {} as Event);
+    const auth = decodeRelayFrame(sockets[0]!.sent[0]!);
+    expect(
+      auth.ok && auth.value.type === "auth" && auth.value.peer === "node" && auth.value.nonce,
+    ).toEqual(new Uint8Array(32).fill(2));
+    sockets[0]!.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await starting;
+    await settle();
+    expect(connector.status().state).toBe("online");
+    expect(clock.timers.size).toBe(2);
+    await connector.stop();
+    expect(clock.timers.size).toBe(0);
   });
 
   it("flushes asynchronous channel output without waiting for another inbound frame", async () => {

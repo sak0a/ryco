@@ -10,7 +10,7 @@ import {
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
 
 import type { ConnectorFailureKind } from "./HubConnectorState.ts";
-import type { HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
+import { HubRelayAuthenticationError, type HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
 import {
   type HubRelaySocket,
   type HubRelaySocketEventMap,
@@ -154,8 +154,10 @@ export class RelayConnectionSession {
         protocolMajor: RELAY_PROTOCOL_MAJOR,
         protocolMinor: RELAY_PROTOCOL_MINOR,
       });
-    } catch {
-      throw new RelayConnectionError("authentication_failed");
+    } catch (error) {
+      throw new RelayConnectionError(
+        error instanceof HubRelayAuthenticationError ? error.failure : "authentication_failed",
+      );
     }
     if (this.#closed) {
       auth.nonce.fill(0);

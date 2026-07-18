@@ -4,7 +4,7 @@ import {
 } from "@ryco/shared/nodeIdentity";
 import type { RelayNodeAuthHandshake } from "@ryco/contracts/relay";
 
-import { fetchBoundedJson } from "./BoundedHttp.ts";
+import { fetchBoundedJson, type BoundedJsonFailure } from "./BoundedHttp.ts";
 import type { LocalHubIdentityStateStore } from "./LocalHubIdentityState.ts";
 import type { NodeSigningIdentity } from "./NodeSigningIdentity.ts";
 
@@ -34,12 +34,22 @@ export interface NodeAuthenticationKeySelector {
 
 export type NodeRelayAuthenticationFrame = RelayNodeAuthHandshake;
 
+export type HubNodeProofFailure =
+  | "network"
+  | "rate_limited"
+  | "server_draining"
+  | "authentication_failed"
+  | "protocol_invalid"
+  | "identity_unavailable";
+
 export class HubNodeProofClientError extends Error {
   readonly code = "node_proof_failed" as const;
+  readonly failure: HubNodeProofFailure;
 
-  constructor() {
+  constructor(failure: HubNodeProofFailure) {
     super("Hub node proof operation failed.");
     this.name = "HubNodeProofClientError";
+    this.failure = failure;
   }
 }
 
@@ -50,8 +60,21 @@ export interface HubNodeProofClient {
   ) => Promise<NodeRelayAuthenticationFrame>;
 }
 
-function proofError(): never {
-  throw new HubNodeProofClientError();
+function proofError(failure: HubNodeProofFailure): never {
+  throw new HubNodeProofClientError(failure);
+}
+
+function proofHttpError(status: number): never {
+  if (status === 429) return proofError("rate_limited");
+  if (status === 503) return proofError("server_draining");
+  if (status >= 500 && status <= 599) return proofError("network");
+  if (status >= 400 && status <= 499) return proofError("authentication_failed");
+  return proofError("protocol_invalid");
+}
+
+function proofTransportError(failure: BoundedJsonFailure): never {
+  if (failure.kind === "transport") return proofError("network");
+  return proofHttpError(failure.status);
 }
 
 function validateChallenge(
@@ -68,7 +91,7 @@ function validateChallenge(
     value.challengeExpiresAt <= now ||
     value.challengeExpiresAt > now + 60_000
   ) {
-    return proofError();
+    return proofError("protocol_invalid");
   }
   return { ...value, challenge: Uint8Array.from(value.challenge) };
 }
@@ -87,7 +110,7 @@ export function makeHubNodeProofClient(dependencies: {
       try {
         hubOrigin = canonicalizeHubOrigin(rawHubOrigin);
       } catch {
-        return proofError();
+        return proofError("identity_unavailable");
       }
       if (
         !Number.isSafeInteger(protocol.protocolMajor) ||
@@ -97,12 +120,21 @@ export function makeHubNodeProofClient(dependencies: {
         protocol.protocolMinor < 0 ||
         protocol.protocolMinor > 65_535
       ) {
-        return proofError();
+        return proofError("protocol_invalid");
       }
-      const state = await dependencies.stateStore.readOrCreate();
-      const active = state.activeNode;
-      if (active === null || active.hubOrigin !== hubOrigin) return proofError();
-      const selected = await dependencies.keySelector.authenticationKey(hubOrigin);
+      let active;
+      let selected;
+      try {
+        const state = await dependencies.stateStore.readOrCreate();
+        active = state.activeNode;
+        if (active === null || active.hubOrigin !== hubOrigin) {
+          return proofError("identity_unavailable");
+        }
+        selected = await dependencies.keySelector.authenticationKey(hubOrigin);
+      } catch (error) {
+        if (error instanceof HubNodeProofClientError) throw error;
+        return proofError("identity_unavailable");
+      }
       let challenge: HubNodeChallenge;
       try {
         challenge = validateChallenge(
@@ -115,8 +147,9 @@ export function makeHubNodeProofClient(dependencies: {
           protocol,
           now(),
         );
-      } catch {
-        return proofError();
+      } catch (error) {
+        if (error instanceof HubNodeProofClientError) throw error;
+        return proofError("network");
       }
       const transcript = encodeNodeAuthenticationTranscript({
         hubOrigin,
@@ -137,7 +170,7 @@ export function makeHubNodeProofClient(dependencies: {
           signature,
         };
       } catch {
-        return proofError();
+        return proofError("identity_unavailable");
       } finally {
         challenge.challenge.fill(0);
         transcript.fill(0);
@@ -171,12 +204,12 @@ export function makeHubNodeChallengeHttpTransport(
           redirect: "error",
           referrerPolicy: "no-referrer",
         },
-        proofError,
+        proofTransportError,
         options,
       );
-      if (!response.ok) return proofError();
+      if (!response.ok) return proofHttpError(response.status);
       const value = response.value;
-      if (typeof value !== "object" || value === null) return proofError();
+      if (typeof value !== "object" || value === null) return proofError("protocol_invalid");
       const candidate = value as Record<string, unknown>;
       if (
         typeof candidate.protocolMajor !== "number" ||
@@ -185,11 +218,11 @@ export function makeHubNodeChallengeHttpTransport(
         typeof candidate.challenge !== "string" ||
         !/^[A-Za-z0-9_-]{43}$/.test(candidate.challenge)
       ) {
-        return proofError();
+        return proofError("protocol_invalid");
       }
       const challenge = Buffer.from(candidate.challenge, "base64url");
       if (challenge.byteLength !== 32 || challenge.toString("base64url") !== candidate.challenge) {
-        return proofError();
+        return proofError("protocol_invalid");
       }
       return {
         protocolMajor: candidate.protocolMajor,

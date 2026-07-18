@@ -8,7 +8,7 @@ import {
 } from "@ryco/contracts/relay";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
 
-import type { HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
+import { HubRelayAuthenticationError, type HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
 import type { HubRelaySocket, HubRelaySocketEventMap } from "./HubRelayTransport.ts";
 import {
   relayErrorKind,
@@ -311,5 +311,28 @@ describe("RelayConnectionSession", () => {
     }
     expect(String(error)).toBe("RelayConnectionError: Hub relay connection failed.");
     expect(JSON.stringify(error)).not.toContain(canary);
+  });
+
+  it("preserves a bounded transient proof-preflight reason without opening a socket", async () => {
+    let opens = 0;
+    const session = new RelayConnectionSession({
+      identity: {
+        ...identity(),
+        createRelayAuthenticationFrame: async () => {
+          throw new HubRelayAuthenticationError("server_draining");
+        },
+      },
+      transport: {
+        open: () => {
+          opens += 1;
+          return new FakeSocket();
+        },
+      },
+      hubOrigin: "https://relay.example",
+      onFrame: () => undefined,
+      onTerminal: () => undefined,
+    });
+    await expect(session.authenticate()).rejects.toMatchObject({ kind: "server_draining" });
+    expect(opens).toBe(0);
   });
 });

@@ -5,7 +5,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { ProtectedSecretStore } from "../hubIdentity/ProtectedSecretStore.ts";
-import { HubIdentityRuntimeError, makeHubIdentityRuntime } from "./HubIdentityRuntime.ts";
+import {
+  HubIdentityRuntimeError,
+  HubRelayAuthenticationError,
+  makeHubIdentityRuntime,
+} from "./HubIdentityRuntime.ts";
 
 const nodeId = `node_${"A".repeat(22)}`;
 const activeKeyId = `nkey_${"B".repeat(22)}`;
@@ -35,6 +39,7 @@ describe("HubIdentityRuntime", () => {
     const store = makeMemoryStore();
     let environmentId = "";
     let challengeRequests = 0;
+    let challengeUnavailable = false;
     const fetchImplementation = async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/api/node/enrollments")) {
@@ -58,6 +63,9 @@ describe("HubIdentityRuntime", () => {
       }
       if (url.endsWith("/api/node/auth/challenges")) {
         challengeRequests += 1;
+        if (challengeUnavailable) {
+          return new Response("PROOF-PREFLIGHT-RESPONSE-CANARY", { status: 503 });
+        }
         return Response.json({
           protocolMajor: 1,
           protocolMinor: 2,
@@ -104,6 +112,21 @@ describe("HubIdentityRuntime", () => {
     expect(first.nonce).not.toEqual(second.nonce);
     expect(challengeRequests).toBe(2);
     expect("secretStore" in restarted).toBe(false);
+
+    challengeUnavailable = true;
+    let error: unknown;
+    try {
+      await restarted.createRelayAuthenticationFrame("https://relay.example", {
+        protocolMajor: 1,
+        protocolMinor: 2,
+      });
+    } catch (cause) {
+      error = cause;
+    }
+    expect(error).toBeInstanceOf(HubRelayAuthenticationError);
+    expect(error).toMatchObject({ failure: "server_draining" });
+    expect(String(error)).not.toContain("CANARY");
+    expect(JSON.stringify(error)).not.toContain("CANARY");
   });
 
   it("fails restart with a bounded error when enrolled key custody is missing", async () => {
