@@ -54,6 +54,17 @@ afterEach(() => {
 });
 
 describe("HostedHubApi", () => {
+  it("validates the exact fail-closed bootstrap availability response", async () => {
+    const api = new HostedHubApi();
+    globalThis.fetch = vi.fn(async () => response({ available: true }));
+    await expect(api.getBootstrapAvailability()).resolves.toBe(true);
+
+    globalThis.fetch = vi.fn(async () => response({ available: true, detail: "unexpected" }));
+    await expect(api.getBootstrapAvailability()).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+  });
+
   it("uses the existing same-origin first-owner WebAuthn registration endpoints", async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     createPasskeyRegistration.mockResolvedValue({ id: "passkey-response-canary" });
@@ -222,5 +233,70 @@ describe("HostedHubApi", () => {
     expect(nodes).toHaveLength(1);
     expect(nodes[0]).toMatchObject({ label: "Studio", effectiveRole: "operator" });
     expect(JSON.stringify(nodes)).not.toContain("directory-sensitive-canary");
+  });
+
+  it("looks up, approves, and denies enrollments with session-bound CSRF", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    const enrollment = {
+      id: "enr_aaaaaaaaaaaaaaaaaaaaaa",
+      label: "Studio",
+      platformOs: "darwin",
+      platformArch: "arm64",
+      clientVersion: "0.1.8",
+      algorithm: "ed25519",
+      fingerprint: `SHA256:${"a".repeat(43)}`,
+      createdAt: 10,
+      expiresAt: 20,
+    } as const;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      if (requests.length === 1) return response(session);
+      if (requests.length === 2) return response({ enrollment });
+      if (requests.length === 3) {
+        return response({
+          node: {
+            id: "node_aaaaaaaaaaaaaaaaaaaaaa",
+            environmentId: "env_aaaaaaaaaaaaaaaaaaaaaa",
+          },
+          grant: { id: "grant_aaaaaaaaaaaaaaaaaaaaaa", role: "owner" },
+        });
+      }
+      return response({ ok: true });
+    });
+
+    const api = new HostedHubApi();
+    await api.restoreSession();
+    await expect(api.lookupNodeEnrollment("ABCD-EFGH")).resolves.toEqual(enrollment);
+    await expect(api.approveNodeEnrollment("ABCD-EFGH")).resolves.toBeUndefined();
+    await expect(api.denyNodeEnrollment("ABCD-EFGH")).resolves.toBeUndefined();
+
+    expect(requests.slice(1).map(({ input }) => input)).toEqual([
+      "/api/admin/node-enrollments/lookup",
+      "/api/admin/node-enrollments/approve",
+      "/api/admin/node-enrollments/deny",
+    ]);
+    for (const request of requests.slice(1)) {
+      const headers = request.init?.headers;
+      expect(headers).toBeInstanceOf(Headers);
+      expect((headers as Headers).get("X-Ryco-CSRF")).toBe("csrf-canary");
+      expect(String(request.input)).not.toContain("ABCD-EFGH");
+      expect(JSON.parse(String(request.init?.body))).toEqual({ deviceCode: "ABCD-EFGH" });
+    }
+  });
+
+  it("rejects malformed enrollment lookup and approval responses", async () => {
+    const api = new HostedHubApi();
+    globalThis.fetch = vi.fn(async () => response(session));
+    await api.restoreSession();
+
+    globalThis.fetch = vi.fn(async () => response({ enrollment: { id: "enr_bad" } }));
+    await expect(api.lookupNodeEnrollment("ABCD-EFGH")).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+
+    globalThis.fetch = vi.fn(async () => response({ node: {}, grant: {} }));
+    await expect(api.approveNodeEnrollment("ABCD-EFGH")).rejects.toMatchObject({
+      code: "invalid_response",
+    });
   });
 });

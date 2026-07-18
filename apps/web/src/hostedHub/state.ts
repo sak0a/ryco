@@ -16,6 +16,7 @@ import type {
 } from "./types";
 
 interface HostedHubState {
+  readonly bootstrapAvailable: boolean;
   readonly accountStatus: HostedAccountStatus;
   readonly account: HostedHubAccount | null;
   readonly session: HostedHubSession | null;
@@ -34,6 +35,7 @@ interface HostedHubState {
 }
 
 const initialState: HostedHubState = {
+  bootstrapAvailable: false,
   accountStatus: "signed-out",
   account: null,
   session: null,
@@ -99,17 +101,22 @@ class HostedHubController {
         await this.refreshDirectory();
       })
       .catch((error) => {
-        if (operation.signal.aborted) return;
+        if (operation.signal.aborted) return undefined;
         hostedHubApi.clearSessionMaterial();
         if (isSessionFailure(error)) {
-          patchState(initialState);
-          return;
+          return hostedHubApi
+            .getBootstrapAvailability(operation.signal)
+            .catch(() => false)
+            .then((bootstrapAvailable) => {
+              if (!operation.signal.aborted) patchState({ ...initialState, bootstrapAvailable });
+            });
         }
         patchState({
           ...initialState,
           accountStatus: "unavailable",
           errorMessage: errorMessage(error),
         });
+        return undefined;
       })
       .finally(() => {
         if (this.#operation === operation) this.#operation = null;
@@ -166,6 +173,7 @@ class HostedHubController {
         account: result.account,
         session: result.session,
         recoveryCodes: result.recoveryCodes ?? [],
+        bootstrapAvailable: false,
       });
       await this.refreshDirectory();
     } catch (error) {

@@ -62,6 +62,18 @@ export interface HostedHubSessionResponse {
   readonly recoveryCodes?: ReadonlyArray<string>;
 }
 
+export interface HostedNodeEnrollment {
+  readonly id: string;
+  readonly label: string;
+  readonly platformOs: "darwin" | "linux" | "windows" | "unknown";
+  readonly platformArch: "arm64" | "x64" | "other";
+  readonly clientVersion: string;
+  readonly algorithm: "ed25519";
+  readonly fingerprint: string;
+  readonly createdAt: number;
+  readonly expiresAt: number;
+}
+
 export interface HostedHubNode {
   readonly id: string;
   readonly environmentId: EnvironmentId;
