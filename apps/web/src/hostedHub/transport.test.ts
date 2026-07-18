@@ -1,6 +1,7 @@
 import { EnvironmentId, ORCHESTRATION_WS_METHODS, WS_METHODS } from "@ryco/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { WsTransport } from "../rpc/wsTransport";
 import { hostedHubApi, HostedHubApiError } from "./api";
 import { encodeBase64Url } from "./base64url";
 import { hostedHubController, useHostedHubStore } from "./state";
@@ -26,6 +27,7 @@ class MockSocket extends EventTarget {
 }
 
 const sockets: MockSocket[] = [];
+const transports: WsTransport[] = [];
 
 const originalWindow = globalThis.window;
 const originalWebSocket = globalThis.WebSocket;
@@ -46,8 +48,22 @@ const selectedNode: HostedHubNode = {
   presence: { online: true, lastHeartbeatAt: 1 },
 };
 
+async function waitFor(assertion: () => void, timeoutMs = 1_000): Promise<void> {
+  const startedAt = Date.now();
+  for (;;) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      if (Date.now() - startedAt >= timeoutMs) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+}
+
 beforeEach(() => {
   sockets.length = 0;
+  transports.length = 0;
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: { location: { origin: "https://hub.example.test" } },
@@ -68,7 +84,9 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.allSettled(transports.map((transport) => transport.dispose()));
+  transports.length = 0;
   hostedHubController.resetForTests();
   Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
   globalThis.WebSocket = originalWebSocket;
@@ -134,6 +152,54 @@ describe("HostedRelayAttemptFactory", () => {
     factory.createSocket(secondUrl);
     expect(issue).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(useHostedHubStore.getState())).not.toContain(ticket);
+  });
+
+  it("retries transient ticket preflight with fresh attempt material", async () => {
+    const ticket = encodeBase64Url(new Uint8Array(32).fill(7));
+    const issue = vi
+      .spyOn(hostedHubApi, "issueRelayTicket")
+      .mockRejectedValueOnce(new HostedHubApiError("server_draining", 503, 0))
+      .mockResolvedValue({
+        ticket,
+        expiresAt: Date.now() + 60_000,
+        protocolMajor: 1,
+        protocolMinor: 2,
+      });
+    const factory = new HostedRelayAttemptFactory();
+    const transport = new WsTransport(() => factory.nextUrl(), {
+      ...factory.lifecycleHandlers(),
+      getReconnectDelayMs: () => 0,
+    });
+    transports.push(transport);
+
+    await waitFor(() => {
+      expect(issue).toHaveBeenCalledTimes(2);
+      expect(sockets).toHaveLength(1);
+    });
+
+    expect(useHostedHubStore.getState().transportStatus).toBe("connecting");
+    expect(JSON.stringify(useHostedHubStore.getState())).not.toContain(ticket);
+  });
+
+  it("stops terminal ticket preflight without opening a socket", async () => {
+    const issue = vi
+      .spyOn(hostedHubApi, "issueRelayTicket")
+      .mockRejectedValue(new HostedHubApiError("forbidden", 403));
+    const factory = new HostedRelayAttemptFactory();
+    const transport = new WsTransport(() => factory.nextUrl(), {
+      ...factory.lifecycleHandlers(),
+      getReconnectDelayMs: () => 0,
+    });
+    transports.push(transport);
+
+    await waitFor(() => {
+      expect(issue).toHaveBeenCalledOnce();
+      expect(useHostedHubStore.getState().transportStatus).toBe("terminal-failure");
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(issue).toHaveBeenCalledOnce();
+    expect(sockets).toHaveLength(0);
   });
 
   it("rejects expired tickets before opening a relay socket", async () => {

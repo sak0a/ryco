@@ -1,5 +1,5 @@
 import { WsRpcGroup } from "@ryco/contracts";
-import { Duration, Effect, Layer, Schedule } from "effect";
+import { Data, Duration, Effect, Layer, Schedule } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
 
@@ -71,12 +71,9 @@ export type WsRpcProtocolClient =
   RpcClientFactory extends Effect.Effect<infer Client, any, any> ? Client : never;
 export type WsRpcProtocolSocketUrlProvider = string | (() => Promise<string>);
 
-function formatSocketErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-  return String(error);
-}
+const WS_URL_PROVIDER_ERROR_MESSAGE = "Unable to prepare the Ryco server WebSocket connection.";
+
+class WsUrlProviderError extends Data.TaggedError("WsUrlProviderError") {}
 
 function resolveWsRpcSocketUrl(rawUrl: string, preservePath = false): string {
   const resolved = new URL(rawUrl);
@@ -168,15 +165,33 @@ export function createWsRpcProtocolLayer(
   handlers?: WsProtocolLifecycleHandlers,
 ) {
   const lifecycle = composeLifecycleHandlers(handlers);
+  const retryPolicy = Schedule.addDelay(
+    Schedule.recurs(handlers?.reconnectMaxRetries ?? WS_RECONNECT_MAX_RETRIES),
+    (retryCount) =>
+      Effect.succeed(
+        Duration.millis(
+          handlers?.getReconnectDelayMs?.(retryCount) ??
+            getWsReconnectDelayMsForRetry(retryCount) ??
+            0,
+        ),
+      ),
+  ).pipe(Schedule.while(() => lifecycle.isActive() && (handlers?.shouldReconnect?.() ?? true)));
   const resolvedUrl =
     typeof url === "function"
-      ? Effect.promise(() => url()).pipe(
+      ? Effect.tryPromise({
+          try: () => {
+            if (!lifecycle.isActive()) throw new WsUrlProviderError();
+            return url();
+          },
+          catch: () => new WsUrlProviderError(),
+        }).pipe(
           Effect.map((rawUrl) => resolveWsRpcSocketUrl(rawUrl, handlers?.preserveSocketPath)),
-          Effect.tapError((error) =>
+          Effect.tapError(() =>
             Effect.sync(() => {
-              lifecycle.onError(formatSocketErrorMessage(error));
+              lifecycle.onError(WS_URL_PROVIDER_ERROR_MESSAGE);
             }),
           ),
+          Effect.retry(retryPolicy),
           Effect.orDie,
         )
       : resolveWsRpcSocketUrl(url, handlers?.preserveSocketPath);
@@ -225,17 +240,6 @@ export function createWsRpcProtocolLayer(
   const socketLayer = Socket.layerWebSocket(resolvedUrl).pipe(
     Layer.provide(trackingWebSocketConstructorLayer),
   );
-  const retryPolicy = Schedule.addDelay(
-    Schedule.recurs(handlers?.reconnectMaxRetries ?? WS_RECONNECT_MAX_RETRIES),
-    (retryCount) =>
-      Effect.succeed(
-        Duration.millis(
-          handlers?.getReconnectDelayMs?.(retryCount) ??
-            getWsReconnectDelayMsForRetry(retryCount) ??
-            0,
-        ),
-      ),
-  ).pipe(Schedule.while(() => handlers?.shouldReconnect?.() ?? true));
   const protocolLayer = Layer.effect(
     RpcClient.Protocol,
     Effect.map(

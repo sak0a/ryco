@@ -52,6 +52,8 @@ Hosted mode therefore requests fresh one-use attempt material while its existing
 - [ ] Apply the schedule to provider resolution and URL normalization before `Effect.orDie`.
 - [ ] Continue applying the same immutable schedule description to the RPC socket loop.
 - [ ] Preserve synchronous static URL normalization exactly.
+- [ ] Check the composed session activity guard before each provider invocation and stop the retry
+      schedule when the transport session is inactive.
 - [ ] Preserve all lifecycle composition, socket construction, close handling, request hooks, and
       retry-transient-error behavior.
 
@@ -60,10 +62,12 @@ Hosted mode therefore requests fresh one-use attempt material while its existing
 **Files:**
 
 - Modify: `apps/web/src/hostedHub/transport.test.ts`
-- Modify only if test isolation requires it: `apps/web/src/hostedHub/transport.ts`
+- Modify: `apps/web/src/hostedHub/transport.ts`
 
 - [ ] Drive `HostedRelayAttemptFactory.nextUrl()` through a transient ticket-preflight failure and
       then success under the shared transport retry path.
+- [ ] Record the selected connection generation when ticket acquisition starts so retryable
+      pre-socket failures remain eligible for the existing hosted reconnect predicate.
 - [ ] Assert a fresh ticket request occurs and exactly one relay socket is constructed.
 - [ ] Drive a terminal ticket failure and prove the schedule stops without constructing a socket.
 - [ ] Preserve existing ticket-consumed-once and delivery-unknown assertions.
