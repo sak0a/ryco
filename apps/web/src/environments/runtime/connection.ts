@@ -44,6 +44,7 @@ interface EnvironmentConnectionInput extends OrchestrationHandlers {
   readonly onConfigSnapshot?: (config: ServerConfig) => void;
   readonly onWelcome?: (payload: ServerLifecycleWelcomePayload) => void;
   readonly onResubscribe?: (environmentId: EnvironmentId) => void;
+  readonly onShellError?: (environmentId: EnvironmentId) => void;
 }
 
 function createBootstrapGate() {
@@ -147,6 +148,13 @@ export function createEnvironmentConnection(
         }
         bootstrapGate.reset();
         input.onResubscribe?.(environmentId);
+      },
+      onError: () => {
+        if (disposed) {
+          return;
+        }
+        bootstrapGate.reject(new Error("Shell snapshot synchronization failed."));
+        input.onShellError?.(environmentId);
       },
     },
   );

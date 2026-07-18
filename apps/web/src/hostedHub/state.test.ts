@@ -398,6 +398,143 @@ describe("hosted registration and directory state", () => {
     expect(useHostedHubStore.getState().sessionStatus).toBe("ready");
   });
 
+  it("fails initial synchronization after exactly thirty seconds", async () => {
+    vi.useFakeTimers();
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      nodes: [selected],
+    });
+
+    await hostedHubController.selectNode(selected.id);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(useHostedHubStore.getState().transportStatus).not.toBe("terminal-failure");
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      transportStatus: "terminal-failure",
+      sessionStatus: "stale",
+      sessionEstablished: false,
+      errorMessage: "Ryco state could not be synchronized.",
+    });
+  });
+
+  it("cancels the synchronization deadline after the matching snapshot is ready", async () => {
+    vi.useFakeTimers();
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      nodes: [selected],
+    });
+
+    await hostedHubController.selectNode(selected.id);
+    hostedHubController.markSessionReady(selected.environmentId);
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(useHostedHubStore.getState()).toMatchObject({
+      transportStatus: "idle",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      errorMessage: null,
+    });
+  });
+
+  it("isolates the synchronization deadline to the current selection generation", async () => {
+    vi.useFakeTimers();
+    const first = node("node_aaaaaaaaaaaaaaaaaaaaaa");
+    const second = node("node_bbbbbbbbbbbbbbbbbbbbbb");
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      nodes: [first, second],
+    });
+
+    await hostedHubController.selectNode(first.id);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await hostedHubController.selectNode(second.id);
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    expect(useHostedHubStore.getState()).toMatchObject({
+      selectedNode: second,
+      sessionStatus: "synchronizing",
+      errorMessage: null,
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      selectedNode: second,
+      transportStatus: "terminal-failure",
+      errorMessage: "Ryco state could not be synchronized.",
+    });
+  });
+
+  it("retries the selected node once with a fresh generation", async () => {
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "terminal-failure",
+      sessionStatus: "stale",
+      sessionEstablished: false,
+      errorMessage: "Ryco state could not be synchronized.",
+      generation: 7,
+    });
+
+    await Promise.all([
+      hostedHubController.retrySelectedNode(),
+      hostedHubController.retrySelectedNode(),
+    ]);
+
+    expect(activateHostedNode).toHaveBeenCalledOnce();
+    expect(activateHostedNode).toHaveBeenCalledWith(selected, selected.environmentId);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      generation: 8,
+      transportStatus: "idle",
+      sessionStatus: "synchronizing",
+      sessionEstablished: false,
+      errorMessage: null,
+    });
+  });
+
+  it("fails before readiness and emits only a stable diagnostic after readiness", () => {
+    const selected = node();
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      selectedNode: selected,
+      transportStatus: "online",
+      sessionStatus: "synchronizing",
+      sessionEstablished: false,
+      generation: 3,
+    });
+
+    hostedHubController.reportShellSnapshotFailure(selected.environmentId);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      transportStatus: "terminal-failure",
+      errorMessage: "Ryco state could not be synchronized.",
+    });
+
+    useHostedHubStore.setState({
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      errorMessage: null,
+    });
+    hostedHubController.reportShellSnapshotFailure(selected.environmentId);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      transportStatus: "online",
+      sessionStatus: "ready",
+      errorMessage: null,
+    });
+    expect(warning).toHaveBeenCalledWith("hosted_snapshot_reconciliation_failed");
+  });
+
   it("keeps delivery uncertainty visible through replay until the user acknowledges it", () => {
     const selected = node();
     useHostedHubStore.setState({

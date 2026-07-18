@@ -26,6 +26,7 @@ import { isTransportConnectionErrorMessage } from "./transportError";
 interface SubscribeOptions {
   readonly retryDelay?: Duration.Input;
   readonly onResubscribe?: () => void;
+  readonly onError?: () => void;
   readonly tag?: string;
 }
 
@@ -158,6 +159,7 @@ export class WsTransport {
             listener,
             {
               ...(options?.tag === undefined ? {} : { tag: options.tag }),
+              ...(options?.onError === undefined ? {} : { onError: options.onError }),
               ...(hasReceivedValue
                 ? {
                     onStarted: () => {
@@ -194,9 +196,18 @@ export class WsTransport {
             return;
           }
           if (!isRetryableSubscriptionError(formattedError)) {
-            console.warn("WebSocket RPC subscription failed", {
-              error: formattedError,
-            });
+            try {
+              options?.onError?.();
+            } catch {
+              // Swallow failure-hook errors so diagnostics cannot mask the subscription failure.
+            }
+            if (options?.onError) {
+              console.warn("WebSocket RPC subscription failed");
+            } else {
+              console.warn("WebSocket RPC subscription failed", {
+                error: formattedError,
+              });
+            }
             return;
           }
 
@@ -303,6 +314,7 @@ export class WsTransport {
     requestStart: {
       readonly tag?: string;
       readonly onStarted?: () => void;
+      readonly onError?: () => void;
     },
     isActive: () => boolean,
     markValueReceived: () => void,
@@ -349,6 +361,11 @@ export class WsTransport {
               try {
                 listener(value);
               } catch {
+                try {
+                  requestStart.onError?.();
+                } catch {
+                  // Swallow failure-hook errors so the stream stays live.
+                }
                 // Swallow listener errors so the stream stays live.
               }
             }),

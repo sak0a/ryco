@@ -51,7 +51,8 @@ will cover genuine non-delivery without creating another socket retry loop.
 - [ ] Use only synthetic public identifiers and metadata. Assert sensitive canaries are absent from
       errors and snapshots.
 - [ ] Run
-      `bun run test apps/server/src/hubConnector/HostedRelaySessionIntegration.test.ts apps/server/src/hubConnector/RelayRpcIntegration.test.ts apps/web/src/hostedHub/relaySocket.test.ts`.
+      `bun run --cwd apps/server test src/hubConnector/HostedRelaySessionIntegration.test.ts src/hubConnector/RelayRpcIntegration.test.ts`
+      and `bun run --cwd apps/web test src/hostedHub/transport.test.ts`.
 - [ ] Record whether the failure is transport delivery, stream acknowledgment, snapshot callback,
       or readiness transition. Do not change production code until a test is red at that boundary.
 
@@ -85,7 +86,9 @@ will cover genuine non-delivery without creating another socket retry loop.
 - [ ] Add tests for first snapshot, duplicate replay snapshot, stale snapshot, wrong environment,
       core failure, secondary failure, and later stream events.
 - [ ] Run
-      `bun run test apps/web/src/environments/runtime/connection.test.ts apps/web/src/environments/runtime/service.test.ts apps/server/src/hubConnector/HostedRelaySessionIntegration.test.ts`.
+      `bun run --cwd apps/web test src/environments/runtime/connection.test.ts src/environments/runtime/service.test.ts`
+      and
+      `bun run --cwd apps/server test src/hubConnector/HostedRelaySessionIntegration.test.ts`.
 
 **Checkpoint commit:** `fix(hub): release hosted readiness after snapshot acceptance`
 
@@ -115,7 +118,8 @@ will cover genuine non-delivery without creating another socket retry loop.
 - [ ] Test 29,999 ms versus 30,000 ms, every cancellation path, duplicate retry clicks, fresh ticket
       use, and stale timer isolation with fake clocks.
 - [ ] Run
-      `bun run test apps/web/src/hostedHub/state.test.ts apps/web/src/hostedHub/environment.test.ts apps/web/src/hostedHub/transport.test.ts` plus the focused component test.
+      `bun run --cwd apps/web test src/hostedHub/state.test.ts src/hostedHub/environment.test.ts src/hostedHub/transport.test.ts`
+      plus the focused browser component test.
 
 **Checkpoint commit:** `fix(hub): bound hosted synchronization and retry`
 

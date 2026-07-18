@@ -11,24 +11,74 @@ import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
 import { Effect, Exit, Scope, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { createWsRpcClient } from "../../../web/src/rpc/wsRpcClient.ts";
-import { WsTransport } from "../../../web/src/rpc/wsTransport.ts";
-import { encodeBase64Url } from "../../../web/src/hostedHub/base64url.ts";
-import { hostedHubApi } from "../../../web/src/hostedHub/api.ts";
-import { hostedHubController, useHostedHubStore } from "../../../web/src/hostedHub/state.ts";
-import {
-  getHostedRelayAttemptFactory,
-  resetHostedRelayAttemptFactory,
-} from "../../../web/src/hostedHub/transport.ts";
-import type { HostedHubNode } from "../../../web/src/hostedHub/types.ts";
 import { makeRpcByteSession } from "../ws/RpcByteSession.ts";
 import { RelayChannelRegistry } from "./RelayChannelRegistry.ts";
 import { RelaySendQueue } from "./RelaySendQueue.ts";
 
+interface HostedWebTestModules {
+  readonly createWsRpcClient: (transport: unknown) => {
+    readonly orchestration: {
+      readonly subscribeShell: (listener: (item: unknown) => void) => () => void;
+    };
+    readonly dispose: () => Promise<void>;
+  };
+  readonly WsTransport: new (url: () => Promise<string>, lifecycleHandlers: unknown) => unknown;
+  readonly encodeBase64Url: (value: Uint8Array) => string;
+  readonly hostedHubApi: {
+    issueRelayTicket: (nodeId: string) => Promise<unknown>;
+  };
+  readonly hostedHubController: { readonly resetForTests: () => void };
+  readonly useHostedHubStore: {
+    readonly setState: (state: Record<string, unknown>) => void;
+    readonly getState: () => Record<string, unknown>;
+  };
+  readonly getHostedRelayAttemptFactory: () => {
+    readonly nextUrl: () => Promise<string>;
+    readonly lifecycleHandlers: () => unknown;
+  };
+  readonly resetHostedRelayAttemptFactory: () => void;
+}
+
+async function loadHostedWebTestModules(): Promise<HostedWebTestModules> {
+  const load = async <T>(relativePath: string): Promise<T> =>
+    (await import(
+      /* @vite-ignore */ new URL(`../../../web/src/${relativePath}`, import.meta.url).href
+    )) as T;
+  const [client, transport, base64url, api, state, hostedTransport] = await Promise.all([
+    load<{ createWsRpcClient: HostedWebTestModules["createWsRpcClient"] }>("rpc/wsRpcClient.ts"),
+    load<{ WsTransport: HostedWebTestModules["WsTransport"] }>("rpc/wsTransport.ts"),
+    load<{ encodeBase64Url: HostedWebTestModules["encodeBase64Url"] }>("hostedHub/base64url.ts"),
+    load<{ hostedHubApi: HostedWebTestModules["hostedHubApi"] }>("hostedHub/api.ts"),
+    load<Pick<HostedWebTestModules, "hostedHubController" | "useHostedHubStore">>(
+      "hostedHub/state.ts",
+    ),
+    load<
+      Pick<HostedWebTestModules, "getHostedRelayAttemptFactory" | "resetHostedRelayAttemptFactory">
+    >("hostedHub/transport.ts"),
+  ]);
+  return { ...client, ...transport, ...base64url, ...api, ...state, ...hostedTransport };
+}
+
+const {
+  createWsRpcClient,
+  WsTransport,
+  encodeBase64Url,
+  hostedHubApi,
+  hostedHubController,
+  useHostedHubStore,
+  getHostedRelayAttemptFactory,
+  resetHostedRelayAttemptFactory,
+} = await loadHostedWebTestModules();
+
 const VERSION = { protocolMajor: 1, protocolMinor: 2 } as const;
 const CHANNEL_ID = `ch_${"c".repeat(22)}` as RelayChannelId;
-const originalWindow = globalThis.window;
-const originalWebSocket = globalThis.WebSocket;
+const testGlobals = globalThis as unknown as {
+  window?: unknown;
+  WebSocket?: unknown;
+};
+const originalWindow = testGlobals.window;
+const originalWebSocket = testGlobals.WebSocket;
+const physicalSockets: PhysicalRelaySocket[] = [];
 
 function toBytes(value: string | ArrayBufferLike | Blob | ArrayBufferView): Uint8Array {
   if (typeof value === "string") return new TextEncoder().encode(value);
@@ -46,11 +96,14 @@ class PhysicalRelaySocket extends EventTarget {
   static readonly CLOSED = 3;
   readyState = PhysicalRelaySocket.CONNECTING;
   bufferedAmount = 0;
-  binaryType: BinaryType = "blob";
+  binaryType = "blob";
   readonly receivedFromClient: RelayFrame[] = [];
+  private readonly registry: RelayChannelRegistry;
 
-  constructor(private readonly registry: RelayChannelRegistry) {
+  constructor(registry: RelayChannelRegistry) {
     super();
+    this.registry = registry;
+    physicalSockets.push(this);
   }
 
   open(): void {
@@ -98,18 +151,19 @@ class PhysicalRelaySocket extends EventTarget {
 }
 
 beforeEach(() => {
-  Object.defineProperty(globalThis, "window", {
+  physicalSockets.length = 0;
+  Object.defineProperty(testGlobals, "window", {
     configurable: true,
     value: { location: { origin: "http://localhost:3020" } },
   });
-  globalThis.WebSocket = PhysicalRelaySocket as unknown as typeof WebSocket;
+  testGlobals.WebSocket = PhysicalRelaySocket;
 });
 
 afterEach(() => {
   resetHostedRelayAttemptFactory();
   hostedHubController.resetForTests();
-  Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
-  globalThis.WebSocket = originalWebSocket;
+  Object.defineProperty(testGlobals, "window", { configurable: true, value: originalWindow });
+  testGlobals.WebSocket = originalWebSocket;
   vi.restoreAllMocks();
 });
 
@@ -145,10 +199,9 @@ describe("hosted relay session integration", () => {
       ),
     );
     const sessionScopes: Scope.Closeable[] = [];
-    let physicalSocket: PhysicalRelaySocket | null = null;
     const relaySocket = {
       bufferedAmount: 0,
-      send: (bytes: Uint8Array) => physicalSocket?.deliverBytes(bytes),
+      send: (bytes: Uint8Array) => physicalSockets.at(-1)?.deliverBytes(bytes),
     };
     const sendQueue = new RelaySendQueue(relaySocket, RELAY_INITIAL_LIMITS);
     const registry = new RelayChannelRegistry({
@@ -178,14 +231,13 @@ describe("hosted relay session integration", () => {
         },
       },
     });
-    globalThis.WebSocket = class extends PhysicalRelaySocket {
+    testGlobals.WebSocket = class extends PhysicalRelaySocket {
       constructor() {
         super(registry);
-        physicalSocket = this;
         queueMicrotask(() => this.open());
       }
-    } as unknown as typeof WebSocket;
-    const selectedNode: HostedHubNode = {
+    };
+    const selectedNode = {
       id: "node_aaaaaaaaaaaaaaaaaaaaaa",
       environmentId: EnvironmentId.make("env_aaaaaaaaaaaaaaaaaaaaaa"),
       label: "Public test node",
@@ -229,8 +281,10 @@ describe("hosted relay session integration", () => {
       sessionStatus: "synchronizing",
       effectiveRole: "operator",
     });
+    const activePhysicalSocket = physicalSockets.at(-1);
+    if (!activePhysicalSocket) throw new Error("Expected the physical relay socket to open.");
     expect(
-      physicalSocket.receivedFromClient.filter(
+      activePhysicalSocket.receivedFromClient.filter(
         (frame) => frame.type === "data" && frame.channelId === CHANNEL_ID,
       ).length,
     ).toBeGreaterThanOrEqual(2);

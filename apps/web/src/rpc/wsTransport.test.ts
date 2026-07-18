@@ -708,6 +708,56 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("reports a subscriber callback failure without exposing the thrown value", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    const onError = vi.fn();
+    const sensitiveError = new Error("sensitive-listener-canary");
+    const unsubscribe = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      () => {
+        throw sensitiveError;
+      },
+      { onError },
+    );
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const socket = getSocket();
+    socket.open();
+    await waitFor(() => expect(socket.sent).toHaveLength(1));
+    const requestMessage = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+
+    socket.serverMessage(
+      JSON.stringify({
+        _tag: "Chunk",
+        requestId: requestMessage.id,
+        values: [
+          {
+            version: 1,
+            sequence: 1,
+            type: "welcome",
+            payload: {
+              environment: {
+                environmentId: "environment-local",
+                label: "Local environment",
+                platform: { os: "darwin", arch: "arm64" },
+                serverVersion: "0.0.0-test",
+                capabilities: { repositoryIdentity: true },
+              },
+              cwd: "/tmp/workspace",
+              projectName: "workspace",
+            },
+          },
+        ],
+      }),
+    );
+
+    await waitFor(() => expect(onError).toHaveBeenCalledOnce());
+    expect(onError).toHaveBeenCalledWith();
+    expect(JSON.stringify(onError.mock.calls)).not.toContain(sensitiveError.message);
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
   it("re-subscribes stream listeners after the stream exits", async () => {
     const transport = createTransport("ws://localhost:3020");
     const listener = vi.fn();
@@ -972,6 +1022,60 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("reports listener failures without forwarding sensitive error details", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    const onError = vi.fn();
+    const unsubscribe = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      () => {
+        throw new Error("sensitive-listener-canary");
+      },
+      { onError },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    const socket = getSocket();
+    socket.open();
+    await waitFor(() => {
+      expect(socket.sent).toHaveLength(1);
+    });
+    const request = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    socket.serverMessage(
+      JSON.stringify({
+        _tag: "Chunk",
+        requestId: request.id,
+        values: [
+          {
+            version: 1,
+            sequence: 1,
+            type: "welcome",
+            payload: {
+              environment: {
+                environmentId: "environment-local",
+                label: "Local environment",
+                platform: { os: "darwin", arch: "arm64" },
+                serverVersion: "0.0.0-test",
+                capabilities: { repositoryIdentity: true },
+              },
+              cwd: "/tmp/example",
+              projectName: "example",
+            },
+          },
+        ],
+      }),
+    );
+
+    await waitFor(() => {
+      expect(onError).toHaveBeenCalledOnce();
+    });
+    expect(onError).toHaveBeenCalledWith();
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
   it("does not retry stream subscriptions after application-level failures", async () => {
     const transport = createTransport("ws://localhost:3020");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -1006,6 +1110,32 @@ describe("WsTransport", () => {
       "WebSocket RPC subscription disconnected",
       expect.anything(),
     );
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
+  it("redacts application-level failures when a bounded error handler is registered", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const onError = vi.fn();
+    const unsubscribe = transport.subscribe(
+      () => Stream.fail(new Error("sensitive-subscription-canary")),
+      vi.fn(),
+      { onError },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    getSocket().open();
+    await waitFor(() => {
+      expect(onError).toHaveBeenCalledOnce();
+    });
+
+    expect(onError).toHaveBeenCalledWith();
+    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription failed");
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("sensitive-subscription-canary");
 
     unsubscribe();
     await transport.dispose();
