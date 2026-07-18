@@ -16,6 +16,8 @@ import {
 } from "../hubIdentity/HubKeyRotationClient.ts";
 import { makeHubKeyRotationHttpTransport } from "../hubIdentity/HubKeyRotationHttpTransport.ts";
 import {
+  HubNodeProofClientError,
+  type HubNodeProofFailure,
   makeHubNodeChallengeHttpTransport,
   makeHubNodeProofClient,
 } from "../hubIdentity/HubNodeProofClient.ts";
@@ -43,6 +45,18 @@ export class HubIdentityRuntimeError extends Error {
     super("Hub identity operation failed.");
     this.name = "HubIdentityRuntimeError";
     this.code = code;
+  }
+}
+
+export type HubRelayAuthenticationFailure = HubNodeProofFailure;
+
+export class HubRelayAuthenticationError extends Error {
+  readonly failure: HubRelayAuthenticationFailure;
+
+  constructor(failure: HubRelayAuthenticationFailure) {
+    super("Hub relay authentication preparation failed.");
+    this.name = "HubRelayAuthenticationError";
+    this.failure = failure;
   }
 }
 
@@ -142,8 +156,15 @@ export async function makeHubIdentityRuntime(options: {
     pollEnrollment: (hubOrigin) => bounded("enrollment_failed", () => enrollment.poll(hubOrigin)),
     cancelEnrollment: (hubOrigin) =>
       bounded("enrollment_failed", () => enrollment.cancel(hubOrigin)),
-    createRelayAuthenticationFrame: (hubOrigin, protocol) =>
-      bounded("node_proof_failed", () => proof.createRelayAuthenticationFrame(hubOrigin, protocol)),
+    createRelayAuthenticationFrame: async (hubOrigin, protocol) => {
+      try {
+        return await proof.createRelayAuthenticationFrame(hubOrigin, protocol);
+      } catch (error) {
+        throw new HubRelayAuthenticationError(
+          error instanceof HubNodeProofClientError ? error.failure : "identity_unavailable",
+        );
+      }
+    },
     stageKeyRotation: (hubOrigin) => bounded("rotation_failed", () => rotation.stage(hubOrigin)),
     resumeKeyRotation: (hubOrigin) => bounded("rotation_failed", () => rotation.resume(hubOrigin)),
     confirmAuthenticatedKey: (hubOrigin, keyId) =>

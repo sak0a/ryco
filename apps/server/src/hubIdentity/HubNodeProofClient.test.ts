@@ -153,8 +153,83 @@ describe("Hub node proof client", () => {
     });
     await expect(
       client.createRelayAuthenticationFrame(hubOrigin, { protocolMajor: 1, protocolMinor: 1 }),
-    ).rejects.toMatchObject({ code: "node_proof_failed" });
+    ).rejects.toMatchObject({ code: "node_proof_failed", failure: "protocol_invalid" });
     expect(signCalls).toBe(0);
+  });
+
+  it("keeps missing local state and signing failures terminal", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-node-proof-local-failure-"));
+    const stateStore = await makeLocalHubIdentityStateStore(join(root, "identity.json"));
+    const signingIdentity = makeNodeSigningIdentity(memoryStore());
+    let challengeRequests = 0;
+    const challenge = new Uint8Array(32).fill(0x45);
+    const transport = {
+      request: async () => {
+        challengeRequests += 1;
+        return {
+          protocolMajor: 1,
+          protocolMinor: 1,
+          challenge,
+          challengeExpiresAt: now + 30_000,
+        };
+      },
+    };
+    const missingStateClient = makeHubNodeProofClient({
+      transport,
+      stateStore,
+      signingIdentity,
+      keySelector: {
+        authenticationKey: async () => ({ keyId, secretName: "node-key.missing" }),
+      },
+      now: () => now,
+    });
+    await expect(
+      missingStateClient.createRelayAuthenticationFrame(hubOrigin, {
+        protocolMajor: 1,
+        protocolMinor: 1,
+      }),
+    ).rejects.toMatchObject({ code: "node_proof_failed", failure: "identity_unavailable" });
+    expect(challengeRequests).toBe(0);
+
+    await stateStore.update((state) => ({
+      ...state,
+      revision: state.revision + 1,
+      activeNode: {
+        hubOrigin,
+        nodeId,
+        activeKeyId: keyId,
+        activeKeySecretName: "node-key.missing",
+        cleanupPollingSecretName: null,
+        enrolledAt: now,
+      },
+    }));
+    const signingFailureClient = makeHubNodeProofClient({
+      transport,
+      stateStore,
+      signingIdentity: {
+        ...signingIdentity,
+        sign: async () => {
+          throw new Error("SIGNING-FAILURE-CANARY");
+        },
+      },
+      keySelector: {
+        authenticationKey: async () => ({ keyId, secretName: "node-key.missing" }),
+      },
+      now: () => now,
+    });
+    let error: unknown;
+    try {
+      await signingFailureClient.createRelayAuthenticationFrame(hubOrigin, {
+        protocolMajor: 1,
+        protocolMinor: 1,
+      });
+    } catch (cause) {
+      error = cause;
+    }
+    expect(error).toMatchObject({ code: "node_proof_failed", failure: "identity_unavailable" });
+    expect(String(error)).not.toContain("CANARY");
+    expect(JSON.stringify(error)).not.toContain("CANARY");
+    expect(challengeRequests).toBe(1);
   });
 
   it("uses a credential-free HTTP preflight", async () => {
@@ -196,6 +271,75 @@ describe("Hub node proof client", () => {
         protocolMajor: 1,
         protocolMinor: 1,
       }),
-    ).rejects.toMatchObject({ code: "node_proof_failed" });
+    ).rejects.toMatchObject({ code: "node_proof_failed", failure: "protocol_invalid" });
+  });
+
+  it("classifies proof-preflight availability without reflecting remote content", async () => {
+    const cases = [
+      {
+        name: "network",
+        fetch: async () => {
+          throw new Error("NETWORK-RESPONSE-CANARY");
+        },
+        failure: "network",
+      },
+      {
+        name: "rate limit",
+        fetch: async () =>
+          new Response('{"error":"RATE-LIMIT-CANARY"}', {
+            status: 429,
+            headers: { "content-type": "application/json" },
+          }),
+        failure: "rate_limited",
+      },
+      {
+        name: "drain",
+        fetch: async () =>
+          new Response("DRAIN-RESPONSE-CANARY", {
+            status: 503,
+            headers: { "content-type": "text/plain" },
+          }),
+        failure: "server_draining",
+      },
+      {
+        name: "server failure",
+        fetch: async () => Response.json({ error: "SERVER-CANARY" }, { status: 502 }),
+        failure: "network",
+      },
+      {
+        name: "identity rejection",
+        fetch: async () => Response.json({ error: "IDENTITY-CANARY" }, { status: 401 }),
+        failure: "authentication_failed",
+      },
+      {
+        name: "invalid success",
+        fetch: async () => Response.json({ challenge: "SUCCESS-CANARY" }, { status: 201 }),
+        failure: "protocol_invalid",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const transport = makeHubNodeChallengeHttpTransport(testCase.fetch);
+      let error: unknown;
+      try {
+        await transport.request({
+          hubOrigin,
+          nodeId,
+          activeKeyId: keyId,
+          protocolMajor: 1,
+          protocolMinor: 1,
+        });
+      } catch (cause) {
+        error = cause;
+      }
+      expect(error, testCase.name).toMatchObject({
+        code: "node_proof_failed",
+        failure: testCase.failure,
+      });
+      expect(String(error), testCase.name).toBe(
+        "HubNodeProofClientError: Hub node proof operation failed.",
+      );
+      expect(JSON.stringify(error), testCase.name).not.toContain("CANARY");
+    }
   });
 });

@@ -62,16 +62,16 @@ and would not cover generic network, timeout, or 5xx failures. This approach is 
 The proof-preflight boundary will expose only stable bounded categories and will never retain a URL,
 response body, remote error message, credential, challenge, signature, key, or filesystem path.
 
-| Condition | Connector classification | Disposition |
-| --- | --- | --- |
-| Fetch exception, abort, timeout, or connection loss | `network` | Bounded automatic retry |
-| HTTP 429 | `rate_limited` | Bounded automatic retry using the existing local backoff |
-| HTTP 503 | `server_draining` | Bounded automatic retry |
-| Other HTTP 500–599 | `network` | Bounded automatic retry |
-| Explicit 400–499 identity/key rejection other than 429 | `authentication_failed` | Operator action |
-| Successful response with malformed JSON, invalid bounds, or invalid challenge binding | `protocol_invalid` | Existing one-retry-then-operator policy |
-| Missing/corrupt local state, protected-key failure, or origin mismatch | Existing identity failure | Operator action |
-| Signing failure after a valid challenge | Existing identity failure | Operator action |
+| Condition                                                                             | Connector classification  | Disposition                                              |
+| ------------------------------------------------------------------------------------- | ------------------------- | -------------------------------------------------------- |
+| Fetch exception, abort, timeout, or connection loss                                   | `network`                 | Bounded automatic retry                                  |
+| HTTP 429                                                                              | `rate_limited`            | Bounded automatic retry using the existing local backoff |
+| HTTP 503                                                                              | `server_draining`         | Bounded automatic retry                                  |
+| Other HTTP 500–599                                                                    | `network`                 | Bounded automatic retry                                  |
+| Explicit 400–499 identity/key rejection other than 429                                | `authentication_failed`   | Operator action                                          |
+| Successful response with malformed JSON, invalid bounds, or invalid challenge binding | `protocol_invalid`        | Existing one-retry-then-operator policy                  |
+| Missing/corrupt local state, protected-key failure, or origin mismatch                | Existing identity failure | Operator action                                          |
+| Signing failure after a valid challenge                                               | Existing identity failure | Operator action                                          |
 
 Status classification must not parse or expose arbitrary remote text. A completed non-success
 response is classified from its numeric HTTP status after its body is cancelled or consumed under
