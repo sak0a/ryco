@@ -65,6 +65,32 @@ afterEach(() => {
 });
 
 describe("hosted account state", () => {
+  it("discovers bootstrap availability only after a signed-out session result", async () => {
+    vi.spyOn(hostedHubApi, "restoreSession").mockRejectedValue(
+      new HostedHubApiError("session_invalid", 401),
+    );
+    vi.spyOn(hostedHubApi, "getBootstrapAvailability").mockResolvedValue(true);
+    await hostedHubController.bootstrap();
+    expect(useHostedHubStore.getState()).toMatchObject({
+      accountStatus: "signed-out",
+      bootstrapAvailable: true,
+    });
+  });
+
+  it("fails closed when bootstrap availability cannot be loaded", async () => {
+    vi.spyOn(hostedHubApi, "restoreSession").mockRejectedValue(
+      new HostedHubApiError("session_invalid", 401),
+    );
+    vi.spyOn(hostedHubApi, "getBootstrapAvailability").mockRejectedValue(
+      new HostedHubApiError("unavailable", 0),
+    );
+    await hostedHubController.bootstrap();
+    expect(useHostedHubStore.getState()).toMatchObject({
+      accountStatus: "signed-out",
+      bootstrapAvailable: false,
+    });
+  });
+
   it("restores a session, signs in, signs out, and expires without exposing credentials", async () => {
     vi.useFakeTimers();
     vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
@@ -149,6 +175,7 @@ describe("hosted registration and directory state", () => {
     });
     vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([]);
 
+    useHostedHubStore.setState({ bootstrapAvailable: true });
     await hostedHubController.bootstrapOwner({
       credential: "bootstrap-sensitive-canary",
       displayName: "Ada",
@@ -158,6 +185,7 @@ describe("hosted registration and directory state", () => {
     expect(useHostedHubStore.getState()).toMatchObject({
       accountStatus: "authenticated",
       recoveryCodes: ["recovery-sensitive-canary"],
+      bootstrapAvailable: false,
     });
     expect(JSON.stringify(useHostedHubStore.getState())).not.toContain(
       "bootstrap-sensitive-canary",

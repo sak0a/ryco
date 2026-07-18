@@ -183,6 +183,25 @@ live regions. Online, offline, stale, reconnecting, and delivery-unknown states 
 addition to color. The same shell adapts from narrow browser widths through tablet and desktop; there
 is no second hosted feature UI.
 
+## First-owner and node onboarding
+
+The signed-out shell requests the Hub's bounded bootstrap-availability response before offering
+first-owner setup. An unavailable, malformed, or failed response hides the setup action while
+leaving passkey sign-in and invitation redemption available. Successful owner setup hides the
+action immediately. The Hub remains authoritative for permanent bootstrap completion.
+
+An authenticated owner can start **Enroll node** from the node directory after running `ryco hub
+enroll` on the intended node. The owner enters the short device code, then compares the displayed
+label, platform, client version, algorithm, expiry, and public-key fingerprint with the node or a
+trusted operator channel before approving or denying. Approval creates the owner's explicit node
+grant; the directory reports the node offline until its outbound connector polls the result and
+authenticates.
+
+Device codes remain only in the active onboarding component. They are not placed in URLs, global
+stores, browser storage, diagnostics, telemetry, or logs. Polling secrets and private keys never
+enter the browser. Session, role, same-origin, CSRF, expiry, rate-limit, and enrollment-state checks
+remain server-enforced.
+
 ## Troubleshooting
 
 - **Passkey unavailable or rejected:** verify the page origin is inside the Hub's configured RP ID

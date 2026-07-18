@@ -1,6 +1,11 @@
 import { EnvironmentId } from "@ryco/contracts";
 
-import type { HostedHubNode, HostedHubSessionResponse, HostedRelayTicket } from "./types";
+import type {
+  HostedHubNode,
+  HostedHubSessionResponse,
+  HostedNodeEnrollment,
+  HostedRelayTicket,
+} from "./types";
 import { createPasskeyRegistration, getPasskeyAuthentication } from "./webauthn";
 
 const JSON_HEADERS = { accept: "application/json", "content-type": "application/json" } as const;
@@ -39,7 +44,10 @@ function messageForCode(code: string): string {
     case "ticket_consumed":
       return "The request has already been used.";
     case "rate_limited":
+    case "node_rate_limited":
       return "Too many attempts. Wait briefly and try again.";
+    case "enrollment_unavailable":
+      return "The node enrollment is unavailable or expired.";
     case "node_offline":
       return "The selected node is offline.";
     case "server_draining":
@@ -66,6 +74,14 @@ function nullableNumber(value: unknown): value is number | null {
 
 function roleValue(value: unknown): value is "viewer" | "operator" | "owner" {
   return value === "viewer" || value === "operator" || value === "owner";
+}
+
+function platformOsValue(value: unknown): value is "darwin" | "linux" | "windows" | "unknown" {
+  return value === "darwin" || value === "linux" || value === "windows" || value === "unknown";
+}
+
+function platformArchValue(value: unknown): value is "arm64" | "x64" | "other" {
+  return value === "arm64" || value === "x64" || value === "other";
 }
 
 async function responseJson(response: Response): Promise<Record<string, unknown>> {
@@ -102,6 +118,14 @@ export class HostedHubApi {
 
   clearSessionMaterial(): void {
     this.#csrfToken = null;
+  }
+
+  async getBootstrapAvailability(signal?: AbortSignal): Promise<boolean> {
+    const result = await this.#request("/api/auth/bootstrap-status", signal ? { signal } : {});
+    if (Object.keys(result).length !== 1 || typeof result.available !== "boolean") {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
+    return result.available;
   }
 
   async restoreSession(signal?: AbortSignal): Promise<HostedHubSessionResponse> {
@@ -206,13 +230,8 @@ export class HostedHubApi {
         typeof node.id !== "string" ||
         typeof node.environmentId !== "string" ||
         typeof node.label !== "string" ||
-        (node.platformOs !== "darwin" &&
-          node.platformOs !== "linux" &&
-          node.platformOs !== "windows" &&
-          node.platformOs !== "unknown") ||
-        (node.platformArch !== "arm64" &&
-          node.platformArch !== "x64" &&
-          node.platformArch !== "other") ||
+        !platformOsValue(node.platformOs) ||
+        !platformArchValue(node.platformArch) ||
         typeof node.clientVersion !== "string" ||
         !nullableNumber(node.createdAt) ||
         node.createdAt === null ||
@@ -249,6 +268,84 @@ export class HostedHubApi {
         },
       } as unknown as HostedHubNode;
     });
+  }
+
+  async lookupNodeEnrollment(
+    deviceCode: string,
+    signal?: AbortSignal,
+  ): Promise<HostedNodeEnrollment> {
+    const result = await this.#request("/api/admin/node-enrollments/lookup", {
+      method: "POST",
+      body: { deviceCode },
+      csrf: true,
+      ...(signal ? { signal } : {}),
+    });
+    const enrollment = objectValue(result.enrollment);
+    if (
+      typeof enrollment.id !== "string" ||
+      !/^enr_[A-Za-z0-9_-]{22}$/.test(enrollment.id) ||
+      typeof enrollment.label !== "string" ||
+      enrollment.label.length < 1 ||
+      enrollment.label.length > 100 ||
+      !platformOsValue(enrollment.platformOs) ||
+      !platformArchValue(enrollment.platformArch) ||
+      typeof enrollment.clientVersion !== "string" ||
+      enrollment.clientVersion.length < 1 ||
+      enrollment.clientVersion.length > 64 ||
+      enrollment.algorithm !== "ed25519" ||
+      typeof enrollment.fingerprint !== "string" ||
+      !/^SHA256:[A-Za-z0-9_-]{43}$/.test(enrollment.fingerprint) ||
+      !Number.isSafeInteger(enrollment.createdAt) ||
+      !Number.isSafeInteger(enrollment.expiresAt) ||
+      Number(enrollment.expiresAt) <= Number(enrollment.createdAt)
+    ) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
+    return {
+      id: enrollment.id,
+      label: enrollment.label,
+      platformOs: enrollment.platformOs,
+      platformArch: enrollment.platformArch,
+      clientVersion: enrollment.clientVersion,
+      algorithm: enrollment.algorithm,
+      fingerprint: enrollment.fingerprint,
+      createdAt: enrollment.createdAt as number,
+      expiresAt: enrollment.expiresAt as number,
+    };
+  }
+
+  async approveNodeEnrollment(deviceCode: string, signal?: AbortSignal): Promise<void> {
+    const result = await this.#request("/api/admin/node-enrollments/approve", {
+      method: "POST",
+      body: { deviceCode },
+      csrf: true,
+      ...(signal ? { signal } : {}),
+    });
+    const node = objectValue(result.node);
+    const grant = objectValue(result.grant);
+    if (
+      typeof node.id !== "string" ||
+      !/^node_[A-Za-z0-9_-]{22,43}$/.test(node.id) ||
+      typeof node.environmentId !== "string" ||
+      !/^env_[A-Za-z0-9_-]{22}$/.test(node.environmentId) ||
+      typeof grant.id !== "string" ||
+      !/^grant_[A-Za-z0-9_-]{22}$/.test(grant.id) ||
+      grant.role !== "owner"
+    ) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
+  }
+
+  async denyNodeEnrollment(deviceCode: string, signal?: AbortSignal): Promise<void> {
+    const result = await this.#request("/api/admin/node-enrollments/deny", {
+      method: "POST",
+      body: { deviceCode },
+      csrf: true,
+      ...(signal ? { signal } : {}),
+    });
+    if (Object.keys(result).length !== 1 || result.ok !== true) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
   }
 
   async issueRelayTicket(nodeId: string, signal?: AbortSignal): Promise<HostedRelayTicket> {

@@ -17,6 +17,7 @@ import { Button } from "../ui/button";
 import { APP_DISPLAY_NAME } from "../../branding";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import type { HostedHubNode } from "../../hostedHub/types";
+import { HostedNodeEnrollmentFlow } from "./HostedNodeEnrollment";
 
 export function HostedHubRoot() {
   const accountStatus = useHostedHubStore((state) => state.accountStatus);
@@ -102,6 +103,7 @@ function Surface({ children }: { readonly children: React.ReactNode }) {
 function HostedAuthenticationSurface() {
   const status = useHostedHubStore((state) => state.accountStatus);
   const error = useHostedHubStore((state) => state.errorMessage);
+  const bootstrapAvailable = useHostedHubStore((state) => state.bootstrapAvailable);
   const [registrationMode, setRegistrationMode] = useState<"invitation" | "bootstrap" | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const registrationInputRef = useRef<HTMLInputElement>(null);
@@ -163,9 +165,15 @@ function HostedAuthenticationSurface() {
               <Button variant="outline" size="lg" onClick={() => setRegistrationMode("invitation")}>
                 Redeem invitation
               </Button>
-              <Button variant="outline" size="lg" onClick={() => setRegistrationMode("bootstrap")}>
-                Set up first owner
-              </Button>
+              {bootstrapAvailable ? (
+                <Button
+                  variant="outline"
+                  size="lg"
+                  onClick={() => setRegistrationMode("bootstrap")}
+                >
+                  Set up first owner
+                </Button>
+              ) : null}
             </>
           )}
         </div>
@@ -312,6 +320,15 @@ function HostedNodeDirectory() {
   const account = useHostedHubStore((state) => state.account);
   const selection = useHostedHubStore((state) => state.selectionStatus);
   const navigate = useNavigate();
+  const [enrolling, setEnrolling] = useState(false);
+
+  if (enrolling) {
+    return (
+      <Surface>
+        <HostedNodeEnrollmentFlow onClose={() => setEnrolling(false)} />
+      </Surface>
+    );
+  }
 
   const select = async (node: HostedHubNode) => {
     await navigate({ to: "/", replace: true });
@@ -404,6 +421,11 @@ function HostedNodeDirectory() {
       >
         <RefreshCwIcon aria-hidden /> Refresh nodes
       </Button>
+      {account?.role === "owner" ? (
+        <Button className="mt-3" onClick={() => setEnrolling(true)}>
+          <ServerIcon aria-hidden /> Enroll node
+        </Button>
+      ) : null}
     </Surface>
   );
 }
