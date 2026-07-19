@@ -171,6 +171,10 @@ export class HostedRelayAttemptFactory {
     };
   }
 
+  hasPendingRequests(): boolean {
+    return this.#pendingRequests.size > 0;
+  }
+
   reset(): void {
     this.#pendingTicket = null;
     this.#pendingRequests.clear();
@@ -185,6 +189,10 @@ let attemptFactory: HostedRelayAttemptFactory | null = null;
 export function getHostedRelayAttemptFactory(): HostedRelayAttemptFactory {
   attemptFactory ??= new HostedRelayAttemptFactory();
   return attemptFactory;
+}
+
+export function hasHostedRelayPendingRequests(): boolean {
+  return attemptFactory?.hasPendingRequests() ?? false;
 }
 
 export function resetHostedRelayAttemptFactory(): void {

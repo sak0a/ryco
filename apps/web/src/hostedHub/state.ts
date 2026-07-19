@@ -473,7 +473,7 @@ class HostedHubController {
   }
 
   async #retrySelectedNode(): Promise<void> {
-    const state = useHostedHubStore.getState();
+    let state = useHostedHubStore.getState();
     const node = state.selectedNode;
     if (
       !node ||
@@ -483,13 +483,26 @@ class HostedHubController {
     ) {
       return;
     }
+    const { hasHostedRelayPendingRequests } = await import("./transport");
+    state = useHostedHubStore.getState();
+    if (
+      state.selectedNode?.id !== node.id ||
+      state.selectedNode.environmentId !== node.environmentId ||
+      state.selectedNode.revokedAt !== null ||
+      state.accountStatus !== "authenticated" ||
+      state.directoryStatus !== "ready"
+    ) {
+      return;
+    }
+    const deliveryUnknown =
+      state.sessionStatus === "delivery-unknown" || hasHostedRelayPendingRequests();
     const generation = state.generation + 1;
     this.#clearSessionSyncTimer();
     patchState({
       selectionStatus: node.presence.online ? "online" : "offline",
       effectiveRole: node.effectiveRole,
       transportStatus: "idle",
-      sessionStatus: "synchronizing",
+      sessionStatus: deliveryUnknown ? "delivery-unknown" : "synchronizing",
       sessionEstablished: false,
       sessionRecoveredAfterUnknown: false,
       errorMessage: null,

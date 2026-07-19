@@ -4,11 +4,15 @@ import { EnvironmentId } from "@ryco/contracts";
 
 const originalDocument = globalThis.document;
 
-const { activateHostedNode, deactivateHostedNode } = vi.hoisted(() => ({
-  activateHostedNode: vi.fn(async () => undefined),
-  deactivateHostedNode: vi.fn(async () => undefined),
-}));
+const { activateHostedNode, deactivateHostedNode, hasHostedRelayPendingRequests } = vi.hoisted(
+  () => ({
+    activateHostedNode: vi.fn(async () => undefined),
+    deactivateHostedNode: vi.fn(async () => undefined),
+    hasHostedRelayPendingRequests: vi.fn(() => false),
+  }),
+);
 vi.mock("./environment", () => ({ activateHostedNode, deactivateHostedNode }));
+vi.mock("./transport", () => ({ hasHostedRelayPendingRequests }));
 
 import { hostedHubApi, HostedHubApiError } from "./api";
 import { hostedHubController, useHostedHubStore } from "./state";
@@ -59,6 +63,8 @@ afterEach(() => {
   hostedHubController.resetForTests();
   activateHostedNode.mockClear();
   deactivateHostedNode.mockClear();
+  hasHostedRelayPendingRequests.mockReset();
+  hasHostedRelayPendingRequests.mockReturnValue(false);
   vi.restoreAllMocks();
   vi.useRealTimers();
   Object.defineProperty(globalThis, "document", { configurable: true, value: originalDocument });
@@ -425,6 +431,44 @@ describe("hosted registration and directory state", () => {
     expect(useHostedHubStore.getState()).toMatchObject({
       browserStatus: "current",
       sessionStatus: "ready",
+    });
+  });
+
+  it("preserves delivery uncertainty when resume replaces a relay with a pending mutation", async () => {
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      browserStatus: "current",
+      generation: 4,
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([selected]);
+    hasHostedRelayPendingRequests.mockReturnValue(true);
+
+    hostedHubController.suspendBrowser("hidden");
+    await hostedHubController.resumeBrowser();
+
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "synchronizing",
+      sessionStatus: "delivery-unknown",
+      sessionRecoveredAfterUnknown: false,
+      generation: 5,
+    });
+    hostedHubController.markSessionReady(selected.environmentId);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
+      sessionStatus: "delivery-unknown",
+      sessionRecoveredAfterUnknown: true,
     });
   });
 

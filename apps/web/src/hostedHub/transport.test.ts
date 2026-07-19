@@ -230,6 +230,7 @@ describe("HostedRelayAttemptFactory", () => {
       tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
       stream: false,
     });
+    expect(factory.hasPendingRequests()).toBe(true);
     lifecycle.onRequestStart?.({ id: "read-1", tag: WS_METHODS.projectsList, stream: false });
     lifecycle.onRequestExit?.({ id: "read-1", tag: WS_METHODS.projectsList, stream: false });
     sockets[0]!.fail();
@@ -237,6 +238,7 @@ describe("HostedRelayAttemptFactory", () => {
       transportStatus: "reconnecting",
       sessionStatus: "delivery-unknown",
     });
+    expect(factory.hasPendingRequests()).toBe(false);
   });
 
   it("keeps generic retry delays state-neutral", async () => {
