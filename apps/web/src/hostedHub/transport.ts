@@ -1,4 +1,4 @@
-import type { RelayEffectiveRole } from "@ryco/contracts";
+import { ORCHESTRATION_WS_METHODS, type RelayEffectiveRole, WS_METHODS } from "@ryco/contracts";
 import { hostedRoleAllows } from "@ryco/shared/rpcAccessPolicy";
 
 import type { WsProtocolLifecycleHandlers } from "../rpc/protocol";
@@ -17,6 +17,39 @@ interface PendingTicket {
   readonly expiresAt: number;
   readonly generation: number;
   used: boolean;
+}
+
+const HOSTED_SESSION_SYNC_SUBSCRIPTIONS = new Set<string>([
+  ORCHESTRATION_WS_METHODS.subscribeShell,
+  ORCHESTRATION_WS_METHODS.subscribeThread,
+  WS_METHODS.subscribeServerConfig,
+  WS_METHODS.subscribeServerLifecycle,
+  WS_METHODS.subscribeTerminalEvents,
+  WS_METHODS.subscribeVcsStatus,
+]);
+
+function authorizeHostedRequest(info: { readonly tag: string; readonly stream: boolean }): boolean {
+  const state = useHostedHubStore.getState();
+  if (!hostedRoleAllows(state.effectiveRole, info.tag, state.directoryStatus === "ready")) {
+    return false;
+  }
+  if (
+    state.transportStatus === "online" &&
+    state.browserStatus === "current" &&
+    state.sessionStatus === "ready"
+  ) {
+    return true;
+  }
+  return (
+    info.stream &&
+    (state.browserStatus === "current" || state.browserStatus === "synchronizing") &&
+    (state.sessionStatus === "synchronizing" ||
+      state.sessionStatus === "replaying" ||
+      state.sessionStatus === "delivery-unknown" ||
+      state.sessionStatus === "stale" ||
+      state.sessionStatus === "closed") &&
+    HOSTED_SESSION_SYNC_SUBSCRIPTIONS.has(info.tag)
+  );
 }
 
 export function ticketFailure(error: HostedHubApiError): HostedRelayFailure {
@@ -145,10 +178,7 @@ export class HostedRelayAttemptFactory {
           state.transportStatus !== "terminal-failure"
         );
       },
-      authorizeRequest: (info) => {
-        const state = useHostedHubStore.getState();
-        return hostedRoleAllows(state.effectiveRole, info.tag, state.directoryStatus === "ready");
-      },
+      authorizeRequest: authorizeHostedRequest,
       getReconnectDelayMs: () => {
         const delay = this.#reconnect.nextDelay(this.#lastRetryAfterMs);
         this.#lastRetryAfterMs = undefined;

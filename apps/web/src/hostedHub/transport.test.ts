@@ -116,7 +116,7 @@ describe("HostedRelayAttemptFactory", () => {
     });
   });
 
-  it("authorizes bootstrap subscriptions from a fresh directory role before socket open", () => {
+  it("authorizes only bootstrap subscriptions while the hosted session opens", () => {
     const lifecycle = new HostedRelayAttemptFactory().lifecycleHandlers();
 
     expect(
@@ -125,6 +125,24 @@ describe("HostedRelayAttemptFactory", () => {
         stream: true,
       }),
     ).toBe(true);
+    expect(
+      lifecycle.authorizeRequest?.({
+        tag: WS_METHODS.subscribeTerminalEvents,
+        stream: true,
+      }),
+    ).toBe(true);
+    expect(
+      lifecycle.authorizeRequest?.({
+        tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+        stream: false,
+      }),
+    ).toBe(false);
+    expect(
+      lifecycle.authorizeRequest?.({
+        tag: WS_METHODS.gitRunStackedAction,
+        stream: true,
+      }),
+    ).toBe(false);
 
     useHostedHubStore.setState({ directoryStatus: "stale" });
     expect(
@@ -133,6 +151,44 @@ describe("HostedRelayAttemptFactory", () => {
         stream: true,
       }),
     ).toBe(false);
+  });
+
+  it("denies RPCs at the transport boundary until browser recovery is complete", () => {
+    const lifecycle = new HostedRelayAttemptFactory().lifecycleHandlers();
+    const dispatch = {
+      tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+      stream: false,
+    } as const;
+    const subscribeShell = {
+      tag: ORCHESTRATION_WS_METHODS.subscribeShell,
+      stream: true,
+    } as const;
+    useHostedHubStore.setState({
+      transportStatus: "online",
+      sessionStatus: "ready",
+      browserStatus: "current",
+    });
+
+    expect(lifecycle.authorizeRequest?.(dispatch)).toBe(true);
+    hostedHubController.suspendBrowser("hidden");
+    expect(useHostedHubStore.getState()).toMatchObject({
+      directoryStatus: "ready",
+      effectiveRole: "operator",
+      browserStatus: "suspended",
+      sessionStatus: "stale",
+    });
+    expect(lifecycle.authorizeRequest?.(dispatch)).toBe(false);
+    expect(lifecycle.authorizeRequest?.(subscribeShell)).toBe(false);
+
+    useHostedHubStore.setState({
+      browserStatus: "synchronizing",
+      sessionStatus: "stale",
+    });
+    expect(lifecycle.authorizeRequest?.(dispatch)).toBe(false);
+    expect(lifecycle.authorizeRequest?.(subscribeShell)).toBe(true);
+
+    useHostedHubStore.setState({ browserStatus: "current", sessionStatus: "ready" });
+    expect(lifecycle.authorizeRequest?.(dispatch)).toBe(true);
   });
   it("requests and consumes one memory-only ticket per connection attempt", async () => {
     const ticket = encodeBase64Url(new Uint8Array(32).fill(9));
