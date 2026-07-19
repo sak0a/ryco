@@ -27,11 +27,17 @@ on:
 permissions:
   contents: read
 
+# Each check runs as its own job so they execute in parallel instead of as one
+# serial chain. Jobs share the same Turbo/Bun caches via setup-ryco, so the
+# redundant install/build work is cache-cheap. The two long poles — the Effect
+# (TS6) typecheck and the unit tests — are sharded across runners. Browser tests,
+# the desktop build, and release smoke stay gated behind their inputs so callers
+# can skip them per path (see pull-request-validation.yml) or event.
 jobs:
-  quality:
-    name: Quality
+  static:
+    name: Static
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -51,17 +57,95 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+  typecheck-effect:
+    name: Effect typecheck ${{ matrix.shard }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/2", "2/2"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          persist-credentials: false
+
+      - name: Setup project
+        uses: ./.github/actions/setup-ryco
+
       - name: Effect typecheck (TS6)
-        run: bun run typecheck:effect
+        run: bun run typecheck:effect --shard ${{ matrix.shard }}
+
+  test:
+    name: Test ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The two heaviest packages get a runner each; "rest" catches every
+          # other package via negation filters, so a new package can never slip
+          # out of CI unnoticed.
+          - name: server
+            filter: --filter=ryco-cli
+          - name: web
+            filter: --filter=@ryco/web
+          - name: rest
+            filter: --filter=!ryco-cli --filter=!@ryco/web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          persist-credentials: false
+
+      - name: Setup project
+        uses: ./.github/actions/setup-ryco
 
       - name: Test
-        run: bun run test
+        run: bun run test ${{ matrix.filter }}
+
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          persist-credentials: false
+
+      - name: Setup project
+        uses: ./.github/actions/setup-ryco
 
       - name: Build
         run: bun run build
 
+  browser:
+    name: Browser tests
+    if: ${{ inputs['run-browser-tests'] }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          persist-credentials: false
+
+      - name: Setup project
+        uses: ./.github/actions/setup-ryco
+
+      # Browser tests run vitest directly (not through Turbo), so build the web
+      # package and its workspace dependencies first.
+      - name: Build web package
+        run: bun run build --filter=@ryco/web
+
       - name: Cache Playwright browsers
-        if: ${{ inputs['run-browser-tests'] }}
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
@@ -70,19 +154,30 @@ jobs:
             ${{ runner.os }}-playwright-
 
       - name: Install browser test runtime
-        if: ${{ inputs['run-browser-tests'] }}
         run: bun run --cwd apps/web test:browser:install
 
       - name: Browser test
-        if: ${{ inputs['run-browser-tests'] }}
         run: bun run --cwd apps/web test:browser
 
+  desktop:
+    name: Desktop build
+    if: ${{ inputs['run-desktop-build'] }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          persist-credentials: false
+
+      - name: Setup project
+        uses: ./.github/actions/setup-ryco
+
       - name: Build desktop pipeline
-        if: ${{ inputs['run-desktop-build'] }}
         run: bun run build:desktop
 
       - name: Verify preload bundle output
-        if: ${{ inputs['run-desktop-build'] }}
         run: |
           test -f apps/desktop/dist-electron/preload.cjs
           grep -nE "desktopBridge|getLocalEnvironmentBootstrap|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.cjs
