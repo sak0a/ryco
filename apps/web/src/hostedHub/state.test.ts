@@ -6,7 +6,13 @@ const originalDocument = globalThis.document;
 
 const { activateHostedNode, deactivateHostedNode, hasHostedRelayPendingRequests } = vi.hoisted(
   () => ({
-    activateHostedNode: vi.fn(async () => undefined),
+    activateHostedNode: vi.fn(
+      async (
+        _node?: HostedHubNode,
+        _previousEnvironmentId?: EnvironmentId | null,
+        _signal?: AbortSignal,
+      ): Promise<void> => undefined,
+    ),
     deactivateHostedNode: vi.fn(async () => undefined),
     hasHostedRelayPendingRequests: vi.fn(() => false),
   }),
@@ -568,6 +574,56 @@ describe("hosted registration and directory state", () => {
     });
   });
 
+  it("aborts same-node activation when the browser is suspended again", async () => {
+    vi.useFakeTimers();
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      browserStatus: "current",
+      generation: 4,
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([selected]);
+    activateHostedNode.mockImplementationOnce(
+      async (_node, _previousEnvironmentId, signal: AbortSignal | undefined) =>
+        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve())),
+    );
+
+    hostedHubController.suspendBrowser("hidden");
+    const interrupted = hostedHubController.resumeBrowser();
+    await vi.waitFor(() => expect(activateHostedNode).toHaveBeenCalledOnce());
+    const firstSignal = activateHostedNode.mock.calls[0]?.[2] as AbortSignal | undefined;
+    hostedHubController.suspendBrowser("hidden");
+    await interrupted;
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(firstSignal?.aborted).toBe(true);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "suspended",
+      sessionStatus: "stale",
+      generation: 5,
+    });
+    expect(useHostedHubStore.getState().transportStatus).not.toBe("terminal-failure");
+
+    await hostedHubController.resumeBrowser();
+    expect(activateHostedNode).toHaveBeenCalledTimes(2);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "synchronizing",
+      sessionStatus: "synchronizing",
+      generation: 6,
+    });
+  });
+
   it("restarts full resume after a stale directory retry recovers", async () => {
     vi.useFakeTimers();
     const selected = node();
@@ -774,7 +830,11 @@ describe("hosted registration and directory state", () => {
     ]);
 
     expect(activateHostedNode).toHaveBeenCalledOnce();
-    expect(activateHostedNode).toHaveBeenCalledWith(selected, selected.environmentId);
+    expect(activateHostedNode).toHaveBeenCalledWith(
+      selected,
+      selected.environmentId,
+      expect.any(AbortSignal),
+    );
     expect(useHostedHubStore.getState()).toMatchObject({
       generation: 8,
       transportStatus: "idle",

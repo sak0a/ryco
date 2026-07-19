@@ -91,6 +91,7 @@ class HostedHubController {
   #directoryPromise: Promise<void> | null = null;
   #bootstrapPromise: Promise<void> | null = null;
   #sessionSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  #retrySelectedNodeOperation: AbortController | null = null;
   #retrySelectedNodePromise: Promise<void> | null = null;
   #browserResumeOperation: AbortController | null = null;
   #browserResumePromise: Promise<void> | null = null;
@@ -214,6 +215,8 @@ class HostedHubController {
     this.#directoryPromise = null;
     this.#bootstrapPromise = null;
     this.#clearSessionSyncTimer();
+    this.#retrySelectedNodeOperation?.abort();
+    this.#retrySelectedNodeOperation = null;
     this.#retrySelectedNodePromise = null;
     this.#browserResumeOperation?.abort();
     this.#browserResumeOperation = null;
@@ -251,6 +254,8 @@ class HostedHubController {
     this.#browserResumeOperation?.abort();
     this.#browserResumeOperation = null;
     this.#browserResumePromise = null;
+    this.#retrySelectedNodeOperation?.abort();
+    this.#clearSessionSyncTimer();
     patchState({
       browserStatus: reason === "offline" ? "offline" : "suspended",
       sessionStatus: state.sessionStatus === "delivery-unknown" ? "delivery-unknown" : "stale",
@@ -300,7 +305,7 @@ class HostedHubController {
         return;
       }
       patchState({ browserStatus: "synchronizing" });
-      await this.retrySelectedNode();
+      await this.#retrySelectedNode(operation.signal);
     } catch (error) {
       if (operation.signal.aborted || this.#browserLifecycleGeneration !== browserGeneration)
         return;
@@ -317,6 +322,9 @@ class HostedHubController {
     this.#browserResumeOperation?.abort();
     this.#browserResumeOperation = null;
     this.#browserResumePromise = null;
+    this.#retrySelectedNodeOperation?.abort();
+    this.#retrySelectedNodeOperation = null;
+    this.#retrySelectedNodePromise = null;
     this.#clearDirectoryTimer();
     this.#clearSessionSyncTimer();
     this.#directoryOperation?.abort();
@@ -465,14 +473,20 @@ class HostedHubController {
 
   retrySelectedNode(): Promise<void> {
     if (this.#retrySelectedNodePromise) return this.#retrySelectedNodePromise;
-    const promise = this.#retrySelectedNode().finally(() => {
+    const operation = new AbortController();
+    this.#retrySelectedNodeOperation = operation;
+    const promise = this.#retrySelectedNode(operation.signal).finally(() => {
+      if (this.#retrySelectedNodeOperation === operation) {
+        this.#retrySelectedNodeOperation = null;
+      }
       if (this.#retrySelectedNodePromise === promise) this.#retrySelectedNodePromise = null;
     });
     this.#retrySelectedNodePromise = promise;
     return promise;
   }
 
-  async #retrySelectedNode(): Promise<void> {
+  async #retrySelectedNode(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return;
     let state = useHostedHubStore.getState();
     const node = state.selectedNode;
     if (
@@ -483,9 +497,13 @@ class HostedHubController {
     ) {
       return;
     }
-    const { hasHostedRelayPendingRequests } = await import("./transport");
+    const [{ hasHostedRelayPendingRequests }, { activateHostedNode }] = await Promise.all([
+      import("./transport"),
+      import("./environment"),
+    ]);
     state = useHostedHubStore.getState();
     if (
+      signal.aborted ||
       state.selectedNode?.id !== node.id ||
       state.selectedNode.environmentId !== node.environmentId ||
       state.selectedNode.revokedAt !== null ||
@@ -509,10 +527,10 @@ class HostedHubController {
       generation,
     });
     this.#startSessionSyncTimer(generation);
-    const { activateHostedNode } = await import("./environment");
     try {
-      await activateHostedNode(node, node.environmentId);
+      await activateHostedNode(node, node.environmentId, signal);
     } catch {
+      if (signal.aborted) return;
       this.#failSessionSync(generation);
     }
   }

@@ -111,13 +111,16 @@ export async function deactivateHostedNode(environmentId: EnvironmentId): Promis
 export async function activateHostedNode(
   node: HostedHubNode,
   previousEnvironmentId: EnvironmentId | null,
+  signal?: AbortSignal,
 ): Promise<void> {
   await enqueueTransition(async () => {
+    if (signal?.aborted) return;
     const previous = activeHostedEnvironmentId ?? previousEnvironmentId;
     if (previous) {
       await deactivateCurrentHostedNode(previous, {
         preserveComposerDrafts: previous === node.environmentId,
       });
+      if (signal?.aborted) return;
     }
     writePrimaryEnvironmentDescriptor(descriptorForNode(node));
     useStore.getState().setActiveEnvironmentId(node.environmentId);
