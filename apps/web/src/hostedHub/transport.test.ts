@@ -297,6 +297,63 @@ describe("HostedRelayAttemptFactory", () => {
     expect(factory.hasPendingRequests()).toBe(false);
   });
 
+  it("preserves streaming mutation uncertainty through progress until final exit", async () => {
+    vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
+      ticket: encodeBase64Url(new Uint8Array(32).fill(4)),
+      expiresAt: Date.now() + 60_000,
+      protocolMajor: 1,
+      protocolMinor: 2,
+    });
+    const factory = new HostedRelayAttemptFactory();
+    const lifecycle = factory.lifecycleHandlers();
+    factory.createSocket(await factory.nextUrl());
+
+    lifecycle.onRequestStart?.({
+      id: "subscription-1",
+      tag: ORCHESTRATION_WS_METHODS.subscribeShell,
+      stream: true,
+    });
+    expect(factory.hasPendingRequests()).toBe(false);
+
+    lifecycle.onRequestStart?.({
+      id: "stacked-action-1",
+      tag: WS_METHODS.gitRunStackedAction,
+      stream: true,
+    });
+    lifecycle.onRequestChunk?.({
+      id: "stacked-action-1",
+      tag: WS_METHODS.gitRunStackedAction,
+      chunkCount: 1,
+    });
+    expect(factory.hasPendingRequests()).toBe(true);
+
+    sockets[0]!.fail();
+    expect(useHostedHubStore.getState()).toMatchObject({
+      transportStatus: "reconnecting",
+      sessionStatus: "delivery-unknown",
+    });
+    expect(factory.hasPendingRequests()).toBe(false);
+  });
+
+  it("clears streaming mutation uncertainty after final exit", () => {
+    const factory = new HostedRelayAttemptFactory();
+    const lifecycle = factory.lifecycleHandlers();
+
+    lifecycle.onRequestStart?.({
+      id: "stacked-action-1",
+      tag: WS_METHODS.gitRunStackedAction,
+      stream: true,
+    });
+    expect(factory.hasPendingRequests()).toBe(true);
+
+    lifecycle.onRequestExit?.({
+      id: "stacked-action-1",
+      tag: WS_METHODS.gitRunStackedAction,
+      stream: true,
+    });
+    expect(factory.hasPendingRequests()).toBe(false);
+  });
+
   it("keeps generic retry delays state-neutral", async () => {
     vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
       ticket: encodeBase64Url(new Uint8Array(32).fill(6)),

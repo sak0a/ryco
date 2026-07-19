@@ -28,6 +28,11 @@ const HOSTED_SESSION_SYNC_SUBSCRIPTIONS = new Set<string>([
   WS_METHODS.subscribeVcsStatus,
 ]);
 
+const HOSTED_READ_ONLY_STREAMS = new Set<string>([
+  ...HOSTED_SESSION_SYNC_SUBSCRIPTIONS,
+  WS_METHODS.subscribeAuthAccess,
+]);
+
 function authorizeHostedRequest(info: { readonly tag: string; readonly stream: boolean }): boolean {
   const state = useHostedHubStore.getState();
   if (!hostedRoleAllows(state.effectiveRole, info.tag, state.directoryStatus === "ready")) {
@@ -86,7 +91,7 @@ export function ticketFailure(error: HostedHubApiError): HostedRelayFailure {
 
 export class HostedRelayAttemptFactory {
   readonly #reconnect = new HostedReconnectPolicy();
-  readonly #pendingRequests = new Set<string>();
+  readonly #pendingRequests = new Map<string, "first-chunk" | "exit">();
   #pendingTicket: PendingTicket | null = null;
   #lastRetryAfterMs: number | undefined;
   #activeGeneration: number | null = null;
@@ -193,9 +198,14 @@ export class HostedRelayAttemptFactory {
         hostedHubController.connectionClosed(generation);
       },
       onRequestStart: (info) => {
-        if (!info.stream) this.#pendingRequests.add(info.id);
+        if (info.stream && HOSTED_READ_ONLY_STREAMS.has(info.tag)) return;
+        this.#pendingRequests.set(info.id, info.stream ? "exit" : "first-chunk");
       },
-      onRequestChunk: (info) => this.#pendingRequests.delete(info.id),
+      onRequestChunk: (info) => {
+        if (this.#pendingRequests.get(info.id) === "first-chunk") {
+          this.#pendingRequests.delete(info.id);
+        }
+      },
       onRequestExit: (info) => this.#pendingRequests.delete(info.id),
       onRequestInterrupt: (info) => this.#pendingRequests.delete(info.id),
     };
