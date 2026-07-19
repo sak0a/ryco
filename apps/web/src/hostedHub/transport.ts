@@ -180,6 +180,7 @@ export class HostedRelayAttemptFactory {
           this.#activeGeneration === state.generation &&
           state.accountStatus === "authenticated" &&
           state.selectedNode !== null &&
+          (state.browserStatus === "current" || state.browserStatus === "synchronizing") &&
           state.transportStatus !== "terminal-failure"
         );
       },

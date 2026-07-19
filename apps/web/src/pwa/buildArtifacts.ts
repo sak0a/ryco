@@ -46,6 +46,7 @@ function stableDigest(value: string): string {
 export function resolveHostedPwaPrecache(input: {
   readonly base: string;
   readonly entries: ReadonlyArray<HostedPwaBundleEntry>;
+  readonly offlineDocument: string;
 }): HostedPwaPrecache {
   const entriesByFileName = new Map(input.entries.map((entry) => [entry.fileName, entry]));
   const pendingFileNames = input.entries
@@ -78,7 +79,9 @@ export function resolveHostedPwaPrecache(input: {
   ].toSorted();
 
   return {
-    cacheName: `${CACHE_NAME_PREFIX}${stableDigest(urls.join("\n"))}`,
+    cacheName: `${CACHE_NAME_PREFIX}${stableDigest(
+      `${urls.join("\n")}\noffline:${stableDigest(input.offlineDocument)}`,
+    )}`,
     urls,
   };
 }
@@ -173,14 +176,18 @@ export function createHostedPwaBuildPlugin(): Plugin {
       publicBase = config.base;
     },
     generateBundle(_outputOptions, bundle) {
+      const offlineDocument = renderHostedPwaOfflineDocument({
+        startUrl: normalizeBase(publicBase),
+      });
       const precache = resolveHostedPwaPrecache({
         base: publicBase,
         entries: entriesFromBundle(bundle),
+        offlineDocument,
       });
       this.emitFile({
         type: "asset",
         fileName: "offline.html",
-        source: renderHostedPwaOfflineDocument({ startUrl: normalizeBase(publicBase) }),
+        source: offlineDocument,
       });
       this.emitFile({
         type: "asset",

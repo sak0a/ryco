@@ -237,6 +237,27 @@ describe("HostedRelayAttemptFactory", () => {
     expect(JSON.stringify(useHostedHubStore.getState())).not.toContain(ticket);
   });
 
+  it("stops automatic relay reconnects while the browser is suspended", async () => {
+    vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
+      ticket: encodeBase64Url(new Uint8Array(32).fill(8)),
+      expiresAt: Date.now() + 60_000,
+      protocolMajor: 1,
+      protocolMinor: 2,
+    });
+    const factory = new HostedRelayAttemptFactory();
+    const lifecycle = factory.lifecycleHandlers();
+    await factory.nextUrl();
+
+    expect(lifecycle.shouldReconnect?.()).toBe(true);
+    hostedHubController.suspendBrowser("hidden");
+    expect(lifecycle.shouldReconnect?.()).toBe(false);
+
+    useHostedHubStore.setState({ browserStatus: "checking-access" });
+    expect(lifecycle.shouldReconnect?.()).toBe(false);
+    useHostedHubStore.setState({ browserStatus: "synchronizing" });
+    expect(lifecycle.shouldReconnect?.()).toBe(true);
+  });
+
   it("stops terminal ticket preflight without opening a socket", async () => {
     const issue = vi
       .spyOn(hostedHubApi, "issueRelayTicket")

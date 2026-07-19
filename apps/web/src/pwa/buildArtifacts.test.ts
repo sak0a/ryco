@@ -4,6 +4,7 @@ import { renderHostedPwaServiceWorker, resolveHostedPwaPrecache } from "./buildA
 import { renderHostedPwaOfflineDocument } from "./offlineDocument";
 
 describe("hosted PWA build artifacts", () => {
+  const offlineDocument = renderHostedPwaOfflineDocument({ startUrl: "/" });
   const entries = [
     {
       fileName: "assets/main-AbCd1234.js",
@@ -31,7 +32,7 @@ describe("hosted PWA build artifacts", () => {
   ] as const;
 
   it("allows only fingerprinted immutable shell assets plus the offline document", () => {
-    expect(resolveHostedPwaPrecache({ base: "/", entries }).urls).toEqual([
+    expect(resolveHostedPwaPrecache({ base: "/", entries, offlineDocument }).urls).toEqual([
       "/assets/lazy-UvWx1234.js",
       "/assets/lazy-dependency-YzAb5678.js",
       "/assets/logo-MnOp3456.png",
@@ -44,7 +45,7 @@ describe("hosted PWA build artifacts", () => {
   });
 
   it("respects a configured public base path", () => {
-    expect(resolveHostedPwaPrecache({ base: "/ryco/", entries }).urls).toEqual([
+    expect(resolveHostedPwaPrecache({ base: "/ryco/", entries, offlineDocument }).urls).toEqual([
       "/ryco/assets/lazy-UvWx1234.js",
       "/ryco/assets/lazy-dependency-YzAb5678.js",
       "/ryco/assets/logo-MnOp3456.png",
@@ -56,9 +57,13 @@ describe("hosted PWA build artifacts", () => {
     ]);
   });
 
-  it("derives a deterministic cache key from immutable output names", () => {
-    const first = resolveHostedPwaPrecache({ base: "/", entries });
-    const reordered = resolveHostedPwaPrecache({ base: "/", entries: entries.toReversed() });
+  it("derives a deterministic cache key from immutable output and offline revisions", () => {
+    const first = resolveHostedPwaPrecache({ base: "/", entries, offlineDocument });
+    const reordered = resolveHostedPwaPrecache({
+      base: "/",
+      entries: entries.toReversed(),
+      offlineDocument,
+    });
     const changed = resolveHostedPwaPrecache({
       base: "/",
       entries: entries.map((entry) =>
@@ -66,15 +71,22 @@ describe("hosted PWA build artifacts", () => {
           ? { fileName: "assets/main-ZyXw9876.js" }
           : entry,
       ),
+      offlineDocument,
+    });
+    const changedOfflineDocument = resolveHostedPwaPrecache({
+      base: "/",
+      entries,
+      offlineDocument: `${offlineDocument}\n<!-- revised -->`,
     });
 
     expect(first.cacheName).toMatch(/^ryco-pwa-shell-[a-f0-9]{16}$/);
     expect(reordered).toEqual(first);
     expect(changed.cacheName).not.toBe(first.cacheName);
+    expect(changedOfflineDocument.cacheName).not.toBe(first.cacheName);
   });
 
   it("renders a bounded worker that caches only the resolved allowlist", () => {
-    const precache = resolveHostedPwaPrecache({ base: "/", entries });
+    const precache = resolveHostedPwaPrecache({ base: "/", entries, offlineDocument });
     const source = renderHostedPwaServiceWorker(precache);
 
     expect(source).toContain(JSON.stringify(precache.cacheName));
