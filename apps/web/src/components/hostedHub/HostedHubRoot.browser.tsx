@@ -15,6 +15,7 @@ import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedHubRoot, HostedNodeMenu } from "./HostedHubRoot";
+import { HOSTED_RELAY_TRUST_DISCLOSURE } from "./HostedRelayTrustNotice";
 
 const account = {
   id: "acct_aaaaaaaaaaaaaaaaaaaaaa",
@@ -77,6 +78,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
       .element(page.getByRole("heading", { name: "Connect to your Ryco nodes" }))
       .toBeVisible();
     await expect.element(page.getByRole("button", { name: "Sign in with passkey" })).toBeVisible();
+    await expect.element(page.getByText(HOSTED_RELAY_TRUST_DISCLOSURE)).toBeVisible();
 
     await page.getByRole("button", { name: "Redeem invitation" }).click();
     await expect.element(page.getByLabelText("Invitation code")).toBeVisible();
@@ -153,6 +155,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     await expect.element(page.getByRole("button", { name: /Travel offline/ })).toBeDisabled();
     await expect.element(page.getByText("Online", { exact: true })).toBeVisible();
     await expect.element(page.getByText("Offline", { exact: true })).toBeVisible();
+    await expect.element(page.getByText(HOSTED_RELAY_TRUST_DISCLOSURE)).toBeVisible();
   });
 
   it("keeps one-time recovery material out of browser storage", async () => {

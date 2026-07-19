@@ -22,6 +22,8 @@ import {
 } from "../../hostedHub/state";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedNodeEnrollmentFlow } from "./HostedNodeEnrollment";
+import { HostedPwaControls } from "./HostedPwaControls";
+import { HostedRelayTrustNotice } from "./HostedRelayTrustNotice";
 
 export function HostedHubRoot() {
   const accountStatus = useHostedHubStore((state) => state.accountStatus);
@@ -137,6 +139,10 @@ function HostedAuthenticationSurface() {
         Sign in with the passkey registered for this Hub. Your session stays in a secure, HttpOnly
         cookie.
       </p>
+      <div className="mt-4">
+        <HostedRelayTrustNotice />
+      </div>
+      <HostedPwaControls />
       {error ? (
         <p
           role="alert"
@@ -422,6 +428,10 @@ function HostedNodeDirectory() {
           </p>
         ) : null}
       </div>
+      <div className="mt-5">
+        <HostedRelayTrustNotice />
+      </div>
+      <HostedPwaControls />
       <Button
         className="mt-5"
         variant="outline"
@@ -565,6 +575,10 @@ export function HostedNodeMenu() {
             <Button size="sm" variant="ghost" onClick={() => void hostedHubController.signOut()}>
               <LogOutIcon aria-hidden /> Sign out
             </Button>
+          </div>
+          <div className="mt-3 space-y-3 border-t border-border pt-3">
+            <HostedRelayTrustNotice compact />
+            <HostedPwaControls compact />
           </div>
         </div>
       </details>
