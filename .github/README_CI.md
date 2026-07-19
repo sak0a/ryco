@@ -4,13 +4,14 @@ Ryco keeps CI entrypoints small and routes shared checks through
 `.github/workflows/_validation.yml`.
 
 - `ci.yml` validates `main` and manual CI runs with the full suite.
-- `branch-ci.yml` validates non-`main` branch pushes with format, lint,
-  typecheck, and tests. When the branch already has an open PR, branch CI skips
-  expensive validation and lets PR validation own the ref.
-- `pull-request-validation.yml` runs the validation suite for PR review. A
-  `changes` preflight (via `dorny/paths-filter`, no checkout) decides whether the
-  browser and desktop jobs are needed for the PR's touched paths; `main` always
-  runs the full suite.
+- `pull-request-validation.yml` is the single automatic source of truth for
+  branches. It runs the validation suite for PR review; a `changes` preflight
+  (via `dorny/paths-filter`, no checkout) decides whether the browser and desktop
+  jobs are needed for the PR's touched paths. `main` always runs the full suite.
+- `branch-ci.yml` manually validates an arbitrary branch/ref on demand
+  (`workflow_dispatch`) with format, lint, typecheck, and tests. It does not run
+  on push, so a commit is never validated twice (once on push and once on its
+  PR) — pull request validation owns automatic branch CI.
 - `worktree-validation.yml` manually validates a worktree-backed ref and records
   the local worktree label/path in the run summary when provided.
 
