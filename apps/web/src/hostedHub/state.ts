@@ -366,6 +366,7 @@ class HostedHubController {
       }
       this.#directoryRetry = 0;
       const current = useHostedHubStore.getState();
+      const resumeStaleBrowser = current.browserStatus === "stale";
       const selected = current.selectedNode;
       const refreshedSelection = selected
         ? (nodes.find(
@@ -399,6 +400,18 @@ class HostedHubController {
         });
       }
       this.#scheduleDirectory(DIRECTORY_REFRESH_MS);
+      if (resumeStaleBrowser) {
+        queueMicrotask(() => {
+          const recovered = useHostedHubStore.getState();
+          if (
+            recovered.accountStatus === "authenticated" &&
+            recovered.directoryStatus === "ready" &&
+            recovered.browserStatus === "stale"
+          ) {
+            void this.resumeBrowser();
+          }
+        });
+      }
     } catch (error) {
       if (operation.signal.aborted) return;
       if (isSessionFailure(error)) {

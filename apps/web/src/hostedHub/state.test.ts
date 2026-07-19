@@ -462,6 +462,54 @@ describe("hosted registration and directory state", () => {
     });
   });
 
+  it("restarts full resume after a stale directory retry recovers", async () => {
+    vi.useFakeTimers();
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      browserStatus: "current",
+      generation: 4,
+    });
+    const restoreSession = vi
+      .spyOn(hostedHubApi, "restoreSession")
+      .mockResolvedValue(sessionResponse);
+    const listNodes = vi
+      .spyOn(hostedHubApi, "listNodes")
+      .mockRejectedValueOnce(new HostedHubApiError("unavailable", 0))
+      .mockResolvedValue([selected]);
+
+    hostedHubController.suspendBrowser("hidden");
+    await hostedHubController.resumeBrowser();
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "stale",
+      directoryStatus: "stale",
+      effectiveRole: null,
+    });
+
+    await hostedHubController.refreshDirectory();
+    await vi.waitFor(() => expect(restoreSession).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(activateHostedNode).toHaveBeenCalledOnce());
+
+    expect(listNodes).toHaveBeenCalledTimes(3);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "synchronizing",
+      directoryStatus: "ready",
+      sessionStatus: "synchronizing",
+    });
+    hostedHubController.markSessionReady(selected.environmentId);
+    expect(useHostedHubStore.getState().browserStatus).toBe("current");
+  });
+
   it("switches nodes through the ordered environment teardown boundary", async () => {
     const first = node();
     const second = node("node_bbbbbbbbbbbbbbbbbbbbbb", "owner");
