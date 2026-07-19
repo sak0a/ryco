@@ -8,6 +8,7 @@ describe("hosted PWA build artifacts", () => {
     {
       fileName: "assets/main-AbCd1234.js",
       isEntry: true,
+      dynamicImports: ["assets/lazy-UvWx1234.js"],
       imports: ["assets/vendor-QrSt7890.js"],
       importedCss: ["assets/main-EfGh5678.css"],
       importedAssets: ["assets/mono-IjKl9012.woff2", "assets/logo-MnOp3456.png"],
@@ -22,11 +23,17 @@ describe("hosted PWA build artifacts", () => {
     { fileName: "favicon-96x96.png" },
     { fileName: "assets/unversioned.js" },
     { fileName: "assets/readme-QrSt7890.txt" },
-    { fileName: "assets/lazy-UvWx1234.js" },
+    {
+      fileName: "assets/lazy-UvWx1234.js",
+      imports: ["assets/lazy-dependency-YzAb5678.js"],
+    },
+    { fileName: "assets/lazy-dependency-YzAb5678.js" },
   ] as const;
 
   it("allows only fingerprinted immutable shell assets plus the offline document", () => {
     expect(resolveHostedPwaPrecache({ base: "/", entries }).urls).toEqual([
+      "/assets/lazy-UvWx1234.js",
+      "/assets/lazy-dependency-YzAb5678.js",
       "/assets/logo-MnOp3456.png",
       "/assets/main-AbCd1234.js",
       "/assets/main-EfGh5678.css",
@@ -38,6 +45,8 @@ describe("hosted PWA build artifacts", () => {
 
   it("respects a configured public base path", () => {
     expect(resolveHostedPwaPrecache({ base: "/ryco/", entries }).urls).toEqual([
+      "/ryco/assets/lazy-UvWx1234.js",
+      "/ryco/assets/lazy-dependency-YzAb5678.js",
       "/ryco/assets/logo-MnOp3456.png",
       "/ryco/assets/main-AbCd1234.js",
       "/ryco/assets/main-EfGh5678.css",

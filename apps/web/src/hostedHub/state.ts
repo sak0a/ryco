@@ -557,6 +557,10 @@ class HostedHubController {
       effectiveRole: failure.retryable ? state.effectiveRole : null,
       transportStatus: failure.retryable ? "reconnecting" : "terminal-failure",
       sessionStatus: state.sessionStatus === "delivery-unknown" ? "delivery-unknown" : "stale",
+      browserStatus:
+        !failure.retryable && state.browserStatus === "synchronizing"
+          ? "current"
+          : state.browserStatus,
       errorMessage: failureMessage(failure),
     });
   }

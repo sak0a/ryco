@@ -4,6 +4,7 @@ import { renderHostedPwaOfflineDocument } from "./offlineDocument";
 import { HOSTED_PWA_NETWORK_ONLY_PATH_PREFIXES } from "./serviceWorkerPolicy";
 
 export interface HostedPwaBundleEntry {
+  readonly dynamicImports?: ReadonlyArray<string>;
   readonly fileName: string;
   readonly importedAssets?: ReadonlyArray<string>;
   readonly importedCss?: ReadonlyArray<string>;
@@ -59,6 +60,7 @@ export function resolveHostedPwaPrecache(input: {
     const entry = entriesByFileName.get(fileName);
     if (!entry) continue;
     pendingFileNames.push(
+      ...(entry.dynamicImports ?? []),
       ...(entry.imports ?? []),
       ...(entry.importedCss ?? []),
       ...(entry.importedAssets ?? []),
@@ -141,6 +143,7 @@ function entriesFromBundle(
 ): ReadonlyArray<HostedPwaBundleEntry> {
   return Object.values(bundle).map((entry) => {
     const output = entry as typeof entry & {
+      readonly dynamicImports?: ReadonlyArray<string>;
       readonly imports?: ReadonlyArray<string>;
       readonly isEntry?: boolean;
       readonly referencedFiles?: ReadonlyArray<string>;
@@ -150,6 +153,7 @@ function entriesFromBundle(
       };
     };
     return {
+      dynamicImports: output.dynamicImports ?? [],
       fileName: output.fileName,
       imports: output.imports ?? [],
       isEntry: output.isEntry ?? false,

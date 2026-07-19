@@ -461,4 +461,35 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     await expect.element(page.getByText("Delivery unknown", { exact: true })).toBeVisible();
     await expect.element(page.getByText(/did not resend it automatically/)).toBeVisible();
   });
+
+  it("allows another node after terminal failure ends browser synchronization", async () => {
+    const current = node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator");
+    const replacement = {
+      ...node("node_bbbbbbbbbbbbbbbbbbbbbb", true, "owner"),
+      label: "Second node",
+    };
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account,
+      session,
+      directoryStatus: "ready",
+      browserStatus: "synchronizing",
+      nodes: [current, replacement],
+      selectedNode: current,
+      selectionStatus: "online",
+      effectiveRole: current.effectiveRole,
+      transportStatus: "connecting",
+      sessionStatus: "synchronizing",
+      generation: 9,
+    });
+    mounted = await render(<HostedNodeMenu />);
+    await page.getByText("Synchronizing", { exact: true }).click();
+    const replacementButton = page.getByRole("button", { name: new RegExp(replacement.label) });
+    await expect.element(replacementButton).toBeDisabled();
+
+    hostedHubController.failure(9, { kind: "incompatible", retryable: false });
+
+    await expect.element(page.getByText("Incompatible", { exact: true })).toBeVisible();
+    await expect.element(replacementButton).toBeEnabled();
+  });
 });

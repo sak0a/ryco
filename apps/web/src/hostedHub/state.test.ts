@@ -627,6 +627,32 @@ describe("hosted registration and directory state", () => {
     expect(useHostedHubStore.getState().selectedNode).toBeNull();
   });
 
+  it("ends browser synchronization after a terminal relay failure", () => {
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      browserStatus: "synchronizing",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "connecting",
+      sessionStatus: "synchronizing",
+      generation: 5,
+    });
+
+    hostedHubController.failure(5, { kind: "incompatible", retryable: false });
+
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
+      selectionStatus: "incompatible",
+      effectiveRole: null,
+      transportStatus: "terminal-failure",
+      sessionStatus: "stale",
+    });
+  });
+
   it("fails initial synchronization after exactly thirty seconds", async () => {
     vi.useFakeTimers();
     const selected = node();
