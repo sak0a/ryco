@@ -734,14 +734,20 @@ function failureMessage(failure: HostedRelayFailure): string {
 
 export const hostedHubController = new HostedHubController();
 
-export function markHostedSessionReady(environmentId: EnvironmentId): void {
+export function markHostedSessionReady(environmentId: EnvironmentId, generation: number): void {
+  if (useHostedHubStore.getState().generation !== generation) return;
   hostedHubController.markSessionReady(environmentId);
 }
 
-export function markHostedSessionReplaying(environmentId: EnvironmentId): void {
+export function markHostedSessionReplaying(environmentId: EnvironmentId, generation: number): void {
+  if (useHostedHubStore.getState().generation !== generation) return;
   hostedHubController.markSessionReplaying(environmentId);
 }
 
-export function reportHostedShellSnapshotFailure(environmentId: EnvironmentId): void {
+export function reportHostedShellSnapshotFailure(
+  environmentId: EnvironmentId,
+  generation: number,
+): void {
+  if (useHostedHubStore.getState().generation !== generation) return;
   hostedHubController.reportShellSnapshotFailure(environmentId);
 }

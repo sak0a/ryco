@@ -216,6 +216,7 @@ describe("retainThreadDetailSubscription", () => {
   afterEach(async () => {
     const { resetEnvironmentServiceForTests } = await import("./service");
     await resetEnvironmentServiceForTests();
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -271,6 +272,32 @@ describe("retainThreadDetailSubscription", () => {
 
     expect(mockCreateEnvironmentConnection).not.toHaveBeenCalled();
     expect(listEnvironmentConnections()).toEqual([]);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("drops shell snapshots from a superseded hosted connection generation", async () => {
+    vi.stubEnv("VITE_RYCO_CLIENT_MODE", "hosted-hub");
+    const { useHostedHubStore } = await import("~/hostedHub/state");
+    const { useStore } = await import("~/store");
+    useHostedHubStore.setState({ generation: 7 });
+    const syncServerShellSnapshot = vi.spyOn(useStore.getState(), "syncServerShellSnapshot");
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+    const stop = startEnvironmentConnectionService();
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    const environmentId = EnvironmentId.make("env-1");
+    const snapshot = makeThreadShellSnapshot({ threadId: ThreadId.make("thread-stale") });
+    expect(connectionInput).toBeDefined();
+
+    useHostedHubStore.setState({ generation: 8 });
+    connectionInput.syncShellSnapshot(snapshot, environmentId);
+    expect(syncServerShellSnapshot).not.toHaveBeenCalled();
+
+    useHostedHubStore.setState({ generation: 7 });
+    connectionInput.syncShellSnapshot(snapshot, environmentId);
+    expect(syncServerShellSnapshot).toHaveBeenCalledOnce();
 
     stop();
     await resetEnvironmentServiceForTests();

@@ -51,4 +51,16 @@ describe("hosted node cleanup", () => {
     expect(useCommandPaletteStore.getState()).toMatchObject({ open: false, openIntent: null });
     expect(useSettingsDialogStore.getState().open).toBe(false);
   });
+
+  it("preserves in-memory composer drafts during same-node recovery", () => {
+    useComposerDraftStore.getState().setPrompt(DraftId.make("draft-thread"), "unsent prompt");
+    useMessageQueueStore.setState({ queuesByThreadKey: { draftThread: [] } });
+
+    clearHostedNodeScopedState(environmentId, { preserveComposerDrafts: true });
+
+    expect(Object.values(useComposerDraftStore.getState().draftsByThreadKey)).toContainEqual(
+      expect.objectContaining({ prompt: "unsent prompt" }),
+    );
+    expect(useMessageQueueStore.getState().queuesByThreadKey).toEqual({});
+  });
 });

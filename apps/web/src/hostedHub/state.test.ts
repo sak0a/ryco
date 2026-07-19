@@ -15,7 +15,7 @@ vi.mock("./environment", () => ({ activateHostedNode, deactivateHostedNode }));
 vi.mock("./transport", () => ({ hasHostedRelayPendingRequests }));
 
 import { hostedHubApi, HostedHubApiError } from "./api";
-import { hostedHubController, useHostedHubStore } from "./state";
+import { hostedHubController, markHostedSessionReady, useHostedHubStore } from "./state";
 
 const sessionResponse: HostedHubSessionResponse = {
   account: {
@@ -431,6 +431,33 @@ describe("hosted registration and directory state", () => {
     expect(useHostedHubStore.getState()).toMatchObject({
       browserStatus: "current",
       sessionStatus: "ready",
+    });
+  });
+
+  it("ignores readiness from a superseded hosted connection generation", () => {
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      selectedNode: selected,
+      transportStatus: "online",
+      sessionStatus: "synchronizing",
+      sessionEstablished: false,
+      browserStatus: "synchronizing",
+      generation: 5,
+    });
+
+    markHostedSessionReady(selected.environmentId, 4);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "synchronizing",
+      sessionStatus: "synchronizing",
+      sessionEstablished: false,
+    });
+
+    markHostedSessionReady(selected.environmentId, 5);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
+      sessionStatus: "ready",
+      sessionEstablished: true,
     });
   });
 

@@ -79,6 +79,7 @@ import {
   markHostedSessionReady,
   markHostedSessionReplaying,
   reportHostedShellSnapshotFailure,
+  useHostedHubStore,
 } from "~/hostedHub/state";
 import { getHostedRelayAttemptFactory } from "~/hostedHub/transport";
 import {
@@ -1141,10 +1142,16 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
   }
 }
 
-function createEnvironmentConnectionHandlers() {
+function createEnvironmentConnectionHandlers(hostedGeneration: number | null = null) {
+  const acceptsEvent = () =>
+    hostedGeneration === null || useHostedHubStore.getState().generation === hostedGeneration;
   return {
-    applyShellEvent,
+    applyShellEvent: (event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) => {
+      if (!acceptsEvent()) return;
+      applyShellEvent(event, environmentId);
+    },
     syncShellSnapshot: (snapshot: OrchestrationShellSnapshot, environmentId: EnvironmentId) => {
+      if (!acceptsEvent()) return;
       const primaryEnvironmentId = getPrimaryKnownEnvironment()?.environmentId;
       if (environmentId === primaryEnvironmentId) {
         markStartupPhase("primary-shell-snapshot-received");
@@ -1154,7 +1161,9 @@ function createEnvironmentConnectionHandlers() {
         next: snapshot,
       });
       if (snapshotClassification === "current") {
-        if (isHostedHubMode()) markHostedSessionReady(environmentId);
+        if (hostedGeneration !== null) {
+          markHostedSessionReady(environmentId, hostedGeneration);
+        }
         return;
       }
       if (snapshotClassification === "stale") {
@@ -1178,7 +1187,7 @@ function createEnvironmentConnectionHandlers() {
         markPrimaryShellSnapshotApplied();
       }
       markAppliedProjectionSnapshot(environmentId, snapshot);
-      if (isHostedHubMode()) markHostedSessionReady(environmentId);
+      if (hostedGeneration !== null) markHostedSessionReady(environmentId, hostedGeneration);
       reconcileThreadDetailSubscriptionsForEnvironment(
         environmentId,
         snapshot.threads.map((thread) => thread.id),
@@ -1187,6 +1196,7 @@ function createEnvironmentConnectionHandlers() {
       reconcileSnapshotDerivedState();
     },
     applyTerminalEvent: (event: TerminalEvent, environmentId: EnvironmentId) => {
+      if (!acceptsEvent()) return;
       const threadRef = scopeThreadRef(environmentId, ThreadId.make(event.threadId));
       const serverThread = selectThreadByRef(useStore.getState(), threadRef);
       const hasDraftThread =
@@ -1388,20 +1398,21 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
     return existing;
   }
 
+  const hostedGeneration = isHostedHubMode() ? useHostedHubStore.getState().generation : null;
   return registerConnection(
     createEnvironmentConnection({
       kind: "primary",
       knownEnvironment,
       client: createPrimaryEnvironmentClient(knownEnvironment),
-      ...(isHostedHubMode()
+      ...(hostedGeneration !== null
         ? {
             onResubscribe: (environmentId: EnvironmentId) =>
-              markHostedSessionReplaying(environmentId),
+              markHostedSessionReplaying(environmentId, hostedGeneration),
             onShellError: (environmentId: EnvironmentId) =>
-              reportHostedShellSnapshotFailure(environmentId),
+              reportHostedShellSnapshotFailure(environmentId, hostedGeneration),
           }
         : {}),
-      ...createEnvironmentConnectionHandlers(),
+      ...createEnvironmentConnectionHandlers(hostedGeneration),
     }),
   );
 }

@@ -35,20 +35,25 @@ function descriptorForNode(node: HostedHubNode): ExecutionEnvironmentDescriptor 
   };
 }
 
-export function clearHostedNodeScopedState(environmentId: EnvironmentId): void {
+export function clearHostedNodeScopedState(
+  environmentId: EnvironmentId,
+  options?: { readonly preserveComposerDrafts?: boolean },
+): void {
   clearKeyedQueriesForEnvironment(environmentId);
   clearProjectAtomState();
   clearGitAtomState();
   clearOverviewAtomState();
   clearCheckpointDiffState();
   useStore.getState().removeEnvironmentState(environmentId);
-  useComposerDraftStore.setState({
-    draftsByThreadKey: {},
-    draftThreadsByThreadKey: {},
-    logicalProjectDraftThreadKeyByLogicalProjectKey: {},
-    stickyModelSelectionByProvider: {},
-    stickyActiveProvider: null,
-  });
+  if (!options?.preserveComposerDrafts) {
+    useComposerDraftStore.setState({
+      draftsByThreadKey: {},
+      draftThreadsByThreadKey: {},
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+      stickyModelSelectionByProvider: {},
+      stickyActiveProvider: null,
+    });
+  }
   useTerminalStateStore.setState({
     terminalStateByThreadKey: {},
     terminalLaunchContextByThreadKey: {},
@@ -86,10 +91,13 @@ function enqueueTransition(work: () => Promise<void>): Promise<void> {
   return next;
 }
 
-async function deactivateCurrentHostedNode(environmentId: EnvironmentId): Promise<void> {
+async function deactivateCurrentHostedNode(
+  environmentId: EnvironmentId,
+  options?: { readonly preserveComposerDrafts?: boolean },
+): Promise<void> {
   resetHostedRelayAttemptFactory();
   await disconnectPrimaryEnvironment();
-  clearHostedNodeScopedState(environmentId);
+  clearHostedNodeScopedState(environmentId, options);
   writePrimaryEnvironmentDescriptor(null);
   if (activeHostedEnvironmentId === environmentId) activeHostedEnvironmentId = null;
 }
@@ -107,7 +115,9 @@ export async function activateHostedNode(
   await enqueueTransition(async () => {
     const previous = activeHostedEnvironmentId ?? previousEnvironmentId;
     if (previous) {
-      await deactivateCurrentHostedNode(previous);
+      await deactivateCurrentHostedNode(previous, {
+        preserveComposerDrafts: previous === node.environmentId,
+      });
     }
     writePrimaryEnvironmentDescriptor(descriptorForNode(node));
     useStore.getState().setActiveEnvironmentId(node.environmentId);
