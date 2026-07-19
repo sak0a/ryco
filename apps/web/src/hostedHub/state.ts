@@ -681,7 +681,7 @@ class HostedHubController {
     this.#clearSessionSyncTimer();
     patchState({
       transportStatus: "terminal-failure",
-      sessionStatus: "stale",
+      sessionStatus: state.sessionStatus === "delivery-unknown" ? "delivery-unknown" : "stale",
       sessionEstablished: false,
       sessionRecoveredAfterUnknown: false,
       errorMessage: HOSTED_SESSION_SYNC_FAILURE_MESSAGE,

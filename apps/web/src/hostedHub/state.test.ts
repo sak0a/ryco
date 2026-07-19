@@ -472,6 +472,41 @@ describe("hosted registration and directory state", () => {
     });
   });
 
+  it("preserves resumed delivery uncertainty when synchronization times out", async () => {
+    vi.useFakeTimers();
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      browserStatus: "current",
+      generation: 4,
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([selected]);
+    hasHostedRelayPendingRequests.mockReturnValue(true);
+
+    hostedHubController.suspendBrowser("hidden");
+    await hostedHubController.resumeBrowser();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(useHostedHubStore.getState()).toMatchObject({
+      transportStatus: "terminal-failure",
+      sessionStatus: "delivery-unknown",
+      sessionEstablished: false,
+      sessionRecoveredAfterUnknown: false,
+      errorMessage: "Ryco state could not be synchronized.",
+    });
+  });
+
   it("starts a fresh access check when suspension cancels an in-flight resume", async () => {
     useHostedHubStore.setState({
       accountStatus: "authenticated",
