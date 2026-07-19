@@ -1,5 +1,5 @@
 import { EnvironmentId } from "@ryco/contracts";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
@@ -8,12 +8,39 @@ import { useSettingsDialogStore } from "../settingsDialogStore";
 import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
-import { clearHostedNodeScopedState } from "./environment";
+import type { HostedHubNode } from "./types";
+
+const {
+  connectPrimaryEnvironment,
+  disconnectPrimaryEnvironment,
+  resetHostedRelayAttemptFactory,
+  writePrimaryEnvironmentDescriptor,
+} = vi.hoisted(() => ({
+  connectPrimaryEnvironment: vi.fn(),
+  disconnectPrimaryEnvironment: vi.fn(async () => undefined),
+  resetHostedRelayAttemptFactory: vi.fn(),
+  writePrimaryEnvironmentDescriptor: vi.fn(),
+}));
+
+vi.mock("../environments/runtime/service", () => ({
+  connectPrimaryEnvironment,
+  disconnectPrimaryEnvironment,
+}));
+vi.mock("../environments/primary", () => ({ writePrimaryEnvironmentDescriptor }));
+vi.mock("./transport", () => ({ resetHostedRelayAttemptFactory }));
+
+import {
+  activateHostedNode,
+  clearHostedNodeScopedState,
+  deactivateHostedNode,
+} from "./environment";
 
 const environmentId = EnvironmentId.make("env_aaaaaaaaaaaaaaaaaaaaaa");
 
-afterEach(() => {
+afterEach(async () => {
+  await deactivateHostedNode(environmentId);
   clearHostedNodeScopedState(environmentId);
+  vi.clearAllMocks();
 });
 
 describe("hosted node cleanup", () => {
@@ -52,15 +79,45 @@ describe("hosted node cleanup", () => {
     expect(useSettingsDialogStore.getState().open).toBe(false);
   });
 
-  it("preserves in-memory composer drafts during same-node recovery", () => {
+  it("preserves node-scoped UI state during same-node relay recovery", async () => {
+    const selectedNode: HostedHubNode = {
+      id: "node_aaaaaaaaaaaaaaaaaaaaaa",
+      environmentId,
+      label: "Node",
+      platformOs: "linux",
+      platformArch: "x64",
+      clientVersion: "0.9.0",
+      createdAt: 1,
+      updatedAt: 1,
+      lastAuthenticatedAt: 1,
+      revokedAt: null,
+      revocationReasonCode: null,
+      grant: { id: "grant_aaaaaaaaaaaaaaaaaaaaaa", role: "operator" },
+      effectiveRole: "operator",
+      presence: { online: true, lastHeartbeatAt: 1 },
+    };
+    await activateHostedNode(selectedNode, null);
     useComposerDraftStore.getState().setPrompt(DraftId.make("draft-thread"), "unsent prompt");
-    useMessageQueueStore.setState({ queuesByThreadKey: { draftThread: [] } });
+    useTerminalStateStore.setState({
+      terminalStateByThreadKey: { retainedThread: {} as never },
+      terminalLaunchContextByThreadKey: {},
+      terminalEventEntriesByKey: { retainedThread: [] },
+    });
+    useMessageQueueStore.setState({ queuesByThreadKey: { retainedThread: [] } });
+    useUiStateStore.setState({ pinnedThreadKeys: { retainedThread: true } });
 
-    clearHostedNodeScopedState(environmentId, { preserveComposerDrafts: true });
+    await activateHostedNode(selectedNode, environmentId);
 
     expect(Object.values(useComposerDraftStore.getState().draftsByThreadKey)).toContainEqual(
       expect.objectContaining({ prompt: "unsent prompt" }),
     );
-    expect(useMessageQueueStore.getState().queuesByThreadKey).toEqual({});
+    expect(useTerminalStateStore.getState().terminalStateByThreadKey).toHaveProperty(
+      "retainedThread",
+    );
+    expect(useMessageQueueStore.getState().queuesByThreadKey).toHaveProperty("retainedThread");
+    expect(useUiStateStore.getState().pinnedThreadKeys).toHaveProperty("retainedThread", true);
+    expect(resetHostedRelayAttemptFactory).toHaveBeenCalledOnce();
+    expect(disconnectPrimaryEnvironment).toHaveBeenCalledOnce();
+    expect(connectPrimaryEnvironment).toHaveBeenCalledTimes(2);
   });
 });
