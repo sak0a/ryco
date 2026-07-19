@@ -375,6 +375,59 @@ describe("hosted registration and directory state", () => {
     Object.defineProperty(globalThis, "document", { configurable: true, value: originalDocument });
   });
 
+  it("keeps mutations stale until browser resume revalidates access and node state", async () => {
+    const selected = node();
+    const order: string[] = [];
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      browserStatus: "current",
+      generation: 4,
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockImplementation(async () => {
+      order.push("session");
+      return sessionResponse;
+    });
+    vi.spyOn(hostedHubApi, "listNodes").mockImplementation(async () => {
+      order.push("directory");
+      return [selected];
+    });
+    activateHostedNode.mockImplementationOnce(async () => {
+      order.push("relay");
+    });
+
+    hostedHubController.suspendBrowser("hidden");
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "suspended",
+      sessionStatus: "stale",
+    });
+    hostedHubController.markSessionReady(selected.environmentId);
+    expect(useHostedHubStore.getState().browserStatus).toBe("suspended");
+
+    await hostedHubController.resumeBrowser();
+    expect(order).toEqual(["session", "directory", "relay"]);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "synchronizing",
+      sessionStatus: "synchronizing",
+      generation: 5,
+    });
+
+    hostedHubController.markSessionReady(selected.environmentId);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
+      sessionStatus: "ready",
+    });
+  });
+
   it("switches nodes through the ordered environment teardown boundary", async () => {
     const first = node();
     const second = node("node_bbbbbbbbbbbbbbbbbbbbbb", "owner");
