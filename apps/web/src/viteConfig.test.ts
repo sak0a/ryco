@@ -18,7 +18,7 @@ function collectPluginNames(value: unknown): ReadonlyArray<string> {
 
 describe("web Vite config", () => {
   it("prebundles react-dom/client before browser tests start", () => {
-    const config = createWebViteConfig("serve") as ViteConfigWithOptimizeDeps;
+    const config = createWebViteConfig() as ViteConfigWithOptimizeDeps;
 
     expect(config.optimizeDeps?.include).toContain("react-dom/client");
   });
@@ -29,10 +29,9 @@ describe("web Vite config", () => {
     expect(shouldEnableHostedPwaBuild({ clientMode: "standard", command: "build" })).toBe(false);
     expect(shouldEnableHostedPwaBuild({ clientMode: "standard", command: "serve" })).toBe(false);
 
-    const pluginNames = (command: string, clientMode: "hosted-hub" | "standard") =>
-      collectPluginNames(createWebViteConfig(command, clientMode).plugins);
-    expect(pluginNames("build", "hosted-hub")).toContain("ryco-hosted-pwa");
-    expect(pluginNames("serve", "hosted-hub")).not.toContain("ryco-hosted-pwa");
-    expect(pluginNames("build", "standard")).not.toContain("ryco-hosted-pwa");
+    const pluginNames = (clientMode: "hosted-hub" | "standard") =>
+      collectPluginNames(createWebViteConfig(clientMode).plugins);
+    expect(pluginNames("hosted-hub")).toContain("ryco-hosted-pwa");
+    expect(pluginNames("standard")).not.toContain("ryco-hosted-pwa");
   });
 });

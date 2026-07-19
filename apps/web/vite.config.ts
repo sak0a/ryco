@@ -58,7 +58,6 @@ function resolveDevProxyTarget(wsUrl: string | undefined): string | undefined {
 const devProxyTarget = resolveDevProxyTarget(configuredWsUrl);
 
 export function createWebViteConfig(
-  command: string,
   resolvedClientMode: "hosted-hub" | "standard" = clientMode,
 ): UserConfig {
   return {
@@ -77,9 +76,7 @@ export function createWebViteConfig(
         presets: [reactCompilerPreset()],
       }),
       tailwindcss(),
-      ...(shouldEnableHostedPwaBuild({ clientMode: resolvedClientMode, command })
-        ? [createHostedPwaBuildPlugin()]
-        : []),
+      ...(resolvedClientMode === "hosted-hub" ? [createHostedPwaBuildPlugin()] : []),
     ],
     optimizeDeps: {
       include: [
@@ -150,4 +147,4 @@ export function createWebViteConfig(
   };
 }
 
-export default defineConfig(({ command }) => createWebViteConfig(command));
+export default defineConfig(createWebViteConfig());
