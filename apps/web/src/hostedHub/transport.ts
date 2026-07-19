@@ -152,9 +152,6 @@ export class HostedRelayAttemptFactory {
       getReconnectDelayMs: () => {
         const delay = this.#reconnect.nextDelay(this.#lastRetryAfterMs);
         this.#lastRetryAfterMs = undefined;
-        if (this.#activeGeneration !== null) {
-          hostedHubController.transportStatus(this.#activeGeneration, "reconnecting");
-        }
         return delay;
       },
       onOpen: () => this.#reconnect.opened(),

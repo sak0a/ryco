@@ -239,7 +239,7 @@ describe("HostedRelayAttemptFactory", () => {
     });
   });
 
-  it("keeps delayed lifecycle callbacks scoped to their socket generation", async () => {
+  it("keeps generic retry delays state-neutral", async () => {
     vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
       ticket: encodeBase64Url(new Uint8Array(32).fill(6)),
       expiresAt: Date.now() + 60_000,
@@ -249,18 +249,36 @@ describe("HostedRelayAttemptFactory", () => {
     const factory = new HostedRelayAttemptFactory();
     const lifecycle = factory.lifecycleHandlers();
     factory.createSocket(await factory.nextUrl());
+    useHostedHubStore.setState({ transportStatus: "online" });
     const transportStatus = vi.spyOn(hostedHubController, "transportStatus");
-    const connectionClosed = vi.spyOn(hostedHubController, "connectionClosed");
 
-    useHostedHubStore.setState({ generation: 5 });
-    lifecycle.getReconnectDelayMs?.(0);
-    lifecycle.onClose?.({ code: 1006, reason: "network" }, { intentional: false });
+    expect(lifecycle.getReconnectDelayMs?.(0)).toBeGreaterThan(0);
+    expect(useHostedHubStore.getState().transportStatus).toBe("online");
+    expect(transportStatus).not.toHaveBeenCalled();
 
-    expect(transportStatus).toHaveBeenCalledWith(4, "reconnecting");
-    expect(connectionClosed).toHaveBeenCalledWith(4);
     factory.reset();
     lifecycle.getReconnectDelayMs?.(1);
+    expect(transportStatus).not.toHaveBeenCalled();
+  });
+
+  it("transitions on an actual close and ignores delayed close callbacks after reset", async () => {
+    vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
+      ticket: encodeBase64Url(new Uint8Array(32).fill(6)),
+      expiresAt: Date.now() + 60_000,
+      protocolMajor: 1,
+      protocolMinor: 2,
+    });
+    const factory = new HostedRelayAttemptFactory();
+    const lifecycle = factory.lifecycleHandlers();
+    factory.createSocket(await factory.nextUrl());
+    useHostedHubStore.setState({ transportStatus: "online" });
+
     lifecycle.onClose?.({ code: 1006, reason: "network" }, { intentional: false });
-    expect(connectionClosed).toHaveBeenCalledTimes(1);
+    expect(useHostedHubStore.getState().transportStatus).toBe("reconnecting");
+
+    factory.reset();
+    useHostedHubStore.setState({ transportStatus: "online" });
+    lifecycle.onClose?.({ code: 1006, reason: "network" }, { intentional: false });
+    expect(useHostedHubStore.getState().transportStatus).toBe("online");
   });
 });
