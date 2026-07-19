@@ -37,6 +37,14 @@ export type HostedRycoSessionStatus =
   | "delivery-unknown"
   | "closed";
 
+export type HostedBrowserStatus =
+  | "current"
+  | "suspended"
+  | "offline"
+  | "checking-access"
+  | "synchronizing"
+  | "stale";
+
 export interface HostedHubAccount {
   readonly id: string;
   readonly displayName: string;

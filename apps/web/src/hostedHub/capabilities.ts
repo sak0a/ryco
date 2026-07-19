@@ -14,10 +14,12 @@ export function resolveHostedRpcCapability(input: {
   readonly hosted: boolean;
   readonly role: RelayEffectiveRole | null;
   readonly fresh: boolean;
+  readonly browserCurrent?: boolean;
+  readonly sessionReady?: boolean;
   readonly method: string;
 }): HostedRpcCapability {
   if (!input.hosted) return { hosted: false, allowed: true, reason: null };
-  if (!input.fresh) {
+  if (!input.fresh || input.browserCurrent === false || input.sessionReady === false) {
     return {
       hosted: true,
       allowed: false,
@@ -38,10 +40,14 @@ export function useHostedRpcCapability(method: string): HostedRpcCapability {
   const role = useHostedHubStore((state) => state.effectiveRole);
   const directoryStatus = useHostedHubStore((state) => state.directoryStatus);
   const transportStatus = useHostedHubStore((state) => state.transportStatus);
+  const sessionStatus = useHostedHubStore((state) => state.sessionStatus);
+  const browserStatus = useHostedHubStore((state) => state.browserStatus);
   return resolveHostedRpcCapability({
     hosted: isHostedHubMode(),
     role,
     fresh: directoryStatus === "ready" && transportStatus === "online",
+    browserCurrent: browserStatus === "current",
+    sessionReady: sessionStatus === "ready",
     method,
   });
 }

@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { hostedHubApi, HostedHubApiError } from "./api";
 import type {
   HostedAccountStatus,
+  HostedBrowserStatus,
   HostedDirectoryStatus,
   HostedHubAccount,
   HostedHubNode,
@@ -29,6 +30,7 @@ interface HostedHubState {
   readonly sessionStatus: HostedRycoSessionStatus;
   readonly sessionEstablished: boolean;
   readonly sessionRecoveredAfterUnknown: boolean;
+  readonly browserStatus: HostedBrowserStatus;
   readonly recoveryCodes: ReadonlyArray<string>;
   readonly errorMessage: string | null;
   readonly generation: number;
@@ -48,6 +50,7 @@ const initialState: HostedHubState = {
   sessionStatus: "closed",
   sessionEstablished: false,
   sessionRecoveredAfterUnknown: false,
+  browserStatus: "current",
   recoveryCodes: [],
   errorMessage: null,
   generation: 0,
@@ -89,6 +92,8 @@ class HostedHubController {
   #bootstrapPromise: Promise<void> | null = null;
   #sessionSyncTimer: ReturnType<typeof setTimeout> | null = null;
   #retrySelectedNodePromise: Promise<void> | null = null;
+  #browserResumePromise: Promise<void> | null = null;
+  #browserLifecycleGeneration = 0;
 
   bootstrap(): Promise<void> {
     if (this.#bootstrapPromise) return this.#bootstrapPromise;
@@ -209,6 +214,8 @@ class HostedHubController {
     this.#bootstrapPromise = null;
     this.#clearSessionSyncTimer();
     this.#retrySelectedNodePromise = null;
+    this.#browserResumePromise = null;
+    this.#browserLifecycleGeneration += 1;
     hostedHubApi.clearSessionMaterial();
     useHostedHubStore.setState(initialState, true);
   }
@@ -234,7 +241,68 @@ class HostedHubController {
     await this.clearAccount("session-expired");
   }
 
+  suspendBrowser(reason: "hidden" | "offline"): void {
+    const state = useHostedHubStore.getState();
+    if (state.accountStatus !== "authenticated") return;
+    this.#browserLifecycleGeneration += 1;
+    patchState({
+      browserStatus: reason === "offline" ? "offline" : "suspended",
+      sessionStatus: state.sessionStatus === "delivery-unknown" ? "delivery-unknown" : "stale",
+      sessionRecoveredAfterUnknown: false,
+    });
+  }
+
+  resumeBrowser(): Promise<void> {
+    if (this.#browserResumePromise) return this.#browserResumePromise;
+    const promise = this.#resumeBrowser().finally(() => {
+      if (this.#browserResumePromise === promise) this.#browserResumePromise = null;
+    });
+    this.#browserResumePromise = promise;
+    return promise;
+  }
+
+  async #resumeBrowser(): Promise<void> {
+    const initial = useHostedHubStore.getState();
+    if (initial.accountStatus !== "authenticated") return;
+    const browserGeneration = this.#browserLifecycleGeneration + 1;
+    this.#browserLifecycleGeneration = browserGeneration;
+    const expectedAccountId = initial.account?.id ?? null;
+    patchState({ browserStatus: "checking-access", errorMessage: null });
+    const operation = new AbortController();
+    try {
+      const restored = await hostedHubApi.restoreSession(operation.signal);
+      if (this.#browserLifecycleGeneration !== browserGeneration) return;
+      const active = useHostedHubStore.getState();
+      if (active.accountStatus !== "authenticated" || restored.account.id !== expectedAccountId) {
+        await this.expireSession();
+        return;
+      }
+      patchState({ account: restored.account, session: restored.session });
+      await this.refreshDirectory();
+      if (this.#browserLifecycleGeneration !== browserGeneration) return;
+      const refreshed = useHostedHubStore.getState();
+      if (refreshed.accountStatus !== "authenticated") return;
+      if (refreshed.directoryStatus !== "ready") {
+        patchState({ browserStatus: "stale" });
+        return;
+      }
+      if (!refreshed.selectedNode) {
+        patchState({ browserStatus: "current" });
+        return;
+      }
+      patchState({ browserStatus: "synchronizing" });
+      await this.retrySelectedNode();
+    } catch (error) {
+      if (isSessionFailure(error)) {
+        await this.expireSession();
+        return;
+      }
+      patchState({ browserStatus: "stale", errorMessage: errorMessage(error) });
+    }
+  }
+
   async clearAccount(status: "signed-out" | "session-expired"): Promise<void> {
+    this.#browserLifecycleGeneration += 1;
     this.#clearDirectoryTimer();
     this.#clearSessionSyncTimer();
     this.#directoryOperation?.abort();
@@ -474,13 +542,18 @@ class HostedHubController {
     if (state.selectedNode?.environmentId !== environmentId) return;
     this.#clearSessionSyncTimer();
     if (state.sessionStatus === "delivery-unknown") {
-      patchState({ sessionEstablished: true, sessionRecoveredAfterUnknown: true });
+      patchState({
+        sessionEstablished: true,
+        sessionRecoveredAfterUnknown: true,
+        browserStatus: state.browserStatus === "synchronizing" ? "current" : state.browserStatus,
+      });
       return;
     }
     patchState({
       sessionStatus: "ready",
       sessionEstablished: true,
       sessionRecoveredAfterUnknown: false,
+      browserStatus: state.browserStatus === "synchronizing" ? "current" : state.browserStatus,
     });
   }
 
@@ -491,7 +564,13 @@ class HostedHubController {
       patchState({ sessionRecoveredAfterUnknown: false });
       return;
     }
-    patchState({ sessionStatus: "replaying" });
+    patchState({
+      sessionStatus: "replaying",
+      browserStatus:
+        state.browserStatus === "current" || state.browserStatus === "synchronizing"
+          ? "synchronizing"
+          : state.browserStatus,
+    });
   }
 
   reportShellSnapshotFailure(environmentId: EnvironmentId): void {

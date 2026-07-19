@@ -34,13 +34,30 @@ export function HostedHubRoot() {
   const errorMessage = useHostedHubStore((state) => state.errorMessage);
 
   useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState === "visible" && accountStatus === "authenticated") {
-        void hostedHubController.refreshDirectory();
+    if (accountStatus !== "authenticated") return;
+    const resumeIfVisible = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) {
+        void hostedHubController.resumeBrowser();
       }
     };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") hostedHubController.suspendBrowser("hidden");
+      else resumeIfVisible();
+    };
+    const onOffline = () => hostedHubController.suspendBrowser("offline");
+    const onOnline = () => resumeIfVisible();
+    const onPageShow = () => resumeIfVisible();
     document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("pageshow", onPageShow);
+    if (!navigator.onLine) onOffline();
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("pageshow", onPageShow);
+    };
   }, [accountStatus]);
 
   if (accountStatus !== "authenticated") return <HostedAuthenticationSurface />;
@@ -472,6 +489,7 @@ export function HostedNodeMenu() {
   const directory = useHostedHubStore((state) => state.directoryStatus);
   const role = useHostedHubStore((state) => state.effectiveRole);
   const error = useHostedHubStore((state) => state.errorMessage);
+  const browserStatus = useHostedHubStore((state) => state.browserStatus);
   const navigate = useNavigate();
   if (!node) return null;
 
@@ -481,21 +499,29 @@ export function HostedNodeMenu() {
   };
 
   const statusText =
-    session === "delivery-unknown"
-      ? "Delivery unknown"
-      : selection === "authorization-removed"
-        ? "Authorization removed"
-        : selection === "revoked"
-          ? "Revoked"
-          : selection === "incompatible"
-            ? "Incompatible"
-            : transport === "online" && session === "ready"
-              ? "Online"
-              : transport === "reconnecting"
-                ? "Reconnecting"
-                : selection === "offline"
-                  ? "Offline"
-                  : transport.replaceAll("-", " ");
+    browserStatus === "offline"
+      ? "Offline"
+      : browserStatus === "checking-access"
+        ? "Checking access"
+        : browserStatus === "synchronizing"
+          ? "Synchronizing"
+          : browserStatus === "suspended" || browserStatus === "stale"
+            ? "Stale"
+            : session === "delivery-unknown"
+              ? "Delivery unknown"
+              : selection === "authorization-removed"
+                ? "Authorization removed"
+                : selection === "revoked"
+                  ? "Revoked"
+                  : selection === "incompatible"
+                    ? "Incompatible"
+                    : transport === "online" && session === "ready"
+                      ? "Online"
+                      : transport === "reconnecting"
+                        ? "Reconnecting"
+                        : selection === "offline"
+                          ? "Offline"
+                          : transport.replaceAll("-", " ");
 
   return (
     <div className="fixed top-2 right-2 z-50 max-w-[calc(100vw-1rem)] sm:top-3 sm:right-3">
