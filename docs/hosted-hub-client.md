@@ -161,7 +161,34 @@ Hosted mode keeps the shared feature UI and uses the selected node's RPC capabil
   project discovery, desktop IPC, and editor/Finder launch affordances remain desktop-only;
 - no local filesystem path or desktop bridge is exposed to the hosted page.
 
-Installable/mobile PWA behavior is not part of hosted Hub mode.
+Production `hosted-hub` builds are installable mobile PWAs. Standard, desktop, hosted-static, and
+development builds do not register the production service worker. The hosted worker precaches only
+an explicit allowlist of immutable shell assets and a static offline document. Live HTML,
+authentication, API, RPC, relay, WebSocket, attachment, project, file, terminal, conversation, and
+other node-owned responses remain network-only.
+
+## Mobile installation and updates
+
+On Android Chrome, Ryco exposes **Install Ryco** when the browser supplies its native install
+prompt. If the prompt is unavailable, use the browser menu and choose **Add to home screen** or
+**Install app**. On iOS Safari, open the Share or browser menu, choose **Add to Home Screen**, enable
+**Open as Web App** when offered, and confirm **Add**. Installation is optional; browser use remains
+available without it.
+
+Installed Ryco uses standalone display mode. A new service worker waits while an existing client is
+active. Ryco shows **Update ready** and activates it only after the user confirms; finding an update
+does not reload active work automatically.
+
+Navigation remains network-first. If the network is unavailable, the worker returns a static
+offline document containing no account, node, project, or conversation data. Returning online does
+not make stale browser state authoritative: hosted mutations remain disabled until Ryco validates
+the current session, refreshes the authorized node directory and grant, establishes a fresh relay
+generation, and accepts the current node snapshot or replay point.
+
+Installing Ryco does not change the relay trust boundary. Hosted connections use WSS transport
+security, but they are not application-level end-to-end encrypted. The trusted relay can observe
+forwarded bytes in memory and must not log or persist payloads. This limitation is shown in the
+hosted authentication, node-selection, and installation paths.
 
 ## Security and browser persistence
 
