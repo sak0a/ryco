@@ -71,6 +71,34 @@ afterEach(async () => {
 });
 
 describe("HostedHubRoot accessibility and responsive flows", () => {
+  it("contains hosted admission and node selection at 320 CSS pixels", async () => {
+    await page.viewport(320, 568);
+    try {
+      mounted = await render(<HostedHubRoot />);
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+      await mounted.unmount();
+
+      const selected = node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator");
+      useHostedHubStore.setState({
+        accountStatus: "authenticated",
+        account,
+        session,
+        directoryStatus: "ready",
+        nodes: [selected],
+      });
+      mounted = await render(<HostedHubRoot />);
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+      const selectButton = page.getByRole("button", { name: /Studio online/ });
+      await expect.element(selectButton).toBeVisible();
+      const box = selectButton.element().getBoundingClientRect();
+      expect(box.left).toBeGreaterThanOrEqual(0);
+      expect(box.right).toBeLessThanOrEqual(window.innerWidth);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    } finally {
+      await page.viewport(1_280, 720);
+    }
+  });
+
   it("provides keyboard-labelled authentication and registration controls with focus management", async () => {
     useHostedHubStore.setState({ bootstrapAvailable: true });
     mounted = await render(<HostedHubRoot />);

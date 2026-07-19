@@ -188,6 +188,13 @@ const COMPACT_FOOTER_VIEWPORT: ViewportSpec = {
   textTolerancePx: 56,
   attachmentTolerancePx: 56,
 };
+const NARROW_PHONE_VIEWPORT: ViewportSpec = {
+  name: "narrow-phone",
+  width: 320,
+  height: 568,
+  textTolerancePx: 56,
+  attachmentTolerancePx: 56,
+};
 
 interface MountedChatView {
   [Symbol.asyncDispose]: () => Promise<void>;
@@ -1905,6 +1912,31 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await expect.element(page.getByTestId("composer-editor")).toBeInTheDocument();
       expect(document.querySelector('button[aria-label="Run on"]')).toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("contains the active chat and composer at 320 CSS pixels", async () => {
+    const mounted = await mountChatView({
+      viewport: NARROW_PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-narrow-mobile" as MessageId,
+        targetText: "narrow mobile workspace",
+      }),
+    });
+
+    try {
+      const composer = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="composer-editor"]'),
+        "Unable to find the mobile composer.",
+      );
+      await waitForLayout();
+      const rect = composer.getBoundingClientRect();
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+      expect(rect.left).toBeGreaterThanOrEqual(0);
+      expect(rect.right).toBeLessThanOrEqual(window.innerWidth);
+      expect(rect.bottom).toBeLessThanOrEqual(window.innerHeight);
     } finally {
       await mounted.cleanup();
     }
