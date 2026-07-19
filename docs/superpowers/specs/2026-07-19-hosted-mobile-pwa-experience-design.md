@@ -376,3 +376,27 @@ contract and resume gate are proven by automated tests, the responsive acceptanc
 public repository gates and review are green, and both physical platform qualifications have
 bounded redacted evidence. Deployment, operational access changes, and longer-running rollout
 qualification remain separately authorized activities.
+
+## Synchronization-failure addendum
+
+A browser resume can enter `synchronizing` while the hosted relay establishes a fresh authoritative
+session. If that synchronization ends in a terminal failure, the browser lifecycle must also leave
+`synchronizing`; otherwise the node menu remains disabled behind a misleading in-progress state.
+
+Three approaches were considered:
+
+1. Teach each timeout, activation, and snapshot-failure caller to reset browser state separately.
+2. Reset browser state in the shared session-sync failure transition.
+3. Add a new browser lifecycle status dedicated to terminal synchronization failures.
+
+The shared transition is selected because every pre-readiness synchronization failure already
+converges there, it mirrors the existing terminal relay-failure behavior, and it avoids duplicated
+state policy or a new public state with no distinct user action. When the shared failure transition
+observes `browserStatus: "synchronizing"`, it changes that status to `"current"` while retaining the
+terminal transport state, stale or delivery-unknown session state, stable error message, and
+fail-closed RPC authorization. Other browser states, including `suspended`, `offline`, and
+`checking-access`, remain unchanged.
+
+Focused tests cover the shared timeout transition and the snapshot-failure entry point while the
+browser is synchronizing. They assert that the terminal failure remains visible, browser
+synchronization ends, and node selection can recover through the existing UI without a reload.
