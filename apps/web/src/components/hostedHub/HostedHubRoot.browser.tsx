@@ -285,6 +285,25 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     expect(selectNode).toHaveBeenCalledWith(selectable.id);
   });
 
+  it("disables cached node selection while browser access is being revalidated", async () => {
+    const selectable = node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator");
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account,
+      session,
+      directoryStatus: "ready",
+      browserStatus: "checking-access",
+      nodes: [selectable],
+    });
+    const selectNode = vi.spyOn(hostedHubController, "selectNode").mockResolvedValue();
+
+    mounted = await render(<HostedHubRoot />);
+
+    const nodeButton = page.getByRole("button", { name: /Studio online/ });
+    await expect.element(nodeButton).toBeDisabled();
+    expect(selectNode).not.toHaveBeenCalled();
+  });
+
   it("lets an owner review and approve bounded node enrollment metadata", async () => {
     useHostedHubStore.setState({
       accountStatus: "authenticated",

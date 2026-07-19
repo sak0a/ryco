@@ -434,7 +434,7 @@ class HostedHubController {
 
   async selectNode(nodeId: string): Promise<void> {
     const state = useHostedHubStore.getState();
-    if (state.directoryStatus !== "ready") return;
+    if (state.directoryStatus !== "ready" || state.browserStatus !== "current") return;
     const node = state.nodes.find((candidate) => candidate.id === nodeId);
     if (!node || node.revokedAt) return;
     if (

@@ -612,6 +612,21 @@ describe("hosted registration and directory state", () => {
     expect(useHostedHubStore.getState().sessionStatus).toBe("ready");
   });
 
+  it("rejects node selection while browser access is being revalidated", async () => {
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      browserStatus: "checking-access",
+      nodes: [selected],
+    });
+
+    await hostedHubController.selectNode(selected.id);
+
+    expect(activateHostedNode).not.toHaveBeenCalled();
+    expect(useHostedHubStore.getState().selectedNode).toBeNull();
+  });
+
   it("fails initial synchronization after exactly thirty seconds", async () => {
     vi.useFakeTimers();
     const selected = node();

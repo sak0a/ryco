@@ -348,6 +348,7 @@ function RecoveryCodesSurface() {
 function HostedNodeDirectory() {
   const nodes = useHostedHubStore((state) => state.nodes);
   const status = useHostedHubStore((state) => state.directoryStatus);
+  const browserStatus = useHostedHubStore((state) => state.browserStatus);
   const error = useHostedHubStore((state) => state.errorMessage);
   const account = useHostedHubStore((state) => state.account);
   const selection = useHostedHubStore((state) => state.selectionStatus);
@@ -418,7 +419,7 @@ function HostedNodeDirectory() {
           <button
             key={`${node.id}:${node.environmentId}`}
             type="button"
-            disabled={status !== "ready" || node.revokedAt !== null}
+            disabled={status !== "ready" || browserStatus !== "current" || node.revokedAt !== null}
             onClick={() => void select(node)}
             className="flex min-h-16 w-full items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
           >
@@ -581,7 +582,11 @@ export function HostedNodeMenu() {
                 <button
                   key={candidate.id}
                   type="button"
-                  disabled={directory !== "ready" || candidate.revokedAt !== null}
+                  disabled={
+                    directory !== "ready" ||
+                    browserStatus !== "current" ||
+                    candidate.revokedAt !== null
+                  }
                   className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   onClick={() => void switchNode(candidate)}
                 >
