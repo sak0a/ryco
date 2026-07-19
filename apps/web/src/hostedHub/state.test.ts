@@ -428,6 +428,40 @@ describe("hosted registration and directory state", () => {
     });
   });
 
+  it("starts a fresh access check when suspension cancels an in-flight resume", async () => {
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      browserStatus: "current",
+    });
+    let restoreCalls = 0;
+    vi.spyOn(hostedHubApi, "restoreSession").mockImplementation((signal) => {
+      restoreCalls += 1;
+      if (restoreCalls > 1) return Promise.resolve(sessionResponse);
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () =>
+          reject(new DOMException("suspended", "AbortError")),
+        );
+      });
+    });
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([]);
+
+    const interrupted = hostedHubController.resumeBrowser();
+    await Promise.resolve();
+    hostedHubController.suspendBrowser("hidden");
+    const resumed = hostedHubController.resumeBrowser();
+    await Promise.all([interrupted, resumed]);
+
+    expect(restoreCalls).toBe(2);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
+      directoryStatus: "ready",
+      errorMessage: null,
+    });
+  });
+
   it("switches nodes through the ordered environment teardown boundary", async () => {
     const first = node();
     const second = node("node_bbbbbbbbbbbbbbbbbbbbbb", "owner");

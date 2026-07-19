@@ -92,6 +92,7 @@ class HostedHubController {
   #bootstrapPromise: Promise<void> | null = null;
   #sessionSyncTimer: ReturnType<typeof setTimeout> | null = null;
   #retrySelectedNodePromise: Promise<void> | null = null;
+  #browserResumeOperation: AbortController | null = null;
   #browserResumePromise: Promise<void> | null = null;
   #browserLifecycleGeneration = 0;
 
@@ -214,6 +215,8 @@ class HostedHubController {
     this.#bootstrapPromise = null;
     this.#clearSessionSyncTimer();
     this.#retrySelectedNodePromise = null;
+    this.#browserResumeOperation?.abort();
+    this.#browserResumeOperation = null;
     this.#browserResumePromise = null;
     this.#browserLifecycleGeneration += 1;
     hostedHubApi.clearSessionMaterial();
@@ -245,6 +248,9 @@ class HostedHubController {
     const state = useHostedHubStore.getState();
     if (state.accountStatus !== "authenticated") return;
     this.#browserLifecycleGeneration += 1;
+    this.#browserResumeOperation?.abort();
+    this.#browserResumeOperation = null;
+    this.#browserResumePromise = null;
     patchState({
       browserStatus: reason === "offline" ? "offline" : "suspended",
       sessionStatus: state.sessionStatus === "delivery-unknown" ? "delivery-unknown" : "stale",
@@ -254,24 +260,27 @@ class HostedHubController {
 
   resumeBrowser(): Promise<void> {
     if (this.#browserResumePromise) return this.#browserResumePromise;
-    const promise = this.#resumeBrowser().finally(() => {
+    const operation = new AbortController();
+    this.#browserResumeOperation = operation;
+    const promise = this.#resumeBrowser(operation).finally(() => {
       if (this.#browserResumePromise === promise) this.#browserResumePromise = null;
+      if (this.#browserResumeOperation === operation) this.#browserResumeOperation = null;
     });
     this.#browserResumePromise = promise;
     return promise;
   }
 
-  async #resumeBrowser(): Promise<void> {
+  async #resumeBrowser(operation: AbortController): Promise<void> {
     const initial = useHostedHubStore.getState();
     if (initial.accountStatus !== "authenticated") return;
     const browserGeneration = this.#browserLifecycleGeneration + 1;
     this.#browserLifecycleGeneration = browserGeneration;
     const expectedAccountId = initial.account?.id ?? null;
     patchState({ browserStatus: "checking-access", errorMessage: null });
-    const operation = new AbortController();
     try {
       const restored = await hostedHubApi.restoreSession(operation.signal);
-      if (this.#browserLifecycleGeneration !== browserGeneration) return;
+      if (operation.signal.aborted || this.#browserLifecycleGeneration !== browserGeneration)
+        return;
       const active = useHostedHubStore.getState();
       if (active.accountStatus !== "authenticated" || restored.account.id !== expectedAccountId) {
         await this.expireSession();
@@ -293,6 +302,8 @@ class HostedHubController {
       patchState({ browserStatus: "synchronizing" });
       await this.retrySelectedNode();
     } catch (error) {
+      if (operation.signal.aborted || this.#browserLifecycleGeneration !== browserGeneration)
+        return;
       if (isSessionFailure(error)) {
         await this.expireSession();
         return;
@@ -303,6 +314,9 @@ class HostedHubController {
 
   async clearAccount(status: "signed-out" | "session-expired"): Promise<void> {
     this.#browserLifecycleGeneration += 1;
+    this.#browserResumeOperation?.abort();
+    this.#browserResumeOperation = null;
+    this.#browserResumePromise = null;
     this.#clearDirectoryTimer();
     this.#clearSessionSyncTimer();
     this.#directoryOperation?.abort();
