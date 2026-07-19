@@ -49,7 +49,7 @@ describe("hosted PWA build artifacts", () => {
 
   it("derives a deterministic cache key from immutable output names", () => {
     const first = resolveHostedPwaPrecache({ base: "/", entries });
-    const reordered = resolveHostedPwaPrecache({ base: "/", entries: [...entries].reverse() });
+    const reordered = resolveHostedPwaPrecache({ base: "/", entries: entries.toReversed() });
     const changed = resolveHostedPwaPrecache({
       base: "/",
       entries: entries.map((entry) =>

@@ -172,6 +172,7 @@ export function createHostedPwaLifecycle(runtime: HostedPwaRuntime) {
       if (!waiting || snapshot.updateState !== "ready") return;
       reloadRequested = true;
       publish({ updateState: "activating" });
+      // eslint-disable-next-line unicorn/require-post-message-target-origin -- ServiceWorker.postMessage has no targetOrigin parameter.
       waiting.postMessage({ type: ACTIVATION_MESSAGE });
     },
     dismissInstall(): void {

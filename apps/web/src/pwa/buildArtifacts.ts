@@ -73,7 +73,7 @@ export function resolveHostedPwaPrecache(input: {
         .map((fileName) => pathAtBase(input.base, fileName)),
     ),
     pathAtBase(input.base, "offline.html"),
-  ].sort();
+  ].toSorted();
 
   return {
     cacheName: `${CACHE_NAME_PREFIX}${stableDigest(urls.join("\n"))}`,
