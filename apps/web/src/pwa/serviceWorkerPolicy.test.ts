@@ -50,17 +50,12 @@ describe("hosted PWA service-worker request policy", () => {
     ["well-known", { url: `${origin}/.well-known/ryco` }],
     ["relay", { url: `${origin}/v1/relay/client` }],
     ["WebSocket", { url: "wss://ryco.example/v1/relay/client" }],
-    [
-      "event stream",
-      { url: `${origin}/events`, headers: { accept: "text/event-stream" } },
-    ],
+    ["event stream", { url: `${origin}/events`, headers: { accept: "text/event-stream" } }],
   ])("keeps %s network-only", (_label, request) => {
     expect(classify(request)).toBe("network-only");
   });
 
   it("checks dynamic exclusions before navigation fallback", () => {
-    expect(classify({ url: `${origin}/api/auth/session`, mode: "navigate" })).toBe(
-      "network-only",
-    );
+    expect(classify({ url: `${origin}/api/auth/session`, mode: "navigate" })).toBe("network-only");
   });
 });

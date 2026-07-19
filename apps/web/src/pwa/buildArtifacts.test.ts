@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveHostedPwaPrecache } from "./buildArtifacts";
+import { renderHostedPwaServiceWorker, resolveHostedPwaPrecache } from "./buildArtifacts";
+import { renderHostedPwaOfflineDocument } from "./offlineDocument";
 
 describe("hosted PWA build artifacts", () => {
   const entries = [
-    { fileName: "assets/main-AbCd1234.js" },
+    {
+      fileName: "assets/main-AbCd1234.js",
+      isEntry: true,
+      imports: ["assets/vendor-QrSt7890.js"],
+      importedCss: ["assets/main-EfGh5678.css"],
+      importedAssets: ["assets/mono-IjKl9012.woff2", "assets/logo-MnOp3456.png"],
+    },
+    { fileName: "assets/vendor-QrSt7890.js" },
     { fileName: "assets/main-EfGh5678.css" },
     { fileName: "assets/mono-IjKl9012.woff2" },
     { fileName: "assets/logo-MnOp3456.png" },
@@ -14,6 +22,7 @@ describe("hosted PWA build artifacts", () => {
     { fileName: "favicon-96x96.png" },
     { fileName: "assets/unversioned.js" },
     { fileName: "assets/readme-QrSt7890.txt" },
+    { fileName: "assets/lazy-UvWx1234.js" },
   ] as const;
 
   it("allows only fingerprinted immutable shell assets plus the offline document", () => {
@@ -22,6 +31,7 @@ describe("hosted PWA build artifacts", () => {
       "/assets/main-AbCd1234.js",
       "/assets/main-EfGh5678.css",
       "/assets/mono-IjKl9012.woff2",
+      "/assets/vendor-QrSt7890.js",
       "/offline.html",
     ]);
   });
@@ -32,6 +42,7 @@ describe("hosted PWA build artifacts", () => {
       "/ryco/assets/main-AbCd1234.js",
       "/ryco/assets/main-EfGh5678.css",
       "/ryco/assets/mono-IjKl9012.woff2",
+      "/ryco/assets/vendor-QrSt7890.js",
       "/ryco/offline.html",
     ]);
   });
@@ -51,5 +62,28 @@ describe("hosted PWA build artifacts", () => {
     expect(first.cacheName).toMatch(/^ryco-pwa-shell-[a-f0-9]{16}$/);
     expect(reordered).toEqual(first);
     expect(changed.cacheName).not.toBe(first.cacheName);
+  });
+
+  it("renders a bounded worker that caches only the resolved allowlist", () => {
+    const precache = resolveHostedPwaPrecache({ base: "/", entries });
+    const source = renderHostedPwaServiceWorker(precache);
+
+    expect(source).toContain(JSON.stringify(precache.cacheName));
+    expect(source).toContain(JSON.stringify(precache.urls));
+    expect(source).toContain('request.mode === "navigate"');
+    expect(source).toContain('request.headers.has("range")');
+    expect(source).toContain("event.data?.type === ACTIVATION_MESSAGE");
+    expect(source).not.toContain("index.html");
+    expect(source).not.toContain('skipWaiting();\n});\n\nself.addEventListener("activate"');
+  });
+
+  it("renders a self-contained offline document without application data hooks", () => {
+    const source = renderHostedPwaOfflineDocument({ startUrl: "/ryco/" });
+
+    expect(source).toContain('href="/ryco/"');
+    expect(source).toContain("No project or conversation data is stored");
+    expect(source).not.toContain("<script");
+    expect(source).not.toContain("/api/");
+    expect(source).not.toContain("localStorage");
   });
 });
