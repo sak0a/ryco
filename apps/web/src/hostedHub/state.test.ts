@@ -574,6 +574,41 @@ describe("hosted registration and directory state", () => {
     });
   });
 
+  it("replaces an in-flight directory refresh with a post-resume access check", async () => {
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [],
+      browserStatus: "current",
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    let firstSignal: AbortSignal | undefined;
+    const listNodes = vi.spyOn(hostedHubApi, "listNodes").mockImplementation((signal) => {
+      if (listNodes.mock.calls.length > 1) return Promise.resolve([]);
+      firstSignal = signal;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () =>
+          reject(new DOMException("suspended", "AbortError")),
+        );
+      });
+    });
+
+    const staleRefresh = hostedHubController.refreshDirectory();
+    await vi.waitFor(() => expect(listNodes).toHaveBeenCalledOnce());
+    hostedHubController.suspendBrowser("hidden");
+    await staleRefresh;
+    await hostedHubController.resumeBrowser();
+
+    expect(firstSignal?.aborted).toBe(true);
+    expect(listNodes).toHaveBeenCalledTimes(2);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
+      directoryStatus: "ready",
+    });
+  });
+
   it("aborts same-node activation when the browser is suspended again", async () => {
     vi.useFakeTimers();
     const selected = node();

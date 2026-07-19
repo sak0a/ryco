@@ -256,6 +256,10 @@ class HostedHubController {
     this.#browserResumePromise = null;
     this.#retrySelectedNodeOperation?.abort();
     this.#clearSessionSyncTimer();
+    this.#clearDirectoryTimer();
+    this.#directoryOperation?.abort();
+    this.#directoryOperation = null;
+    this.#directoryPromise = null;
     patchState({
       browserStatus: reason === "offline" ? "offline" : "suspended",
       sessionStatus: state.sessionStatus === "delivery-unknown" ? "delivery-unknown" : "stale",
