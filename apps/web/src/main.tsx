@@ -5,7 +5,8 @@ import { createHashHistory, createBrowserHistory } from "@tanstack/react-router"
 
 import "./index.css";
 
-import { isElectron } from "./env";
+import { isElectron, isHostedHubMode } from "./env";
+import { hostedPwaLifecycle } from "./pwa/lifecycle";
 import { getRouter } from "./router";
 import { APP_DISPLAY_NAME } from "./branding";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
@@ -20,6 +21,10 @@ if (isElectron) {
 }
 
 document.title = APP_DISPLAY_NAME;
+
+if (hostedPwaLifecycle) {
+  void hostedPwaLifecycle.start({ enabled: import.meta.env.PROD && isHostedHubMode() });
+}
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
