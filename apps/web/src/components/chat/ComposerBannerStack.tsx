@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { XIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
+import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
 import { Button } from "../ui/button";
 
@@ -41,6 +42,11 @@ interface ComposerBannerStackProps {
 
 export function ComposerBannerStack({ className, items }: ComposerBannerStackProps) {
   const [exitingItemId, setExitingItemId] = useState<string | null>(null);
+  // Touch path for the hover-revealed stack: on coarse pointers the stack cap
+  // becomes a button that expands the hidden banners; fine pointers keep the
+  // original decorative cap and hover/focus reveal unchanged.
+  const isCoarsePointer = useMediaQuery({ pointer: "coarse" });
+  const [isStackExpanded, setIsStackExpanded] = useState(false);
   const dismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -48,6 +54,12 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
       setExitingItemId(null);
     }
   }, [exitingItemId, items]);
+
+  useEffect(() => {
+    if (items.length <= 1 || !isCoarsePointer) {
+      setIsStackExpanded(false);
+    }
+  }, [isCoarsePointer, items.length]);
 
   useEffect(() => {
     return () => {
@@ -89,19 +101,49 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
         className={cn(
           "relative",
           hasStack ? "group-hover/banner-stack:z-50 group-focus-within/banner-stack:z-50" : null,
+          hasStack && isStackExpanded ? "z-50" : null,
         )}
       >
         {showCollapsedStackCap ? (
-          <div
-            className={cn(
-              "pointer-events-none absolute inset-x-0 -top-3 z-0 mx-auto h-3 rounded-t-xl",
-              "border border-b-0 border-warning/24 bg-background/96 shadow-[0_6px_18px_rgba(0,0,0,0.06)]",
-              "transition-opacity duration-150 ease-out",
-              "group-hover/banner-stack:opacity-0 group-focus-within/banner-stack:opacity-0",
-            )}
-            style={{ width: "96%" }}
-            aria-hidden="true"
-          />
+          isCoarsePointer ? (
+            <button
+              type="button"
+              data-composer-banner-stack-cap="true"
+              aria-expanded={isStackExpanded}
+              aria-label={
+                isStackExpanded
+                  ? "Hide stacked notifications"
+                  : `Show ${stackedItems.length} more ${
+                      stackedItems.length === 1 ? "notification" : "notifications"
+                    }`
+              }
+              className={cn(
+                // z-0 keeps the revealed stack (z-20) above the cap so taps on
+                // the lowest banner are never intercepted. The after pseudo
+                // extends the 12px cap to a >=44px effective touch target; it
+                // reaches only 6px into the front banner, whose controls sit
+                // below the alert's 12px top padding.
+                "absolute inset-x-0 -top-3 z-0 mx-auto h-3 cursor-pointer rounded-t-xl",
+                "after:absolute after:inset-x-0 after:-top-7 after:-bottom-1.5",
+                "outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "border border-b-0 border-warning/24 bg-background/96 shadow-[0_6px_18px_rgba(0,0,0,0.06)]",
+              )}
+              style={{ width: "96%" }}
+              onClick={() => setIsStackExpanded((expanded) => !expanded)}
+            />
+          ) : (
+            <div
+              data-composer-banner-stack-cap="true"
+              className={cn(
+                "pointer-events-none absolute inset-x-0 -top-3 z-0 mx-auto h-3 rounded-t-xl",
+                "border border-b-0 border-warning/24 bg-background/96 shadow-[0_6px_18px_rgba(0,0,0,0.06)]",
+                "transition-opacity duration-150 ease-out",
+                "group-hover/banner-stack:opacity-0 group-focus-within/banner-stack:opacity-0",
+              )}
+              style={{ width: "96%" }}
+              aria-hidden="true"
+            />
+          )
         ) : null}
         <div
           className={cn(
@@ -121,12 +163,14 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
         </div>
         {hasStack ? (
           <div
+            data-composer-banner-stack-rest="true"
             className={cn(
               "pointer-events-none absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-20 space-y-2 opacity-0",
               "transition-[opacity,transform] duration-150 ease-out",
               "translate-y-1",
               "group-hover/banner-stack:pointer-events-auto group-hover/banner-stack:translate-y-0 group-hover/banner-stack:opacity-100",
               "group-focus-within/banner-stack:pointer-events-auto group-focus-within/banner-stack:translate-y-0 group-focus-within/banner-stack:opacity-100",
+              isStackExpanded ? "pointer-events-auto translate-y-0 opacity-100" : null,
             )}
           >
             {stackedItems.map((item) => (

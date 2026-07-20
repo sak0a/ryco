@@ -28,6 +28,7 @@ import {
   isTrailingDoubleClick,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME,
 } from "../Sidebar.logic";
 import { SidebarMenuSubButton, SidebarMenuSubItem } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -184,7 +185,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
     : !isThreadRunning
-      ? "pointer-events-none transition-opacity duration-150 max-sm:pr-10 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
+      ? "pointer-events-none transition-opacity duration-150 max-sm:pointer-fine:pr-10 max-sm:pointer-coarse:pr-20 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
       : "pointer-events-none";
   const threadStatusTextStyle = useMemo(
     () => (threadStatus ? resolveSidebarStatusTextStyle(thread.title) : undefined),
@@ -501,7 +502,9 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
           )}
           <div
             className={`flex min-w-12 justify-end ${
-              isRemoteThread ? "max-sm:min-w-24" : "max-sm:min-w-20"
+              isRemoteThread
+                ? "max-sm:pointer-fine:min-w-24 max-sm:pointer-coarse:min-w-34"
+                : "max-sm:pointer-fine:min-w-20 max-sm:pointer-coarse:min-w-30"
             }`}
           >
             {isConfirmingArchive ? (
@@ -511,14 +514,14 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
                 data-thread-selection-safe
                 data-testid={`thread-archive-confirm-${thread.id}`}
                 aria-label={`Confirm archive ${thread.title}`}
-                className="absolute top-1/2 right-1 inline-flex h-5 -translate-y-1/2 cursor-pointer items-center rounded-full bg-destructive/12 px-2 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/18 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-destructive/40"
+                className="absolute top-1/2 right-1 inline-flex h-5 -translate-y-1/2 cursor-pointer items-center rounded-full bg-destructive/12 px-2 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/18 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-destructive/40 max-md:pointer-coarse:h-8 max-md:pointer-coarse:after:absolute max-md:pointer-coarse:after:top-1/2 max-md:pointer-coarse:after:left-1/2 max-md:pointer-coarse:after:h-11 max-md:pointer-coarse:after:w-full max-md:pointer-coarse:after:min-w-11 max-md:pointer-coarse:after:-translate-x-1/2 max-md:pointer-coarse:after:-translate-y-1/2"
                 onPointerDown={stopPropagationOnPointerDown}
                 onClick={handleConfirmArchiveClick}
               >
                 Confirm
               </button>
             ) : canCloseThread || (canArchiveThread && !isThreadRunning) ? (
-              <div className="pointer-events-none absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+              <div className="pointer-events-none absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5 max-md:pointer-coarse:gap-3 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
                 {canCloseThread ? (
                   <Tooltip>
                     <TooltipTrigger
@@ -528,7 +531,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
                           data-thread-selection-safe
                           data-testid={`thread-close-${thread.id}`}
                           aria-label={`Close ${thread.title}`}
-                          className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                          className={`inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
                           onPointerDown={stopPropagationOnPointerDown}
                           onClick={handleCloseClick}
                         >
@@ -545,7 +548,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
                     data-thread-selection-safe
                     data-testid={`thread-archive-${thread.id}`}
                     aria-label={`Archive ${thread.title}`}
-                    className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                    className={`inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
                     onPointerDown={stopPropagationOnPointerDown}
                     onClick={handleStartArchiveConfirmation}
                   >
@@ -561,7 +564,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
                           data-thread-selection-safe
                           data-testid={`thread-archive-${thread.id}`}
                           aria-label={`Archive ${thread.title}`}
-                          className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                          className={`inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
                           onPointerDown={stopPropagationOnPointerDown}
                           onClick={handleArchiveImmediateClick}
                         >

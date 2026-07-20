@@ -4,7 +4,6 @@ import { CircleAlertIcon, XIcon } from "lucide-react";
 import type { ComposerImageAttachment } from "../../composerDraftStore";
 import type { ComposerTrigger } from "../../composer-logic";
 import type { TerminalContextDraft } from "../../lib/terminalContext";
-import type { PendingApproval } from "../../session-logic";
 import type { SessionPhase, Thread } from "../../types";
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { ComposerCommandMenuOverlay } from "./ComposerAttachmentMenus";
@@ -79,7 +78,6 @@ export interface ComposerPromptShellProps {
   onComposerPaste: (event: React.ClipboardEvent<HTMLElement>) => void;
 
   // Placeholder / disabled state
-  activePendingApproval: PendingApproval | null;
   activePendingProgress: ComposerPromptShellPendingProgress | null;
   showPlanFollowUpPrompt: boolean;
   activeProposedPlan: Thread["proposedPlans"][number] | null;
@@ -137,7 +135,6 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
     onPromptChange,
     onComposerCommandKey,
     onComposerPaste,
-    activePendingApproval,
     activePendingProgress,
     showPlanFollowUpPrompt,
     activeProposedPlan,
@@ -275,7 +272,10 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
           onPaste={onComposerPaste}
           placeholder={
             isComposerApprovalState
-              ? (activePendingApproval?.detail ?? "Resolve this approval request to continue")
+              ? // The full approval detail renders as a scrollable block in the
+                // pending-approval panel; the clipped placeholder only carries
+                // the generic hint.
+                "Resolve this approval request to continue"
               : activePendingProgress
                 ? "Type your own answer, or leave this blank to use the selected option"
                 : showPlanFollowUpPrompt && activeProposedPlan

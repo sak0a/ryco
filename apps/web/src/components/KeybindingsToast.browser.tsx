@@ -37,6 +37,7 @@ import { getWsConnectionStatus } from "../rpc/wsConnectionState";
 import { getRouter } from "../router";
 import { useStore } from "../store";
 import { createAuthenticatedSessionHandlers } from "../../test/authHttpHandlers";
+import { resetPointerEmulation, parkPointer } from "../../test/browserPointer";
 import { BrowserWsRpcHarness } from "../../test/wsRpcHarness";
 
 vi.mock("../lib/gitStatusState", () => ({
@@ -451,6 +452,12 @@ async function mountApp(): Promise<{ cleanup: () => Promise<void> }> {
     { container: host },
   );
   await waitForComposerEditor();
+  // Earlier test files leave the shared pointer wherever their last click
+  // landed. If a toast later mounts under that parked pointer, Base UI pauses
+  // its dismiss timers (pause-on-hover) and the auto-dismiss assertions hang.
+  // Park the pointer in the top-left corner, outside the toast region at
+  // every viewport width.
+  await parkPointer(4, 4);
   await waitForToastViewport();
   await waitForInitialWsSubscriptions();
   await waitForWsConnection();
@@ -530,6 +537,9 @@ describe("Keybindings update toast", () => {
       },
     });
     await __resetLocalApiForTests();
+    // Defensive: no earlier test or file may leak touch emulation into these
+    // pointer-sensitive toast-dismissal tests.
+    await resetPointerEmulation();
     localStorage.clear();
     document.body.innerHTML = "";
     useComposerDraftStore.setState({

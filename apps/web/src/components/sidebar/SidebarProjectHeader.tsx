@@ -4,7 +4,11 @@ import { ProjectFavicon } from "../ProjectFavicon";
 import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SidebarMenuButton } from "../ui/sidebar";
-import type { ThreadStatusPill } from "../Sidebar.logic";
+import {
+  SIDEBAR_ROW_ACTION_COARSE_ANCHORED_CLASS_NAME,
+  SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME,
+  type ThreadStatusPill,
+} from "../Sidebar.logic";
 import type {
   SidebarProjectGroupMember,
   SidebarProjectSnapshot,
@@ -57,7 +61,7 @@ export function SidebarProjectHeader(props: {
       <SidebarMenuButton
         ref={dragHandleProps?.setActivatorNodeRef}
         size="sm"
-        className={`gap-2 px-2 py-1.5 pr-20 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground ${
+        className={`gap-2 px-2 py-1.5 pr-20 max-md:pointer-coarse:pr-36 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground ${
           isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
         }`}
         {...(dragHandleProps ? dragHandleProps.attributes : {})}
@@ -111,7 +115,7 @@ export function SidebarProjectHeader(props: {
                     ? "Remote project"
                     : "Available in multiple environments"
                 }
-                className="pointer-events-none absolute top-1 right-1.5 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/60 transition-opacity duration-150 max-sm:right-7 group-hover/project-header:opacity-0 group-focus-within/project-header:opacity-0 max-sm:group-hover/project-header:opacity-100 max-sm:group-focus-within/project-header:opacity-100"
+                className="pointer-events-none absolute top-1 right-1.5 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/60 transition-opacity duration-150 max-sm:pointer-fine:right-7 max-md:pointer-coarse:top-1/2 max-md:pointer-coarse:-translate-y-1/2 max-md:pointer-coarse:right-31 group-hover/project-header:opacity-0 group-focus-within/project-header:opacity-0 max-sm:group-hover/project-header:opacity-100 max-sm:group-focus-within/project-header:opacity-100"
               />
             }
           >
@@ -125,12 +129,12 @@ export function SidebarProjectHeader(props: {
       <Tooltip>
         <TooltipTrigger
           render={
-            <div className="pointer-events-none absolute top-1 right-[3.25rem] opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
+            <div className="pointer-events-none absolute top-1 right-[3.25rem] max-md:pointer-coarse:top-1/2 max-md:pointer-coarse:-translate-y-1/2 max-md:pointer-coarse:right-23 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
               <button
                 type="button"
                 aria-label={`Open project overview for ${project.displayName}`}
                 data-testid="project-overview-button"
-                className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                className={`inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
                 onClick={onOpenProjectOverviewClick}
               >
                 <FolderOpenIcon className="size-3.5" />
@@ -143,12 +147,12 @@ export function SidebarProjectHeader(props: {
       <Tooltip>
         <TooltipTrigger
           render={
-            <div className="pointer-events-none absolute top-1 right-7 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
+            <div className="pointer-events-none absolute top-1 right-7 max-md:pointer-coarse:top-1/2 max-md:pointer-coarse:-translate-y-1/2 max-md:pointer-coarse:right-12 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
               <button
                 type="button"
                 aria-label={`Create new workspace in ${project.displayName}`}
                 data-testid="new-thread-button"
-                className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                className={`inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
                 onClick={onOpenNewWorktreeClick}
               >
                 <PlusIcon className="size-3.5" />
@@ -164,7 +168,7 @@ export function SidebarProjectHeader(props: {
             render={
               <MenuTrigger
                 aria-label={`Open project settings for ${project.displayName}`}
-                className="pointer-events-none absolute top-1 right-1.5 inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-opacity duration-150 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100"
+                className={`pointer-events-none absolute top-1 right-1.5 max-md:pointer-coarse:top-1/2 max-md:pointer-coarse:-translate-y-1/2 max-md:pointer-coarse:right-1 inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-opacity duration-150 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100 ${SIDEBAR_ROW_ACTION_COARSE_ANCHORED_CLASS_NAME}`}
               />
             }
           >
