@@ -24,9 +24,28 @@ rather than as one serial chain. The two long poles are sharded across runners:
   `bun run typecheck:effect --shard <i>/<n>`. Sharding is derived from the
   authoritative project list in `scripts/typecheck-effect.ts` (round-robin), so
   adding a project can never silently drop it from a shard.
-- `test` runs three matrix legs: `ryco-cli` (server) and `@ryco/web` each get a
-  runner, and `rest` catches every other package through negation filters
-  (`--filter=!ryco-cli --filter=!@ryco/web`) so a new package is always covered.
+- `test` switches shape by mode (Turbo forbids `--filter` with `--affected`):
+  full runs shard the whole suite into three legs — `ryco-cli` (server) and
+  `@ryco/web` each get a runner, and `rest` catches every other package through
+  negation filters (`--filter=!ryco-cli --filter=!@ryco/web`) so a new package is
+  always covered; PRs instead run a single `--affected` job.
+
+## Affected scoping and caching
+
+On PRs, `pull-request-validation.yml` passes `affected-base` (the base branch
+SHA) into `_validation.yml`, which sets `TURBO_SCM_BASE` and appends `--affected`
+to `typecheck`, `test`, and `build`. Turbo then runs those tasks only for the
+packages the diff touches **and their dependents** (a change to
+`packages/contracts` still tests everything that imports it). Full history is
+checked out (`fetch-depth: 0`) in those jobs so Turbo can compute the diff; `main`
+and manual runs pass no base and validate every package.
+
+Caching compounds this: `typecheck` and `build` are Turbo-cached (unchanged
+packages are skipped and their pass/fail memoized by input hash), while `test`
+stays uncached because tests may not be pure. `globalDependencies` lists the
+shared root `tsconfig.*.json` files so editing them busts every cache, and the
+`.turbo` action cache uses a per-commit key with `restore-keys` so it accumulates
+run to run instead of freezing at a lockfile-stable key.
 
 `browser`, `desktop`, and `release-smoke` stay gated behind the `run-*` inputs.
 On PRs those inputs come from the `changes` preflight; filters are deliberately

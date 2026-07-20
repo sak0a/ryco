@@ -97,38 +97,55 @@ jobs:
       - name: Effect typecheck (TS6)
         run: bun run typecheck:effect --shard ${{ matrix.shard }}
 
+  # Turbo forbids combining `--filter` with `--affected`, so the test strategy
+  # switches shape by mode: PRs run a single `--affected` job (changed packages
+  # plus their dependents — small and fast); full runs (main / manual) shard the
+  # whole suite across three runners. This job just emits the matrix.
+  test-matrix:
+    name: Test matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      include: ${{ steps.pick.outputs.include }}
+    steps:
+      - id: pick
+        shell: bash
+        env:
+          AFFECTED_BASE: ${{ inputs['affected-base'] }}
+        run: |
+          if [ -n "$AFFECTED_BASE" ]; then
+            echo 'include=[{"name":"affected","filter":"--affected"}]' >> "$GITHUB_OUTPUT"
+          else
+            # "rest" uses negation filters so a newly added package is always
+            # covered by exactly one shard and can never slip out of CI.
+            echo 'include=[{"name":"server","filter":"--filter=ryco-cli"},{"name":"web","filter":"--filter=@ryco/web"},{"name":"rest","filter":"--filter=!ryco-cli --filter=!@ryco/web"}]' >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: Test ${{ matrix.name }}
+    needs: test-matrix
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # The two heaviest packages get a runner each; "rest" catches every
-          # other package via negation filters, so a new package can never slip
-          # out of CI unnoticed.
-          - name: server
-            filter: --filter=ryco-cli
-          - name: web
-            filter: --filter=@ryco/web
-          - name: rest
-            filter: --filter=!ryco-cli --filter=!@ryco/web
+        include: ${{ fromJson(needs.test-matrix.outputs.include) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          # Full history when scoping to affected packages so Turbo can diff
+          # against affected-base; shallow otherwise.
           fetch-depth: ${{ inputs['affected-base'] == '' && 1 || 0 }}
           persist-credentials: false
 
       - name: Setup project
         uses: ./.github/actions/setup-ryco
 
-      # `--affected` intersects with the shard filter: a shard runs only its
-      # packages that the PR diff actually touched.
+      # PR mode passes `--affected`; full mode passes one shard's `--filter`.
       - name: Test
-        run: bun run test ${{ matrix.filter }} ${{ inputs['affected-base'] != '' && '--affected' || '' }}
+        run: bun run test ${{ matrix.filter }}
 
   build:
     name: Build
