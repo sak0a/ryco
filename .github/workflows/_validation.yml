@@ -23,20 +23,44 @@ on:
         required: false
         type: boolean
         default: false
+      affected-base:
+        description: >
+          Git ref/SHA to diff against for Turbo `--affected` scoping. When set
+          (PRs pass the base branch SHA), typecheck/test/build only run for
+          packages the diff touches. Empty (the default) runs every package —
+          the full-run backstop for main, branch-ci, and worktree validation.
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
+# Feeds Turbo's `--affected` diff. Harmless when `--affected` isn't passed
+# (empty affected-base ⇒ full run), so this can live at the workflow level.
+env:
+  TURBO_SCM_BASE: ${{ inputs['affected-base'] }}
+  TURBO_SCM_HEAD: HEAD
+
+# Each check runs as its own job so they execute in parallel instead of as one
+# serial chain. Jobs share the same Turbo/Bun caches via setup-ryco, so the
+# redundant install/build work is cache-cheap. The two long poles — the Effect
+# (TS6) typecheck and the unit tests — are sharded across runners. Browser tests,
+# the desktop build, and release smoke stay gated behind their inputs so callers
+# can skip them per path (see pull-request-validation.yml) or event.
 jobs:
-  quality:
-    name: Quality
+  static:
+    name: Static
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          # Full history when scoping to affected packages so Turbo can compute
+          # the merge-base against affected-base; shallow otherwise.
+          fetch-depth: ${{ inputs['affected-base'] == '' && 1 || 0 }}
           persist-credentials: false
 
       - name: Setup project
@@ -48,20 +72,120 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # fmt/lint stay repo-wide (fast); only typecheck scopes to affected.
       - name: Typecheck
-        run: bun run typecheck
+        run: bun run typecheck ${{ inputs['affected-base'] != '' && '--affected' || '' }}
+
+  typecheck-effect:
+    name: Effect typecheck ${{ matrix.shard }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/2", "2/2"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          persist-credentials: false
+
+      - name: Setup project
+        uses: ./.github/actions/setup-ryco
 
       - name: Effect typecheck (TS6)
-        run: bun run typecheck:effect
+        run: bun run typecheck:effect --shard ${{ matrix.shard }}
 
+  # Turbo forbids combining `--filter` with `--affected`, so the test strategy
+  # switches shape by mode: PRs run a single `--affected` job (changed packages
+  # plus their dependents — small and fast); full runs (main / manual) shard the
+  # whole suite across three runners. This job just emits the matrix.
+  test-matrix:
+    name: Test matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      include: ${{ steps.pick.outputs.include }}
+    steps:
+      - id: pick
+        shell: bash
+        env:
+          AFFECTED_BASE: ${{ inputs['affected-base'] }}
+        run: |
+          if [ -n "$AFFECTED_BASE" ]; then
+            echo 'include=[{"name":"affected","filter":"--affected"}]' >> "$GITHUB_OUTPUT"
+          else
+            # "rest" uses negation filters so a newly added package is always
+            # covered by exactly one shard and can never slip out of CI.
+            echo 'include=[{"name":"server","filter":"--filter=ryco-cli"},{"name":"web","filter":"--filter=@ryco/web"},{"name":"rest","filter":"--filter=!ryco-cli --filter=!@ryco/web"}]' >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    name: Test ${{ matrix.name }}
+    needs: test-matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.test-matrix.outputs.include) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          # Full history when scoping to affected packages so Turbo can diff
+          # against affected-base; shallow otherwise.
+          fetch-depth: ${{ inputs['affected-base'] == '' && 1 || 0 }}
+          persist-credentials: false
+
+      - name: Setup project
+        uses: ./.github/actions/setup-ryco
+
+      # PR mode passes `--affected`; full mode passes one shard's `--filter`.
       - name: Test
-        run: bun run test
+        run: bun run test ${{ matrix.filter }}
+
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          fetch-depth: ${{ inputs['affected-base'] == '' && 1 || 0 }}
+          persist-credentials: false
+
+      - name: Setup project
+        uses: ./.github/actions/setup-ryco
 
       - name: Build
-        run: bun run build
+        run: bun run build ${{ inputs['affected-base'] != '' && '--affected' || '' }}
+
+  browser:
+    name: Browser tests
+    if: ${{ inputs['run-browser-tests'] }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          persist-credentials: false
+
+      - name: Setup project
+        uses: ./.github/actions/setup-ryco
+
+      # Browser tests run vitest directly (not through Turbo), so build the web
+      # package and its workspace dependencies first.
+      - name: Build web package
+        run: bun run build --filter=@ryco/web
 
       - name: Cache Playwright browsers
-        if: ${{ inputs['run-browser-tests'] }}
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
@@ -70,19 +194,30 @@ jobs:
             ${{ runner.os }}-playwright-
 
       - name: Install browser test runtime
-        if: ${{ inputs['run-browser-tests'] }}
         run: bun run --cwd apps/web test:browser:install
 
       - name: Browser test
-        if: ${{ inputs['run-browser-tests'] }}
         run: bun run --cwd apps/web test:browser
 
+  desktop:
+    name: Desktop build
+    if: ${{ inputs['run-desktop-build'] }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
+          persist-credentials: false
+
+      - name: Setup project
+        uses: ./.github/actions/setup-ryco
+
       - name: Build desktop pipeline
-        if: ${{ inputs['run-desktop-build'] }}
         run: bun run build:desktop
 
       - name: Verify preload bundle output
-        if: ${{ inputs['run-desktop-build'] }}
         run: |
           test -f apps/desktop/dist-electron/preload.cjs
           grep -nE "desktopBridge|getLocalEnvironmentBootstrap|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.cjs

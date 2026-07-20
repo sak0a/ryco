@@ -1,9 +1,10 @@
 name: Branch CI
 
+# Manual-only branch validation. Pull request validation is the single
+# automatic source of truth for branches, so pushes are not validated here —
+# that prevents a commit from being validated twice (once on push, once on the
+# PR). Use this to validate an arbitrary ref on demand.
 on:
-  push:
-    branches-ignore:
-      - main
   workflow_dispatch:
     inputs:
       ref:
@@ -14,55 +15,17 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 concurrency:
-  group: branch-ci-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
+  group: branch-ci-${{ github.event.inputs.ref != '' && github.event.inputs.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  preflight:
-    name: Branch Preflight
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      should-validate: ${{ steps.scope.outputs.should-validate }}
-    steps:
-      - id: scope
-        name: Check for open pull request
-        uses: actions/github-script@v8
-        with:
-          script: |
-            if (context.eventName !== "push") {
-              core.setOutput("should-validate", "true");
-              return;
-            }
-
-            const branch = context.ref.replace("refs/heads/", "");
-            const pulls = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: "open",
-              head: `${context.repo.owner}:${branch}`,
-              per_page: 1,
-            });
-
-            const hasOpenPullRequest = pulls.data.length > 0;
-            core.setOutput("should-validate", hasOpenPullRequest ? "false" : "true");
-
-            if (hasOpenPullRequest) {
-              core.info(
-                `Skipping branch validation for ${branch}; pull request validation owns this ref.`,
-              );
-            }
-
   validate:
     name: Branch
-    needs: preflight
-    if: ${{ needs.preflight.outputs.should-validate == 'true' }}
     uses: ./.github/workflows/_validation.yml
     with:
-      checkout-ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
+      checkout-ref: ${{ github.event.inputs.ref != '' && github.event.inputs.ref || github.ref }}
       run-browser-tests: false
       run-desktop-build: false
       run-release-smoke: false

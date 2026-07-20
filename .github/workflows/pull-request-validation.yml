@@ -10,16 +10,56 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: pr-validation-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
+  # Decide which of the expensive, opt-in jobs a PR actually needs. Filters are
+  # deliberately broad (any package/, lockfile, or CI infra change trips them)
+  # so a check is never wrongly skipped; the savings come from app-scoped PRs
+  # (server-only, docs-only, config-only) that don't touch the web or desktop
+  # surfaces. Uses the PR file list via the API — no checkout, ~seconds.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      web: ${{ steps.filter.outputs.web }}
+      desktop: ${{ steps.filter.outputs.desktop }}
+    steps:
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            shared: &shared
+              - 'packages/**'
+              - 'package.json'
+              - 'bun.lock'
+              - 'turbo.json'
+              - 'tsconfig*.json'
+              - '.github/actions/**'
+              - '.github/workflows/_validation.yml'
+              - '.github/workflows/pull-request-validation.yml'
+            web:
+              - *shared
+              - 'apps/web/**'
+            desktop:
+              - *shared
+              - 'apps/desktop/**'
+              - 'apps/server/**'
+              - 'apps/web/**'
+
   validate:
     name: Pull Request
+    needs: changes
     uses: ./.github/workflows/_validation.yml
     with:
-      run-browser-tests: true
-      run-desktop-build: true
+      run-browser-tests: ${{ needs.changes.outputs.web == 'true' }}
+      run-desktop-build: ${{ needs.changes.outputs.desktop == 'true' }}
       run-release-smoke: true
+      # Scope typecheck/test/build to packages this PR's diff touches. Base
+      # branch tip; Turbo diffs base...HEAD (merge-base) to find the change set.
+      affected-base: ${{ github.event.pull_request.base.sha }}
