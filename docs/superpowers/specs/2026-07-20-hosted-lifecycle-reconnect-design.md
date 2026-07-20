@@ -1,8 +1,11 @@
 # Hosted lifecycle reconnect ownership design
 
-**Status:** Approved design
+**Status:** Implemented on `main` through public PR #183
 
 **Date:** 2026-07-20
+
+The design below is retained as the rationale and compatibility boundary for the merged repair.
+Physical-device qualification remains separate from the public implementation record.
 
 ## Summary
 

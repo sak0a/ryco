@@ -1,5 +1,10 @@
 # Hosted Mobile PWA Experience Implementation Plan
 
+> **Implementation status (2026-07-20):** The public implementation landed on `main` through PR
+> #180, with lifecycle reconnect ownership completed through PR #183. This checklist is retained as
+> the historical execution plan. Physical iOS and Chromium qualification remains outstanding and
+> external to the public repository.
+
 **Goal:** Make the production hosted Ryco client installable and usable on physical iOS and Android
 devices while keeping authenticated, node-owned, and relay data network-only and making browser
 resume fail closed until authorization and node state are current.

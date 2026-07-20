@@ -1,8 +1,12 @@
 # Hosted mobile PWA experience design
 
-**Status:** Approved design
+**Status:** Implemented on `main`; physical iOS and Chromium qualification pending
 
 **Date:** 2026-07-19
+
+The core implementation landed through public PR #180. The lifecycle reconnect follow-up landed
+through public PR #183. The original design and completion boundary below remain authoritative;
+physical-device evidence is intentionally outside the repository implementation record.
 
 ## Summary
 
