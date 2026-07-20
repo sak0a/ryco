@@ -145,6 +145,16 @@ describe("ComposerBannerStack", () => {
     );
 
     try {
+      // TEMP-CI-DIAGNOSTIC: capture the runner's input media defaults.
+      console.error(
+        "CI-MEDIA-DIAGNOSTIC start",
+        JSON.stringify({
+          hover: window.matchMedia("(hover: hover)").matches,
+          anyHover: window.matchMedia("(any-hover: hover)").matches,
+          pointerFine: window.matchMedia("(pointer: fine)").matches,
+          pointerCoarse: window.matchMedia("(pointer: coarse)").matches,
+        }),
+      );
       // Desktop baseline: the cap is a non-interactive decoration, exactly as
       // before the touch path existed — no tab stop, no click target.
       const cap = capElement();
@@ -162,6 +172,18 @@ describe("ComposerBannerStack", () => {
       expect(getComputedStyle(container!).opacity).toBe("0");
 
       await page.getByText("Front notice").hover();
+      // TEMP-CI-DIAGNOSTIC: media state and :hover chain after the hover.
+      console.error(
+        "CI-MEDIA-DIAGNOSTIC after-hover",
+        JSON.stringify({
+          hover: window.matchMedia("(hover: hover)").matches,
+          pointerFine: window.matchMedia("(pointer: fine)").matches,
+          hoverChain: Array.from(document.querySelectorAll(":hover")).map(
+            (el) => `${el.tagName}:${el.className.toString().slice(0, 40)}`,
+          ),
+          containerPointerEvents: getComputedStyle(container!).pointerEvents,
+        }),
+      );
       await vi.waitFor(() => {
         expect(getComputedStyle(container!).pointerEvents).toBe("auto");
         expect(getComputedStyle(container!).opacity).toBe("1");
