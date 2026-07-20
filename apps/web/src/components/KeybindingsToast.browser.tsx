@@ -27,6 +27,7 @@ import {
   it,
   vi,
 } from "vite-plus/test";
+import { cdp } from "vite-plus/test/browser";
 import { render } from "vitest-browser-react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -451,6 +452,17 @@ async function mountApp(): Promise<{ cleanup: () => Promise<void> }> {
     { container: host },
   );
   await waitForComposerEditor();
+  // Earlier test files leave the shared pointer wherever their last click
+  // landed. If a toast later mounts under that parked pointer, Base UI pauses
+  // its dismiss timers (pause-on-hover) and the auto-dismiss assertions hang.
+  // Park the pointer in the top-left corner, outside the toast region at
+  // every viewport width. The published CDPSession type is an empty
+  // interface; the playwright provider's session exposes `send` at runtime.
+  await (
+    cdp() as unknown as {
+      send: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
+    }
+  ).send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 4, y: 4 });
   await waitForToastViewport();
   await waitForInitialWsSubscriptions();
   await waitForWsConnection();
