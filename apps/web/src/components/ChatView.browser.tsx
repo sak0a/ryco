@@ -66,7 +66,11 @@ import { selectBootstrapCompleteForActiveEnvironment, useStore } from "../store"
 import { useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
 import { createAuthenticatedSessionHandlers } from "../../test/authHttpHandlers";
-import { setCoarsePointerEmulation } from "../../test/browserPointer";
+import {
+  resetPointerEmulation,
+  parkPointer,
+  setCoarsePointerEmulation,
+} from "../../test/browserPointer";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
 import { toastManager } from "./ui/toast";
 
@@ -1997,6 +2001,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
       },
     });
     await __resetLocalApiForTests();
+    // Defensive: no earlier test or file may leak touch emulation or a parked
+    // hovering pointer into pointer-sensitive assertions.
+    await resetPointerEmulation();
+    await parkPointer(4, 4);
     await setViewport(DEFAULT_VIEWPORT);
     localStorage.clear();
     document.body.innerHTML = "";

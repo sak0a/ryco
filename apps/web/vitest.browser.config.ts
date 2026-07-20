@@ -26,7 +26,21 @@ export default mergeConfig(
       fileParallelism: false,
       browser: {
         enabled: true,
-        provider: playwright(),
+        provider: playwright({
+          launchOptions: {
+            args: [
+              // Linux headless CI has no input devices, so it reports
+              // `pointer: none` / `hover: none` while Tailwind v4 gates hover
+              // variants behind `@media (hover: hover)`. Declare a
+              // hover-capable fine pointer as the launch default so pristine
+              // pages match a real desktop. Note: a CDP touch-emulation
+              // disable recomputes from the platform and drops these values
+              // again, so hover-media-dependent assertions must still gate on
+              // `(hover: hover)`.
+              "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
+            ],
+          },
+        }),
         instances: [{ browser: "chromium" }],
         headless: true,
         api: {

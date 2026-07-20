@@ -37,7 +37,7 @@ import { getWsConnectionStatus } from "../rpc/wsConnectionState";
 import { getRouter } from "../router";
 import { useStore } from "../store";
 import { createAuthenticatedSessionHandlers } from "../../test/authHttpHandlers";
-import { parkPointer } from "../../test/browserPointer";
+import { resetPointerEmulation, parkPointer } from "../../test/browserPointer";
 import { BrowserWsRpcHarness } from "../../test/wsRpcHarness";
 
 vi.mock("../lib/gitStatusState", () => ({
@@ -537,6 +537,9 @@ describe("Keybindings update toast", () => {
       },
     });
     await __resetLocalApiForTests();
+    // Defensive: no earlier test or file may leak touch emulation into these
+    // pointer-sensitive toast-dismissal tests.
+    await resetPointerEmulation();
     localStorage.clear();
     document.body.innerHTML = "";
     useComposerDraftStore.setState({

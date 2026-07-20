@@ -1,11 +1,15 @@
 import "../../index.css";
 
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
 import { render } from "vitest-browser-react";
 import { TriangleAlertIcon } from "lucide-react";
 
-import { setCoarsePointerEmulation } from "../../../test/browserPointer";
+import {
+  resetPointerEmulation,
+  parkPointer,
+  setCoarsePointerEmulation,
+} from "../../../test/browserPointer";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./ComposerBannerStack";
 
 // The vitest browser default viewport; every test sets its own viewport and
@@ -32,6 +36,13 @@ function capElement(): HTMLElement | null {
 }
 
 describe("ComposerBannerStack", () => {
+  beforeEach(async () => {
+    // Defensive: no earlier test or file may leak touch emulation or a parked
+    // hovering pointer into these hover- and pointer-sensitive assertions.
+    await resetPointerEmulation();
+    await parkPointer(4, 4);
+  });
+
   afterEach(async () => {
     await page.viewport(DEFAULT_TEST_VIEWPORT.width, DEFAULT_TEST_VIEWPORT.height);
   });
@@ -145,16 +156,6 @@ describe("ComposerBannerStack", () => {
     );
 
     try {
-      // TEMP-CI-DIAGNOSTIC: capture the runner's input media defaults.
-      console.error(
-        "CI-MEDIA-DIAGNOSTIC start",
-        JSON.stringify({
-          hover: window.matchMedia("(hover: hover)").matches,
-          anyHover: window.matchMedia("(any-hover: hover)").matches,
-          pointerFine: window.matchMedia("(pointer: fine)").matches,
-          pointerCoarse: window.matchMedia("(pointer: coarse)").matches,
-        }),
-      );
       // Desktop baseline: the cap is a non-interactive decoration, exactly as
       // before the touch path existed — no tab stop, no click target.
       const cap = capElement();
@@ -171,30 +172,43 @@ describe("ComposerBannerStack", () => {
       expect(container).not.toBeNull();
       expect(getComputedStyle(container!).opacity).toBe("0");
 
-      await page.getByText("Front notice").hover();
-      // TEMP-CI-DIAGNOSTIC: media state and :hover chain after the hover.
-      console.error(
-        "CI-MEDIA-DIAGNOSTIC after-hover",
-        JSON.stringify({
-          hover: window.matchMedia("(hover: hover)").matches,
-          pointerFine: window.matchMedia("(pointer: fine)").matches,
-          hoverChain: Array.from(document.querySelectorAll(":hover")).map(
-            (el) => `${el.tagName}:${el.className.toString().slice(0, 40)}`,
-          ),
-          containerPointerEvents: getComputedStyle(container!).pointerEvents,
-        }),
+      // The focus-within reveal is not hover-media-gated, so it verifies the
+      // desktop reveal pipeline deterministically in every environment.
+      const frontDismiss = document.querySelector<HTMLElement>(
+        '[aria-label="Dismiss Front notice"]',
       );
+      expect(frontDismiss).not.toBeNull();
+      frontDismiss!.focus();
       await vi.waitFor(() => {
         expect(getComputedStyle(container!).pointerEvents).toBe("auto");
         expect(getComputedStyle(container!).opacity).toBe("1");
       });
-
-      // Moving the pointer away collapses the stack again (pure hover reveal).
-      await page.getByTestId("outside-hover-target").hover();
+      frontDismiss!.blur();
       await vi.waitFor(() => {
         expect(getComputedStyle(container!).pointerEvents).toBe("none");
         expect(getComputedStyle(container!).opacity).toBe("0");
       });
+
+      // The hover reveal is `(hover: hover)`-gated CSS (Tailwind v4). Linux
+      // headless reports `hover: none` after any touch-emulation cycle (the
+      // platform has no input devices to restore), so the hover path can only
+      // be exercised where the environment is hover-capable — locally and on
+      // every real desktop.
+      if (window.matchMedia("(hover: hover)").matches) {
+        await page.getByText("Front notice").hover();
+        await vi.waitFor(() => {
+          expect(getComputedStyle(container!).pointerEvents).toBe("auto");
+          expect(getComputedStyle(container!).opacity).toBe("1");
+        });
+
+        // Moving the pointer away collapses the stack again (pure hover
+        // reveal).
+        await page.getByTestId("outside-hover-target").hover();
+        await vi.waitFor(() => {
+          expect(getComputedStyle(container!).pointerEvents).toBe("none");
+          expect(getComputedStyle(container!).opacity).toBe("0");
+        });
+      }
     } finally {
       await screen.unmount();
     }
