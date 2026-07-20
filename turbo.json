@@ -57,13 +57,7 @@
       // subtract inputs that can't affect build output: docs and test files.
       // This stops a README or test-only edit from busting the build cache
       // without risking a stale hit on a real source change.
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!**/*.md",
-        "!**/*.test.ts",
-        "!**/*.test.tsx",
-        "!**/*.spec.ts"
-      ]
+      "inputs": ["$TURBO_DEFAULT$", "!**/*.md", "!**/*.test.ts", "!**/*.test.tsx", "!**/*.spec.ts"]
     },
     "dev": {
       "dependsOn": ["@ryco/contracts#build"],
