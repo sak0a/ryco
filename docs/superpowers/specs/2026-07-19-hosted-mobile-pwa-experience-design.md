@@ -8,6 +8,13 @@ The core implementation landed through public PR #180. The lifecycle reconnect f
 through public PR #183. The original design and completion boundary below remain authoritative;
 physical-device evidence is intentionally outside the repository implementation record.
 
+**Amendment (2026-07-20):** The phone navigation portions of the "Responsive application shell"
+section — the drawer-centric navigation direction, the node or environment selector placed
+directly below the header, and the phone entry route — are superseded by
+`2026-07-20-focused-mobile-workspace-design.md`. The build-mode boundary, service-worker cache
+contract, installation experience, hosted resume and mutation gate, user-visible state model,
+and the addenda below remain authoritative.
+
 ## Summary
 
 Ryco's hosted web client will become an installable mobile progressive web app without turning the
