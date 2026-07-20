@@ -26,7 +26,11 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { SidebarMenuSub, SidebarMenuSubItem } from "../ui/sidebar";
-import { resolveSharedSidebarGitStatusTarget, type SidebarStatusBucket } from "../Sidebar.logic";
+import {
+  resolveSharedSidebarGitStatusTarget,
+  SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME,
+  type SidebarStatusBucket,
+} from "../Sidebar.logic";
 import {
   normalizeWorktreePath,
   type SidebarTreeProject,
@@ -191,7 +195,7 @@ function ArchivedWorktreeRow(props: {
   const isProjectRoot = isProjectRootWorktree(props.worktree.worktree, props.projectCwd);
   return (
     <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
-      <div className="ml-3 flex h-7 items-center gap-1.5 rounded-md px-2 text-muted-foreground">
+      <div className="ml-3 flex h-7 pointer-coarse:min-h-11 items-center gap-1.5 pointer-coarse:gap-3 rounded-md px-2 text-muted-foreground">
         <ArchiveIcon className="size-3.5 shrink-0" />
         <span className="min-w-0 flex-1 truncate text-xs">
           {getWorktreeDisplayTitle(props.worktree)}
@@ -211,7 +215,7 @@ function ArchivedWorktreeRow(props: {
         />
         <button
           type="button"
-          className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-secondary hover:text-foreground"
+          className={`inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-secondary hover:text-foreground ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
           aria-label={`Restore ${props.worktree.worktree.branch}`}
           onClick={() => props.onRestoreWorktree(props.worktree)}
         >
@@ -220,7 +224,7 @@ function ArchivedWorktreeRow(props: {
         {isProjectRoot ? null : (
           <button
             type="button"
-            className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-secondary hover:text-destructive"
+            className={`inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-secondary hover:text-destructive ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
             aria-label={`Delete ${props.worktree.worktree.branch}`}
             onClick={() => props.onDeleteWorktree(props.worktree)}
           >
@@ -340,7 +344,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                 role="button"
                 tabIndex={0}
                 aria-expanded={!isCollapsed}
-                className="group/worktree flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                className="group/worktree flex h-7 pointer-coarse:min-h-11 w-full items-center gap-1.5 pointer-coarse:gap-3 rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                 onClick={toggleCollapsed}
                 onKeyDown={(event) => {
                   if (event.key === "ArrowLeft") {
@@ -369,7 +373,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                   ? `Expand ${props.worktree.worktree.branch}`
                   : `Collapse ${props.worktree.worktree.branch}`
               }
-              className="-ml-1 inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+              className={`-ml-1 inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -474,7 +478,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
             <button
               type="button"
               aria-label={`New session in ${props.worktree.worktree.branch}`}
-              className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/55 opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover/worktree:opacity-100 group-focus-within/worktree:opacity-100 max-sm:opacity-100"
+              className={`ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/55 opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover/worktree:opacity-100 group-focus-within/worktree:opacity-100 max-sm:opacity-100 ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -639,7 +643,7 @@ function WorktreeMenu(props: {
   return (
     <Menu>
       <MenuTrigger
-        className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/55 opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover/worktree:opacity-100 group-focus-within/worktree:opacity-100 max-sm:opacity-100"
+        className={`inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/55 opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover/worktree:opacity-100 group-focus-within/worktree:opacity-100 max-sm:opacity-100 ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();

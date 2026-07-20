@@ -672,6 +672,15 @@ const RenderedChatMarkdown = memo(function RenderedChatMarkdown({
           </blockquote>
         );
       },
+      table({ node: _node, children, ...props }) {
+        // Timeline rows clip horizontal overflow, so wide tables need their own
+        // contained horizontal scroll instead of being silently cut off.
+        return (
+          <div className="chat-markdown-table-scroll">
+            <table {...props}>{children}</table>
+          </div>
+        );
+      },
       td({ node: _node, children, ...props }) {
         return (
           <td {...props}>

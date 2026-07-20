@@ -73,6 +73,10 @@ import {
 } from "../ui/sidebar";
 import { Kbd } from "../ui/kbd";
 import { CommandDialogTrigger } from "../ui/command";
+import {
+  SIDEBAR_ROW_ACTION_COARSE_ANCHORED_CLASS_NAME,
+  SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME,
+} from "../Sidebar.logic";
 
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
@@ -138,7 +142,9 @@ function ProjectSortMenu({
       <Tooltip>
         <TooltipTrigger
           render={
-            <MenuTrigger className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground" />
+            <MenuTrigger
+              className={`inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
+            />
           }
         >
           <ArrowUpDownIcon className="size-3.5" />
@@ -269,7 +275,7 @@ const SidebarProjectFolderRow = memo(function SidebarProjectFolderRow(
       <SidebarMenuButton
         ref={props.isManualProjectSorting ? props.dragHandleProps?.setActivatorNodeRef : undefined}
         size="sm"
-        className={`gap-2 px-2 py-1.5 pr-9 text-left hover:bg-accent group-hover/folder-row:bg-accent group-hover/folder-row:text-sidebar-accent-foreground ${
+        className={`gap-2 px-2 py-1.5 pr-9 pointer-coarse:pr-12 text-left hover:bg-accent group-hover/folder-row:bg-accent group-hover/folder-row:text-sidebar-accent-foreground ${
           props.isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
         }`}
         {...(props.isManualProjectSorting && props.dragHandleProps
@@ -297,7 +303,7 @@ const SidebarProjectFolderRow = memo(function SidebarProjectFolderRow(
             render={
               <MenuTrigger
                 aria-label={`Open folder settings for ${props.folderName}`}
-                className="pointer-events-none absolute top-1 right-1.5 inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-opacity duration-150 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring max-sm:pointer-events-auto max-sm:opacity-100 group-hover/folder-row:pointer-events-auto group-hover/folder-row:opacity-100 group-focus-within/folder-row:pointer-events-auto group-focus-within/folder-row:opacity-100"
+                className={`pointer-events-none absolute top-1 right-1.5 pointer-coarse:top-1/2 pointer-coarse:-translate-y-1/2 pointer-coarse:right-1 inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-opacity duration-150 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring max-sm:pointer-events-auto max-sm:opacity-100 group-hover/folder-row:pointer-events-auto group-hover/folder-row:opacity-100 group-focus-within/folder-row:pointer-events-auto group-focus-within/folder-row:opacity-100 ${SIDEBAR_ROW_ACTION_COARSE_ANCHORED_CLASS_NAME}`}
               />
             }
           >
@@ -520,7 +526,7 @@ export const SidebarProjectsContent = memo(function SidebarProjectsContent(
             <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
               Projects
             </span>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 pointer-coarse:gap-3">
               <ProjectSortMenu
                 projectSortOrder={projectSortOrder}
                 threadSortOrder={threadSortOrder}
@@ -535,7 +541,7 @@ export const SidebarProjectsContent = memo(function SidebarProjectsContent(
                     <button
                       type="button"
                       aria-label="Create project folder"
-                      className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                      className={`inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
                       onClick={() => openCreateFolderDialog()}
                     />
                   }
@@ -560,7 +566,7 @@ export const SidebarProjectsContent = memo(function SidebarProjectsContent(
                         type="button"
                         aria-label="Add project"
                         data-testid="sidebar-add-project-trigger"
-                        className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                        className={`inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
                         disabled={!addProjectCapability.allowed}
                         onClick={openAddProject}
                       >

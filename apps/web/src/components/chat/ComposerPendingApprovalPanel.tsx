@@ -26,6 +26,14 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
           <span className="text-xs text-muted-foreground">1/{pendingCount}</span>
         ) : null}
       </div>
+      {approval.detail ? (
+        <div
+          data-testid="pending-approval-detail"
+          className="mt-2 max-h-[min(10rem,20dvh)] min-h-0 overflow-y-auto overscroll-contain whitespace-pre-wrap wrap-break-word text-sm text-muted-foreground select-text"
+        >
+          {approval.detail}
+        </div>
+      ) : null}
     </div>
   );
 });

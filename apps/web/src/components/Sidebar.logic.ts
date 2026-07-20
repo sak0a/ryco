@@ -18,6 +18,16 @@ export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
 export const SIDEBAR_THREAD_PREWARM_LIMIT = 10;
 export const SIDEBAR_AUTO_ANIMATE_PROJECT_LIMIT = 80;
 export const SIDEBAR_AUTO_ANIMATE_VISIBLE_THREAD_LIMIT = 120;
+// 44px effective touch target for compact sidebar row actions on coarse
+// pointers, using the same after-pseudo hit-area expansion as ui/button.tsx.
+// Desktop (fine-pointer) density is unchanged. Callers must keep adjacent
+// action centers >=44px apart (visible size + gap) so hit areas do not overlap.
+// The anchored variant is for controls that are already positioned (absolute);
+// in-flow controls also need pointer-coarse:relative so the hit area centers
+// on the control instead of the row.
+export const SIDEBAR_ROW_ACTION_COARSE_ANCHORED_CLASS_NAME =
+  "pointer-coarse:size-8 pointer-coarse:after:absolute pointer-coarse:after:top-1/2 pointer-coarse:after:left-1/2 pointer-coarse:after:size-11 pointer-coarse:after:-translate-x-1/2 pointer-coarse:after:-translate-y-1/2";
+export const SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME = `pointer-coarse:relative ${SIDEBAR_ROW_ACTION_COARSE_ANCHORED_CLASS_NAME}`;
 export type SidebarNewThreadEnvMode = "local" | "worktree";
 type SidebarProject = {
   id: string;

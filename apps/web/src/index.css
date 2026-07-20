@@ -997,6 +997,12 @@ label:has(> select#reasoning-effort) select {
   border-collapse: collapse;
 }
 
+/* Wide tables scroll inside their own container; timeline rows clip overflow. */
+.chat-markdown .chat-markdown-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .chat-markdown th,
 .chat-markdown td {
   border: 1px solid var(--border);

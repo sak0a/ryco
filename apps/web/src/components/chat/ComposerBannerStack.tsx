@@ -41,6 +41,9 @@ interface ComposerBannerStackProps {
 
 export function ComposerBannerStack({ className, items }: ComposerBannerStackProps) {
   const [exitingItemId, setExitingItemId] = useState<string | null>(null);
+  // Touch path for the hover-revealed stack: tapping the stack cap expands the
+  // hidden banners; desktop hover/focus reveal is unchanged.
+  const [isStackExpanded, setIsStackExpanded] = useState(false);
   const dismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -48,6 +51,12 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
       setExitingItemId(null);
     }
   }, [exitingItemId, items]);
+
+  useEffect(() => {
+    if (items.length <= 1) {
+      setIsStackExpanded(false);
+    }
+  }, [items.length]);
 
   useEffect(() => {
     return () => {
@@ -89,18 +98,31 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
         className={cn(
           "relative",
           hasStack ? "group-hover/banner-stack:z-50 group-focus-within/banner-stack:z-50" : null,
+          hasStack && isStackExpanded ? "z-50" : null,
         )}
       >
         {showCollapsedStackCap ? (
-          <div
+          <button
+            type="button"
+            aria-expanded={isStackExpanded}
+            aria-label={
+              isStackExpanded
+                ? "Hide stacked notifications"
+                : `Show ${stackedItems.length} more ${
+                    stackedItems.length === 1 ? "notification" : "notifications"
+                  }`
+            }
             className={cn(
-              "pointer-events-none absolute inset-x-0 -top-3 z-0 mx-auto h-3 rounded-t-xl",
+              "absolute inset-x-0 -top-3 mx-auto h-3 cursor-pointer rounded-t-xl outline-none",
+              isStackExpanded ? "z-30" : "z-0",
               "border border-b-0 border-warning/24 bg-background/96 shadow-[0_6px_18px_rgba(0,0,0,0.06)]",
               "transition-opacity duration-150 ease-out",
-              "group-hover/banner-stack:opacity-0 group-focus-within/banner-stack:opacity-0",
+              isStackExpanded
+                ? null
+                : "group-hover/banner-stack:opacity-0 group-focus-within/banner-stack:opacity-0",
             )}
             style={{ width: "96%" }}
-            aria-hidden="true"
+            onClick={() => setIsStackExpanded((expanded) => !expanded)}
           />
         ) : null}
         <div
@@ -121,12 +143,14 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
         </div>
         {hasStack ? (
           <div
+            data-composer-banner-stack-rest="true"
             className={cn(
               "pointer-events-none absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-20 space-y-2 opacity-0",
               "transition-[opacity,transform] duration-150 ease-out",
               "translate-y-1",
               "group-hover/banner-stack:pointer-events-auto group-hover/banner-stack:translate-y-0 group-hover/banner-stack:opacity-100",
               "group-focus-within/banner-stack:pointer-events-auto group-focus-within/banner-stack:translate-y-0 group-focus-within/banner-stack:opacity-100",
+              isStackExpanded ? "pointer-events-auto translate-y-0 opacity-100" : null,
             )}
           >
             {stackedItems.map((item) => (
