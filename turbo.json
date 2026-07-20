@@ -48,7 +48,18 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "dist-electron/**"]
+      "outputs": ["dist/**", "dist-electron/**"],
+      // Start from Turbo's default (every git-tracked file in the package) and
+      // subtract inputs that can't affect build output: docs and test files.
+      // This stops a README or test-only edit from busting the build cache
+      // without risking a stale hit on a real source change.
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!**/*.md",
+        "!**/*.test.ts",
+        "!**/*.test.tsx",
+        "!**/*.spec.ts"
+      ]
     },
     "dev": {
       "dependsOn": ["@ryco/contracts#build"],
@@ -58,9 +69,15 @@
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "outputs": [],
-      "cache": false
+      // Cacheable: tsc is deterministic, so an unchanged package's pass/fail can
+      // be memoized by input hash and skipped on reruns. Keep test files in the
+      // input set (they're type-checked); only docs are irrelevant.
+      "inputs": ["$TURBO_DEFAULT$", "!**/*.md"]
     },
     "test": {
+      // Not result-cached: tests may not be pure (clock/network/fs), so a green
+      // must never be memoized. PR runs skip untouched packages via `--affected`
+      // instead, which is sound regardless of test purity.
       "dependsOn": ["^build"],
       "cache": false,
       "outputs": []

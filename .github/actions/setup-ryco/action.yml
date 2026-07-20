@@ -37,8 +37,13 @@ runs:
       uses: actions/cache@v5
       with:
         path: .turbo
-        key: ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}
+        # Per-commit key so every run writes a fresh cache entry (GitHub never
+        # overwrites an existing key — a lockfile-stable key froze the cache at
+        # its first run and never re-saved). restore-keys seed each run from the
+        # most recent prefix match, so the cache accumulates commit-to-commit.
+        key: ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}-${{ github.sha }}
         restore-keys: |
+          ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}-
           ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-
           ${{ runner.os }}-bun-turbo-
 

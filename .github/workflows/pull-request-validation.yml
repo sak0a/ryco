@@ -60,3 +60,6 @@ jobs:
       run-browser-tests: ${{ needs.changes.outputs.web == 'true' }}
       run-desktop-build: ${{ needs.changes.outputs.desktop == 'true' }}
       run-release-smoke: true
+      # Scope typecheck/test/build to packages this PR's diff touches. Base
+      # branch tip; Turbo diffs base...HEAD (merge-base) to find the change set.
+      affected-base: ${{ github.event.pull_request.base.sha }}
