@@ -421,6 +421,7 @@ describe("hosted registration and directory state", () => {
     expect(useHostedHubStore.getState()).toMatchObject({
       browserStatus: "suspended",
       sessionStatus: "stale",
+      generation: 5,
     });
     hostedHubController.markSessionReady(selected.environmentId);
     expect(useHostedHubStore.getState().browserStatus).toBe("suspended");
@@ -430,7 +431,7 @@ describe("hosted registration and directory state", () => {
     expect(useHostedHubStore.getState()).toMatchObject({
       browserStatus: "synchronizing",
       sessionStatus: "synchronizing",
-      generation: 5,
+      generation: 6,
     });
 
     hostedHubController.markSessionReady(selected.environmentId);
@@ -495,7 +496,7 @@ describe("hosted registration and directory state", () => {
       browserStatus: "synchronizing",
       sessionStatus: "delivery-unknown",
       sessionRecoveredAfterUnknown: false,
-      generation: 5,
+      generation: 6,
     });
     hostedHubController.markSessionReady(selected.environmentId);
     expect(useHostedHubStore.getState()).toMatchObject({
@@ -646,7 +647,7 @@ describe("hosted registration and directory state", () => {
     expect(useHostedHubStore.getState()).toMatchObject({
       browserStatus: "suspended",
       sessionStatus: "stale",
-      generation: 5,
+      generation: 7,
     });
     expect(useHostedHubStore.getState().transportStatus).not.toBe("terminal-failure");
 
@@ -655,7 +656,7 @@ describe("hosted registration and directory state", () => {
     expect(useHostedHubStore.getState()).toMatchObject({
       browserStatus: "synchronizing",
       sessionStatus: "synchronizing",
-      generation: 6,
+      generation: 8,
     });
   });
 

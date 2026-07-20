@@ -277,26 +277,27 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("drops shell snapshots from a superseded hosted connection generation", async () => {
+  it("drops shell snapshots after browser suspension invalidates the hosted generation", async () => {
     vi.stubEnv("VITE_RYCO_CLIENT_MODE", "hosted-hub");
-    const { useHostedHubStore } = await import("~/hostedHub/state");
+    const { hostedHubController, useHostedHubStore } = await import("~/hostedHub/state");
     const { useStore } = await import("~/store");
-    useHostedHubStore.setState({ generation: 7 });
+    useHostedHubStore.setState({ accountStatus: "authenticated", generation: 7 });
     const syncServerShellSnapshot = vi.spyOn(useStore.getState(), "syncServerShellSnapshot");
     const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
       await import("./service");
     const stop = startEnvironmentConnectionService();
     const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
     const environmentId = EnvironmentId.make("env-1");
-    const snapshot = makeThreadShellSnapshot({ threadId: ThreadId.make("thread-stale") });
+    const currentSnapshot = makeThreadShellSnapshot({ threadId: ThreadId.make("thread-current") });
+    const staleSnapshot = makeThreadShellSnapshot({ threadId: ThreadId.make("thread-stale") });
     expect(connectionInput).toBeDefined();
 
-    useHostedHubStore.setState({ generation: 8 });
-    connectionInput.syncShellSnapshot(snapshot, environmentId);
-    expect(syncServerShellSnapshot).not.toHaveBeenCalled();
+    connectionInput.syncShellSnapshot(currentSnapshot, environmentId);
+    expect(syncServerShellSnapshot).toHaveBeenCalledOnce();
 
-    useHostedHubStore.setState({ generation: 7 });
-    connectionInput.syncShellSnapshot(snapshot, environmentId);
+    hostedHubController.suspendBrowser("hidden");
+    expect(useHostedHubStore.getState().generation).toBe(8);
+    connectionInput.syncShellSnapshot(staleSnapshot, environmentId);
     expect(syncServerShellSnapshot).toHaveBeenCalledOnce();
 
     stop();

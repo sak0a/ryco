@@ -255,6 +255,9 @@ describe("HostedRelayAttemptFactory", () => {
     useHostedHubStore.setState({ browserStatus: "checking-access" });
     expect(lifecycle.shouldReconnect?.()).toBe(false);
     useHostedHubStore.setState({ browserStatus: "synchronizing" });
+    expect(lifecycle.shouldReconnect?.()).toBe(false);
+
+    await factory.nextUrl();
     expect(lifecycle.shouldReconnect?.()).toBe(true);
   });
 

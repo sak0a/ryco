@@ -264,6 +264,7 @@ class HostedHubController {
       browserStatus: reason === "offline" ? "offline" : "suspended",
       sessionStatus: state.sessionStatus === "delivery-unknown" ? "delivery-unknown" : "stale",
       sessionRecoveredAfterUnknown: false,
+      generation: state.generation + 1,
     });
   }
 

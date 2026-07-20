@@ -130,6 +130,33 @@ describe("hosted PWA lifecycle", () => {
     expect(test.reload).toHaveBeenCalledOnce();
   });
 
+  it("does not reload on initial control and reloads once on later controller replacement", async () => {
+    const test = runtime();
+    const lifecycle = createHostedPwaLifecycle(test.runtime);
+    await lifecycle.start({ enabled: true });
+
+    test.serviceWorker.controller = new FakeServiceWorker();
+    test.serviceWorker.dispatchEvent(new Event("controllerchange"));
+    expect(test.reload).not.toHaveBeenCalled();
+
+    test.serviceWorker.controller = new FakeServiceWorker();
+    test.serviceWorker.dispatchEvent(new Event("controllerchange"));
+    test.serviceWorker.dispatchEvent(new Event("controllerchange"));
+    expect(test.reload).toHaveBeenCalledOnce();
+  });
+
+  it("reloads a previously controlled client when another client activates an update", async () => {
+    const test = runtime();
+    test.serviceWorker.controller = new FakeServiceWorker();
+    const lifecycle = createHostedPwaLifecycle(test.runtime);
+    await lifecycle.start({ enabled: true });
+
+    test.serviceWorker.controller = new FakeServiceWorker();
+    test.serviceWorker.dispatchEvent(new Event("controllerchange"));
+    test.serviceWorker.dispatchEvent(new Event("controllerchange"));
+    expect(test.reload).toHaveBeenCalledOnce();
+  });
+
   it("keeps registration failures bounded and ordinary hosted use available", async () => {
     const test = runtime();
     test.serviceWorker.register.mockRejectedValueOnce(new Error("sensitive registration detail"));

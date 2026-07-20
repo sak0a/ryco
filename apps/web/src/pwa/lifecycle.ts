@@ -89,6 +89,8 @@ export function createHostedPwaLifecycle(runtime: HostedPwaRuntime) {
   let started = false;
   let installPrompt: InstallPromptEvent | null = null;
   let registration: HostedPwaServiceWorkerRegistration | null = null;
+  let controllerObserved = Boolean(runtime.navigator.serviceWorker?.controller);
+  let reloadIssued = false;
   let reloadRequested = false;
   const listeners = new Set<() => void>();
   const displayMode = runtime.window.matchMedia("(display-mode: standalone)");
@@ -129,8 +131,11 @@ export function createHostedPwaLifecycle(runtime: HostedPwaRuntime) {
     }
   };
   const onControllerChange: EventListener = () => {
-    if (!reloadRequested) return;
+    const wasControlled = controllerObserved;
+    controllerObserved = Boolean(runtime.navigator.serviceWorker?.controller);
+    if (reloadIssued || (!reloadRequested && !wasControlled)) return;
     reloadRequested = false;
+    reloadIssued = true;
     runtime.window.reload();
   };
 
@@ -198,6 +203,8 @@ export function createHostedPwaLifecycle(runtime: HostedPwaRuntime) {
       started = true;
       if (!input.enabled) return;
 
+      controllerObserved = Boolean(runtime.navigator.serviceWorker?.controller);
+      reloadIssued = false;
       publish({
         installState: fallbackInstallState(),
         platform: isIosBrowser(runtime) ? "ios" : "other",
@@ -218,6 +225,8 @@ export function createHostedPwaLifecycle(runtime: HostedPwaRuntime) {
       started = false;
       installPrompt = null;
       registration = null;
+      controllerObserved = false;
+      reloadIssued = false;
       reloadRequested = false;
       runtime.window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
       runtime.window.removeEventListener("appinstalled", onAppInstalled);
