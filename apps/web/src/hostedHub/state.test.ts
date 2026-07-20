@@ -781,11 +781,13 @@ describe("hosted registration and directory state", () => {
     });
 
     await hostedHubController.selectNode(selected.id);
+    useHostedHubStore.setState({ browserStatus: "synchronizing" });
     await vi.advanceTimersByTimeAsync(29_999);
     expect(useHostedHubStore.getState().transportStatus).not.toBe("terminal-failure");
 
     await vi.advanceTimersByTimeAsync(1);
     expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
       transportStatus: "terminal-failure",
       sessionStatus: "stale",
       sessionEstablished: false,
@@ -885,6 +887,7 @@ describe("hosted registration and directory state", () => {
     useHostedHubStore.setState({
       accountStatus: "authenticated",
       selectedNode: selected,
+      browserStatus: "synchronizing",
       transportStatus: "online",
       sessionStatus: "synchronizing",
       sessionEstablished: false,
@@ -893,6 +896,7 @@ describe("hosted registration and directory state", () => {
 
     hostedHubController.reportShellSnapshotFailure(selected.environmentId);
     expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
       transportStatus: "terminal-failure",
       errorMessage: "Ryco state could not be synchronized.",
     });

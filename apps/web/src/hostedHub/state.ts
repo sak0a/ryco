@@ -710,6 +710,7 @@ class HostedHubController {
       sessionStatus: state.sessionStatus === "delivery-unknown" ? "delivery-unknown" : "stale",
       sessionEstablished: false,
       sessionRecoveredAfterUnknown: false,
+      browserStatus: state.browserStatus === "synchronizing" ? "current" : state.browserStatus,
       errorMessage: HOSTED_SESSION_SYNC_FAILURE_MESSAGE,
     });
   }
