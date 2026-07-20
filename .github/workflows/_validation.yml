@@ -65,6 +65,8 @@ jobs:
 
       - name: Setup project
         uses: ./.github/actions/setup-ryco
+        with:
+          turbo-cache-scope: static
 
       - name: Format
         run: bun run fmt:check
@@ -93,6 +95,10 @@ jobs:
 
       - name: Setup project
         uses: ./.github/actions/setup-ryco
+        with:
+          # Effect typecheck runs its own script, not a Turbo task, so it writes
+          # no Turbo archives — its own inert lane keeps it out of the others'.
+          turbo-cache-scope: effect
 
       - name: Effect typecheck (TS6)
         run: bun run typecheck:effect --shard ${{ matrix.shard }}
@@ -142,6 +148,10 @@ jobs:
 
       - name: Setup project
         uses: ./.github/actions/setup-ryco
+        with:
+          # One lane per shard — the shards build disjoint `^build` dep sets, so a
+          # shared lane would let them overwrite each other like the old setup did.
+          turbo-cache-scope: test-${{ matrix.name }}
 
       # PR mode passes `--affected`; full mode passes one shard's `--filter`.
       - name: Test
@@ -161,6 +171,8 @@ jobs:
 
       - name: Setup project
         uses: ./.github/actions/setup-ryco
+        with:
+          turbo-cache-scope: build
 
       - name: Build
         run: bun run build ${{ inputs['affected-base'] != '' && '--affected' || '' }}
@@ -179,6 +191,8 @@ jobs:
 
       - name: Setup project
         uses: ./.github/actions/setup-ryco
+        with:
+          turbo-cache-scope: browser
 
       # Browser tests run vitest directly (not through Turbo), so build the web
       # package and its workspace dependencies first.
@@ -213,6 +227,8 @@ jobs:
 
       - name: Setup project
         uses: ./.github/actions/setup-ryco
+        with:
+          turbo-cache-scope: desktop
 
       - name: Build desktop pipeline
         run: bun run build:desktop
@@ -236,6 +252,8 @@ jobs:
 
       - name: Setup project
         uses: ./.github/actions/setup-ryco
+        with:
+          turbo-cache-scope: release
 
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts

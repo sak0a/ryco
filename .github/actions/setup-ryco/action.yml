@@ -14,6 +14,15 @@ inputs:
     description: Vite+ CLI version. Keep aligned with package.json workspaces.catalog.vite-plus.
     required: false
     default: "0.1.24"
+  turbo-cache-scope:
+    description: >
+      Lane name for the Turbo cache. Each caller must pass a value unique to the
+      Turbo task set it runs (build, typecheck, one test shard, …). Parallel jobs
+      that share a scope race to save one key and overwrite each other with
+      partial caches — the reason PR builds saw 0 cache hits. A distinct scope
+      per job keeps each lane coherent so it self-warms commit to commit.
+    required: false
+    default: shared
 
 runs:
   using: composite
@@ -41,11 +50,18 @@ runs:
         # overwrites an existing key — a lockfile-stable key froze the cache at
         # its first run and never re-saved). restore-keys seed each run from the
         # most recent prefix match, so the cache accumulates commit-to-commit.
-        key: ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}-${{ github.sha }}
+        #
+        # The scope segment gives each job its own lane. Without it, the parallel
+        # jobs all shared one key and raced to save it (`Failed to save … another
+        # job may be creating this cache`); the winner only ran a subset of tasks,
+        # so every other job restored a partial cache and rebuilt from scratch
+        # (`Cached: 0 cached`). restore-keys keep the scope fixed so a lane only
+        # ever restores its own task hashes.
+        key: ${{ runner.os }}-turbo-${{ inputs['turbo-cache-scope'] }}-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}-${{ github.sha }}
         restore-keys: |
-          ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}-
-          ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-
-          ${{ runner.os }}-bun-turbo-
+          ${{ runner.os }}-turbo-${{ inputs['turbo-cache-scope'] }}-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}-
+          ${{ runner.os }}-turbo-${{ inputs['turbo-cache-scope'] }}-${{ hashFiles('bun.lock') }}-
+          ${{ runner.os }}-turbo-${{ inputs['turbo-cache-scope'] }}-
 
     - name: Install dependencies
       if: ${{ inputs['install-dependencies'] == 'true' }}
