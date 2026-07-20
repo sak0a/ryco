@@ -2,12 +2,40 @@
 
 ## Task Completion Requirements
 
-- All of `bun fmt`, `bun lint`, and `bun typecheck` must pass before considering tasks completed.
+- Use the Bun version pinned in `package.json` and install with `bun install --frozen-lockfile`.
+- Run the full repository backstop before considering a change complete:
+
+  ```sh
+  bun fmt
+  bun run fmt:check
+  bun lint
+  bun typecheck
+  bun run typecheck:effect
+  bun run test
+  bun run build
+  ```
+
 - NEVER run `bun test`. Always use `bun run test` (runs Vitest).
+- For changes to web interaction, responsive layout, PWA behavior, browser lifecycle, or hosted
+  reconnect behavior, also build the web package and run the browser suite:
+
+  ```sh
+  bun run build --filter=@ryco/web
+  bun run --cwd apps/web test:browser
+  ```
+
+  Install the pinned Playwright browser runtime first with
+  `bun run --cwd apps/web test:browser:install` when it is not already present.
+
+- Run `bun run build:desktop` for desktop pipeline changes and `bun run release:smoke` for release-
+  workflow changes. CI may path-scope these jobs, but local validation must cover every affected
+  surface.
 
 ## TypeScript
 
-Daily typecheck uses **TS7** (`bun typecheck`). Effect-specific rules still run via patched **TS6** — use `bun run typecheck:effect` when touching Effect code (also enforced in CI). See [docs/typescript.md](docs/typescript.md) for why both coexist.
+Daily typecheck uses **TS7** (`bun typecheck`). Effect-specific rules still run via patched **TS6**
+(`bun run typecheck:effect`) and are enforced in CI. See [docs/typescript.md](docs/typescript.md) for
+why both coexist.
 
 ## Project Snapshot
 
@@ -26,6 +54,22 @@ If a tradeoff is required, choose correctness and robustness over short-term con
 ## Maintainability
 
 Long term maintainability is a core priority. If you add new functionality, first check if there is shared logic that can be extracted to a separate module. Duplicate logic across multiple files is a code smell and should be avoided. Don't be afraid to change existing code. Don't take shortcuts by just adding local logic to solve a problem.
+
+## Hosted Hub and PWA Boundaries
+
+- Hosted Hub lifecycle recovery has one authoritative owner. A hosted browser must revalidate its
+  session and authorized directory state, create a fresh relay attempt, and accept a current shell
+  snapshot before mutation capability becomes available.
+- Generic direct/saved-environment reconnect helpers must not race or bypass hosted lifecycle
+  ownership. Stale generations cannot publish readiness, role, snapshots, or mutation authority.
+- The production hosted service worker is a static-shell availability mechanism, not a data plane.
+  Never cache authenticated APIs, RPC, relay traffic, tickets, proofs, credentials, node-owned
+  content, request bodies, or live application documents.
+- Mobile presentation may adapt substantially, but authentication, relay, synchronization,
+  application state, and mutation-readiness policy remain shared. Do not fork those security or
+  lifecycle decisions into a second mobile implementation.
+- Keep this public repository free of private Hub issue links, deployment identifiers,
+  infrastructure details, credentials, private operational policies, and qualification evidence.
 
 ## Package Roles
 

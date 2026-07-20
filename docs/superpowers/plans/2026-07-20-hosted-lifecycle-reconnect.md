@@ -1,5 +1,9 @@
 # Hosted lifecycle reconnect implementation plan
 
+> **Implementation status (2026-07-20):** Landed on `main` through public PR #183. This checklist
+> is retained as the historical execution plan; live and physical-device qualification remains a
+> separate authorized activity.
+
 **Goal:** Make hosted browser offline/online and background/foreground recovery complete
 automatically through one fresh, fail-closed session lifecycle without duplicate environment or
 relay connections.
