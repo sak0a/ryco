@@ -15,6 +15,11 @@ import { getPrimaryEnvironmentConnection } from "../environments/runtime";
 
 const FORCED_WS_RECONNECT_DEBOUNCE_MS = 5_000;
 type WsAutoReconnectTrigger = "focus" | "online";
+export type ConnectionRecoveryOwner = "generic" | "hosted-lifecycle";
+
+export function allowsGenericConnectionRecovery(owner: ConnectionRecoveryOwner): boolean {
+  return owner === "generic";
+}
 
 const connectionTimeFormatter = new Intl.DateTimeFormat(undefined, {
   day: "numeric",
@@ -93,13 +98,17 @@ function describeSlowRpcAckToast(requests: ReadonlyArray<SlowRpcAckRequest>): st
 function buildReconnectingToast(
   status: WsConnectionStatus,
   nowMs: number,
-  triggerManualReconnect: () => void,
+  triggerManualReconnect?: () => void,
 ) {
   return stackedThreadToast({
-    actionProps: {
-      children: "Retry now",
-      onClick: triggerManualReconnect,
-    },
+    ...(triggerManualReconnect
+      ? {
+          actionProps: {
+            children: "Retry now",
+            onClick: triggerManualReconnect,
+          },
+        }
+      : {}),
     data: {
       hideCopyButton: true,
     },
@@ -168,8 +177,13 @@ export function shouldRestartStalledReconnect(
   );
 }
 
-export function WebSocketConnectionCoordinator() {
+export function WebSocketConnectionCoordinator({
+  recoveryOwner = "generic",
+}: {
+  readonly recoveryOwner?: ConnectionRecoveryOwner;
+}) {
   const status = useWsConnectionStatus();
+  const genericRecoveryEnabled = allowsGenericConnectionRecovery(recoveryOwner);
   const lastForcedReconnectAtRef = useRef(0);
   const toastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
   const toastResetTimerRef = useRef<number | null>(null);
@@ -177,6 +191,7 @@ export function WebSocketConnectionCoordinator() {
   const previousDisconnectedAtRef = useRef<string | null>(status.disconnectedAt);
 
   const runReconnect = useEffectEvent((showFailureToast: boolean) => {
+    if (!genericRecoveryEnabled) return;
     if (toastResetTimerRef.current !== null) {
       window.clearTimeout(toastResetTimerRef.current);
       toastResetTimerRef.current = null;
@@ -213,6 +228,7 @@ export function WebSocketConnectionCoordinator() {
     const currentStatus =
       trigger === "online" ? setBrowserOnlineStatus(true) : getWsConnectionStatus();
 
+    if (!genericRecoveryEnabled) return;
     if (!shouldAutoReconnect(currentStatus, trigger)) {
       return;
     }
@@ -262,7 +278,11 @@ export function WebSocketConnectionCoordinator() {
 
       toastManager.update(
         toastIdRef.current,
-        buildReconnectingToast(currentStatus, Date.now(), triggerManualReconnect),
+        buildReconnectingToast(
+          currentStatus,
+          Date.now(),
+          genericRecoveryEnabled ? triggerManualReconnect : undefined,
+        ),
       );
     };
 
@@ -272,10 +292,11 @@ export function WebSocketConnectionCoordinator() {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [status.nextRetryAt, status.reconnectPhase]);
+  }, [genericRecoveryEnabled, status.nextRetryAt, status.reconnectPhase]);
 
   useEffect(() => {
     if (
+      !genericRecoveryEnabled ||
       status.reconnectPhase !== "waiting" ||
       status.nextRetryAt === null ||
       !status.online ||
@@ -299,6 +320,7 @@ export function WebSocketConnectionCoordinator() {
       window.clearTimeout(timeoutId);
     };
   }, [
+    genericRecoveryEnabled,
     status.hasConnected,
     status.nextRetryAt,
     status.online,
@@ -335,10 +357,14 @@ export function WebSocketConnectionCoordinator() {
           })
         : shouldShowExhaustedToast
           ? stackedThreadToast({
-              actionProps: {
-                children: "Retry",
-                onClick: triggerManualReconnect,
-              },
+              ...(genericRecoveryEnabled
+                ? {
+                    actionProps: {
+                      children: "Retry",
+                      onClick: triggerManualReconnect,
+                    },
+                  }
+                : {}),
               data: {
                 hideCopyButton: true,
               },
@@ -347,7 +373,11 @@ export function WebSocketConnectionCoordinator() {
               title: buildReconnectTitle(status),
               type: "error",
             })
-          : buildReconnectingToast(status, Date.now(), triggerManualReconnect);
+          : buildReconnectingToast(
+              status,
+              Date.now(),
+              genericRecoveryEnabled ? triggerManualReconnect : undefined,
+            );
 
       if (toastIdRef.current) {
         toastManager.update(toastIdRef.current, toastPayload);
@@ -389,7 +419,7 @@ export function WebSocketConnectionCoordinator() {
 
     previousUiStateRef.current = uiState;
     previousDisconnectedAtRef.current = status.disconnectedAt;
-  }, [status]);
+  }, [genericRecoveryEnabled, status]);
 
   useEffect(() => {
     return () => {

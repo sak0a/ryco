@@ -4,21 +4,27 @@ import { EnvironmentId } from "@ryco/contracts";
 
 const originalDocument = globalThis.document;
 
-const { activateHostedNode, deactivateHostedNode, hasHostedRelayPendingRequests } = vi.hoisted(
-  () => ({
-    activateHostedNode: vi.fn(
-      async (
-        _node?: HostedHubNode,
-        _previousEnvironmentId?: EnvironmentId | null,
-        _signal?: AbortSignal,
-      ): Promise<void> => undefined,
-    ),
-    deactivateHostedNode: vi.fn(async () => undefined),
-    hasHostedRelayPendingRequests: vi.fn(() => false),
-  }),
-);
-vi.mock("./environment", () => ({ activateHostedNode, deactivateHostedNode }));
-vi.mock("./transport", () => ({ hasHostedRelayPendingRequests }));
+const {
+  activateHostedNode,
+  deactivateHostedNode,
+  suspendHostedNode,
+  hasHostedRelayPendingRequests,
+  resetHostedRelayAttemptFactory,
+} = vi.hoisted(() => ({
+  activateHostedNode: vi.fn(
+    async (
+      _node?: HostedHubNode,
+      _previousEnvironmentId?: EnvironmentId | null,
+      _signal?: AbortSignal,
+    ): Promise<void> => undefined,
+  ),
+  deactivateHostedNode: vi.fn(async () => undefined),
+  suspendHostedNode: vi.fn(async () => undefined),
+  hasHostedRelayPendingRequests: vi.fn(() => false),
+  resetHostedRelayAttemptFactory: vi.fn(),
+}));
+vi.mock("./environment", () => ({ activateHostedNode, deactivateHostedNode, suspendHostedNode }));
+vi.mock("./transport", () => ({ hasHostedRelayPendingRequests, resetHostedRelayAttemptFactory }));
 
 import { hostedHubApi, HostedHubApiError } from "./api";
 import { hostedHubController, markHostedSessionReady, useHostedHubStore } from "./state";
@@ -69,6 +75,7 @@ afterEach(() => {
   hostedHubController.resetForTests();
   activateHostedNode.mockClear();
   deactivateHostedNode.mockClear();
+  suspendHostedNode.mockClear();
   hasHostedRelayPendingRequests.mockReset();
   hasHostedRelayPendingRequests.mockReturnValue(false);
   vi.restoreAllMocks();
@@ -418,6 +425,7 @@ describe("hosted registration and directory state", () => {
     });
 
     hostedHubController.suspendBrowser("hidden");
+    await vi.waitFor(() => expect(suspendHostedNode).toHaveBeenCalledWith(selected.environmentId));
     expect(useHostedHubStore.getState()).toMatchObject({
       browserStatus: "suspended",
       sessionStatus: "stale",
@@ -572,6 +580,76 @@ describe("hosted registration and directory state", () => {
       browserStatus: "current",
       directoryStatus: "ready",
       errorMessage: null,
+    });
+  });
+
+  it("coalesces repeated browser resume events into one access check and relay activation", async () => {
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      browserStatus: "current",
+      generation: 4,
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([selected]);
+
+    hostedHubController.suspendBrowser("hidden");
+    const first = hostedHubController.resumeBrowser();
+    const second = hostedHubController.resumeBrowser();
+    const third = hostedHubController.resumeBrowser();
+
+    expect(first).toBe(second);
+    expect(second).toBe(third);
+    await Promise.all([first, second, third]);
+    expect(activateHostedNode).toHaveBeenCalledOnce();
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "synchronizing",
+      sessionStatus: "synchronizing",
+      generation: 6,
+    });
+  });
+
+  it("expires authority during resume without opening another hosted connection", async () => {
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      browserStatus: "current",
+      generation: 4,
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockRejectedValue(
+      new HostedHubApiError("session_invalid", 401),
+    );
+
+    hostedHubController.suspendBrowser("offline");
+    await hostedHubController.resumeBrowser();
+
+    expect(activateHostedNode).not.toHaveBeenCalled();
+    expect(resetHostedRelayAttemptFactory).toHaveBeenCalledOnce();
+    expect(useHostedHubStore.getState()).toMatchObject({
+      accountStatus: "session-expired",
+      selectedNode: null,
+      effectiveRole: null,
+      sessionEstablished: false,
     });
   });
 
