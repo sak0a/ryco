@@ -400,3 +400,47 @@ fail-closed RPC authorization. Other browser states, including `suspended`, `off
 Focused tests cover the shared timeout transition and the snapshot-failure entry point while the
 browser is synchronizing. They assert that the terminal failure remains visible, browser
 synchronization ends, and node selection can recover through the existing UI without a reload.
+
+## Suspension-generation and multi-client update addendum
+
+### Stale relay invalidation on suspension
+
+Hiding a hosted tab or taking it offline must immediately make events from its current relay
+generation ineligible to update local state. Three approaches were considered:
+
+1. Increment the hosted connection generation as part of the suspension state transition.
+2. Disconnect and rebuild the selected environment during suspension.
+3. Add browser-lifecycle checks to every shell, terminal, transport, and session callback.
+
+The generation boundary is selected because the connection handlers already enforce it, it covers
+all current and future generation-scoped callbacks centrally, and it does not clear same-node UI
+state. `suspendBrowser()` increments the store generation in the same patch that changes the browser
+to `suspended` or `offline`. The existing resume flow performs session and directory revalidation
+before creating a still newer connection generation. Pending mutation evidence remains available to
+the resume path, and no hosted RPC is authorized while the browser is stale.
+
+### Multi-client service-worker activation
+
+An explicitly activated worker update must not leave another open Ryco client running shell assets
+whose cache was deleted during activation. Three approaches were considered:
+
+1. Reload each previously controlled client exactly once when its controller changes.
+2. Broadcast an activation message from the worker and coordinate acknowledgements from clients.
+3. Retain every prior shell cache until no old client remains.
+
+Controller-change reload is selected because the browser already delivers that event to every
+claimed client, while broadcast acknowledgement introduces lifecycle races and cache retention
+requires new ownership and pruning policy. Each page tracks whether it has already acquired a
+service-worker controller and whether a reload has been issued. Initial controller acquisition does
+not reload. A later controller replacement reloads that page exactly once, whether or not that page
+clicked the update action. The explicit `Update ready` action remains the only path that asks a
+waiting worker to activate.
+
+### Verification
+
+Focused state tests prove suspension advances the generation and rejects callbacks from the old
+generation without clearing the selected node. Environment-service coverage proves a shell snapshot
+captured before suspension cannot update local state afterward. PWA lifecycle tests prove initial
+controller acquisition is reload-free, the update initiator reloads once, and an independently open
+previously controlled client also reloads once after controller replacement. Existing cache-policy,
+explicit-activation, resume, delivery-unknown, browser, and full repository gates remain required.
