@@ -114,7 +114,12 @@
             sizes: "180x180",
             href: "/apple-touch-icon.png",
           });
-          appendDeferredHeadLink({ rel: "manifest", href: "/site.webmanifest" });
+          if (import.meta.env.VITE_RYCO_CLIENT_MODE === "hosted-hub") {
+            appendDeferredHeadLink({
+              rel: "manifest",
+              href: `${import.meta.env.BASE_URL}site.webmanifest`,
+            });
+          }
         },
         { once: true },
       );

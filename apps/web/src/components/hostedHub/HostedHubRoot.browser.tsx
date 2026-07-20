@@ -15,6 +15,7 @@ import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedHubRoot, HostedNodeMenu } from "./HostedHubRoot";
+import { HOSTED_RELAY_TRUST_DISCLOSURE } from "./HostedRelayTrustNotice";
 
 const account = {
   id: "acct_aaaaaaaaaaaaaaaaaaaaaa",
@@ -70,6 +71,34 @@ afterEach(async () => {
 });
 
 describe("HostedHubRoot accessibility and responsive flows", () => {
+  it("contains hosted admission and node selection at 320 CSS pixels", async () => {
+    await page.viewport(320, 568);
+    try {
+      mounted = await render(<HostedHubRoot />);
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+      await mounted.unmount();
+
+      const selected = node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator");
+      useHostedHubStore.setState({
+        accountStatus: "authenticated",
+        account,
+        session,
+        directoryStatus: "ready",
+        nodes: [selected],
+      });
+      mounted = await render(<HostedHubRoot />);
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+      const selectButton = page.getByRole("button", { name: /Studio online/ });
+      await expect.element(selectButton).toBeVisible();
+      const box = selectButton.element().getBoundingClientRect();
+      expect(box.left).toBeGreaterThanOrEqual(0);
+      expect(box.right).toBeLessThanOrEqual(window.innerWidth);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    } finally {
+      await page.viewport(1_280, 720);
+    }
+  });
+
   it("provides keyboard-labelled authentication and registration controls with focus management", async () => {
     useHostedHubStore.setState({ bootstrapAvailable: true });
     mounted = await render(<HostedHubRoot />);
@@ -77,6 +106,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
       .element(page.getByRole("heading", { name: "Connect to your Ryco nodes" }))
       .toBeVisible();
     await expect.element(page.getByRole("button", { name: "Sign in with passkey" })).toBeVisible();
+    await expect.element(page.getByText(HOSTED_RELAY_TRUST_DISCLOSURE)).toBeVisible();
 
     await page.getByRole("button", { name: "Redeem invitation" }).click();
     await expect.element(page.getByLabelText("Invitation code")).toBeVisible();
@@ -153,6 +183,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     await expect.element(page.getByRole("button", { name: /Travel offline/ })).toBeDisabled();
     await expect.element(page.getByText("Online", { exact: true })).toBeVisible();
     await expect.element(page.getByText("Offline", { exact: true })).toBeVisible();
+    await expect.element(page.getByText(HOSTED_RELAY_TRUST_DISCLOSURE)).toBeVisible();
   });
 
   it("keeps one-time recovery material out of browser storage", async () => {
@@ -252,6 +283,25 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     mounted = await render(<HostedHubRoot />);
     await page.getByRole("button", { name: /Studio online/ }).click();
     expect(selectNode).toHaveBeenCalledWith(selectable.id);
+  });
+
+  it("disables cached node selection while browser access is being revalidated", async () => {
+    const selectable = node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator");
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account,
+      session,
+      directoryStatus: "ready",
+      browserStatus: "checking-access",
+      nodes: [selectable],
+    });
+    const selectNode = vi.spyOn(hostedHubController, "selectNode").mockResolvedValue();
+
+    mounted = await render(<HostedHubRoot />);
+
+    const nodeButton = page.getByRole("button", { name: /Studio online/ });
+    await expect.element(nodeButton).toBeDisabled();
+    expect(selectNode).not.toHaveBeenCalled();
   });
 
   it("lets an owner review and approve bounded node enrollment metadata", async () => {
@@ -410,5 +460,36 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     });
     await expect.element(page.getByText("Delivery unknown", { exact: true })).toBeVisible();
     await expect.element(page.getByText(/did not resend it automatically/)).toBeVisible();
+  });
+
+  it("allows another node after terminal failure ends browser synchronization", async () => {
+    const current = node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator");
+    const replacement = {
+      ...node("node_bbbbbbbbbbbbbbbbbbbbbb", true, "owner"),
+      label: "Second node",
+    };
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account,
+      session,
+      directoryStatus: "ready",
+      browserStatus: "synchronizing",
+      nodes: [current, replacement],
+      selectedNode: current,
+      selectionStatus: "online",
+      effectiveRole: current.effectiveRole,
+      transportStatus: "connecting",
+      sessionStatus: "synchronizing",
+      generation: 9,
+    });
+    mounted = await render(<HostedNodeMenu />);
+    await page.getByText("Synchronizing", { exact: true }).click();
+    const replacementButton = page.getByRole("button", { name: new RegExp(replacement.label) });
+    await expect.element(replacementButton).toBeDisabled();
+
+    hostedHubController.failure(9, { kind: "incompatible", retryable: false });
+
+    await expect.element(page.getByText("Incompatible", { exact: true })).toBeVisible();
+    await expect.element(replacementButton).toBeEnabled();
   });
 });

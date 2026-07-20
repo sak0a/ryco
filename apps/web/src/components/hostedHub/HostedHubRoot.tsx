@@ -22,6 +22,8 @@ import {
 } from "../../hostedHub/state";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedNodeEnrollmentFlow } from "./HostedNodeEnrollment";
+import { HostedPwaControls } from "./HostedPwaControls";
+import { HostedRelayTrustNotice } from "./HostedRelayTrustNotice";
 
 export function HostedHubRoot() {
   const accountStatus = useHostedHubStore((state) => state.accountStatus);
@@ -32,13 +34,30 @@ export function HostedHubRoot() {
   const errorMessage = useHostedHubStore((state) => state.errorMessage);
 
   useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState === "visible" && accountStatus === "authenticated") {
-        void hostedHubController.refreshDirectory();
+    if (accountStatus !== "authenticated") return;
+    const resumeIfVisible = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) {
+        void hostedHubController.resumeBrowser();
       }
     };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") hostedHubController.suspendBrowser("hidden");
+      else resumeIfVisible();
+    };
+    const onOffline = () => hostedHubController.suspendBrowser("offline");
+    const onOnline = () => resumeIfVisible();
+    const onPageShow = () => resumeIfVisible();
     document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("pageshow", onPageShow);
+    if (!navigator.onLine) onOffline();
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("pageshow", onPageShow);
+    };
   }, [accountStatus]);
 
   if (accountStatus !== "authenticated") return <HostedAuthenticationSurface />;
@@ -137,6 +156,10 @@ function HostedAuthenticationSurface() {
         Sign in with the passkey registered for this Hub. Your session stays in a secure, HttpOnly
         cookie.
       </p>
+      <div className="mt-4">
+        <HostedRelayTrustNotice />
+      </div>
+      <HostedPwaControls />
       {error ? (
         <p
           role="alert"
@@ -325,6 +348,7 @@ function RecoveryCodesSurface() {
 function HostedNodeDirectory() {
   const nodes = useHostedHubStore((state) => state.nodes);
   const status = useHostedHubStore((state) => state.directoryStatus);
+  const browserStatus = useHostedHubStore((state) => state.browserStatus);
   const error = useHostedHubStore((state) => state.errorMessage);
   const account = useHostedHubStore((state) => state.account);
   const selection = useHostedHubStore((state) => state.selectionStatus);
@@ -395,7 +419,7 @@ function HostedNodeDirectory() {
           <button
             key={`${node.id}:${node.environmentId}`}
             type="button"
-            disabled={status !== "ready" || node.revokedAt !== null}
+            disabled={status !== "ready" || browserStatus !== "current" || node.revokedAt !== null}
             onClick={() => void select(node)}
             className="flex min-h-16 w-full items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
           >
@@ -422,6 +446,10 @@ function HostedNodeDirectory() {
           </p>
         ) : null}
       </div>
+      <div className="mt-5">
+        <HostedRelayTrustNotice />
+      </div>
+      <HostedPwaControls />
       <Button
         className="mt-5"
         variant="outline"
@@ -462,6 +490,7 @@ export function HostedNodeMenu() {
   const directory = useHostedHubStore((state) => state.directoryStatus);
   const role = useHostedHubStore((state) => state.effectiveRole);
   const error = useHostedHubStore((state) => state.errorMessage);
+  const browserStatus = useHostedHubStore((state) => state.browserStatus);
   const navigate = useNavigate();
   if (!node) return null;
 
@@ -471,21 +500,29 @@ export function HostedNodeMenu() {
   };
 
   const statusText =
-    session === "delivery-unknown"
-      ? "Delivery unknown"
-      : selection === "authorization-removed"
-        ? "Authorization removed"
-        : selection === "revoked"
-          ? "Revoked"
-          : selection === "incompatible"
-            ? "Incompatible"
-            : transport === "online" && session === "ready"
-              ? "Online"
-              : transport === "reconnecting"
-                ? "Reconnecting"
-                : selection === "offline"
-                  ? "Offline"
-                  : transport.replaceAll("-", " ");
+    browserStatus === "offline"
+      ? "Offline"
+      : browserStatus === "checking-access"
+        ? "Checking access"
+        : browserStatus === "synchronizing"
+          ? "Synchronizing"
+          : browserStatus === "suspended" || browserStatus === "stale"
+            ? "Stale"
+            : session === "delivery-unknown"
+              ? "Delivery unknown"
+              : selection === "authorization-removed"
+                ? "Authorization removed"
+                : selection === "revoked"
+                  ? "Revoked"
+                  : selection === "incompatible"
+                    ? "Incompatible"
+                    : transport === "online" && session === "ready"
+                      ? "Online"
+                      : transport === "reconnecting"
+                        ? "Reconnecting"
+                        : selection === "offline"
+                          ? "Offline"
+                          : transport.replaceAll("-", " ");
 
   return (
     <div className="fixed top-2 right-2 z-50 max-w-[calc(100vw-1rem)] sm:top-3 sm:right-3">
@@ -545,7 +582,11 @@ export function HostedNodeMenu() {
                 <button
                   key={candidate.id}
                   type="button"
-                  disabled={directory !== "ready" || candidate.revokedAt !== null}
+                  disabled={
+                    directory !== "ready" ||
+                    browserStatus !== "current" ||
+                    candidate.revokedAt !== null
+                  }
                   className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   onClick={() => void switchNode(candidate)}
                 >
@@ -565,6 +606,10 @@ export function HostedNodeMenu() {
             <Button size="sm" variant="ghost" onClick={() => void hostedHubController.signOut()}>
               <LogOutIcon aria-hidden /> Sign out
             </Button>
+          </div>
+          <div className="mt-3 space-y-3 border-t border-border pt-3">
+            <HostedRelayTrustNotice compact />
+            <HostedPwaControls compact />
           </div>
         </div>
       </details>

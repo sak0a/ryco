@@ -1,4 +1,4 @@
-import type { RelayEffectiveRole } from "@ryco/contracts";
+import { ORCHESTRATION_WS_METHODS, type RelayEffectiveRole, WS_METHODS } from "@ryco/contracts";
 import { hostedRoleAllows } from "@ryco/shared/rpcAccessPolicy";
 
 import type { WsProtocolLifecycleHandlers } from "../rpc/protocol";
@@ -17,6 +17,44 @@ interface PendingTicket {
   readonly expiresAt: number;
   readonly generation: number;
   used: boolean;
+}
+
+const HOSTED_SESSION_SYNC_SUBSCRIPTIONS = new Set<string>([
+  ORCHESTRATION_WS_METHODS.subscribeShell,
+  ORCHESTRATION_WS_METHODS.subscribeThread,
+  WS_METHODS.subscribeServerConfig,
+  WS_METHODS.subscribeServerLifecycle,
+  WS_METHODS.subscribeTerminalEvents,
+  WS_METHODS.subscribeVcsStatus,
+]);
+
+const HOSTED_READ_ONLY_STREAMS = new Set<string>([
+  ...HOSTED_SESSION_SYNC_SUBSCRIPTIONS,
+  WS_METHODS.subscribeAuthAccess,
+]);
+
+function authorizeHostedRequest(info: { readonly tag: string; readonly stream: boolean }): boolean {
+  const state = useHostedHubStore.getState();
+  if (!hostedRoleAllows(state.effectiveRole, info.tag, state.directoryStatus === "ready")) {
+    return false;
+  }
+  if (
+    state.transportStatus === "online" &&
+    state.browserStatus === "current" &&
+    state.sessionStatus === "ready"
+  ) {
+    return true;
+  }
+  return (
+    info.stream &&
+    (state.browserStatus === "current" || state.browserStatus === "synchronizing") &&
+    (state.sessionStatus === "synchronizing" ||
+      state.sessionStatus === "replaying" ||
+      state.sessionStatus === "delivery-unknown" ||
+      state.sessionStatus === "stale" ||
+      state.sessionStatus === "closed") &&
+    HOSTED_SESSION_SYNC_SUBSCRIPTIONS.has(info.tag)
+  );
 }
 
 export function ticketFailure(error: HostedHubApiError): HostedRelayFailure {
@@ -53,7 +91,7 @@ export function ticketFailure(error: HostedHubApiError): HostedRelayFailure {
 
 export class HostedRelayAttemptFactory {
   readonly #reconnect = new HostedReconnectPolicy();
-  readonly #pendingRequests = new Set<string>();
+  readonly #pendingRequests = new Map<string, "first-chunk" | "exit">();
   #pendingTicket: PendingTicket | null = null;
   #lastRetryAfterMs: number | undefined;
   #activeGeneration: number | null = null;
@@ -142,13 +180,11 @@ export class HostedRelayAttemptFactory {
           this.#activeGeneration === state.generation &&
           state.accountStatus === "authenticated" &&
           state.selectedNode !== null &&
+          (state.browserStatus === "current" || state.browserStatus === "synchronizing") &&
           state.transportStatus !== "terminal-failure"
         );
       },
-      authorizeRequest: (info) => {
-        const state = useHostedHubStore.getState();
-        return hostedRoleAllows(state.effectiveRole, info.tag, state.directoryStatus === "ready");
-      },
+      authorizeRequest: authorizeHostedRequest,
       getReconnectDelayMs: () => {
         const delay = this.#reconnect.nextDelay(this.#lastRetryAfterMs);
         this.#lastRetryAfterMs = undefined;
@@ -163,12 +199,21 @@ export class HostedRelayAttemptFactory {
         hostedHubController.connectionClosed(generation);
       },
       onRequestStart: (info) => {
-        if (!info.stream) this.#pendingRequests.add(info.id);
+        if (info.stream && HOSTED_READ_ONLY_STREAMS.has(info.tag)) return;
+        this.#pendingRequests.set(info.id, info.stream ? "exit" : "first-chunk");
       },
-      onRequestChunk: (info) => this.#pendingRequests.delete(info.id),
+      onRequestChunk: (info) => {
+        if (this.#pendingRequests.get(info.id) === "first-chunk") {
+          this.#pendingRequests.delete(info.id);
+        }
+      },
       onRequestExit: (info) => this.#pendingRequests.delete(info.id),
       onRequestInterrupt: (info) => this.#pendingRequests.delete(info.id),
     };
+  }
+
+  hasPendingRequests(): boolean {
+    return this.#pendingRequests.size > 0;
   }
 
   reset(): void {
@@ -185,6 +230,10 @@ let attemptFactory: HostedRelayAttemptFactory | null = null;
 export function getHostedRelayAttemptFactory(): HostedRelayAttemptFactory {
   attemptFactory ??= new HostedRelayAttemptFactory();
   return attemptFactory;
+}
+
+export function hasHostedRelayPendingRequests(): boolean {
+  return attemptFactory?.hasPendingRequests() ?? false;
 }
 
 export function resetHostedRelayAttemptFactory(): void {

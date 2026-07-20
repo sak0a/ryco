@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { hostedHubApi, HostedHubApiError } from "./api";
 import type {
   HostedAccountStatus,
+  HostedBrowserStatus,
   HostedDirectoryStatus,
   HostedHubAccount,
   HostedHubNode,
@@ -29,6 +30,7 @@ interface HostedHubState {
   readonly sessionStatus: HostedRycoSessionStatus;
   readonly sessionEstablished: boolean;
   readonly sessionRecoveredAfterUnknown: boolean;
+  readonly browserStatus: HostedBrowserStatus;
   readonly recoveryCodes: ReadonlyArray<string>;
   readonly errorMessage: string | null;
   readonly generation: number;
@@ -48,6 +50,7 @@ const initialState: HostedHubState = {
   sessionStatus: "closed",
   sessionEstablished: false,
   sessionRecoveredAfterUnknown: false,
+  browserStatus: "current",
   recoveryCodes: [],
   errorMessage: null,
   generation: 0,
@@ -88,7 +91,11 @@ class HostedHubController {
   #directoryPromise: Promise<void> | null = null;
   #bootstrapPromise: Promise<void> | null = null;
   #sessionSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  #retrySelectedNodeOperation: AbortController | null = null;
   #retrySelectedNodePromise: Promise<void> | null = null;
+  #browserResumeOperation: AbortController | null = null;
+  #browserResumePromise: Promise<void> | null = null;
+  #browserLifecycleGeneration = 0;
 
   bootstrap(): Promise<void> {
     if (this.#bootstrapPromise) return this.#bootstrapPromise;
@@ -208,7 +215,13 @@ class HostedHubController {
     this.#directoryPromise = null;
     this.#bootstrapPromise = null;
     this.#clearSessionSyncTimer();
+    this.#retrySelectedNodeOperation?.abort();
+    this.#retrySelectedNodeOperation = null;
     this.#retrySelectedNodePromise = null;
+    this.#browserResumeOperation?.abort();
+    this.#browserResumeOperation = null;
+    this.#browserResumePromise = null;
+    this.#browserLifecycleGeneration += 1;
     hostedHubApi.clearSessionMaterial();
     useHostedHubStore.setState(initialState, true);
   }
@@ -234,7 +247,89 @@ class HostedHubController {
     await this.clearAccount("session-expired");
   }
 
+  suspendBrowser(reason: "hidden" | "offline"): void {
+    const state = useHostedHubStore.getState();
+    if (state.accountStatus !== "authenticated") return;
+    this.#browserLifecycleGeneration += 1;
+    this.#browserResumeOperation?.abort();
+    this.#browserResumeOperation = null;
+    this.#browserResumePromise = null;
+    this.#retrySelectedNodeOperation?.abort();
+    this.#clearSessionSyncTimer();
+    this.#clearDirectoryTimer();
+    this.#directoryOperation?.abort();
+    this.#directoryOperation = null;
+    this.#directoryPromise = null;
+    patchState({
+      browserStatus: reason === "offline" ? "offline" : "suspended",
+      sessionStatus: state.sessionStatus === "delivery-unknown" ? "delivery-unknown" : "stale",
+      sessionRecoveredAfterUnknown: false,
+      generation: state.generation + 1,
+    });
+  }
+
+  resumeBrowser(): Promise<void> {
+    if (this.#browserResumePromise) return this.#browserResumePromise;
+    const operation = new AbortController();
+    this.#browserResumeOperation = operation;
+    const promise = this.#resumeBrowser(operation).finally(() => {
+      if (this.#browserResumePromise === promise) this.#browserResumePromise = null;
+      if (this.#browserResumeOperation === operation) this.#browserResumeOperation = null;
+    });
+    this.#browserResumePromise = promise;
+    return promise;
+  }
+
+  async #resumeBrowser(operation: AbortController): Promise<void> {
+    const initial = useHostedHubStore.getState();
+    if (initial.accountStatus !== "authenticated") return;
+    const browserGeneration = this.#browserLifecycleGeneration + 1;
+    this.#browserLifecycleGeneration = browserGeneration;
+    const expectedAccountId = initial.account?.id ?? null;
+    patchState({ browserStatus: "checking-access", errorMessage: null });
+    try {
+      const restored = await hostedHubApi.restoreSession(operation.signal);
+      if (operation.signal.aborted || this.#browserLifecycleGeneration !== browserGeneration)
+        return;
+      const active = useHostedHubStore.getState();
+      if (active.accountStatus !== "authenticated" || restored.account.id !== expectedAccountId) {
+        await this.expireSession();
+        return;
+      }
+      patchState({ account: restored.account, session: restored.session });
+      await this.refreshDirectory();
+      if (this.#browserLifecycleGeneration !== browserGeneration) return;
+      const refreshed = useHostedHubStore.getState();
+      if (refreshed.accountStatus !== "authenticated") return;
+      if (refreshed.directoryStatus !== "ready") {
+        patchState({ browserStatus: "stale" });
+        return;
+      }
+      if (!refreshed.selectedNode) {
+        patchState({ browserStatus: "current" });
+        return;
+      }
+      patchState({ browserStatus: "synchronizing" });
+      await this.#retrySelectedNode(operation.signal);
+    } catch (error) {
+      if (operation.signal.aborted || this.#browserLifecycleGeneration !== browserGeneration)
+        return;
+      if (isSessionFailure(error)) {
+        await this.expireSession();
+        return;
+      }
+      patchState({ browserStatus: "stale", errorMessage: errorMessage(error) });
+    }
+  }
+
   async clearAccount(status: "signed-out" | "session-expired"): Promise<void> {
+    this.#browserLifecycleGeneration += 1;
+    this.#browserResumeOperation?.abort();
+    this.#browserResumeOperation = null;
+    this.#browserResumePromise = null;
+    this.#retrySelectedNodeOperation?.abort();
+    this.#retrySelectedNodeOperation = null;
+    this.#retrySelectedNodePromise = null;
     this.#clearDirectoryTimer();
     this.#clearSessionSyncTimer();
     this.#directoryOperation?.abort();
@@ -284,6 +379,7 @@ class HostedHubController {
       }
       this.#directoryRetry = 0;
       const current = useHostedHubStore.getState();
+      const resumeStaleBrowser = current.browserStatus === "stale";
       const selected = current.selectedNode;
       const refreshedSelection = selected
         ? (nodes.find(
@@ -317,6 +413,18 @@ class HostedHubController {
         });
       }
       this.#scheduleDirectory(DIRECTORY_REFRESH_MS);
+      if (resumeStaleBrowser) {
+        queueMicrotask(() => {
+          const recovered = useHostedHubStore.getState();
+          if (
+            recovered.accountStatus === "authenticated" &&
+            recovered.directoryStatus === "ready" &&
+            recovered.browserStatus === "stale"
+          ) {
+            void this.resumeBrowser();
+          }
+        });
+      }
     } catch (error) {
       if (operation.signal.aborted) return;
       if (isSessionFailure(error)) {
@@ -339,7 +447,7 @@ class HostedHubController {
 
   async selectNode(nodeId: string): Promise<void> {
     const state = useHostedHubStore.getState();
-    if (state.directoryStatus !== "ready") return;
+    if (state.directoryStatus !== "ready" || state.browserStatus !== "current") return;
     const node = state.nodes.find((candidate) => candidate.id === nodeId);
     if (!node || node.revokedAt) return;
     if (
@@ -370,15 +478,21 @@ class HostedHubController {
 
   retrySelectedNode(): Promise<void> {
     if (this.#retrySelectedNodePromise) return this.#retrySelectedNodePromise;
-    const promise = this.#retrySelectedNode().finally(() => {
+    const operation = new AbortController();
+    this.#retrySelectedNodeOperation = operation;
+    const promise = this.#retrySelectedNode(operation.signal).finally(() => {
+      if (this.#retrySelectedNodeOperation === operation) {
+        this.#retrySelectedNodeOperation = null;
+      }
       if (this.#retrySelectedNodePromise === promise) this.#retrySelectedNodePromise = null;
     });
     this.#retrySelectedNodePromise = promise;
     return promise;
   }
 
-  async #retrySelectedNode(): Promise<void> {
-    const state = useHostedHubStore.getState();
+  async #retrySelectedNode(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return;
+    let state = useHostedHubStore.getState();
     const node = state.selectedNode;
     if (
       !node ||
@@ -388,23 +502,40 @@ class HostedHubController {
     ) {
       return;
     }
+    const [{ hasHostedRelayPendingRequests }, { activateHostedNode }] = await Promise.all([
+      import("./transport"),
+      import("./environment"),
+    ]);
+    state = useHostedHubStore.getState();
+    if (
+      signal.aborted ||
+      state.selectedNode?.id !== node.id ||
+      state.selectedNode.environmentId !== node.environmentId ||
+      state.selectedNode.revokedAt !== null ||
+      state.accountStatus !== "authenticated" ||
+      state.directoryStatus !== "ready"
+    ) {
+      return;
+    }
+    const deliveryUnknown =
+      state.sessionStatus === "delivery-unknown" || hasHostedRelayPendingRequests();
     const generation = state.generation + 1;
     this.#clearSessionSyncTimer();
     patchState({
       selectionStatus: node.presence.online ? "online" : "offline",
       effectiveRole: node.effectiveRole,
       transportStatus: "idle",
-      sessionStatus: "synchronizing",
+      sessionStatus: deliveryUnknown ? "delivery-unknown" : "synchronizing",
       sessionEstablished: false,
       sessionRecoveredAfterUnknown: false,
       errorMessage: null,
       generation,
     });
     this.#startSessionSyncTimer(generation);
-    const { activateHostedNode } = await import("./environment");
     try {
-      await activateHostedNode(node, node.environmentId);
+      await activateHostedNode(node, node.environmentId, signal);
     } catch {
+      if (signal.aborted) return;
       this.#failSessionSync(generation);
     }
   }
@@ -449,6 +580,10 @@ class HostedHubController {
       effectiveRole: failure.retryable ? state.effectiveRole : null,
       transportStatus: failure.retryable ? "reconnecting" : "terminal-failure",
       sessionStatus: state.sessionStatus === "delivery-unknown" ? "delivery-unknown" : "stale",
+      browserStatus:
+        !failure.retryable && state.browserStatus === "synchronizing"
+          ? "current"
+          : state.browserStatus,
       errorMessage: failureMessage(failure),
     });
   }
@@ -474,13 +609,18 @@ class HostedHubController {
     if (state.selectedNode?.environmentId !== environmentId) return;
     this.#clearSessionSyncTimer();
     if (state.sessionStatus === "delivery-unknown") {
-      patchState({ sessionEstablished: true, sessionRecoveredAfterUnknown: true });
+      patchState({
+        sessionEstablished: true,
+        sessionRecoveredAfterUnknown: true,
+        browserStatus: state.browserStatus === "synchronizing" ? "current" : state.browserStatus,
+      });
       return;
     }
     patchState({
       sessionStatus: "ready",
       sessionEstablished: true,
       sessionRecoveredAfterUnknown: false,
+      browserStatus: state.browserStatus === "synchronizing" ? "current" : state.browserStatus,
     });
   }
 
@@ -491,7 +631,13 @@ class HostedHubController {
       patchState({ sessionRecoveredAfterUnknown: false });
       return;
     }
-    patchState({ sessionStatus: "replaying" });
+    patchState({
+      sessionStatus: "replaying",
+      browserStatus:
+        state.browserStatus === "current" || state.browserStatus === "synchronizing"
+          ? "synchronizing"
+          : state.browserStatus,
+    });
   }
 
   reportShellSnapshotFailure(environmentId: EnvironmentId): void {
@@ -562,9 +708,10 @@ class HostedHubController {
     this.#clearSessionSyncTimer();
     patchState({
       transportStatus: "terminal-failure",
-      sessionStatus: "stale",
+      sessionStatus: state.sessionStatus === "delivery-unknown" ? "delivery-unknown" : "stale",
       sessionEstablished: false,
       sessionRecoveredAfterUnknown: false,
+      browserStatus: state.browserStatus === "synchronizing" ? "current" : state.browserStatus,
       errorMessage: HOSTED_SESSION_SYNC_FAILURE_MESSAGE,
     });
   }
@@ -611,14 +758,20 @@ function failureMessage(failure: HostedRelayFailure): string {
 
 export const hostedHubController = new HostedHubController();
 
-export function markHostedSessionReady(environmentId: EnvironmentId): void {
+export function markHostedSessionReady(environmentId: EnvironmentId, generation: number): void {
+  if (useHostedHubStore.getState().generation !== generation) return;
   hostedHubController.markSessionReady(environmentId);
 }
 
-export function markHostedSessionReplaying(environmentId: EnvironmentId): void {
+export function markHostedSessionReplaying(environmentId: EnvironmentId, generation: number): void {
+  if (useHostedHubStore.getState().generation !== generation) return;
   hostedHubController.markSessionReplaying(environmentId);
 }
 
-export function reportHostedShellSnapshotFailure(environmentId: EnvironmentId): void {
+export function reportHostedShellSnapshotFailure(
+  environmentId: EnvironmentId,
+  generation: number,
+): void {
+  if (useHostedHubStore.getState().generation !== generation) return;
   hostedHubController.reportShellSnapshotFailure(environmentId);
 }

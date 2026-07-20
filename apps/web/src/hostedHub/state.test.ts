@@ -4,14 +4,24 @@ import { EnvironmentId } from "@ryco/contracts";
 
 const originalDocument = globalThis.document;
 
-const { activateHostedNode, deactivateHostedNode } = vi.hoisted(() => ({
-  activateHostedNode: vi.fn(async () => undefined),
-  deactivateHostedNode: vi.fn(async () => undefined),
-}));
+const { activateHostedNode, deactivateHostedNode, hasHostedRelayPendingRequests } = vi.hoisted(
+  () => ({
+    activateHostedNode: vi.fn(
+      async (
+        _node?: HostedHubNode,
+        _previousEnvironmentId?: EnvironmentId | null,
+        _signal?: AbortSignal,
+      ): Promise<void> => undefined,
+    ),
+    deactivateHostedNode: vi.fn(async () => undefined),
+    hasHostedRelayPendingRequests: vi.fn(() => false),
+  }),
+);
 vi.mock("./environment", () => ({ activateHostedNode, deactivateHostedNode }));
+vi.mock("./transport", () => ({ hasHostedRelayPendingRequests }));
 
 import { hostedHubApi, HostedHubApiError } from "./api";
-import { hostedHubController, useHostedHubStore } from "./state";
+import { hostedHubController, markHostedSessionReady, useHostedHubStore } from "./state";
 
 const sessionResponse: HostedHubSessionResponse = {
   account: {
@@ -59,6 +69,8 @@ afterEach(() => {
   hostedHubController.resetForTests();
   activateHostedNode.mockClear();
   deactivateHostedNode.mockClear();
+  hasHostedRelayPendingRequests.mockReset();
+  hasHostedRelayPendingRequests.mockReturnValue(false);
   vi.restoreAllMocks();
   vi.useRealTimers();
   Object.defineProperty(globalThis, "document", { configurable: true, value: originalDocument });
@@ -375,6 +387,327 @@ describe("hosted registration and directory state", () => {
     Object.defineProperty(globalThis, "document", { configurable: true, value: originalDocument });
   });
 
+  it("keeps mutations stale until browser resume revalidates access and node state", async () => {
+    const selected = node();
+    const order: string[] = [];
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      browserStatus: "current",
+      generation: 4,
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockImplementation(async () => {
+      order.push("session");
+      return sessionResponse;
+    });
+    vi.spyOn(hostedHubApi, "listNodes").mockImplementation(async () => {
+      order.push("directory");
+      return [selected];
+    });
+    activateHostedNode.mockImplementationOnce(async () => {
+      order.push("relay");
+    });
+
+    hostedHubController.suspendBrowser("hidden");
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "suspended",
+      sessionStatus: "stale",
+      generation: 5,
+    });
+    hostedHubController.markSessionReady(selected.environmentId);
+    expect(useHostedHubStore.getState().browserStatus).toBe("suspended");
+
+    await hostedHubController.resumeBrowser();
+    expect(order).toEqual(["session", "directory", "relay"]);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "synchronizing",
+      sessionStatus: "synchronizing",
+      generation: 6,
+    });
+
+    hostedHubController.markSessionReady(selected.environmentId);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
+      sessionStatus: "ready",
+    });
+  });
+
+  it("ignores readiness from a superseded hosted connection generation", () => {
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      selectedNode: selected,
+      transportStatus: "online",
+      sessionStatus: "synchronizing",
+      sessionEstablished: false,
+      browserStatus: "synchronizing",
+      generation: 5,
+    });
+
+    markHostedSessionReady(selected.environmentId, 4);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "synchronizing",
+      sessionStatus: "synchronizing",
+      sessionEstablished: false,
+    });
+
+    markHostedSessionReady(selected.environmentId, 5);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+    });
+  });
+
+  it("preserves delivery uncertainty when resume replaces a relay with a pending mutation", async () => {
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      browserStatus: "current",
+      generation: 4,
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([selected]);
+    hasHostedRelayPendingRequests.mockReturnValue(true);
+
+    hostedHubController.suspendBrowser("hidden");
+    await hostedHubController.resumeBrowser();
+
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "synchronizing",
+      sessionStatus: "delivery-unknown",
+      sessionRecoveredAfterUnknown: false,
+      generation: 6,
+    });
+    hostedHubController.markSessionReady(selected.environmentId);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
+      sessionStatus: "delivery-unknown",
+      sessionRecoveredAfterUnknown: true,
+    });
+  });
+
+  it("preserves resumed delivery uncertainty when synchronization times out", async () => {
+    vi.useFakeTimers();
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      browserStatus: "current",
+      generation: 4,
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([selected]);
+    hasHostedRelayPendingRequests.mockReturnValue(true);
+
+    hostedHubController.suspendBrowser("hidden");
+    await hostedHubController.resumeBrowser();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(useHostedHubStore.getState()).toMatchObject({
+      transportStatus: "terminal-failure",
+      sessionStatus: "delivery-unknown",
+      sessionEstablished: false,
+      sessionRecoveredAfterUnknown: false,
+      errorMessage: "Ryco state could not be synchronized.",
+    });
+  });
+
+  it("starts a fresh access check when suspension cancels an in-flight resume", async () => {
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      browserStatus: "current",
+    });
+    let restoreCalls = 0;
+    vi.spyOn(hostedHubApi, "restoreSession").mockImplementation((signal) => {
+      restoreCalls += 1;
+      if (restoreCalls > 1) return Promise.resolve(sessionResponse);
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () =>
+          reject(new DOMException("suspended", "AbortError")),
+        );
+      });
+    });
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([]);
+
+    const interrupted = hostedHubController.resumeBrowser();
+    await Promise.resolve();
+    hostedHubController.suspendBrowser("hidden");
+    const resumed = hostedHubController.resumeBrowser();
+    await Promise.all([interrupted, resumed]);
+
+    expect(restoreCalls).toBe(2);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
+      directoryStatus: "ready",
+      errorMessage: null,
+    });
+  });
+
+  it("replaces an in-flight directory refresh with a post-resume access check", async () => {
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [],
+      browserStatus: "current",
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    let firstSignal: AbortSignal | undefined;
+    const listNodes = vi.spyOn(hostedHubApi, "listNodes").mockImplementation((signal) => {
+      if (listNodes.mock.calls.length > 1) return Promise.resolve([]);
+      firstSignal = signal;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () =>
+          reject(new DOMException("suspended", "AbortError")),
+        );
+      });
+    });
+
+    const staleRefresh = hostedHubController.refreshDirectory();
+    await vi.waitFor(() => expect(listNodes).toHaveBeenCalledOnce());
+    hostedHubController.suspendBrowser("hidden");
+    await staleRefresh;
+    await hostedHubController.resumeBrowser();
+
+    expect(firstSignal?.aborted).toBe(true);
+    expect(listNodes).toHaveBeenCalledTimes(2);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
+      directoryStatus: "ready",
+    });
+  });
+
+  it("aborts same-node activation when the browser is suspended again", async () => {
+    vi.useFakeTimers();
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      browserStatus: "current",
+      generation: 4,
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([selected]);
+    activateHostedNode.mockImplementationOnce(
+      async (_node, _previousEnvironmentId, signal: AbortSignal | undefined) =>
+        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve())),
+    );
+
+    hostedHubController.suspendBrowser("hidden");
+    const interrupted = hostedHubController.resumeBrowser();
+    await vi.waitFor(() => expect(activateHostedNode).toHaveBeenCalledOnce());
+    const firstSignal = activateHostedNode.mock.calls[0]?.[2] as AbortSignal | undefined;
+    hostedHubController.suspendBrowser("hidden");
+    await interrupted;
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(firstSignal?.aborted).toBe(true);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "suspended",
+      sessionStatus: "stale",
+      generation: 7,
+    });
+    expect(useHostedHubStore.getState().transportStatus).not.toBe("terminal-failure");
+
+    await hostedHubController.resumeBrowser();
+    expect(activateHostedNode).toHaveBeenCalledTimes(2);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "synchronizing",
+      sessionStatus: "synchronizing",
+      generation: 8,
+    });
+  });
+
+  it("restarts full resume after a stale directory retry recovers", async () => {
+    vi.useFakeTimers();
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+      browserStatus: "current",
+      generation: 4,
+    });
+    const restoreSession = vi
+      .spyOn(hostedHubApi, "restoreSession")
+      .mockResolvedValue(sessionResponse);
+    const listNodes = vi
+      .spyOn(hostedHubApi, "listNodes")
+      .mockRejectedValueOnce(new HostedHubApiError("unavailable", 0))
+      .mockResolvedValue([selected]);
+
+    hostedHubController.suspendBrowser("hidden");
+    await hostedHubController.resumeBrowser();
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "stale",
+      directoryStatus: "stale",
+      effectiveRole: null,
+    });
+
+    await hostedHubController.refreshDirectory();
+    await vi.waitFor(() => expect(restoreSession).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(activateHostedNode).toHaveBeenCalledOnce());
+
+    expect(listNodes).toHaveBeenCalledTimes(3);
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "synchronizing",
+      directoryStatus: "ready",
+      sessionStatus: "synchronizing",
+    });
+    hostedHubController.markSessionReady(selected.environmentId);
+    expect(useHostedHubStore.getState().browserStatus).toBe("current");
+  });
+
   it("switches nodes through the ordered environment teardown boundary", async () => {
     const first = node();
     const second = node("node_bbbbbbbbbbbbbbbbbbbbbb", "owner");
@@ -398,6 +731,47 @@ describe("hosted registration and directory state", () => {
     expect(useHostedHubStore.getState().sessionStatus).toBe("ready");
   });
 
+  it("rejects node selection while browser access is being revalidated", async () => {
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      browserStatus: "checking-access",
+      nodes: [selected],
+    });
+
+    await hostedHubController.selectNode(selected.id);
+
+    expect(activateHostedNode).not.toHaveBeenCalled();
+    expect(useHostedHubStore.getState().selectedNode).toBeNull();
+  });
+
+  it("ends browser synchronization after a terminal relay failure", () => {
+    const selected = node();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      browserStatus: "synchronizing",
+      nodes: [selected],
+      selectedNode: selected,
+      selectionStatus: "online",
+      effectiveRole: selected.effectiveRole,
+      transportStatus: "connecting",
+      sessionStatus: "synchronizing",
+      generation: 5,
+    });
+
+    hostedHubController.failure(5, { kind: "incompatible", retryable: false });
+
+    expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
+      selectionStatus: "incompatible",
+      effectiveRole: null,
+      transportStatus: "terminal-failure",
+      sessionStatus: "stale",
+    });
+  });
+
   it("fails initial synchronization after exactly thirty seconds", async () => {
     vi.useFakeTimers();
     const selected = node();
@@ -408,11 +782,13 @@ describe("hosted registration and directory state", () => {
     });
 
     await hostedHubController.selectNode(selected.id);
+    useHostedHubStore.setState({ browserStatus: "synchronizing" });
     await vi.advanceTimersByTimeAsync(29_999);
     expect(useHostedHubStore.getState().transportStatus).not.toBe("terminal-failure");
 
     await vi.advanceTimersByTimeAsync(1);
     expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
       transportStatus: "terminal-failure",
       sessionStatus: "stale",
       sessionEstablished: false,
@@ -492,7 +868,11 @@ describe("hosted registration and directory state", () => {
     ]);
 
     expect(activateHostedNode).toHaveBeenCalledOnce();
-    expect(activateHostedNode).toHaveBeenCalledWith(selected, selected.environmentId);
+    expect(activateHostedNode).toHaveBeenCalledWith(
+      selected,
+      selected.environmentId,
+      expect.any(AbortSignal),
+    );
     expect(useHostedHubStore.getState()).toMatchObject({
       generation: 8,
       transportStatus: "idle",
@@ -508,6 +888,7 @@ describe("hosted registration and directory state", () => {
     useHostedHubStore.setState({
       accountStatus: "authenticated",
       selectedNode: selected,
+      browserStatus: "synchronizing",
       transportStatus: "online",
       sessionStatus: "synchronizing",
       sessionEstablished: false,
@@ -516,6 +897,7 @@ describe("hosted registration and directory state", () => {
 
     hostedHubController.reportShellSnapshotFailure(selected.environmentId);
     expect(useHostedHubStore.getState()).toMatchObject({
+      browserStatus: "current",
       transportStatus: "terminal-failure",
       errorMessage: "Ryco state could not be synchronized.",
     });

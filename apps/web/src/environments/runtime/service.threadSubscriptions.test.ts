@@ -216,6 +216,7 @@ describe("retainThreadDetailSubscription", () => {
   afterEach(async () => {
     const { resetEnvironmentServiceForTests } = await import("./service");
     await resetEnvironmentServiceForTests();
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -271,6 +272,33 @@ describe("retainThreadDetailSubscription", () => {
 
     expect(mockCreateEnvironmentConnection).not.toHaveBeenCalled();
     expect(listEnvironmentConnections()).toEqual([]);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("drops shell snapshots after browser suspension invalidates the hosted generation", async () => {
+    vi.stubEnv("VITE_RYCO_CLIENT_MODE", "hosted-hub");
+    const { hostedHubController, useHostedHubStore } = await import("~/hostedHub/state");
+    const { useStore } = await import("~/store");
+    useHostedHubStore.setState({ accountStatus: "authenticated", generation: 7 });
+    const syncServerShellSnapshot = vi.spyOn(useStore.getState(), "syncServerShellSnapshot");
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+    const stop = startEnvironmentConnectionService();
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    const environmentId = EnvironmentId.make("env-1");
+    const currentSnapshot = makeThreadShellSnapshot({ threadId: ThreadId.make("thread-current") });
+    const staleSnapshot = makeThreadShellSnapshot({ threadId: ThreadId.make("thread-stale") });
+    expect(connectionInput).toBeDefined();
+
+    connectionInput.syncShellSnapshot(currentSnapshot, environmentId);
+    expect(syncServerShellSnapshot).toHaveBeenCalledOnce();
+
+    hostedHubController.suspendBrowser("hidden");
+    expect(useHostedHubStore.getState().generation).toBe(8);
+    connectionInput.syncShellSnapshot(staleSnapshot, environmentId);
+    expect(syncServerShellSnapshot).toHaveBeenCalledOnce();
 
     stop();
     await resetEnvironmentServiceForTests();

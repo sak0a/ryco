@@ -116,7 +116,7 @@ describe("HostedRelayAttemptFactory", () => {
     });
   });
 
-  it("authorizes bootstrap subscriptions from a fresh directory role before socket open", () => {
+  it("authorizes only bootstrap subscriptions while the hosted session opens", () => {
     const lifecycle = new HostedRelayAttemptFactory().lifecycleHandlers();
 
     expect(
@@ -125,6 +125,24 @@ describe("HostedRelayAttemptFactory", () => {
         stream: true,
       }),
     ).toBe(true);
+    expect(
+      lifecycle.authorizeRequest?.({
+        tag: WS_METHODS.subscribeTerminalEvents,
+        stream: true,
+      }),
+    ).toBe(true);
+    expect(
+      lifecycle.authorizeRequest?.({
+        tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+        stream: false,
+      }),
+    ).toBe(false);
+    expect(
+      lifecycle.authorizeRequest?.({
+        tag: WS_METHODS.gitRunStackedAction,
+        stream: true,
+      }),
+    ).toBe(false);
 
     useHostedHubStore.setState({ directoryStatus: "stale" });
     expect(
@@ -133,6 +151,44 @@ describe("HostedRelayAttemptFactory", () => {
         stream: true,
       }),
     ).toBe(false);
+  });
+
+  it("denies RPCs at the transport boundary until browser recovery is complete", () => {
+    const lifecycle = new HostedRelayAttemptFactory().lifecycleHandlers();
+    const dispatch = {
+      tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+      stream: false,
+    } as const;
+    const subscribeShell = {
+      tag: ORCHESTRATION_WS_METHODS.subscribeShell,
+      stream: true,
+    } as const;
+    useHostedHubStore.setState({
+      transportStatus: "online",
+      sessionStatus: "ready",
+      browserStatus: "current",
+    });
+
+    expect(lifecycle.authorizeRequest?.(dispatch)).toBe(true);
+    hostedHubController.suspendBrowser("hidden");
+    expect(useHostedHubStore.getState()).toMatchObject({
+      directoryStatus: "ready",
+      effectiveRole: "operator",
+      browserStatus: "suspended",
+      sessionStatus: "stale",
+    });
+    expect(lifecycle.authorizeRequest?.(dispatch)).toBe(false);
+    expect(lifecycle.authorizeRequest?.(subscribeShell)).toBe(false);
+
+    useHostedHubStore.setState({
+      browserStatus: "synchronizing",
+      sessionStatus: "stale",
+    });
+    expect(lifecycle.authorizeRequest?.(dispatch)).toBe(false);
+    expect(lifecycle.authorizeRequest?.(subscribeShell)).toBe(true);
+
+    useHostedHubStore.setState({ browserStatus: "current", sessionStatus: "ready" });
+    expect(lifecycle.authorizeRequest?.(dispatch)).toBe(true);
   });
   it("requests and consumes one memory-only ticket per connection attempt", async () => {
     const ticket = encodeBase64Url(new Uint8Array(32).fill(9));
@@ -179,6 +235,30 @@ describe("HostedRelayAttemptFactory", () => {
 
     expect(useHostedHubStore.getState().transportStatus).toBe("connecting");
     expect(JSON.stringify(useHostedHubStore.getState())).not.toContain(ticket);
+  });
+
+  it("stops automatic relay reconnects while the browser is suspended", async () => {
+    vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
+      ticket: encodeBase64Url(new Uint8Array(32).fill(8)),
+      expiresAt: Date.now() + 60_000,
+      protocolMajor: 1,
+      protocolMinor: 2,
+    });
+    const factory = new HostedRelayAttemptFactory();
+    const lifecycle = factory.lifecycleHandlers();
+    await factory.nextUrl();
+
+    expect(lifecycle.shouldReconnect?.()).toBe(true);
+    hostedHubController.suspendBrowser("hidden");
+    expect(lifecycle.shouldReconnect?.()).toBe(false);
+
+    useHostedHubStore.setState({ browserStatus: "checking-access" });
+    expect(lifecycle.shouldReconnect?.()).toBe(false);
+    useHostedHubStore.setState({ browserStatus: "synchronizing" });
+    expect(lifecycle.shouldReconnect?.()).toBe(false);
+
+    await factory.nextUrl();
+    expect(lifecycle.shouldReconnect?.()).toBe(true);
   });
 
   it("stops terminal ticket preflight without opening a socket", async () => {
@@ -230,6 +310,7 @@ describe("HostedRelayAttemptFactory", () => {
       tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
       stream: false,
     });
+    expect(factory.hasPendingRequests()).toBe(true);
     lifecycle.onRequestStart?.({ id: "read-1", tag: WS_METHODS.projectsList, stream: false });
     lifecycle.onRequestExit?.({ id: "read-1", tag: WS_METHODS.projectsList, stream: false });
     sockets[0]!.fail();
@@ -237,6 +318,64 @@ describe("HostedRelayAttemptFactory", () => {
       transportStatus: "reconnecting",
       sessionStatus: "delivery-unknown",
     });
+    expect(factory.hasPendingRequests()).toBe(false);
+  });
+
+  it("preserves streaming mutation uncertainty through progress until final exit", async () => {
+    vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
+      ticket: encodeBase64Url(new Uint8Array(32).fill(4)),
+      expiresAt: Date.now() + 60_000,
+      protocolMajor: 1,
+      protocolMinor: 2,
+    });
+    const factory = new HostedRelayAttemptFactory();
+    const lifecycle = factory.lifecycleHandlers();
+    factory.createSocket(await factory.nextUrl());
+
+    lifecycle.onRequestStart?.({
+      id: "subscription-1",
+      tag: ORCHESTRATION_WS_METHODS.subscribeShell,
+      stream: true,
+    });
+    expect(factory.hasPendingRequests()).toBe(false);
+
+    lifecycle.onRequestStart?.({
+      id: "stacked-action-1",
+      tag: WS_METHODS.gitRunStackedAction,
+      stream: true,
+    });
+    lifecycle.onRequestChunk?.({
+      id: "stacked-action-1",
+      tag: WS_METHODS.gitRunStackedAction,
+      chunkCount: 1,
+    });
+    expect(factory.hasPendingRequests()).toBe(true);
+
+    sockets[0]!.fail();
+    expect(useHostedHubStore.getState()).toMatchObject({
+      transportStatus: "reconnecting",
+      sessionStatus: "delivery-unknown",
+    });
+    expect(factory.hasPendingRequests()).toBe(false);
+  });
+
+  it("clears streaming mutation uncertainty after final exit", () => {
+    const factory = new HostedRelayAttemptFactory();
+    const lifecycle = factory.lifecycleHandlers();
+
+    lifecycle.onRequestStart?.({
+      id: "stacked-action-1",
+      tag: WS_METHODS.gitRunStackedAction,
+      stream: true,
+    });
+    expect(factory.hasPendingRequests()).toBe(true);
+
+    lifecycle.onRequestExit?.({
+      id: "stacked-action-1",
+      tag: WS_METHODS.gitRunStackedAction,
+      stream: true,
+    });
+    expect(factory.hasPendingRequests()).toBe(false);
   });
 
   it("keeps generic retry delays state-neutral", async () => {

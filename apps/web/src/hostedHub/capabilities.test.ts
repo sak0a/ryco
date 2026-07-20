@@ -26,6 +26,29 @@ describe("hosted UI capabilities", () => {
     ).toMatchObject({ allowed: false, reason: expect.any(String) });
   });
 
+  it("fails closed while the browser resume or Ryco session is stale", () => {
+    expect(
+      resolveHostedRpcCapability({
+        hosted: true,
+        role: "operator",
+        fresh: true,
+        browserCurrent: false,
+        sessionReady: true,
+        method: ORCHESTRATION_WS_METHODS.dispatchCommand,
+      }).allowed,
+    ).toBe(false);
+    expect(
+      resolveHostedRpcCapability({
+        hosted: true,
+        role: "operator",
+        fresh: true,
+        browserCurrent: true,
+        sessionReady: false,
+        method: ORCHESTRATION_WS_METHODS.dispatchCommand,
+      }).allowed,
+    ).toBe(false);
+  });
+
   it("adapts viewer, operator, and owner actions from the server policy", () => {
     const allowed = (role: "viewer" | "operator" | "owner", method: string) =>
       resolveHostedRpcCapability({ hosted: true, role, fresh: true, method }).allowed;

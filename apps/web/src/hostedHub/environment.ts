@@ -103,11 +103,18 @@ export async function deactivateHostedNode(environmentId: EnvironmentId): Promis
 export async function activateHostedNode(
   node: HostedHubNode,
   previousEnvironmentId: EnvironmentId | null,
+  signal?: AbortSignal,
 ): Promise<void> {
   await enqueueTransition(async () => {
+    if (signal?.aborted) return;
     const previous = activeHostedEnvironmentId ?? previousEnvironmentId;
-    if (previous) {
+    if (previous === node.environmentId) {
+      resetHostedRelayAttemptFactory();
+      await disconnectPrimaryEnvironment();
+      if (signal?.aborted) return;
+    } else if (previous) {
       await deactivateCurrentHostedNode(previous);
+      if (signal?.aborted) return;
     }
     writePrimaryEnvironmentDescriptor(descriptorForNode(node));
     useStore.getState().setActiveEnvironmentId(node.environmentId);

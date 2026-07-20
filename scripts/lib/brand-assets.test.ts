@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -113,5 +115,25 @@ describe("brand-assets", () => {
       sourceRelativePath: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
       targetRelativePath: "apps/web/dist/apple-touch-icon.png",
     });
+  });
+
+  it.each([
+    BRAND_ASSET_PATHS.productionWebSiteManifest,
+    BRAND_ASSET_PATHS.nightlyWebSiteManifest,
+    BRAND_ASSET_PATHS.developmentWebSiteManifest,
+    "apps/web/public/site.webmanifest",
+  ])("keeps %s installable within its serving scope", (manifestPath) => {
+    const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+    const manifest = JSON.parse(readFileSync(`${repoRoot}/${manifestPath}`, "utf8")) as {
+      readonly id?: string;
+      readonly start_url?: string;
+      readonly scope?: string;
+      readonly display?: string;
+      readonly icons?: ReadonlyArray<{ readonly purpose?: string }>;
+    };
+
+    expect(manifest).toMatchObject({ id: ".", start_url: ".", scope: ".", display: "standalone" });
+    expect(manifest.icons).toHaveLength(2);
+    expect(manifest.icons?.every((icon) => icon.purpose === "any maskable")).toBe(true);
   });
 });

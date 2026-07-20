@@ -1,0 +1,199 @@
+import type { Plugin } from "vite";
+
+import { renderHostedPwaOfflineDocument } from "./offlineDocument";
+import { HOSTED_PWA_NETWORK_ONLY_PATH_PREFIXES } from "./serviceWorkerPolicy";
+
+export interface HostedPwaBundleEntry {
+  readonly dynamicImports?: ReadonlyArray<string>;
+  readonly fileName: string;
+  readonly importedAssets?: ReadonlyArray<string>;
+  readonly importedCss?: ReadonlyArray<string>;
+  readonly imports?: ReadonlyArray<string>;
+  readonly isEntry?: boolean;
+  readonly referencedFiles?: ReadonlyArray<string>;
+}
+
+export interface HostedPwaPrecache {
+  readonly cacheName: string;
+  readonly urls: ReadonlyArray<string>;
+}
+
+const IMMUTABLE_ASSET_PATTERN =
+  /(?:^|\/)[^/]+-[A-Za-z0-9_-]{8,}\.(?:css|gif|jpe?g|js|mjs|png|svg|ttf|webp|woff2?)$/i;
+const CACHE_NAME_PREFIX = "ryco-pwa-shell-";
+const FNV_OFFSET_BASIS = 0xcbf29ce484222325n;
+const FNV_PRIME = 0x100000001b3n;
+const UINT64_MASK = 0xffffffffffffffffn;
+
+function normalizeBase(base: string): string {
+  const withLeadingSlash = base.startsWith("/") ? base : `/${base}`;
+  return withLeadingSlash.endsWith("/") ? withLeadingSlash : `${withLeadingSlash}/`;
+}
+
+function pathAtBase(base: string, fileName: string): string {
+  return `${normalizeBase(base)}${fileName.replace(/^\/+/, "")}`;
+}
+
+function stableDigest(value: string): string {
+  let hash = FNV_OFFSET_BASIS;
+  for (const character of value) {
+    hash ^= BigInt(character.codePointAt(0) ?? 0);
+    hash = (hash * FNV_PRIME) & UINT64_MASK;
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+export function resolveHostedPwaPrecache(input: {
+  readonly base: string;
+  readonly entries: ReadonlyArray<HostedPwaBundleEntry>;
+  readonly offlineDocument: string;
+}): HostedPwaPrecache {
+  const entriesByFileName = new Map(input.entries.map((entry) => [entry.fileName, entry]));
+  const pendingFileNames = input.entries
+    .filter((entry) => entry.isEntry)
+    .map((entry) => entry.fileName);
+  const reachableFileNames = new Set<string>();
+
+  for (let index = 0; index < pendingFileNames.length; index += 1) {
+    const fileName = pendingFileNames[index];
+    if (!fileName || reachableFileNames.has(fileName)) continue;
+    reachableFileNames.add(fileName);
+    const entry = entriesByFileName.get(fileName);
+    if (!entry) continue;
+    pendingFileNames.push(
+      ...(entry.dynamicImports ?? []),
+      ...(entry.imports ?? []),
+      ...(entry.importedCss ?? []),
+      ...(entry.importedAssets ?? []),
+      ...(entry.referencedFiles ?? []),
+    );
+  }
+
+  const urls = [
+    ...new Set(
+      [...reachableFileNames]
+        .filter((fileName) => IMMUTABLE_ASSET_PATTERN.test(fileName))
+        .map((fileName) => pathAtBase(input.base, fileName)),
+    ),
+    pathAtBase(input.base, "offline.html"),
+  ].toSorted();
+
+  return {
+    cacheName: `${CACHE_NAME_PREFIX}${stableDigest(
+      `${urls.join("\n")}\noffline:${stableDigest(input.offlineDocument)}`,
+    )}`,
+    urls,
+  };
+}
+
+export const HOSTED_PWA_CACHE_NAME_PREFIX = CACHE_NAME_PREFIX;
+
+export function renderHostedPwaServiceWorker(input: HostedPwaPrecache): string {
+  return `"use strict";
+const CACHE_NAME = ${JSON.stringify(input.cacheName)};
+const CACHE_PREFIX = ${JSON.stringify(CACHE_NAME_PREFIX)};
+const PRECACHE_URLS = ${JSON.stringify(input.urls)};
+const NETWORK_ONLY_PATH_PREFIXES = ${JSON.stringify(HOSTED_PWA_NETWORK_ONLY_PATH_PREFIXES)};
+const ACTIVATION_MESSAGE = "ryco:pwa:activate:v1";
+const absolutePrecacheUrls = new Set(PRECACHE_URLS.map((url) => new URL(url, self.registration.scope).href));
+const offlineUrl = new URL(PRECACHE_URLS.find((url) => url.endsWith("/offline.html")), self.registration.scope).href;
+
+function hasPathPrefix(pathname, prefix) {
+  return pathname === prefix || pathname.startsWith(prefix + "/");
+}
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS)));
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((names) => Promise.all(names.filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME).map((name) => caches.delete(name))))
+      .then(() => self.clients.claim()),
+  );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === ACTIVATION_MESSAGE) {
+    event.waitUntil(self.skipWaiting());
+  }
+});
+
+self.addEventListener("fetch", (event) => {
+  const request = event.request;
+  if (request.method !== "GET") return;
+
+  const url = new URL(request.url);
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.origin !== self.location.origin) return;
+  if (request.headers.has("range")) return;
+  if (request.headers.get("accept")?.toLowerCase().includes("text/event-stream")) return;
+  if (NETWORK_ONLY_PATH_PREFIXES.some((prefix) => hasPathPrefix(url.pathname, prefix))) return;
+
+  if (request.mode === "navigate") {
+    event.respondWith(fetch(request).catch(async () => (await caches.match(offlineUrl)) ?? Response.error()));
+    return;
+  }
+
+  if (!absolutePrecacheUrls.has(url.href)) return;
+  event.respondWith(caches.open(CACHE_NAME).then(async (cache) => (await cache.match(request)) ?? fetch(request)));
+});
+`;
+}
+
+function entriesFromBundle(
+  bundle: Readonly<Record<string, { readonly fileName: string }>>,
+): ReadonlyArray<HostedPwaBundleEntry> {
+  return Object.values(bundle).map((entry) => {
+    const output = entry as typeof entry & {
+      readonly dynamicImports?: ReadonlyArray<string>;
+      readonly imports?: ReadonlyArray<string>;
+      readonly isEntry?: boolean;
+      readonly referencedFiles?: ReadonlyArray<string>;
+      readonly viteMetadata?: {
+        readonly importedAssets?: ReadonlySet<string>;
+        readonly importedCss?: ReadonlySet<string>;
+      };
+    };
+    return {
+      dynamicImports: output.dynamicImports ?? [],
+      fileName: output.fileName,
+      imports: output.imports ?? [],
+      isEntry: output.isEntry ?? false,
+      referencedFiles: output.referencedFiles ?? [],
+      importedAssets: [...(output.viteMetadata?.importedAssets ?? [])],
+      importedCss: [...(output.viteMetadata?.importedCss ?? [])],
+    };
+  });
+}
+
+export function createHostedPwaBuildPlugin(): Plugin {
+  let publicBase = "/";
+  return {
+    name: "ryco-hosted-pwa",
+    apply: "build",
+    configResolved(config) {
+      publicBase = config.base;
+    },
+    generateBundle(_outputOptions, bundle) {
+      const offlineDocument = renderHostedPwaOfflineDocument({
+        startUrl: normalizeBase(publicBase),
+      });
+      const precache = resolveHostedPwaPrecache({
+        base: publicBase,
+        entries: entriesFromBundle(bundle),
+        offlineDocument,
+      });
+      this.emitFile({
+        type: "asset",
+        fileName: "offline.html",
+        source: offlineDocument,
+      });
+      this.emitFile({
+        type: "asset",
+        fileName: "service-worker.js",
+        source: renderHostedPwaServiceWorker(precache),
+      });
+    },
+  };
+}
