@@ -33,6 +33,7 @@ import {
   activateHostedNode,
   clearHostedNodeScopedState,
   deactivateHostedNode,
+  suspendHostedNode,
 } from "./environment";
 
 const environmentId = EnvironmentId.make("env_aaaaaaaaaaaaaaaaaaaaaa");
@@ -119,5 +120,45 @@ describe("hosted node cleanup", () => {
     expect(resetHostedRelayAttemptFactory).toHaveBeenCalledOnce();
     expect(disconnectPrimaryEnvironment).toHaveBeenCalledOnce();
     expect(connectPrimaryEnvironment).toHaveBeenCalledTimes(2);
+  });
+
+  it("suspends hosted transport idempotently without clearing same-node presentation state", async () => {
+    const selectedNode: HostedHubNode = {
+      id: "node_aaaaaaaaaaaaaaaaaaaaaa",
+      environmentId,
+      label: "Node",
+      platformOs: "linux",
+      platformArch: "x64",
+      clientVersion: "0.9.0",
+      createdAt: 1,
+      updatedAt: 1,
+      lastAuthenticatedAt: 1,
+      revokedAt: null,
+      revocationReasonCode: null,
+      grant: { id: "grant_aaaaaaaaaaaaaaaaaaaaaa", role: "operator" },
+      effectiveRole: "operator",
+      presence: { online: true, lastHeartbeatAt: 1 },
+    };
+    await activateHostedNode(selectedNode, null);
+    useComposerDraftStore.getState().setPrompt(DraftId.make("draft-thread"), "unsent prompt");
+    vi.clearAllMocks();
+
+    await Promise.all([
+      suspendHostedNode(environmentId),
+      suspendHostedNode(environmentId),
+      suspendHostedNode(environmentId),
+    ]);
+
+    expect(resetHostedRelayAttemptFactory).toHaveBeenCalledOnce();
+    expect(disconnectPrimaryEnvironment).toHaveBeenCalledOnce();
+    expect(writePrimaryEnvironmentDescriptor).not.toHaveBeenCalled();
+    expect(Object.values(useComposerDraftStore.getState().draftsByThreadKey)).toContainEqual(
+      expect.objectContaining({ prompt: "unsent prompt" }),
+    );
+
+    await activateHostedNode(selectedNode, environmentId);
+    expect(resetHostedRelayAttemptFactory).toHaveBeenCalledOnce();
+    expect(disconnectPrimaryEnvironment).toHaveBeenCalledOnce();
+    expect(connectPrimaryEnvironment).toHaveBeenCalledOnce();
   });
 });

@@ -1931,7 +1931,7 @@ export function startEnvironmentConnectionService(): () => void {
       .catch(() => undefined);
   }
 
-  const unsubscribeBrowserResumeReconnects = subscribeBrowserResumeReconnects();
+  const unsubscribeBrowserResumeReconnects = hostedMode ? NOOP : subscribeBrowserResumeReconnects();
 
   const service: EnvironmentServiceState = {
     queryInvalidationThrottler,

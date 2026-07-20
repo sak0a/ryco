@@ -95,6 +95,7 @@ class HostedHubController {
   #retrySelectedNodePromise: Promise<void> | null = null;
   #browserResumeOperation: AbortController | null = null;
   #browserResumePromise: Promise<void> | null = null;
+  #browserSuspendPromise: Promise<void> | null = null;
   #browserLifecycleGeneration = 0;
 
   bootstrap(): Promise<void> {
@@ -221,6 +222,7 @@ class HostedHubController {
     this.#browserResumeOperation?.abort();
     this.#browserResumeOperation = null;
     this.#browserResumePromise = null;
+    this.#browserSuspendPromise = null;
     this.#browserLifecycleGeneration += 1;
     hostedHubApi.clearSessionMaterial();
     useHostedHubStore.setState(initialState, true);
@@ -266,6 +268,16 @@ class HostedHubController {
       sessionRecoveredAfterUnknown: false,
       generation: state.generation + 1,
     });
+    if (state.selectedNode && !this.#browserSuspendPromise) {
+      const environmentId = state.selectedNode.environmentId;
+      const promise = import("./environment")
+        .then(({ suspendHostedNode }) => suspendHostedNode(environmentId))
+        .catch(() => undefined)
+        .finally(() => {
+          if (this.#browserSuspendPromise === promise) this.#browserSuspendPromise = null;
+        });
+      this.#browserSuspendPromise = promise;
+    }
   }
 
   resumeBrowser(): Promise<void> {
@@ -491,6 +503,8 @@ class HostedHubController {
   }
 
   async #retrySelectedNode(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return;
+    await this.#browserSuspendPromise;
     if (signal.aborted) return;
     let state = useHostedHubStore.getState();
     const node = state.selectedNode;

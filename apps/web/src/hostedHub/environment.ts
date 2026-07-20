@@ -78,6 +78,7 @@ export function clearHostedNodeScopedState(environmentId: EnvironmentId): void {
 }
 
 let activeHostedEnvironmentId: EnvironmentId | null = null;
+let hostedTransportSuspended = false;
 let transition: Promise<void> = Promise.resolve();
 
 function enqueueTransition(work: () => Promise<void>): Promise<void> {
@@ -92,11 +93,22 @@ async function deactivateCurrentHostedNode(environmentId: EnvironmentId): Promis
   clearHostedNodeScopedState(environmentId);
   writePrimaryEnvironmentDescriptor(null);
   if (activeHostedEnvironmentId === environmentId) activeHostedEnvironmentId = null;
+  hostedTransportSuspended = false;
 }
 
 export async function deactivateHostedNode(environmentId: EnvironmentId): Promise<void> {
   await enqueueTransition(async () => {
     await deactivateCurrentHostedNode(activeHostedEnvironmentId ?? environmentId);
+  });
+}
+
+export async function suspendHostedNode(environmentId: EnvironmentId): Promise<void> {
+  await enqueueTransition(async () => {
+    const activeEnvironmentId = activeHostedEnvironmentId ?? environmentId;
+    if (activeEnvironmentId !== environmentId || hostedTransportSuspended) return;
+    hostedTransportSuspended = true;
+    resetHostedRelayAttemptFactory();
+    await disconnectPrimaryEnvironment();
   });
 }
 
@@ -109,8 +121,10 @@ export async function activateHostedNode(
     if (signal?.aborted) return;
     const previous = activeHostedEnvironmentId ?? previousEnvironmentId;
     if (previous === node.environmentId) {
-      resetHostedRelayAttemptFactory();
-      await disconnectPrimaryEnvironment();
+      if (!hostedTransportSuspended) {
+        resetHostedRelayAttemptFactory();
+        await disconnectPrimaryEnvironment();
+      }
       if (signal?.aborted) return;
     } else if (previous) {
       await deactivateCurrentHostedNode(previous);
@@ -119,6 +133,7 @@ export async function activateHostedNode(
     writePrimaryEnvironmentDescriptor(descriptorForNode(node));
     useStore.getState().setActiveEnvironmentId(node.environmentId);
     activeHostedEnvironmentId = node.environmentId;
+    hostedTransportSuspended = false;
     connectPrimaryEnvironment();
   });
 }

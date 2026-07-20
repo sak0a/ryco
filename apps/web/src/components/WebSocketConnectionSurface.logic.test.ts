@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import type { WsConnectionStatus } from "../rpc/wsConnectionState";
-import { shouldAutoReconnect, shouldRestartStalledReconnect } from "./WebSocketConnectionSurface";
+import {
+  allowsGenericConnectionRecovery,
+  shouldAutoReconnect,
+  shouldRestartStalledReconnect,
+} from "./WebSocketConnectionSurface";
 
 function makeStatus(overrides: Partial<WsConnectionStatus> = {}): WsConnectionStatus {
   return {
@@ -26,6 +30,11 @@ function makeStatus(overrides: Partial<WsConnectionStatus> = {}): WsConnectionSt
 }
 
 describe("WebSocketConnectionSurface.logic", () => {
+  it("leaves hosted recovery to the hosted lifecycle owner", () => {
+    expect(allowsGenericConnectionRecovery("hosted-lifecycle")).toBe(false);
+    expect(allowsGenericConnectionRecovery("generic")).toBe(true);
+  });
+
   it("forces reconnect on online when the app was offline", () => {
     expect(
       shouldAutoReconnect(
