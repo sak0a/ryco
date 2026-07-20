@@ -25,7 +25,7 @@ import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { Option } from "effect";
 import { HttpResponse, http, ws } from "msw";
 import { setupWorker } from "msw/browser";
-import { cdp, page } from "vite-plus/test/browser";
+import { page } from "vite-plus/test/browser";
 import {
   afterAll,
   afterEach,
@@ -66,6 +66,7 @@ import { selectBootstrapCompleteForActiveEnvironment, useStore } from "../store"
 import { useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
 import { createAuthenticatedSessionHandlers } from "../../test/authHttpHandlers";
+import { setCoarsePointerEmulation } from "../../test/browserPointer";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
 import { toastManager } from "./ui/toast";
 
@@ -200,6 +201,20 @@ const PHONE_VIEWPORT: ViewportSpec = {
   name: "phone",
   width: 390,
   height: 844,
+  textTolerancePx: 56,
+  attachmentTolerancePx: 56,
+};
+const NARROW_TABLET_VIEWPORT: ViewportSpec = {
+  name: "narrow-tablet",
+  width: 700,
+  height: 900,
+  textTolerancePx: 56,
+  attachmentTolerancePx: 56,
+};
+const TABLET_VIEWPORT: ViewportSpec = {
+  name: "tablet",
+  width: 768,
+  height: 1_024,
   textTolerancePx: 56,
   attachmentTolerancePx: 56,
 };
@@ -1053,30 +1068,25 @@ function createSnapshotWithWideMarkdownTable(): OrchestrationReadModel {
   };
 }
 
-// The published CDPSession type is an empty interface; the playwright
-// provider's session exposes `send` at runtime.
-interface CdpEmulationSession {
-  send: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
-}
-
 // Emulates a touch primary pointer so `pointer-coarse:` styles apply; the
 // emulation is always reverted so later tests keep the fine-pointer default.
 async function withCoarsePointer(run: () => Promise<void>): Promise<void> {
-  const session = cdp() as unknown as CdpEmulationSession;
-  await session.send("Emulation.setTouchEmulationEnabled", {
-    enabled: true,
-    maxTouchPoints: 1,
-  });
+  await setCoarsePointerEmulation(true);
   try {
     await vi.waitFor(() => {
       expect(window.matchMedia("(pointer: coarse)").matches).toBe(true);
     });
     await run();
   } finally {
-    await session.send("Emulation.setTouchEmulationEnabled", { enabled: false });
-    await vi.waitFor(() => {
-      expect(window.matchMedia("(pointer: coarse)").matches).toBe(false);
-    });
+    try {
+      await setCoarsePointerEmulation(false);
+      await vi.waitFor(() => {
+        expect(window.matchMedia("(pointer: coarse)").matches).toBe(false);
+      });
+    } catch (revertError) {
+      // Surface revert failures without masking an assertion error from run().
+      console.error("Failed to revert coarse pointer emulation", revertError);
+    }
   }
 }
 
@@ -6671,26 +6681,33 @@ describe("ChatView timeline estimator parity (full app)", () => {
         title: "Reconnecting",
         description: "Attempting to restore the connection.",
         type: "info",
+        // Keep the toast mounted across the viewport sweep below.
+        timeout: 0,
       });
 
       const toastRoot = await waitForElement(
         () => document.querySelector<HTMLElement>('[data-slot="toast-viewport"] [data-position]'),
         "Unable to find the mounted toast.",
       );
-      await vi.waitFor(() => {
-        const toastRect = toastRoot.getBoundingClientRect();
-        const tabsRect = tabStrip.getBoundingClientRect();
-        expect(toastRect.height).toBeGreaterThan(0);
-        expect(toastRect.top).toBeGreaterThanOrEqual(tabsRect.bottom);
-      });
+      // The mobile chat header (and its tab strip) renders below md, so the
+      // notice must clear the tab strip across the whole sub-768px range.
+      for (const viewport of [PHONE_VIEWPORT, NARROW_PHONE_VIEWPORT, NARROW_TABLET_VIEWPORT]) {
+        await mounted.setViewport(viewport);
+        await vi.waitFor(() => {
+          const toastRect = toastRoot.getBoundingClientRect();
+          const tabsRect = tabStrip.getBoundingClientRect();
+          expect(toastRect.height).toBeGreaterThan(0);
+          expect(toastRect.top).toBeGreaterThanOrEqual(tabsRect.bottom);
+        });
 
-      const composerForm = await waitForElement(
-        () => document.querySelector<HTMLElement>('[data-chat-composer-form="true"]'),
-        "Unable to find the composer form.",
-      );
-      expect(toastRoot.getBoundingClientRect().bottom).toBeLessThan(
-        composerForm.getBoundingClientRect().top,
-      );
+        const composerForm = await waitForElement(
+          () => document.querySelector<HTMLElement>('[data-chat-composer-form="true"]'),
+          "Unable to find the composer form.",
+        );
+        expect(toastRoot.getBoundingClientRect().bottom).toBeLessThan(
+          composerForm.getBoundingClientRect().top,
+        );
+      }
 
       // Desktop placement is unchanged: inset 32px + header offset 52px.
       await mounted.setViewport(DEFAULT_VIEWPORT);
@@ -6703,6 +6720,151 @@ describe("ChatView timeline estimator parity (full app)", () => {
       if (toastId !== null) {
         toastManager.close(toastId);
       }
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps tablet-width sidebar density unchanged on coarse pointers", async () => {
+    const mounted = await mountChatView({
+      viewport: TABLET_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-tablet-density" as MessageId,
+        targetText: "tablet density thread",
+      }),
+    });
+
+    try {
+      // The persistent desktop sidebar renders at md and up; expand the
+      // worktree section so a thread row (and its actions) is in the DOM.
+      await page.getByRole("button", { name: "Expand main", exact: true }).click();
+      const threadRow = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="thread-row-thread-browser-test"]'),
+        "Unable to find the sidebar thread row.",
+      );
+      const archiveAction = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>('[data-testid="thread-archive-thread-browser-test"]'),
+        "Unable to find the sidebar thread archive action.",
+      );
+      const settingsTrigger = await waitForElement(
+        () => document.querySelector<HTMLElement>('[aria-label^="Open project settings for"]'),
+        "Unable to find the project settings action.",
+      );
+      const headerButton = await waitForElement(
+        () =>
+          settingsTrigger.parentElement?.querySelector<HTMLElement>(
+            '[data-sidebar="menu-button"]',
+          ) ?? null,
+        "Unable to find the project header row button.",
+      );
+
+      // Rect-based values can carry sub-pixel scaling from the shared test
+      // iframe, so they get range/tolerance assertions; computed styles are
+      // unscaled CSS px and stay exact.
+      const measureDensity = () => ({
+        threadRowHeight: threadRow.getBoundingClientRect().height,
+        archiveActionWidth: archiveAction.getBoundingClientRect().width,
+        archiveHitAreaContent: getComputedStyle(archiveAction, "::after").content,
+        headerPaddingRight: getComputedStyle(headerButton).paddingRight,
+        settingsRight: getComputedStyle(settingsTrigger).right,
+        settingsTop: getComputedStyle(settingsTrigger).top,
+      });
+
+      const baseline = measureDensity();
+      // Desktop values: 28px rows (h-7) and 20px actions (size-5); the coarse
+      // variants would be 44px rows and 32px actions.
+      expect(baseline.threadRowHeight).toBeLessThanOrEqual(28.5);
+      expect(baseline.archiveActionWidth).toBeGreaterThanOrEqual(18);
+      expect(baseline.archiveActionWidth).toBeLessThanOrEqual(22);
+      expect(baseline.archiveHitAreaContent).toBe("none");
+      expect(baseline.headerPaddingRight).toBe("80px");
+      expect(baseline.settingsRight).toBe("6px");
+      expect(baseline.settingsTop).toBe("4px");
+
+      // A coarse pointer at tablet width must not change the desktop density
+      // or positioning: the touch-target styles are gated below md.
+      await withCoarsePointer(async () => {
+        await waitForLayout();
+        const coarse = measureDensity();
+        expect(Math.abs(coarse.threadRowHeight - baseline.threadRowHeight)).toBeLessThanOrEqual(1);
+        expect(
+          Math.abs(coarse.archiveActionWidth - baseline.archiveActionWidth),
+        ).toBeLessThanOrEqual(1);
+        expect(coarse.archiveHitAreaContent).toBe(baseline.archiveHitAreaContent);
+        expect(coarse.headerPaddingRight).toBe(baseline.headerPaddingRight);
+        expect(coarse.settingsRight).toBe(baseline.settingsRight);
+        expect(coarse.settingsTop).toBe(baseline.settingsTop);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps approval actions visible when an approval arrives while the phone composer is expanded", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-phone-approval-expanded" as MessageId,
+        targetText: "phone expanded approval thread",
+      }),
+    });
+
+    try {
+      await page.getByRole("button", { name: "Expand composer" }).click();
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-composer-mobile-collapsed="false"]'),
+        ).not.toBeNull();
+      });
+
+      // Deliver the approval over the live thread subscription, mirroring an
+      // approval arriving while the user has the composer open.
+      const approvalSnapshot = createSnapshotWithPendingApproval();
+      fixture.snapshot = approvalSnapshot;
+      const approvalThread = approvalSnapshot.threads.find((thread) => thread.id === THREAD_ID);
+      if (!approvalThread) {
+        throw new Error("Expected the approval thread in the snapshot.");
+      }
+      rpcHarness.emitStreamValue(ORCHESTRATION_WS_METHODS.subscribeThread, {
+        kind: "snapshot",
+        snapshot: {
+          snapshotSequence: approvalSnapshot.snapshotSequence + 1,
+          thread: approvalThread,
+        },
+      });
+
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="pending-approval-detail"]'),
+        "Unable to find the pending approval detail block.",
+      );
+      await waitForLayout();
+
+      // Whether the composer stays expanded or collapses once the editor is
+      // disabled, every approval action must remain fully visible at 390px.
+      const buttons: HTMLElement[] = [];
+      for (const label of APPROVAL_ACTION_LABELS) {
+        buttons.push(
+          await waitForElement(
+            () => findButtonByText(label),
+            `Unable to find approval action "${label}".`,
+          ),
+        );
+      }
+      for (const button of buttons) {
+        const rect = button.getBoundingClientRect();
+        expect(rect.width).toBeGreaterThan(0);
+        expect(rect.left).toBeGreaterThanOrEqual(-0.5);
+        expect(rect.right).toBeLessThanOrEqual(PHONE_VIEWPORT.width + 0.5);
+        expect(rect.top).toBeGreaterThanOrEqual(-0.5);
+        expect(rect.bottom).toBeLessThanOrEqual(PHONE_VIEWPORT.height + 0.5);
+      }
+      // The four actions cannot fit one 390px line, so the row must wrap.
+      const rowTops = new Set(
+        buttons.map((button) => Math.round(button.getBoundingClientRect().top)),
+      );
+      expect(rowTops.size).toBeGreaterThan(1);
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(PHONE_VIEWPORT.width);
+    } finally {
       await mounted.cleanup();
     }
   });

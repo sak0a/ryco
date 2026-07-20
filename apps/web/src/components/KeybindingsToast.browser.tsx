@@ -27,7 +27,6 @@ import {
   it,
   vi,
 } from "vite-plus/test";
-import { cdp } from "vite-plus/test/browser";
 import { render } from "vitest-browser-react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -38,6 +37,7 @@ import { getWsConnectionStatus } from "../rpc/wsConnectionState";
 import { getRouter } from "../router";
 import { useStore } from "../store";
 import { createAuthenticatedSessionHandlers } from "../../test/authHttpHandlers";
+import { parkPointer } from "../../test/browserPointer";
 import { BrowserWsRpcHarness } from "../../test/wsRpcHarness";
 
 vi.mock("../lib/gitStatusState", () => ({
@@ -456,13 +456,8 @@ async function mountApp(): Promise<{ cleanup: () => Promise<void> }> {
   // landed. If a toast later mounts under that parked pointer, Base UI pauses
   // its dismiss timers (pause-on-hover) and the auto-dismiss assertions hang.
   // Park the pointer in the top-left corner, outside the toast region at
-  // every viewport width. The published CDPSession type is an empty
-  // interface; the playwright provider's session exposes `send` at runtime.
-  await (
-    cdp() as unknown as {
-      send: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
-    }
-  ).send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 4, y: 4 });
+  // every viewport width.
+  await parkPointer(4, 4);
   await waitForToastViewport();
   await waitForInitialWsSubscriptions();
   await waitForWsConnection();

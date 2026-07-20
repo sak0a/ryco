@@ -195,7 +195,7 @@ function ArchivedWorktreeRow(props: {
   const isProjectRoot = isProjectRootWorktree(props.worktree.worktree, props.projectCwd);
   return (
     <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
-      <div className="ml-3 flex h-7 pointer-coarse:min-h-11 items-center gap-1.5 pointer-coarse:gap-3 rounded-md px-2 text-muted-foreground">
+      <div className="ml-3 flex h-7 max-md:pointer-coarse:min-h-11 items-center gap-1.5 max-md:pointer-coarse:gap-3 rounded-md px-2 text-muted-foreground">
         <ArchiveIcon className="size-3.5 shrink-0" />
         <span className="min-w-0 flex-1 truncate text-xs">
           {getWorktreeDisplayTitle(props.worktree)}
@@ -344,7 +344,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                 role="button"
                 tabIndex={0}
                 aria-expanded={!isCollapsed}
-                className="group/worktree flex h-7 pointer-coarse:min-h-11 w-full items-center gap-1.5 pointer-coarse:gap-3 rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                className="group/worktree flex h-7 max-md:pointer-coarse:min-h-11 w-full items-center gap-1.5 max-md:pointer-coarse:gap-3 rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                 onClick={toggleCollapsed}
                 onKeyDown={(event) => {
                   if (event.key === "ArrowLeft") {
