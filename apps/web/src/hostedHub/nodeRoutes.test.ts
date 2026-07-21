@@ -96,7 +96,11 @@ describe("hosted node route segment parsing", () => {
 describe("hosted node history", () => {
   it("captures the routed node at install time and exposes the logical location", () => {
     const { history } = install("/node/node_a/env_a/t_1?workspaceTab=diff");
-    expect(getRoutedHostedNode()).toEqual({ nodeId: "node_a", malformed: false });
+    expect(getRoutedHostedNode()).toEqual({
+      nodeId: "node_a",
+      malformed: false,
+      logicalPathname: "/env_a/t_1",
+    });
     expect(history.location.pathname).toBe("/env_a/t_1");
     expect(history.location.search).toBe("?workspaceTab=diff");
   });
@@ -166,8 +170,25 @@ describe("hosted node history", () => {
 
   it("marks malformed browser locations and keeps the router on the root", () => {
     const { history } = install("/node/a%20b/env_a/t_1");
-    expect(getRoutedHostedNode()).toEqual({ nodeId: null, malformed: true });
+    expect(getRoutedHostedNode()).toEqual({
+      nodeId: null,
+      malformed: true,
+      logicalPathname: "/",
+    });
     expect(history.location.pathname).toBe("/");
+  });
+
+  it("publishes the logical pathname of the parsed entry across Back and Forward", () => {
+    const { win, history } = install("/env_a/t_1?workspaceTab=diff");
+    expect(getRoutedHostedNode().logicalPathname).toBe("/env_a/t_1");
+    expect(adoptRoutedHostedNode("node_a")).toBe(true);
+    history.flush();
+    expect(getRoutedHostedNode().logicalPathname).toBe("/env_a/t_1");
+
+    clearHostedNodeRoute();
+    history.flush();
+    expect(getRoutedHostedNode().logicalPathname).toBe("/");
+    expect(win.location.pathname).toBe("/");
   });
 
   it("keeps history entry state free of application material", () => {

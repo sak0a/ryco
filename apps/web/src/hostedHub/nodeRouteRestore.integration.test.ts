@@ -39,6 +39,13 @@ vi.mock("../rpc/wsTransport", () => ({ WsTransport: MockWsTransport }));
 
 vi.mock("../rpc/wsRpcClient", () => ({ createWsRpcClient }));
 
+// The unrelated saved environment's HTTP session probe must not hit the
+// network; everything else in the remote API keeps its real implementation.
+vi.mock("../environments/remote/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../environments/remote/api")>()),
+  fetchRemoteSessionState: vi.fn(async () => ({ authenticated: true, role: "client" })),
+}));
+
 const environmentId = EnvironmentId.make("env_aaaaaaaaaaaaaaaaaaaaaa");
 const routedNode: HostedHubNode = {
   id: "node_aaaaaaaaaaaaaaaaaaaaaa",
@@ -97,6 +104,15 @@ function makeClient(): CapturedClient & Record<string, unknown> {
     server: {
       subscribeLifecycle: vi.fn(() => () => undefined),
       subscribeConfig: vi.fn(() => () => undefined),
+      getConfig: vi.fn(async () => ({
+        environment: {
+          environmentId: EnvironmentId.make("env_bbbbbbbbbbbbbbbbbbbbbb"),
+          label: "Unrelated saved environment",
+          platform: { os: "linux", arch: "x64" },
+          serverVersion: "0.9.0",
+          capabilities: { repositoryIdentity: false },
+        },
+      })),
     },
     orchestration: {
       subscribeShell: vi.fn((listener: typeof shellListener) => {
@@ -237,7 +253,10 @@ describe("hosted node route restore integration", () => {
     const { win, history } = await setup("/");
     const { hostedHubApi } = await import("./api");
     const { hostedHubController, useHostedHubStore } = await import("./state");
-    const { listEnvironmentConnections } = await import("../environments/runtime/service");
+    const { listEnvironmentConnections, reconnectSavedEnvironment } =
+      await import("../environments/runtime/service");
+    const { useSavedEnvironmentRegistryStore, writeSavedEnvironmentBearerToken } =
+      await import("../environments/runtime/catalog");
     const { selectHostedNodeRoute } = await import("./nodeRouteOrchestrator");
     vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
     vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([routedNode]);
@@ -248,39 +267,68 @@ describe("hosted node route restore integration", () => {
       protocolMinor: 2,
     });
 
+    // An unrelated saved-environment connection exists alongside the hosted
+    // relay session and must survive hosted teardown untouched.
+    const secondEnvironmentId = EnvironmentId.make("env_bbbbbbbbbbbbbbbbbbbbbb");
+    useSavedEnvironmentRegistryStore.getState().upsert({
+      environmentId: secondEnvironmentId,
+      label: "Unrelated saved environment",
+      wsBaseUrl: "ws://second.example.test/",
+      httpBaseUrl: "http://second.example.test/",
+      createdAt: "2026-07-20T00:00:00.000Z",
+      lastConnectedAt: "2026-07-20T00:00:00.000Z",
+    });
+    await writeSavedEnvironmentBearerToken(secondEnvironmentId, "saved-bearer-token");
+    await reconnectSavedEnvironment(secondEnvironmentId);
+    expect(listEnvironmentConnections()).toHaveLength(1);
+    const savedClientCount = capturedClients.length;
+
     await hostedHubController.bootstrap();
     expect(selectHostedNodeRoute(routedNode.id)).toBe(true);
-    await vi.waitFor(() => expect(capturedTransports).toHaveLength(1));
-    await capturedTransports[0]!.resolveUrl();
-    capturedTransports[0]!.options.onOpen?.();
+    await vi.waitFor(() => expect(capturedTransports).toHaveLength(savedClientCount + 1));
+    const hostedTransport = capturedTransports[savedClientCount]!;
+    const hostedClient = capturedClients[savedClientCount]!;
+    await hostedTransport.resolveUrl();
+    hostedTransport.options.onOpen?.();
     hostedHubController.transportStatus(useHostedHubStore.getState().generation, "online");
-    capturedClients[0]!.emitShellSnapshot(shellSnapshot(1));
+    hostedClient.emitShellSnapshot(shellSnapshot(1));
     expect(useHostedHubStore.getState().sessionEstablished).toBe(true);
-    expect(listEnvironmentConnections()).toHaveLength(1);
+    expect(listEnvironmentConnections()).toHaveLength(2);
     history.flush();
     expect(win.location.pathname).toBe(`/node/${routedNode.id}`);
 
     // Back returns to the directory and tears down exactly the browser relay
-    // session (client disposed, environment connection removed).
+    // session (hosted client disposed, hosted connection removed) while the
+    // unrelated saved connection stays online.
     win.history.back();
-    await vi.waitFor(() => expect(capturedClients[0]!.dispose).toHaveBeenCalled());
-    await vi.waitFor(() => expect(listEnvironmentConnections()).toHaveLength(0));
+    await vi.waitFor(() => expect(hostedClient.dispose).toHaveBeenCalled());
+    await vi.waitFor(() => expect(listEnvironmentConnections()).toHaveLength(1));
+    expect(
+      listEnvironmentConnections().some(
+        (connection) => connection.knownEnvironment.environmentId === secondEnvironmentId,
+      ),
+    ).toBe(true);
+    for (let index = 0; index < savedClientCount; index += 1) {
+      expect(capturedClients[index]!.dispose).not.toHaveBeenCalled();
+    }
     expect(useHostedHubStore.getState().selectedNode).toBeNull();
     expect(win.location.pathname).toBe("/");
 
     // Forward re-enters through the restore pipeline with a fresh ticket.
     win.history.forward();
-    await vi.waitFor(() => expect(capturedTransports).toHaveLength(2));
-    await capturedTransports[1]!.resolveUrl();
+    await vi.waitFor(() => expect(capturedTransports).toHaveLength(savedClientCount + 2));
+    const secondHostedTransport = capturedTransports[savedClientCount + 1]!;
+    await secondHostedTransport.resolveUrl();
     expect(issueRelayTicket).toHaveBeenCalledTimes(2);
-    capturedTransports[1]!.options.onOpen?.();
+    secondHostedTransport.options.onOpen?.();
     hostedHubController.transportStatus(useHostedHubStore.getState().generation, "online");
     expect(useHostedHubStore.getState().sessionEstablished).toBe(false);
-    capturedClients[1]!.emitShellSnapshot(shellSnapshot(2));
+    capturedClients[savedClientCount + 1]!.emitShellSnapshot(shellSnapshot(2));
     expect(useHostedHubStore.getState()).toMatchObject({
       sessionStatus: "ready",
       sessionEstablished: true,
     });
     expect(win.location.pathname).toBe(`/node/${routedNode.id}`);
+    expect(listEnvironmentConnections()).toHaveLength(2);
   });
 });
