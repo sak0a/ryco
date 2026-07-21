@@ -12,6 +12,7 @@ import {
   shouldIgnoreGlobalNavigationShortcut,
 } from "../../keybindings";
 import { installVisualViewportStub } from "../../../test/browserVisualViewport";
+import { syncDocumentPresentationTier } from "../../lib/presentationTier";
 import { syncDocumentVisualViewportInsets } from "../../lib/visualViewportInsets";
 import {
   Dialog,
@@ -275,9 +276,14 @@ describe("Dialog", () => {
     const initialHeight = window.innerHeight;
     const viewportStub = installVisualViewportStub();
     const stopAdapter = syncDocumentVisualViewportInsets();
+    // Bottom-stick is a phone-tier behavior, keyed off the data-tier root
+    // attribute stamped by the presentation-tier sync (in the app: main.tsx).
+    syncDocumentPresentationTier();
     try {
-      // max-sm bottom-stick applies below the 640px breakpoint.
       await page.viewport(390, 844);
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
       mounted = await render(<BottomStickDialogHarness />);
 
       const confirmButton = page.getByRole("button", { name: "Confirm" });
