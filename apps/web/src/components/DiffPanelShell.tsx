@@ -5,10 +5,15 @@ import { cn } from "~/lib/utils";
 
 import { Skeleton } from "./ui/skeleton";
 
-export type DiffPanelMode = "inline" | "sheet" | "sidebar";
+/**
+ * Presentation contexts for the workspace panels. `phone` is the full-screen
+ * work-surface promotion on the phone tier: same panels, same URL state, no
+ * Electron drag region (the surface covers the whole viewport).
+ */
+export type DiffPanelMode = "inline" | "sheet" | "sidebar" | "phone";
 
 function getDiffPanelHeaderRowClassName(mode: DiffPanelMode) {
-  const shouldUseDragRegion = isElectron && mode !== "sheet";
+  const shouldUseDragRegion = isElectron && mode !== "sheet" && mode !== "phone";
   return cn(
     "flex items-center justify-between gap-2 px-4",
     shouldUseDragRegion
@@ -22,7 +27,7 @@ export function DiffPanelShell(props: {
   header: ReactNode;
   children: ReactNode;
 }) {
-  const shouldUseDragRegion = isElectron && props.mode !== "sheet";
+  const shouldUseDragRegion = isElectron && props.mode !== "sheet" && props.mode !== "phone";
 
   return (
     <div

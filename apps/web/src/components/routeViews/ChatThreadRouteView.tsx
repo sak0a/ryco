@@ -9,6 +9,7 @@ import {
   useEnvironmentHasDraftThreads,
 } from "../../composerDraftSelectors";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { useSettings } from "../../hooks/useSettings";
 import { usePerfMark } from "../../perf/tabSwitchInstrumentation";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
@@ -35,6 +36,7 @@ import ChatView from "../ChatView";
 import { threadHasStarted } from "../ChatView.logic";
 import { LazyRightPanel, RightPanelInlineSidebar, closeRightPanelSearch } from "../ChatRightPanel";
 import { RightPanelSheet } from "../RightPanelSheet";
+import { PhoneWorkSurfaceSheet } from "../shell/phone/PhoneWorkSurface";
 import { SidebarInset } from "~/components/ui/sidebar";
 
 export function ChatThreadRouteView({
@@ -78,6 +80,7 @@ export function ChatThreadRouteView({
   const activeAgentKey =
     search.workspaceTab === "agent" && search.workspaceAgentKey ? search.workspaceAgentKey : null;
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const presentationTier = usePresentationTier();
   const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
   const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
     threadKey: currentThreadKey,
@@ -422,6 +425,40 @@ export function ChatThreadRouteView({
   const mountedRightPanelMode: RightPanelMode | null = rightPanelOpen
     ? rightPanelMode
     : lastOpenedRightPanelMode;
+
+  // Phone tier: the same URL-driven panel state renders as a full-screen
+  // pushed surface over the thread instead of an inline panel or right sheet.
+  // Links stay interchangeable with desktop; closing clears the same params.
+  if (presentationTier === "phone") {
+    return (
+      <>
+        <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
+          <ChatView
+            environmentId={threadRef.environmentId}
+            threadId={threadRef.threadId}
+            onDiffPanelOpen={() => markRightPanelOpened("review")}
+            onPreviewPanelOpen={() => markRightPanelOpened("files")}
+            onTerminalPanelOpen={() => markRightPanelOpened("terminal")}
+            onAgentPanelOpen={() => markRightPanelOpened("agent")}
+            workspacePanelOpen={rightPanelOpen}
+            onToggleWorkspacePanel={toggleRightPanel}
+            routeKind="server"
+          />
+        </SidebarInset>
+        <PhoneWorkSurfaceSheet label="Workspace" open={rightPanelOpen} onClose={closeRightPanel}>
+          {shouldRenderRightPanelContent ? (
+            <LazyRightPanel
+              mode="phone"
+              panelMode={mountedRightPanelMode}
+              openedPanelModes={openedPanelModes}
+              openedAgentKeys={openedAgentKeys}
+              onClosePanelTab={closePanelTab}
+            />
+          ) : null}
+        </PhoneWorkSurfaceSheet>
+      </>
+    );
+  }
 
   if (!shouldUseDiffSheet) {
     return (
