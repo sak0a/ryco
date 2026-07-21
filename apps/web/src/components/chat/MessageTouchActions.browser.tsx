@@ -5,9 +5,11 @@ import "../../index.css";
 import { EnvironmentId, MessageId } from "@ryco/contracts";
 import { createRef } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
+
+import { parkPointer } from "../../../test/browserPointer";
 
 vi.mock("@legendapp/list/react", async () => {
   const React = await import("react");
@@ -46,9 +48,11 @@ vi.mock("@legendapp/list/react", async () => {
   return { LegendList };
 });
 
+import { __resetContextMenuSheetForTests } from "../../contextMenuSheetState";
 import { getPresentationTier, syncDocumentPresentationTier } from "../../lib/presentationTier";
 import { useUiStateStore } from "../../uiStateStore";
 import ChatMarkdown from "../ChatMarkdown";
+import { ContextMenuActionSheetHost } from "../shell/phone/ContextMenuActionSheetHost";
 import { MessagesTimeline } from "./MessagesTimeline";
 
 const USER_MESSAGE_ID = MessageId.make("message-user-1");
@@ -189,6 +193,7 @@ describe("message touch actions", () => {
     }
     // Remove the per-instance override installed in beforeEach.
     delete (navigator as unknown as Record<string, unknown>)["clipboard"];
+    __resetContextMenuSheetForTests();
     useUiStateStore.setState({ threadWorkEntryExpandedById: {} });
     vi.restoreAllMocks();
     document.body.innerHTML = "";
@@ -212,6 +217,9 @@ describe("message touch actions", () => {
     await vi.waitFor(() => {
       expect(getPresentationTier()).toBe("desktop");
     });
+    // Park the real pointer so the hover-reveal assertion cannot be
+    // satisfied by wherever an earlier interaction left it.
+    await parkPointer(4, 4);
     await vi.waitFor(() => {
       expect(getComputedStyle(actionRow).opacity).toBe("0");
     });
@@ -396,8 +404,77 @@ describe("message touch actions", () => {
     await vi.waitFor(() => {
       expect(getPresentationTier()).toBe("desktop");
     });
+    await parkPointer(4, 4);
     await vi.waitFor(() => {
       expect(getComputedStyle(copyButton).opacity).toBe("0");
+    });
+  });
+
+  it("fires only the innermost recognizer on a nested long-press and keeps right-click working", async () => {
+    mounted = await render(
+      <>
+        <ContextMenuActionSheetHost />
+        <MessagesTimeline
+          {...buildProps()}
+          markdownCwd="/repo"
+          timelineEntries={[
+            {
+              id: "message-2",
+              kind: "message",
+              createdAt: "2026-07-20T12:00:05.000Z",
+              message: {
+                id: ASSISTANT_MESSAGE_ID,
+                role: "assistant" as const,
+                text: "See [src/app.ts](src/app.ts) for details.",
+                createdAt: "2026-07-20T12:00:05.000Z",
+                completedAt: "2026-07-20T12:00:09.000Z",
+                streaming: false,
+              },
+            },
+          ]}
+        />
+      </>,
+    );
+
+    const anchor = await vi.waitFor(() => {
+      const link = document.querySelector<HTMLAnchorElement>(".chat-markdown a");
+      expect(link).not.toBeNull();
+      return link!;
+    });
+
+    // The file-link recognizer (innermost) wins; the surrounding message
+    // recognizer must not also fire, so exactly one sheet opens — the
+    // file-link menu, not the message-actions sheet.
+    await dispatchLongPress(anchor);
+    await vi.waitFor(() => {
+      expect(sheetRow("Open in editor")).not.toBeNull();
+    });
+    expect(document.querySelectorAll('[data-slot="sheet-popup"]')).toHaveLength(1);
+    expect(sheetRow("Copy response")).toBeNull();
+
+    await userEvent.keyboard("{Escape}");
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-slot="sheet-popup"]')).toBeNull();
+    });
+
+    // The post-fire suppression self-heals: a later contextmenu on the same
+    // link is not swallowed and presents the file actions again.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const rect = anchor.getBoundingClientRect();
+    anchor.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 4,
+        clientY: rect.top + 4,
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(sheetRow("Open in editor")).not.toBeNull();
+    });
+    await userEvent.keyboard("{Escape}");
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-slot="sheet-popup"]')).toBeNull();
     });
   });
 });

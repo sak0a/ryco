@@ -430,20 +430,27 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
       if (row.kind !== "message") return;
       if (row.message.role === "user") {
         const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
+        const copyText = displayedUserMessage.copyText ?? null;
+        const canRevert = typeof row.revertTurnCount === "number";
+        // No actions apply (nothing to copy, no checkpoint): open no sheet.
+        if (copyText === null && !canRevert) return;
         ctx.onOpenMessageActions({
           messageId: row.message.id,
           role: "user",
-          copyText: displayedUserMessage.copyText ?? null,
-          canRevert: typeof row.revertTurnCount === "number",
+          copyText,
+          canRevert,
         });
         return;
       }
       if (row.message.role !== "assistant") return;
       const assistantCopyState = resolveAssistantRowCopyState(row, ctx);
+      const copyText = assistantCopyState.visible ? (assistantCopyState.text ?? null) : null;
+      // A streaming or copy-ineligible response has no actions: open no sheet.
+      if (copyText === null) return;
       ctx.onOpenMessageActions({
         messageId: row.message.id,
         role: "assistant",
-        copyText: assistantCopyState.visible ? (assistantCopyState.text ?? null) : null,
+        copyText,
         canRevert: false,
       });
     },
