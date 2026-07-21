@@ -44,7 +44,10 @@ function SheetViewport({
     <SheetPrimitive.Viewport
       className={cn(
         "pointer-events-auto fixed inset-0 z-50 grid",
-        side === "bottom" && "grid grid-rows-[1fr_auto] pt-12",
+        // Bottom sheets pad by the keyboard inset published by the
+        // visual-viewport adapter so their action rows stay above an open
+        // software keyboard; the variable is unset (0) otherwise.
+        side === "bottom" && "grid grid-rows-[1fr_auto] pt-12 pb-[var(--app-keyboard-inset,0px)]",
         side === "top" && "grid grid-rows-[auto_1fr] pb-12",
         side === "left" && "flex justify-start",
         side === "right" && "flex justify-end",

@@ -3226,13 +3226,23 @@ export default function ChatView(props: ChatViewProps) {
             )}
           </div>
 
-          {/* Input bar */}
+          {/* Input bar. Bottom padding composes the safe-area inset with the
+              keyboard inset published by the visual-viewport adapter: with the
+              software keyboard open the keyboard inset wins the max() and keeps
+              the composer, send action, and pending-approval panel above the
+              keyboard; with no keyboard the variable is unset and the padding
+              resolves exactly to the safe-area value. min-h-0 plus bottom
+              anchoring lets the bar shrink when the keyboard leaves less room
+              than its content needs: banners then overlap the collapsed
+              timeline upward (unclipped, so the stack hover reveal keeps
+              working) instead of pushing the composer behind the keyboard. */}
           <div
             className={cn(
+              "flex min-h-0 flex-col justify-end",
               "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
               isGitRepo
-                ? "pb-[calc(env(safe-area-inset-bottom)+0.25rem)]"
-                : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
+                ? "pb-[calc(max(env(safe-area-inset-bottom),var(--app-keyboard-inset,0px))+0.25rem)]"
+                : "pb-[calc(max(env(safe-area-inset-bottom),var(--app-keyboard-inset,0px))+0.75rem)] sm:pb-[calc(max(env(safe-area-inset-bottom),var(--app-keyboard-inset,0px))+1rem)]",
             )}
           >
             <div className="relative isolate">

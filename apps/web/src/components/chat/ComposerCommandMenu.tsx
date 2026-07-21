@@ -159,7 +159,17 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
         ref={listRef}
         className="relative overflow-hidden rounded-xl border border-border/80 bg-popover/96 shadow-lg/8 backdrop-blur-xs"
       >
-        <CommandList className="max-h-72">
+        {/* The upward-anchored mention/command menu caps at 18rem (max-h-72)
+            but clamps to the visible viewport height published by the
+            visual-viewport adapter, minus a 12.5rem allowance for the composer
+            region it anchors above (prompt editor, footer row, paddings, and
+            the anchor gap), so an open software keyboard cannot clip it. The
+            4.5rem floor keeps the menu usable when the visible height is
+            smaller than the allowance (phone landscape with the keyboard
+            open). Without a keyboard the variable is unset and the 9999px
+            fallback never engages, preserving the historical 18rem cap on
+            every viewport. */}
+        <CommandList className="max-h-[clamp(4.5rem,calc(var(--app-visible-viewport-height,9999px)-12.5rem),18rem)]">
           {groups.map((group, groupIndex) => (
             <div key={group.id}>
               {groupIndex > 0 ? <CommandSeparator className="my-0.5" /> : null}
