@@ -6,21 +6,23 @@ Ryco keeps CI entrypoints small and routes shared checks through
 ## Temporary self-hosted-only mode
 
 All Linux CI and PR-support jobs use the repository-scoped
-`[self-hosted, ryco-validation]` pool while GitHub-hosted capacity is
-unavailable. Browser, desktop, and release-smoke validation run on that pool
-too.
+`[self-hosted, ryco-validation]` pool. This avoids GitHub-hosted Actions runner
+usage while hosted capacity is unavailable. Browser, desktop, and release-smoke
+validation run on that pool too.
 
-Desktop release publishing still needs macOS and Windows runners. Until
-suitable private runners exist, `release.yml` fails at its private preflight
-and does not queue any hosted job. After hosted capacity returns, set the
-repository Actions variable `RYCO_ENABLE_HOSTED_RELEASES` to `true` to restore
-the existing release runner matrix.
+Desktop release publishing still needs macOS and Windows runners. Until suitable
+private runners exist, `release.yml` fails at its private preflight and does not
+queue any hosted job. After hosted capacity returns, set the repository Actions
+variable `RYCO_ENABLE_HOSTED_RELEASES` to `true` to restore the existing release
+runner matrix.
 
 - `ci.yml` validates `main` and manual CI runs with the full suite.
 - `pull-request-validation.yml` is the single automatic source of truth for
-  branches. It runs the validation suite for PR review; a `changes` preflight
-  (via `dorny/paths-filter`, no checkout) decides whether the browser and desktop
-  jobs are needed for the PR's touched paths. `main` always runs the full suite.
+  branches. `pr-vouch.yml` dispatches validation for `vouch:trusted` PRs; an
+  unvouched PR requires a maintainer's manual dispatch. Its gate fetches the PR
+  through the API to decide whether browser and desktop jobs are needed and to
+  supply the base SHA for affected-package validation. `main` always runs the
+  full suite.
 - `branch-ci.yml` manually validates an arbitrary branch/ref on demand
   (`workflow_dispatch`) with format, lint, typecheck, and tests. It does not run
   on push, so a commit is never validated twice (once on push and once on its
@@ -31,7 +33,9 @@ the existing release runner matrix.
 ## Parallelism and path scoping
 
 `_validation.yml` runs each check as its own job so they execute in parallel
-rather than as one serial chain. The two long poles are sharded across runners:
+rather than as one serial chain. Every validation and control job uses the
+repository-scoped self-hosted runner label `ryco-validation`. The two long poles
+are sharded across runners:
 
 - `typecheck-effect` splits its projects into two shards via
   `bun run typecheck:effect --shard <i>/<n>`. Sharding is derived from the
@@ -61,7 +65,7 @@ shared root `tsconfig.*.json` files so editing them busts every cache, and the
 run to run instead of freezing at a lockfile-stable key.
 
 `browser`, `desktop`, and `release-smoke` stay gated behind the `run-*` inputs.
-On PRs those inputs come from the `changes` preflight; filters are deliberately
+On PRs their inputs come from the dispatch gate. Its filters are deliberately
 broad (any `packages/**`, lockfile, or CI-infra change trips them) so a check is
 never wrongly skipped — the savings come from app-scoped PRs (server-only,
 docs-only, config-only) that don't touch the web or desktop surfaces.
@@ -71,7 +75,10 @@ should reuse that action instead of duplicating Vite+, Bun, Node, cache, and
 install steps. The action uses `setup-vp` for Vite+ and Node, sets up Bun
 explicitly for Ryco's command surface, and installs dependencies with
 `vp install`, which keeps Bun as the underlying package manager via
-`packageManager`.
+`packageManager`. Bun setup caching is disabled because runner containers do not
+share stable home-directory paths; the explicit Turbo cache supplies reuse.
+For the same reason, browser validation installs its pinned Playwright runtime
+instead of restoring a home-directory cache.
 
 Reusable validation uses Ryco's canonical Bun entrypoints: `bun run fmt:check`,
 `bun run lint`, `bun run typecheck`, `bun run test`, and `bun run build`.
