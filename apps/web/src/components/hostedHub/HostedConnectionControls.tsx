@@ -340,11 +340,32 @@ export function HostedConnectionPill() {
 
   return (
     <>
+      {/* Always-mounted announcements (the sheet's own live region exists
+          only while the sheet is open): every derived status change announces
+          politely, and delivery-unknown arrival announces assertively — its
+          explicit acknowledgment flow lives in the connection sheet. */}
+      <span
+        role="status"
+        aria-live="polite"
+        data-testid="hosted-connection-status-announcer"
+        className="sr-only"
+      >
+        Node {node.label}: {statusText}.
+      </span>
+      {session === "delivery-unknown" ? (
+        <span role="alert" className="sr-only">
+          Delivery unknown: a request may or may not have reached the node. Open the connection
+          controls to acknowledge.
+        </span>
+      ) : null}
       <button
         type="button"
         data-testid="hosted-connection-pill"
         aria-label={`Connection: ${node.label}, ${statusText}`}
-        className="flex min-h-9 max-w-44 shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-xs outline-none pointer-coarse:min-h-11 focus-visible:ring-2 focus-visible:ring-ring"
+        // min-w-0 + shrink (not shrink-0): under 200% text scaling on narrow
+        // phones the pill truncates its labels instead of pushing the app-bar
+        // controls after it out of the viewport.
+        className="flex min-h-9 min-w-0 max-w-44 shrink items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-xs outline-none pointer-coarse:min-h-11 focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => setOpen(true)}
       >
         {transport === "online" ? (

@@ -359,6 +359,16 @@ body {
   padding-top: max(env(safe-area-inset-top), 0px);
 }
 
+/* The phone tier owns its safe areas surface by surface (app bars pad
+   `pt-safe`, composer and sheets pad `pb-safe`), so the root-level top inset
+   is removed there: keeping it would double-pad every phone app bar and push
+   the dvh-sized shell past the bottom of the visual viewport by the top
+   inset, clipping the composer. The desktop tier keeps the root inset — its
+   chrome does not pad itself. */
+:root[data-tier="phone"] #root {
+  padding-top: 0;
+}
+
 body::after {
   content: "";
   position: fixed;

@@ -3084,7 +3084,9 @@ export default function ChatView(props: ChatViewProps) {
       {/* Top bar */}
       <header
         className={cn(
-          "border-b border-border bg-muted/24",
+          // The phone tier pads the top safe area itself (the root-level
+          // inset is disabled for the phone tier in index.css).
+          "border-b border-border bg-muted/24 phone:pt-safe",
           isElectron
             ? cn(
                 "drag-region flex min-h-[52px] items-stretch px-3 sm:px-5 wco:min-h-[env(titlebar-area-height)]",

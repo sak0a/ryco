@@ -14,7 +14,7 @@ import { Sheet, SheetPopup } from "../../ui/sheet";
  * example the terminal toolbar) above an open software keyboard.
  */
 const PHONE_WORK_SURFACE_CLASS_NAME =
-  "w-full min-w-0 max-w-none border-s-0 p-0 pt-[env(safe-area-inset-top)] pb-[max(env(safe-area-inset-bottom),var(--app-keyboard-inset,0px))] wco:mt-[env(titlebar-area-height)] wco:h-[calc(100%-env(titlebar-area-height))] wco:max-h-[calc(100%-env(titlebar-area-height))]";
+  "w-full min-w-0 max-w-none border-s-0 p-0 pt-[env(safe-area-inset-top)] pl-safe pr-safe pb-[max(env(safe-area-inset-bottom),var(--app-keyboard-inset,0px))] wco:mt-[env(titlebar-area-height)] wco:h-[calc(100%-env(titlebar-area-height))] wco:max-h-[calc(100%-env(titlebar-area-height))]";
 
 /**
  * Full-screen pushed surface over the thread on the phone tier. Mirrors the
