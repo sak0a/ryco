@@ -9,6 +9,7 @@ import { isElectron, isHostedHubMode } from "./env";
 import { hostedPwaLifecycle } from "./pwa/lifecycle";
 import { getRouter } from "./router";
 import { APP_DISPLAY_NAME } from "./branding";
+import { syncDocumentPresentationTier } from "./lib/presentationTier";
 import { syncDocumentVisualViewportInsets } from "./lib/visualViewportInsets";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
 
@@ -20,6 +21,11 @@ const router = getRouter(history);
 if (isElectron) {
   syncDocumentWindowControlsOverlayClass();
 }
+
+// The single presentation-tier classification: stamps data-tier on the root
+// element so tier-critical CSS and JS agree everywhere, including the hosted
+// root and /pair subtrees.
+syncDocumentPresentationTier();
 
 // The single VisualViewport subscription: publishes bounded keyboard-inset CSS
 // variables that phone input surfaces consume from CSS only.

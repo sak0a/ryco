@@ -3,6 +3,9 @@
 @custom-variant dark (&:is(.dark, .dark *));
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
 @custom-variant wco (&:is(.wco, .wco *));
+/* Presentation tier: data-tier is stamped on the root element by lib/presentationTier.ts. */
+@custom-variant phone (&:is([data-tier="phone"], [data-tier="phone"] *));
+@custom-variant not-phone (&:not(:is([data-tier="phone"], [data-tier="phone"] *)));
 
 @font-face {
   font-family: "DM Sans";
