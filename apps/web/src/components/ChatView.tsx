@@ -84,6 +84,7 @@ import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { PREFERS_REDUCED_MOTION_QUERY } from "../lib/perf/motion";
 import { useDelayedUnmount } from "../hooks/useDelayedUnmount";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { usePresentationTier } from "../hooks/usePresentationTier";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
 import {
@@ -140,6 +141,7 @@ import {
 } from "./chat/ThreadMessageSearch.logic";
 import type { ThreadMessageSearchOccurrence } from "./chat/ThreadMessageSearch.logic";
 import { ChatHeader } from "./chat/ChatHeader";
+import { PhoneThreadAppBar } from "./shell/phone/PhoneThreadAppBar";
 import { type ChatSessionTabsItem } from "./chat/ChatSessionTabs";
 import { useChatSessionTabsPrefetch } from "./chat/useChatSessionTabsPrefetch";
 import { createSessionTabsSelector, draftThreadToSidebarSummary } from "../sessionTabs.selectors";
@@ -496,6 +498,7 @@ export default function ChatView(props: ChatViewProps) {
   const [overviewFloatingOpen, setOverviewFloatingOpen] = useState(false);
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const prefersReducedMotion = useMediaQuery(PREFERS_REDUCED_MOTION_QUERY);
+  const presentationTier = usePresentationTier();
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
@@ -3056,45 +3059,60 @@ export default function ChatView(props: ChatViewProps) {
             : "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)]",
         )}
       >
-        <ChatHeader
-          activeThreadEnvironmentId={activeThread.environmentId}
-          activeThreadTitle={activeThread.title}
-          activeProjectName={activeProject?.name}
-          isGitRepo={isGitRepo}
-          openInCwd={gitCwd}
-          activeProjectScripts={activeProject?.scripts}
-          preferredScriptId={
-            activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-          }
-          keybindings={keybindings}
-          availableEditors={availableEditors}
-          worktreeBranch={activeWorktreeSummary?.branch ?? activeThread.branch ?? null}
-          worktreeTitle={activeWorktreeSummary?.title ?? null}
-          worktreeOrigin={activeWorktreeSummary?.origin ?? null}
-          worktreeIssueNumber={activeWorktreeSummary?.issueNumber ?? null}
-          worktreeIssueState={activeWorktreeSummary?.issueState ?? null}
-          worktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
-          worktreePrState={activeWorktreeSummary?.prState ?? null}
-          worktreePrIsDraft={activeWorktreeSummary?.prIsDraft ?? null}
-          worktreeWorkItemProvider={activeWorktreeSummary?.workItemProvider ?? null}
-          worktreeWorkItemKey={activeWorktreeSummary?.workItemKey ?? null}
-          worktreeWorkItemState={activeWorktreeSummary?.workItemState ?? null}
-          worktreeWorkItemStateName={activeWorktreeSummary?.workItemStateName ?? null}
-          sessionTabs={activeWorktreeSessionTabs}
-          activeSessionTabKey={activeSessionTabKey}
-          onOpenLinkedWorktreeItem={handleOpenHeaderLinkedItem}
-          onSelectSessionTab={handleSelectSessionTab}
-          onPrefetchTabEnter={handleTabPrefetchEnter}
-          onPrefetchTabLeave={handleTabPrefetchLeave}
-          workspacePanelOpen={workspacePanelOpen}
-          onToggleWorkspacePanel={onToggleWorkspacePanel}
-          overviewSidebarOpen={overviewControlOpen}
-          onToggleOverviewSidebar={toggleOverviewSidebar}
-          onRunProjectScript={runProjectScript}
-          onAddProjectScript={saveProjectScript}
-          onUpdateProjectScript={updateProjectScript}
-          onDeleteProjectScript={deleteProjectScript}
-        />
+        {presentationTier === "phone" ? (
+          <PhoneThreadAppBar
+            environmentId={activeThread.environmentId}
+            threadId={activeThread.id}
+            title={activeThread.title}
+            projectCwd={gitCwd}
+            workspacePanelOpen={workspacePanelOpen}
+            onToggleWorkspacePanel={onToggleWorkspacePanel}
+            onOpenFindInThread={openThreadMessageSearch}
+            sessionTabs={activeWorktreeSessionTabs}
+            activeSessionTabKey={activeSessionTabKey}
+            onSelectSessionTab={handleSelectSessionTab}
+          />
+        ) : (
+          <ChatHeader
+            activeThreadEnvironmentId={activeThread.environmentId}
+            activeThreadTitle={activeThread.title}
+            activeProjectName={activeProject?.name}
+            isGitRepo={isGitRepo}
+            openInCwd={gitCwd}
+            activeProjectScripts={activeProject?.scripts}
+            preferredScriptId={
+              activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+            }
+            keybindings={keybindings}
+            availableEditors={availableEditors}
+            worktreeBranch={activeWorktreeSummary?.branch ?? activeThread.branch ?? null}
+            worktreeTitle={activeWorktreeSummary?.title ?? null}
+            worktreeOrigin={activeWorktreeSummary?.origin ?? null}
+            worktreeIssueNumber={activeWorktreeSummary?.issueNumber ?? null}
+            worktreeIssueState={activeWorktreeSummary?.issueState ?? null}
+            worktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
+            worktreePrState={activeWorktreeSummary?.prState ?? null}
+            worktreePrIsDraft={activeWorktreeSummary?.prIsDraft ?? null}
+            worktreeWorkItemProvider={activeWorktreeSummary?.workItemProvider ?? null}
+            worktreeWorkItemKey={activeWorktreeSummary?.workItemKey ?? null}
+            worktreeWorkItemState={activeWorktreeSummary?.workItemState ?? null}
+            worktreeWorkItemStateName={activeWorktreeSummary?.workItemStateName ?? null}
+            sessionTabs={activeWorktreeSessionTabs}
+            activeSessionTabKey={activeSessionTabKey}
+            onOpenLinkedWorktreeItem={handleOpenHeaderLinkedItem}
+            onSelectSessionTab={handleSelectSessionTab}
+            onPrefetchTabEnter={handleTabPrefetchEnter}
+            onPrefetchTabLeave={handleTabPrefetchLeave}
+            workspacePanelOpen={workspacePanelOpen}
+            onToggleWorkspacePanel={onToggleWorkspacePanel}
+            overviewSidebarOpen={overviewControlOpen}
+            onToggleOverviewSidebar={toggleOverviewSidebar}
+            onRunProjectScript={runProjectScript}
+            onAddProjectScript={saveProjectScript}
+            onUpdateProjectScript={updateProjectScript}
+            onDeleteProjectScript={deleteProjectScript}
+          />
+        )}
       </header>
       <LinkedWorktreeItemDialog
         open={headerLinkedItem !== null}

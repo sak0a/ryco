@@ -2,21 +2,30 @@ import { createFileRoute } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
 
 import { NoActiveThreadState } from "../components/NoActiveThreadState";
+import { PhoneHome } from "../components/shell/phone/PhoneHome";
 import { Button } from "../components/ui/button";
 import { useSettingsDialogStore } from "../settingsDialogStore";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
-import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
+import { SidebarInset } from "../components/ui/sidebar";
 import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
+import { usePresentationTier } from "../hooks/usePresentationTier";
 import { APP_DISPLAY_NAME } from "~/branding";
 
 function ChatIndexRouteView() {
   const { authGateState } = Route.useRouteContext();
+  const presentationTier = usePresentationTier();
   const savedEnvironmentCount = useSavedEnvironmentRegistryStore(
     (state) => Object.keys(state.byId).length,
   );
 
   if (authGateState.status === "hosted-static" && savedEnvironmentCount === 0) {
     return <HostedStaticOnboardingState />;
+  }
+
+  // The phone tier lands on Home (the project-grouped thread list); desktop
+  // keeps the empty no-active-thread surface and its last-thread redirect.
+  if (presentationTier === "phone") {
+    return <PhoneHome />;
   }
 
   return <NoActiveThreadState />;
@@ -33,7 +42,6 @@ function HostedStaticOnboardingState() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
         <header className="border-b border-border px-3 py-2 sm:px-5 sm:py-3">
           <div className="flex items-center gap-2">
-            <SidebarTrigger className="size-7 shrink-0 not-phone:hidden" />
             <span className="text-sm font-medium text-foreground md:text-muted-foreground/60">
               {APP_DISPLAY_NAME}
             </span>

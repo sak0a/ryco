@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 
 import ThreadSidebar from "./Sidebar";
+import { usePresentationTier } from "../hooks/usePresentationTier";
 import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
 import {
   clearShortcutModifierState,
@@ -16,7 +17,7 @@ const LazySettingsDialog = lazy(() =>
   import("./settings/SettingsDialog").then((module) => ({ default: module.SettingsDialog })),
 );
 
-function LazySettingsDialogMount() {
+export function LazySettingsDialogMount() {
   const open = useSettingsDialogStore((s) => s.open);
   const [hasOpened, setHasOpened] = useState(open);
 
@@ -37,7 +38,13 @@ function LazySettingsDialogMount() {
   );
 }
 
-export function AppSidebarLayout({ children }: { children: ReactNode }) {
+/**
+ * Shell-wide global effects shared by every application shell tier: the
+ * shortcut-modifier keydown/keyup/blur sync and the desktop-bridge
+ * open-settings menu action. Mounted once by the active shell (desktop
+ * sidebar layout or the phone shell) — never by both.
+ */
+export function useAppShellGlobalEffects(): void {
   const openSettings = useSettingsDialogStore((s) => s.openSettings);
 
   useEffect(() => {
@@ -78,23 +85,40 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       unsubscribe?.();
     };
   }, [openSettings]);
+}
+
+/**
+ * The tier-aware application shell (delivery step 6 of the focused mobile
+ * workspace design). The `SidebarProvider` context and the route subtree stay
+ * mounted identically on both tiers — a tier flip (mid-size rotation, QA
+ * override) must never remount the workspace and lose scroll, draft, or
+ * panel state, and many components call `useSidebar()` unconditionally. Only
+ * the sidebar chrome is tier-conditional: the desktop tier renders the
+ * persistent thread sidebar; the phone tier renders no drawer — navigation is
+ * URL-driven through the phone Home surface and the compact thread app bar.
+ */
+export function AppSidebarLayout({ children }: { children: ReactNode }) {
+  useAppShellGlobalEffects();
+  const presentationTier = usePresentationTier();
 
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
-      <Sidebar
-        side="left"
-        collapsible="offcanvas"
-        className="border-r border-border bg-card text-foreground"
-        resizable={{
-          minWidth: THREAD_SIDEBAR_MIN_WIDTH,
-          shouldAcceptWidth: ({ nextWidth, wrapper }) =>
-            wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
-          storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
-        }}
-      >
-        <ThreadSidebar />
-        <SidebarRail />
-      </Sidebar>
+      {presentationTier === "desktop" ? (
+        <Sidebar
+          side="left"
+          collapsible="offcanvas"
+          className="border-r border-border bg-card text-foreground"
+          resizable={{
+            minWidth: THREAD_SIDEBAR_MIN_WIDTH,
+            shouldAcceptWidth: ({ nextWidth, wrapper }) =>
+              wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
+            storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
+          }}
+        >
+          <ThreadSidebar />
+          <SidebarRail />
+        </Sidebar>
+      ) : null}
       {children}
       <LazySettingsDialogMount />
     </SidebarProvider>

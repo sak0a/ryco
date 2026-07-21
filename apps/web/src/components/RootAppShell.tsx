@@ -5,6 +5,7 @@ import { useEffect, useEffectEvent, useRef } from "react";
 
 import { AppSidebarLayout } from "./AppSidebarLayout";
 import { CommandPalette } from "./CommandPalette";
+import { shouldApplyBootstrapThreadRedirect } from "./RootAppShell.logic";
 import { SshPasswordPromptDialog } from "./desktop/SshPasswordPromptDialog";
 import { ProviderUpdateLaunchNotification } from "./ProviderUpdateLaunchNotification";
 import {
@@ -15,6 +16,7 @@ import {
 import { AnchoredToastProvider, stackedThreadToast, ToastProvider, toastManager } from "./ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { readLocalApi } from "../localApi";
+import { getPresentationTier } from "../lib/presentationTier";
 import { useSettings } from "../hooks/useSettings";
 import { useHostedRpcCapability } from "../hostedHub/capabilities";
 import {
@@ -52,6 +54,9 @@ export interface RootAppShellProps {
 export function RootAppShell({ authGateState }: RootAppShellProps) {
   const primaryEnvironmentAuthenticated = authGateState.status !== "hosted-static";
   const localTracingAllowed = authGateState.status === "authenticated";
+  // The presentation-tier seam lives inside `AppSidebarLayout`: the provider
+  // and the route subtree stay mounted identically for both tiers (a tier
+  // flip must not remount the workspace); only the sidebar chrome forks.
   const appShell = (
     <CommandPalette>
       <AppSidebarLayout>
@@ -177,7 +182,13 @@ function EventRouter() {
         );
       useUiStateStore.getState().setProjectExpanded(bootstrapProjectKey, true);
 
-      if (readPathname() !== "/") {
+      // Desktop keeps the last-thread redirect; the phone tier lands on Home.
+      if (
+        !shouldApplyBootstrapThreadRedirect({
+          pathname: readPathname(),
+          tier: getPresentationTier(),
+        })
+      ) {
         return;
       }
       if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {

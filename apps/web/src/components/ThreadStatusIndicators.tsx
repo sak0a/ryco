@@ -96,9 +96,15 @@ export function terminalStatusFromRunningIds(
 export function ThreadStatusLabel({
   status,
   compact = false,
+  alwaysShowLabel = false,
 }: {
   status: ThreadStatusPill;
   compact?: boolean;
+  /**
+   * Render the text label at every width. Phone surfaces set this so status
+   * is always conveyed as text plus indicator, never the dot alone.
+   */
+  alwaysShowLabel?: boolean;
 }) {
   if (compact) {
     return (
@@ -126,7 +132,7 @@ export function ThreadStatusLabel({
           status.pulse ? "animate-pulse" : ""
         }`}
       />
-      <span className="hidden md:inline">{status.label}</span>
+      <span className={alwaysShowLabel ? undefined : "hidden md:inline"}>{status.label}</span>
     </span>
   );
 }
@@ -136,7 +142,13 @@ export function ThreadStatusLabel({
  * like the command palette. Shows the change request state icon (if present) and the
  * thread status dot, matching the sidebar's leading indicators.
  */
-export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummary }) {
+export function ThreadRowLeadingStatus({
+  thread,
+  alwaysShowStatusLabel = false,
+}: {
+  thread: SidebarThreadSummary;
+  alwaysShowStatusLabel?: boolean;
+}) {
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const lastVisitedAt = useUiStateStore(
     (state) => state.threadLastVisitedAtById[scopedThreadKey(threadRef)],
@@ -184,7 +196,9 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
           <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
         </Tooltip>
       ) : null}
-      {threadStatus ? <ThreadStatusLabel status={threadStatus} /> : null}
+      {threadStatus ? (
+        <ThreadStatusLabel status={threadStatus} alwaysShowLabel={alwaysShowStatusLabel} />
+      ) : null}
     </span>
   );
 }

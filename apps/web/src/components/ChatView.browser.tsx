@@ -25,7 +25,7 @@ import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { Option } from "effect";
 import { HttpResponse, http, ws } from "msw";
 import { setupWorker } from "msw/browser";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import {
   afterAll,
   afterEach,
@@ -6523,95 +6523,91 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("opens the phone navigation drawer near-full-width with 44px coarse-pointer targets", async () => {
+  it("navigates the phone stack from the thread app bar to Home with 44px coarse-pointer targets", async () => {
     const mounted = await mountChatView({
       viewport: PHONE_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-phone-drawer" as MessageId,
-        targetText: "phone drawer thread",
+        targetMessageId: "msg-user-phone-stack" as MessageId,
+        targetText: "phone stack thread",
       }),
     });
 
     try {
-      await page.getByRole("button", { name: "Toggle Sidebar" }).first().click();
-      const drawer = await waitForElement(
-        () => document.querySelector<HTMLElement>('[data-slot="sidebar"][data-mobile="true"]'),
-        "Unable to find the mobile navigation drawer.",
+      // The phone tier renders the compact thread app bar instead of the
+      // persistent sidebar or a navigation drawer.
+      const backButton = await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Back to threads"]'),
+        "Unable to find the phone app bar back affordance.",
       );
-
-      await vi.waitFor(() => {
-        const rect = drawer.getBoundingClientRect();
-        expect(rect.width).toBeGreaterThanOrEqual(PHONE_VIEWPORT.width - 13);
-        expect(rect.width).toBeLessThanOrEqual(PHONE_VIEWPORT.width);
-      });
-
-      // Thread rows are nested under the worktree section, collapsed at first.
-      await page.getByRole("button", { name: "Expand main", exact: true }).click();
-      const threadRow = await waitForElement(
-        () => document.querySelector<HTMLElement>('[data-testid="thread-row-thread-browser-test"]'),
-        "Unable to find the drawer thread row.",
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Thread actions"]'),
+        "Unable to find the phone app bar kebab.",
       );
-      // Fine-pointer density is unchanged by the coarse-pointer touch targets.
-      expect(threadRow.getBoundingClientRect().height).toBeLessThanOrEqual(28.5);
+      expect(document.querySelector('[data-slot="sidebar-container"]')).toBeNull();
+      expect(document.querySelector('[data-slot="sidebar"][data-mobile="true"]')).toBeNull();
 
       await withCoarsePointer(async () => {
-        await vi.waitFor(() => {
-          expect(threadRow.getBoundingClientRect().height).toBeGreaterThanOrEqual(43.5);
-        });
-
-        const archiveAction = await waitForElement(
-          () =>
-            document.querySelector<HTMLElement>(
-              '[data-testid="thread-archive-thread-browser-test"]',
-            ),
-          "Unable to find the drawer thread archive action.",
-        );
-        const archiveRect = archiveAction.getBoundingClientRect();
-        expect(archiveRect.width).toBeGreaterThanOrEqual(31.5);
-        expect(archiveRect.height).toBeGreaterThanOrEqual(31.5);
-        const archiveHitArea = getComputedStyle(archiveAction, "::after");
-        expect(archiveHitArea.position).toBe("absolute");
-        expect(archiveHitArea.width).toBe("44px");
-        expect(archiveHitArea.height).toBe("44px");
-
-        const headerActions = [
-          await waitForElement(
-            () => document.querySelector<HTMLElement>('[data-testid="project-overview-button"]'),
-            "Unable to find the project overview action.",
-          ),
-          await waitForElement(
-            () => document.querySelector<HTMLElement>('[data-testid="new-thread-button"]'),
-            "Unable to find the project new-workspace action.",
-          ),
-          await waitForElement(
-            () => document.querySelector<HTMLElement>('[aria-label^="Open project settings for"]'),
-            "Unable to find the project settings action.",
-          ),
-        ];
-        for (const action of headerActions) {
-          const hitArea = getComputedStyle(action, "::after");
+        // App bar controls expand to 44px hit areas on coarse pointers.
+        for (const selector of [
+          'button[aria-label="Back to threads"]',
+          'button[aria-label="Thread actions"]',
+        ]) {
+          const control = document.querySelector<HTMLElement>(selector)!;
+          const hitArea = getComputedStyle(control, "::after");
           expect(hitArea.position).toBe("absolute");
-          expect(hitArea.width).toBe("44px");
-          expect(hitArea.height).toBe("44px");
+          expect(parseFloat(hitArea.width)).toBeGreaterThanOrEqual(44);
+          expect(parseFloat(hitArea.height)).toBeGreaterThanOrEqual(44);
         }
-        // Adjacent expanded hit areas must not overlap: centers >= 44px apart.
-        const centers = headerActions
-          .map((action) => {
-            const rect = action.getBoundingClientRect();
-            return rect.left + rect.width / 2;
-          })
-          .toSorted((left, right) => left - right);
-        for (let index = 1; index < centers.length; index += 1) {
-          expect(centers[index]! - centers[index - 1]!).toBeGreaterThanOrEqual(43.5);
-        }
-
-        await mounted.setViewport(NARROW_PHONE_VIEWPORT);
-        await vi.waitFor(() => {
-          const rect = drawer.getBoundingClientRect();
-          expect(rect.width).toBeGreaterThanOrEqual(NARROW_PHONE_VIEWPORT.width - 13);
-          expect(rect.width).toBeLessThanOrEqual(NARROW_PHONE_VIEWPORT.width);
-        });
       });
+
+      // Back navigates the URL-driven stack to Home (the thread list).
+      backButton.click();
+      await vi.waitFor(() => {
+        expect(mounted.router.state.location.pathname).toBe("/");
+      });
+      const homeHeading = await waitForElement(
+        () => document.querySelector<HTMLElement>("h1"),
+        "Unable to find the Home heading.",
+      );
+      expect(homeHeading.textContent).toBe("Threads");
+
+      // Home renders the same store-backed thread with a >=44px row and a
+      // visible kebab (no hover-only affordances on the phone tier).
+      const homeRow = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>(
+            `button[aria-label="Thread actions for ${THREAD_TITLE}"]`,
+          ),
+        "Unable to find the Home thread row kebab.",
+      );
+      const rowRect = homeRow.getBoundingClientRect();
+      expect(rowRect.height).toBeGreaterThanOrEqual(44);
+      expect(rowRect.width).toBeGreaterThanOrEqual(44);
+
+      // The kebab opens the bottom-sheet action inventory.
+      homeRow.click();
+      await vi.waitFor(() => {
+        const sheet = document.querySelector<HTMLElement>('[data-slot="sheet-popup"]');
+        expect(sheet).not.toBeNull();
+        expect(sheet!.textContent).toContain("Rename thread");
+        expect(sheet!.textContent).toContain("Mark unread");
+      });
+
+      // Deep links keep working: navigating forward re-enters the thread.
+      await userEvent.keyboard("{Escape}");
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-slot="sheet-popup"]')).toBeNull();
+      });
+      mounted.router.history.back();
+      await vi.waitFor(() => {
+        expect(mounted.router.state.location.pathname).toBe(
+          `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`,
+        );
+      });
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Back to threads"]'),
+        "Unable to find the app bar after returning to the thread.",
+      );
     } finally {
       await mounted.cleanup();
     }
@@ -6741,12 +6737,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     let toastId: ReturnType<typeof toastManager.add> | null = null;
     try {
-      const tabStrip = await waitForElement(
+      // The phone tier renders the compact app bar (the session tab strip
+      // moved into the thread kebab sheet), so notices must clear the app bar.
+      const appBar = await waitForElement(
         () =>
-          document.querySelector<HTMLElement>(
-            '[role="tablist"][aria-label="Sessions in this worktree"]',
-          ),
-        "Unable to find the session tab strip.",
+          document
+            .querySelector<HTMLElement>('button[aria-label="Back to threads"]')
+            ?.closest("header") ?? null,
+        "Unable to find the phone thread app bar.",
       );
 
       toastId = toastManager.add({
@@ -6761,15 +6759,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
         () => document.querySelector<HTMLElement>('[data-slot="toast-viewport"] [data-position]'),
         "Unable to find the mounted toast.",
       );
-      // The mobile chat header (and its tab strip) renders below md, so the
-      // notice must clear the tab strip across the whole sub-768px range.
+      // The notice must clear the app bar across the whole sub-768px range.
       for (const viewport of [PHONE_VIEWPORT, NARROW_PHONE_VIEWPORT, NARROW_TABLET_VIEWPORT]) {
         await mounted.setViewport(viewport);
         await vi.waitFor(() => {
           const toastRect = toastRoot.getBoundingClientRect();
-          const tabsRect = tabStrip.getBoundingClientRect();
+          const appBarRect = appBar.getBoundingClientRect();
           expect(toastRect.height).toBeGreaterThan(0);
-          expect(toastRect.top).toBeGreaterThanOrEqual(tabsRect.bottom);
+          expect(toastRect.top).toBeGreaterThanOrEqual(appBarRect.bottom);
         });
 
         const composerForm = await waitForElement(
@@ -6781,9 +6778,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
         );
       }
 
-      // A coarse landscape phone (844x390) is md-wide, so the old width-keyed
-      // offset would fall back to the 52px desktop value and overlap the tab
-      // strip; the tier keys the 76px phone offset there too.
+      // A coarse landscape phone (844x390) is md-wide, so a width-keyed
+      // offset would fall back to the 52px desktop value and overlap the app
+      // bar; the tier keys the 76px phone offset there too.
       await withCoarsePointer(async () => {
         await mounted.setViewport(PHONE_LANDSCAPE_VIEWPORT);
         await vi.waitFor(() => {
@@ -6791,9 +6788,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
         });
         await vi.waitFor(() => {
           const toastRect = toastRoot.getBoundingClientRect();
-          const tabsRect = tabStrip.getBoundingClientRect();
+          const appBarRect = appBar.getBoundingClientRect();
           expect(toastRect.height).toBeGreaterThan(0);
-          expect(toastRect.top).toBeGreaterThanOrEqual(tabsRect.bottom);
+          expect(toastRect.top).toBeGreaterThanOrEqual(appBarRect.bottom);
         });
       });
 
@@ -7119,20 +7116,15 @@ describe("ChatView timeline estimator parity (full app)", () => {
       });
 
       await withCoarsePointer(async () => {
-        // The pointer clause reclassifies the same viewport as a phone.
+        // The pointer clause reclassifies the same viewport as a phone: the
+        // persistent sidebar unmounts and the compact thread app bar renders
+        // its back affordance (width-only styling kept the desktop header at
+        // 844px before).
         await vi.waitFor(() => {
           expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
           expect(document.querySelector('[data-slot="sidebar-container"]')).toBeNull();
-        });
-
-        // The hamburger trigger is tier-shown (width-only styling kept it
-        // hidden at 844px before).
-        const trigger = await waitForElement(
-          () => document.querySelector<HTMLElement>('[data-slot="sidebar-trigger"]'),
-          "Unable to find the sidebar trigger.",
-        );
-        await vi.waitFor(() => {
-          expect(getComputedStyle(trigger).display).not.toBe("none");
+          expect(document.querySelector('button[aria-label="Back to threads"]')).not.toBeNull();
+          expect(document.querySelector('button[aria-label="Thread actions"]')).not.toBeNull();
         });
 
         // The composer collapses like any other phone-tier viewport once the
@@ -7144,26 +7136,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
             document.querySelector('[data-chat-composer-mobile-collapsed="true"]'),
           ).not.toBeNull();
         });
-
-        // Opening the drawer renders the near-full-width phone sheet instead
-        // of the fixed desktop sidebar.
-        await page.getByRole("button", { name: "Toggle Sidebar" }).first().click();
-        const drawer = await waitForElement(
-          () => document.querySelector<HTMLElement>('[data-slot="sidebar"][data-mobile="true"]'),
-          "Unable to find the mobile navigation drawer.",
-        );
-        await vi.waitFor(() => {
-          const rect = drawer.getBoundingClientRect();
-          expect(rect.width).toBeGreaterThanOrEqual(PHONE_LANDSCAPE_VIEWPORT.width - 13);
-          expect(rect.width).toBeLessThanOrEqual(PHONE_LANDSCAPE_VIEWPORT.width);
-        });
       });
 
       // Reverting the pointer restores the desktop presentation in place; the
-      // phone drawer unmounts with the tier flip.
+      // phone app bar unmounts with the tier flip.
       await vi.waitFor(() => {
         expect(document.documentElement.getAttribute("data-tier")).toBe("desktop");
-        expect(document.querySelector('[data-slot="sidebar"][data-mobile="true"]')).toBeNull();
+        expect(document.querySelector('button[aria-label="Back to threads"]')).toBeNull();
         expect(document.querySelector('[data-slot="sidebar-container"]')).not.toBeNull();
       });
     } finally {
