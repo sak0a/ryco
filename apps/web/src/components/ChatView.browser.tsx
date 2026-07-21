@@ -56,6 +56,11 @@ import {
   type TerminalContextDraft,
 } from "../lib/terminalContext";
 import { isMacPlatform } from "../lib/utils";
+import {
+  KEYBOARD_INSET_CSS_VAR,
+  VISIBLE_VIEWPORT_HEIGHT_CSS_VAR,
+  syncDocumentVisualViewportInsets,
+} from "../lib/visualViewportInsets";
 import { __resetLocalApiForTests } from "../localApi";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { resetProjectAtomsForTests } from "../rpc/projectAtoms";
@@ -71,6 +76,7 @@ import {
   parkPointer,
   setCoarsePointerEmulation,
 } from "../../test/browserPointer";
+import { installVisualViewportStub } from "../../test/browserVisualViewport";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
 import { toastManager } from "./ui/toast";
 
@@ -205,6 +211,13 @@ const PHONE_VIEWPORT: ViewportSpec = {
   name: "phone",
   width: 390,
   height: 844,
+  textTolerancePx: 56,
+  attachmentTolerancePx: 56,
+};
+const PHONE_LANDSCAPE_VIEWPORT: ViewportSpec = {
+  name: "phone-landscape",
+  width: 844,
+  height: 390,
   textTolerancePx: 56,
   attachmentTolerancePx: 56,
 };
@@ -1564,6 +1577,27 @@ async function waitForSendButton(): Promise<HTMLButtonElement> {
     () => document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]'),
     "Unable to find send button.",
   );
+}
+
+async function expandPhoneComposerIfCollapsed(): Promise<void> {
+  // The phone composer re-collapses via a scheduled blur frame (for example
+  // right after a viewport change), so expanding must be a retry loop: click
+  // the pill whenever it is present until the editor is actually visible.
+  await vi.waitFor(
+    () => {
+      const pill = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="Expand composer"]',
+      );
+      if (pill) {
+        pill.click();
+      }
+      const editor = document.querySelector<HTMLElement>('[data-testid="composer-editor"]');
+      expect(editor).not.toBeNull();
+      expect(editor!.offsetParent).not.toBeNull();
+    },
+    { timeout: 8_000, interval: 100 },
+  );
+  await waitForLayout();
 }
 
 function findComposerProviderModelPicker(): HTMLButtonElement | null {
@@ -6873,6 +6907,260 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(rowTops.size).toBeGreaterThan(1);
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(PHONE_VIEWPORT.width);
     } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the composer and send action above a stubbed software keyboard on phones", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-keyboard-composer" as MessageId,
+        targetText: "keyboard composer thread",
+      }),
+    });
+
+    const viewportStub = installVisualViewportStub();
+    const stopAdapter = syncDocumentVisualViewportInsets();
+    try {
+      const rootStyle = document.documentElement.style;
+      for (const { viewport, keyboardInset } of [
+        { viewport: PHONE_VIEWPORT, keyboardInset: 300 },
+        { viewport: NARROW_PHONE_VIEWPORT, keyboardInset: 250 },
+      ]) {
+        await mounted.setViewport(viewport);
+        await expandPhoneComposerIfCollapsed();
+
+        const composerForm = await waitForElement(
+          () => document.querySelector<HTMLElement>('[data-chat-composer-form="true"]'),
+          "Unable to find the composer form.",
+        );
+        const sendButton = await waitForSendButton();
+        const baselineFormBottom = composerForm.getBoundingClientRect().bottom;
+
+        viewportStub.setKeyboardInset(keyboardInset);
+        await waitForLayout();
+
+        expect(rootStyle.getPropertyValue(KEYBOARD_INSET_CSS_VAR)).toBe(`${keyboardInset}px`);
+        expect(rootStyle.getPropertyValue(VISIBLE_VIEWPORT_HEIGHT_CSS_VAR)).toBe(
+          `${viewport.height - keyboardInset}px`,
+        );
+
+        const visibleBottom = viewport.height - keyboardInset;
+        await vi.waitFor(() => {
+          const formRect = composerForm.getBoundingClientRect();
+          const sendRect = sendButton.getBoundingClientRect();
+          expect(formRect.height).toBeGreaterThan(0);
+          expect(formRect.top).toBeGreaterThanOrEqual(-0.5);
+          expect(formRect.bottom).toBeLessThanOrEqual(visibleBottom + 0.5);
+          expect(sendRect.height).toBeGreaterThan(0);
+          expect(sendRect.top).toBeGreaterThanOrEqual(-0.5);
+          expect(sendRect.bottom).toBeLessThanOrEqual(visibleBottom + 0.5);
+        });
+
+        // Hiding the keyboard removes the variables and restores the exact
+        // keyboard-closed geometry.
+        viewportStub.setKeyboardInset(0);
+        await waitForLayout();
+        expect(rootStyle.getPropertyValue(KEYBOARD_INSET_CSS_VAR)).toBe("");
+        expect(rootStyle.getPropertyValue(VISIBLE_VIEWPORT_HEIGHT_CSS_VAR)).toBe("");
+        await vi.waitFor(() => {
+          expect(composerForm.getBoundingClientRect().bottom).toBeCloseTo(baselineFormBottom, 0);
+        });
+      }
+    } finally {
+      stopAdapter();
+      viewportStub.restore();
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps approval detail and actions visible above a stubbed software keyboard", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotWithPendingApproval(),
+    });
+
+    const viewportStub = installVisualViewportStub();
+    const stopAdapter = syncDocumentVisualViewportInsets();
+    try {
+      const detail = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="pending-approval-detail"]'),
+        "Unable to find the pending approval detail block.",
+      );
+
+      const keyboardInset = 300;
+      viewportStub.setKeyboardInset(keyboardInset);
+      await waitForLayout();
+
+      const visibleBottom = PHONE_VIEWPORT.height - keyboardInset;
+      await vi.waitFor(() => {
+        const detailRect = detail.getBoundingClientRect();
+        expect(detailRect.height).toBeGreaterThan(0);
+        expect(detailRect.top).toBeGreaterThanOrEqual(-0.5);
+        expect(detailRect.bottom).toBeLessThanOrEqual(visibleBottom + 0.5);
+      });
+      for (const label of APPROVAL_ACTION_LABELS) {
+        const button = await waitForElement(
+          () => findButtonByText(label),
+          `Unable to find approval action "${label}".`,
+        );
+        const rect = button.getBoundingClientRect();
+        expect(rect.height).toBeGreaterThan(0);
+        expect(rect.top).toBeGreaterThanOrEqual(-0.5);
+        expect(rect.bottom).toBeLessThanOrEqual(visibleBottom + 0.5);
+      }
+    } finally {
+      stopAdapter();
+      viewportStub.restore();
+      await mounted.cleanup();
+    }
+  });
+
+  it("clamps the mention/command menu to the visible viewport height with the keyboard open", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-keyboard-command-menu" as MessageId,
+        targetText: "keyboard command menu thread",
+      }),
+    });
+
+    const viewportStub = installVisualViewportStub();
+    const stopAdapter = syncDocumentVisualViewportInsets();
+    try {
+      for (const { viewport, keyboardInset } of [
+        { viewport: PHONE_VIEWPORT, keyboardInset: 300 },
+        { viewport: NARROW_PHONE_VIEWPORT, keyboardInset: 250 },
+      ]) {
+        await mounted.setViewport(viewport);
+        await expandPhoneComposerIfCollapsed();
+        await waitForComposerEditor();
+        await page.getByTestId("composer-editor").fill("/");
+        await waitForComposerMenuItem("slash:model");
+
+        const menuList = await waitForElement(
+          () => document.querySelector<HTMLElement>('[data-slot="command-list"]'),
+          "Unable to find the composer command menu list.",
+        );
+        // Keyboard-closed baseline: the historical 18rem cap applies.
+        expect(getComputedStyle(menuList).maxHeight).toBe("288px");
+
+        viewportStub.setKeyboardInset(keyboardInset);
+        await waitForLayout();
+
+        const visibleHeight = viewport.height - keyboardInset;
+        // 18rem cap clamped by the visible height minus the 12.5rem composer
+        // allowance (see ComposerCommandMenu).
+        const expectedMaxHeight = Math.min(288, visibleHeight - 200);
+        await vi.waitFor(() => {
+          expect(getComputedStyle(menuList).maxHeight).toBe(`${expectedMaxHeight}px`);
+          const menuRect = menuList.getBoundingClientRect();
+          expect(menuRect.height).toBeGreaterThan(0);
+          expect(menuRect.top).toBeGreaterThanOrEqual(-0.5);
+          expect(menuRect.bottom).toBeLessThanOrEqual(visibleHeight + 0.5);
+        });
+
+        viewportStub.setKeyboardInset(0);
+        await waitForLayout();
+        expect(getComputedStyle(menuList).maxHeight).toBe("288px");
+        await page.getByTestId("composer-editor").fill("");
+      }
+    } finally {
+      stopAdapter();
+      viewportStub.restore();
+      await mounted.cleanup();
+    }
+  });
+
+  it("tracks keyboard insets across orientation changes and removes them when closed", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_LANDSCAPE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-keyboard-orientation" as MessageId,
+        targetText: "keyboard orientation thread",
+      }),
+    });
+
+    const viewportStub = installVisualViewportStub();
+    const stopAdapter = syncDocumentVisualViewportInsets();
+    try {
+      const rootStyle = document.documentElement.style;
+
+      viewportStub.setKeyboardInset(160);
+      await waitForLayout();
+      expect(rootStyle.getPropertyValue(KEYBOARD_INSET_CSS_VAR)).toBe("160px");
+      expect(rootStyle.getPropertyValue(VISIBLE_VIEWPORT_HEIGHT_CSS_VAR)).toBe(
+        `${PHONE_LANDSCAPE_VIEWPORT.height - 160}px`,
+      );
+      const composerForm = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-form="true"]'),
+        "Unable to find the composer form.",
+      );
+      await vi.waitFor(() => {
+        expect(composerForm.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+          PHONE_LANDSCAPE_VIEWPORT.height - 160 + 0.5,
+        );
+      });
+
+      // Rotating to portrait re-derives the inset from the new geometry.
+      await mounted.setViewport(PHONE_VIEWPORT);
+      viewportStub.setKeyboardInset(300);
+      await waitForLayout();
+      expect(rootStyle.getPropertyValue(KEYBOARD_INSET_CSS_VAR)).toBe("300px");
+      expect(rootStyle.getPropertyValue(VISIBLE_VIEWPORT_HEIGHT_CSS_VAR)).toBe(
+        `${PHONE_VIEWPORT.height - 300}px`,
+      );
+
+      viewportStub.setKeyboardInset(0);
+      await waitForLayout();
+      expect(rootStyle.getPropertyValue(KEYBOARD_INSET_CSS_VAR)).toBe("");
+      expect(rootStyle.getPropertyValue(VISIBLE_VIEWPORT_HEIGHT_CSS_VAR)).toBe("");
+    } finally {
+      stopAdapter();
+      viewportStub.restore();
+      await mounted.cleanup();
+    }
+  });
+
+  it("publishes no keyboard variables and changes no composer geometry without an inset", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-keyboard-desktop-baseline" as MessageId,
+        targetText: "keyboard desktop baseline thread",
+      }),
+    });
+
+    const viewportStub = installVisualViewportStub();
+    const stopAdapter = syncDocumentVisualViewportInsets();
+    try {
+      const composerForm = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-form="true"]'),
+        "Unable to find the composer form.",
+      );
+      const sendButton = await waitForSendButton();
+      const baselineFormRect = composerForm.getBoundingClientRect();
+      const baselineSendRect = sendButton.getBoundingClientRect();
+
+      // A resize without any keyboard inset must publish nothing and move
+      // nothing (desktop baseline guard).
+      viewportStub.resizeTo({});
+      await waitForLayout();
+
+      const rootStyle = document.documentElement.style;
+      expect(rootStyle.getPropertyValue(KEYBOARD_INSET_CSS_VAR)).toBe("");
+      expect(rootStyle.getPropertyValue(VISIBLE_VIEWPORT_HEIGHT_CSS_VAR)).toBe("");
+
+      const formRect = composerForm.getBoundingClientRect();
+      const sendRect = sendButton.getBoundingClientRect();
+      expect(formRect.top).toBeCloseTo(baselineFormRect.top, 2);
+      expect(formRect.bottom).toBeCloseTo(baselineFormRect.bottom, 2);
+      expect(sendRect.top).toBeCloseTo(baselineSendRect.top, 2);
+      expect(sendRect.bottom).toBeCloseTo(baselineSendRect.bottom, 2);
+    } finally {
+      stopAdapter();
+      viewportStub.restore();
       await mounted.cleanup();
     }
   });

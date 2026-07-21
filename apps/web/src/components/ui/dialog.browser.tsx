@@ -1,6 +1,6 @@
 import "../../index.css";
 
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 import { render } from "vitest-browser-react";
 import { useEffect, useState } from "react";
@@ -11,7 +11,16 @@ import {
   matchesExactModShortcut,
   shouldIgnoreGlobalNavigationShortcut,
 } from "../../keybindings";
-import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "./dialog";
+import { installVisualViewportStub } from "../../../test/browserVisualViewport";
+import { syncDocumentVisualViewportInsets } from "../../lib/visualViewportInsets";
+import {
+  Dialog,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "./dialog";
 
 function DialogHarness() {
   const [open, setOpen] = useState(true);
@@ -89,6 +98,24 @@ function NestedDialogShortcutHarness() {
         </DialogPopup>
       </Dialog>
     </>
+  );
+}
+
+function BottomStickDialogHarness() {
+  return (
+    <Dialog open onOpenChange={() => undefined}>
+      <DialogPopup>
+        <DialogHeader>
+          <DialogTitle>Confirm change</DialogTitle>
+        </DialogHeader>
+        <DialogPanel>
+          <textarea aria-label="Reason" className="min-h-24 w-full" />
+        </DialogPanel>
+        <DialogFooter>
+          <button type="button">Confirm</button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
   );
 }
 
@@ -241,5 +268,46 @@ describe("Dialog", () => {
     );
 
     await expect.element(page.getByTestId("parent-shortcut-count")).toHaveTextContent("0");
+  });
+
+  it("keeps the bottom-stuck mobile dialog footer above a stubbed software keyboard", async () => {
+    const initialWidth = window.innerWidth;
+    const initialHeight = window.innerHeight;
+    const viewportStub = installVisualViewportStub();
+    const stopAdapter = syncDocumentVisualViewportInsets();
+    try {
+      // max-sm bottom-stick applies below the 640px breakpoint.
+      await page.viewport(390, 844);
+      mounted = await render(<BottomStickDialogHarness />);
+
+      const confirmButton = page.getByRole("button", { name: "Confirm" });
+      await expect.element(confirmButton).toBeInTheDocument();
+      const popup = document.querySelector<HTMLElement>('[data-slot="dialog-popup"]');
+      expect(popup).not.toBeNull();
+
+      // Keyboard-closed baseline: the popup sticks to the viewport bottom.
+      await vi.waitFor(() => {
+        expect(popup!.getBoundingClientRect().bottom).toBeGreaterThan(843);
+      });
+
+      viewportStub.setKeyboardInset(300);
+      await vi.waitFor(() => {
+        const popupRect = popup!.getBoundingClientRect();
+        const buttonRect = confirmButton.element().getBoundingClientRect();
+        expect(popupRect.bottom).toBeLessThanOrEqual(544.5);
+        expect(buttonRect.height).toBeGreaterThan(0);
+        expect(buttonRect.bottom).toBeLessThanOrEqual(544.5);
+      });
+
+      // Hiding the keyboard restores the bottom-stuck geometry.
+      viewportStub.setKeyboardInset(0);
+      await vi.waitFor(() => {
+        expect(popup!.getBoundingClientRect().bottom).toBeGreaterThan(843);
+      });
+    } finally {
+      stopAdapter();
+      viewportStub.restore();
+      await page.viewport(initialWidth, initialHeight);
+    }
   });
 });
