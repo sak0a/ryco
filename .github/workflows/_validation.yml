@@ -168,7 +168,7 @@ jobs:
   browser:
     name: Browser tests
     if: ${{ inputs['run-browser-tests'] }}
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ryco-validation]
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -185,14 +185,8 @@ jobs:
       - name: Build web package
         run: bun run build --filter=@ryco/web
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
-
+      # Private runner containers do not share a stable home directory, so
+      # install the pinned runtime instead of restoring a hosted-runner cache.
       - name: Install browser test runtime
         run: bun run --cwd apps/web test:browser:install
 
@@ -202,7 +196,7 @@ jobs:
   desktop:
     name: Desktop build
     if: ${{ inputs['run-desktop-build'] }}
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ryco-validation]
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -225,7 +219,7 @@ jobs:
   release-smoke:
     name: Release Smoke
     if: ${{ inputs['run-release-smoke'] }}
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ryco-validation]
     timeout-minutes: 10
     steps:
       - name: Checkout
