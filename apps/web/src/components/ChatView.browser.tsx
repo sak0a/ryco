@@ -8441,18 +8441,40 @@ describe("ChatView timeline estimator parity (full app)", () => {
       // Emulate 200% browser text scaling: the layout is rem-based, so
       // doubling the root font size scales typography and rem-sized controls.
       document.documentElement.style.fontSize = "32px";
+      const APP_BAR_SELECTORS = [
+        'button[aria-label="Back to threads"]',
+        'button[aria-label="Thread actions"]',
+        'button[aria-label="Toggle workspace panel"]',
+      ] as const;
       for (const viewport of [NARROW_PHONE_VIEWPORT, PHONE_VIEWPORT]) {
         await mounted.setViewport(viewport);
         await waitForLayout();
-        for (const selector of [
-          'button[aria-label="Back to threads"]',
-          'button[aria-label="Thread actions"]',
-          'button[aria-label="Toggle workspace panel"]',
-        ]) {
+        for (const selector of APP_BAR_SELECTORS) {
           assertControlWithinViewport(selector, viewport.width);
         }
         expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(viewport.width);
       }
+
+      // Landscape (844x390) classifies as phone only with a coarse pointer;
+      // with the landscape side safe-area padding it is the most
+      // width-constrained case in the matrix.
+      await withCoarsePointer(async () => {
+        await mounted.setViewport(PHONE_LANDSCAPE_VIEWPORT);
+        await vi.waitFor(() => {
+          expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+        });
+        await waitForLayout();
+        for (const selector of APP_BAR_SELECTORS) {
+          assertControlWithinViewport(selector, PHONE_LANDSCAPE_VIEWPORT.width);
+        }
+        expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
+          PHONE_LANDSCAPE_VIEWPORT.width,
+        );
+      });
+      await mounted.setViewport(PHONE_VIEWPORT);
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
 
       // Home at 200%: the app-bar actions stay visible and tappable.
       document.querySelector<HTMLElement>('button[aria-label="Back to threads"]')!.click();

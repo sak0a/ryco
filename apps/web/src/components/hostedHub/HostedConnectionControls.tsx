@@ -340,24 +340,29 @@ export function HostedConnectionPill() {
 
   return (
     <>
-      {/* Always-mounted announcements (the sheet's own live region exists
-          only while the sheet is open): every derived status change announces
+      {/* Sheet-closed announcements: every derived status change announces
           politely, and delivery-unknown arrival announces assertively — its
-          explicit acknowledgment flow lives in the connection sheet. */}
-      <span
-        role="status"
-        aria-live="polite"
-        data-testid="hosted-connection-status-announcer"
-        className="sr-only"
-      >
-        Node {node.label}: {statusText}.
-      </span>
-      {session === "delivery-unknown" ? (
-        <span role="alert" className="sr-only">
-          Delivery unknown: a request may or may not have reached the node. Open the connection
-          controls to acknowledge.
-        </span>
-      ) : null}
+          explicit acknowledgment flow lives in the connection sheet. While
+          the sheet is open its own live regions cover both, so the pill's
+          copies unmount to avoid double announcements. */}
+      {open ? null : (
+        <>
+          <span
+            role="status"
+            aria-live="polite"
+            data-testid="hosted-connection-status-announcer"
+            className="sr-only"
+          >
+            Node {node.label}: {statusText}.
+          </span>
+          {session === "delivery-unknown" ? (
+            <span role="alert" className="sr-only">
+              Delivery unknown: a request may or may not have reached the node. Open the connection
+              controls to acknowledge.
+            </span>
+          ) : null}
+        </>
+      )}
       <button
         type="button"
         data-testid="hosted-connection-pill"

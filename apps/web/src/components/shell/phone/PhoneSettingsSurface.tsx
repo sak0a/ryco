@@ -313,6 +313,13 @@ export function PhoneSettingsSurface() {
   const popToList = () => {
     const returnTo = lastPushedSectionRef.current;
     setPushedSection(null);
+    // Return the canonical section to the resting default while the list is
+    // showing; otherwise a deep link back to the just-visited section would
+    // be a store no-op and could not push the page again. The ref is synced
+    // first so the change-watcher effect does not read this reset as an
+    // external open-to-section call.
+    prevSectionRef.current = DEFAULT_SECTION;
+    setSection(DEFAULT_SECTION);
     scheduleFocus(() => (returnTo ? (listRowRefs.current.get(returnTo) ?? null) : null));
   };
   useEffect(() => {

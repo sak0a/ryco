@@ -434,6 +434,18 @@ describe("PhoneSettingsSurface", () => {
       expect(listRow("General")).not.toBeNull();
     });
 
+    // Re-linking to the SAME section from the list is not a store no-op:
+    // the back affordance rests the canonical section, so a palette or menu
+    // deep link to the just-visited section pushes its page again.
+    useSettingsDialogStore.getState().openSettings("source-control");
+    await vi.waitFor(() => {
+      expect(sectionHeading()?.textContent).toBe("Source Control");
+    });
+    backToSettingsButton()!.click();
+    await vi.waitFor(() => {
+      expect(sectionHeading()).toBeNull();
+    });
+
     // While open, a menu-driven openSettings(section) pushes that section.
     useSettingsDialogStore.getState().openSettings("connections");
     await vi.waitFor(() => {

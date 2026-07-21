@@ -6,6 +6,7 @@ import { render } from "vitest-browser-react";
 import { TriangleAlertIcon } from "lucide-react";
 
 import {
+  cdpSession,
   resetPointerEmulation,
   parkPointer,
   setCoarsePointerEmulation,
@@ -136,6 +137,55 @@ describe("ComposerBannerStack", () => {
         console.error("Failed to revert coarse pointer emulation", revertError);
       }
       await screen.unmount();
+    }
+  });
+
+  it("dismisses immediately without exit-transition styles under reduced motion", async () => {
+    await page.viewport(390, 844);
+    // Emulate prefers-reduced-motion through CDP so the JS gate (not only
+    // the motion-reduce CSS variants) is under test.
+    await cdpSession().send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+    });
+    const dismissFront = vi.fn();
+    let screen: Awaited<ReturnType<typeof render>> | null = null;
+    try {
+      await vi.waitFor(() => {
+        expect(window.matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(true);
+      });
+      screen = await render(
+        <div style={{ width: 390, paddingTop: 320 }}>
+          <ComposerBannerStack items={[createItem("front", "Front notice", dismissFront)]} />
+        </div>,
+      );
+
+      // The front banner wrapper (the element the exit animation styles) has
+      // no inline transition under reduced motion.
+      const wrapper = [...document.querySelectorAll<HTMLElement>("div")].find((element) =>
+        element.style.transform.startsWith("translate3d"),
+      );
+      expect(wrapper).not.toBeUndefined();
+      expect(wrapper!.style.transition).toBe("");
+
+      await page.getByRole("button", { name: "Dismiss Front notice" }).click();
+      // Dismissal runs on a zero-delay timer instead of the 220ms exit
+      // animation, and the exiting wrapper still carries no transition.
+      await vi.waitFor(
+        () => {
+          expect(dismissFront).toHaveBeenCalledTimes(1);
+        },
+        { timeout: 200, interval: 10 },
+      );
+      expect(wrapper!.style.transition).toBe("");
+      expect(wrapper!.style.opacity).toBe("0");
+    } finally {
+      await cdpSession().send("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-reduced-motion", value: "" }],
+      });
+      await vi.waitFor(() => {
+        expect(window.matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(false);
+      });
+      await screen?.unmount();
     }
   });
 

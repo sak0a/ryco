@@ -306,15 +306,15 @@ describe("hosted connection controls", () => {
     expect(acknowledge).toHaveBeenCalled();
   });
 
-  it("announces every bounded status change politely from the always-mounted pill region", async () => {
+  it("announces every bounded status change politely from the pill while the sheet is closed", async () => {
     await page.viewport(390, 844);
     seedConnectedState();
     mounted = await render(<HostedConnectionPill />);
 
     const announcer = () =>
       document.querySelector<HTMLElement>('[data-testid="hosted-connection-status-announcer"]');
-    // The region exists while the pill is mounted (the sheet is closed) and
-    // is polite, so status changes never interrupt the user mid-task.
+    // The region exists while the sheet is closed and is polite, so status
+    // changes never interrupt the user mid-task.
     const region = announcer();
     expect(region).not.toBeNull();
     expect(region!.getAttribute("aria-live")).toBe("polite");
@@ -340,6 +340,25 @@ describe("hosted connection controls", () => {
     await vi.waitFor(() => {
       expect(announcer()!.textContent).toContain("Online");
     });
+
+    // While the sheet is open its own polite region covers the status, so
+    // the pill's announcer unmounts — no double announcement.
+    await page.getByTestId("hosted-connection-pill").click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-slot="sheet-popup"]')).not.toBeNull();
+      expect(announcer()).toBeNull();
+    });
+    const politeStatusRegions = [
+      ...document.querySelectorAll<HTMLElement>('[aria-live="polite"]'),
+    ].filter((region) => region.textContent?.includes("Studio node"));
+    expect(politeStatusRegions).toHaveLength(1);
+
+    // Closing the sheet restores the pill's announcer.
+    await userEvent.keyboard("{Escape}");
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-slot="sheet-popup"]')).toBeNull();
+      expect(announcer()).not.toBeNull();
+    });
   });
 
   it("announces delivery-unknown assertively while the connection sheet is closed", async () => {
@@ -359,6 +378,22 @@ describe("hosted connection controls", () => {
     expect(alert.textContent).toContain("Delivery unknown");
     expect(alert.closest('[data-slot="sheet-popup"]')).toBeNull();
 
+    // While the sheet is open its acknowledgment block is the single alert;
+    // the pill's copy unmounts so the arrival never announces twice.
+    await page.getByTestId("hosted-connection-pill").click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-slot="sheet-popup"]')).not.toBeNull();
+    });
+    await vi.waitFor(() => {
+      const alerts = [...document.querySelectorAll<HTMLElement>('[role="alert"]')];
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]!.closest('[data-slot="sheet-popup"]')).not.toBeNull();
+    });
+
+    await userEvent.keyboard("{Escape}");
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-slot="sheet-popup"]')).toBeNull();
+    });
     useHostedHubStore.setState({ sessionStatus: "ready" });
     await vi.waitFor(() => {
       expect(document.querySelector('[role="alert"]')).toBeNull();
