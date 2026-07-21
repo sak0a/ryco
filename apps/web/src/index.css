@@ -986,6 +986,13 @@ label:has(> select#reasoning-effort) select {
   pointer-events: auto;
 }
 
+/* Phone tier: hover cannot reveal the code-block copy button on touch, so it
+   stays visible as a compact always-on control. Desktop keeps hover-reveal. */
+[data-tier="phone"] .chat-markdown .chat-markdown-copy-button {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .chat-markdown .chat-markdown-copy-button:hover {
   color: var(--foreground);
   border-color: color-mix(in srgb, var(--border) 70%, var(--foreground));

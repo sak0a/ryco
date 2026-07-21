@@ -50,6 +50,8 @@ import {
   type ThreadTerminalGroup,
 } from "../types";
 import { readEnvironmentApi } from "~/environmentApi";
+import { useLongPress } from "~/hooks/useLongPress";
+import { usePresentationTier } from "~/hooks/usePresentationTier";
 import { readLocalApi } from "~/localApi";
 import {
   approximateTextBytes,
@@ -978,6 +980,110 @@ interface TerminalActionButtonProps {
   children: ReactNode;
 }
 
+/**
+ * A terminal tab: select on tap, hover-revealed close on fine pointers. On
+ * coarse pointers the close affordance stays visible, and on the phone tier
+ * a long-press presents the close action through the shared action sheet.
+ */
+function TerminalTabItem(props: {
+  group: { readonly id: string; readonly terminalIds: ReadonlyArray<string> };
+  isActive: boolean;
+  isRunning: boolean;
+  label: string;
+  groupActiveTerminalId: string;
+  canCloseTab: boolean;
+  onActiveTerminalChange: (terminalId: string) => void;
+  onCloseTerminal: (terminalId: string) => void;
+}) {
+  const {
+    group,
+    isActive,
+    isRunning,
+    label,
+    groupActiveTerminalId,
+    canCloseTab,
+    onActiveTerminalChange,
+    onCloseTerminal,
+  } = props;
+  const closeTabLabel = `Close ${label}`;
+  const closeTab = useCallback(() => {
+    for (const terminalId of group.terminalIds) {
+      onCloseTerminal(terminalId);
+    }
+  }, [group.terminalIds, onCloseTerminal]);
+  const isPhoneTier = usePresentationTier() === "phone";
+  const longPress = useLongPress(
+    () => {
+      if (!canCloseTab) return;
+      const localApi = readLocalApi();
+      if (!localApi) return;
+      void localApi.contextMenu
+        .show([{ id: "close-tab", label: closeTabLabel, destructive: true }] as const)
+        .then((clicked) => {
+          if (clicked === "close-tab") {
+            closeTab();
+          }
+        });
+    },
+    { disabled: !isPhoneTier },
+  );
+
+  return (
+    <div
+      role="tab"
+      aria-selected={isActive}
+      data-terminal-tab-id={group.id}
+      className={`group relative z-10 flex shrink-0 items-center gap-1.5 border-r border-border/70 px-2 text-xs transition-colors duration-150 ${
+        isActive
+          ? "text-foreground"
+          : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+      }`}
+      {...longPress}
+    >
+      <button
+        type="button"
+        className="flex min-w-0 items-center gap-1.5"
+        onClick={() => onActiveTerminalChange(groupActiveTerminalId)}
+      >
+        <TerminalSquare className="size-3 shrink-0" />
+        <span className="truncate">{label}</span>
+        {isRunning && (
+          <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" aria-label="Running" />
+        )}
+      </button>
+      {canCloseTab && (
+        <Popover>
+          <PopoverTrigger
+            openOnHover
+            render={
+              <button
+                type="button"
+                className="inline-flex size-3.5 items-center justify-center rounded text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground group-hover:opacity-100 pointer-coarse:relative pointer-coarse:opacity-100 pointer-coarse:after:absolute pointer-coarse:after:top-1/2 pointer-coarse:after:left-1/2 pointer-coarse:after:size-11 pointer-coarse:after:-translate-x-1/2 pointer-coarse:after:-translate-y-1/2"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  closeTab();
+                }}
+                aria-label={closeTabLabel}
+              />
+            }
+          >
+            <XIcon className="size-2.5" />
+          </PopoverTrigger>
+          <PopoverPopup
+            tooltipStyle
+            side="bottom"
+            sideOffset={6}
+            align="center"
+            className="pointer-events-none select-none"
+          >
+            {closeTabLabel}
+          </PopoverPopup>
+        </Popover>
+      )}
+    </div>
+  );
+}
+
 function TerminalActionButton({ label, className, onClick, children }: TerminalActionButtonProps) {
   return (
     <Popover>
@@ -1330,65 +1436,18 @@ export default function ThreadTerminalDrawer({
               ? resolvedActiveTerminalId
               : (group.terminalIds[0] ?? resolvedActiveTerminalId);
             const canCloseTab = resolvedTerminalGroups.length > 1;
-            const closeTabLabel = `Close ${label}`;
             return (
-              <div
+              <TerminalTabItem
                 key={group.id}
-                role="tab"
-                aria-selected={isActive}
-                data-terminal-tab-id={group.id}
-                className={`group relative z-10 flex shrink-0 items-center gap-1.5 border-r border-border/70 px-2 text-xs transition-colors duration-150 ${
-                  isActive
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
-                }`}
-              >
-                <button
-                  type="button"
-                  className="flex min-w-0 items-center gap-1.5"
-                  onClick={() => onActiveTerminalChange(groupActiveTerminalId)}
-                >
-                  <TerminalSquare className="size-3 shrink-0" />
-                  <span className="truncate">{label}</span>
-                  {isRunning && (
-                    <span
-                      className="size-1.5 shrink-0 rounded-full bg-emerald-500"
-                      aria-label="Running"
-                    />
-                  )}
-                </button>
-                {canCloseTab && (
-                  <Popover>
-                    <PopoverTrigger
-                      openOnHover
-                      render={
-                        <button
-                          type="button"
-                          className="inline-flex size-3.5 items-center justify-center rounded text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground group-hover:opacity-100"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            for (const terminalId of group.terminalIds) {
-                              onCloseTerminal(terminalId);
-                            }
-                          }}
-                          aria-label={closeTabLabel}
-                        />
-                      }
-                    >
-                      <XIcon className="size-2.5" />
-                    </PopoverTrigger>
-                    <PopoverPopup
-                      tooltipStyle
-                      side="bottom"
-                      sideOffset={6}
-                      align="center"
-                      className="pointer-events-none select-none"
-                    >
-                      {closeTabLabel}
-                    </PopoverPopup>
-                  </Popover>
-                )}
-              </div>
+                group={group}
+                isActive={isActive}
+                isRunning={isRunning}
+                label={label}
+                groupActiveTerminalId={groupActiveTerminalId}
+                canCloseTab={canCloseTab}
+                onActiveTerminalChange={onActiveTerminalChange}
+                onCloseTerminal={onCloseTerminal}
+              />
             );
           })}
           <TerminalActionButton

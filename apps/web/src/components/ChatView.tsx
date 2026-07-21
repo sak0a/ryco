@@ -3065,6 +3065,15 @@ export default function ChatView(props: ChatViewProps) {
             threadId={activeThread.id}
             title={activeThread.title}
             projectCwd={gitCwd}
+            draft={
+              routeKind === "draft" && draftId
+                ? {
+                    draftId,
+                    projectId: activeThread.projectId,
+                    createdAt: activeThread.createdAt,
+                  }
+                : null
+            }
             workspacePanelOpen={workspacePanelOpen}
             onToggleWorkspacePanel={onToggleWorkspacePanel}
             onOpenFindInThread={openThreadMessageSearch}

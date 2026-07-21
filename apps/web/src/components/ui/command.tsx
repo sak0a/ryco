@@ -43,7 +43,10 @@ function CommandDialogViewport({ className, ...props }: CommandDialogPrimitive.V
   return (
     <CommandDialogPrimitive.Viewport
       className={cn(
-        "pointer-events-none fixed inset-0 z-50 flex flex-col items-center px-4 py-[max(--spacing(4),4vh)] sm:py-[10vh]",
+        // The bottom padding tracks the software-keyboard inset published by
+        // the visual-viewport adapter (unset → 0) so the palette stays fully
+        // operable above an open keyboard on phones.
+        "pointer-events-none fixed inset-0 z-50 flex flex-col items-center px-4 py-[max(--spacing(4),4vh)] pb-[max(--spacing(4),var(--app-keyboard-inset,0px))] sm:py-[10vh]",
         className,
       )}
       data-slot="command-dialog-viewport"
@@ -202,7 +205,9 @@ function CommandShortcut({ className, ...props }: React.ComponentProps<"kbd">) {
   return (
     <kbd
       className={cn(
-        "ms-auto font-medium font-sans text-muted-foreground/72 text-xs tracking-widest",
+        // Shortcut hints are keyboard chrome; coarse-pointer devices hide
+        // them (every action keeps a button path).
+        "ms-auto font-medium font-sans text-muted-foreground/72 text-xs tracking-widest pointer-coarse:hidden",
         className,
       )}
       data-slot="command-shortcut"

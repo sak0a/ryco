@@ -52,9 +52,13 @@ import {
   resolveAssistantMessageCopyState,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
+  type TimelineMessageActionsRequest,
   type TimelineStableState,
   type TimelineStreamingState,
 } from "./MessagesTimeline.logic";
+import { MessageActionsSheet } from "./MessageActionsSheet";
+import { useLongPress } from "~/hooks/useLongPress";
+import { usePresentationTier } from "~/hooks/usePresentationTier";
 import type { ThreadMessageSearchOccurrence } from "./ThreadMessageSearch.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -200,6 +204,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const rows = useStableRows(rawRows);
   const [highlightedMessageId, setHighlightedMessageId] = useState<MessageId | null>(null);
+  // Long-press target for the phone message action sheet.
+  const [messageActionsRequest, setMessageActionsRequest] =
+    useState<TimelineMessageActionsRequest | null>(null);
+  const onOpenMessageActions = useCallback((request: TimelineMessageActionsRequest) => {
+    setMessageActionsRequest(request);
+  }, []);
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -316,6 +326,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         onImageExpand,
         onOpenTurnDiff,
         onCloseDiff: onCloseDiff ?? NOOP_CLOSE_DIFF,
+        onOpenMessageActions,
       }),
     [
       timestampFormat,
@@ -333,6 +344,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onCloseDiff,
+      onOpenMessageActions,
     ],
   );
 
@@ -375,6 +387,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           ListHeaderComponent={TIMELINE_LIST_HEADER}
           ListFooterComponent={TIMELINE_LIST_FOOTER}
         />
+        <MessageActionsSheet
+          target={messageActionsRequest}
+          onOpenChange={(open) => {
+            if (!open) setMessageActionsRequest(null);
+          }}
+          revertDisabled={isRevertingCheckpoint || isWorking}
+          onRevert={() => {
+            if (messageActionsRequest) {
+              onRevertUserMessage(messageActionsRequest.messageId);
+            }
+          }}
+        />
       </TimelineStreamingCtx.Provider>
     </TimelineStableCtx.Provider>
   );
@@ -398,6 +422,40 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
   // fields), so it re-renders on streaming transitions as before. The merged
   // object is local — it does not propagate through any context boundary.
   const ctx = { ...use(TimelineStableCtx), ...use(TimelineStreamingCtx) };
+  // Phone tier: long-press on a message bubble opens the message action
+  // sheet with the same copy/revert actions as the desktop hover row.
+  const isPhoneTier = usePresentationTier() === "phone";
+  const messageLongPress = useLongPress(
+    () => {
+      if (row.kind !== "message") return;
+      if (row.message.role === "user") {
+        const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
+        const copyText = displayedUserMessage.copyText ?? null;
+        const canRevert = typeof row.revertTurnCount === "number";
+        // No actions apply (nothing to copy, no checkpoint): open no sheet.
+        if (copyText === null && !canRevert) return;
+        ctx.onOpenMessageActions({
+          messageId: row.message.id,
+          role: "user",
+          copyText,
+          canRevert,
+        });
+        return;
+      }
+      if (row.message.role !== "assistant") return;
+      const assistantCopyState = resolveAssistantRowCopyState(row, ctx);
+      const copyText = assistantCopyState.visible ? (assistantCopyState.text ?? null) : null;
+      // A streaming or copy-ineligible response has no actions: open no sheet.
+      if (copyText === null) return;
+      ctx.onOpenMessageActions({
+        messageId: row.message.id,
+        role: "assistant",
+        copyText,
+        canRevert: false,
+      });
+    },
+    { disabled: !isPhoneTier || row.kind !== "message" },
+  );
   const isHighlightedMessage =
     row.kind === "message" && ctx.highlightedMessageId === row.message.id;
   const messageSearchOccurrences =
@@ -450,7 +508,10 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           return (
             <div className="flex justify-end">
               <div className="group flex max-w-[80%] flex-col items-end">
-                <div className="relative rounded-2xl rounded-br-sm bg-foreground/8 px-3 py-2 shadow-md/5 transition-[background-color,box-shadow] duration-200 group-hover:bg-foreground/10 group-hover:shadow-lg/8">
+                <div
+                  className="relative rounded-2xl rounded-br-sm bg-foreground/8 px-3 py-2 shadow-md/5 transition-[background-color,box-shadow] duration-200 group-hover:bg-foreground/10 group-hover:shadow-lg/8"
+                  {...messageLongPress}
+                >
                   {userImages.length > 0 && (
                     <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                       {userImages.map(
@@ -502,7 +563,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   )}
                 </div>
                 <div className="mt-1 flex items-center justify-end gap-2">
-                  <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+                  <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100 phone:opacity-100">
                     {displayedUserMessage.copyText && (
                       <MessageCopyButton
                         text={displayedUserMessage.copyText}
@@ -539,25 +600,8 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
         row.message.role === "assistant" &&
         (() => {
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
-          const assistantTurnStillInProgress =
-            ctx.activeTurnInProgress &&
-            ctx.activeTurnId !== null &&
-            ctx.activeTurnId !== undefined &&
-            row.message.turnId === ctx.activeTurnId;
-          const assistantSummaryStillInProgress =
-            ctx.activeTurnInProgress &&
-            ctx.activeTurnId !== null &&
-            ctx.activeTurnId !== undefined &&
-            row.assistantTurnDiffSummary?.turnId === ctx.activeTurnId;
-          const assistantResponseStillInProgress =
-            row.message.streaming ||
-            assistantTurnStillInProgress ||
-            assistantSummaryStillInProgress;
-          const assistantCopyState = resolveAssistantMessageCopyState({
-            text: row.message.text ?? null,
-            showCopyButton: row.showAssistantCopyButton,
-            streaming: assistantResponseStillInProgress,
-          });
+          const assistantResponseStillInProgress = resolveAssistantRowInProgress(row, ctx);
+          const assistantCopyState = resolveAssistantRowCopyState(row, ctx);
           return (
             <>
               {row.showCompletionDivider && (
@@ -569,7 +613,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   <span className="h-px flex-1 bg-border" />
                 </div>
               )}
-              <div className="min-w-0 px-1 py-0.5">
+              <div className="min-w-0 px-1 py-0.5" {...messageLongPress}>
                 <ChatMarkdown
                   text={messageText}
                   cwd={ctx.markdownCwd}
@@ -604,7 +648,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                     )}
                   </p>
                   {assistantCopyState.visible ? (
-                    <div className="flex items-center opacity-0 transition-opacity duration-200  group-hover/assistant:opacity-100">
+                    <div className="flex items-center opacity-0 transition-opacity duration-200 group-hover/assistant:opacity-100 phone:opacity-100">
                       <MessageCopyButton
                         text={assistantCopyState.text ?? ""}
                         size="icon-xs"
@@ -1080,6 +1124,40 @@ function useStableRows(rows: MessagesTimelineRow[]): MessagesTimelineRow[] {
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
+
+type TimelineMessageRow = Extract<MessagesTimelineRow, { kind: "message" }>;
+
+/** Shared by the assistant JSX and the phone long-press handler so the copy
+ *  affordance and the action sheet can never disagree about availability. */
+function resolveAssistantRowInProgress(
+  row: TimelineMessageRow,
+  ctx: Pick<TimelineStreamingState, "activeTurnInProgress" | "activeTurnId">,
+): boolean {
+  const assistantTurnStillInProgress =
+    ctx.activeTurnInProgress &&
+    ctx.activeTurnId !== null &&
+    ctx.activeTurnId !== undefined &&
+    row.message.turnId === ctx.activeTurnId;
+  const assistantSummaryStillInProgress =
+    ctx.activeTurnInProgress &&
+    ctx.activeTurnId !== null &&
+    ctx.activeTurnId !== undefined &&
+    row.assistantTurnDiffSummary?.turnId === ctx.activeTurnId;
+  return Boolean(
+    row.message.streaming || assistantTurnStillInProgress || assistantSummaryStillInProgress,
+  );
+}
+
+function resolveAssistantRowCopyState(
+  row: TimelineMessageRow,
+  ctx: Pick<TimelineStreamingState, "activeTurnInProgress" | "activeTurnId">,
+): ReturnType<typeof resolveAssistantMessageCopyState> {
+  return resolveAssistantMessageCopyState({
+    text: row.message.text ?? null,
+    showCopyButton: row.showAssistantCopyButton,
+    streaming: resolveAssistantRowInProgress(row, ctx),
+  });
+}
 
 function formatWorkingTimer(startIso: string, endIso: string): string | null {
   const startedAtMs = Date.parse(startIso);
@@ -1572,6 +1650,10 @@ const WorkEntryExpandedPanel = memo(function WorkEntryExpandedPanel(props: {
   const cleanedOutput = workEntry.output ? workEntry.output.replace(ANSI_SGR_RE, "") : "";
   const hasOutput = cleanedOutput.length > 0;
   const showExitChip = workEntry.exitCode !== undefined && workEntry.exitCode !== 0;
+  // The collapsed row truncates its detail and reveals the full text only in
+  // a hover tooltip; on phone the expanded panel carries the full text
+  // instead so tooltip-only content stays reachable by tap.
+  const phoneDetailText = workEntry.detail?.trim() || null;
 
   return (
     <div
@@ -1580,6 +1662,14 @@ const WorkEntryExpandedPanel = memo(function WorkEntryExpandedPanel(props: {
       aria-label={`${headingLabel} details`}
       className="mt-1 border-t border-border/40 pt-1.5 pl-7"
     >
+      {phoneDetailText && phoneDetailText !== inputLine && (
+        <p
+          data-work-entry-phone-detail="true"
+          className="hidden whitespace-pre-wrap wrap-break-word pb-1 text-[11px] leading-4 text-foreground/85 phone:block"
+        >
+          {phoneDetailText}
+        </p>
+      )}
       {inputLine && (
         <div className="flex items-start gap-1.5 overflow-x-auto">
           <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted-foreground/55">

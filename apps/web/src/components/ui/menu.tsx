@@ -266,7 +266,9 @@ function MenuShortcut({ className, ...props }: React.ComponentProps<"kbd">) {
   return (
     <kbd
       className={cn(
-        "ms-auto font-medium font-sans text-muted-foreground/72 text-xs tracking-widest",
+        // Shortcut hints are keyboard chrome; coarse-pointer devices hide
+        // them (every action keeps a button path).
+        "ms-auto font-medium font-sans text-muted-foreground/72 text-xs tracking-widest pointer-coarse:hidden",
         className,
       )}
       data-slot="menu-shortcut"

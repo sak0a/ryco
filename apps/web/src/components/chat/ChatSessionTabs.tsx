@@ -134,7 +134,7 @@ export const ChatSessionTabs = memo(function ChatSessionTabs(props: ChatSessionT
               <span className={cn("size-1.5 rounded-full", BUCKET_DOT[item.bucket])} />
             </span>
             {hint ? (
-              <kbd className="shrink-0 rounded border border-border/60 bg-muted/40 px-1 font-mono text-[9px] text-muted-foreground/80">
+              <kbd className="shrink-0 rounded border border-border/60 bg-muted/40 px-1 font-mono text-[9px] text-muted-foreground/80 pointer-coarse:hidden">
                 {hint}
               </kbd>
             ) : null}

@@ -21,7 +21,14 @@ export const PRESENTATION_TIER_ATTRIBUTE = "data-tier";
 const subscribers = new Set<() => void>();
 
 function matchesPhoneMedia(): boolean {
-  return typeof window !== "undefined" && window.matchMedia(PHONE_TIER_MEDIA_QUERY).matches;
+  // The matchMedia probe also guards non-browser unit-test environments that
+  // stub `window` without a media-query implementation; they classify as
+  // desktop, matching the SSR snapshot.
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(PHONE_TIER_MEDIA_QUERY).matches
+  );
 }
 
 function computeTier(): PresentationTier {

@@ -36,10 +36,12 @@ export function useSidebarProjectContextMenu(params: {
     handleRemoveProject,
   } = params;
 
-  const handleProjectButtonContextMenu = useCallback(
-    (event: React.MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      suppressProjectClickForContextMenuRef.current = true;
+  // The shared opener: builds the single project action inventory and
+  // dispatches the clicked handler. The desktop right-click handler and the
+  // phone header kebab/long-press both present this inventory (through the
+  // native menu, the DOM fallback, or the phone action sheet respectively).
+  const openProjectMenu = useCallback(
+    (position: { x: number; y: number }) => {
       void (async () => {
         const api = readLocalApi();
         if (!api) return;
@@ -177,10 +179,7 @@ export function useSidebarProjectContextMenu(params: {
           }),
         ];
 
-        const clicked = await api.contextMenu.show(menuItems, {
-          x: event.clientX,
-          y: event.clientY,
-        });
+        const clicked = await api.contextMenu.show(menuItems, position);
 
         if (!clicked) {
           return;
@@ -201,9 +200,17 @@ export function useSidebarProjectContextMenu(params: {
       openProjectSettingsDialog,
       project.groupedProjectCount,
       project.memberProjects,
-      suppressProjectClickForContextMenuRef,
     ],
   );
 
-  return { handleProjectButtonContextMenu };
+  const handleProjectButtonContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      suppressProjectClickForContextMenuRef.current = true;
+      openProjectMenu({ x: event.clientX, y: event.clientY });
+    },
+    [openProjectMenu, suppressProjectClickForContextMenuRef],
+  );
+
+  return { handleProjectButtonContextMenu, openProjectMenu };
 }

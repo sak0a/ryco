@@ -204,6 +204,44 @@ export function ThreadRowLeadingStatus({
 }
 
 /**
+ * Plain-text change-request detail for phone action sheets. Desktop exposes
+ * the PR number, state, and title only in a hover tooltip; phone surfaces
+ * include this line in the thread's kebab sheet so the detail stays
+ * reachable by touch. Renders nothing when the thread has no change request.
+ */
+export function ThreadStatusDetailLine({ thread }: { thread: SidebarThreadSummary }) {
+  const threadProjectCwd = useStore(
+    useMemo(
+      () => (state: AppState) =>
+        selectProjectByRef(state, scopeProjectRef(thread.environmentId, thread.projectId))?.cwd ??
+        null,
+      [thread.environmentId, thread.projectId],
+    ),
+  );
+  const gitCwd = thread.worktreePath ?? threadProjectCwd;
+  const gitStatus = useGitStatus({
+    environmentId: thread.environmentId,
+    cwd: thread.branch != null ? gitCwd : null,
+  });
+  const pr = resolveThreadPr(thread.branch, gitStatus.data);
+  const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
+
+  if (!prStatus) {
+    return null;
+  }
+
+  return (
+    <p
+      data-thread-status-detail="true"
+      className="flex items-start gap-1.5 px-2 pb-2 text-xs text-muted-foreground"
+    >
+      <ChangeRequestStatusIcon className={`mt-0.5 size-3 shrink-0 ${prStatus.colorClass}`} />
+      <span className="min-w-0 flex-1 wrap-break-word">{prStatus.tooltip}</span>
+    </p>
+  );
+}
+
+/**
  * Non-interactive trailing status icons for a thread row in compact contexts
  * like the command palette. Shows a terminal-running indicator and a remote
  * environment indicator, matching the sidebar's trailing indicators.

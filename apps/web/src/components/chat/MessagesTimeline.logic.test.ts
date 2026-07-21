@@ -745,6 +745,7 @@ describe("timeline context split", () => {
     "onImageExpand",
     "onOpenTurnDiff",
     "onCloseDiff",
+    "onOpenMessageActions",
   ];
 
   function makeCombinedInput(): TimelineStreamingState & TimelineStableState {
@@ -770,6 +771,7 @@ describe("timeline context split", () => {
       onImageExpand: () => {},
       onOpenTurnDiff: () => {},
       onCloseDiff: () => {},
+      onOpenMessageActions: () => {},
     };
   }
 

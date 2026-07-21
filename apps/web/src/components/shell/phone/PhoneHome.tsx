@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { ProjectId } from "@ryco/contracts";
 import {
@@ -13,6 +13,7 @@ import {
   ChevronRightIcon,
   EllipsisVerticalIcon,
   FolderIcon,
+  GitBranchIcon,
   PinIcon,
   PlusIcon,
   SearchIcon,
@@ -39,23 +40,46 @@ import {
   selectProjectsAcrossEnvironments,
   selectSidebarThreadsAcrossEnvironments,
   selectSidebarThreadsForProjectRefs,
+  selectSidebarWorktreesForProjectRefs,
   useStore,
   type AppState,
 } from "../../../store";
 import { formatRelativeTimeLabel } from "../../../timestampFormat";
 import { useUiStateStore } from "../../../uiStateStore";
 import { cn } from "~/lib/utils";
-import { useSettings } from "~/hooks/useSettings";
+import { useLongPress } from "~/hooks/useLongPress";
+import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import {
   orderItemsByPreferredIds,
   resolveSidebarNewThreadEnvMode,
   sortProjectsForSidebar,
   sortThreadsWithPinned,
 } from "../../Sidebar.logic";
-import { createSidebarProjectDraftThreadsSelector } from "../../sidebar/sidebarTreeAdapters";
-import type { SidebarTreeThread } from "../../sidebar/hooks/useSidebarTree";
+import {
+  adaptProjectForSidebarTree,
+  createSidebarProjectDraftThreadsSelector,
+} from "../../sidebar/sidebarTreeAdapters";
+import {
+  useSidebarTree,
+  type SidebarTreeThread,
+  type SidebarTreeWorktree,
+} from "../../sidebar/hooks/useSidebarTree";
+import { useSidebarProjectActions } from "../../sidebar/hooks/useSidebarProjectActions";
+import { useSidebarProjectContextMenu } from "../../sidebar/hooks/useSidebarProjectContextMenu";
+import { useSidebarProjectGroupingDialog } from "../../sidebar/hooks/useSidebarProjectGroupingDialog";
+import { useSidebarProjectRenameDialog } from "../../sidebar/hooks/useSidebarProjectRenameDialog";
+import { useSidebarProjectSettingsDialog } from "../../sidebar/hooks/useSidebarProjectSettingsDialog";
+import { useThreadClipboardActions } from "../../sidebar/hooks/useThreadClipboardActions";
+import { ProjectExplorerDialog } from "../../projectExplorer/ProjectExplorerDialog";
+import { ProjectSettingsDialog } from "../../sidebar/ProjectSettingsDialog";
+import { SidebarProjectGroupingDialog } from "../../sidebar/SidebarProjectGroupingDialog";
+import { SidebarProjectRenameDialog } from "../../sidebar/SidebarProjectRenameDialog";
 import { HostedConnectionPill } from "../../hostedHub/HostedConnectionControls";
-import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "../../ThreadStatusIndicators";
+import {
+  ThreadRowLeadingStatus,
+  ThreadRowTrailingStatus,
+  ThreadStatusDetailLine,
+} from "../../ThreadStatusIndicators";
 import { Button } from "../../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../../ui/empty";
 import { SidebarInset } from "../../ui/sidebar";
@@ -69,6 +93,11 @@ import {
 } from "../../ui/sheet";
 import { PhoneThreadActionsSheet, PhoneThreadRenameDialog } from "./PhoneThreadActionsSheet";
 import { usePhoneThreadActions } from "./usePhoneThreadActions";
+
+// Jira project links are resolved by the desktop explorer visibility
+// machinery; the phone project menu omits the "Open Jira project" entry
+// rather than porting that fetch pipeline.
+const EMPTY_JIRA_PROJECT_LINKS: ReadonlyMap<string, string> = new Map();
 
 /**
  * Phone Home ("Threads"): the first-class phone route at the logical root — a
@@ -401,48 +430,160 @@ function PhoneHomeProjectSection({
     ? (threadByKey.get(threadActions.renamingThreadKey) ?? null)
     : null;
 
+  // The same worktree tree the desktop sidebar composes (adapters unchanged):
+  // projects with more than one worktree layer their sessions into
+  // collapsed-by-default worktree sections; simple projects keep the flat
+  // list.
+  const worktreeSummaries = useStore(
+    useShallow(
+      useMemo(
+        () => (state: AppState) =>
+          selectSidebarWorktreesForProjectRefs(state, project.memberProjectRefs),
+        [project.memberProjectRefs],
+      ),
+    ),
+  );
+  const sidebarTreeInput = useMemo(
+    () =>
+      adaptProjectForSidebarTree({
+        project,
+        threads: sortedThreads,
+        worktrees: worktreeSummaries,
+      }),
+    [project, sortedThreads, worktreeSummaries],
+  );
+  const sidebarTree = useSidebarTree({
+    projects: [sidebarTreeInput.project],
+    threads: sidebarTreeInput.threads,
+    worktrees: sidebarTreeInput.worktrees,
+  });
+  const treeProject = sidebarTree.projects[0] ?? null;
+  const worktreeSections =
+    treeProject && treeProject.isGitRepo && treeProject.worktrees.length > 1
+      ? treeProject.worktrees
+      : null;
+
+  // Project-management actions (issue criterion: no right-click-only
+  // actions on phone): the header kebab and a header long-press present the
+  // EXISTING desktop project context-menu inventory through the shared
+  // action sheet, reusing the desktop dialogs and handlers unchanged.
+  const { updateSettings } = useUpdateSettings();
+  const projectGroupingSettings = useSettings((settings) => ({
+    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
+    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
+  }));
+  const { copyPathToClipboard } = useThreadClipboardActions();
+  const [explorerDialogOpen, setExplorerDialogOpen] = useState(false);
+  const settingsDialog = useSidebarProjectSettingsDialog();
+  const renameDialog = useSidebarProjectRenameDialog();
+  const groupingDialog = useSidebarProjectGroupingDialog({
+    projectGroupingSettings,
+    updateSettings,
+  });
+  const memberThreadCountByPhysicalKey = useMemo(() => {
+    const counts = new Map<string, number>(
+      project.memberProjects.map((member) => [member.physicalProjectKey, 0] as const),
+    );
+    for (const thread of threads) {
+      const member = memberProjectByScopedKey.get(
+        scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
+      );
+      if (!member) continue;
+      counts.set(member.physicalProjectKey, (counts.get(member.physicalProjectKey) ?? 0) + 1);
+    }
+    return counts;
+  }, [memberProjectByScopedKey, project.memberProjects, threads]);
+  const { openProjectRemoteLink, openProjectJiraLink, handleRemoveProject } =
+    useSidebarProjectActions({
+      memberThreadCountByPhysicalKey,
+      jiraProjectOpenUrlByProjectKey: EMPTY_JIRA_PROJECT_LINKS,
+    });
+  const suppressProjectClickForContextMenuRef = useRef(false);
+  const openProjectOverview = useCallback(() => {
+    setExplorerDialogOpen(true);
+  }, []);
+  const { openProjectMenu } = useSidebarProjectContextMenu({
+    project,
+    jiraProjectOpenUrlByProjectKey: EMPTY_JIRA_PROJECT_LINKS,
+    suppressProjectClickForContextMenuRef,
+    onOpenOverview: openProjectOverview,
+    openProjectSettingsDialog: settingsDialog.openProjectSettingsDialog,
+    openProjectRemoteLink,
+    openProjectJiraLink,
+    openProjectRenameDialog: renameDialog.openProjectRenameDialog,
+    openProjectGroupingDialog: groupingDialog.openProjectGroupingDialog,
+    copyPathToClipboard,
+    handleRemoveProject,
+  });
+  const projectLongPress = useLongPress((point) => openProjectMenu(point));
+
+  const renderThreadRow = (thread: SidebarTreeThread) => {
+    const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+    return (
+      <PhoneHomeThreadRow
+        key={threadKey}
+        thread={thread}
+        pinned={pinnedThreadKeys.has(threadKey)}
+        onOpen={() => {
+          const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+          if (thread.draftId) {
+            threadActions.navigateToDraft(thread.draftId, threadRef);
+            return;
+          }
+          threadActions.navigateToThread(threadRef);
+        }}
+        onMenu={() => setMenuThreadKey(threadKey)}
+      />
+    );
+  };
+
   return (
     <section aria-label={project.displayName} className={cn(nested && "pl-3")}>
-      <button
-        type="button"
-        className="flex min-h-11 w-full items-center gap-2 px-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring hover:bg-accent/40"
-        aria-expanded={expanded}
-        onClick={() => toggleProject(project.projectKey)}
-      >
-        {expanded ? (
-          <ChevronDownIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRightIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-        )}
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{project.displayName}</span>
-        <span className="shrink-0 text-xs text-muted-foreground">{sortedThreads.length}</span>
-      </button>
-      {expanded ? (
-        <div role="list" aria-label={`Threads in ${project.displayName}`}>
-          {sortedThreads.length === 0 ? (
-            <p className="px-3 pb-3 text-sm text-muted-foreground">No threads yet.</p>
+      <div className="flex items-stretch">
+        <button
+          type="button"
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring hover:bg-accent/40"
+          aria-expanded={expanded}
+          onClick={() => toggleProject(project.projectKey)}
+          {...projectLongPress}
+        >
+          {expanded ? (
+            <ChevronDownIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
           ) : (
-            sortedThreads.map((thread) => {
-              const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-              return (
-                <PhoneHomeThreadRow
-                  key={threadKey}
-                  thread={thread}
-                  pinned={pinnedThreadKeys.has(threadKey)}
-                  onOpen={() => {
-                    const threadRef = scopeThreadRef(thread.environmentId, thread.id);
-                    if (thread.draftId) {
-                      threadActions.navigateToDraft(thread.draftId, threadRef);
-                      return;
-                    }
-                    threadActions.navigateToThread(threadRef);
-                  }}
-                  onMenu={() => setMenuThreadKey(threadKey)}
-                />
-              );
-            })
+            <ChevronRightIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
           )}
-        </div>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{project.displayName}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">{sortedThreads.length}</span>
+        </button>
+        <button
+          type="button"
+          aria-label={`Project actions for ${project.displayName}`}
+          className="flex w-11 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          onClick={(event) => openProjectMenu({ x: event.clientX, y: event.clientY })}
+        >
+          <EllipsisVerticalIcon aria-hidden className="size-4" />
+        </button>
+      </div>
+      {expanded ? (
+        worktreeSections ? (
+          <div className="pl-3">
+            {worktreeSections.map((worktreeNode) => (
+              <PhoneHomeWorktreeSection
+                key={worktreeNode.worktree.worktreeId}
+                worktreeNode={worktreeNode}
+                renderThreadRow={renderThreadRow}
+              />
+            ))}
+          </div>
+        ) : (
+          <div role="list" aria-label={`Threads in ${project.displayName}`}>
+            {sortedThreads.length === 0 ? (
+              <p className="px-3 pb-3 text-sm text-muted-foreground">No threads yet.</p>
+            ) : (
+              sortedThreads.map((thread) => renderThreadRow(thread))
+            )}
+          </div>
+        )
       ) : null}
       <PhoneThreadActionsSheet
         open={menuThread !== null}
@@ -451,6 +592,7 @@ function PhoneHomeProjectSection({
         }}
         title={menuThread?.title ?? "Thread"}
         items={menuThreadKey ? threadActions.listThreadMenuActions(menuThreadKey) : []}
+        leadingSections={menuThread ? <ThreadStatusDetailLine thread={menuThread} /> : undefined}
         onAction={(actionId) => {
           const threadRef = menuThreadKey ? parseScopedThreadKey(menuThreadKey) : null;
           setMenuThreadKey(null);
@@ -466,6 +608,108 @@ function PhoneHomeProjectSection({
         commitRename={threadActions.commitRename}
         cancelRename={threadActions.cancelRename}
       />
+      {/* The desktop project dialogs, reused unchanged behind the phone
+          project menu. They render nothing while closed. */}
+      <ProjectExplorerDialog
+        open={explorerDialogOpen}
+        projectName={project.displayName}
+        memberProjects={project.memberProjects}
+        initialTab="overview"
+        onOpenChange={setExplorerDialogOpen}
+      />
+      <ProjectSettingsDialog
+        open={settingsDialog.projectSettingsOpen}
+        target={settingsDialog.projectSettingsTarget}
+        title={settingsDialog.projectSettingsTitle}
+        customAvatarContentHash={settingsDialog.projectSettingsCustomAvatarContentHash}
+        projectAvatarUploadUnavailableReason={settingsDialog.projectAvatarUploadUnavailableReason}
+        preferredRemoteName={settingsDialog.projectSettingsPreferredRemoteName}
+        workspaceRoot={settingsDialog.projectSettingsWorkspaceRoot}
+        customSystemPrompt={settingsDialog.projectSettingsCustomSystemPrompt}
+        defaultModelSelection={settingsDialog.projectSettingsDefaultModelSelection}
+        saving={settingsDialog.projectSettingsSaving}
+        onClose={settingsDialog.closeProjectSettingsDialog}
+        onSave={() => void settingsDialog.submitProjectSettings()}
+        onTitleChange={settingsDialog.setProjectSettingsTitle}
+        onWorkspaceRootChange={settingsDialog.setProjectSettingsWorkspaceRoot}
+        onCustomSystemPromptChange={settingsDialog.setProjectSettingsCustomSystemPrompt}
+        onDefaultModelSelectionChange={settingsDialog.setProjectSettingsDefaultModelSelection}
+        onPreferredRemoteChange={settingsDialog.setProjectSettingsPreferredRemoteName}
+        onPickWorkspaceRoot={() => void settingsDialog.pickProjectSettingsWorkspaceRoot()}
+        onOpenRemote={settingsDialog.openProjectRemoteByName}
+        onUploadAvatar={settingsDialog.uploadProjectAvatar}
+        onRemoveAvatar={settingsDialog.removeProjectAvatar}
+      />
+      <SidebarProjectRenameDialog
+        target={renameDialog.projectRenameTarget}
+        title={renameDialog.projectRenameTitle}
+        onTitleChange={renameDialog.setProjectRenameTitle}
+        onClose={renameDialog.closeProjectRenameDialog}
+        onSubmit={() => void renameDialog.submitProjectRename()}
+      />
+      <SidebarProjectGroupingDialog
+        target={groupingDialog.projectGroupingTarget}
+        selection={groupingDialog.projectGroupingSelection}
+        globalGroupingMode={projectGroupingSettings.sidebarProjectGroupingMode}
+        onSelectionChange={groupingDialog.setProjectGroupingSelection}
+        onClose={groupingDialog.closeProjectGroupingDialog}
+        onSave={groupingDialog.saveProjectGroupingPreference}
+      />
+    </section>
+  );
+}
+
+/**
+ * A worktree section inside a phone Home project group, mirroring the
+ * desktop sidebar's worktree rows: collapsed by default, expand/collapse by
+ * tap or keyboard, sessions listed inside in the shared tree order.
+ */
+function PhoneHomeWorktreeSection({
+  worktreeNode,
+  renderThreadRow,
+}: {
+  readonly worktreeNode: SidebarTreeWorktree;
+  readonly renderThreadRow: (thread: SidebarTreeThread) => ReactNode;
+}) {
+  const [collapsed, setCollapsed] = useState(true);
+  const title = worktreeNode.worktree.title ?? worktreeNode.worktree.branch;
+  return (
+    <section aria-label={title}>
+      <button
+        type="button"
+        aria-expanded={!collapsed}
+        className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm text-muted-foreground hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        onClick={() => setCollapsed((value) => !value)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            setCollapsed(true);
+            return;
+          }
+          if (event.key === "ArrowRight") {
+            event.preventDefault();
+            setCollapsed(false);
+          }
+        }}
+      >
+        {collapsed ? (
+          <ChevronRightIcon aria-hidden className="size-4 shrink-0" />
+        ) : (
+          <ChevronDownIcon aria-hidden className="size-4 shrink-0" />
+        )}
+        <GitBranchIcon aria-hidden className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <span className="shrink-0 text-xs">{worktreeNode.sessions.length}</span>
+      </button>
+      {collapsed ? null : (
+        <div role="list" aria-label={`Sessions in ${title}`}>
+          {worktreeNode.sessions.length === 0 ? (
+            <p className="px-3 pb-3 text-sm text-muted-foreground">No sessions yet.</p>
+          ) : (
+            worktreeNode.sessions.map((thread) => renderThreadRow(thread))
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -483,12 +727,16 @@ function PhoneHomeThreadRow({
 }) {
   const timestamp =
     thread.latestTurn?.completedAt ?? thread.latestUserMessageAt ?? thread.createdAt;
+  // Long-press mirrors the kebab: it opens the same thread action sheet
+  // without hijacking scroll (a >10px drag cancels) or text selection.
+  const longPress = useLongPress(() => onMenu());
   return (
     <div role="listitem" className="flex items-stretch">
       <button
         type="button"
         className="flex min-h-11 min-w-0 flex-1 items-center gap-2 py-1 pl-3 text-left hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         onClick={onOpen}
+        {...longPress}
       >
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1 text-sm">

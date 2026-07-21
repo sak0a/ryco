@@ -16,6 +16,8 @@ import {
 import { getPrimaryKnownEnvironment } from "./environments/primary";
 import { type WsRpcClient } from "./rpc/wsRpcClient";
 import { showContextMenuFallback } from "./contextMenuFallback";
+import { isContextMenuSheetHostMounted, presentContextMenuSheet } from "./contextMenuSheetState";
+import { getPresentationTier } from "./lib/presentationTier";
 import {
   readBrowserClientSettings,
   readBrowserSavedEnvironmentRegistry,
@@ -75,6 +77,11 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
       ): Promise<T | null> => {
         if (window.desktopBridge) {
           return window.desktopBridge.showContextMenu(items, position) as Promise<T | null>;
+        }
+        // The phone tier presents context actions as a bottom action sheet
+        // (touch-sized rows, focus trap); desktop keeps the DOM fallback.
+        if (getPresentationTier() === "phone" && isContextMenuSheetHostMounted()) {
+          return presentContextMenuSheet(items);
         }
         return showContextMenuFallback(items, position);
       },

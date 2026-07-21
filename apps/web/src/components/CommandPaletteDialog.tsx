@@ -1860,7 +1860,7 @@ function OpenCommandPaletteDialog() {
               title={`${remoteProjectButtonLabel ?? "Continue"} (Enter)`}
             >
               <span>{isRemoteProjectPending ? "Working" : remoteProjectButtonLabel}</span>
-              <KbdGroup className="pointer-events-none -me-0.5 items-center gap-1">
+              <KbdGroup className="pointer-events-none -me-0.5 items-center gap-1 pointer-coarse:hidden">
                 <Kbd>Enter</Kbd>
               </KbdGroup>
             </Button>
@@ -1895,7 +1895,7 @@ function OpenCommandPaletteDialog() {
               <span>
                 {isCloneDestinationStep && isRemoteProjectPending ? "Cloning" : submitActionLabel}
               </span>
-              <KbdGroup className="pointer-events-none -me-0.5 items-center gap-1">
+              <KbdGroup className="pointer-events-none -me-0.5 items-center gap-1 pointer-coarse:hidden">
                 <Kbd>{hasHighlightedBrowseItem ? `${submitModifierLabel} Enter` : "Enter"}</Kbd>
               </KbdGroup>
             </Button>
@@ -1947,7 +1947,9 @@ function OpenCommandPaletteDialog() {
           />
         </CommandPanel>
         <CommandFooter className="gap-3 max-sm:flex-col max-sm:items-start">
-          <div className="flex items-center gap-3">
+          {/* Keyboard-navigation hints; hidden on coarse pointers where every
+              action is reachable by tap. */}
+          <div className="flex items-center gap-3 pointer-coarse:hidden">
             <KbdGroup className="items-center gap-1.5">
               <Kbd>
                 <ArrowUpIcon />

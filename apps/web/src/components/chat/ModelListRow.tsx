@@ -97,7 +97,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
             ) : null}
           </div>
           {props.jumpLabel ? (
-            <Kbd className="h-4 min-w-0 shrink-0 rounded-sm px-1.5 text-[10px]">
+            <Kbd className="h-4 min-w-0 shrink-0 rounded-sm px-1.5 text-[10px] pointer-coarse:hidden">
               {props.jumpLabel}
             </Kbd>
           ) : null}

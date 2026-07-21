@@ -8,6 +8,7 @@ import {
   type EnvironmentApi,
   type ProjectId,
   type ThreadId,
+  type WorktreeId,
 } from "@ryco/contracts";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
 import { page, userEvent } from "vite-plus/test/browser";
@@ -29,6 +30,7 @@ vi.mock("../../../lib/gitStatusState", () => ({
   resetGitStatusStateForTests: () => undefined,
 }));
 
+import { __resetContextMenuSheetForTests } from "../../../contextMenuSheetState";
 import {
   __resetEnvironmentApiOverridesForTests,
   __setEnvironmentApiOverrideForTests,
@@ -39,6 +41,7 @@ import { useStore, type EnvironmentState } from "../../../store";
 import type { SidebarThreadSummary } from "../../../types";
 import { useUiStateStore } from "../../../uiStateStore";
 import { SidebarProvider } from "../../ui/sidebar";
+import { ContextMenuActionSheetHost } from "./ContextMenuActionSheetHost";
 import { PhoneHome } from "./PhoneHome";
 
 const ENV_ID = EnvironmentId.make("environment-local");
@@ -46,8 +49,90 @@ const PROJECT_A = "project-a" as ProjectId;
 const PROJECT_B = "project-b" as ProjectId;
 const THREAD_A = "thread-a" as ThreadId;
 const THREAD_B = "thread-b" as ThreadId;
+const THREAD_C = "thread-c" as ThreadId;
+const WORKTREE_MAIN = "worktree-main" as WorktreeId;
+const WORKTREE_FEATURE = "worktree-feature" as WorktreeId;
 const THREAD_A_KEY = scopedThreadKey(scopeThreadRef(ENV_ID, THREAD_A));
 const NOW_ISO = "2026-07-20T00:00:00.000Z";
+const LONG_PRESS_HOLD_MS = 600;
+
+async function dispatchLongPress(element: HTMLElement, moveByPx = 0): Promise<void> {
+  const rect = element.getBoundingClientRect();
+  const x = rect.left + rect.width / 2;
+  const y = rect.top + rect.height / 2;
+  element.dispatchEvent(
+    new PointerEvent("pointerdown", {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 11,
+      isPrimary: true,
+      button: 0,
+      clientX: x,
+      clientY: y,
+      pointerType: "touch",
+    }),
+  );
+  if (moveByPx > 0) {
+    element.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 11,
+        isPrimary: true,
+        clientX: x,
+        clientY: y + moveByPx,
+        pointerType: "touch",
+      }),
+    );
+  }
+  await new Promise((resolve) => setTimeout(resolve, LONG_PRESS_HOLD_MS));
+  element.dispatchEvent(
+    new PointerEvent("pointerup", {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 11,
+      isPrimary: true,
+      button: 0,
+      clientX: x,
+      clientY: y + moveByPx,
+      pointerType: "touch",
+    }),
+  );
+}
+
+function worktreeSummary(
+  worktreeId: WorktreeId,
+  branch: string,
+  worktreePath: string | null,
+  origin: "main" | "branch",
+) {
+  return {
+    id: worktreeId,
+    environmentId: ENV_ID,
+    projectId: PROJECT_B,
+    title: null,
+    branch,
+    worktreePath,
+    origin,
+    prNumber: null,
+    issueNumber: null,
+    prTitle: null,
+    issueTitle: null,
+    prState: null,
+    prIsDraft: null,
+    issueState: null,
+    workItemProvider: null,
+    workItemKey: null,
+    workItemTitle: null,
+    workItemState: null,
+    workItemStateName: null,
+    workItemUrl: null,
+    createdAt: NOW_ISO,
+    updatedAt: NOW_ISO,
+    archivedAt: null,
+    manualPosition: origin === "main" ? 0 : 1,
+  };
+}
 
 function summary(
   threadId: ThreadId,
@@ -160,6 +245,7 @@ describe("PhoneHome", () => {
   });
 
   afterEach(async () => {
+    __resetContextMenuSheetForTests();
     await mounted?.unmount();
     mounted = null;
     __resetEnvironmentApiOverridesForTests();
@@ -322,6 +408,162 @@ describe("PhoneHome", () => {
     await vi.waitFor(() => {
       expect(document.activeElement).toBe(kebab);
     });
+  });
+
+  it("opens the thread action sheet from a long-press without hijacking scroll", async () => {
+    mounted = await render(
+      <SidebarProvider>
+        <PhoneHome />
+      </SidebarProvider>,
+    );
+    const rowButton = await vi.waitFor(() => {
+      const button = page.getByText("Alpha thread").element().closest("button");
+      expect(button).not.toBeNull();
+      return button as HTMLButtonElement;
+    });
+
+    // A >10px drag (scroll gesture) cancels the press: no sheet opens.
+    await dispatchLongPress(rowButton, 24);
+    expect(document.querySelector('[data-slot="sheet-popup"]')).toBeNull();
+    expect(window.getSelection()?.toString() ?? "").toBe("");
+
+    // A stationary long-press opens the same shared action inventory as the
+    // visible kebab.
+    await dispatchLongPress(rowButton);
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-slot="sheet-popup"]')).not.toBeNull();
+    });
+    await expect.element(page.getByRole("button", { name: "Unpin thread" })).toBeVisible();
+    // The long-press did not also navigate into the thread.
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("exposes the desktop project action inventory from the header kebab through the shared sheet", async () => {
+    const clipboardWriteText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardWriteText },
+    });
+
+    try {
+      mounted = await render(
+        <SidebarProvider>
+          <ContextMenuActionSheetHost />
+          <PhoneHome />
+        </SidebarProvider>,
+      );
+
+      const sheetRow = (label: string): HTMLButtonElement | null => {
+        const popup = document.querySelector<HTMLElement>('[data-slot="sheet-popup"]');
+        if (!popup) return null;
+        return (
+          [...popup.querySelectorAll<HTMLButtonElement>("button")].find(
+            (button) => button.textContent?.trim() === label,
+          ) ?? null
+        );
+      };
+
+      // The kebab presents the existing desktop project context-menu
+      // inventory through the shared bottom sheet.
+      await page.getByRole("button", { name: "Project actions for Alpha" }).click();
+      for (const label of [
+        "Project overview",
+        "Project settings",
+        "Rename project",
+        "Project grouping…",
+        "Copy Project Path",
+        "Remove project",
+      ]) {
+        await vi.waitFor(() => {
+          expect(sheetRow(label), `project menu row "${label}"`).not.toBeNull();
+        });
+        expect(sheetRow(label)!.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      }
+      expect(sheetRow("Remove project")!.className).toContain("text-destructive");
+
+      // Non-destructive round-trip through the shared clipboard handler.
+      sheetRow("Copy Project Path")!.click();
+      await vi.waitFor(() => {
+        expect(clipboardWriteText).toHaveBeenCalledWith("/repo/alpha");
+      });
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-slot="sheet-popup"]')).toBeNull();
+      });
+
+      // A long-press on the project header opens the same menu.
+      const header = page.getByRole("button", { name: /^Alpha 1$/ }).element() as HTMLButtonElement;
+      await dispatchLongPress(header);
+      await vi.waitFor(() => {
+        expect(sheetRow("Project overview")).not.toBeNull();
+      });
+    } finally {
+      delete (navigator as unknown as Record<string, unknown>)["clipboard"];
+    }
+  });
+
+  it("layers worktree sections into project groups with collapsed-by-default touch and keyboard rows", async () => {
+    const state = environmentState();
+    state.threadIds = [THREAD_A, THREAD_B, THREAD_C];
+    state.threadIdsByProjectId = {
+      [PROJECT_A]: [THREAD_A],
+      [PROJECT_B]: [THREAD_B, THREAD_C],
+    };
+    state.sidebarThreadSummaryById = {
+      ...state.sidebarThreadSummaryById,
+      [THREAD_C]: summary(THREAD_C, PROJECT_B, "Beta worktree thread", {
+        branch: "feat-x",
+        worktreePath: "/repo/beta-wt",
+      }),
+    };
+    state.worktreeIds = [WORKTREE_MAIN, WORKTREE_FEATURE];
+    state.worktreeIdsByProjectId = { [PROJECT_B]: [WORKTREE_MAIN, WORKTREE_FEATURE] };
+    state.worktreeById = {
+      [WORKTREE_MAIN]: worktreeSummary(WORKTREE_MAIN, "main", null, "main"),
+      [WORKTREE_FEATURE]: worktreeSummary(WORKTREE_FEATURE, "feat-x", "/repo/beta-wt", "branch"),
+    };
+    useStore.setState({
+      activeEnvironmentId: ENV_ID,
+      environmentStateById: { [ENV_ID]: state },
+    });
+
+    mounted = await render(
+      <SidebarProvider>
+        <PhoneHome />
+      </SidebarProvider>,
+    );
+
+    // The multi-worktree project renders collapsed sections; its threads are
+    // not in the flat list.
+    const mainHeader = await vi.waitFor(() => {
+      const header = page.getByRole("button", { name: "main 1" }).element() as HTMLButtonElement;
+      expect(header).not.toBeNull();
+      return header;
+    });
+    const featureHeader = page
+      .getByRole("button", { name: "feat-x 1" })
+      .element() as HTMLButtonElement;
+    expect(mainHeader.getAttribute("aria-expanded")).toBe("false");
+    expect(featureHeader.getAttribute("aria-expanded")).toBe("false");
+    expect(mainHeader.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+    expect(featureHeader.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+    await expect.element(page.getByText("Beta running thread")).not.toBeInTheDocument();
+    await expect.element(page.getByText("Beta worktree thread")).not.toBeInTheDocument();
+
+    // The single-worktree project keeps its flat list.
+    await expect.element(page.getByText("Alpha thread")).toBeVisible();
+
+    // Tap expands a section and reveals its sessions in tree order.
+    featureHeader.click();
+    await expect.element(page.getByText("Beta worktree thread")).toBeVisible();
+    expect(featureHeader.getAttribute("aria-expanded")).toBe("true");
+
+    // Keyboard: Enter toggles the section, matching the desktop tree rows.
+    mainHeader.focus();
+    await userEvent.keyboard("{Enter}");
+    await expect.element(page.getByText("Beta running thread")).toBeVisible();
+    expect(mainHeader.getAttribute("aria-expanded")).toBe("true");
+    await userEvent.keyboard("{Enter}");
+    await expect.element(page.getByText("Beta running thread")).not.toBeInTheDocument();
   });
 
   it("survives a hosted node switch reset of the presentation stores", async () => {

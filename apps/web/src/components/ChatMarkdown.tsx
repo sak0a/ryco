@@ -35,6 +35,8 @@ import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
+import { useLongPress } from "../hooks/useLongPress";
+import { usePresentationTier } from "../hooks/usePresentationTier";
 import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "../markdown-links";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
@@ -506,11 +508,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     );
   }, []);
 
-  const handleContextMenu = useCallback(
-    async (event: ReactMouseEvent<HTMLAnchorElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-
+  const openFileLinkMenu = useCallback(
+    async (position: { x: number; y: number }) => {
       const api = readLocalApi();
       if (!api) return;
 
@@ -520,7 +519,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
           { id: "copy-relative", label: "Copy relative path" },
           { id: "copy-full", label: "Copy full path" },
         ] as const,
-        { x: event.clientX, y: event.clientY },
+        position,
       );
 
       if (clicked === "open") {
@@ -538,6 +537,25 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     [displayPath, handleCopy, handleOpen, targetPath],
   );
 
+  const handleContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLAnchorElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void openFileLinkMenu({ x: event.clientX, y: event.clientY });
+    },
+    [openFileLinkMenu],
+  );
+
+  // Phone tier: long-press mirrors right-click, presenting the same file
+  // actions through the shared bottom action sheet.
+  const isPhoneTier = usePresentationTier() === "phone";
+  const longPress = useLongPress(
+    (point) => {
+      void openFileLinkMenu(point);
+    },
+    { disabled: !isPhoneTier },
+  );
+
   return (
     <Tooltip>
       <TooltipTrigger
@@ -545,12 +563,24 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
           <a
             href={href}
             className={cn(MARKDOWN_FILE_LINK_CLASS_NAME, className)}
+            onPointerDown={longPress.onPointerDown}
+            onPointerMove={longPress.onPointerMove}
+            onPointerUp={longPress.onPointerUp}
+            onPointerCancel={longPress.onPointerCancel}
+            onPointerLeave={longPress.onPointerLeave}
+            onClickCapture={longPress.onClickCapture}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
               handleOpen();
             }}
-            onContextMenu={handleContextMenu}
+            onContextMenu={(event) => {
+              // A fired long-press already presented the menu; swallow the
+              // platform's synthetic contextmenu instead of double-firing.
+              longPress.onContextMenu(event);
+              if (event.defaultPrevented) return;
+              handleContextMenu(event);
+            }}
           >
             <VscodeEntryIcon
               pathValue={filePath}
