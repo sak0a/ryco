@@ -247,6 +247,15 @@ describe("user-facing return to the node directory (All nodes)", () => {
     expect(state.nodes[0]!.presence.online).toBe(true);
     expect(win.location.pathname).toBe("/");
 
+    // A second tap mid- or post-teardown is a handled no-op: no duplicate
+    // "/" history entry is pushed.
+    history.flush();
+    const entryCountAfterLeave = win.entries().length;
+    expect(leaveHostedNodeRouteToDirectory()).toBe(true);
+    history.flush();
+    expect(win.entries().length).toBe(entryCountAfterLeave);
+    expect(win.location.pathname).toBe("/");
+
     // No sensitive material reached the URL or history entries.
     const serialized = JSON.stringify(win.entries());
     for (const sensitive of [RELAY_TICKET, sessionResponse.csrfToken, sessionResponse.session.id]) {

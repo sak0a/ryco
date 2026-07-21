@@ -3,7 +3,7 @@ import React, { memo, useCallback } from "react";
 import { Link } from "@tanstack/react-router";
 import { APP_STAGE_LABEL, APP_VERSION } from "../../branding";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
-import { SidebarFooter, SidebarHeader, SidebarTrigger, useSidebar } from "../ui/sidebar";
+import { SidebarFooter, SidebarHeader, useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SidebarUpdatePill } from "./SidebarUpdatePill";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
@@ -74,7 +74,6 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 
   const wordmark = (
     <div className="@container/sidebar-header flex w-full min-w-0 items-center gap-2">
-      <SidebarTrigger className="shrink-0 not-phone:hidden" />
       <Tooltip>
         <TooltipTrigger
           render={

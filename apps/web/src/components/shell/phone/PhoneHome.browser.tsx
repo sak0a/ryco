@@ -10,7 +10,7 @@ import {
   type ThreadId,
 } from "@ryco/contracts";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
@@ -272,6 +272,55 @@ describe("PhoneHome", () => {
       expect(dispatchCommand).toHaveBeenCalledWith(
         expect.objectContaining({ type: "thread.archive", threadId: THREAD_A }),
       );
+    });
+  });
+
+  it("supports the keyboard flow from a thread row through the kebab action sheet", async () => {
+    mounted = await render(
+      <SidebarProvider>
+        <PhoneHome />
+      </SidebarProvider>,
+    );
+
+    // The row and its kebab are reachable in tab order: the kebab follows
+    // the row button directly.
+    const rowButton = page
+      .getByText("Alpha thread")
+      .element()
+      .closest("button") as HTMLButtonElement;
+    expect(rowButton).not.toBeNull();
+    rowButton.focus();
+    expect(document.activeElement).toBe(rowButton);
+    await userEvent.keyboard("{Tab}");
+    const kebab = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Thread actions for Alpha thread"]',
+    )!;
+    expect(document.activeElement).toBe(kebab);
+
+    // Enter opens the bottom-sheet action inventory and moves focus inside.
+    await userEvent.keyboard("{Enter}");
+    const sheet = await vi.waitFor(() => {
+      const popup = document.querySelector<HTMLElement>('[data-slot="sheet-popup"]');
+      expect(popup).not.toBeNull();
+      return popup!;
+    });
+    await vi.waitFor(() => {
+      expect(sheet.contains(document.activeElement)).toBe(true);
+    });
+
+    // Focus is trapped: tabbing cycles within the sheet.
+    for (let index = 0; index < 12; index += 1) {
+      await userEvent.keyboard("{Tab}");
+      expect(sheet.contains(document.activeElement)).toBe(true);
+    }
+
+    // Escape closes the sheet and focus returns to the kebab.
+    await userEvent.keyboard("{Escape}");
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-slot="sheet-popup"]')).toBeNull();
+    });
+    await vi.waitFor(() => {
+      expect(document.activeElement).toBe(kebab);
     });
   });
 

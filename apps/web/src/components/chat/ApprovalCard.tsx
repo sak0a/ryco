@@ -47,8 +47,14 @@ export const ApprovalCard = memo(function ApprovalCard({
   onRespondToApproval,
 }: ApprovalCardProps) {
   const tier = usePresentationTier();
-  const [expanded, setExpanded] = useState(false);
-  const sheetOpen = expanded && tier === "phone";
+  // Keyed by request id so the expanded sheet never persists across
+  // approvals; leaving the phone tier discards it as well, so a tier round
+  // trip does not silently reopen it.
+  const [expandedRequestId, setExpandedRequestId] = useState<ApprovalRequestId | null>(null);
+  const sheetOpen = tier === "phone" && expandedRequestId === approval.requestId;
+  if (tier !== "phone" && expandedRequestId !== null) {
+    setExpandedRequestId(null);
+  }
 
   const actions = (
     <ComposerPendingApprovalActions
@@ -71,7 +77,7 @@ export const ApprovalCard = memo(function ApprovalCard({
             size="sm"
             variant="ghost"
             className="min-h-11 text-muted-foreground"
-            onClick={() => setExpanded(true)}
+            onClick={() => setExpandedRequestId(approval.requestId)}
           >
             <ExpandIcon aria-hidden /> Show full detail
           </Button>
@@ -88,7 +94,7 @@ export const ApprovalCard = memo(function ApprovalCard({
       <Sheet
         open={sheetOpen}
         onOpenChange={(nextOpen) => {
-          if (!nextOpen) setExpanded(false);
+          if (!nextOpen) setExpandedRequestId(null);
         }}
       >
         <SheetPopup side="bottom" aria-label="Approval detail">

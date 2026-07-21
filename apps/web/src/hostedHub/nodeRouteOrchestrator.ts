@@ -312,6 +312,10 @@ export function leaveHostedNodeRouteToDirectory(): boolean {
   if (!getInstalledHostedNodeHistory()) return false;
   interactiveNodeId = null;
   setNotice(null);
+  // Already on the directory route (for example a second tap while the
+  // teardown is in flight): the leave is handled without pushing a duplicate
+  // "/" history entry.
+  if (getRoutedHostedNode().nodeId === null) return true;
   return leaveHostedNodeRoute();
 }
 
