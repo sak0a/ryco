@@ -196,7 +196,10 @@ describe("hosted node route restore integration", () => {
     });
 
     await hostedHubController.bootstrap();
-    await vi.waitFor(() => expect(capturedTransports).toHaveLength(1));
+    // The bootstrap path lazily imports large module graphs; under a loaded
+    // full-repo test run (turbo runs the package suites concurrently) the
+    // default one-second poll window starves before the transport appears.
+    await vi.waitFor(() => expect(capturedTransports).toHaveLength(1), { timeout: 10_000 });
 
     // The activation path is the existing one: a fresh one-use ticket is
     // requested only when the relay attempt resolves its URL.
