@@ -23,7 +23,7 @@ permissions:
 jobs:
   preflight:
     name: Preflight
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ryco-validation]
     timeout-minutes: 10
     outputs:
       release_channel: ${{ steps.release_meta.outputs.release_channel }}
@@ -37,6 +37,18 @@ jobs:
       make_latest: ${{ steps.release_meta.outputs.make_latest }}
       ref: ${{ github.sha }}
     steps:
+      - name: Require hosted release runners
+        shell: bash
+        env:
+          RYCO_ENABLE_HOSTED_RELEASES: ${{ vars.RYCO_ENABLE_HOSTED_RELEASES }}
+        run: |
+          if [[ "${RYCO_ENABLE_HOSTED_RELEASES}" == "true" ]]; then
+            exit 0
+          fi
+
+          echo "::error title=Hosted release runners are disabled::Mac and Windows release artifacts require hosted runners. Set the RYCO_ENABLE_HOSTED_RELEASES repository Actions variable to true after hosted capacity is available."
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
