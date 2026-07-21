@@ -370,9 +370,11 @@ Two consequences this design resolves explicitly:
 - **Inline tokens.** Collapsed now renders Lexical inline nodes (mentions, skills, terminal
   contexts) rather than a raw string. Collapsed truncation ellipsises at the line box and must not
   reflow token nodes.
-- **Placeholder with terminal contexts.** `ComposerPromptEditor.tsx:1657` suppresses the placeholder
-  entirely when terminal contexts are attached, so a permanently visible collapsed editor would show
-  nothing. Collapsed state renders a bounded context-count placeholder instead.
+- **Placeholder with terminal contexts.** No change is required, contrary to an earlier reading of
+  `ComposerPromptEditor.tsx:1657`. Attaching a terminal context writes a marker into the prompt, so
+  the editor is never empty when contexts are present and Lexical's placeholder never renders in
+  that state at all. The collapsed editor therefore shows the clipped inline context chips, not an
+  empty line. A bounded context-count placeholder would be unreachable code and must not be added.
 
 The `onFocusCapture` early return at `ChatComposer.tsx:1710-1718` — which skips setting focus state
 when the target is inside `[data-chat-composer-collapsed-controls="true"]`, the container holding the
