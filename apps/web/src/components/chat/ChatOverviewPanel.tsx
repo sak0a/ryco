@@ -180,6 +180,8 @@ export interface ChatOverviewPanelProps {
   markdownCwd: string | undefined;
   workspaceRoot: string | undefined;
   mode: "floating" | "sheet" | "sidebar";
+  /** Visible close affordance for overlay presentations (see PlanSidebar). */
+  onClose?: (() => void) | undefined;
   onOpenFiles: () => void;
   onOpenReview: () => void;
   onOpenSubagent: (subagent: ThreadSubagentView) => void;
@@ -349,6 +351,7 @@ export function ChatOverviewPanel(
     markdownCwd,
     workspaceRoot,
     mode,
+    onClose,
     onOpenFiles,
     onOpenReview,
     onOpenSubagent,
@@ -796,6 +799,7 @@ export function ChatOverviewPanel(
       markdownCwd={markdownCwd}
       workspaceRoot={workspaceRoot}
       mode={mode}
+      onClose={onClose}
       onOpenFiles={onOpenFiles}
       onOpenReview={onOpenReview}
       onOpenSubagent={onOpenSubagent}

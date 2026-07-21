@@ -74,6 +74,91 @@ describe("ThreadWorkspacePanel", () => {
     ).toBeLessThanOrEqual(1);
   });
 
+  it("renders the phone surface bar with a back affordance and 44px tab targets", async () => {
+    const host = document.createElement("div");
+    host.style.width = "390px";
+    host.style.height = "700px";
+    host.style.display = "flex";
+    document.body.append(host);
+
+    mounted = await render(
+      <ThreadWorkspacePanel
+        mode="phone"
+        panelMode={null}
+        openedPanelModes={["files", "review", "terminal"]}
+        openedAgentKeys={[]}
+        onClosePanelTab={vi.fn()}
+      />,
+      { container: host },
+    );
+
+    // Surface bar: back affordance to the thread instead of the desktop X.
+    const backButton = document.querySelector<HTMLElement>('button[aria-label="Back to thread"]');
+    expect(backButton).not.toBeNull();
+    expect(document.querySelector('button[aria-label="Close workspace panel"]')).toBeNull();
+
+    // Every tab is a >=44px touch target on the phone surface.
+    const tabs = [...document.querySelectorAll<HTMLElement>('[role="tab"]')];
+    expect(tabs.length).toBe(3);
+    for (const tab of tabs) {
+      expect(tab.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+    }
+    for (const label of ["Files", "Review", "Terminal"]) {
+      const closeButton = document.querySelector<HTMLElement>(
+        `button[aria-label="Close ${label} tab"]`,
+      );
+      expect(closeButton).not.toBeNull();
+      const hitArea = getComputedStyle(closeButton!, "::after");
+      expect(hitArea.position).toBe("absolute");
+      expect(parseFloat(hitArea.width)).toBeGreaterThanOrEqual(44);
+      expect(parseFloat(hitArea.height)).toBeGreaterThanOrEqual(44);
+    }
+    const launcherButton = document.querySelector<HTMLElement>(
+      'button[aria-label="Workspace launcher"]',
+    );
+    expect(launcherButton).not.toBeNull();
+    expect(launcherButton!.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+    expect(launcherButton!.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
+  });
+
+  it("scrolls the workspace launcher when the cards overflow a short phone pane", async () => {
+    const host = document.createElement("div");
+    host.style.width = "320px";
+    host.style.height = "420px";
+    host.style.display = "flex";
+    document.body.append(host);
+
+    mounted = await render(
+      <ThreadWorkspacePanel
+        mode="phone"
+        panelMode={null}
+        openedPanelModes={[]}
+        openedAgentKeys={[]}
+        onClosePanelTab={vi.fn()}
+      />,
+      { container: host },
+    );
+
+    const viewport = document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    expect(viewport).not.toBeNull();
+    // The launcher card stack overflows 420px and must scroll instead of
+    // clipping: the first card starts inside the scroll range (auto margins
+    // collapse), and the pane scrolls through the full stack.
+    expect(viewport!.scrollHeight).toBeGreaterThan(viewport!.clientHeight);
+    viewport!.scrollTop = 0;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const filesCard = [...viewport!.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes("Files"),
+    );
+    expect(filesCard).toBeDefined();
+    expect(filesCard!.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+      viewport!.getBoundingClientRect().top - 0.5,
+    );
+    viewport!.scrollTop = viewport!.scrollHeight;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(viewport!.scrollTop).toBeGreaterThan(0);
+  });
+
   it("scrolls long subagent transcripts inside the agent panel", async () => {
     const host = document.createElement("div");
     host.style.width = "420px";

@@ -61,7 +61,7 @@ import { resolveDiffOpenInEditorTarget } from "./DiffPanel.openInEditor.logic";
 type DiffRenderMode = "stacked" | "split";
 type DiffThemeType = "light" | "dark";
 
-const DIFF_PANEL_UNSAFE_CSS = `
+const DIFF_PANEL_BASE_UNSAFE_CSS = `
 [data-diffs-header],
 [data-diff],
 [data-file],
@@ -108,7 +108,12 @@ const DIFF_PANEL_UNSAFE_CSS = `
   background-color: color-mix(in srgb, var(--card) 94%, var(--foreground)) !important;
   border-bottom: 1px solid var(--border) !important;
 }
+`;
 
+// Open-in-editor affordances (clickable title, clickable line numbers). These
+// fire local RPCs that cannot succeed from a phone, so the phone presentation
+// omits them along with the click handlers.
+const DIFF_PANEL_EDITOR_OPEN_UNSAFE_CSS = `
 [data-title] {
   cursor: pointer;
   transition:
@@ -127,12 +132,17 @@ const DIFF_PANEL_UNSAFE_CSS = `
 [data-interactive-line-numbers] [data-line-number-content] {
   cursor: pointer;
 }
+`;
 
+const DIFF_PANEL_SEARCH_UNSAFE_CSS = `
 ::highlight(ryco-diff-search-match) {
   background-color: color-mix(in srgb, var(--warning) 60%, transparent);
   color: var(--foreground);
 }
 `;
+
+const DIFF_PANEL_UNSAFE_CSS = `${DIFF_PANEL_BASE_UNSAFE_CSS}${DIFF_PANEL_EDITOR_OPEN_UNSAFE_CSS}${DIFF_PANEL_SEARCH_UNSAFE_CSS}`;
+const DIFF_PANEL_PHONE_UNSAFE_CSS = `${DIFF_PANEL_BASE_UNSAFE_CSS}${DIFF_PANEL_SEARCH_UNSAFE_CSS}`;
 
 type RenderablePatch =
   | {
@@ -430,8 +440,15 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const navigate = useNavigate();
   const { resolvedTheme } = useTheme();
   const settings = useSettings();
+  // Phone work surface: word wrap defaults on (320-430px columns are
+  // unreadable with horizontal code scroll), open-in-editor taps are
+  // suppressed, and the split-view toggle is hidden. The settings-driven
+  // desktop defaults are untouched.
+  const isPhonePresentation = mode === "phone";
   const [diffRenderMode, setDiffRenderMode] = useState<DiffRenderMode>("stacked");
-  const [diffWordWrap, setDiffWordWrap] = useState(settings.diffWordWrap);
+  const [diffWordWrap, setDiffWordWrap] = useState(
+    isPhonePresentation ? true : settings.diffWordWrap,
+  );
   const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
   const [collapsedDiffFileKeys, setCollapsedDiffFileKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -766,12 +783,12 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
 
   useEffect(() => {
     if (diffOpen && !previousDiffOpenRef.current) {
-      setDiffWordWrap(settings.diffWordWrap);
+      setDiffWordWrap(isPhonePresentation ? true : settings.diffWordWrap);
       setDiffIgnoreWhitespace(settings.diffIgnoreWhitespace);
       setDiffSearchQuery("");
     }
     previousDiffOpenRef.current = diffOpen;
-  }, [diffOpen, settings.diffIgnoreWhitespace, settings.diffWordWrap]);
+  }, [diffOpen, isPhonePresentation, settings.diffIgnoreWhitespace, settings.diffWordWrap]);
 
   useEffect(() => {
     setDiffSearchQuery("");
@@ -995,25 +1012,29 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
-        <ToggleGroup
-          className="shrink-0"
-          variant="outline"
-          size="xs"
-          value={[diffRenderMode]}
-          onValueChange={(value) => {
-            const next = value[0];
-            if (next === "stacked" || next === "split") {
-              setDiffRenderMode(next);
-            }
-          }}
-        >
-          <Toggle aria-label="Stacked diff view" value="stacked">
-            <Rows3Icon className="size-3" />
-          </Toggle>
-          <Toggle aria-label="Split diff view" value="split">
-            <Columns2Icon className="size-3" />
-          </Toggle>
-        </ToggleGroup>
+        {/* Split view is meaningless at phone width: the toolbar reduces to
+            wrap and whitespace toggles (the turn strip stays as file nav). */}
+        {isPhonePresentation ? null : (
+          <ToggleGroup
+            className="shrink-0"
+            variant="outline"
+            size="xs"
+            value={[diffRenderMode]}
+            onValueChange={(value) => {
+              const next = value[0];
+              if (next === "stacked" || next === "split") {
+                setDiffRenderMode(next);
+              }
+            }}
+          >
+            <Toggle aria-label="Stacked diff view" value="stacked">
+              <Rows3Icon className="size-3" />
+            </Toggle>
+            <Toggle aria-label="Split diff view" value="split">
+              <Columns2Icon className="size-3" />
+            </Toggle>
+          </ToggleGroup>
+        )}
         <Toggle
           aria-label={diffWordWrap ? "Disable diff line wrapping" : "Enable diff line wrapping"}
           title={diffWordWrap ? "Disable line wrapping" : "Enable line wrapping"}
@@ -1171,16 +1192,23 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                           data-diff-file-path={filePath}
                           data-diff-file-index={fileIndex}
                           className="diff-render-file group/diff-file mb-2 rounded-md first:mt-2 last:mb-0"
-                          onClickCapture={(event) => {
-                            const nativeEvent = event.nativeEvent as MouseEvent;
-                            const composedPath = nativeEvent.composedPath?.() ?? [];
-                            const clickedHeader = composedPath.some((node) => {
-                              if (!(node instanceof Element)) return false;
-                              return node.hasAttribute("data-title");
-                            });
-                            if (!clickedHeader) return;
-                            openDiffFileInEditor(filePath);
-                          }}
+                          // Open-in-editor fires a local RPC that cannot
+                          // succeed from a phone; the phone surface renders
+                          // the title as plain text instead of a dead tap.
+                          onClickCapture={
+                            isPhonePresentation
+                              ? undefined
+                              : (event) => {
+                                  const nativeEvent = event.nativeEvent as MouseEvent;
+                                  const composedPath = nativeEvent.composedPath?.() ?? [];
+                                  const clickedHeader = composedPath.some((node) => {
+                                    if (!(node instanceof Element)) return false;
+                                    return node.hasAttribute("data-title");
+                                  });
+                                  if (!clickedHeader) return;
+                                  openDiffFileInEditor(filePath);
+                                }
+                          }
                         >
                           <FileDiff
                             fileDiff={fileDiff}
@@ -1189,6 +1217,10 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                                 type="button"
                                 className={cn(
                                   "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
+                                  // Phone: expand the collapse tap target to
+                                  // the 44px floor (step-7 coarse pattern).
+                                  isPhonePresentation &&
+                                    "relative after:absolute after:top-1/2 after:left-1/2 after:size-11 after:-translate-x-1/2 after:-translate-y-1/2",
                                   getDiffCollapseIconClassName(fileDiff),
                                 )}
                                 aria-label={
@@ -1215,11 +1247,20 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                               overflow: diffWordWrap ? "wrap" : "scroll",
                               theme: resolveDiffThemeName(resolvedTheme),
                               themeType: resolvedTheme as DiffThemeType,
-                              unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
+                              unsafeCSS: isPhonePresentation
+                                ? DIFF_PANEL_PHONE_UNSAFE_CSS
+                                : DIFF_PANEL_UNSAFE_CSS,
                               lineHoverHighlight: "number",
-                              onLineNumberClick: ({ lineNumber }) => {
-                                openDiffFileInEditor(filePath, lineNumber);
-                              },
+                              // Line-number editor-open taps are suppressed on
+                              // the phone surface (same RPC constraint as the
+                              // title click above).
+                              ...(isPhonePresentation
+                                ? {}
+                                : {
+                                    onLineNumberClick: ({ lineNumber }: { lineNumber: number }) => {
+                                      openDiffFileInEditor(filePath, lineNumber);
+                                    },
+                                  }),
                             }}
                           />
                         </div>

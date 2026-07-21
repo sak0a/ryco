@@ -1412,7 +1412,11 @@ export default function ThreadTerminalDrawer({
       <div
         role="tablist"
         aria-label="Terminals"
-        className="flex h-7 shrink-0 items-stretch border-border/70 border-b bg-muted/10"
+        // The phone tier grows the toolbar so its stretched action targets
+        // clear the 44px touch floor (the strip's bottom border eats 1px);
+        // combined with the work surface's keyboard-inset padding it stays
+        // reachable above an open software keyboard.
+        className="flex h-7 shrink-0 items-stretch border-border/70 border-b bg-muted/10 phone:h-12"
       >
         <div
           ref={terminalTablistRef}
@@ -1451,7 +1455,7 @@ export default function ThreadTerminalDrawer({
             );
           })}
           <TerminalActionButton
-            className="inline-flex shrink-0 items-center border-r border-border/70 px-2 text-foreground/90 transition-colors hover:bg-accent/70"
+            className="inline-flex shrink-0 items-center border-r border-border/70 px-2 text-foreground/90 transition-colors hover:bg-accent/70 phone:min-w-11 phone:justify-center"
             onClick={onNewTerminalAction}
             label={newTerminalActionLabel}
           >
@@ -1460,7 +1464,7 @@ export default function ThreadTerminalDrawer({
         </div>
         <div className="flex shrink-0 items-stretch border-l border-border/70">
           <TerminalActionButton
-            className={`inline-flex items-center px-2 text-foreground/90 transition-colors ${
+            className={`inline-flex items-center px-2 text-foreground/90 transition-colors phone:min-w-11 phone:justify-center ${
               hasReachedSplitLimit
                 ? "cursor-not-allowed opacity-45 hover:bg-transparent"
                 : "hover:bg-accent/70"
@@ -1471,7 +1475,7 @@ export default function ThreadTerminalDrawer({
             <SquareSplitHorizontal className="size-3.25" />
           </TerminalActionButton>
           <TerminalActionButton
-            className="inline-flex items-center border-l border-border/70 px-2 text-foreground/90 transition-colors hover:bg-accent/70"
+            className="inline-flex items-center border-l border-border/70 px-2 text-foreground/90 transition-colors hover:bg-accent/70 phone:min-w-11 phone:justify-center"
             onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
             label={closeTerminalActionLabel}
           >

@@ -300,6 +300,80 @@ describe("PreviewPanel", () => {
     expect(previewHarness.readAttempts).not.toContain("logs/huge.log");
   });
 
+  it("pushes a full-width file view from the tree and returns with back on the phone surface", async () => {
+    previewHarness.entries = [
+      { path: "src", kind: "directory" },
+      { path: "src/app.ts", kind: "file", sizeBytes: 64 },
+    ];
+    previewHarness.readFiles.set("src/app.ts", {
+      relativePath: "src/app.ts",
+      contents: "const answer = 42;",
+    });
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <PreviewPanel mode="phone" />
+      </AppAtomRegistryProvider>,
+    );
+
+    // Single-pane phone arrangement: the tree renders full-width — no split
+    // rail, no tree-visibility toggle, no side-by-side empty state.
+    await expect.element(page.getByRole("button", { name: "src/app.ts" })).toBeInTheDocument();
+    expect(document.querySelector("[data-preview-file-rail]")).toBeNull();
+    expect(document.querySelector('[aria-label="Resize workspace tree"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Hide workspace tree"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("Open file");
+
+    // Tapping a file pushes the full-width file view with a back affordance.
+    await page.getByRole("button", { name: "src/app.ts" }).click();
+    await expect.element(page.getByText("const answer = 42;")).toBeInTheDocument();
+    const backButton = page.getByRole("button", { name: "Back to workspace tree" });
+    await expect.element(backButton).toBeInTheDocument();
+    expect(document.querySelector('[aria-label="Filter files"]')).toBeNull();
+
+    // Back returns to the tree.
+    await backButton.click();
+    await expect.element(page.getByRole("button", { name: "src/app.ts" })).toBeInTheDocument();
+    await expect.element(page.getByLabelText("Filter files")).toBeInTheDocument();
+  });
+
+  it("defaults preview wrap on for the phone surface and keeps the toggle live", async () => {
+    previewHarness.entries = [{ path: "src/app.ts", kind: "file", sizeBytes: 64 }];
+    previewHarness.readFiles.set("src/app.ts", {
+      relativePath: "src/app.ts",
+      contents: "const answer = 42;",
+    });
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <PreviewPanel mode="phone" />
+      </AppAtomRegistryProvider>,
+    );
+
+    // Wrap defaults on for the phone presentation even though the settings
+    // mock has diffWordWrap: false (same rationale as the phone diff surface).
+    await expect
+      .element(page.getByRole("button", { name: "Disable preview line wrapping" }))
+      .toBeInTheDocument();
+
+    // The toggle stays user-operable on the phone surface.
+    await page.getByRole("button", { name: "Disable preview line wrapping" }).click();
+    await expect
+      .element(page.getByRole("button", { name: "Enable preview line wrapping" }))
+      .toBeInTheDocument();
+  });
+
+  it("keeps the settings-driven preview wrap default on desktop presentations", async () => {
+    previewHarness.entries = [{ path: "src/app.ts", kind: "file", sizeBytes: 64 }];
+
+    mounted = await renderPreviewPanel();
+
+    // diffWordWrap: false in the settings mock stays authoritative off-phone.
+    await expect
+      .element(page.getByRole("button", { name: "Enable preview line wrapping" }))
+      .toBeInTheDocument();
+  });
+
   it("falls back to the draft store on the draft route URL", async () => {
     previewHarness.serverThreadEnabled = false;
     previewHarness.routeParams = { draftId: "draft-1" };

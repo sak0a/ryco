@@ -3,6 +3,7 @@ import { scopedThreadKey, scopeProjectRef, scopeThreadRef } from "@ryco/client-r
 import { type ScopedThreadRef, type ThreadId } from "@ryco/contracts";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@ryco/shared/projectScripts";
 import {
+  ArrowLeftIcon,
   FileTextIcon,
   FolderIcon,
   GlobeIcon,
@@ -262,6 +263,14 @@ function TerminalUnavailableState(props: { title: string; description: string })
   );
 }
 
+/**
+ * The workspace terminal tab. On the phone tier this renders inside the
+ * full-screen work surface: xterm fills the surface, the drawer toolbar grows
+ * to the 44px touch floor via the `phone:` variant, and the surface sheet pads
+ * by the published keyboard inset so the toolbar never sits under the software
+ * keyboard. Deep touch/IME terminal ergonomics are explicitly deferred
+ * follow-up work (see the focused mobile workspace design, non-goals).
+ */
 function WorkspaceTerminalPanel() {
   const params = useParams({ strict: false }) as Record<string, string | undefined>;
   const routeThreadRef = resolveThreadRouteRef(params);
@@ -549,8 +558,12 @@ function WorkspaceLauncher(props: {
 
   return (
     <ScrollArea className="h-full">
-      <div className="flex min-h-full items-center justify-center p-5 sm:p-6">
-        <div className="w-full max-w-lg space-y-4">
+      {/* Auto margins center the card stack like items-center/justify-center
+          did, but collapse to zero when the stack is taller than the pane —
+          so short phone viewports scroll from the first card instead of
+          clipping the overflow above the scroll start. */}
+      <div className="flex min-h-full p-5 sm:p-6">
+        <div className="m-auto w-full max-w-lg space-y-4">
           <LauncherCard
             label="Files"
             description="Browse project files"
@@ -623,6 +636,10 @@ export default function ThreadWorkspacePanel(props: {
   onClosePanelTab: (input: { mode: RightPanelMode; agentKey?: string }) => void;
 }) {
   const { onClosePanelTab } = props;
+  // Full-screen phone work surface: the bar swaps to a surface bar (back
+  // affordance to the thread instead of the desktop close X) and every tab
+  // control meets the >=44px phone touch-target floor.
+  const isPhoneSurface = props.mode === "phone";
   const navigate = useNavigate();
   const params = useParams({ strict: false }) as Record<string, string | undefined>;
   const search = useSearch({
@@ -769,7 +786,23 @@ export default function ThreadWorkspacePanel(props: {
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-background w-full">
-      <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border bg-card/40 px-2">
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-1 border-b border-border bg-card/40 px-2",
+          isPhoneSurface ? "h-14" : "h-12",
+        )}
+      >
+        {isPhoneSurface ? (
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label="Back to thread"
+            className="shrink-0"
+            onClick={closePanel}
+          >
+            <ArrowLeftIcon />
+          </Button>
+        ) : null}
         <div
           className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
           role="tablist"
@@ -781,7 +814,8 @@ export default function ThreadWorkspacePanel(props: {
               <div
                 key={tab.key}
                 className={cn(
-                  "flex h-8 min-w-0 shrink-0 items-center rounded-md text-sm transition-colors",
+                  "flex min-w-0 shrink-0 items-center rounded-md text-sm transition-colors",
+                  isPhoneSurface ? "h-11" : "h-8",
                   active
                     ? "bg-muted text-foreground"
                     : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
@@ -794,7 +828,10 @@ export default function ThreadWorkspacePanel(props: {
                   aria-selected={active}
                   aria-controls={workspaceTabPanelId(tab.key)}
                   tabIndex={active ? 0 : -1}
-                  className="flex h-full min-w-0 items-center gap-1.5 pl-2.5 pr-1"
+                  className={cn(
+                    "flex h-full min-w-0 items-center gap-1.5",
+                    isPhoneSurface ? "pl-3 pr-1.5" : "pl-2.5 pr-1",
+                  )}
                   onClick={() => selectTab(tab)}
                   onKeyDown={(event) => onTabKeyDown(tab, event)}
                 >
@@ -816,7 +853,19 @@ export default function ThreadWorkspacePanel(props: {
                 </button>
                 <button
                   type="button"
-                  className="mr-1 flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-background/60 hover:text-foreground"
+                  className={cn(
+                    "mr-1 flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-background/60 hover:text-foreground",
+                    // Phone: expand the tap target to the 44px floor without
+                    // growing the visible glyph (step-7 coarse-target
+                    // pattern). The centered target deliberately overlaps the
+                    // tail of its own label and the next tab's leading
+                    // padding — same geometry as the terminal tab close; the
+                    // rest of the 44px-tall tab remains a much larger select
+                    // target and a mis-tapped close is recoverable from the
+                    // launcher.
+                    isPhoneSurface &&
+                      "relative after:absolute after:top-1/2 after:left-1/2 after:size-11 after:-translate-x-1/2 after:-translate-y-1/2",
+                  )}
                   aria-label={`Close ${tab.label} tab`}
                   onClick={() => closeTab(tab)}
                 >
@@ -831,7 +880,8 @@ export default function ThreadWorkspacePanel(props: {
                 <button
                   type="button"
                   className={cn(
-                    "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground",
+                    "flex shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground",
+                    isPhoneSurface ? "size-11" : "size-6",
                     !activeMode && "bg-muted text-foreground",
                   )}
                   aria-label="Workspace launcher"
@@ -845,15 +895,17 @@ export default function ThreadWorkspacePanel(props: {
             <TooltipPopup side="bottom">Workspace launcher</TooltipPopup>
           </Tooltip>
         </div>
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          className="shrink-0 text-muted-foreground/70 hover:text-foreground"
-          onClick={closePanel}
-          aria-label="Close workspace panel"
-        >
-          <XIcon className="size-3.5" />
-        </Button>
+        {isPhoneSurface ? null : (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            className="shrink-0 text-muted-foreground/70 hover:text-foreground"
+            onClick={closePanel}
+            aria-label="Close workspace panel"
+          >
+            <XIcon className="size-3.5" />
+          </Button>
+        )}
       </div>
       <div
         className="flex min-h-0 flex-1 flex-col overflow-hidden"

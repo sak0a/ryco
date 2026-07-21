@@ -2,6 +2,7 @@ import { File as DiffsFile } from "@pierre/diffs/react";
 import { useParams, useSearch } from "@tanstack/react-router";
 import { Schema } from "effect";
 import {
+  ArrowLeftIcon,
   CircleAlertIcon,
   FolderOpenIcon,
   PanelRightCloseIcon,
@@ -205,6 +206,11 @@ interface PreviewPanelProps {
 export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
   const { resolvedTheme } = useTheme();
   const settings = useSettings();
+  // Phone work surface: the two-pane tree+preview split becomes a single-pane
+  // push — the tree renders full-width and selecting a file pushes a
+  // full-width file view with a back-to-tree affordance. Tree data, filter,
+  // and file loading logic are shared with the desktop presentations.
+  const isPhonePresentation = mode === "phone";
   const routeThreadRef = useParams({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
@@ -260,7 +266,12 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [fileFilterQuery, setFileFilterQuery] = useState("");
   const [isTreeVisible, setIsTreeVisible] = useState(true);
-  const [wrapPreviewLines, setWrapPreviewLines] = useState(settings.diffWordWrap);
+  // Same readability rationale as the phone diff surface: 320-430px columns
+  // are unreadable with horizontal code scroll, so wrap defaults on for the
+  // phone presentation only; desktop keeps the settings-driven default.
+  const [wrapPreviewLines, setWrapPreviewLines] = useState(
+    isPhonePresentation ? true : settings.diffWordWrap,
+  );
   const splitLayoutRef = useRef<HTMLDivElement | null>(null);
   const [treeWidth, setTreeWidth] = useState(() => {
     if (typeof window === "undefined") {
@@ -283,8 +294,8 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
   const missingFileRefreshKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    setWrapPreviewLines(settings.diffWordWrap);
-  }, [settings.diffWordWrap]);
+    setWrapPreviewLines(isPhonePresentation ? true : settings.diffWordWrap);
+  }, [isPhonePresentation, settings.diffWordWrap]);
 
   useEffect(() => {
     setSelectedFilePath(null);
@@ -548,21 +559,24 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
-        <Button
-          aria-label={isTreeVisible ? "Hide workspace tree" : "Show workspace tree"}
-          aria-pressed={isTreeVisible}
-          title={isTreeVisible ? "Hide workspace tree" : "Show workspace tree"}
-          variant="outline"
-          size="icon-xs"
-          className="shrink-0"
-          onClick={onToggleTreeVisibility}
-        >
-          {isTreeVisible ? (
-            <PanelRightCloseIcon className="size-3" />
-          ) : (
-            <PanelRightOpenIcon className="size-3" />
-          )}
-        </Button>
+        {/* Single-pane phone push has no side-by-side tree to hide. */}
+        {isPhonePresentation ? null : (
+          <Button
+            aria-label={isTreeVisible ? "Hide workspace tree" : "Show workspace tree"}
+            aria-pressed={isTreeVisible}
+            title={isTreeVisible ? "Hide workspace tree" : "Show workspace tree"}
+            variant="outline"
+            size="icon-xs"
+            className="shrink-0"
+            onClick={onToggleTreeVisibility}
+          >
+            {isTreeVisible ? (
+              <PanelRightCloseIcon className="size-3" />
+            ) : (
+              <PanelRightOpenIcon className="size-3" />
+            )}
+          </Button>
+        )}
         <Button
           aria-label="Refresh workspace tree"
           title="Refresh workspace tree"
@@ -592,6 +606,129 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
     </>
   );
 
+  const selectedFileView =
+    selectedFileSizeGuard?.state === "too-large" ? (
+      <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+        File is too large to preview ({selectedFileSizeGuard.sizeBytes} bytes). Limit is{" "}
+        {selectedFileSizeGuard.limitBytes} bytes.
+      </div>
+    ) : selectedFileQuery.isLoading && !selectedFileData ? (
+      <DiffPanelLoadingState label="Loading file preview..." />
+    ) : selectedFileError ? (
+      <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+        {selectedFileError}
+      </div>
+    ) : (
+      <div className="min-h-0 flex-1 overflow-auto p-2">
+        <style>{PREVIEW_CODE_CSS}</style>
+        <div className="min-h-full overflow-hidden rounded-md border border-border/70 bg-[color:color-mix(in_srgb,var(--card)_90%,var(--background))]">
+          <div className="border-b border-border/70 bg-[color:color-mix(in_srgb,var(--card)_94%,var(--foreground))] px-3 py-2 text-foreground">
+            <div className="truncate font-mono text-[12px] font-medium">{selectedFilePath}</div>
+          </div>
+          {selectedFileKind === "image" && richSelectedFileData?.base64 ? (
+            <div className="flex min-h-0 justify-center overflow-auto bg-background/70 p-3">
+              <img
+                alt={selectedFilePath ?? undefined}
+                className="max-h-full max-w-full object-contain"
+                src={`data:${selectedFileMimeType ?? "image/png"};base64,${
+                  richSelectedFileData.base64
+                }`}
+              />
+            </div>
+          ) : previewTextFile ? (
+            <DiffsFile
+              file={previewTextFile}
+              className="preview-panel-diffs-file"
+              options={{
+                disableFileHeader: true,
+                overflow: wrapPreviewLines ? "wrap" : "scroll",
+                theme: resolveDiffThemeName(resolvedTheme),
+                themeType: resolvedTheme,
+                unsafeCSS: PREVIEW_FILE_UNSAFE_CSS,
+                tokenizeMaxLineLength: 1_000,
+              }}
+            />
+          ) : (
+            <pre
+              className={cn(
+                "min-h-full bg-transparent p-3 font-mono text-[11px] leading-5 text-muted-foreground/90",
+                wrapPreviewLines
+                  ? "overflow-auto whitespace-pre-wrap wrap-break-word"
+                  : "overflow-auto",
+              )}
+            >
+              {richSelectedFileData?.contents ?? ""}
+            </pre>
+          )}
+        </div>
+      </div>
+    );
+
+  const treePane = (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 border-b border-border/60 p-2">
+        <label className="relative block">
+          <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/65" />
+          <input
+            type="text"
+            value={fileFilterQuery}
+            onChange={(event) => setFileFilterQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setFileFilterQuery("");
+                event.currentTarget.blur();
+              }
+            }}
+            placeholder="Filter files..."
+            aria-label="Filter files"
+            className="h-8 w-full rounded-md border border-border/70 bg-background/65 pl-8 pr-3 text-xs text-foreground outline-none transition-[border-color,background-color,box-shadow] placeholder:text-muted-foreground/55 focus:border-ring/60 focus:bg-background focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--ring)_18%,transparent)]"
+          />
+        </label>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-2">
+        {projectFilesError || projectFilesTruncated ? (
+          <Alert
+            variant={projectFilesError ? "error" : "warning"}
+            className="mb-2 rounded-lg border-border/70 px-3 py-2 text-[11px]"
+          >
+            {projectFilesError ? (
+              <CircleAlertIcon className="size-3.5" />
+            ) : (
+              <TriangleAlertIcon className="size-3.5" />
+            )}
+            <AlertTitle className="text-[11px]">
+              {projectFilesError ? "Workspace tree refresh failed" : "Workspace tree is truncated"}
+            </AlertTitle>
+            <AlertDescription className="gap-1 text-[11px] leading-4">
+              {projectFilesError ? (
+                <span>{projectFilesError}</span>
+              ) : (
+                <span>
+                  Only the first indexed workspace entries are shown here, so some files may be
+                  omitted from preview.
+                </span>
+              )}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {filteredProjectFiles.length === 0 ? (
+          <div className="px-2 py-6 text-center text-xs leading-5 text-muted-foreground/70">
+            No files match this filter.
+          </div>
+        ) : (
+          <ChangedFilesTree
+            files={filteredProjectFiles}
+            allDirectoriesExpanded={isFilteringProjectFiles}
+            resolvedTheme={resolvedTheme}
+            onSelectFile={setSelectedFilePath}
+            selectedFilePath={selectedFilePath}
+            showStats={false}
+          />
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <DiffPanelShell mode={mode} header={headerRow}>
       {!activeThread ? (
@@ -608,72 +745,41 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           No project files available yet.
         </div>
+      ) : isPhonePresentation ? (
+        // Single-pane phone arrangement: tree full-width, tapping a file
+        // pushes a full-width file view with back-to-tree. A `preview=1` deep
+        // link lands on the tree (the preview params carry no file path), so
+        // the surface is never empty.
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {selectedFilePath ? (
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <div className="flex min-h-12 shrink-0 items-center gap-1 border-b border-border/60 px-1.5">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Back to workspace tree"
+                  className="shrink-0"
+                  onClick={() => setSelectedFilePath(null)}
+                >
+                  <ArrowLeftIcon />
+                </Button>
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
+                  {selectedFilePath}
+                </span>
+              </div>
+              {selectedFileView}
+            </div>
+          ) : (
+            treePane
+          )}
+        </div>
       ) : (
         <div ref={splitLayoutRef} className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <div
             data-preview-content-panel
             className="flex min-h-0 min-w-0 flex-1 flex-col transition-[min-width] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
           >
-            {!selectedFilePath ? (
-              <PreviewOpenFileEmptyState />
-            ) : selectedFileSizeGuard?.state === "too-large" ? (
-              <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-                File is too large to preview ({selectedFileSizeGuard.sizeBytes} bytes). Limit is{" "}
-                {selectedFileSizeGuard.limitBytes} bytes.
-              </div>
-            ) : selectedFileQuery.isLoading && !selectedFileData ? (
-              <DiffPanelLoadingState label="Loading file preview..." />
-            ) : selectedFileError ? (
-              <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-                {selectedFileError}
-              </div>
-            ) : (
-              <div className="min-h-0 flex-1 overflow-auto p-2">
-                <style>{PREVIEW_CODE_CSS}</style>
-                <div className="min-h-full overflow-hidden rounded-md border border-border/70 bg-[color:color-mix(in_srgb,var(--card)_90%,var(--background))]">
-                  <div className="border-b border-border/70 bg-[color:color-mix(in_srgb,var(--card)_94%,var(--foreground))] px-3 py-2 text-foreground">
-                    <div className="truncate font-mono text-[12px] font-medium">
-                      {selectedFilePath}
-                    </div>
-                  </div>
-                  {selectedFileKind === "image" && richSelectedFileData?.base64 ? (
-                    <div className="flex min-h-0 justify-center overflow-auto bg-background/70 p-3">
-                      <img
-                        alt={selectedFilePath}
-                        className="max-h-full max-w-full object-contain"
-                        src={`data:${selectedFileMimeType ?? "image/png"};base64,${
-                          richSelectedFileData.base64
-                        }`}
-                      />
-                    </div>
-                  ) : previewTextFile ? (
-                    <DiffsFile
-                      file={previewTextFile}
-                      className="preview-panel-diffs-file"
-                      options={{
-                        disableFileHeader: true,
-                        overflow: wrapPreviewLines ? "wrap" : "scroll",
-                        theme: resolveDiffThemeName(resolvedTheme),
-                        themeType: resolvedTheme,
-                        unsafeCSS: PREVIEW_FILE_UNSAFE_CSS,
-                        tokenizeMaxLineLength: 1_000,
-                      }}
-                    />
-                  ) : (
-                    <pre
-                      className={cn(
-                        "min-h-full bg-transparent p-3 font-mono text-[11px] leading-5 text-muted-foreground/90",
-                        wrapPreviewLines
-                          ? "overflow-auto whitespace-pre-wrap wrap-break-word"
-                          : "overflow-auto",
-                      )}
-                    >
-                      {richSelectedFileData?.contents ?? ""}
-                    </pre>
-                  )}
-                </div>
-              </div>
-            )}
+            {!selectedFilePath ? <PreviewOpenFileEmptyState /> : selectedFileView}
           </div>
           <button
             type="button"
@@ -692,70 +798,7 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
             <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/80 group-hover:bg-border" />
           </button>
           <PreviewTreeMotionFrame width={treeWidth} open={isTreeVisible} resizing={isTreeResizing}>
-            <div className="flex h-full min-h-0 flex-col">
-              <div className="shrink-0 border-b border-border/60 p-2">
-                <label className="relative block">
-                  <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/65" />
-                  <input
-                    type="text"
-                    value={fileFilterQuery}
-                    onChange={(event) => setFileFilterQuery(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        setFileFilterQuery("");
-                        event.currentTarget.blur();
-                      }
-                    }}
-                    placeholder="Filter files..."
-                    aria-label="Filter files"
-                    className="h-8 w-full rounded-md border border-border/70 bg-background/65 pl-8 pr-3 text-xs text-foreground outline-none transition-[border-color,background-color,box-shadow] placeholder:text-muted-foreground/55 focus:border-ring/60 focus:bg-background focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--ring)_18%,transparent)]"
-                  />
-                </label>
-              </div>
-              <div className="min-h-0 flex-1 overflow-auto p-2">
-                {projectFilesError || projectFilesTruncated ? (
-                  <Alert
-                    variant={projectFilesError ? "error" : "warning"}
-                    className="mb-2 rounded-lg border-border/70 px-3 py-2 text-[11px]"
-                  >
-                    {projectFilesError ? (
-                      <CircleAlertIcon className="size-3.5" />
-                    ) : (
-                      <TriangleAlertIcon className="size-3.5" />
-                    )}
-                    <AlertTitle className="text-[11px]">
-                      {projectFilesError
-                        ? "Workspace tree refresh failed"
-                        : "Workspace tree is truncated"}
-                    </AlertTitle>
-                    <AlertDescription className="gap-1 text-[11px] leading-4">
-                      {projectFilesError ? (
-                        <span>{projectFilesError}</span>
-                      ) : (
-                        <span>
-                          Only the first indexed workspace entries are shown here, so some files may
-                          be omitted from preview.
-                        </span>
-                      )}
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-                {filteredProjectFiles.length === 0 ? (
-                  <div className="px-2 py-6 text-center text-xs leading-5 text-muted-foreground/70">
-                    No files match this filter.
-                  </div>
-                ) : (
-                  <ChangedFilesTree
-                    files={filteredProjectFiles}
-                    allDirectoriesExpanded={isFilteringProjectFiles}
-                    resolvedTheme={resolvedTheme}
-                    onSelectFile={setSelectedFilePath}
-                    selectedFilePath={selectedFilePath}
-                    showStats={false}
-                  />
-                )}
-              </div>
-            </div>
+            {treePane}
           </PreviewTreeMotionFrame>
         </div>
       )}

@@ -1,4 +1,4 @@
-import { EyeIcon, RotateCwIcon, TriangleAlertIcon } from "lucide-react";
+import { EyeIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { memo } from "react";
 
 import { useAppearancePreference } from "~/hooks/useAppearancePreference";
@@ -22,6 +22,13 @@ export type {
 
 export interface PlanSidebarProps extends OverviewLayoutProps {
   mode?: OverviewPanelMode;
+  /**
+   * Renders a visible close affordance in the panel header. Passed for
+   * overlay presentations (the floating desktop overlay had no close button
+   * and could trap the user); inline and sheet presentations keep their
+   * existing dismissal paths.
+   */
+  onClose?: (() => void) | undefined;
 }
 
 function HeaderTrailing({
@@ -80,10 +87,23 @@ function HeaderTrailing({
 
 const PlanSidebar = memo(function PlanSidebar({
   mode = "sidebar",
+  onClose,
   ...layoutProps
 }: PlanSidebarProps) {
   const layout = useAppearancePreference("panelLayout") as PanelLayout;
   const empty = isOverviewEmpty(layoutProps);
+  const closeButton = onClose ? (
+    <Button
+      type="button"
+      size="icon-xs"
+      variant="ghost"
+      className="shrink-0 text-muted-foreground hover:text-foreground"
+      onClick={onClose}
+      aria-label="Close overview"
+    >
+      <XIcon className="size-3.5" />
+    </Button>
+  ) : null;
 
   const body = empty ? (
     <OverviewEmptyState />
@@ -109,7 +129,20 @@ const PlanSidebar = memo(function PlanSidebar({
       {!empty && layoutProps.branchControl ? (
         <div className="flex min-w-0 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 py-2.5">
           <div className="flex min-w-0 items-center">{layoutProps.branchControl}</div>
-          <HeaderTrailing layout={layout} layoutProps={layoutProps} />
+          {closeButton ? (
+            <div className="flex shrink-0 items-center gap-1.5">
+              <HeaderTrailing layout={layout} layoutProps={layoutProps} />
+              {closeButton}
+            </div>
+          ) : (
+            <HeaderTrailing layout={layout} layoutProps={layoutProps} />
+          )}
+        </div>
+      ) : closeButton ? (
+        // The close affordance must exist even when the panel has no header
+        // content (empty state): an overlay without it can trap the user.
+        <div className="flex shrink-0 items-center justify-end border-b border-border/60 px-2 py-1.5">
+          {closeButton}
         </div>
       ) : null}
 

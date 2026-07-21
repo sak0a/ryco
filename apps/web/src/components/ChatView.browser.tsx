@@ -5,6 +5,7 @@ import {
   EventId,
   ORCHESTRATION_WS_METHODS,
   EnvironmentId,
+  type CheckpointRef,
   type EnvironmentApi,
   type MessageId,
   type OrchestrationReadModel,
@@ -65,6 +66,8 @@ import {
 import { __resetLocalApiForTests } from "../localApi";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { resetProjectAtomsForTests } from "../rpc/projectAtoms";
+import { resetProjectPreviewAtomsForTests } from "../rpc/projectPreviewAtoms";
+import { resetCheckpointDiffStateForTests } from "../rpc/providerAtoms";
 import { getServerConfig } from "../rpc/serverState";
 import { getRouter } from "../router";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
@@ -1991,6 +1994,124 @@ async function mountChatView(options: {
   };
 }
 
+// --- Phone work-surface fixtures (delivery step 8) ---
+
+const WORK_SURFACE_TURN_ID = "turn-work-surface-1" as TurnId;
+// A single 600+ character line: with wrap disabled this must scroll inside
+// the diff surface, never at document level.
+const WIDE_DIFF_LINE = `export const wide = "${"wide-segment-".repeat(50)}";`;
+const WORK_SURFACE_DIFF = [
+  "diff --git a/src/wide.ts b/src/wide.ts",
+  "index 1111111..2222222 100644",
+  "--- a/src/wide.ts",
+  "+++ b/src/wide.ts",
+  "@@ -1,2 +1,2 @@",
+  " export const kept = true;",
+  '-export const wide = "old";',
+  `+${WIDE_DIFF_LINE}`,
+  "",
+].join("\n");
+
+function createSnapshotWithWorkSurfaceCheckpoint(options: {
+  targetMessageId: MessageId;
+  targetText: string;
+}): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser(options);
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === THREAD_ID
+        ? Object.assign({}, thread, {
+            checkpoints: [
+              {
+                turnId: WORK_SURFACE_TURN_ID,
+                checkpointTurnCount: 1,
+                checkpointRef: "checkpoint-work-surface-1" as CheckpointRef,
+                status: "ready" as const,
+                files: [{ path: "src/wide.ts", kind: "M", additions: 1, deletions: 1 }],
+                assistantMessageId: null,
+                completedAt: NOW_ISO,
+              },
+            ],
+          })
+        : thread,
+    ),
+  };
+}
+
+function resolveWorkSurfaceRpc(body: NormalizedWsRpcRequestBody): unknown | undefined {
+  if (
+    body._tag === ORCHESTRATION_WS_METHODS.getFullThreadDiff ||
+    body._tag === ORCHESTRATION_WS_METHODS.getTurnDiff
+  ) {
+    return {
+      threadId: THREAD_ID,
+      fromTurnCount: 0,
+      toTurnCount: 1,
+      diff: WORK_SURFACE_DIFF,
+    };
+  }
+  if (body._tag === WS_METHODS.projectsListEntries) {
+    return {
+      entries: [
+        { path: "README.md", kind: "file" },
+        { path: "src", kind: "directory" },
+        { path: "src/wide.ts", kind: "file", parentPath: "src" },
+      ],
+      truncated: false,
+    };
+  }
+  if (body._tag === WS_METHODS.projectsReadFile) {
+    return {
+      relativePath: typeof body.relativePath === "string" ? body.relativePath : "README.md",
+      contents: "# Work surface readme\n",
+    };
+  }
+  return undefined;
+}
+
+function queryPhoneSurfacePopup(label: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-slot="sheet-popup"][aria-label="${label}"]`);
+}
+
+function isElementVisible(element: HTMLElement): boolean {
+  return element.checkVisibility?.() ?? element.getBoundingClientRect().width > 0;
+}
+
+/** Text lookup across light DOM and any nested shadow roots (@pierre/diffs). */
+function surfaceContainsText(root: HTMLElement, text: string): boolean {
+  if (root.textContent?.includes(text)) {
+    return true;
+  }
+  return [root, ...root.querySelectorAll<HTMLElement>("*")].some((host) =>
+    host.shadowRoot ? (host.shadowRoot.textContent?.includes(text) ?? false) : false,
+  );
+}
+
+/**
+ * Whether a rendered diff file scrolls horizontally inside its own surface.
+ * @pierre/diffs renders line content into `diffs-container` shadow roots, so
+ * the contained scroller lives inside the shadow DOM rather than on the
+ * virtualizer viewport.
+ */
+function hasContainedHorizontalDiffOverflow(fileElement: HTMLElement): boolean {
+  const hostElements = [fileElement, ...fileElement.querySelectorAll<HTMLElement>("*")];
+  const candidates: HTMLElement[] = [];
+  for (const host of hostElements) {
+    candidates.push(host);
+    if (host.shadowRoot) {
+      candidates.push(...host.shadowRoot.querySelectorAll<HTMLElement>("*"));
+    }
+  }
+  return candidates.some((node) => {
+    if (node.scrollWidth <= node.clientWidth + 1) {
+      return false;
+    }
+    const overflowX = getComputedStyle(node).overflowX;
+    return overflowX === "auto" || overflowX === "scroll";
+  });
+}
+
 describe("ChatView timeline estimator parity (full app)", () => {
   beforeAll(async () => {
     // Mirrors main.tsx: stamps data-tier on the root element so tier-gated
@@ -2076,6 +2197,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
     customWsRpcResolver = null;
     __resetEnvironmentApiOverridesForTests();
     resetProjectAtomsForTests();
+    // The checkpoint-diff and project-preview caches are module-level; stale
+    // entries from a previous mount would otherwise dedupe the fresh fetches
+    // the work-surface tests depend on.
+    resetCheckpointDiffStateForTests();
+    resetProjectPreviewAtomsForTests();
     resetSavedEnvironmentRegistryStoreForTests();
     resetSavedEnvironmentRuntimeStoreForTests();
     Reflect.deleteProperty(window, "desktopBridge");
@@ -7476,6 +7602,550 @@ describe("ChatView timeline estimator parity (full app)", () => {
     } finally {
       stopAdapter();
       viewportStub.restore();
+      await mounted.cleanup();
+    }
+  });
+
+  it("promotes the workspace panel to a full-screen phone surface with history-coherent back", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotWithWorkSurfaceCheckpoint({
+        targetMessageId: "msg-user-work-surface-promotion" as MessageId,
+        targetText: "work surface promotion thread",
+      }),
+      resolveRpc: resolveWorkSurfaceRpc,
+      initialPath: "/",
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+
+      // Home -> thread: the navigation stack the surface must unwind through.
+      const homeHeading = await waitForElement(
+        () => document.querySelector<HTMLElement>("h1"),
+        "Unable to find the Home heading.",
+      );
+      expect(homeHeading.textContent).toBe("Threads");
+      const threadRow = await waitForElement(
+        () =>
+          [...document.querySelectorAll<HTMLElement>('[role="listitem"] button')].find((button) =>
+            button.textContent?.includes(THREAD_TITLE),
+          ) ?? null,
+        "Unable to find the Home thread row.",
+      );
+      threadRow.click();
+      await vi.waitFor(() => {
+        expect(mounted.router.state.location.pathname).toBe(
+          `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`,
+        );
+      });
+
+      // The app-bar workspace toggle opens the full-screen surface (launcher).
+      const workspaceToggle = await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Toggle workspace panel"]'),
+        "Unable to find the workspace toggle.",
+      );
+      workspaceToggle.click();
+      const popup = await waitForElement(
+        () => queryPhoneSurfacePopup("Workspace"),
+        "Unable to find the phone work surface.",
+      );
+      await vi.waitFor(() => {
+        const rect = popup.getBoundingClientRect();
+        expect(rect.width).toBeGreaterThanOrEqual(PHONE_VIEWPORT.width - 0.5);
+        expect(rect.height).toBeGreaterThanOrEqual(PHONE_VIEWPORT.height - 0.5);
+      });
+      expect(mounted.router.state.location.searchStr).toContain("workspaceOpen");
+
+      // Launcher content fits the phone pane: the card stack scrolls instead
+      // of clipping above the scroll start.
+      const launcherViewport = await waitForElement(
+        () => popup.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]'),
+        "Unable to find the launcher scroll viewport.",
+      );
+      await vi.waitFor(() => {
+        expect(launcherViewport.scrollHeight).toBeGreaterThan(launcherViewport.clientHeight);
+      });
+      launcherViewport.scrollTop = 0;
+      await waitForLayout();
+      const filesCard = await waitForElement(
+        () =>
+          [...launcherViewport.querySelectorAll<HTMLElement>("button")].find((button) =>
+            button.textContent?.includes("Browse project files"),
+          ) ?? null,
+        "Unable to find the Files launcher card.",
+      );
+      expect(filesCard.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+        launcherViewport.getBoundingClientRect().top - 0.5,
+      );
+
+      // Launcher -> Review pushes the diff surface through the same URL
+      // params desktop uses.
+      const reviewCard = await waitForElement(
+        () =>
+          [...popup.querySelectorAll<HTMLElement>("button")].find((button) =>
+            button.textContent?.includes("View code changes"),
+          ) ?? null,
+        "Unable to find the Review launcher card.",
+      );
+      reviewCard.click();
+      await vi.waitFor(() => {
+        const search = mounted.router.state.location.search as Record<string, unknown>;
+        expect(search.workspaceTab).toBe("review");
+        expect(search.diff).toBe("1");
+      });
+
+      // Surface bar: visible back affordance with a 44px coarse hit area.
+      const backButton = await waitForElement(
+        () => popup.querySelector<HTMLElement>('button[aria-label="Back to thread"]'),
+        "Unable to find the surface back affordance.",
+      );
+      await withCoarsePointer(async () => {
+        const hitArea = getComputedStyle(backButton, "::after");
+        expect(hitArea.position).toBe("absolute");
+        expect(parseFloat(hitArea.width)).toBeGreaterThanOrEqual(44);
+        expect(parseFloat(hitArea.height)).toBeGreaterThanOrEqual(44);
+      });
+
+      // Phone review surface: wrap defaults on, the split toggle is gone, and
+      // the page never scrolls horizontally.
+      await waitForElement(
+        () => popup.querySelector<HTMLElement>('[aria-label="Disable diff line wrapping"]'),
+        "Unable to find the pressed wrap toggle.",
+      );
+      expect(popup.querySelector('[aria-label="Split diff view"]')).toBeNull();
+      expect(popup.querySelector('[aria-label="Stacked diff view"]')).toBeNull();
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(PHONE_VIEWPORT.width);
+
+      // Browser back exits the surface to the thread, then Home — never the
+      // app. (Tab pushes replace the launcher entry, so one back suffices.)
+      mounted.router.history.back();
+      await vi.waitFor(() => {
+        const search = mounted.router.state.location.search as Record<string, unknown>;
+        expect(search.workspaceTab).toBeUndefined();
+        expect(search.diff).toBeUndefined();
+        expect(search.workspaceOpen).toBeUndefined();
+        expect(isElementVisible(popup)).toBe(false);
+      });
+      expect(mounted.router.state.location.pathname).toBe(`/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`);
+      mounted.router.history.back();
+      await vi.waitFor(() => {
+        expect(mounted.router.state.location.pathname).toBe("/");
+      });
+      await waitForElement(
+        () =>
+          [...document.querySelectorAll<HTMLElement>("h1")].find(
+            (heading) => heading.textContent === "Threads",
+          ) ?? null,
+        "Unable to find the Home heading after unwinding history.",
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders desktop-shaped workspace links full-screen at 320px with contained diff scrolling and a files push", async () => {
+    const mounted = await mountChatView({
+      viewport: NARROW_PHONE_VIEWPORT,
+      snapshot: createSnapshotWithWorkSurfaceCheckpoint({
+        targetMessageId: "msg-user-work-surface-roundtrip" as MessageId,
+        targetText: "work surface roundtrip thread",
+      }),
+      resolveRpc: resolveWorkSurfaceRpc,
+      initialPath: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}?workspaceOpen=1&workspaceTab=review&diff=1`,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+
+      // The desktop-shaped deep link lands directly on the full-screen diff.
+      const popup = await waitForElement(
+        () => queryPhoneSurfacePopup("Workspace"),
+        "Unable to find the phone work surface.",
+      );
+      await vi.waitFor(() => {
+        const rect = popup.getBoundingClientRect();
+        expect(rect.width).toBeGreaterThanOrEqual(NARROW_PHONE_VIEWPORT.width - 0.5);
+        expect(rect.height).toBeGreaterThanOrEqual(NARROW_PHONE_VIEWPORT.height - 0.5);
+      });
+      await waitForElement(
+        () => popup.querySelector<HTMLElement>('button[aria-label="Back to thread"]'),
+        "Unable to find the surface back affordance.",
+      );
+
+      // The wide diff renders wrapped by default with no page-level overflow.
+      await waitForElement(
+        () => popup.querySelector<HTMLElement>('[data-diff-file-path="src/wide.ts"]'),
+        "Unable to find the rendered diff file.",
+      );
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(NARROW_PHONE_VIEWPORT.width);
+
+      // Disabling wrap keeps the horizontal overflow inside the diff surface.
+      const wrapToggle = await waitForElement(
+        () => popup.querySelector<HTMLElement>('[aria-label="Disable diff line wrapping"]'),
+        "Unable to find the wrap toggle.",
+      );
+      wrapToggle.click();
+      const wideDiffFile = await waitForElement(
+        () => popup.querySelector<HTMLElement>('[data-diff-file-path="src/wide.ts"]'),
+        "Unable to find the rendered diff file after toggling wrap.",
+      );
+      await vi.waitFor(
+        () => {
+          expect(hasContainedHorizontalDiffOverflow(wideDiffFile)).toBe(true);
+          expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
+            NARROW_PHONE_VIEWPORT.width,
+          );
+        },
+        { timeout: 10_000, interval: 50 },
+      );
+
+      // Files surface: single-pane tree -> full-width file view -> back.
+      const launcherButton = await waitForElement(
+        () => popup.querySelector<HTMLElement>('button[aria-label="Workspace launcher"]'),
+        "Unable to find the workspace launcher button.",
+      );
+      launcherButton.click();
+      const filesCard = await waitForElement(
+        () =>
+          [...popup.querySelectorAll<HTMLElement>("button")].find((button) =>
+            button.textContent?.includes("Browse project files"),
+          ) ?? null,
+        "Unable to find the Files launcher card.",
+      );
+      filesCard.click();
+      await vi.waitFor(() => {
+        const search = mounted.router.state.location.search as Record<string, unknown>;
+        expect(search.workspaceTab).toBe("files");
+        expect(search.preview).toBe("1");
+      });
+      // The tree renders full-width (no split rail, no tree toggle).
+      const readmeRow = await waitForElement(
+        () =>
+          [...popup.querySelectorAll<HTMLElement>("button")].find(
+            (button) => button.textContent?.trim() === "README.md",
+          ) ?? null,
+        "Unable to find the README.md tree row.",
+      );
+      expect(popup.querySelector("[data-preview-file-rail]")).toBeNull();
+      expect(popup.querySelector('[aria-label="Hide workspace tree"]')).toBeNull();
+      expect(readmeRow.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      readmeRow.click();
+      const backToTree = await waitForElement(
+        () => popup.querySelector<HTMLElement>('button[aria-label="Back to workspace tree"]'),
+        "Unable to find the back-to-tree affordance.",
+      );
+      // The file view replaces the tree in the single pane and renders the
+      // fetched contents (inside the @pierre/diffs shadow DOM).
+      expect(popup.querySelector('[aria-label="Filter files"]')).toBeNull();
+      await vi.waitFor(
+        () => {
+          expect(surfaceContainsText(popup, "Work surface readme")).toBe(true);
+        },
+        { timeout: 10_000, interval: 50 },
+      );
+      backToTree.click();
+      await waitForElement(
+        () =>
+          [...popup.querySelectorAll<HTMLElement>("button")].find(
+            (button) => button.textContent?.trim() === "README.md",
+          ) ?? null,
+        "Unable to find the tree after backing out of the file view.",
+      );
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(NARROW_PHONE_VIEWPORT.width);
+
+      // Back clears the same URL params desktop writes and returns to the
+      // thread (no trap).
+      const backButton = await waitForElement(
+        () => popup.querySelector<HTMLElement>('button[aria-label="Back to thread"]'),
+        "Unable to find the surface back affordance.",
+      );
+      backButton.click();
+      await vi.waitFor(() => {
+        const search = mounted.router.state.location.search as Record<string, unknown>;
+        expect(search.workspaceOpen).toBeUndefined();
+        expect(search.workspaceTab).toBeUndefined();
+        expect(search.preview).toBeUndefined();
+        expect(isElementVisible(popup)).toBe(false);
+      });
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Back to threads"]'),
+        "Unable to find the thread app bar after closing the surface.",
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders the terminal surface full-screen with a 44px toolbar above a stubbed keyboard", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotWithWorkSurfaceCheckpoint({
+        targetMessageId: "msg-user-work-surface-terminal" as MessageId,
+        targetText: "work surface terminal thread",
+      }),
+      resolveRpc: resolveWorkSurfaceRpc,
+      initialPath: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}?workspaceOpen=1&workspaceTab=terminal`,
+    });
+
+    const viewportStub = installVisualViewportStub();
+    const stopAdapter = syncDocumentVisualViewportInsets();
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      const popup = await waitForElement(
+        () => queryPhoneSurfacePopup("Workspace"),
+        "Unable to find the phone work surface.",
+      );
+      await vi.waitFor(() => {
+        expect(popup.getBoundingClientRect().width).toBeGreaterThanOrEqual(
+          PHONE_VIEWPORT.width - 0.5,
+        );
+      });
+      const backButton = await waitForElement(
+        () => popup.querySelector<HTMLElement>('button[aria-label="Back to thread"]'),
+        "Unable to find the surface back affordance.",
+      );
+
+      // The terminal toolbar reaches the 44px phone floor.
+      const toolbar = await waitForElement(
+        () => popup.querySelector<HTMLElement>('[role="tablist"][aria-label="Terminals"]'),
+        "Unable to find the terminal toolbar.",
+      );
+      await vi.waitFor(() => {
+        expect(toolbar.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      });
+      const newTerminalButton = await waitForElement(
+        () =>
+          [...popup.querySelectorAll<HTMLElement>("button")].find((button) =>
+            button.getAttribute("aria-label")?.startsWith("New Terminal"),
+          ) ?? null,
+        "Unable to find the New Terminal action.",
+      );
+      expect(newTerminalButton.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
+      expect(newTerminalButton.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+
+      // With the software keyboard open, the surface shrinks by the published
+      // inset: the terminal container (toolbar included) stays fully visible.
+      const keyboardInset = 300;
+      viewportStub.setKeyboardInset(keyboardInset);
+      await waitForLayout();
+      const visibleBottom = PHONE_VIEWPORT.height - keyboardInset;
+      await vi.waitFor(() => {
+        const drawer = popup.querySelector<HTMLElement>(".thread-terminal-drawer");
+        expect(drawer).not.toBeNull();
+        expect(drawer!.getBoundingClientRect().bottom).toBeLessThanOrEqual(visibleBottom + 0.5);
+        expect(toolbar.getBoundingClientRect().bottom).toBeLessThanOrEqual(visibleBottom + 0.5);
+        expect(toolbar.getBoundingClientRect().top).toBeGreaterThanOrEqual(-0.5);
+      });
+      viewportStub.setKeyboardInset(0);
+      await waitForLayout();
+
+      // The terminal surface exits cleanly back to the thread through its own
+      // back affordance (acceptance criterion, asserted on this surface).
+      backButton.click();
+      await vi.waitFor(() => {
+        const search = mounted.router.state.location.search as Record<string, unknown>;
+        expect(search.workspaceOpen).toBeUndefined();
+        expect(search.workspaceTab).toBeUndefined();
+        expect(isElementVisible(popup)).toBe(false);
+      });
+      expect(mounted.router.state.location.pathname).toBe(`/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`);
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Back to threads"]'),
+        "Unable to find the thread app bar after closing the terminal surface.",
+      );
+    } finally {
+      stopAdapter();
+      viewportStub.restore();
+      await mounted.cleanup();
+    }
+  });
+
+  it("gives the floating desktop overview overlay a working close affordance", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-overview-overlay-close" as MessageId,
+        targetText: "overview overlay close thread",
+      }),
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("desktop");
+      });
+      // Open the inline workspace panel, then the overview: this is the
+      // audited floating overlay that previously had no close affordance.
+      const workspaceToggle = await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Toggle workspace panel"]'),
+        "Unable to find the workspace toggle.",
+      );
+      workspaceToggle.click();
+      // Wait for the inline panel to actually open (URL-driven) before
+      // toggling the overview, so the toggle takes the floating-overlay path.
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Close workspace panel"]'),
+        "Unable to find the opened inline workspace panel.",
+      );
+      const overviewToggle = await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Toggle overview panel"]'),
+        "Unable to find the overview toggle.",
+      );
+      overviewToggle.click();
+
+      const closeOverview = await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Close overview"]'),
+        "Unable to find the overview close affordance.",
+      );
+      closeOverview.click();
+      await vi.waitFor(() => {
+        expect(document.querySelector('button[aria-label="Close overview"]')).toBeNull();
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("promotes the overview to a full-screen phone surface with a back affordance", async () => {
+    // The overview has no phone-tier launcher control today (it opens through
+    // auto-open or before a rotation), so enter it on the desktop tier and
+    // rotate across the boundary: the tier flip must preserve the open panel
+    // and re-present it as a full-screen surface.
+    const mounted = await mountChatView({
+      viewport: ROTATED_MID_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-overview-phone-surface" as MessageId,
+        targetText: "overview phone surface thread",
+      }),
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("desktop");
+      });
+      const overviewToggle = await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Toggle overview panel"]'),
+        "Unable to find the overview toggle.",
+      );
+      overviewToggle.click();
+      // Desktop <=980 regression guard: the overview renders as the right
+      // sheet, narrower than the viewport, without the phone surface bar.
+      const desktopSheet = await waitForElement(
+        () =>
+          [...document.querySelectorAll<HTMLElement>('[data-slot="sheet-popup"]')].find(
+            isElementVisible,
+          ) ?? null,
+        "Unable to find the desktop overview sheet.",
+      );
+      await vi.waitFor(() => {
+        const width = desktopSheet.getBoundingClientRect().width;
+        expect(width).toBeGreaterThan(200);
+        expect(width).toBeLessThan(ROTATED_MID_VIEWPORT.width * 0.7);
+      });
+      expect(document.querySelector('button[aria-label="Back to thread"]')).toBeNull();
+
+      // Rotate across the tier boundary: the open overview re-presents as a
+      // full-screen phone surface with an explicit back affordance (no trap).
+      await mounted.setViewport(NARROW_TABLET_VIEWPORT);
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      const popup = await waitForElement(
+        () => queryPhoneSurfacePopup("Overview"),
+        "Unable to find the phone overview surface.",
+      );
+      await vi.waitFor(() => {
+        expect(isElementVisible(popup)).toBe(true);
+        const rect = popup.getBoundingClientRect();
+        expect(rect.width).toBeGreaterThanOrEqual(NARROW_TABLET_VIEWPORT.width - 0.5);
+        expect(rect.height).toBeGreaterThanOrEqual(NARROW_TABLET_VIEWPORT.height - 0.5);
+      });
+      expect(popup.textContent).toContain("Overview");
+
+      const backButton = await waitForElement(
+        () => popup.querySelector<HTMLElement>('button[aria-label="Back to thread"]'),
+        "Unable to find the overview back affordance.",
+      );
+      backButton.click();
+      await vi.waitFor(() => {
+        expect(isElementVisible(popup)).toBe(false);
+      });
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
+        NARROW_TABLET_VIEWPORT.width,
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the desktop inline panel and the sub-980 sheet presentation for workspace links", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithWorkSurfaceCheckpoint({
+        targetMessageId: "msg-user-desktop-panel-guard" as MessageId,
+        targetText: "desktop panel guard thread",
+      }),
+      resolveRpc: resolveWorkSurfaceRpc,
+      initialPath: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}?workspaceOpen=1&workspaceTab=review&diff=1`,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("desktop");
+      });
+
+      // 960px (desktop tier, <=980): the right sheet, not a full-screen
+      // surface and not the phone surface bar. (The overview sheet keeps a
+      // hidden keep-mounted popup in the DOM, so select the visible one.)
+      const sheetPopup = await waitForElement(
+        () =>
+          [...document.querySelectorAll<HTMLElement>('[data-slot="sheet-popup"]')].find(
+            isElementVisible,
+          ) ?? null,
+        "Unable to find the desktop right-panel sheet.",
+      );
+      await vi.waitFor(() => {
+        const width = sheetPopup.getBoundingClientRect().width;
+        expect(width).toBeGreaterThan(300);
+        expect(width).toBeLessThan(DEFAULT_VIEWPORT.width * 0.6);
+      });
+      expect(queryPhoneSurfacePopup("Workspace")).toBeNull();
+      expect(document.querySelector('button[aria-label="Back to thread"]')).toBeNull();
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Close workspace panel"]'),
+        "Unable to find the desktop panel close button.",
+      );
+      // Desktop keeps the settings-driven wrap default (off) and the split
+      // toggle.
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[aria-label="Enable diff line wrapping"]'),
+        "Unable to find the desktop wrap toggle.",
+      );
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[aria-label="Split diff view"]'),
+        "Unable to find the desktop split toggle.",
+      );
+
+      // Above 980px the same URL renders the inline right panel.
+      await mounted.setViewport(WIDE_FOOTER_VIEWPORT);
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector<HTMLElement>('[data-slot="sidebar"][data-side="right"]'),
+        ).not.toBeNull();
+      });
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Close workspace panel"]'),
+        "Unable to find the inline panel close button.",
+      );
+      expect(queryPhoneSurfacePopup("Workspace")).toBeNull();
+      expect(document.querySelector('button[aria-label="Back to thread"]')).toBeNull();
+    } finally {
       await mounted.cleanup();
     }
   });
