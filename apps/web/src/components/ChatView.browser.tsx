@@ -8667,4 +8667,377 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await mounted.cleanup();
     }
   });
+
+  // --- Acceptance-matrix gap fills (delivery step 10) ---
+  // The consolidated cell → proving-test mapping lives in
+  // AcceptanceMatrix.browser.tsx; the tests below fill the matrix cells only
+  // this file's full-app harness can prove.
+
+  it("hides keyboard-shortcut hints in the command palette on coarse pointers", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-kbd-hints" as MessageId,
+        targetText: "shortcut hint thread",
+      }),
+      initialPath: "/",
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      const openPaletteFromHome = async (): Promise<HTMLElement> => {
+        const searchButton = await waitForElement(
+          () => document.querySelector<HTMLElement>('button[aria-label="Search threads"]'),
+          "Unable to find the Home search affordance.",
+        );
+        searchButton.click();
+        return waitForElement(
+          () => document.querySelector<HTMLElement>('[data-testid="command-palette"]'),
+          "Unable to find the command palette.",
+        );
+      };
+      const paletteShortcutHints = (palette: HTMLElement): HTMLElement[] => [
+        ...palette.querySelectorAll<HTMLElement>('[data-slot="kbd"], [data-slot="kbd-group"]'),
+      ];
+
+      await withCoarsePointer(async () => {
+        // The visible search entry point replaces the ⌘K hint on touch: the
+        // palette opens from a button, and every rendered shortcut hint
+        // inside it is hidden on the coarse pointer.
+        const palette = await openPaletteFromHome();
+        const hints = paletteShortcutHints(palette);
+        expect(hints.length).toBeGreaterThan(0);
+        for (const hint of hints) {
+          expect(
+            hint.checkVisibility?.() ?? true,
+            "A keyboard-shortcut hint stayed visible on a coarse pointer.",
+          ).toBe(false);
+        }
+        await userEvent.keyboard("{Escape}");
+        await vi.waitFor(() => {
+          expect(document.querySelector('[data-testid="command-palette"]')).toBeNull();
+        });
+      });
+
+      // Fine-pointer guard: the same hints render again once the pointer is
+      // hover-capable. (Device-less CI reports `pointer: none` after the
+      // emulation revert, so the visibility leg gates on a fine pointer.)
+      if (window.matchMedia("(pointer: fine)").matches) {
+        const palette = await openPaletteFromHome();
+        await vi.waitFor(() => {
+          const visible = paletteShortcutHints(palette).filter(
+            (hint) => hint.checkVisibility?.() ?? false,
+          );
+          expect(visible.length).toBeGreaterThan(0);
+        });
+        await userEvent.keyboard("{Escape}");
+        await vi.waitFor(() => {
+          expect(document.querySelector('[data-testid="command-palette"]')).toBeNull();
+        });
+      }
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("contains the terminal surface at 320px and on a coarse landscape phone", async () => {
+    const mounted = await mountChatView({
+      viewport: NARROW_PHONE_VIEWPORT,
+      snapshot: createSnapshotWithWorkSurfaceCheckpoint({
+        targetMessageId: "msg-user-terminal-matrix" as MessageId,
+        targetText: "terminal matrix thread",
+      }),
+      resolveRpc: resolveWorkSurfaceRpc,
+      initialPath: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}?workspaceOpen=1&workspaceTab=terminal`,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      const popup = await waitForElement(
+        () => queryPhoneSurfacePopup("Workspace"),
+        "Unable to find the phone work surface.",
+      );
+      // 320×568: the terminal surface is full-screen, its toolbar keeps the
+      // 44px floor, and the page never scrolls horizontally.
+      await vi.waitFor(() => {
+        const rect = popup.getBoundingClientRect();
+        expect(rect.width).toBeGreaterThanOrEqual(NARROW_PHONE_VIEWPORT.width - 0.5);
+        expect(rect.height).toBeGreaterThanOrEqual(NARROW_PHONE_VIEWPORT.height - 0.5);
+      });
+      const toolbar = await waitForElement(
+        () => popup.querySelector<HTMLElement>('[role="tablist"][aria-label="Terminals"]'),
+        "Unable to find the terminal toolbar.",
+      );
+      await vi.waitFor(() => {
+        expect(toolbar.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      });
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(NARROW_PHONE_VIEWPORT.width);
+
+      // Rotate to the coarse landscape phone: the surface survives the flip
+      // (fine 844px is desktop; the coarse clause reclassifies it) with the
+      // terminal contained, the URL untouched, and no horizontal overflow.
+      // The tier flip re-presents the surface, so the landscape elements are
+      // re-queried instead of reusing the portrait references.
+      await mounted.setViewport(PHONE_LANDSCAPE_VIEWPORT);
+      await withCoarsePointer(async () => {
+        await vi.waitFor(() => {
+          expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+        });
+        const landscapePopup = await waitForElement(
+          () => queryPhoneSurfacePopup("Workspace"),
+          "Unable to find the phone work surface after rotating to landscape.",
+        );
+        await vi.waitFor(() => {
+          expect(isElementVisible(landscapePopup)).toBe(true);
+          const rect = landscapePopup.getBoundingClientRect();
+          expect(rect.width).toBeGreaterThanOrEqual(PHONE_LANDSCAPE_VIEWPORT.width - 0.5);
+          expect(rect.height).toBeGreaterThanOrEqual(PHONE_LANDSCAPE_VIEWPORT.height - 0.5);
+        });
+        const landscapeToolbar = await waitForElement(
+          () =>
+            landscapePopup.querySelector<HTMLElement>('[role="tablist"][aria-label="Terminals"]'),
+          "Unable to find the terminal toolbar after rotating to landscape.",
+        );
+        await vi.waitFor(() => {
+          const rect = landscapeToolbar.getBoundingClientRect();
+          expect(rect.height).toBeGreaterThanOrEqual(44);
+          expect(rect.bottom).toBeLessThanOrEqual(PHONE_LANDSCAPE_VIEWPORT.height + 0.5);
+        });
+        expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
+          PHONE_LANDSCAPE_VIEWPORT.width,
+        );
+        const search = mounted.router.state.location.search as Record<string, unknown>;
+        expect(search.workspaceTab).toBe("terminal");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("contains the review and files surfaces on a coarse landscape phone", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_LANDSCAPE_VIEWPORT,
+      snapshot: createSnapshotWithWorkSurfaceCheckpoint({
+        targetMessageId: "msg-user-landscape-work-surface" as MessageId,
+        targetText: "landscape work surface thread",
+      }),
+      resolveRpc: resolveWorkSurfaceRpc,
+      initialPath: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}?workspaceOpen=1&workspaceTab=review&diff=1`,
+    });
+
+    try {
+      await withCoarsePointer(async () => {
+        await vi.waitFor(() => {
+          expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+        });
+        // The desktop-shaped deep link presents full-screen on the coarse
+        // landscape phone with the wrapped diff contained.
+        const popup = await waitForElement(
+          () => queryPhoneSurfacePopup("Workspace"),
+          "Unable to find the phone work surface.",
+        );
+        await vi.waitFor(() => {
+          expect(isElementVisible(popup)).toBe(true);
+          const rect = popup.getBoundingClientRect();
+          expect(rect.width).toBeGreaterThanOrEqual(PHONE_LANDSCAPE_VIEWPORT.width - 0.5);
+          expect(rect.height).toBeGreaterThanOrEqual(PHONE_LANDSCAPE_VIEWPORT.height - 0.5);
+        });
+        await waitForElement(
+          () => popup.querySelector<HTMLElement>('[data-diff-file-path="src/wide.ts"]'),
+          "Unable to find the rendered diff file.",
+        );
+        await waitForElement(
+          () => popup.querySelector<HTMLElement>('[aria-label="Disable diff line wrapping"]'),
+          "Unable to find the pressed wrap toggle.",
+        );
+        expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
+          PHONE_LANDSCAPE_VIEWPORT.width,
+        );
+
+        // Every rendered surface-bar tab keeps the 44px floor in landscape.
+        const tabs = [...popup.querySelectorAll<HTMLElement>('[role="tab"]')];
+        expect(tabs.length).toBeGreaterThan(0);
+        for (const tab of tabs) {
+          expect(tab.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+        }
+
+        // The launcher pushes the single-pane files tree, still without
+        // horizontal overflow.
+        const launcherButton = await waitForElement(
+          () => popup.querySelector<HTMLElement>('button[aria-label="Workspace launcher"]'),
+          "Unable to find the workspace launcher button.",
+        );
+        launcherButton.click();
+        const filesCard = await waitForElement(
+          () =>
+            [...popup.querySelectorAll<HTMLElement>("button")].find((button) =>
+              button.textContent?.includes("Browse project files"),
+            ) ?? null,
+          "Unable to find the Files launcher card.",
+        );
+        filesCard.click();
+        await vi.waitFor(() => {
+          const search = mounted.router.state.location.search as Record<string, unknown>;
+          expect(search.workspaceTab).toBe("files");
+        });
+        const readmeRow = await waitForElement(
+          () =>
+            [...popup.querySelectorAll<HTMLElement>("button")].find(
+              (button) => button.textContent?.trim() === "README.md",
+            ) ?? null,
+          "Unable to find the README.md tree row.",
+        );
+        expect(readmeRow.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+        expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
+          PHONE_LANDSCAPE_VIEWPORT.width,
+        );
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("preserves the open review surface across a mid-size rotation tier flip", async () => {
+    const mounted = await mountChatView({
+      viewport: NARROW_TABLET_VIEWPORT,
+      snapshot: createSnapshotWithWorkSurfaceCheckpoint({
+        targetMessageId: "msg-user-review-rotation" as MessageId,
+        targetText: "review rotation thread",
+      }),
+      resolveRpc: resolveWorkSurfaceRpc,
+      initialPath: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}?workspaceOpen=1&workspaceTab=review&diff=1`,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      const popup = await waitForElement(
+        () => queryPhoneSurfacePopup("Workspace"),
+        "Unable to find the phone work surface.",
+      );
+      await vi.waitFor(() => {
+        expect(isElementVisible(popup)).toBe(true);
+        const rect = popup.getBoundingClientRect();
+        expect(rect.width).toBeGreaterThanOrEqual(NARROW_TABLET_VIEWPORT.width - 0.5);
+      });
+      await waitForElement(
+        () => popup.querySelector<HTMLElement>('[data-diff-file-path="src/wide.ts"]'),
+        "Unable to find the rendered diff file.",
+      );
+      const initialSearch = mounted.router.state.location.searchStr;
+      expect(initialSearch).toContain("workspaceTab");
+
+      // Rotate across the 768px boundary: the same URL params re-present the
+      // panel in the desktop sub-980 sheet without dropping the open state.
+      await mounted.setViewport(ROTATED_MID_VIEWPORT);
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("desktop");
+      });
+      expect(mounted.router.state.location.searchStr).toBe(initialSearch);
+      await vi.waitFor(() => {
+        expect(isElementVisible(popup)).toBe(false);
+        const desktopSheet = [
+          ...document.querySelectorAll<HTMLElement>('[data-slot="sheet-popup"]'),
+        ].find(
+          (sheet) =>
+            isElementVisible(sheet) &&
+            sheet.querySelector('[role="tablist"][aria-label="Workspace tabs"]') !== null,
+        );
+        expect(desktopSheet, "Missing the desktop workspace sheet.").not.toBeUndefined();
+        expect(desktopSheet!.getBoundingClientRect().width).toBeLessThan(
+          ROTATED_MID_VIEWPORT.width * 0.7,
+        );
+      });
+
+      // Rotate back: the full-screen phone surface returns with the same
+      // route state and no document-level overflow. (The tier flip
+      // re-presents the surface, so the popup is re-queried.)
+      await mounted.setViewport(NARROW_TABLET_VIEWPORT);
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      const restoredPopup = await waitForElement(
+        () => queryPhoneSurfacePopup("Workspace"),
+        "Unable to find the phone work surface after rotating back.",
+      );
+      await vi.waitFor(() => {
+        expect(isElementVisible(restoredPopup)).toBe(true);
+        const rect = restoredPopup.getBoundingClientRect();
+        expect(rect.width).toBeGreaterThanOrEqual(NARROW_TABLET_VIEWPORT.width - 0.5);
+        expect(rect.height).toBeGreaterThanOrEqual(NARROW_TABLET_VIEWPORT.height - 0.5);
+      });
+      expect(mounted.router.state.location.searchStr).toBe(initialSearch);
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
+        NARROW_TABLET_VIEWPORT.width,
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("preserves open settings across a mid-size rotation tier flip", async () => {
+    const mounted = await mountChatView({
+      viewport: NARROW_TABLET_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-settings-rotation" as MessageId,
+        targetText: "settings rotation thread",
+      }),
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      useSettingsDialogStore.getState().openSettings("appearance");
+      const surface = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="phone-settings-surface"]'),
+        "Unable to find the phone settings surface.",
+      );
+      // The open-to-section entry lands directly on the pushed section page.
+      await vi.waitFor(() => {
+        const heading = surface.querySelector<HTMLElement>("h1[tabindex]");
+        expect(heading?.textContent).toContain("Appearance");
+      });
+
+      // Rotate across the boundary: the desktop dialog takes over the same
+      // open settings state; the phone surface unmounts.
+      await mounted.setViewport(ROTATED_MID_VIEWPORT);
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("desktop");
+      });
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-slot="dialog-popup"]'),
+        "Unable to find the desktop settings dialog after the tier flip.",
+      );
+      expect(document.querySelector('[data-testid="phone-settings-surface"]')).toBeNull();
+      expect(useSettingsDialogStore.getState().open).toBe(true);
+      expect(useSettingsDialogStore.getState().section).toBe("appearance");
+
+      // Rotate back: the phone surface returns on the same section page.
+      await mounted.setViewport(NARROW_TABLET_VIEWPORT);
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      const restoredSurface = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="phone-settings-surface"]'),
+        "Unable to find the phone settings surface after rotating back.",
+      );
+      await vi.waitFor(() => {
+        const heading = restoredSurface.querySelector<HTMLElement>("h1[tabindex]");
+        expect(heading?.textContent).toContain("Appearance");
+      });
+      expect(useSettingsDialogStore.getState().section).toBe("appearance");
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
+        NARROW_TABLET_VIEWPORT.width,
+      );
+    } finally {
+      useSettingsDialogStore.setState({ open: false, section: "general" });
+      await mounted.cleanup();
+    }
+  });
 });

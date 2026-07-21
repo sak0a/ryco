@@ -31,6 +31,7 @@ vi.mock("../../../lib/gitStatusState", () => ({
 }));
 
 import { __resetContextMenuSheetForTests } from "../../../contextMenuSheetState";
+import { setCoarsePointerEmulation } from "../../../../test/browserPointer";
 import {
   __resetEnvironmentApiOverridesForTests,
   __setEnvironmentApiOverrideForTests,
@@ -282,6 +283,63 @@ describe("PhoneHome", () => {
     expect(kebab.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
     // No page-level horizontal overflow at the phone viewport.
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  });
+
+  it("contains the Home surface at 320px and on a coarse landscape phone", async () => {
+    // Acceptance-matrix gap fill (delivery step 10): the per-step suite
+    // proves Home at 390×844; this covers the narrowest portrait phone and
+    // the coarse-pointer landscape classification.
+    const assertHomeContained = async (width: number) => {
+      await expect.element(page.getByRole("heading", { name: "Threads" })).toBeVisible();
+      await expect.element(page.getByText("Alpha thread")).toBeVisible();
+      // No page-level horizontal overflow.
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+      expect(document.body.scrollWidth).toBeLessThanOrEqual(width);
+      // Rows and kebabs keep the 44px phone touch-target floor.
+      const row = page.getByText("Alpha thread").element().closest('[role="listitem"]');
+      expect(row).not.toBeNull();
+      expect((row as HTMLElement).getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      const kebab = page.getByRole("button", { name: "Thread actions for Alpha thread" }).element();
+      expect(kebab.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      expect(kebab.getBoundingClientRect().right).toBeLessThanOrEqual(width + 0.5);
+      // The app-bar affordances stay reachable inside the viewport.
+      for (const label of ["Search threads", "Open settings"]) {
+        const control = page.getByRole("button", { name: label }).element() as HTMLElement;
+        const box = control.getBoundingClientRect();
+        expect(box.left, `${label} off-screen left at ${width}px`).toBeGreaterThanOrEqual(0);
+        expect(box.right, `${label} off-screen right at ${width}px`).toBeLessThanOrEqual(
+          width + 0.5,
+        );
+      }
+    };
+
+    await page.viewport(320, 568);
+    mounted = await render(
+      <SidebarProvider>
+        <PhoneHome />
+      </SidebarProvider>,
+    );
+    await assertHomeContained(320);
+    await mounted.unmount();
+    mounted = null;
+
+    // 844×390 classifies as a phone only through the coarse-pointer clause;
+    // the phone: CSS variants must keep the touch density there.
+    await page.viewport(844, 390);
+    await setCoarsePointerEmulation(true);
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      mounted = await render(
+        <SidebarProvider>
+          <PhoneHome />
+        </SidebarProvider>,
+      );
+      await assertHomeContained(844);
+    } finally {
+      await setCoarsePointerEmulation(false);
+    }
   });
 
   it("navigates into a thread from a row", async () => {

@@ -89,6 +89,7 @@ vi.mock("../../../environments/runtime", () => {
   };
 });
 
+import { setCoarsePointerEmulation } from "../../../../test/browserPointer";
 import { __resetLocalApiForTests } from "../../../localApi";
 import { syncDocumentPresentationTier } from "../../../lib/presentationTier";
 import { AppAtomRegistryProvider } from "../../../rpc/atomRegistry";
@@ -552,6 +553,58 @@ describe("PhoneSettingsSurface", () => {
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(320);
     } finally {
       document.documentElement.style.fontSize = previousFontSize;
+    }
+  });
+
+  it("keeps the settings surface full-screen on a coarse landscape phone", async () => {
+    // Acceptance-matrix gap fill (delivery step 10): 844×390 classifies as a
+    // phone only through the coarse-pointer clause; the full-screen surface,
+    // its 44px rows, and the section push/pop must hold there too.
+    await page.viewport(844, 390);
+    await setCoarsePointerEmulation(true);
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      mounted = await mountSurface();
+      useSettingsDialogStore.getState().openSettings();
+      const popup = await vi.waitFor(() => {
+        const element = settingsPopup();
+        expect(element).not.toBeNull();
+        return element!;
+      });
+      await vi.waitFor(() => {
+        const rect = popup.getBoundingClientRect();
+        expect(rect.width).toBeGreaterThanOrEqual(844 - 0.5);
+        expect(rect.height).toBeGreaterThanOrEqual(390 - 0.5);
+      });
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(844);
+
+      const generalRow = await vi.waitFor(() => {
+        const row = listRow("General");
+        expect(row).not.toBeNull();
+        return row!;
+      });
+      expect(generalRow.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+
+      // Section push and the back affordance work in landscape, with the
+      // pushed page still contained.
+      generalRow.click();
+      await vi.waitFor(() => {
+        expect(sectionHeading()?.textContent).toContain("General");
+      });
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(844);
+      const back = await vi.waitFor(() => {
+        const button = backToSettingsButton();
+        expect(button).not.toBeNull();
+        return button!;
+      });
+      back.click();
+      await vi.waitFor(() => {
+        expect(listRow("General")).not.toBeNull();
+      });
+    } finally {
+      await setCoarsePointerEmulation(false);
     }
   });
 });
