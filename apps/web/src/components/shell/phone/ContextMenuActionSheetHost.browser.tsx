@@ -147,10 +147,18 @@ describe("ContextMenuActionSheetHost", () => {
     await vi.waitFor(() => {
       expect(sheetRow("Alpha (this project)")).not.toBeNull();
     });
-    // Back returns to the top level without settling the request.
+    // Drill-in moves focus to the first row of the new level (Back).
+    await vi.waitFor(() => {
+      expect(document.activeElement).toBe(sheetRow("Back"));
+    });
+    // Back returns to the top level without settling the request and moves
+    // focus to the level's first row.
     sheetRow("Back")!.click();
     await vi.waitFor(() => {
       expect(sheetRow("Project overview")).not.toBeNull();
+    });
+    await vi.waitFor(() => {
+      expect(document.activeElement).toBe(sheetRow("Project overview"));
     });
     sheetRow("Project settings")!.click();
     await vi.waitFor(() => {

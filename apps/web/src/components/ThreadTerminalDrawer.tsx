@@ -1058,7 +1058,7 @@ function TerminalTabItem(props: {
             render={
               <button
                 type="button"
-                className="inline-flex size-3.5 items-center justify-center rounded text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground group-hover:opacity-100 pointer-coarse:opacity-100"
+                className="inline-flex size-3.5 items-center justify-center rounded text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground group-hover:opacity-100 pointer-coarse:relative pointer-coarse:opacity-100 pointer-coarse:after:absolute pointer-coarse:after:top-1/2 pointer-coarse:after:left-1/2 pointer-coarse:after:size-11 pointer-coarse:after:-translate-x-1/2 pointer-coarse:after:-translate-y-1/2"
                 onClick={(event) => {
                   event.stopPropagation();
                   closeTab();

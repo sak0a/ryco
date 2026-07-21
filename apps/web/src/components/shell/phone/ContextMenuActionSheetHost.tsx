@@ -73,6 +73,20 @@ function ContextMenuActionSheetContent({ request }: { readonly request: ContextM
   const currentLevel = submenuStack.at(-1);
   const items = currentLevel?.items ?? request.items;
 
+  // Drill-in focus: pushing or popping a submenu moves focus to the first
+  // row of the new level (Back when inside a submenu) so keyboard and
+  // screen-reader users land on the level they navigated to. The initial
+  // level keeps base-ui's own initial focus.
+  const rowsRef = useRef<HTMLDivElement | null>(null);
+  const previousStackDepthRef = useRef(submenuStack.length);
+  useEffect(() => {
+    if (previousStackDepthRef.current === submenuStack.length) {
+      return;
+    }
+    previousStackDepthRef.current = submenuStack.length;
+    rowsRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+  }, [submenuStack.length]);
+
   return (
     <SheetPopup side="bottom" aria-label="Actions">
       <SheetHeader>
@@ -80,7 +94,7 @@ function ContextMenuActionSheetContent({ request }: { readonly request: ContextM
         <SheetDescription className="sr-only">Context actions</SheetDescription>
       </SheetHeader>
       <SheetPanel className="pb-safe">
-        <div role="group" aria-label="Context actions" className="space-y-0.5">
+        <div ref={rowsRef} role="group" aria-label="Context actions" className="space-y-0.5">
           {currentLevel ? (
             <button
               type="button"
@@ -93,7 +107,10 @@ function ContextMenuActionSheetContent({ request }: { readonly request: ContextM
           ) : null}
           {items.map((item) => {
             const hasChildren = Array.isArray(item.children) && item.children.length > 0;
-            const isDestructive = !hasChildren && item.destructive === true;
+            // Destructive parity with the DOM fallback: explicit flag or the
+            // conventional "delete" leaf id.
+            const isDestructive =
+              !hasChildren && (item.destructive === true || item.id === "delete");
             return (
               <button
                 key={item.id}

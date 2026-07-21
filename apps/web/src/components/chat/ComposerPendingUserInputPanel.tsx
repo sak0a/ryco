@@ -164,7 +164,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               {shortcutKey !== null ? (
                 <kbd
                   className={cn(
-                    "flex size-5 shrink-0 items-center justify-center rounded text-[11px] font-medium tabular-nums transition-colors duration-150",
+                    "flex size-5 shrink-0 items-center justify-center rounded text-[11px] font-medium tabular-nums transition-colors duration-150 pointer-coarse:hidden",
                     isSelected
                       ? "bg-blue-500/20 text-blue-400"
                       : "bg-muted/40 text-muted-foreground/50 group-hover:bg-muted/60 group-hover:text-muted-foreground/70",
