@@ -9,9 +9,9 @@ import { ListChecksIcon, PanelRightIcon } from "lucide-react";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
-import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { HostedNodeMenu } from "../hostedHub/HostedConnectionControls";
 import { ChatHeaderBar } from "./ChatHeaderBar";
 import { ChatSessionTabs, type ChatSessionTabsItem } from "./ChatSessionTabs";
 import type { WorktreeOriginLike } from "./ChatSessionTabs.logic";
@@ -87,6 +87,10 @@ export const ChatHeader = memo(function ChatHeader(props: ChatHeaderProps) {
 
   const inlineActions = (
     <>
+      {/* Hosted connection control, relocated from the fixed overlay into the
+          workspace header so it can never overlap the other header controls.
+          Renders nothing outside hosted-hub sessions. */}
+      <HostedNodeMenu />
       <Tooltip>
         <TooltipTrigger
           render={
@@ -146,7 +150,6 @@ export const ChatHeader = memo(function ChatHeader(props: ChatHeaderProps) {
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex min-w-0 items-center gap-2 pt-4 pb-2.5">
-        <SidebarTrigger className="size-7 shrink-0 not-phone:hidden" />
         <ChatHeaderBar
           projectName={props.activeProjectName}
           isGitRepo={props.isGitRepo}

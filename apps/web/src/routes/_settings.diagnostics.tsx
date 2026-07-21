@@ -2,9 +2,10 @@ import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { ArrowLeftIcon } from "lucide-react";
 
 import { DiagnosticsPanel } from "../components/settings/DiagnosticsPanel";
+import { HostedConnectionControl } from "../components/hostedHub/HostedConnectionControls";
 import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
-import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
+import { SidebarInset } from "../components/ui/sidebar";
 import { APP_DISPLAY_NAME } from "~/branding";
 
 function DiagnosticsRouteView() {
@@ -14,7 +15,6 @@ function DiagnosticsRouteView() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
         <header className="flex items-center gap-2 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
-          <SidebarTrigger className="size-7 shrink-0 not-phone:hidden" />
           <Button
             size="xs"
             variant="ghost"
@@ -29,9 +29,14 @@ function DiagnosticsRouteView() {
             <ArrowLeftIcon className="size-3.5" />
             Back
           </Button>
-          <span className="text-sm font-medium text-foreground">
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
             {APP_DISPLAY_NAME} · Diagnostics
           </span>
+          {/* The connection controls used to float over every routed surface;
+              with the overlay removed, hosted users keep status, switching,
+              and sign-out reachable from this header. Renders nothing outside
+              hosted-hub sessions. */}
+          <HostedConnectionControl />
         </header>
 
         <ScrollArea className="min-h-0 flex-1">

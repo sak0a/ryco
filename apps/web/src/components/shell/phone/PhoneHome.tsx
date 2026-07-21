@@ -1,0 +1,525 @@
+import { useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { ProjectId } from "@ryco/contracts";
+import {
+  parseScopedThreadKey,
+  scopedProjectKey,
+  scopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@ryco/client-runtime";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  EllipsisVerticalIcon,
+  FolderIcon,
+  PinIcon,
+  PlusIcon,
+  SearchIcon,
+  SettingsIcon,
+} from "lucide-react";
+
+import { useCommandPaletteStore } from "../../../commandPaletteStore";
+import { useComposerDraftStore } from "../../../composerDraftStore";
+import { usePrimaryEnvironmentId } from "../../../environments/primary";
+import {
+  useSavedEnvironmentRegistryStore,
+  useSavedEnvironmentRuntimeStore,
+} from "../../../environments/runtime";
+import { useNewThreadHandler } from "../../../hooks/useHandleNewThread";
+import { getProjectOrderKey } from "../../../logicalProject";
+import {
+  buildPhysicalToLogicalProjectKeyMap,
+  buildSidebarProjectSnapshots,
+  type SidebarProjectSnapshot,
+} from "../../../sidebarProjectGrouping";
+import { buildSidebarProjectFolderTree } from "../../../sidebarProjectFolders";
+import { useSettingsDialogStore } from "../../../settingsDialogStore";
+import {
+  selectProjectsAcrossEnvironments,
+  selectSidebarThreadsAcrossEnvironments,
+  selectSidebarThreadsForProjectRefs,
+  useStore,
+  type AppState,
+} from "../../../store";
+import { formatRelativeTimeLabel } from "../../../timestampFormat";
+import { useUiStateStore } from "../../../uiStateStore";
+import { cn } from "~/lib/utils";
+import { useSettings } from "~/hooks/useSettings";
+import {
+  orderItemsByPreferredIds,
+  resolveSidebarNewThreadEnvMode,
+  sortProjectsForSidebar,
+  sortThreadsWithPinned,
+} from "../../Sidebar.logic";
+import { createSidebarProjectDraftThreadsSelector } from "../../sidebar/sidebarTreeAdapters";
+import type { SidebarTreeThread } from "../../sidebar/hooks/useSidebarTree";
+import { HostedConnectionPill } from "../../hostedHub/HostedConnectionControls";
+import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "../../ThreadStatusIndicators";
+import { Button } from "../../ui/button";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../../ui/empty";
+import { SidebarInset } from "../../ui/sidebar";
+import {
+  Sheet,
+  SheetDescription,
+  SheetHeader,
+  SheetPanel,
+  SheetPopup,
+  SheetTitle,
+} from "../../ui/sheet";
+import { PhoneThreadActionsSheet, PhoneThreadRenameDialog } from "./PhoneThreadActionsSheet";
+import { usePhoneThreadActions } from "./usePhoneThreadActions";
+
+/**
+ * Phone Home ("Threads"): the first-class phone route at the logical root — a
+ * project-grouped thread list rendered from exactly the stores and selectors
+ * the desktop sidebar consumes (projects, threads, drafts, uiState ordering,
+ * pinning, and sort-order settings), so a hosted node switch resets both
+ * presentations through the same store resets.
+ */
+export function PhoneHome() {
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const sidebarThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const projectFoldersById = useUiStateStore((store) => store.projectFoldersById);
+  const projectFolderOrder = useUiStateStore((store) => store.projectFolderOrder);
+  const projectTreeOrder = useUiStateStore((store) => store.projectTreeOrder);
+  const setProjectFolderExpanded = useUiStateStore((store) => store.setProjectFolderExpanded);
+  const sidebarProjectSortOrder = useSettings((s) => s.sidebarProjectSortOrder);
+  const defaultThreadEnvMode = useSettings((s) => s.defaultThreadEnvMode);
+  const projectGroupingSettings = useSettings((settings) => ({
+    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
+    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
+  }));
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((s) => s.byId);
+  const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
+  const openSettings = useSettingsDialogStore((s) => s.openSettings);
+  const openCommandPalette = useCommandPaletteStore((store) => store.setOpen);
+  const { handleNewThread } = useNewThreadHandler();
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+
+  const orderedProjects = useMemo(
+    () =>
+      orderItemsByPreferredIds({
+        items: projects,
+        preferredIds: projectOrder,
+        getId: getProjectOrderKey,
+      }),
+    [projectOrder, projects],
+  );
+  const physicalToLogicalKey = useMemo(
+    () =>
+      buildPhysicalToLogicalProjectKeyMap({
+        projects: orderedProjects,
+        settings: projectGroupingSettings,
+      }),
+    [orderedProjects, projectGroupingSettings],
+  );
+  const sidebarProjects = useMemo(
+    () =>
+      buildSidebarProjectSnapshots({
+        projects: orderedProjects,
+        settings: projectGroupingSettings,
+        primaryEnvironmentId,
+        resolveEnvironmentLabel: (environmentId) => {
+          const rt = savedEnvironmentRuntimeById[environmentId];
+          const saved = savedEnvironmentRegistry[environmentId];
+          return rt?.descriptor?.label ?? saved?.label ?? null;
+        },
+      }),
+    [
+      orderedProjects,
+      projectGroupingSettings,
+      primaryEnvironmentId,
+      savedEnvironmentRegistry,
+      savedEnvironmentRuntimeById,
+    ],
+  );
+  const sidebarProjectByKey = useMemo(
+    () => new Map(sidebarProjects.map((project) => [project.projectKey, project] as const)),
+    [sidebarProjects],
+  );
+  const sortedProjects = useMemo(() => {
+    const sortableProjects = sidebarProjects.map((project) =>
+      Object.assign({}, project, { id: project.projectKey as ProjectId }),
+    );
+    const sortableThreads = sidebarThreads
+      .filter((thread) => thread.archivedAt === null)
+      .map((thread) => {
+        const physicalKey = scopedProjectKey(
+          scopeProjectRef(thread.environmentId, thread.projectId),
+        );
+        return Object.assign({}, thread, {
+          projectId: (physicalToLogicalKey.get(physicalKey) ?? physicalKey) as ProjectId,
+        });
+      });
+    return sortProjectsForSidebar(
+      sortableProjects,
+      sortableThreads,
+      sidebarProjectSortOrder,
+    ).flatMap((project) => {
+      const resolvedProject = sidebarProjectByKey.get(project.id);
+      return resolvedProject ? [resolvedProject] : [];
+    });
+  }, [
+    physicalToLogicalKey,
+    sidebarProjectByKey,
+    sidebarProjectSortOrder,
+    sidebarProjects,
+    sidebarThreads,
+  ]);
+  const projectTreeRows = useMemo(
+    () =>
+      buildSidebarProjectFolderTree({
+        projects: sortedProjects,
+        projectFoldersById,
+        projectFolderOrder,
+        projectTreeOrder,
+        projectSortOrder: sidebarProjectSortOrder,
+      }),
+    [
+      projectFolderOrder,
+      projectFoldersById,
+      projectTreeOrder,
+      sidebarProjectSortOrder,
+      sortedProjects,
+    ],
+  );
+
+  const startThreadInProject = (project: SidebarProjectSnapshot) => {
+    const member = project.memberProjects[0];
+    if (!member) return;
+    setProjectPickerOpen(false);
+    void handleNewThread(scopeProjectRef(member.environmentId, member.id), {
+      envMode: resolveSidebarNewThreadEnvMode({ defaultEnvMode: defaultThreadEnvMode }),
+    });
+  };
+
+  return (
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex items-center gap-1.5 border-b border-border pr-[calc(env(safe-area-inset-right)+0.5rem)] pb-2 pl-[calc(env(safe-area-inset-left)+0.75rem)] pt-[calc(env(safe-area-inset-top)+0.5rem)]">
+          <h1 className="min-w-0 flex-1 truncate text-base font-semibold">Threads</h1>
+          <HostedConnectionPill />
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label="Search threads"
+            onClick={() => openCommandPalette(true)}
+          >
+            <SearchIcon />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label="Open settings"
+            onClick={() => openSettings()}
+          >
+            <SettingsIcon />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label="New thread"
+            disabled={sortedProjects.length === 0}
+            onClick={() => {
+              if (sortedProjects.length === 1 && sortedProjects[0]) {
+                startThreadInProject(sortedProjects[0]);
+                return;
+              }
+              setProjectPickerOpen(true);
+            }}
+          >
+            <PlusIcon />
+          </Button>
+        </header>
+        <div
+          data-testid="phone-home-list"
+          className="min-h-0 flex-1 overflow-y-auto pb-[max(env(safe-area-inset-bottom),0.5rem)]"
+        >
+          {projectTreeRows.length === 0 ? (
+            <Empty className="flex-1 py-16">
+              <EmptyHeader>
+                <EmptyTitle className="text-base">No projects yet</EmptyTitle>
+                <EmptyDescription className="mt-1 text-sm">
+                  Projects opened on this node appear here with their threads.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            projectTreeRows.map((row) =>
+              row.kind === "project" ? (
+                <PhoneHomeProjectSection key={row.itemId} project={row.project} />
+              ) : (
+                <section key={row.itemId} aria-label={row.folder.name}>
+                  <button
+                    type="button"
+                    className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm font-medium text-muted-foreground hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    aria-expanded={row.folder.expanded}
+                    onClick={() => setProjectFolderExpanded(row.folder.id, !row.folder.expanded)}
+                  >
+                    {row.folder.expanded ? (
+                      <ChevronDownIcon aria-hidden className="size-4 shrink-0" />
+                    ) : (
+                      <ChevronRightIcon aria-hidden className="size-4 shrink-0" />
+                    )}
+                    <FolderIcon aria-hidden className="size-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{row.folder.name}</span>
+                  </button>
+                  {row.folder.expanded
+                    ? row.projects.map((project) => (
+                        <PhoneHomeProjectSection
+                          key={project.projectKey}
+                          project={project}
+                          nested
+                        />
+                      ))
+                    : null}
+                </section>
+              ),
+            )
+          )}
+        </div>
+      </div>
+      <Sheet open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
+        <SheetPopup side="bottom" aria-label="New thread">
+          <SheetHeader>
+            <SheetTitle className="text-base">New thread</SheetTitle>
+            <SheetDescription>Choose a project for the new thread.</SheetDescription>
+          </SheetHeader>
+          <SheetPanel className="pb-safe">
+            <div role="group" aria-label="Projects" className="space-y-0.5">
+              {sortedProjects.map((project) => (
+                <button
+                  key={project.projectKey}
+                  type="button"
+                  className="flex min-h-11 w-full items-center rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => startThreadInProject(project)}
+                >
+                  <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
+                </button>
+              ))}
+            </div>
+          </SheetPanel>
+        </SheetPopup>
+      </Sheet>
+    </SidebarInset>
+  );
+}
+
+function PhoneHomeProjectSection({
+  project,
+  nested = false,
+}: {
+  readonly project: SidebarProjectSnapshot;
+  readonly nested?: boolean;
+}) {
+  const threads = useStore(
+    useShallow(
+      useMemo(
+        () => (state: AppState) =>
+          selectSidebarThreadsForProjectRefs(state, project.memberProjectRefs),
+        [project.memberProjectRefs],
+      ),
+    ),
+  );
+  const draftThreads = useComposerDraftStore(
+    useMemo(() => createSidebarProjectDraftThreadsSelector(project), [project]),
+  );
+  const threadSortOrder = useSettings((s) => s.sidebarThreadSortOrder);
+  const pinnedThreadKeysRecord = useUiStateStore((store) => store.pinnedThreadKeys);
+  const expanded = useUiStateStore(
+    (store) => store.projectExpandedById[project.projectKey] ?? true,
+  );
+  const toggleProject = useUiStateStore((store) => store.toggleProject);
+
+  const pinnedThreadKeys = useMemo(
+    () =>
+      new Set(
+        Object.entries(pinnedThreadKeysRecord).flatMap(([threadKey, pinned]) =>
+          pinned ? [threadKey] : [],
+        ),
+      ),
+    [pinnedThreadKeysRecord],
+  );
+  const visibleThreads = useMemo(() => {
+    // A draft can shadow an existing server thread (same scoped key); the
+    // server summary wins so each row key stays unique.
+    const combined: SidebarTreeThread[] = [...threads];
+    const seenKeys = new Set(
+      threads.map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
+    );
+    for (const draft of draftThreads) {
+      const draftKey = scopedThreadKey(scopeThreadRef(draft.environmentId, draft.id));
+      if (seenKeys.has(draftKey)) continue;
+      seenKeys.add(draftKey);
+      combined.push(draft);
+    }
+    return combined.filter((thread) => thread.archivedAt === null);
+  }, [draftThreads, threads]);
+  const sortedThreads = useMemo(
+    () =>
+      sortThreadsWithPinned({
+        threads: visibleThreads,
+        sortOrder: threadSortOrder,
+        pinnedThreadKeys,
+        getThreadKey: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      }),
+    [pinnedThreadKeys, threadSortOrder, visibleThreads],
+  );
+  const threadByKey = useMemo(
+    () =>
+      new Map(
+        sortedThreads.map(
+          (thread) =>
+            [scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)), thread] as const,
+        ),
+      ),
+    [sortedThreads],
+  );
+  const threadByKeyRef = useRef<ReadonlyMap<string, SidebarTreeThread>>(threadByKey);
+  threadByKeyRef.current = threadByKey;
+  const memberProjectByScopedKey = useMemo(
+    () =>
+      new Map(
+        project.memberProjects.map((member) => [
+          scopedProjectKey(scopeProjectRef(member.environmentId, member.id)),
+          member,
+        ]),
+      ),
+    [project.memberProjects],
+  );
+  const threadActions = usePhoneThreadActions({
+    sidebarThreadByKeyRef: threadByKeyRef,
+    memberProjectByScopedKey,
+    projectCwd: project.cwd ?? null,
+  });
+  const [menuThreadKey, setMenuThreadKey] = useState<string | null>(null);
+  const menuThread = menuThreadKey ? (threadByKey.get(menuThreadKey) ?? null) : null;
+  const renamingThread = threadActions.renamingThreadKey
+    ? (threadByKey.get(threadActions.renamingThreadKey) ?? null)
+    : null;
+
+  return (
+    <section aria-label={project.displayName} className={cn(nested && "pl-3")}>
+      <button
+        type="button"
+        className="flex min-h-11 w-full items-center gap-2 px-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring hover:bg-accent/40"
+        aria-expanded={expanded}
+        onClick={() => toggleProject(project.projectKey)}
+      >
+        {expanded ? (
+          <ChevronDownIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRightIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{project.displayName}</span>
+        <span className="shrink-0 text-xs text-muted-foreground">{sortedThreads.length}</span>
+      </button>
+      {expanded ? (
+        <div role="list" aria-label={`Threads in ${project.displayName}`}>
+          {sortedThreads.length === 0 ? (
+            <p className="px-3 pb-3 text-sm text-muted-foreground">No threads yet.</p>
+          ) : (
+            sortedThreads.map((thread) => {
+              const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+              return (
+                <PhoneHomeThreadRow
+                  key={threadKey}
+                  thread={thread}
+                  pinned={pinnedThreadKeys.has(threadKey)}
+                  onOpen={() => {
+                    const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+                    if (thread.draftId) {
+                      threadActions.navigateToDraft(thread.draftId, threadRef);
+                      return;
+                    }
+                    threadActions.navigateToThread(threadRef);
+                  }}
+                  onMenu={() => setMenuThreadKey(threadKey)}
+                />
+              );
+            })
+          )}
+        </div>
+      ) : null}
+      <PhoneThreadActionsSheet
+        open={menuThread !== null}
+        onOpenChange={(open) => {
+          if (!open) setMenuThreadKey(null);
+        }}
+        title={menuThread?.title ?? "Thread"}
+        items={menuThreadKey ? threadActions.listThreadMenuActions(menuThreadKey) : []}
+        onAction={(actionId) => {
+          const threadRef = menuThreadKey ? parseScopedThreadKey(menuThreadKey) : null;
+          setMenuThreadKey(null);
+          if (!threadRef) return;
+          void threadActions.performThreadMenuAction(threadRef, actionId);
+        }}
+      />
+      <PhoneThreadRenameDialog
+        renamingThreadKey={threadActions.renamingThreadKey}
+        originalTitle={renamingThread?.title ?? ""}
+        renamingTitle={threadActions.renamingTitle}
+        setRenamingTitle={threadActions.setRenamingTitle}
+        commitRename={threadActions.commitRename}
+        cancelRename={threadActions.cancelRename}
+      />
+    </section>
+  );
+}
+
+function PhoneHomeThreadRow({
+  thread,
+  pinned,
+  onOpen,
+  onMenu,
+}: {
+  readonly thread: SidebarTreeThread;
+  readonly pinned: boolean;
+  readonly onOpen: () => void;
+  readonly onMenu: () => void;
+}) {
+  const timestamp =
+    thread.latestTurn?.completedAt ?? thread.latestUserMessageAt ?? thread.createdAt;
+  return (
+    <div role="listitem" className="flex items-stretch">
+      <button
+        type="button"
+        className="flex min-h-11 min-w-0 flex-1 items-center gap-2 py-1 pl-3 text-left hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        onClick={onOpen}
+      >
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="flex min-w-0 items-center gap-1 text-sm">
+            {pinned ? (
+              <PinIcon
+                aria-label="Pinned"
+                role="img"
+                className="size-3 shrink-0 text-muted-foreground"
+              />
+            ) : null}
+            <span className="min-w-0 truncate">{thread.title}</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <ThreadRowLeadingStatus thread={thread} alwaysShowStatusLabel />
+            <ThreadRowTrailingStatus thread={thread} />
+          </span>
+        </span>
+        {timestamp ? (
+          <span className="shrink-0 pr-1 text-[10px] text-muted-foreground">
+            {formatRelativeTimeLabel(timestamp)}
+          </span>
+        ) : null}
+      </button>
+      <button
+        type="button"
+        aria-label={`Thread actions for ${thread.title}`}
+        className="flex w-11 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        onClick={onMenu}
+      >
+        <EllipsisVerticalIcon aria-hidden className="size-4" />
+      </button>
+    </div>
+  );
+}

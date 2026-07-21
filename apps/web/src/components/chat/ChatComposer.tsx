@@ -70,9 +70,8 @@ import {
 } from "../composerFooterLayout";
 import { type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { type ComposerCommandItem } from "./ComposerCommandMenu";
-import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
-import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
+import { ApprovalCard } from "./ApprovalCard";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
@@ -1730,9 +1729,11 @@ export const ChatComposer = memo(
             {!isComposerCollapsedMobile &&
               (activePendingApproval ? (
                 <div className="rounded-t-[max(0px,calc(var(--radius-3xl)-3px))] border-b border-border/65 bg-muted/20">
-                  <ComposerPendingApprovalPanel
+                  <ApprovalCard
                     approval={activePendingApproval}
                     pendingCount={pendingApprovals.length}
+                    isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
+                    onRespondToApproval={onRespondToApproval}
                   />
                 </div>
               ) : pendingUserInputs.length > 0 ? (
@@ -1760,17 +1761,12 @@ export const ChatComposer = memo(
                 className="rounded-t-[max(0px,calc(var(--radius-3xl)-3px))] border-b border-border/65 bg-muted/20"
                 data-chat-composer-collapsed-controls="true"
               >
-                <ComposerPendingApprovalPanel
+                <ApprovalCard
                   approval={activePendingApproval}
                   pendingCount={pendingApprovals.length}
+                  isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
+                  onRespondToApproval={onRespondToApproval}
                 />
-                <div className="flex flex-wrap items-center justify-end gap-2 px-3 pb-3 sm:px-4">
-                  <ComposerPendingApprovalActions
-                    requestId={activePendingApproval.requestId}
-                    isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
-                    onRespondToApproval={onRespondToApproval}
-                  />
-                </div>
               </div>
             ) : isComposerCollapsedMobile && pendingUserInputs.length > 0 ? (
               <div
@@ -1918,16 +1914,10 @@ export const ChatComposer = memo(
               onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
             />
 
-            {/* Bottom toolbar */}
-            {isComposerCollapsedMobile ? null : activePendingApproval ? (
-              <div className="flex flex-wrap items-center justify-end gap-2 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
-                <ComposerPendingApprovalActions
-                  requestId={activePendingApproval.requestId}
-                  isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
-                  onRespondToApproval={onRespondToApproval}
-                />
-              </div>
-            ) : (
+            {/* Bottom toolbar. During a pending approval the approval card
+                above the editor carries the single action set, so the footer
+                stays hidden exactly as before. */}
+            {isComposerCollapsedMobile ? null : activePendingApproval ? null : (
               <ComposerFooter
                 isFooterCompact={isComposerFooterCompact}
                 isPrimaryActionsCompact={isComposerPrimaryActionsCompact}

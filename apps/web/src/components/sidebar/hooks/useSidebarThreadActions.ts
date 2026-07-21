@@ -30,6 +30,22 @@ import { stackedThreadToast, toastManager } from "../../ui/toast";
 import type { SidebarThreadSummary } from "../../../types";
 import type { SidebarProjectGroupMember } from "../../../sidebarProjectGrouping";
 
+export type ThreadMenuActionId =
+  | "pin"
+  | "unpin"
+  | "rename"
+  | "mark-unread"
+  | "copy-path"
+  | "copy-thread-id"
+  | "archive"
+  | "close";
+
+export interface ThreadMenuActionItem {
+  readonly id: ThreadMenuActionId;
+  readonly label: string;
+  readonly destructive?: boolean;
+}
+
 export function useSidebarThreadActions(params: {
   router: ReturnType<typeof useRouter>;
   isMobile: boolean;
@@ -426,65 +442,66 @@ export function useSidebarThreadActions(params: {
     [],
   );
 
-  const handleThreadContextMenu = useCallback(
-    async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
-      const api = readLocalApi();
-      if (!api) return;
+  // The single thread action inventory, as data. Both presenters — the DOM
+  // context menu (desktop right-click) and the phone bottom-sheet kebab —
+  // render this inventory and dispatch through `performThreadMenuAction`, so
+  // the handlers are never forked.
+  const listThreadMenuActions = useCallback(
+    (threadKey: string): ThreadMenuActionItem[] => {
+      const thread = sidebarThreadByKeyRef.current.get(threadKey) ?? null;
+      if (!thread) return [];
+      const draftId = (thread as SidebarThreadSummary & { draftId?: DraftId | undefined }).draftId;
+      if (draftId) {
+        return [{ id: "close", label: "Close session" }];
+      }
+      const archiveAvailable = canArchiveSidebarThread(thread);
+      const isPinned = useUiStateStore.getState().pinnedThreadKeys[threadKey] === true;
+      return [
+        { id: isPinned ? "unpin" : "pin", label: isPinned ? "Unpin thread" : "Pin thread" },
+        { id: "rename", label: "Rename thread" },
+        { id: "mark-unread", label: "Mark unread" },
+        { id: "copy-path", label: "Copy Path" },
+        { id: "copy-thread-id", label: "Copy Thread ID" },
+        ...(archiveAvailable
+          ? [{ id: "archive", label: "Archive session" } satisfies ThreadMenuActionItem]
+          : []),
+        {
+          id: "close",
+          label: thread.worktreeId || thread.worktreePath ? "Close session" : "Delete thread",
+          destructive: true,
+        },
+      ];
+    },
+    [sidebarThreadByKeyRef],
+  );
+
+  const performThreadMenuAction = useCallback(
+    async (threadRef: ScopedThreadRef, actionId: ThreadMenuActionId) => {
       const threadKey = scopedThreadKey(threadRef);
       const thread = sidebarThreadByKeyRef.current.get(threadKey) ?? null;
       if (!thread) return;
       const draftId = (thread as SidebarThreadSummary & { draftId?: DraftId | undefined }).draftId;
       const archiveAvailable = !draftId && canArchiveSidebarThread(thread);
-      const isPinned = useUiStateStore.getState().pinnedThreadKeys[threadKey] === true;
       const threadProject = memberProjectByScopedKey.get(
         scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
       );
       const threadWorkspacePath = thread.worktreePath ?? threadProject?.cwd ?? projectCwd ?? null;
-      if (draftId) {
-        if (selectedThreadCount > 0) {
-          clearSelection();
-        }
-        const clicked = await api.contextMenu.show(
-          [{ id: "close", label: "Close session" }],
-          position,
-        );
-        if (clicked === "close") {
-          await closeThread(thread);
-        }
-        return;
-      }
-      const clicked = await api.contextMenu.show(
-        [
-          { id: isPinned ? "unpin" : "pin", label: isPinned ? "Unpin thread" : "Pin thread" },
-          { id: "rename", label: "Rename thread" },
-          { id: "mark-unread", label: "Mark unread" },
-          { id: "copy-path", label: "Copy Path" },
-          { id: "copy-thread-id", label: "Copy Thread ID" },
-          ...(archiveAvailable ? [{ id: "archive", label: "Archive session" }] : []),
-          {
-            id: "close",
-            label: thread.worktreeId || thread.worktreePath ? "Close session" : "Delete thread",
-            destructive: true,
-          },
-        ],
-        position,
-      );
 
-      if (clicked === "rename") {
+      if (actionId === "rename") {
         startThreadRename(threadKey, thread.title);
         return;
       }
 
-      if (clicked === "pin" || clicked === "unpin") {
-        useUiStateStore.getState().setThreadPinned(threadKey, clicked === "pin");
+      if (actionId === "pin" || actionId === "unpin") {
+        useUiStateStore.getState().setThreadPinned(threadKey, actionId === "pin");
         return;
       }
 
-      if (clicked === "mark-unread") {
+      if (actionId === "mark-unread") {
         markThreadUnread(threadKey, thread.latestTurn?.completedAt);
         return;
       }
-      if (clicked === "copy-path") {
+      if (actionId === "copy-path") {
         if (!threadWorkspacePath) {
           toastManager.add(
             stackedThreadToast({
@@ -498,44 +515,77 @@ export function useSidebarThreadActions(params: {
         copyPathToClipboard(threadWorkspacePath, { path: threadWorkspacePath });
         return;
       }
-      if (clicked === "copy-thread-id") {
+      if (actionId === "copy-thread-id") {
         copyThreadIdToClipboard(thread.id, { threadId: thread.id });
         return;
       }
-      if (clicked === "archive") {
+      if (actionId === "archive") {
         if (
           shouldConfirmSidebarThreadArchive({
             archiveAvailable,
             confirmThreadArchive: appSettingsConfirmThreadArchive,
           })
         ) {
-          const confirmed = await api.dialogs.confirm(
-            [
-              `Archive session "${thread.title}"?`,
-              "You can restore archived sessions from Settings > Archive.",
-            ].join("\n"),
-          );
+          const message = [
+            `Archive session "${thread.title}"?`,
+            "You can restore archived sessions from Settings > Archive.",
+          ].join("\n");
+          const localApi = readLocalApi();
+          const confirmed = localApi
+            ? await localApi.dialogs.confirm(message)
+            : window.confirm(message);
           if (!confirmed) return;
         }
         await attemptArchiveThread(threadRef);
         return;
       }
-      if (clicked !== "close") return;
+      if (actionId !== "close") return;
       await closeThread(thread);
     },
     [
       attemptArchiveThread,
       appSettingsConfirmThreadArchive,
-      clearSelection,
       closeThread,
       copyPathToClipboard,
       copyThreadIdToClipboard,
       markThreadUnread,
       memberProjectByScopedKey,
       projectCwd,
-      selectedThreadCount,
       sidebarThreadByKeyRef,
       startThreadRename,
+    ],
+  );
+
+  const handleThreadContextMenu = useCallback(
+    async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
+      const api = readLocalApi();
+      if (!api) return;
+      const threadKey = scopedThreadKey(threadRef);
+      const thread = sidebarThreadByKeyRef.current.get(threadKey) ?? null;
+      if (!thread) return;
+      const draftId = (thread as SidebarThreadSummary & { draftId?: DraftId | undefined }).draftId;
+      if (draftId && selectedThreadCount > 0) {
+        clearSelection();
+      }
+      const items = listThreadMenuActions(threadKey);
+      if (items.length === 0) return;
+      const clicked = await api.contextMenu.show(
+        items.map((item) =>
+          item.destructive
+            ? { id: item.id, label: item.label, destructive: true }
+            : { id: item.id, label: item.label },
+        ),
+        position,
+      );
+      if (!clicked) return;
+      await performThreadMenuAction(threadRef, clicked as ThreadMenuActionId);
+    },
+    [
+      clearSelection,
+      listThreadMenuActions,
+      performThreadMenuAction,
+      selectedThreadCount,
+      sidebarThreadByKeyRef,
     ],
   );
 
@@ -555,6 +605,8 @@ export function useSidebarThreadActions(params: {
     startThreadRename,
     cancelRename,
     commitRename,
+    listThreadMenuActions,
+    performThreadMenuAction,
     handleThreadContextMenu,
   };
 }

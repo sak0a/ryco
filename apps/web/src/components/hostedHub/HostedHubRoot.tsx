@@ -1,14 +1,11 @@
 import { useNavigate } from "@tanstack/react-router";
 import {
   AlertTriangleIcon,
-  ChevronDownIcon,
   KeyRoundIcon,
   LogOutIcon,
   RefreshCwIcon,
   ServerIcon,
   ShieldCheckIcon,
-  WifiIcon,
-  WifiOffIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type RefObject } from "react";
 
@@ -27,9 +24,14 @@ import {
   useRoutedHostedNode,
 } from "../../hostedHub/nodeRouteOrchestrator";
 import type { HostedHubNode } from "../../hostedHub/types";
+import { useHostedBrowserLifecycle } from "../../hostedHub/useHostedBrowserLifecycle";
+import { HostedConnectionControl, NodePresence } from "./HostedConnectionControls";
 import { HostedNodeEnrollmentFlow } from "./HostedNodeEnrollment";
 import { HostedPwaControls } from "./HostedPwaControls";
 import { HostedRelayTrustNotice } from "./HostedRelayTrustNotice";
+
+// Browser suites and callers keep importing the menu from the hosted root.
+export { HostedNodeMenu } from "./HostedConnectionControls";
 
 export function HostedHubRoot() {
   const accountStatus = useHostedHubStore((state) => state.accountStatus);
@@ -40,33 +42,9 @@ export function HostedHubRoot() {
   const errorMessage = useHostedHubStore((state) => state.errorMessage);
   const routedNode = useRoutedHostedNode();
   useHostedNodeRouteOrchestrator();
-
-  useEffect(() => {
-    if (accountStatus !== "authenticated") return;
-    const resumeIfVisible = () => {
-      if (document.visibilityState === "visible" && navigator.onLine) {
-        void hostedHubController.resumeBrowser();
-      }
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") hostedHubController.suspendBrowser("hidden");
-      else resumeIfVisible();
-    };
-    const onOffline = () => hostedHubController.suspendBrowser("offline");
-    const onOnline = () => resumeIfVisible();
-    const onPageShow = () => resumeIfVisible();
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("offline", onOffline);
-    window.addEventListener("online", onOnline);
-    window.addEventListener("pageshow", onPageShow);
-    if (!navigator.onLine) onOffline();
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("offline", onOffline);
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("pageshow", onPageShow);
-    };
-  }, [accountStatus]);
+  // The single browser lifecycle owner, above the presentation-tier seam: the
+  // tier shells mount no lifecycle listeners of their own.
+  useHostedBrowserLifecycle();
 
   if (accountStatus !== "authenticated") return <HostedAuthenticationSurface />;
   if (recoveryCodes.length > 0) return <RecoveryCodesSurface />;
@@ -78,23 +56,15 @@ export function HostedHubRoot() {
     return <HostedNodeDirectory />;
   }
   if (transportStatus === "terminal-failure") {
-    return (
-      <>
-        <HostedNodeFailureSurface node={selectedNode} message={errorMessage} />
-        <HostedNodeMenu />
-      </>
-    );
+    return <HostedNodeFailureSurface node={selectedNode} message={errorMessage} />;
   }
   if (!sessionEstablished) {
     return <HostedNodeStartingSurface node={selectedNode} />;
   }
 
-  return (
-    <>
-      <RootAppShell authGateState={{ status: "hosted-hub" }} />
-      <HostedNodeMenu />
-    </>
-  );
+  // The hosted connection controls render inside the shell (workspace header
+  // on desktop, app-bar pill on the phone tier) — never as a floating overlay.
+  return <RootAppShell authGateState={{ status: "hosted-hub" }} />;
 }
 
 function HostedNodeFailureSurface({
@@ -106,6 +76,9 @@ function HostedNodeFailureSurface({
 }) {
   return (
     <Surface>
+      <div className="mb-4 flex justify-end">
+        <HostedConnectionControl />
+      </div>
       <AlertTriangleIcon aria-hidden className="size-8 text-destructive" />
       <h1 className="mt-4 text-2xl font-semibold">Unable to connect to {node.label}</h1>
       <p role="alert" className="mt-2 text-sm text-muted-foreground">
@@ -145,8 +118,11 @@ function HostedNodeStartingSurface({ node }: { readonly node: HostedHubNode }) {
 }
 
 function Surface({ children }: { readonly children: React.ReactNode }) {
+  // Phone layout system: safe-area-aware edge padding so hosted entry
+  // surfaces stay fully reachable on notched, edge-to-edge phone viewports.
+  // The gating order of the surfaces themselves is unchanged.
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-10 text-foreground sm:px-6">
+    <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-10 text-foreground sm:px-6 phone:px-[max(1rem,env(safe-area-inset-left),env(safe-area-inset-right))] phone:pt-[max(2.5rem,calc(env(safe-area-inset-top)+1rem))] phone:pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1rem))]">
       <section className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-lg shadow-black/5 sm:p-8">
         {children}
       </section>
@@ -204,6 +180,7 @@ function HostedAuthenticationSurface() {
         <div className="mt-6 flex flex-col gap-3">
           <Button
             size="lg"
+            className="phone:min-h-11"
             disabled={status === "authenticating" || status === "signing-out"}
             onClick={() => void hostedHubController.signIn()}
           >
@@ -214,19 +191,26 @@ function HostedAuthenticationSurface() {
             <Button
               variant="outline"
               size="lg"
+              className="phone:min-h-11"
               onClick={() => hostedHubController.cancelAuthentication()}
             >
               Cancel
             </Button>
           ) : (
             <>
-              <Button variant="outline" size="lg" onClick={() => setRegistrationMode("invitation")}>
+              <Button
+                variant="outline"
+                size="lg"
+                className="phone:min-h-11"
+                onClick={() => setRegistrationMode("invitation")}
+              >
                 Redeem invitation
               </Button>
               {bootstrapAvailable ? (
                 <Button
                   variant="outline"
                   size="lg"
+                  className="phone:min-h-11"
                   onClick={() => setRegistrationMode("bootstrap")}
                 >
                   Set up first owner
@@ -301,7 +285,7 @@ function RegistrationForm({
           maxLength={128}
           value={credential}
           onChange={(event) => setCredential(event.currentTarget.value)}
-          className="mt-1 h-10 w-full rounded-lg border border-input bg-background px-3 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="mt-1 h-10 w-full rounded-lg border border-input bg-background px-3 outline-none focus-visible:ring-2 focus-visible:ring-ring phone:h-11"
         />
       </div>
       <div>
@@ -314,7 +298,7 @@ function RegistrationForm({
           maxLength={200}
           value={displayName}
           onChange={(event) => setDisplayName(event.currentTarget.value)}
-          className="mt-1 h-10 w-full rounded-lg border border-input bg-background px-3 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="mt-1 h-10 w-full rounded-lg border border-input bg-background px-3 outline-none focus-visible:ring-2 focus-visible:ring-ring phone:h-11"
         />
       </div>
       <div>
@@ -326,7 +310,7 @@ function RegistrationForm({
           maxLength={100}
           value={passkeyLabel}
           onChange={(event) => setPasskeyLabel(event.currentTarget.value)}
-          className="mt-1 h-10 w-full rounded-lg border border-input bg-background px-3 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="mt-1 h-10 w-full rounded-lg border border-input bg-background px-3 outline-none focus-visible:ring-2 focus-visible:ring-ring phone:h-11"
         />
       </div>
       <div className="flex flex-wrap gap-2">
@@ -364,7 +348,10 @@ function RecoveryCodesSurface() {
           <li key={code}>{code}</li>
         ))}
       </ul>
-      <Button className="mt-5" onClick={() => hostedHubController.dismissRecoveryCodes()}>
+      <Button
+        className="mt-5 phone:min-h-11"
+        onClick={() => hostedHubController.dismissRecoveryCodes()}
+      >
         I saved the codes
       </Button>
     </Surface>
@@ -499,156 +486,5 @@ function HostedNodeDirectory() {
         </Button>
       ) : null}
     </Surface>
-  );
-}
-
-function NodePresence({ node }: { readonly node: HostedHubNode }) {
-  if (node.revokedAt) return <span className="text-xs text-destructive">Revoked</span>;
-  return node.presence.online ? (
-    <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-      <WifiIcon aria-hidden className="size-3.5" /> Online
-    </span>
-  ) : (
-    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-      <WifiOffIcon aria-hidden className="size-3.5" /> Offline
-    </span>
-  );
-}
-
-export function HostedNodeMenu() {
-  const node = useHostedHubStore((state) => state.selectedNode);
-  const nodes = useHostedHubStore((state) => state.nodes);
-  const transport = useHostedHubStore((state) => state.transportStatus);
-  const session = useHostedHubStore((state) => state.sessionStatus);
-  const recoveredAfterUnknown = useHostedHubStore((state) => state.sessionRecoveredAfterUnknown);
-  const selection = useHostedHubStore((state) => state.selectionStatus);
-  const directory = useHostedHubStore((state) => state.directoryStatus);
-  const role = useHostedHubStore((state) => state.effectiveRole);
-  const error = useHostedHubStore((state) => state.errorMessage);
-  const browserStatus = useHostedHubStore((state) => state.browserStatus);
-  const navigate = useNavigate();
-  if (!node) return null;
-
-  const switchNode = async (next: HostedHubNode) => {
-    if (selectHostedNodeRoute(next.id)) return;
-    await navigate({ to: "/", replace: true });
-    await hostedHubController.selectNode(next.id);
-  };
-
-  const statusText =
-    browserStatus === "offline"
-      ? "Offline"
-      : browserStatus === "checking-access"
-        ? "Checking access"
-        : browserStatus === "synchronizing"
-          ? "Synchronizing"
-          : browserStatus === "suspended" || browserStatus === "stale"
-            ? "Stale"
-            : session === "delivery-unknown"
-              ? "Delivery unknown"
-              : selection === "authorization-removed"
-                ? "Authorization removed"
-                : selection === "revoked"
-                  ? "Revoked"
-                  : selection === "incompatible"
-                    ? "Incompatible"
-                    : transport === "online" && session === "ready"
-                      ? "Online"
-                      : transport === "reconnecting"
-                        ? "Reconnecting"
-                        : selection === "offline"
-                          ? "Offline"
-                          : transport.replaceAll("-", " ");
-
-  return (
-    <div className="fixed top-2 right-2 z-50 max-w-[calc(100vw-1rem)] sm:top-3 sm:right-3">
-      <details className="group relative">
-        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-border bg-card/95 px-3 py-2 text-sm shadow-lg backdrop-blur outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          {transport === "online" ? (
-            <WifiIcon aria-hidden className="size-4 text-emerald-500" />
-          ) : (
-            <WifiOffIcon aria-hidden className="size-4 text-amber-500" />
-          )}
-          <span className="max-w-32 truncate font-medium">{node.label}</span>
-          <span className="max-w-24 truncate text-xs text-muted-foreground">{statusText}</span>
-          <ChevronDownIcon
-            aria-hidden
-            className="size-3.5 transition-transform group-open:rotate-180"
-          />
-        </summary>
-        <div className="absolute right-0 mt-2 w-72 rounded-xl border border-border bg-popover p-3 shadow-xl">
-          <p className="font-medium">{node.label}</p>
-          <p className="mt-0.5 text-xs capitalize text-muted-foreground">
-            {role ?? "Role unavailable"} · {statusText}
-          </p>
-          <p className="sr-only" aria-live="polite">
-            Node {node.label}: {statusText}.
-          </p>
-          {error ? (
-            <p role="status" className="mt-2 text-xs text-muted-foreground">
-              {error}
-            </p>
-          ) : null}
-          {session === "delivery-unknown" ? (
-            <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs">
-              <p>
-                A request may or may not have reached the node. Ryco did not resend it
-                automatically.
-              </p>
-              <Button
-                className="mt-2"
-                size="sm"
-                variant="outline"
-                disabled={!recoveredAfterUnknown}
-                title={
-                  recoveredAfterUnknown
-                    ? undefined
-                    : "Wait for session replay to finish before acknowledging this warning."
-                }
-                onClick={() => hostedHubController.acknowledgeDeliveryUnknown()}
-              >
-                {recoveredAfterUnknown ? "Acknowledge" : "Synchronizing…"}
-              </Button>
-            </div>
-          ) : null}
-          <div className="mt-3 max-h-48 space-y-1 overflow-auto border-t border-border pt-3">
-            {nodes
-              .filter((candidate) => candidate.id !== node.id)
-              .map((candidate) => (
-                <button
-                  key={candidate.id}
-                  type="button"
-                  disabled={
-                    directory !== "ready" ||
-                    browserStatus !== "current" ||
-                    candidate.revokedAt !== null
-                  }
-                  className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                  onClick={() => void switchNode(candidate)}
-                >
-                  <span className="truncate">{candidate.label}</span>
-                  <NodePresence node={candidate} />
-                </button>
-              ))}
-          </div>
-          <div className="mt-3 flex gap-2 border-t border-border pt-3">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void hostedHubController.refreshDirectory()}
-            >
-              <RefreshCwIcon aria-hidden /> Refresh
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => void hostedHubController.signOut()}>
-              <LogOutIcon aria-hidden /> Sign out
-            </Button>
-          </div>
-          <div className="mt-3 space-y-3 border-t border-border pt-3">
-            <HostedRelayTrustNotice compact />
-            <HostedPwaControls compact />
-          </div>
-        </div>
-      </details>
-    </div>
   );
 }

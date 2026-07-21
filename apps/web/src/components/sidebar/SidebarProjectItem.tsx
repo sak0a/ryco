@@ -1,6 +1,6 @@
 import React, { useCallback, memo, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { type ThreadEnvMode, ThreadId } from "@ryco/contracts";
+import { type ThreadEnvMode } from "@ryco/contracts";
 import {
   scopedProjectKey,
   scopedThreadKey,
@@ -32,7 +32,6 @@ import { type SidebarTreeThread } from "./hooks/useSidebarTree";
 import { type SortableProjectHandleProps } from "./SidebarProjectList";
 import { SidebarThreadRow } from "./SidebarThreadRow";
 import { SidebarProjectThreadList } from "./SidebarProjectThreadList";
-import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import {
   ProjectExplorerDialog,
@@ -48,6 +47,7 @@ import { useHasIntersectedViewport } from "./hooks/useHasIntersectedViewport";
 import { useSidebarProjectJiraLinks } from "./hooks/useSidebarProjectJiraLinks";
 import { useSidebarProjectThreadPresentation } from "./hooks/useSidebarProjectThreadPresentation";
 import { useSidebarProjectSettingsDialog } from "./hooks/useSidebarProjectSettingsDialog";
+import { useThreadClipboardActions } from "./hooks/useThreadClipboardActions";
 import { useSidebarProjectRenameDialog } from "./hooks/useSidebarProjectRenameDialog";
 import { useSidebarProjectGroupingDialog } from "./hooks/useSidebarProjectGroupingDialog";
 import { useSidebarProjectActions } from "./hooks/useSidebarProjectActions";
@@ -121,46 +121,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
   const removeFromSelection = useThreadSelectionStore((state) => state.removeFromSelection);
   const setSelectionAnchor = useThreadSelectionStore((state) => state.setAnchor);
   const selectedThreadCount = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
-  const { copyToClipboard: copyThreadIdToClipboard } = useCopyToClipboard<{
-    threadId: ThreadId;
-  }>({
-    onCopy: (ctx) => {
-      toastManager.add({
-        type: "success",
-        title: "Thread ID copied",
-        description: ctx.threadId,
-      });
-    },
-    onError: (error) => {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Failed to copy thread ID",
-          description: error instanceof Error ? error.message : "An error occurred.",
-        }),
-      );
-    },
-  });
-  const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{
-    path: string;
-  }>({
-    onCopy: (ctx) => {
-      toastManager.add({
-        type: "success",
-        title: "Path copied",
-        description: ctx.path,
-      });
-    },
-    onError: (error) => {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Failed to copy path",
-          description: error instanceof Error ? error.message : "An error occurred.",
-        }),
-      );
-    },
-  });
+  const { copyThreadIdToClipboard, copyPathToClipboard } = useThreadClipboardActions();
   const openPrLink = useCallback((event: React.MouseEvent<HTMLElement>, prUrl: string) => {
     event.preventDefault();
     event.stopPropagation();

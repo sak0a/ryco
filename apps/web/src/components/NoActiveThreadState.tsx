@@ -1,9 +1,15 @@
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
-import { SidebarInset, SidebarTrigger } from "./ui/sidebar";
+import { useNavigate } from "@tanstack/react-router";
+import { ArrowLeftIcon } from "lucide-react";
+
+import { SidebarInset } from "./ui/sidebar";
+import { Button } from "./ui/button";
+import { HostedConnectionControl } from "./hostedHub/HostedConnectionControls";
 import { isElectron } from "../env";
 import { cn } from "~/lib/utils";
 
 export function NoActiveThreadState() {
+  const navigate = useNavigate();
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -21,10 +27,25 @@ export function NoActiveThreadState() {
             </span>
           ) : (
             <div className="flex items-center gap-2">
-              <SidebarTrigger className="size-7 shrink-0 not-phone:hidden" />
-              <span className="text-sm font-medium text-foreground md:text-muted-foreground/60">
+              {/* This surface is reachable on the phone tier through stale or
+                  deleted thread links; with no drawer on the phone shell the
+                  way out is the URL-driven stack, so offer Home explicitly. */}
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Back to threads"
+                className="shrink-0 not-phone:hidden"
+                onClick={() => void navigate({ to: "/" })}
+              >
+                <ArrowLeftIcon />
+              </Button>
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground md:text-muted-foreground/60">
                 No active thread
               </span>
+              {/* Hosted connection control stays reachable without an active
+                  thread (pill and sheet on phone, inline menu on desktop);
+                  renders nothing outside hosted-hub sessions. */}
+              <HostedConnectionControl />
             </div>
           )}
         </header>

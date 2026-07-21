@@ -6,6 +6,7 @@ import {
   enterHostedNodeRoute,
   getInstalledHostedNodeHistory,
   getRoutedHostedNode,
+  leaveHostedNodeRoute,
   subscribeRoutedHostedNode,
   type RoutedHostedNode,
 } from "./nodeRoutes";
@@ -296,6 +297,26 @@ export function selectHostedNodeRoute(nodeId: string): boolean {
   interactiveNodeId = nodeId;
   setNotice(null);
   return enterHostedNodeRoute(nodeId);
+}
+
+/**
+ * User-facing "All nodes": leave the selected node's route and return to the
+ * node directory. Returns false when no hosted history is installed (callers
+ * then invoke `hostedHubController.returnToDirectory` directly). With the
+ * history installed, the cleared segment reconciles through the same teardown
+ * as history Back: the browser relay session closes and its channel resources
+ * are released while the remote node connector stays online — distinct from
+ * sign-out and from node revocation.
+ */
+export function leaveHostedNodeRouteToDirectory(): boolean {
+  if (!getInstalledHostedNodeHistory()) return false;
+  interactiveNodeId = null;
+  setNotice(null);
+  // Already on the directory route (for example a second tap while the
+  // teardown is in flight): the leave is handled without pushing a duplicate
+  // "/" history entry.
+  if (getRoutedHostedNode().nodeId === null) return true;
+  return leaveHostedNodeRoute();
 }
 
 export function startHostedNodeRouteOrchestrator(): () => void {
