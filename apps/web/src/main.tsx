@@ -6,6 +6,7 @@ import { createHashHistory, createBrowserHistory } from "@tanstack/react-router"
 import "./index.css";
 
 import { isElectron, isHostedHubMode } from "./env";
+import { installHostedNodeHistory } from "./hostedHub/nodeRoutes";
 import { hostedPwaLifecycle } from "./pwa/lifecycle";
 import { getRouter } from "./router";
 import { APP_DISPLAY_NAME } from "./branding";
@@ -13,7 +14,13 @@ import { syncDocumentVisualViewportInsets } from "./lib/visualViewportInsets";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
-const history = isElectron ? createHashHistory() : createBrowserHistory();
+// Hosted-hub builds scope browser URLs under the selected node's stable route
+// segment while the logical route tree stays shared; other modes are untouched.
+const history = isElectron
+  ? createHashHistory()
+  : isHostedHubMode()
+    ? installHostedNodeHistory()
+    : createBrowserHistory();
 
 const router = getRouter(history);
 

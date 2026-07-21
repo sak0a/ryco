@@ -488,6 +488,42 @@ class HostedHubController {
     }
   }
 
+  /**
+   * Deactivate the selected node and return to the node directory without
+   * touching the Hub session. Used by history navigation (Back to the
+   * directory) and by fail-closed route fallbacks. Follows the documented
+   * switching-nodes teardown order via `deactivateHostedNode`; the generation
+   * bump prevents stale relay attempts from publishing readiness or role.
+   * `preserveTerminalSelection` keeps a terminal selection status (revoked,
+   * authorization removed, incompatible) and its bounded message so the
+   * directory renders the existing explanation.
+   */
+  async returnToDirectory(options?: {
+    readonly preserveTerminalSelection?: boolean;
+  }): Promise<void> {
+    const state = useHostedHubStore.getState();
+    const node = state.selectedNode;
+    if (!node) return;
+    const preserve = options?.preserveTerminalSelection === true;
+    this.#retrySelectedNodeOperation?.abort();
+    this.#retrySelectedNodeOperation = null;
+    this.#retrySelectedNodePromise = null;
+    this.#clearSessionSyncTimer();
+    patchState({
+      selectedNode: null,
+      selectionStatus: preserve ? state.selectionStatus : "none",
+      effectiveRole: null,
+      transportStatus: "idle",
+      sessionStatus: "closed",
+      sessionEstablished: false,
+      sessionRecoveredAfterUnknown: false,
+      errorMessage: preserve ? state.errorMessage : null,
+      generation: state.generation + 1,
+    });
+    const { deactivateHostedNode } = await import("./environment");
+    await deactivateHostedNode(node.environmentId);
+  }
+
   retrySelectedNode(): Promise<void> {
     if (this.#retrySelectedNodePromise) return this.#retrySelectedNodePromise;
     const operation = new AbortController();

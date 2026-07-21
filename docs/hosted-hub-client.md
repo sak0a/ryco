@@ -101,6 +101,33 @@ Switching nodes performs an ordered teardown before connecting the replacement:
 Tabs do not share tickets, sockets, queues, reconnect timers, or store instances. Closing a hosted
 channel cannot close direct clients or another tab.
 
+## Stable node routes
+
+The selected node is a stable URL segment: hosted browser URLs take the shape
+`/node/<node id>` for the node root and `/node/<node id>/<environmentId>/<threadId>` (plus the
+existing panel search parameters) for nested views. The segment value is the bounded node
+identifier the authorized directory already renders to signed-in users — directory metadata, never
+node-owned content or authentication material. The mapping lives in the history layer of the
+hosted build only; the shared logical route tree is unchanged and direct-browser, desktop-local,
+and SSH-assisted routing keep their current URL shapes.
+
+Refresh, deep links, and history restore the routed node strictly through the ordered fail-closed
+pipeline: restore the Hub session → refresh the authorized directory → validate the routed node id
+against the directory → issue a fresh one-use relay ticket → establish the relay channel →
+synchronize canonical node state → only then enable mutations. The UI stays on read-only blocked
+surfaces until each stage completes. Possession of a node URL grants nothing.
+
+Absent, revoked, unauthorized, removed, offline, or incompatible routed nodes and malformed
+segments fail closed to the node directory with a bounded explanation. A signed-out or expired
+session shows the normal passkey surface; the routed node resumes only after re-authentication and
+revalidation. Back and Forward navigate between the directory and selected-node views: returning
+to the directory tears down exactly the browser relay session using the switching-nodes order
+above, and Forward re-enters through the restore pipeline with a fresh ticket. Legacy hosted URLs
+without the node segment redirect to the node-scoped shape when the directory can identify the
+node, otherwise to the directory. No session, ticket, credential, challenge, or signature material
+appears in URLs, history state, or browser storage, and node selection is never persisted outside
+the URL itself.
+
 ## Relay transport and ticket custody
 
 The existing `WsTransport` and Effect RPC client accept a WebSocket-compatible hosted adapter. RPC
