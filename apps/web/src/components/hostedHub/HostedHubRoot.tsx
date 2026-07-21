@@ -20,6 +20,12 @@ import {
   hostedHubController,
   useHostedHubStore,
 } from "../../hostedHub/state";
+import {
+  selectHostedNodeRoute,
+  useHostedNodeRouteNotice,
+  useHostedNodeRouteOrchestrator,
+  useRoutedHostedNode,
+} from "../../hostedHub/nodeRouteOrchestrator";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedNodeEnrollmentFlow } from "./HostedNodeEnrollment";
 import { HostedPwaControls } from "./HostedPwaControls";
@@ -32,6 +38,8 @@ export function HostedHubRoot() {
   const transportStatus = useHostedHubStore((state) => state.transportStatus);
   const sessionEstablished = useHostedHubStore((state) => state.sessionEstablished);
   const errorMessage = useHostedHubStore((state) => state.errorMessage);
+  const routedNode = useRoutedHostedNode();
+  useHostedNodeRouteOrchestrator();
 
   useEffect(() => {
     if (accountStatus !== "authenticated") return;
@@ -62,7 +70,13 @@ export function HostedHubRoot() {
 
   if (accountStatus !== "authenticated") return <HostedAuthenticationSurface />;
   if (recoveryCodes.length > 0) return <RecoveryCodesSurface />;
-  if (!selectedNode) return <HostedNodeDirectory />;
+  if (!selectedNode) {
+    // A routed node segment is pending fail-closed validation: keep the UI on
+    // a read-only restoring surface instead of flashing the directory. The
+    // orchestrator either selects the node or clears the segment.
+    if (routedNode.nodeId !== null) return <HostedNodeRestoringSurface />;
+    return <HostedNodeDirectory />;
+  }
   if (transportStatus === "terminal-failure") {
     return (
       <>
@@ -102,6 +116,18 @@ function HostedNodeFailureSurface({
           <RefreshCwIcon aria-hidden /> Retry
         </Button>
       ) : null}
+    </Surface>
+  );
+}
+
+function HostedNodeRestoringSurface() {
+  return (
+    <Surface>
+      <ServerIcon aria-hidden className="size-8 text-primary" />
+      <h1 className="mt-4 text-2xl font-semibold">Restoring your node</h1>
+      <p role="status" aria-live="polite" className="mt-2 text-sm text-muted-foreground">
+        Checking your access before reconnecting…
+      </p>
     </Surface>
   );
 }
@@ -352,6 +378,7 @@ function HostedNodeDirectory() {
   const error = useHostedHubStore((state) => state.errorMessage);
   const account = useHostedHubStore((state) => state.account);
   const selection = useHostedHubStore((state) => state.selectionStatus);
+  const routeNotice = useHostedNodeRouteNotice();
   const navigate = useNavigate();
   const [enrolling, setEnrolling] = useState(false);
 
@@ -364,6 +391,9 @@ function HostedNodeDirectory() {
   }
 
   const select = async (node: HostedHubNode) => {
+    // With the hosted node history installed, selection navigates into the
+    // node-scoped route and the route orchestrator drives `selectNode`.
+    if (selectHostedNodeRoute(node.id)) return;
     await navigate({ to: "/", replace: true });
     await hostedHubController.selectNode(node.id);
   };
@@ -407,6 +437,11 @@ function HostedNodeDirectory() {
             : selection === "revoked"
               ? "The previous node or grant was revoked."
               : "The previous node uses an incompatible relay version."}
+        </p>
+      ) : null}
+      {routeNotice ? (
+        <p role="alert" className="mt-4 text-sm text-destructive">
+          {routeNotice}
         </p>
       ) : null}
       {error && status !== "stale" ? (
@@ -495,6 +530,7 @@ export function HostedNodeMenu() {
   if (!node) return null;
 
   const switchNode = async (next: HostedHubNode) => {
+    if (selectHostedNodeRoute(next.id)) return;
     await navigate({ to: "/", replace: true });
     await hostedHubController.selectNode(next.id);
   };
