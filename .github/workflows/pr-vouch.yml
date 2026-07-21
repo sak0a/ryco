@@ -23,7 +23,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ryco-validation]
     outputs:
       targets: ${{ steps.collect.outputs.targets }}
     steps:
@@ -73,7 +73,7 @@ jobs:
       pull-requests: write
     needs: collect-targets
     if: ${{ needs.collect-targets.outputs.targets != '[]' }}
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ryco-validation]
     concurrency:
       group: pr-vouch-${{ matrix.target.number }}
       cancel-in-progress: true
@@ -174,6 +174,7 @@ jobs:
               issue_number: issueNumber,
               per_page: 100,
             });
+            const wasTrusted = currentLabels.some((label) => label.name === "vouch:trusted");
 
             for (const label of currentLabels) {
               if (!managedLabelNames.has(label.name) || label.name === nextLabelName) {
@@ -204,3 +205,20 @@ jobs:
             }
 
             core.info(`PR #${issueNumber}: ${status} -> ${nextLabelName}`);
+
+            // Repository dispatch always runs a workflow from the default
+            // branch, so no pull-request code is evaluated before this trust
+            // decision. On a synchronize event, dispatch again to validate
+            // the new merge ref even when the author was already trusted.
+            if (nextLabelName === "vouch:trusted" && (context.eventName !== "push" || !wasTrusted)) {
+              await github.rest.repos.createDispatchEvent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                event_type: "trusted-pr-validation",
+                client_payload: {
+                  pr: issueNumber,
+                  source: context.eventName,
+                },
+              });
+              core.info(`Dispatched trusted validation for PR #${issueNumber}.`);
+            }
