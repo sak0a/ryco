@@ -889,6 +889,13 @@ interface ComposerPromptEditorProps {
   skills: ReadonlyArray<ServerProviderSkill>;
   disabled: boolean;
   placeholder: string;
+  /**
+   * Phone-tier collapsed presentation. The editor stays mounted and focusable
+   * while collapsed so the activating tap lands on it directly; only its
+   * presentation changes. The owning composer decides the tier — the editor
+   * never re-derives it.
+   */
+  collapsed: boolean;
   className?: string;
   onRemoveTerminalContext: (contextId: string) => void;
   onChange: (
@@ -1402,6 +1409,7 @@ function ComposerPromptEditorInner({
   skills,
   disabled,
   placeholder,
+  collapsed,
   className,
   onRemoveTerminalContext,
   onChange,
@@ -1644,10 +1652,19 @@ function ComposerPromptEditorInner({
           contentEditable={
             <ContentEditable
               className={cn(
-                "block max-h-[200px] min-h-17.5 w-full overflow-y-auto whitespace-pre-wrap wrap-break-word bg-transparent text-[16px] leading-relaxed text-foreground focus:outline-none sm:text-[14px]",
+                "block w-full whitespace-pre-wrap wrap-break-word bg-transparent text-[16px] leading-relaxed text-foreground focus:outline-none not-phone:text-[14px]",
+                collapsed
+                  ? // Collapsed is a presentation of the same editor: one line,
+                    // clipped and ellipsised, with inline token nodes kept on
+                    // that line rather than reflowed.
+                    "max-h-6.5 min-h-6.5 overflow-hidden text-ellipsis whitespace-nowrap"
+                  : "max-h-[200px] min-h-17.5 overflow-y-auto",
                 className,
               )}
               data-testid="composer-editor"
+              // `aria-placeholder` is not an accessible name, and the collapsed
+              // state no longer has a labelled pill in front of it.
+              aria-label={collapsed ? placeholder : undefined}
               aria-placeholder={placeholder}
               placeholder={<span />}
               onPaste={onPaste}
@@ -1655,7 +1672,12 @@ function ComposerPromptEditorInner({
           }
           placeholder={
             terminalContexts.length > 0 ? null : (
-              <div className="pointer-events-none absolute inset-0 text-[16px] leading-relaxed text-muted-foreground/35 sm:text-[14px]">
+              <div
+                className={cn(
+                  "pointer-events-none absolute inset-0 text-[16px] leading-relaxed text-muted-foreground/35 not-phone:text-[14px]",
+                  collapsed && "overflow-hidden text-ellipsis whitespace-nowrap",
+                )}
+              >
                 {placeholder}
               </div>
             )
@@ -1685,6 +1707,7 @@ export const ComposerPromptEditor = forwardRef<
     skills,
     disabled,
     placeholder,
+    collapsed,
     className,
     onRemoveTerminalContext,
     onChange,
@@ -1724,6 +1747,7 @@ export const ComposerPromptEditor = forwardRef<
         skills={skills}
         disabled={disabled}
         placeholder={placeholder}
+        collapsed={collapsed}
         onRemoveTerminalContext={onRemoveTerminalContext}
         onChange={onChange}
         onPaste={onPaste}

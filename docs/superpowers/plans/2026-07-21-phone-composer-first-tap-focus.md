@@ -1,5 +1,10 @@
 # Phone composer first-tap focus implementation plan
 
+> **Implementation status (2026-07-22):** Executed. Adversarial review of the first implementation
+> found three real defects that this plan either caused or failed to anticipate; all three are fixed
+> and pinned by tests. Corrections are recorded in "Outcome" below. This checklist is retained as
+> the historical execution record.
+
 **Goal:** One tap on the collapsed phone composer focuses the editor and raises the software
 keyboard, every turn — by making the collapsed state a CSS presentation of the always-mounted
 editor rather than a separate button that swaps the editor in.
@@ -192,6 +197,39 @@ Any focus intended to raise the keyboard must run synchronously in the activatio
 - [ ] `bun run --cwd apps/web test:browser`
 - [ ] `bun audit`, distinguishing a proven pre-existing advisory baseline from a regression.
 - [ ] Review the complete diff for unrelated changes, generated drift, and desktop behavior changes.
+
+## Outcome — where this plan was wrong
+
+Recorded so the same mistakes are not repeated in the later steps of the design.
+
+- **Task 4 was wrong to remove the collapsed send button's `preventDefault` unconditionally.** The
+  plan described those handlers as existing "only to keep focus off the pills". On the send button
+  it was also preventing a focus-driven unmount race: engines that focus buttons on `pointerdown`
+  (Chromium, Android) expand the composer through `onFocusCapture`, which unmounts the button before
+  `click` dispatches, so the send never runs. iOS Safari does not focus buttons on tap, so this
+  fails on one platform and passes on the other. The handler is restored with a comment recording
+  the real reason, and a test taps the collapsed send affordance with a draft present.
+- **Task 2 did not account for the editor being `disabled`.** A disabled editor is
+  `contenteditable="false"` and cannot take the activating tap, and the collapsed subtree has no
+  other focusable node, so removing the pill made the composer an inert dead end whenever the
+  environment was connecting or unavailable. The collapsed surface now has an explicit expand path
+  used only when the editor is not editable; the native-focus path is untouched for the normal case.
+- **Skipping Task 7 was not safe.** Un-hiding the editor converted every programmatic
+  `focusComposer()` from a silent no-op into a real focus, including from behind a full-screen sheet
+  via the branch selector. The invariant is now enforced once inside `focusComposer` rather than at
+  call sites, and the separate thread-open guard was removed as redundant.
+- **The bounded terminal-context placeholder specified in Task 3 is unreachable.** Attaching a
+  context writes a marker into the prompt, so the editor is never empty and Lexical's placeholder
+  never renders. The branch was removed rather than left as dead code. The design specification is
+  corrected accordingly.
+
+## Known behavior change, accepted
+
+With the focus invariant centralized, changing a mode or model in the expanded composer footer on
+phone no longer returns focus to the editor, so the software keyboard may dismiss. This was already
+unreliable — those calls run inside `requestAnimationFrame`, outside the activating task — so the
+guard makes an inconsistent behavior consistently absent. Making the keyboard persist across a
+footer mode change needs a synchronous, gesture-local focus and is deliberately deferred.
 
 ## Explicitly deferred to physical qualification
 

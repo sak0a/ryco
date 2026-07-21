@@ -52,6 +52,10 @@ import {
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
 import {
+  readPrimaryEnvironmentDescriptor,
+  writePrimaryEnvironmentDescriptor,
+} from "../environments/primary";
+import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   removeInlineTerminalContextPlaceholder,
   type TerminalContextDraft,
@@ -1611,24 +1615,28 @@ async function waitForSendButton(): Promise<HTMLButtonElement> {
   );
 }
 
+function composerEditorHasFocus(): boolean {
+  const active = document.activeElement;
+  return active instanceof HTMLElement
+    ? active.closest('[data-testid="composer-editor"]') !== null
+    : false;
+}
+
 async function expandPhoneComposerIfCollapsed(): Promise<void> {
-  // The phone composer re-collapses via a scheduled blur frame (for example
-  // right after a viewport change), so expanding must be a retry loop: click
-  // the pill whenever it is present until the editor is actually visible.
-  await vi.waitFor(
-    () => {
-      const pill = document.querySelector<HTMLButtonElement>(
-        'button[aria-label="Expand composer"]',
-      );
-      if (pill) {
-        pill.click();
-      }
-      const editor = document.querySelector<HTMLElement>('[data-testid="composer-editor"]');
-      expect(editor).not.toBeNull();
-      expect(editor!.offsetParent).not.toBeNull();
-    },
-    { timeout: 8_000, interval: 100 },
+  // Exactly one activation. The collapsed composer is the real editor, so a
+  // single tap must both expand it and leave it holding focus; a retry loop
+  // here would tolerate an N-tap regression by construction.
+  await waitForElement(
+    () => document.querySelector<HTMLElement>('[data-testid="composer-editor"]'),
+    "Unable to find the composer editor.",
   );
+  if (!composerEditorHasFocus()) {
+    await page.getByTestId("composer-editor").click();
+  }
+  await vi.waitFor(() => {
+    expect(composerEditorHasFocus()).toBe(true);
+    expect(document.querySelector('[data-chat-composer-mobile-collapsed="true"]')).toBeNull();
+  });
   await waitForLayout();
 }
 
@@ -7056,9 +7064,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(() => {
         expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
       });
-      // Expand/focus the composer through the collapsed pending row so the
-      // mobile pending-answer overlay engages.
-      await page.getByRole("button", { name: "Write custom answer" }).click();
+      // Focus the always-mounted editor so the mobile pending-answer overlay
+      // engages. (The collapsed pending row no longer carries a stand-in pill;
+      // the collapsed editor is the tap target.)
+      await page.getByTestId("composer-editor").click();
       await vi.waitFor(() => {
         expect(
           document.querySelector('[data-chat-composer-mobile-collapsed="false"]'),
@@ -7103,7 +7112,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
         });
         (document.activeElement as HTMLElement | null)?.blur();
-        await page.getByRole("button", { name: "Write custom answer" }).click();
+        await page.getByTestId("composer-editor").click();
         await vi.waitFor(() => {
           expect(
             document.querySelector('[data-chat-composer-mobile-pending-actions="true"]'),
@@ -7278,6 +7287,256 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("focuses the phone composer editor in the activating task on the first tap", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-phone-first-tap" as MessageId,
+        targetText: "first tap focus thread",
+      }),
+    });
+
+    const order: string[] = [];
+    const focusInTargets: EventTarget[] = [];
+    const scheduleRacingFrame = () => {
+      window.requestAnimationFrame(() => order.push("frame"));
+    };
+    const recordFocusIn = (event: Event) => {
+      focusInTargets.push(event.target as EventTarget);
+      order.push("focusin");
+    };
+
+    try {
+      await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-chat-composer-mobile-collapsed]"),
+        "Unable to find the phone composer surface.",
+      );
+      expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      // Opening a thread on a phone leaves the composer collapsed: the first
+      // tap is the user's, and it is the one that must raise the keyboard.
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-composer-mobile-collapsed="true"]'),
+        ).not.toBeNull();
+      });
+
+      // Structural: the collapsed composer must present the real editor, not a
+      // stand-in. A `display: none` editor cannot receive the activating tap at
+      // all, so no amount of focus-timing work can raise the keyboard.
+      const editor = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="composer-editor"]'),
+        "Unable to find the composer editor.",
+      );
+      expect(getComputedStyle(editor).display).not.toBe("none");
+      expect(editor.offsetParent).not.toBeNull();
+      expect(editor.getBoundingClientRect().height).toBeGreaterThan(0);
+
+      // Ordering: a post-await read of document.activeElement cannot tell a
+      // synchronous focus from a next-frame focus, because the harness yields
+      // across the tap. The racing frame is scheduled from inside the
+      // pointerdown of the very same gesture, so "focusin" can only be
+      // recorded first when focus lands in the activation task itself.
+      document.addEventListener("pointerdown", scheduleRacingFrame, {
+        once: true,
+        capture: true,
+      });
+      document.addEventListener("focusin", recordFocusIn, { once: true, capture: true });
+
+      await page.getByTestId("composer-editor").click();
+
+      await vi.waitFor(() => {
+        expect(order).toContain("focusin");
+        expect(order).toContain("frame");
+      });
+      expect(order[0]).toBe("focusin");
+      // The recorded focus must be the editor's own, not some other node that
+      // happened to take focus first during the same gesture.
+      expect(focusInTargets[0]).toBe(editor);
+      expect(document.activeElement).toBe(editor);
+    } finally {
+      document.removeEventListener("pointerdown", scheduleRacingFrame, true);
+      document.removeEventListener("focusin", recordFocusIn, true);
+      await mounted.cleanup();
+    }
+  });
+
+  it("sends from the collapsed phone send affordance on a single tap", async () => {
+    // Seed the draft before mount so the composer renders collapsed with
+    // sendable content and no post-mount controlled update can transiently
+    // focus the editor.
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "Collapsed send probe");
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-collapsed-send" as MessageId,
+        targetText: "collapsed send thread",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return { sequence: fixture.snapshot.snapshotSequence + 1 };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-chat-composer-mobile-collapsed]"),
+        "Unable to find the phone composer surface.",
+      );
+      // The desktop-to-phone viewport switch settles matchMedia a frame late,
+      // which can transiently focus the composer before the tier resolves;
+      // blur and wait for a stable collapsed state so the tap below is
+      // genuinely the collapsed send affordance and not the expanded footer.
+      (document.activeElement as HTMLElement | null)?.blur();
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-composer-mobile-collapsed="true"]'),
+        ).not.toBeNull();
+        expect(document.querySelector('[data-chat-composer-footer="true"]')).toBeNull();
+      });
+      const sendButton = await waitForSendButton();
+      expect(sendButton.disabled).toBe(false);
+
+      // A real pointer sequence, not element.click(): engines that focus a
+      // button on pointerdown would otherwise expand the composer through the
+      // surface's focus handler and unmount this button before `click` is
+      // dispatched, silently dropping the send.
+      await page.getByRole("button", { name: "Send message" }).click();
+
+      await vi.waitFor(
+        () => {
+          expect(
+            wsRequests.some(
+              (request) =>
+                request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+                (request as { type?: string }).type === "thread.turn.start",
+            ),
+          ).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the collapsed phone composer expandable while the environment is unavailable", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-unavailable-expand" as MessageId,
+        targetText: "unavailable expand thread",
+      }),
+    });
+
+    const previousPrimaryDescriptor = readPrimaryEnvironmentDescriptor();
+
+    try {
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-mobile-collapsed="true"]'),
+        "Unable to find the collapsed phone composer.",
+      );
+      // Re-point the primary environment so the thread's own environment
+      // resolves as a saved, non-primary one; with no live runtime it reports
+      // as unavailable, which is what disables the composer editor.
+      expect(previousPrimaryDescriptor).not.toBeNull();
+      writePrimaryEnvironmentDescriptor({
+        ...previousPrimaryDescriptor!,
+        environmentId: REMOTE_ENVIRONMENT_ID,
+      });
+      useSavedEnvironmentRegistryStore.getState().upsert({
+        environmentId: LOCAL_ENVIRONMENT_ID,
+        label: "Workstation",
+        httpBaseUrl: "https://workstation.example.test",
+        wsBaseUrl: "wss://workstation.example.test/ws",
+        createdAt: NOW_ISO,
+        lastConnectedAt: NOW_ISO,
+      });
+
+      const editor = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="composer-editor"]'),
+        "Unable to find the composer editor.",
+      );
+      // A disabled editor is `contenteditable="false"` and cannot take focus,
+      // so the collapsed surface has nothing focusable in it at all.
+      await vi.waitFor(() => {
+        expect(editor.getAttribute("contenteditable")).toBe("false");
+        expect(
+          document.querySelector('[data-chat-composer-mobile-collapsed="true"]'),
+        ).not.toBeNull();
+        expect(document.querySelector('[data-chat-composer-footer="true"]')).toBeNull();
+      });
+
+      await page.getByTestId("composer-editor").click();
+
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-composer-mobile-collapsed="false"]'),
+        ).not.toBeNull();
+      });
+      // Reachable, not merely mounted: the model picker is the entry point to
+      // the footer control set that the collapsed dead end hid.
+      const modelPicker = await waitForElement(
+        () => findComposerProviderModelPicker(),
+        "Unable to find the composer model picker.",
+      );
+      expect(getComputedStyle(modelPicker).display).not.toBe("none");
+      expect(modelPicker.getBoundingClientRect().width).toBeGreaterThan(0);
+    } finally {
+      writePrimaryEnvironmentDescriptor(previousPrimaryDescriptor);
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps a 16px composer type size across the whole phone tier", async () => {
+    const mounted = await mountChatView({
+      viewport: NARROW_TABLET_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-phone-type-size" as MessageId,
+        targetText: "phone type size thread",
+      }),
+    });
+
+    const editorFontSize = (): number => {
+      const editor = document.querySelector<HTMLElement>('[data-testid="composer-editor"]');
+      expect(editor).not.toBeNull();
+      return Number.parseFloat(getComputedStyle(editor!).fontSize);
+    };
+
+    try {
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="composer-editor"]'),
+        "Unable to find the composer editor.",
+      );
+
+      // 640-767px portrait is phone tier. A width-based `sm:` boundary dropped
+      // the editor to 14px here, which makes iOS zoom the page on focus.
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+        expect(editorFontSize()).toBeGreaterThanOrEqual(16);
+      });
+
+      // Coarse landscape is phone tier by pointer, not by width.
+      await mounted.setViewport(PHONE_LANDSCAPE_VIEWPORT);
+      await withCoarsePointer(async () => {
+        await vi.waitFor(() => {
+          expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+          expect(editorFontSize()).toBeGreaterThanOrEqual(16);
+        });
+      });
+
+      // Desktop keeps its 14px density.
+      await mounted.setViewport(ROTATED_MID_VIEWPORT);
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("desktop");
+        expect(editorFontSize()).toBe(14);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps approval actions visible when an approval arrives while the phone composer is expanded", async () => {
     const mounted = await mountChatView({
       viewport: PHONE_VIEWPORT,
@@ -7288,7 +7547,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      await page.getByRole("button", { name: "Expand composer" }).click();
+      await page.getByTestId("composer-editor").click();
       await vi.waitFor(() => {
         expect(
           document.querySelector('[data-chat-composer-mobile-collapsed="false"]'),
@@ -8259,21 +8518,15 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
       });
     };
-    const composerHasFocus = () => {
-      const active = document.activeElement;
-      return active instanceof HTMLElement
-        ? active.closest('[data-chat-composer-form="true"]') !== null
-        : false;
-    };
     const threadTitleShown = (title: string) =>
       [...document.querySelectorAll<HTMLElement>("header p")].some(
         (element) => element.textContent === title,
       );
 
     try {
-      await page.getByRole("button", { name: "Expand composer" }).click();
+      await page.getByTestId("composer-editor").click();
       await vi.waitFor(() => {
-        expect(composerHasFocus()).toBe(true);
+        expect(composerEditorHasFocus()).toBe(true);
       });
 
       // A plan arriving mid-composition must not steal focus into the
@@ -8286,7 +8539,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await waitForLayout();
       const overviewPopup = queryPhoneSurfacePopup("Overview");
       expect(overviewPopup === null || !isElementVisible(overviewPopup)).toBe(true);
-      expect(composerHasFocus()).toBe(true);
+      expect(composerEditorHasFocus()).toBe(true);
 
       // The deferred auto-open is dropped for this turn (not replayed on
       // blur): the plan stays reachable through the kebab's Source control
@@ -8559,7 +8812,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       });
 
       // The expanded composer control set.
-      await page.getByRole("button", { name: "Expand composer" }).click();
+      await page.getByTestId("composer-editor").click();
       await vi.waitFor(() => {
         expect(
           document.querySelector('[data-chat-composer-mobile-collapsed="false"]'),

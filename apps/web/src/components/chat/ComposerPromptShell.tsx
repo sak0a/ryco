@@ -87,6 +87,17 @@ export interface ComposerPromptShellProps {
   } | null;
   phase: SessionPhase;
   isConnecting: boolean;
+  /**
+   * A disabled editor is not editable, so it cannot take the activating tap.
+   * The collapsed surface needs its own expand path in that state.
+   */
+  isEditorDisabled: boolean;
+
+  // Collapsed phone send affordance, rendered beside the collapsed editor.
+  showCollapsedSendAction: boolean;
+  collapsedSendActionLabel: string;
+  collapsedSendActionDisabled: boolean;
+  onCollapsedSend: () => void;
 
   // Mobile pending answer actions
   isSendBusy: boolean;
@@ -141,6 +152,11 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
     environmentUnavailable,
     phase,
     isConnecting,
+    isEditorDisabled,
+    showCollapsedSendAction,
+    collapsedSendActionLabel,
+    collapsedSendActionDisabled,
+    onCollapsedSend,
     isSendBusy,
     pendingPrimaryAction,
     onPreviousPendingQuestion,
@@ -153,7 +169,6 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
       className={cn(
         "relative px-3 pb-2 sm:px-4",
         hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
-        isComposerCollapsedMobile && "hidden",
       )}
     >
       <ComposerCommandMenuOverlay
@@ -250,52 +265,91 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
           </div>
         )}
 
-      <div className="relative">
-        <ComposerPromptEditor
-          ref={editorRef}
-          value={
-            isComposerApprovalState
-              ? ""
-              : activePendingProgress
-                ? activePendingProgress.customAnswer
-                : prompt
-          }
-          cursor={composerCursor}
-          terminalContexts={
-            !isComposerApprovalState && pendingUserInputCount === 0 ? composerTerminalContexts : []
-          }
-          skills={skills}
-          {...(showMobilePendingAnswerActions ? { className: "phone:pb-11" } : {})}
-          onRemoveTerminalContext={onRemoveTerminalContext}
-          onChange={onPromptChange}
-          onCommandKeyDown={onComposerCommandKey}
-          onPaste={onComposerPaste}
-          placeholder={
-            isComposerApprovalState
-              ? // The full approval detail renders as a scrollable block in the
-                // pending-approval panel; the clipped placeholder only carries
-                // the generic hint.
-                "Resolve this approval request to continue"
-              : activePendingProgress
-                ? "Type your own answer, or leave this blank to use the selected option"
-                : showPlanFollowUpPrompt && activeProposedPlan
-                  ? "Add feedback to refine the plan, or leave this blank to implement it"
-                  : environmentUnavailable
-                    ? `${environmentUnavailable.label} is ${
-                        environmentUnavailable.connectionState === "connecting"
-                          ? "connecting"
-                          : "disconnected"
-                      }`
-                    : phase === "disconnected"
-                      ? "Ask for follow-up changes or attach images"
-                      : "Ask anything, @tag files/folders, or use / to show available commands"
-          }
-          disabled={
-            isConnecting ||
-            isComposerApprovalState ||
-            (environmentUnavailable !== null && activePendingProgress === null)
-          }
-        />
+      <div className={cn("relative", showCollapsedSendAction && "flex items-center gap-2")}>
+        {/* Stable wrapper: the editor keeps the same position in the tree
+            across collapse and expand, so the activating tap's focus is never
+            lost to a remount. */}
+        <div className="min-w-0 flex-1">
+          <ComposerPromptEditor
+            ref={editorRef}
+            collapsed={isComposerCollapsedMobile}
+            value={
+              isComposerApprovalState
+                ? ""
+                : activePendingProgress
+                  ? activePendingProgress.customAnswer
+                  : prompt
+            }
+            cursor={composerCursor}
+            terminalContexts={
+              !isComposerApprovalState && pendingUserInputCount === 0
+                ? composerTerminalContexts
+                : []
+            }
+            skills={skills}
+            {...(showMobilePendingAnswerActions ? { className: "phone:pb-11" } : {})}
+            onRemoveTerminalContext={onRemoveTerminalContext}
+            onChange={onPromptChange}
+            onCommandKeyDown={onComposerCommandKey}
+            onPaste={onComposerPaste}
+            placeholder={
+              isComposerApprovalState
+                ? // The full approval detail renders as a scrollable block in the
+                  // pending-approval panel; the clipped placeholder only carries
+                  // the generic hint.
+                  "Resolve this approval request to continue"
+                : activePendingProgress
+                  ? // Collapsed keeps its own shorter wording: the one-line
+                    // presentation cannot show the expanded hint.
+                    isComposerCollapsedMobile
+                    ? "Write custom answer"
+                    : "Type your own answer, or leave this blank to use the selected option"
+                  : showPlanFollowUpPrompt && activeProposedPlan
+                    ? isComposerCollapsedMobile
+                      ? "Add plan feedback"
+                      : "Add feedback to refine the plan, or leave this blank to implement it"
+                    : environmentUnavailable
+                      ? `${environmentUnavailable.label} is ${
+                          environmentUnavailable.connectionState === "connecting"
+                            ? "connecting"
+                            : "disconnected"
+                        }`
+                      : phase === "disconnected"
+                        ? "Ask for follow-up changes or attach images"
+                        : isComposerCollapsedMobile
+                          ? "Ask anything..."
+                          : "Ask anything, @tag files/folders, or use / to show available commands"
+            }
+            disabled={isEditorDisabled}
+          />
+        </div>
+        {showCollapsedSendAction ? (
+          <button
+            type="button"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/90 text-primary-foreground disabled:opacity-30"
+            disabled={collapsedSendActionDisabled}
+            aria-label={collapsedSendActionLabel}
+            // Not about focus movement: engines that focus buttons on
+            // pointerdown (Chromium, Android) would expand the composer through
+            // the surface's onFocusCapture, which unmounts this very button
+            // before `click` is dispatched, so the send would never run.
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onCollapsedSend();
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M8 3L8 13M8 3L4 7M8 3L12 7"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        ) : null}
         {showMobilePendingAnswerActions ? (
           <div
             data-chat-composer-mobile-pending-actions="true"
