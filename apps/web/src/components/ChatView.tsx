@@ -142,6 +142,7 @@ import {
 import type { ThreadMessageSearchOccurrence } from "./chat/ThreadMessageSearch.logic";
 import { ChatHeader } from "./chat/ChatHeader";
 import { PhoneThreadAppBar } from "./shell/phone/PhoneThreadAppBar";
+import { PhoneSurfaceScaffold, PhoneWorkSurfaceSheet } from "./shell/phone/PhoneWorkSurface";
 import { type ChatSessionTabsItem } from "./chat/ChatSessionTabs";
 import { useChatSessionTabsPrefetch } from "./chat/useChatSessionTabsPrefetch";
 import { createSessionTabsSelector, draftThreadToSidebarSummary } from "../sessionTabs.selectors";
@@ -499,6 +500,10 @@ export default function ChatView(props: ChatViewProps) {
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const prefersReducedMotion = useMediaQuery(PREFERS_REDUCED_MOTION_QUERY);
   const presentationTier = usePresentationTier();
+  // Ref mirror for effects that must observe the tier without re-running on
+  // tier flips (rotation preserves route, draft, and panel state).
+  const presentationTierRef = useRef(presentationTier);
+  presentationTierRef.current = presentationTier;
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
@@ -2030,7 +2035,14 @@ export default function ChatView(props: ChatViewProps) {
     // signal the request to surface the new thread's plan would be silently lost.
     const openOverviewForNextThread = planSidebarOpenOnNextThreadRef.current;
     planSidebarOpenOnNextThreadRef.current = false;
-    setPlanSidebarOpen(openOverviewForNextThread || !shouldUsePlanSidebarSheet);
+    // The phone tier renders the overview as a full-screen surface, so it must
+    // never open by default on a thread switch regardless of viewport width.
+    // Read through the ref: a tier flip alone must not re-run this reset (it
+    // would drop preserved panel state on rotation).
+    setPlanSidebarOpen(
+      openOverviewForNextThread ||
+        (!shouldUsePlanSidebarSheet && presentationTierRef.current !== "phone"),
+    );
     planSidebarDismissedForTurnRef.current = null;
   }, [activeThread?.id, shouldUsePlanSidebarSheet]);
 
@@ -3026,8 +3038,13 @@ export default function ChatView(props: ChatViewProps) {
   const overviewSidebarVisible = planSidebarOpen && !workspacePanelOpen;
   const showFloatingOverviewSidebar = overviewFloatingOpen && workspacePanelOpen;
   const overviewControlOpen = overviewSidebarVisible || showFloatingOverviewSidebar;
-  const showInlineOverviewSidebar = overviewSidebarVisible && !shouldUsePlanSidebarSheet;
-  const showOverviewSidebarSheet = overviewSidebarVisible && shouldUsePlanSidebarSheet;
+  // The phone tier always promotes the overview to a full-screen surface;
+  // the width-based inline/sheet fork only applies to the desktop tier.
+  const isPhoneTier = presentationTier === "phone";
+  const showInlineOverviewSidebar =
+    overviewSidebarVisible && !shouldUsePlanSidebarSheet && !isPhoneTier;
+  const showOverviewSidebarSheet =
+    overviewSidebarVisible && (shouldUsePlanSidebarSheet || isPhoneTier);
   const renderFloatingOverviewSidebar = useDelayedUnmount(
     showFloatingOverviewSidebar,
     prefersReducedMotion || !workspacePanelOpen ? 0 : OVERVIEW_FLOATING_EXIT_DURATION_MS,
@@ -3230,6 +3247,7 @@ export default function ChatView(props: ChatViewProps) {
                   markdownCwd={gitCwd ?? undefined}
                   workspaceRoot={activeWorkspaceRoot}
                   mode="floating"
+                  onClose={closePlanSidebar}
                   onOpenFiles={onOpenFilesPanel}
                   onOpenReview={onOpenReviewPanel}
                   onOpenSubagent={onOpenSubagentPanel}
@@ -3480,7 +3498,48 @@ export default function ChatView(props: ChatViewProps) {
           onAddTerminalContext={addTerminalContextToDraft}
         />
       ))}
-      {shouldUsePlanSidebarSheet ? (
+      {isPhoneTier ? (
+        // Phone tier: the overview promotes to a full-screen surface with an
+        // explicit back affordance, consistent with the other work surfaces
+        // (the audited right overlay had no close affordance at all).
+        <PhoneWorkSurfaceSheet
+          label={planSidebarLabel}
+          open={showOverviewSidebarSheet}
+          onClose={closePlanSidebar}
+        >
+          <PhoneSurfaceScaffold
+            title={planSidebarLabel}
+            backLabel="Back to thread"
+            onBack={closePlanSidebar}
+          >
+            <ChatOverviewPanel
+              environmentId={environmentId}
+              gitCwd={gitCwd}
+              activeWorktreeBranch={activeWorktreeSummary?.branch ?? null}
+              activeThreadBranch={activeThread?.branch ?? null}
+              activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
+              activeWorktreePrState={activeWorktreeSummary?.prState}
+              activeWorktreeTitle={activeWorktreeSummary?.title}
+              postPushWorkflowWatch={postPushWorkflowWatch}
+              activeThreadKey={activeThreadKey}
+              activeEnvironmentUnavailableState={activeEnvironmentUnavailableState}
+              activePlan={activePlan}
+              sidebarProposedPlan={sidebarProposedPlan}
+              threadSubagents={threadSubagents}
+              changedFileSummaries={activeThread?.turnDiffSummaries}
+              sourceControlActions={overviewSourceControlActions}
+              branchControl={overviewBranchControl}
+              markdownCwd={gitCwd ?? undefined}
+              workspaceRoot={activeWorkspaceRoot}
+              mode="sheet"
+              onOpenFiles={onOpenFilesPanel}
+              onOpenReview={onOpenReviewPanel}
+              onOpenSubagent={onOpenSubagentPanel}
+              onPostPushDiscoveryComplete={clearPostPushWatch}
+            />
+          </PhoneSurfaceScaffold>
+        </PhoneWorkSurfaceSheet>
+      ) : shouldUsePlanSidebarSheet ? (
         <RightPanelSheet open={showOverviewSidebarSheet} onClose={closePlanSidebar}>
           <ChatOverviewPanel
             environmentId={environmentId}
