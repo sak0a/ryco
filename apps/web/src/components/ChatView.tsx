@@ -1715,7 +1715,17 @@ export default function ChatView(props: ChatViewProps) {
     null;
   const hasReachedSplitLimit =
     (activeTerminalGroup?.terminalIds.length ?? 0) >= MAX_TERMINALS_PER_GROUP;
+  // Invariant: on the phone tier the composer is focused by the user's own tap
+  // and never programmatically. The collapsed composer is the real editor now,
+  // not a hidden stand-in, so every programmatic focus would expand it, move
+  // the caret, and raise the software keyboard — including from behind a
+  // full-screen sheet, and including on paths that cannot raise it reliably
+  // anyway because they run outside the activating task. Enforcing it here
+  // means every call site inherits it. Composer-internal focus
+  // (ComposerPromptEditor's own focusAt*, driven by composer gestures) is a
+  // different concern and is unaffected.
   const focusComposer = useCallback(() => {
+    if (presentationTierRef.current === "phone") return;
     readComposer()?.focusAtEnd();
   }, [readComposer]);
   const scheduleComposerFocus = useCallback(() => {

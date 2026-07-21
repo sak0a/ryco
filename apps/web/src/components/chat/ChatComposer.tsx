@@ -653,9 +653,6 @@ export const ChatComposer = memo(
     const composerMenuItemsRef = useRef<ComposerCommandItem[]>([]);
     const activeComposerMenuItemRef = useRef<ComposerCommandItem | null>(null);
     const composerBlurFrameRef = useRef<number | null>(null);
-    const mobileComposerExpandFrameRef = useRef<number | null>(null);
-    const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
-    const mobileComposerExpandInFlightRef = useRef(false);
 
     // ------------------------------------------------------------------
     // Derived: composer send state
@@ -707,8 +704,18 @@ export const ChatComposer = memo(
       isComposerApprovalState ||
       pendingUserInputs.length > 0 ||
       (showPlanFollowUpPrompt && activeProposedPlan !== null);
-    const showCollapsedMobilePromptRow =
+    // Presentation flag only: the collapsed editor is the same always-mounted
+    // editor, so this decides whether the compact send affordance renders
+    // beside it — nothing is swapped in or out.
+    const showCollapsedMobileSendAction =
       isComposerCollapsedMobile && !isComposerApprovalState && pendingUserInputs.length === 0;
+    // A disabled editor is not editable, so it cannot receive the activating
+    // tap at all. The collapsed surface needs an explicit expand path in that
+    // state (see the surface onClick below).
+    const isComposerEditorDisabled =
+      isConnecting ||
+      isComposerApprovalState ||
+      (environmentUnavailable !== null && activePendingProgress === null);
 
     const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
     const showPlanSidebarToggle = false;
@@ -1394,28 +1401,6 @@ export const ChatComposer = memo(
       },
       [blurMobileComposerAfterSend, onSend, shouldBlurMobileComposerOnSubmit],
     );
-    const expandMobileComposer = useCallback(() => {
-      if (composerBlurFrameRef.current !== null) {
-        window.cancelAnimationFrame(composerBlurFrameRef.current);
-        composerBlurFrameRef.current = null;
-      }
-      if (mobileComposerExpandFrameRef.current !== null) {
-        window.cancelAnimationFrame(mobileComposerExpandFrameRef.current);
-      }
-      if (mobileComposerExpandReleaseFrameRef.current !== null) {
-        window.cancelAnimationFrame(mobileComposerExpandReleaseFrameRef.current);
-      }
-      mobileComposerExpandInFlightRef.current = true;
-      setIsComposerFocused(true);
-      mobileComposerExpandFrameRef.current = window.requestAnimationFrame(() => {
-        mobileComposerExpandFrameRef.current = null;
-        composerEditorRef.current?.focusAtEnd();
-        mobileComposerExpandReleaseFrameRef.current = window.requestAnimationFrame(() => {
-          mobileComposerExpandReleaseFrameRef.current = null;
-          mobileComposerExpandInFlightRef.current = false;
-        });
-      });
-    }, []);
 
     // ------------------------------------------------------------------
     // Callbacks: command key
@@ -1497,17 +1482,11 @@ export const ChatComposer = memo(
       if (!isMobileViewport) {
         return;
       }
-      if (mobileComposerExpandInFlightRef.current) {
-        return;
-      }
       if (composerBlurFrameRef.current !== null) {
         window.cancelAnimationFrame(composerBlurFrameRef.current);
       }
       composerBlurFrameRef.current = window.requestAnimationFrame(() => {
         composerBlurFrameRef.current = null;
-        if (mobileComposerExpandInFlightRef.current) {
-          return;
-        }
         const composerSurface = composerSurfaceRef.current;
         const activeElement = document.activeElement;
         if (activeElement instanceof Element && isInsideComposerFloatingLayer(activeElement)) {
@@ -1528,12 +1507,6 @@ export const ChatComposer = memo(
       return () => {
         if (composerBlurFrameRef.current !== null) {
           window.cancelAnimationFrame(composerBlurFrameRef.current);
-        }
-        if (mobileComposerExpandFrameRef.current !== null) {
-          window.cancelAnimationFrame(mobileComposerExpandFrameRef.current);
-        }
-        if (mobileComposerExpandReleaseFrameRef.current !== null) {
-          window.cancelAnimationFrame(mobileComposerExpandReleaseFrameRef.current);
         }
       };
     }, []);
@@ -1709,6 +1682,12 @@ export const ChatComposer = memo(
             )}
             onFocusCapture={(event) => {
               const activeElement = event.target;
+              // Still required after the collapsed pills were removed: the
+              // container also holds the approval actions and the pending
+              // user-input panel. Focusing one of those is an answer to that
+              // panel, not a request to open the composer, so it must not
+              // expand the composer under the user's finger. Focus reaching
+              // the editor itself is outside this container and does expand.
               if (
                 isComposerCollapsedMobile &&
                 activeElement instanceof HTMLElement &&
@@ -1724,6 +1703,27 @@ export const ChatComposer = memo(
             }}
             onBlurCapture={() => {
               scheduleComposerCollapseCheck();
+            }}
+            onClick={(event) => {
+              // Normal case: the collapsed editor is the tap target and the
+              // browser focuses it natively, which expands through
+              // onFocusCapture. A disabled editor is `contenteditable="false"`
+              // and cannot take focus, and the collapsed surface has no other
+              // focusable node, so without this the composer would be an inert
+              // line whenever the environment is connecting or unavailable.
+              // Expanding here cannot reintroduce the deferred-focus defect: a
+              // disabled editor raises no software keyboard either way.
+              if (!isComposerCollapsedMobile || !isComposerEditorDisabled) {
+                return;
+              }
+              const target = event.target;
+              if (
+                target instanceof HTMLElement &&
+                target.closest('[data-chat-composer-collapsed-controls="true"]')
+              ) {
+                return;
+              }
+              setIsComposerFocused(true);
             }}
           >
             {!isComposerCollapsedMobile &&
@@ -1781,30 +1781,12 @@ export const ChatComposer = memo(
                   onToggleOption={onSelectActivePendingUserInputOption}
                   onAdvance={onAdvanceActivePendingUserInput}
                 />
-                <div className="px-3 pb-3 sm:px-4">
-                  <div
-                    data-chat-composer-mobile-pending-compact="true"
-                    className={cn(
-                      "flex min-w-0 items-center gap-2 rounded-lg border border-border/55 bg-background/55 p-1.5 pl-3 transition-colors hover:bg-background/80",
-                      !activePendingProgress?.activeQuestion?.multiSelect && "p-0",
-                    )}
-                  >
-                    <button
-                      type="button"
-                      className={cn(
-                        "min-w-0 flex-1 truncate bg-transparent py-1.5 text-left text-sm",
-                        activePendingProgress?.customAnswer
-                          ? "text-foreground"
-                          : "text-muted-foreground/60",
-                        !activePendingProgress?.activeQuestion?.multiSelect && "px-3 py-2",
-                      )}
-                      onPointerDown={(event) => event.preventDefault()}
-                      onClick={expandMobileComposer}
-                      aria-label="Write custom answer"
+                {activePendingProgress?.activeQuestion?.multiSelect ? (
+                  <div className="px-3 pb-3 sm:px-4">
+                    <div
+                      data-chat-composer-mobile-pending-compact="true"
+                      className="flex min-w-0 items-center justify-end gap-2 rounded-lg border border-border/55 bg-background/55 p-1.5"
                     >
-                      {activePendingProgress?.customAnswer || "Write custom answer"}
-                    </button>
-                    {activePendingProgress?.activeQuestion?.multiSelect ? (
                       <ComposerPrimaryActions
                         compact
                         pendingAction={pendingPrimaryAction}
@@ -1821,52 +1803,9 @@ export const ChatComposer = memo(
                         onInterrupt={handleInterruptPrimaryAction}
                         onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                       />
-                    ) : null}
+                    </div>
                   </div>
-                </div>
-              </div>
-            ) : null}
-
-            {showCollapsedMobilePromptRow ? (
-              <div className="flex items-center justify-between gap-2 px-3 py-2">
-                <button
-                  type="button"
-                  className={cn(
-                    "min-w-0 flex-1 truncate bg-transparent p-0 text-left text-[14px] focus:outline-none",
-                    (activePendingProgress ? activePendingProgress.customAnswer : prompt.trim())
-                      ? "text-foreground"
-                      : "text-muted-foreground/35",
-                  )}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onClick={expandMobileComposer}
-                  aria-label="Expand composer"
-                >
-                  {activePendingProgress
-                    ? activePendingProgress.customAnswer ||
-                      "Type your own answer, or leave this blank to use the selected option"
-                    : prompt.trim() || "Ask anything..."}
-                </button>
-                <button
-                  type="button"
-                  className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/90 text-primary-foreground disabled:opacity-30"
-                  disabled={collapsedComposerPrimaryActionDisabled}
-                  aria-label={collapsedComposerPrimaryActionLabel}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    submitComposer();
-                  }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path
-                      d="M8 3L8 13M8 3L4 7M8 3L12 7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
+                ) : null}
               </div>
             ) : null}
 
@@ -1907,6 +1846,11 @@ export const ChatComposer = memo(
               environmentUnavailable={environmentUnavailable}
               phase={phase}
               isConnecting={isConnecting}
+              isEditorDisabled={isComposerEditorDisabled}
+              showCollapsedSendAction={showCollapsedMobileSendAction}
+              collapsedSendActionLabel={collapsedComposerPrimaryActionLabel}
+              collapsedSendActionDisabled={collapsedComposerPrimaryActionDisabled}
+              onCollapsedSend={submitComposer}
               isSendBusy={isSendBusy}
               pendingPrimaryAction={pendingPrimaryAction}
               onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
