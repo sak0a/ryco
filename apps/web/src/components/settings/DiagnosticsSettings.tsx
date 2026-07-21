@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ensureLocalApi } from "../../localApi";
 import { cn } from "../../lib/utils";
+import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { useSlowRpcAckRequests } from "../../rpc/requestLatencyState";
+import { useTierOverrideStore, type PresentationTierOverride } from "../../tierOverrideStore";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -217,6 +219,58 @@ function DiagnosticsWarnings({
   );
 }
 
+const TIER_PREVIEW_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: PresentationTierOverride | null;
+}> = [
+  { label: "Auto", value: null },
+  { label: "Phone preview", value: "phone" },
+  { label: "Desktop preview", value: "desktop" },
+];
+
+/**
+ * Development/QA-only preview override for the presentation tier. Rendered
+ * exclusively behind `import.meta.env.DEV`, so production builds tree-shake
+ * this section away. Forcing the tier only changes the tier signal and the
+ * root `data-tier` attribute; it never touches `prefers-color-scheme`,
+ * `display-mode`, reduced motion, PWA lifecycle, or capability logic.
+ */
+function TierPreviewSection() {
+  const override = useTierOverrideStore((state) => state.override);
+  const setOverride = useTierOverrideStore((state) => state.setOverride);
+  const tier = usePresentationTier();
+
+  return (
+    <SettingsSection title="Presentation tier preview">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
+        <div
+          className="flex flex-wrap items-center gap-1.5"
+          role="group"
+          aria-label="Presentation tier preview"
+        >
+          {TIER_PREVIEW_OPTIONS.map((option) => (
+            <Button
+              key={option.label}
+              size="xs"
+              variant={override === option.value ? "secondary" : "outline"}
+              aria-pressed={override === option.value}
+              onClick={() => setOverride(option.value)}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+        <span className="font-mono text-[11px] text-muted-foreground">Effective tier: {tier}</span>
+      </div>
+      <p className="border-border/60 border-t px-4 py-2.5 text-[11px] text-muted-foreground sm:px-5">
+        Development-only QA preview. Forces the phone/desktop layout tier; residual width-based
+        cosmetics may differ slightly from a real device. Theme, display-mode, and PWA behavior are
+        never affected.
+      </p>
+    </SettingsSection>
+  );
+}
+
 export function DiagnosticsSettings() {
   const [snapshot, setSnapshot] = useState<DiagnosticsSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -297,6 +351,8 @@ export function DiagnosticsSettings() {
       </div>
 
       <DiagnosticsWarnings snapshot={snapshot} error={error} />
+
+      {import.meta.env.DEV ? <TierPreviewSection /> : null}
 
       <SettingsSection title="Overview">
         <div className="grid sm:grid-cols-2 lg:grid-cols-3">
