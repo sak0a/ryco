@@ -39,6 +39,17 @@ export interface TimelineStreamingState {
   openDiffTurnId: TurnId | null;
 }
 
+/**
+ * Long-press target payload for the phone message action sheet: which
+ * message was pressed and which of the shared message actions apply to it.
+ */
+export interface TimelineMessageActionsRequest {
+  messageId: MessageId;
+  role: "user" | "assistant";
+  copyText: string | null;
+  canRevert: boolean;
+}
+
 /** Infrequently changing state — settings, per-thread context, and callbacks. */
 export interface TimelineStableState {
   timestampFormat: TimestampFormat;
@@ -59,6 +70,7 @@ export interface TimelineStableState {
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onCloseDiff: () => void;
+  onOpenMessageActions: (request: TimelineMessageActionsRequest) => void;
 }
 
 /**
@@ -99,6 +111,7 @@ export function buildTimelineStableState(input: TimelineStableState): TimelineSt
     onImageExpand: input.onImageExpand,
     onOpenTurnDiff: input.onOpenTurnDiff,
     onCloseDiff: input.onCloseDiff,
+    onOpenMessageActions: input.onOpenMessageActions,
   };
 }
 

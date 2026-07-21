@@ -24,6 +24,8 @@ import {
 import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
 import { isElectron } from "../../env";
 import { useHostedRpcCapability } from "../../hostedHub/capabilities";
+import { useLongPress } from "../../hooks/useLongPress";
+import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
@@ -1065,58 +1067,93 @@ export function ArchivedThreadsPanel() {
             }
           >
             {projectThreads.map((thread) => (
-              <div
+              <ArchivedThreadRow
                 key={thread.id}
-                className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 first:border-t-0 sm:px-5"
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  void handleArchivedThreadContextMenu(
-                    scopeThreadRef(thread.environmentId, thread.id),
-                    {
-                      x: event.clientX,
-                      y: event.clientY,
-                    },
-                  );
-                }}
-              >
-                <div className="min-w-0 flex-1">
-                  <h3 className="truncate text-sm font-medium text-foreground">{thread.title}</h3>
-                  <p className="text-xs text-muted-foreground">
-                    Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
-                    {" \u00b7 Created "}
-                    {formatRelativeTimeLabel(thread.createdAt)}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
-                  disabled={!mutationCapability.allowed}
-                  title={mutationCapability.reason ?? undefined}
-                  onClick={() =>
-                    void unarchiveThread(scopeThreadRef(thread.environmentId, thread.id)).catch(
-                      (error) => {
-                        toastManager.add(
-                          stackedThreadToast({
-                            type: "error",
-                            title: "Failed to unarchive thread",
-                            description:
-                              error instanceof Error ? error.message : "An error occurred.",
-                          }),
-                        );
-                      },
-                    )
-                  }
-                >
-                  <ArchiveX className="size-3.5" />
-                  <span>Unarchive</span>
-                </Button>
-              </div>
+                thread={thread}
+                mutationAllowed={mutationCapability.allowed}
+                mutationReason={mutationCapability.reason ?? null}
+                onOpenMenu={handleArchivedThreadContextMenu}
+                onUnarchive={unarchiveThread}
+              />
             ))}
           </SettingsSection>
         ))
       )}
     </SettingsPageContainer>
+  );
+}
+
+/**
+ * An archived-thread row. Desktop reaches unarchive/delete via right-click;
+ * on the phone tier a long-press presents the same menu through the shared
+ * bottom action sheet.
+ */
+function ArchivedThreadRow(props: {
+  thread: {
+    readonly id: ScopedThreadRef["threadId"];
+    readonly environmentId: ScopedThreadRef["environmentId"];
+    readonly title: string;
+    readonly archivedAt: string | null;
+    readonly createdAt: string;
+  };
+  mutationAllowed: boolean;
+  mutationReason: string | null;
+  onOpenMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => Promise<void>;
+  onUnarchive: (threadRef: ScopedThreadRef) => Promise<void>;
+}) {
+  const { thread, mutationAllowed, mutationReason, onOpenMenu, onUnarchive } = props;
+  const isPhoneTier = usePresentationTier() === "phone";
+  const longPress = useLongPress(
+    (point) => {
+      void onOpenMenu(scopeThreadRef(thread.environmentId, thread.id), point);
+    },
+    { disabled: !isPhoneTier },
+  );
+
+  return (
+    <div
+      className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 first:border-t-0 sm:px-5"
+      {...longPress}
+      onContextMenu={(event) => {
+        longPress.onContextMenu(event);
+        if (event.defaultPrevented) return;
+        event.preventDefault();
+        void onOpenMenu(scopeThreadRef(thread.environmentId, thread.id), {
+          x: event.clientX,
+          y: event.clientY,
+        });
+      }}
+    >
+      <div className="min-w-0 flex-1">
+        <h3 className="truncate text-sm font-medium text-foreground">{thread.title}</h3>
+        <p className="text-xs text-muted-foreground">
+          Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
+          {" · Created "}
+          {formatRelativeTimeLabel(thread.createdAt)}
+        </p>
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+        disabled={!mutationAllowed}
+        title={mutationReason ?? undefined}
+        onClick={() =>
+          void onUnarchive(scopeThreadRef(thread.environmentId, thread.id)).catch((error) => {
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Failed to unarchive thread",
+                description: error instanceof Error ? error.message : "An error occurred.",
+              }),
+            );
+          })
+        }
+      >
+        <ArchiveX className="size-3.5" />
+        <span>Unarchive</span>
+      </Button>
+    </div>
   );
 }
