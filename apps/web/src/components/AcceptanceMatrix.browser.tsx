@@ -69,7 +69,7 @@
 // Thread + composer (collapsed/expanded, stubbed keyboard)
 //   320×568      CV "contains the active chat and composer at 320 CSS pixels",
 //                CV "keeps the composer and send action above a stubbed software keyboard…"
-//   390×844      CV keyboard/approval/expanded-composer tests (7281/7350/7414/7456)
+//   390×844      CV keyboard, approval-visibility, menu-clamp, and expanded-composer tests (by name)
 //   844×390+co   CV "serves the phone structural presentation to a wide coarse-pointer…",
 //                CV "shows exactly one set of pending-answer actions on a coarse landscape…",
 //                CV "tracks keyboard insets across orientation changes…"
@@ -77,7 +77,7 @@
 //                CV "collapses the composer across the whole phone tier, including 640-767px…"
 //   768×1024     CV "keeps tablet-width sidebar density unchanged on coarse pointers"
 //   desktop      CV "publishes no keyboard variables and changes no composer geometry…",
-//                CV footer compaction tests (6292/6325)
+//                CV footer-compaction tests (by name)
 // Approvals (card + sheet)
 //   320×568      CV "renders the full approval detail scrollable with all actions visible…",
 //                AC "stays readable and actionable at 320px with stubbed software keyboard"
@@ -113,7 +113,7 @@
 //   844×390+co   PS "keeps the settings surface full-screen on a coarse landscape phone"
 //   600–800 rot  CV "preserves open settings across a mid-size rotation tier flip"
 //   desktop      CV "keeps the desktop settings dialog presentation on desktop viewports";
-//                SettingsPanels.browser.tsx (desktop panel behavior)
+//                settings/SettingsPanels.browser.tsx (desktop panel behavior)
 // Connection pill + sheet
 //   320×568      AM "contains the connection sheet at 320px and on a coarse landscape phone"
 //   390×844      HC sheet/pill tests (focus trap + restore, live regions, fail-closed)
