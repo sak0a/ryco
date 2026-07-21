@@ -234,6 +234,11 @@ describe("hosted connection controls", () => {
     await pill.click();
     const sheet = document.querySelector<HTMLElement>('[data-slot="sheet-popup"]');
     expect(sheet).not.toBeNull();
+    // The full-width bottom sheet pads the landscape side insets itself and
+    // honors reduced motion on its transition.
+    expect(sheet!.className).toContain("pl-safe");
+    expect(sheet!.className).toContain("pr-safe");
+    expect(sheet!.className).toContain("motion-reduce:transition-none");
     // Node identity, effective role, and status render as bounded text.
     await expect.element(page.getByText(/operator · Online/)).toBeVisible();
     // Polite live region for connection state changes.
@@ -299,5 +304,64 @@ describe("hosted connection controls", () => {
     await expect.element(ackButton).toBeEnabled();
     await ackButton.click();
     expect(acknowledge).toHaveBeenCalled();
+  });
+
+  it("announces every bounded status change politely from the always-mounted pill region", async () => {
+    await page.viewport(390, 844);
+    seedConnectedState();
+    mounted = await render(<HostedConnectionPill />);
+
+    const announcer = () =>
+      document.querySelector<HTMLElement>('[data-testid="hosted-connection-status-announcer"]');
+    // The region exists while the pill is mounted (the sheet is closed) and
+    // is polite, so status changes never interrupt the user mid-task.
+    const region = announcer();
+    expect(region).not.toBeNull();
+    expect(region!.getAttribute("aria-live")).toBe("polite");
+    expect(region!.closest('[data-slot="sheet-popup"]')).toBeNull();
+    expect(region!.textContent).toContain("Studio node");
+    expect(region!.textContent).toContain("Online");
+
+    // Every derived status change re-renders the region content, which is
+    // what triggers a live-region announcement.
+    useHostedHubStore.setState({ transportStatus: "reconnecting" });
+    await vi.waitFor(() => {
+      expect(announcer()!.textContent).toContain("Reconnecting");
+    });
+    useHostedHubStore.setState({ browserStatus: "synchronizing" });
+    await vi.waitFor(() => {
+      expect(announcer()!.textContent).toContain("Synchronizing");
+    });
+    useHostedHubStore.setState({ browserStatus: "offline" });
+    await vi.waitFor(() => {
+      expect(announcer()!.textContent).toContain("Offline");
+    });
+    useHostedHubStore.setState({ browserStatus: "current", transportStatus: "online" });
+    await vi.waitFor(() => {
+      expect(announcer()!.textContent).toContain("Online");
+    });
+  });
+
+  it("announces delivery-unknown assertively while the connection sheet is closed", async () => {
+    await page.viewport(390, 844);
+    seedConnectedState();
+    mounted = await render(<HostedConnectionPill />);
+
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    useHostedHubStore.setState({ sessionStatus: "delivery-unknown" });
+    // Mounting a role=alert element announces assertively on arrival; the
+    // explicit acknowledgment flow stays in the connection sheet.
+    const alert = await vi.waitFor(() => {
+      const element = document.querySelector<HTMLElement>('[role="alert"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    expect(alert.textContent).toContain("Delivery unknown");
+    expect(alert.closest('[data-slot="sheet-popup"]')).toBeNull();
+
+    useHostedHubStore.setState({ sessionStatus: "ready" });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[role="alert"]')).toBeNull();
+    });
   });
 });

@@ -74,6 +74,7 @@ function renderAppBar(onOpenFindInThread: () => void) {
         workspacePanelOpen={false}
         onToggleWorkspacePanel={() => {}}
         onOpenFindInThread={onOpenFindInThread}
+        onOpenSourceControl={null}
         sessionTabs={[]}
         activeSessionTabKey={null}
         onSelectSessionTab={null}
@@ -116,9 +117,12 @@ describe("PhoneThreadAppBar (draft thread)", () => {
     });
     expect(closeRow.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
     // The draft inventory is exactly the shared draft inventory: no
-    // rename/pin/archive entries for a session that only exists locally.
+    // rename/pin/archive entries for a session that only exists locally, and
+    // no source-control entry — a draft has no turns or checkpoints, so the
+    // overview surface would only render empty states.
     expect(sheetRow("Rename thread")).toBeNull();
     expect(sheetRow("Archive session")).toBeNull();
+    expect(sheetRow("Source control")).toBeNull();
 
     closeRow.click();
     await vi.waitFor(() => {

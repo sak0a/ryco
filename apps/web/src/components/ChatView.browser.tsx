@@ -76,10 +76,12 @@ import { useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
 import { createAuthenticatedSessionHandlers } from "../../test/authHttpHandlers";
 import {
+  cdpSession,
   resetPointerEmulation,
   parkPointer,
   setCoarsePointerEmulation,
 } from "../../test/browserPointer";
+import { useSettingsDialogStore } from "../settingsDialogStore";
 import { installVisualViewportStub } from "../../test/browserVisualViewport";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
 import { toastManager } from "./ui/toast";
@@ -8013,10 +8015,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   it("promotes the overview to a full-screen phone surface with a back affordance", async () => {
-    // The overview has no phone-tier launcher control today (it opens through
-    // auto-open or before a rotation), so enter it on the desktop tier and
-    // rotate across the boundary: the tier flip must preserve the open panel
-    // and re-present it as a full-screen surface.
+    // Rotation coverage: enter the overview on the desktop tier and rotate
+    // across the boundary — the tier flip must preserve the open panel and
+    // re-present it as a full-screen surface. (The phone-tier launcher path —
+    // the thread kebab's Source control entry — is covered separately below.)
     const mounted = await mountChatView({
       viewport: ROTATED_MID_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
@@ -8146,6 +8148,500 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(queryPhoneSurfacePopup("Workspace")).toBeNull();
       expect(document.querySelector('button[aria-label="Back to thread"]')).toBeNull();
     } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens the overview surface from the thread kebab's Source control entry", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-kebab-source-control" as MessageId,
+        targetText: "kebab source control thread",
+      }),
+    });
+
+    try {
+      await page.getByRole("button", { name: "Thread actions" }).click();
+      const sourceControlRow = await waitForElement(
+        () =>
+          [
+            ...document.querySelectorAll<HTMLButtonElement>('[data-slot="sheet-popup"] button'),
+          ].find((button) => button.textContent?.trim() === "Source control") ?? null,
+        "Unable to find the Source control kebab entry.",
+      );
+      expect(sourceControlRow.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      sourceControlRow.click();
+
+      const popup = await waitForElement(
+        () => queryPhoneSurfacePopup("Overview"),
+        "Unable to find the phone overview surface.",
+      );
+      await vi.waitFor(() => {
+        expect(isElementVisible(popup)).toBe(true);
+        const rect = popup.getBoundingClientRect();
+        expect(rect.width).toBeGreaterThanOrEqual(PHONE_VIEWPORT.width - 0.5);
+        expect(rect.height).toBeGreaterThanOrEqual(PHONE_VIEWPORT.height - 0.5);
+      });
+      // The full-screen surface honors reduced motion and pads the landscape
+      // side insets in addition to top/bottom.
+      expect(popup.className).toContain("motion-reduce:transition-none");
+      expect(popup.className).toContain("pl-safe");
+      expect(popup.className).toContain("pr-safe");
+      const backButton = await waitForElement(
+        () => popup.querySelector<HTMLElement>('button[aria-label="Back to thread"]'),
+        "Unable to find the overview back affordance.",
+      );
+      backButton.click();
+      await vi.waitFor(() => {
+        expect(isElementVisible(popup)).toBe(false);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("defers the plan auto-open while the phone composer is focused", async () => {
+    localStorage.setItem(
+      "ryco:client-settings:v1",
+      JSON.stringify({
+        ...DEFAULT_CLIENT_SETTINGS,
+        autoOpenPlanSidebar: true,
+      }),
+    );
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-plan-auto-open" as MessageId,
+        targetText: "plan auto-open thread",
+      }),
+    });
+
+    const emitPlanSnapshot = (input: { turnId: string; title: string; offset: number }) => {
+      const base = fixture.snapshot;
+      const nextThreads = base.threads.map((thread) =>
+        thread.id === THREAD_ID
+          ? Object.assign({}, thread, {
+              title: input.title,
+              activities: [
+                ...thread.activities,
+                {
+                  id: EventId.make(`activity-plan-${input.turnId}`),
+                  tone: "info" as const,
+                  kind: "turn.plan.updated",
+                  summary: "Plan updated",
+                  payload: {
+                    plan: [
+                      { step: "Draft the change", status: "inProgress" },
+                      { step: "Verify the change", status: "pending" },
+                    ],
+                  },
+                  turnId: input.turnId as TurnId,
+                  sequence: input.offset,
+                  createdAt: isoAt(1_000 + input.offset),
+                },
+              ],
+              updatedAt: isoAt(1_000 + input.offset),
+            })
+          : thread,
+      );
+      const next = {
+        ...base,
+        snapshotSequence: base.snapshotSequence + 1,
+        threads: nextThreads,
+      };
+      fixture.snapshot = next;
+      rpcHarness.emitStreamValue(ORCHESTRATION_WS_METHODS.subscribeThread, {
+        kind: "snapshot",
+        snapshot: {
+          snapshotSequence: next.snapshotSequence,
+          thread: nextThreads.find((thread) => thread.id === THREAD_ID)!,
+        },
+      });
+    };
+    const composerHasFocus = () => {
+      const active = document.activeElement;
+      return active instanceof HTMLElement
+        ? active.closest('[data-chat-composer-form="true"]') !== null
+        : false;
+    };
+    const threadTitleShown = (title: string) =>
+      [...document.querySelectorAll<HTMLElement>("header p")].some(
+        (element) => element.textContent === title,
+      );
+
+    try {
+      await page.getByRole("button", { name: "Expand composer" }).click();
+      await vi.waitFor(() => {
+        expect(composerHasFocus()).toBe(true);
+      });
+
+      // A plan arriving mid-composition must not steal focus into the
+      // full-screen overview takeover or close the keyboard.
+      emitPlanSnapshot({ turnId: "turn-plan-live-1", title: "Planned thread", offset: 1 });
+      await vi.waitFor(() => {
+        expect(threadTitleShown("Planned thread")).toBe(true);
+      });
+      await waitForLayout();
+      await waitForLayout();
+      const overviewPopup = queryPhoneSurfacePopup("Overview");
+      expect(overviewPopup === null || !isElementVisible(overviewPopup)).toBe(true);
+      expect(composerHasFocus()).toBe(true);
+
+      // The deferred auto-open is dropped for this turn (not replayed on
+      // blur): the plan stays reachable through the kebab's Source control
+      // entry instead of a surprise takeover.
+      (document.activeElement as HTMLElement).blur();
+      await waitForLayout();
+      await waitForLayout();
+      const popupAfterBlur = queryPhoneSurfacePopup("Overview");
+      expect(popupAfterBlur === null || !isElementVisible(popupAfterBlur)).toBe(true);
+
+      // With the composer no longer focused, the next turn's plan auto-opens
+      // the overview surface as configured.
+      emitPlanSnapshot({ turnId: "turn-plan-live-2", title: "Planned thread again", offset: 2 });
+      await vi.waitFor(() => {
+        expect(threadTitleShown("Planned thread again")).toBe(true);
+      });
+      await vi.waitFor(() => {
+        const popup = queryPhoneSurfacePopup("Overview");
+        expect(popup).not.toBeNull();
+        expect(isElementVisible(popup!)).toBe(true);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("presents phone settings full-screen from Home with the labeled section list", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-phone-settings-entry" as MessageId,
+        targetText: "phone settings entry thread",
+      }),
+      initialPath: "/",
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      const settingsButton = await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Open settings"]'),
+        "Unable to find the Home settings affordance.",
+      );
+      settingsButton.click();
+
+      const popup = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="phone-settings-surface"]'),
+        "Unable to find the phone settings surface.",
+      );
+      await vi.waitFor(() => {
+        const rect = popup.getBoundingClientRect();
+        expect(rect.width).toBeGreaterThanOrEqual(PHONE_VIEWPORT.width - 0.5);
+        expect(rect.height).toBeGreaterThanOrEqual(PHONE_VIEWPORT.height - 0.5);
+      });
+      // The desktop dialog presentation stays off the phone tier.
+      expect(document.querySelector('[data-slot="dialog-popup"]')).toBeNull();
+      // Labeled 44px rows instead of the icon-only rail.
+      for (const label of ["General", "Appearance", "Source Control", "Advanced"]) {
+        const row = [...popup.querySelectorAll<HTMLButtonElement>("nav button")].find(
+          (button) => button.textContent?.trim() === label,
+        );
+        expect(row, `Missing settings row "${label}".`).not.toBeUndefined();
+        expect(row!.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      }
+
+      // Escape closes the surface (desktop dialog parity).
+      await userEvent.keyboard("{Escape}");
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-testid="phone-settings-surface"]')).toBeNull();
+      });
+    } finally {
+      useSettingsDialogStore.setState({ open: false, section: "general" });
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the desktop settings dialog presentation on desktop viewports", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-desktop-settings-guard" as MessageId,
+        targetText: "desktop settings guard thread",
+      }),
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("desktop");
+      });
+      useSettingsDialogStore.getState().openSettings();
+      const dialog = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-slot="dialog-popup"]'),
+        "Unable to find the desktop settings dialog.",
+      );
+      expect(dialog.className).toContain("project-glass-surface");
+      // The desktop dialog keeps its section rail; the phone surface never
+      // mounts on the desktop tier.
+      await waitForElement(
+        () => dialog.querySelector<HTMLElement>('nav button[aria-label="General"]'),
+        "Unable to find the desktop settings section rail.",
+      );
+      expect(document.querySelector('[data-testid="phone-settings-surface"]')).toBeNull();
+
+      await userEvent.keyboard("{Escape}");
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-slot="dialog-popup"]')).toBeNull();
+      });
+    } finally {
+      useSettingsDialogStore.setState({ open: false, section: "general" });
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps phone app-bar controls visible at 200% text scale at 320px and 390px", async () => {
+    const mounted = await mountChatView({
+      viewport: NARROW_PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-text-scale" as MessageId,
+        targetText: "text scale thread",
+      }),
+    });
+
+    const assertControlWithinViewport = (selector: string, viewportWidth: number) => {
+      const control = document.querySelector<HTMLElement>(selector);
+      expect(control, `Missing control ${selector} at 200% text scale.`).not.toBeNull();
+      const rect = control!.getBoundingClientRect();
+      expect(rect.width).toBeGreaterThan(0);
+      expect(rect.left).toBeGreaterThanOrEqual(-0.5);
+      expect(
+        rect.right,
+        `Control ${selector} pushed past the viewport at 200% text scale.`,
+      ).toBeLessThanOrEqual(viewportWidth + 0.5);
+    };
+
+    try {
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Back to threads"]'),
+        "Unable to find the phone app bar before scaling text.",
+      );
+      // The harness host is a grid whose auto track sizes to the content's
+      // min-width; index.html's #root is a block that lays the app out at the
+      // viewport width and clips. Cap the track so scaled layout matches
+      // production geometry.
+      const appHost = document.querySelector<HTMLElement>(
+        "div.group\\/sidebar-wrapper",
+      )?.parentElement;
+      if (appHost instanceof HTMLElement) {
+        appHost.style.gridTemplateColumns = "minmax(0, 1fr)";
+        appHost.style.gridTemplateRows = "minmax(0, 1fr)";
+      }
+      // Emulate 200% browser text scaling: the layout is rem-based, so
+      // doubling the root font size scales typography and rem-sized controls.
+      document.documentElement.style.fontSize = "32px";
+      for (const viewport of [NARROW_PHONE_VIEWPORT, PHONE_VIEWPORT]) {
+        await mounted.setViewport(viewport);
+        await waitForLayout();
+        for (const selector of [
+          'button[aria-label="Back to threads"]',
+          'button[aria-label="Thread actions"]',
+          'button[aria-label="Toggle workspace panel"]',
+        ]) {
+          assertControlWithinViewport(selector, viewport.width);
+        }
+        expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(viewport.width);
+      }
+
+      // Home at 200%: the app-bar actions stay visible and tappable.
+      document.querySelector<HTMLElement>('button[aria-label="Back to threads"]')!.click();
+      await vi.waitFor(() => {
+        expect(mounted.router.state.location.pathname).toBe("/");
+      });
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Search threads"]'),
+        "Unable to find the Home app bar after navigating back.",
+      );
+      await waitForLayout();
+      for (const selector of [
+        'button[aria-label="Search threads"]',
+        'button[aria-label="Open settings"]',
+        'button[aria-label="New thread"]',
+      ]) {
+        assertControlWithinViewport(selector, PHONE_VIEWPORT.width);
+      }
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(PHONE_VIEWPORT.width);
+    } finally {
+      document.documentElement.style.fontSize = "";
+      await mounted.cleanup();
+    }
+  });
+
+  it("gives every visible phone control an accessible name across Home, thread, and sheets", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-phone-label-audit" as MessageId,
+        targetText: "phone label audit thread",
+      }),
+    });
+
+    const accessibleControlName = (control: HTMLElement): string => {
+      const ariaLabel = control.getAttribute("aria-label")?.trim();
+      if (ariaLabel) return ariaLabel;
+      const labelledBy = control.getAttribute("aria-labelledby");
+      if (labelledBy) {
+        const text = labelledBy
+          .split(/\s+/)
+          .map((id) => document.getElementById(id)?.textContent?.trim() ?? "")
+          .join(" ")
+          .trim();
+        if (text) return text;
+      }
+      const content = control.textContent?.trim();
+      if (content) return content;
+      return control.getAttribute("title")?.trim() ?? "";
+    };
+    // Enumerate every visible control: anything without an accessible name is
+    // an icon-only affordance a screen reader cannot describe.
+    const unnamedVisibleControls = () =>
+      [...document.querySelectorAll<HTMLElement>('button, [role="button"]')]
+        .filter((control) => control.checkVisibility?.() ?? true)
+        .filter((control) => accessibleControlName(control) === "")
+        .map((control) => control.outerHTML.slice(0, 160));
+
+    try {
+      // Thread surface (app bar, timeline, collapsed composer).
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Back to threads"]'),
+        "Unable to find the phone thread app bar.",
+      );
+      await waitForLayout();
+      expect(unnamedVisibleControls()).toEqual([]);
+
+      // The thread kebab sheet. (The keep-mounted work-surface popups stay in
+      // the DOM while closed, so visibility decides open/closed here.)
+      const visibleSheetPopups = () =>
+        [...document.querySelectorAll<HTMLElement>('[data-slot="sheet-popup"]')].filter(
+          isElementVisible,
+        );
+      await page.getByRole("button", { name: "Thread actions" }).click();
+      await vi.waitFor(() => {
+        expect(visibleSheetPopups().length).toBeGreaterThan(0);
+      });
+      expect(unnamedVisibleControls()).toEqual([]);
+      await userEvent.keyboard("{Escape}");
+      await vi.waitFor(() => {
+        expect(visibleSheetPopups().length).toBe(0);
+      });
+
+      // The expanded composer control set.
+      await page.getByRole("button", { name: "Expand composer" }).click();
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-composer-mobile-collapsed="false"]'),
+        ).not.toBeNull();
+      });
+      await waitForLayout();
+      expect(unnamedVisibleControls()).toEqual([]);
+
+      // Home (app bar, project rows, thread rows and their kebabs).
+      document.querySelector<HTMLElement>('button[aria-label="Back to threads"]')!.click();
+      await vi.waitFor(() => {
+        expect(mounted.router.state.location.pathname).toBe("/");
+      });
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Search threads"]'),
+        "Unable to find the Home app bar.",
+      );
+      await waitForLayout();
+      expect(unnamedVisibleControls()).toEqual([]);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("pads phone surfaces from the safe-area insets directly instead of the root inset", async () => {
+    // Chromium can stub env(safe-area-inset-*) through CDP; when this build
+    // does not support the override the test still asserts the declared
+    // classes, so the padding contract never goes unchecked.
+    const setSafeAreaInsets = async (inset: number): Promise<boolean> => {
+      try {
+        await cdpSession().send("Emulation.setSafeAreaInsetsOverride", {
+          insets: { top: inset, left: inset, right: inset, bottom: inset },
+        });
+      } catch {
+        return false;
+      }
+      const probe = document.createElement("div");
+      probe.style.paddingTop = "env(safe-area-inset-top, 0px)";
+      document.body.append(probe);
+      const resolved = Number.parseFloat(getComputedStyle(probe).paddingTop);
+      probe.remove();
+      return resolved === inset;
+    };
+
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-safe-area" as MessageId,
+        targetText: "safe area thread",
+      }),
+    });
+
+    let insetsStubbed = false;
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      const appBarHeader = await waitForElement(
+        () => document.querySelector<HTMLElement>("header"),
+        "Unable to find the phone thread app bar.",
+      );
+      // Declared contract: the phone tier pads its own app bar; the
+      // root-level inset is scoped out for the phone tier.
+      expect(appBarHeader.className).toContain("phone:pt-safe");
+      // The harness mounts into its own host (index.html's #root is absent),
+      // so probe the `#root` cascade with an empty element carrying the id.
+      const root = document.createElement("div");
+      root.id = "root";
+      document.body.append(root);
+
+      insetsStubbed = await setSafeAreaInsets(24);
+      // The pinned Playwright Chromium supports the override; this assertion
+      // keeps the geometry checks from silently degrading to class checks.
+      expect(insetsStubbed).toBe(true);
+      if (insetsStubbed) {
+        await waitForLayout();
+        // The root inset is disabled on the phone tier (no double padding,
+        // no dvh overflow past the visual viewport bottom).
+        expect(getComputedStyle(root).paddingTop).toBe("0px");
+        // The app bar pads the top inset itself.
+        expect(Number.parseFloat(getComputedStyle(appBarHeader).paddingTop)).toBeGreaterThanOrEqual(
+          24,
+        );
+        // The composer stays clear of the bottom inset.
+        const composerForm = document.querySelector<HTMLElement>(
+          '[data-chat-composer-form="true"]',
+        )!;
+        expect(composerForm.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+          PHONE_VIEWPORT.height - 24 + 0.5,
+        );
+
+        // The desktop tier keeps the root-level inset.
+        await mounted.setViewport(DEFAULT_VIEWPORT);
+        await vi.waitFor(() => {
+          expect(document.documentElement.getAttribute("data-tier")).toBe("desktop");
+        });
+        await vi.waitFor(() => {
+          expect(getComputedStyle(root).paddingTop).toBe("24px");
+        });
+      }
+    } finally {
+      if (insetsStubbed) {
+        await setSafeAreaInsets(0);
+      }
       await mounted.cleanup();
     }
   });
