@@ -7907,7 +7907,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           PHONE_VIEWPORT.width - 0.5,
         );
       });
-      await waitForElement(
+      const backButton = await waitForElement(
         () => popup.querySelector<HTMLElement>('button[aria-label="Back to thread"]'),
         "Unable to find the surface back affordance.",
       );
@@ -7945,6 +7945,21 @@ describe("ChatView timeline estimator parity (full app)", () => {
       });
       viewportStub.setKeyboardInset(0);
       await waitForLayout();
+
+      // The terminal surface exits cleanly back to the thread through its own
+      // back affordance (acceptance criterion, asserted on this surface).
+      backButton.click();
+      await vi.waitFor(() => {
+        const search = mounted.router.state.location.search as Record<string, unknown>;
+        expect(search.workspaceOpen).toBeUndefined();
+        expect(search.workspaceTab).toBeUndefined();
+        expect(isElementVisible(popup)).toBe(false);
+      });
+      expect(mounted.router.state.location.pathname).toBe(`/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`);
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('button[aria-label="Back to threads"]'),
+        "Unable to find the thread app bar after closing the terminal surface.",
+      );
     } finally {
       stopAdapter();
       viewportStub.restore();

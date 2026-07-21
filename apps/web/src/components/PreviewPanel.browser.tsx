@@ -337,6 +337,43 @@ describe("PreviewPanel", () => {
     await expect.element(page.getByLabelText("Filter files")).toBeInTheDocument();
   });
 
+  it("defaults preview wrap on for the phone surface and keeps the toggle live", async () => {
+    previewHarness.entries = [{ path: "src/app.ts", kind: "file", sizeBytes: 64 }];
+    previewHarness.readFiles.set("src/app.ts", {
+      relativePath: "src/app.ts",
+      contents: "const answer = 42;",
+    });
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <PreviewPanel mode="phone" />
+      </AppAtomRegistryProvider>,
+    );
+
+    // Wrap defaults on for the phone presentation even though the settings
+    // mock has diffWordWrap: false (same rationale as the phone diff surface).
+    await expect
+      .element(page.getByRole("button", { name: "Disable preview line wrapping" }))
+      .toBeInTheDocument();
+
+    // The toggle stays user-operable on the phone surface.
+    await page.getByRole("button", { name: "Disable preview line wrapping" }).click();
+    await expect
+      .element(page.getByRole("button", { name: "Enable preview line wrapping" }))
+      .toBeInTheDocument();
+  });
+
+  it("keeps the settings-driven preview wrap default on desktop presentations", async () => {
+    previewHarness.entries = [{ path: "src/app.ts", kind: "file", sizeBytes: 64 }];
+
+    mounted = await renderPreviewPanel();
+
+    // diffWordWrap: false in the settings mock stays authoritative off-phone.
+    await expect
+      .element(page.getByRole("button", { name: "Enable preview line wrapping" }))
+      .toBeInTheDocument();
+  });
+
   it("falls back to the draft store on the draft route URL", async () => {
     previewHarness.serverThreadEnabled = false;
     previewHarness.routeParams = { draftId: "draft-1" };

@@ -1217,6 +1217,10 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                                 type="button"
                                 className={cn(
                                   "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
+                                  // Phone: expand the collapse tap target to
+                                  // the 44px floor (step-7 coarse pattern).
+                                  isPhonePresentation &&
+                                    "relative after:absolute after:top-1/2 after:left-1/2 after:size-11 after:-translate-x-1/2 after:-translate-y-1/2",
                                   getDiffCollapseIconClassName(fileDiff),
                                 )}
                                 aria-label={

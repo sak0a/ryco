@@ -856,7 +856,13 @@ export default function ThreadWorkspacePanel(props: {
                   className={cn(
                     "mr-1 flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-background/60 hover:text-foreground",
                     // Phone: expand the tap target to the 44px floor without
-                    // growing the visible glyph (step-7 coarse-target pattern).
+                    // growing the visible glyph (step-7 coarse-target
+                    // pattern). The centered target deliberately overlaps the
+                    // tail of its own label and the next tab's leading
+                    // padding — same geometry as the terminal tab close; the
+                    // rest of the 44px-tall tab remains a much larger select
+                    // target and a mis-tapped close is recoverable from the
+                    // launcher.
                     isPhoneSurface &&
                       "relative after:absolute after:top-1/2 after:left-1/2 after:size-11 after:-translate-x-1/2 after:-translate-y-1/2",
                   )}

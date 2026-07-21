@@ -266,7 +266,12 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [fileFilterQuery, setFileFilterQuery] = useState("");
   const [isTreeVisible, setIsTreeVisible] = useState(true);
-  const [wrapPreviewLines, setWrapPreviewLines] = useState(settings.diffWordWrap);
+  // Same readability rationale as the phone diff surface: 320-430px columns
+  // are unreadable with horizontal code scroll, so wrap defaults on for the
+  // phone presentation only; desktop keeps the settings-driven default.
+  const [wrapPreviewLines, setWrapPreviewLines] = useState(
+    isPhonePresentation ? true : settings.diffWordWrap,
+  );
   const splitLayoutRef = useRef<HTMLDivElement | null>(null);
   const [treeWidth, setTreeWidth] = useState(() => {
     if (typeof window === "undefined") {
@@ -289,8 +294,8 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
   const missingFileRefreshKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    setWrapPreviewLines(settings.diffWordWrap);
-  }, [settings.diffWordWrap]);
+    setWrapPreviewLines(isPhonePresentation ? true : settings.diffWordWrap);
+  }, [isPhonePresentation, settings.diffWordWrap]);
 
   useEffect(() => {
     setSelectedFilePath(null);
