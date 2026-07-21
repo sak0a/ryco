@@ -65,7 +65,11 @@ function DialogPopup({
       <DialogViewport
         className={cn(
           surface === "glass" && "bg-transparent backdrop-blur-none dark:bg-transparent",
-          bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12",
+          // Bottom-stuck mobile dialogs pad by the keyboard inset published by
+          // the visual-viewport adapter so their action rows stay above an
+          // open software keyboard; the variable is unset (0) otherwise.
+          bottomStickOnMobile &&
+            "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12 max-sm:pb-[var(--app-keyboard-inset,0px)]",
         )}
       >
         <DialogPrimitive.Popup

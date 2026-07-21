@@ -9,6 +9,7 @@ import { isElectron, isHostedHubMode } from "./env";
 import { hostedPwaLifecycle } from "./pwa/lifecycle";
 import { getRouter } from "./router";
 import { APP_DISPLAY_NAME } from "./branding";
+import { syncDocumentVisualViewportInsets } from "./lib/visualViewportInsets";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
@@ -19,6 +20,10 @@ const router = getRouter(history);
 if (isElectron) {
   syncDocumentWindowControlsOverlayClass();
 }
+
+// The single VisualViewport subscription: publishes bounded keyboard-inset CSS
+// variables that phone input surfaces consume from CSS only.
+syncDocumentVisualViewportInsets();
 
 document.title = APP_DISPLAY_NAME;
 
