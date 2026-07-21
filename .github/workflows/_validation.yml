@@ -51,7 +51,7 @@ env:
 jobs:
   static:
     name: Static
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ryco-validation]
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -78,7 +78,7 @@ jobs:
 
   typecheck-effect:
     name: Effect typecheck ${{ matrix.shard }}
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ryco-validation]
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -103,7 +103,7 @@ jobs:
   # whole suite across three runners. This job just emits the matrix.
   test-matrix:
     name: Test matrix
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ryco-validation]
     timeout-minutes: 5
     outputs:
       include: ${{ steps.pick.outputs.include }}
@@ -124,7 +124,7 @@ jobs:
   test:
     name: Test ${{ matrix.name }}
     needs: test-matrix
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ryco-validation]
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -149,7 +149,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ryco-validation]
     timeout-minutes: 20
     steps:
       - name: Checkout
