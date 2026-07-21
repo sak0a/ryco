@@ -1,5 +1,6 @@
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { SidebarInset, SidebarTrigger } from "./ui/sidebar";
+import { HostedNodeMenu } from "./hostedHub/HostedConnectionControls";
 import { isElectron } from "../env";
 import { cn } from "~/lib/utils";
 
@@ -22,9 +23,12 @@ export function NoActiveThreadState() {
           ) : (
             <div className="flex items-center gap-2">
               <SidebarTrigger className="size-7 shrink-0 not-phone:hidden" />
-              <span className="text-sm font-medium text-foreground md:text-muted-foreground/60">
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground md:text-muted-foreground/60">
                 No active thread
               </span>
+              {/* Hosted connection control stays reachable without an active
+                  thread; renders nothing outside hosted-hub sessions. */}
+              <HostedNodeMenu />
             </div>
           )}
         </header>

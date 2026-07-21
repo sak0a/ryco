@@ -12,6 +12,7 @@ import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { HostedNodeMenu } from "../hostedHub/HostedConnectionControls";
 import { ChatHeaderBar } from "./ChatHeaderBar";
 import { ChatSessionTabs, type ChatSessionTabsItem } from "./ChatSessionTabs";
 import type { WorktreeOriginLike } from "./ChatSessionTabs.logic";
@@ -87,6 +88,10 @@ export const ChatHeader = memo(function ChatHeader(props: ChatHeaderProps) {
 
   const inlineActions = (
     <>
+      {/* Hosted connection control, relocated from the fixed overlay into the
+          workspace header so it can never overlap the other header controls.
+          Renders nothing outside hosted-hub sessions. */}
+      <HostedNodeMenu />
       <Tooltip>
         <TooltipTrigger
           render={
