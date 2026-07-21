@@ -192,4 +192,46 @@ describe("DiffPanel", () => {
       expect(openInPreferredEditor).toHaveBeenCalledWith(expect.anything(), "/repo/src/app.ts:12");
     });
   });
+
+  it("defaults to wrapped lines and hides the split toggle on the phone surface", async () => {
+    mounted = await render(<DiffPanel mode="phone" />);
+
+    // Wrap defaults on even though the settings mock has diffWordWrap: false.
+    await expect
+      .element(page.getByRole("button", { name: "Disable diff line wrapping" }))
+      .toBeInTheDocument();
+    // The split/stacked view toggle is meaningless at phone width.
+    expect(document.querySelector('[aria-label="Stacked diff view"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Split diff view"]')).toBeNull();
+    // The whitespace toggle stays available.
+    await expect
+      .element(page.getByRole("button", { name: "Hide whitespace changes" }))
+      .toBeInTheDocument();
+  });
+
+  it("keeps the settings-driven wrap default on desktop presentations", async () => {
+    mounted = await render(<DiffPanel mode="sheet" />);
+
+    // diffWordWrap: false in the settings mock stays authoritative off-phone.
+    await expect
+      .element(page.getByRole("button", { name: "Enable diff line wrapping" }))
+      .toBeInTheDocument();
+  });
+
+  it("suppresses open-in-editor taps on the phone surface", async () => {
+    mounted = await render(<DiffPanel mode="phone" />);
+
+    // Title tap: the desktop presentation opens the file in the preferred
+    // editor from a header click; the phone surface must fire nothing.
+    const title = document.querySelector<HTMLElement>("[data-title]");
+    expect(title).not.toBeNull();
+    title!.click();
+
+    // Line-number tap: the phone surface omits the onLineNumberClick handler,
+    // so the rendered line number is inert.
+    await page.getByRole("button", { name: "Open added line 12" }).click();
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(openInPreferredEditor).not.toHaveBeenCalled();
+  });
 });
