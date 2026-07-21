@@ -1335,6 +1335,23 @@ async function waitForLayout(): Promise<void> {
   await nextFrame();
 }
 
+function findScrollableAncestor(element: HTMLElement): HTMLElement | null {
+  let node = element.parentElement;
+  while (node) {
+    // Note: `overflow-x-hidden` alone makes overflow-y compute to auto, so a
+    // computed-style check must be paired with actually scrollable content.
+    const overflowY = getComputedStyle(node).overflowY;
+    if (
+      (overflowY === "auto" || overflowY === "scroll") &&
+      node.scrollHeight > node.clientHeight + 1
+    ) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
 async function setViewport(viewport: ViewportSpec): Promise<void> {
   await page.viewport(viewport.width, viewport.height);
   await waitForLayout();
@@ -6764,6 +6781,22 @@ describe("ChatView timeline estimator parity (full app)", () => {
         );
       }
 
+      // A coarse landscape phone (844x390) is md-wide, so the old width-keyed
+      // offset would fall back to the 52px desktop value and overlap the tab
+      // strip; the tier keys the 76px phone offset there too.
+      await withCoarsePointer(async () => {
+        await mounted.setViewport(PHONE_LANDSCAPE_VIEWPORT);
+        await vi.waitFor(() => {
+          expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+        });
+        await vi.waitFor(() => {
+          const toastRect = toastRoot.getBoundingClientRect();
+          const tabsRect = tabStrip.getBoundingClientRect();
+          expect(toastRect.height).toBeGreaterThan(0);
+          expect(toastRect.top).toBeGreaterThanOrEqual(tabsRect.bottom);
+        });
+      });
+
       // Desktop placement is unchanged: inset 32px + header offset 52px.
       await mounted.setViewport(DEFAULT_VIEWPORT);
       await vi.waitFor(() => {
@@ -6888,6 +6921,86 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("shows exactly one set of pending-answer actions on a 700px phone-tier viewport", async () => {
+    const mounted = await mountChatView({
+      viewport: NARROW_TABLET_VIEWPORT,
+      snapshot: createSnapshotWithPendingUserInput(),
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      // Expand/focus the composer through the collapsed pending row so the
+      // mobile pending-answer overlay engages.
+      await page.getByRole("button", { name: "Write custom answer" }).click();
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-composer-mobile-collapsed="false"]'),
+        ).not.toBeNull();
+        expect(
+          document.querySelector('[data-chat-composer-mobile-pending-actions="true"]'),
+        ).not.toBeNull();
+      });
+
+      // The footer's own primary actions must be hidden while the overlay
+      // renders: at 640-767px the old width-based sm:flex re-showed them and
+      // doubled the pending actions.
+      const footer = document.querySelector<HTMLElement>('[data-chat-composer-footer="true"]');
+      expect(footer).not.toBeNull();
+      expect(getComputedStyle(footer!).display).toBe("none");
+
+      const visibleSubmitActions = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          '[data-chat-composer-form="true"] button[type="submit"]',
+        ),
+      ).filter((button) => button.getBoundingClientRect().width > 0);
+      expect(visibleSubmitActions.length).toBe(1);
+      expect(
+        document
+          .querySelector('[data-chat-composer-mobile-pending-actions="true"]')
+          ?.contains(visibleSubmitActions[0] ?? null),
+      ).toBe(true);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows exactly one set of pending-answer actions on a coarse landscape phone", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_LANDSCAPE_VIEWPORT,
+      snapshot: createSnapshotWithPendingUserInput(),
+    });
+
+    try {
+      await withCoarsePointer(async () => {
+        await vi.waitFor(() => {
+          expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+        });
+        (document.activeElement as HTMLElement | null)?.blur();
+        await page.getByRole("button", { name: "Write custom answer" }).click();
+        await vi.waitFor(() => {
+          expect(
+            document.querySelector('[data-chat-composer-mobile-pending-actions="true"]'),
+          ).not.toBeNull();
+        });
+
+        const footer = document.querySelector<HTMLElement>('[data-chat-composer-footer="true"]');
+        expect(footer).not.toBeNull();
+        expect(getComputedStyle(footer!).display).toBe("none");
+
+        const visibleSubmitActions = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            '[data-chat-composer-form="true"] button[type="submit"]',
+          ),
+        ).filter((button) => button.getBoundingClientRect().width > 0);
+        expect(visibleSubmitActions.length).toBe(1);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("preserves route, draft, and panel search state across a mid-size rotation tier flip", async () => {
     const targetMessageId = "msg-user-rotation-flip" as MessageId;
     const mounted = await mountChatView({
@@ -6909,6 +7022,45 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       useComposerDraftStore.getState().setPrompt(THREAD_REF, "rotation draft probe");
 
+      // Scroll the timeline away from its bottom-anchored start to a
+      // mid-list offset and note a message row visible at that position.
+      const timelineRow = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-message-id]"),
+        "Unable to find a timeline message row.",
+      );
+      const scrollContainer = findScrollableAncestor(timelineRow);
+      expect(scrollContainer).not.toBeNull();
+      // Scroll to the upper quarter of the list: clearly away from the
+      // bottom-anchored start and outside the maintain-at-end band. The list
+      // keeps re-pinning to the end until its scroll handler observes the
+      // user-initiated position, so re-assert the offset until it sticks.
+      const targetScrollTop = Math.max(
+        300,
+        (scrollContainer!.scrollHeight - scrollContainer!.clientHeight) / 4,
+      );
+      await vi.waitFor(async () => {
+        scrollContainer!.scrollTop = targetScrollTop;
+        await waitForLayout();
+        expect(Math.abs(scrollContainer!.scrollTop - targetScrollTop)).toBeLessThan(50);
+      });
+      // Confirm the position holds without further re-assertion.
+      await waitForLayout();
+      await waitForLayout();
+      expect(Math.abs(scrollContainer!.scrollTop - targetScrollTop)).toBeLessThan(50);
+
+      // The scroller must survive the flips in place. Losing state would
+      // surface as a fresh scroller element, a reset to the top, or a
+      // remount re-running the initial scroll-to-end; a preserved position
+      // stays strictly interior. (The virtualizer legitimately shifts the
+      // pixel offset while re-measuring row heights for the new column
+      // width, so an exact-pixel assertion would overconstrain.)
+      const expectScrollPositionPreserved = () => {
+        expect(scrollContainer!.isConnected).toBe(true);
+        const maxScrollTop = scrollContainer!.scrollHeight - scrollContainer!.clientHeight;
+        expect(scrollContainer!.scrollTop).toBeGreaterThan(100);
+        expect(scrollContainer!.scrollTop).toBeLessThan(maxScrollTop * 0.8);
+      };
+
       // Rotate across the 768px tier boundary: the desktop shell replaces the
       // drawer without resetting route, draft, or panel search state.
       await mounted.setViewport(ROTATED_MID_VIEWPORT);
@@ -6926,6 +7078,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
         const editor = document.querySelector('[data-testid="composer-editor"]');
         expect(editor?.textContent ?? "").toContain("rotation draft probe");
       });
+      // The timeline keeps its anchored scroll position: the row visible
+      // before the flip stays rendered inside the scroll viewport and the
+      // offset is not reset.
+      await vi.waitFor(expectScrollPositionPreserved);
 
       // Rotate back: same route, draft, and search state on the phone tier.
       await mounted.setViewport(NARROW_TABLET_VIEWPORT);
@@ -6938,6 +7094,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(useComposerDraftStore.getState().draftsByThreadKey[THREAD_KEY]?.prompt).toBe(
         "rotation draft probe",
       );
+      // Scroll anchoring survives the round trip as well.
+      await vi.waitFor(expectScrollPositionPreserved);
     } finally {
       await mounted.cleanup();
     }
