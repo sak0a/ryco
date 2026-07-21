@@ -32,13 +32,24 @@ const HOSTED_NODE_ROUTE_PREFIX = "/node";
  */
 const NODE_SEGMENT_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
-export interface RoutedHostedNode {
+export interface RoutedHostedNodeSegment {
   readonly nodeId: string | null;
   readonly malformed: boolean;
 }
 
-const NO_ROUTED_NODE: RoutedHostedNode = { nodeId: null, malformed: false };
-const MALFORMED_ROUTED_NODE: RoutedHostedNode = { nodeId: null, malformed: true };
+/**
+ * The published route snapshot pairs the segment with the logical pathname
+ * parsed from the same browser URL. Consumers (the route orchestrator) must
+ * use this pathname — never `history.location`, which is not yet updated when
+ * this value is published from inside the popstate handler.
+ */
+export interface RoutedHostedNode extends RoutedHostedNodeSegment {
+  readonly logicalPathname: string;
+}
+
+const NO_ROUTED_NODE: RoutedHostedNode = { nodeId: null, malformed: false, logicalPathname: "/" };
+const MALFORMED_ROUTED_NODE_SEGMENT: RoutedHostedNodeSegment = { nodeId: null, malformed: true };
+const NO_ROUTED_NODE_SEGMENT: RoutedHostedNodeSegment = { nodeId: null, malformed: false };
 
 export function isValidHostedNodeRouteSegment(segment: string): boolean {
   return NODE_SEGMENT_PATTERN.test(segment);
@@ -53,7 +64,7 @@ function splitHref(href: string): { readonly pathname: string; readonly suffix: 
 }
 
 export interface ParsedHostedNodeHref {
-  readonly routed: RoutedHostedNode;
+  readonly routed: RoutedHostedNodeSegment;
   readonly logicalHref: string;
 }
 
@@ -67,13 +78,13 @@ export function parseHostedNodeHref(browserHref: string): ParsedHostedNodeHref {
     pathname !== HOSTED_NODE_ROUTE_PREFIX &&
     !pathname.startsWith(`${HOSTED_NODE_ROUTE_PREFIX}/`)
   ) {
-    return { routed: NO_ROUTED_NODE, logicalHref: browserHref };
+    return { routed: NO_ROUTED_NODE_SEGMENT, logicalHref: browserHref };
   }
   const remainder = pathname.slice(HOSTED_NODE_ROUTE_PREFIX.length + 1);
   const slashIndex = remainder.indexOf("/");
   const segment = slashIndex === -1 ? remainder : remainder.slice(0, slashIndex);
   if (!isValidHostedNodeRouteSegment(segment)) {
-    return { routed: MALFORMED_ROUTED_NODE, logicalHref: "/" };
+    return { routed: MALFORMED_ROUTED_NODE_SEGMENT, logicalHref: "/" };
   }
   const logicalPathname = slashIndex === -1 ? "/" : remainder.slice(slashIndex) || "/";
   return {
@@ -98,12 +109,21 @@ const routedSubscribers = new Set<() => void>();
 let installedHistory: RouterHistory | null = null;
 
 function publishRoutedHostedNode(next: RoutedHostedNode): void {
-  if (next.nodeId === routedHostedNode.nodeId && next.malformed === routedHostedNode.malformed) {
+  if (
+    next.nodeId === routedHostedNode.nodeId &&
+    next.malformed === routedHostedNode.malformed &&
+    next.logicalPathname === routedHostedNode.logicalPathname
+  ) {
     return;
   }
   routedHostedNode = next;
   // Snapshot so notification survives subscribe/unsubscribe during dispatch.
   for (const subscriber of Array.from(routedSubscribers)) subscriber();
+}
+
+function logicalPathnameOf(logicalHref: string): string {
+  const { pathname } = splitHref(logicalHref);
+  return pathname === "" ? "/" : pathname;
 }
 
 export function getRoutedHostedNode(): RoutedHostedNode {
@@ -142,7 +162,10 @@ export function installHostedNodeHistory(win: Window & typeof globalThis = windo
     parseLocation: () => {
       const browserHref = `${win.location.pathname}${win.location.search}${win.location.hash}`;
       const parsed = parseHostedNodeHref(browserHref);
-      publishRoutedHostedNode(parsed.routed);
+      publishRoutedHostedNode({
+        ...parsed.routed,
+        logicalPathname: logicalPathnameOf(parsed.logicalHref),
+      });
       return parseLogicalHref(parsed.logicalHref, win.history.state);
     },
     createHref: (href) => buildHostedNodeHref(href, routedHostedNode.nodeId),
@@ -162,7 +185,7 @@ export function getInstalledHostedNodeHistory(): RouterHistory | null {
 export function enterHostedNodeRoute(nodeId: string): boolean {
   const history = installedHistory;
   if (!history || !isValidHostedNodeRouteSegment(nodeId)) return false;
-  publishRoutedHostedNode({ nodeId, malformed: false });
+  publishRoutedHostedNode({ nodeId, malformed: false, logicalPathname: "/" });
   history.push("/");
   return true;
 }
@@ -174,7 +197,11 @@ export function enterHostedNodeRoute(nodeId: string): boolean {
 export function adoptRoutedHostedNode(nodeId: string): boolean {
   const history = installedHistory;
   if (!history || !isValidHostedNodeRouteSegment(nodeId)) return false;
-  publishRoutedHostedNode({ nodeId, malformed: false });
+  publishRoutedHostedNode({
+    nodeId,
+    malformed: false,
+    logicalPathname: routedHostedNode.logicalPathname,
+  });
   history.replace(history.location.href);
   return true;
 }

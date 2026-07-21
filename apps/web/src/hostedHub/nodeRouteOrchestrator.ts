@@ -90,6 +90,28 @@ let restoreOriginNodeId: string | null = null;
 let interactiveNodeId: string | null = null;
 /** Guards compound transitions so reconcile observes only their final state. */
 let reconcileSuspended = false;
+/** Last observed account status, for clearing stale notices on sign-out. */
+let lastAccountStatus: string | null = null;
+/** Active orchestrator subscriptions; scheduled runs no-op at zero. */
+let activeOrchestratorCount = 0;
+let reconcilePending = false;
+
+/**
+ * Reconcile runs deferred on a microtask. Route publications fire as a side
+ * effect of `parseLocation` inside the history's popstate handler, before the
+ * history updates its own location closure and notifies subscribers; deferring
+ * guarantees every reconcile observes post-notify history state and post-patch
+ * store state, and coalesces the bursts a single navigation produces.
+ */
+function scheduleReconcile(): void {
+  if (reconcilePending) return;
+  reconcilePending = true;
+  queueMicrotask(() => {
+    reconcilePending = false;
+    if (activeOrchestratorCount === 0) return;
+    reconcile();
+  });
+}
 
 function runExclusive(transition: () => void): void {
   reconcileSuspended = true;
@@ -98,7 +120,7 @@ function runExclusive(transition: () => void): void {
   } finally {
     reconcileSuspended = false;
   }
-  reconcile();
+  scheduleReconcile();
 }
 
 function failClosed(
@@ -134,27 +156,45 @@ function reconcile(): void {
   if (state.accountStatus !== "authenticated") {
     // Authentication surfaces own the screen. The routed segment stays in the
     // URL so a re-authenticated session resumes it through this same
-    // validation pipeline.
+    // validation pipeline. A notice from the previous authenticated session
+    // is stale once the account leaves it; keep only notices produced while
+    // signed out (for example a normalized malformed link).
+    if (lastAccountStatus === "authenticated") setNotice(null);
+    lastAccountStatus = state.accountStatus;
     return;
   }
+  lastAccountStatus = state.accountStatus;
 
   const nodeId = routed.nodeId;
 
   if (nodeId === null) {
+    interactiveNodeId = null;
     if (state.selectedNode) {
       // The URL returned to the directory (history Back or a fail-closed
-      // rewrite): tear the selection down through the lifecycle owner.
+      // rewrite): tear the selection down through the lifecycle owner. A
+      // terminal selection keeps its bounded explanation for the directory.
       restoreRequestedNodeId = null;
       restoreOriginNodeId = null;
-      void hostedHubController.returnToDirectory();
+      const terminalSelection =
+        state.selectionStatus === "revoked" ||
+        state.selectionStatus === "authorization-removed" ||
+        state.selectionStatus === "incompatible";
+      void hostedHubController.returnToDirectory(
+        terminalSelection ? { preserveTerminalSelection: true } : undefined,
+      );
       return;
     }
-    maybeRedirectLegacyLocation(history.location.pathname, state);
+    // Use the logical pathname published together with the segment. Never
+    // read history.location here: reconcile can run between a popstate parse
+    // and the history's own location update, and a stale thread pathname
+    // would be mapped straight back to the node that was just left.
+    maybeRedirectLegacyLocation(routed.logicalPathname, state);
     return;
   }
 
   if (state.selectedNode?.id === nodeId) {
     restoreRequestedNodeId = null;
+    interactiveNodeId = null;
     if (state.sessionEstablished) {
       restoreOriginNodeId = null;
       setNotice(null);
@@ -184,6 +224,12 @@ function reconcile(): void {
     return;
   }
   if (state.directoryStatus !== "ready") return;
+  // Known bounded transient: while the browser is suspended, a Back/Forward
+  // segment change waits here, so a resume may first reconnect the previously
+  // selected node before this reconcile switches to the routed one. The resume
+  // path always ends in a store update that re-runs reconcile, and generation
+  // guards serialize the switch, so the transient cannot publish stale
+  // readiness or strand the UI.
   if (state.browserStatus !== "current") return;
 
   const node = state.nodes.find((candidate) => candidate.id === nodeId);
@@ -253,12 +299,17 @@ export function selectHostedNodeRoute(nodeId: string): boolean {
 }
 
 export function startHostedNodeRouteOrchestrator(): () => void {
-  const unsubscribeRouted = subscribeRoutedHostedNode(reconcile);
-  const unsubscribeStore = useHostedHubStore.subscribe(reconcile);
+  activeOrchestratorCount += 1;
+  const unsubscribeRouted = subscribeRoutedHostedNode(scheduleReconcile);
+  const unsubscribeStore = useHostedHubStore.subscribe(scheduleReconcile);
   const history = getInstalledHostedNodeHistory();
-  const unsubscribeHistory = history?.subscribe(() => reconcile());
-  reconcile();
+  const unsubscribeHistory = history?.subscribe(() => scheduleReconcile());
+  scheduleReconcile();
+  let stopped = false;
   return () => {
+    if (stopped) return;
+    stopped = true;
+    activeOrchestratorCount -= 1;
     unsubscribeRouted();
     unsubscribeStore();
     unsubscribeHistory?.();
@@ -274,5 +325,6 @@ export function resetHostedNodeRouteOrchestratorForTests(): void {
   restoreOriginNodeId = null;
   interactiveNodeId = null;
   reconcileSuspended = false;
+  lastAccountStatus = null;
   setNotice(null);
 }

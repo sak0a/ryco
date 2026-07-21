@@ -505,6 +505,15 @@ class HostedHubController {
     const node = state.selectedNode;
     if (!node) return;
     const preserve = options?.preserveTerminalSelection === true;
+    // Mirror clearAccount: an in-flight browser resume belongs to the
+    // selection being torn down. Abort it and invalidate its lifecycle
+    // generation so it can neither publish stale state nor leave
+    // browserStatus stuck in a node-scoped phase that would gate every
+    // subsequent selection.
+    this.#browserLifecycleGeneration += 1;
+    this.#browserResumeOperation?.abort();
+    this.#browserResumeOperation = null;
+    this.#browserResumePromise = null;
     this.#retrySelectedNodeOperation?.abort();
     this.#retrySelectedNodeOperation = null;
     this.#retrySelectedNodePromise = null;
@@ -517,6 +526,10 @@ class HostedHubController {
       sessionStatus: "closed",
       sessionEstablished: false,
       sessionRecoveredAfterUnknown: false,
+      browserStatus:
+        state.browserStatus === "synchronizing" || state.browserStatus === "checking-access"
+          ? "current"
+          : state.browserStatus,
       errorMessage: preserve ? state.errorMessage : null,
       generation: state.generation + 1,
     });
