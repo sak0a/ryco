@@ -1,65 +1,137 @@
 name: Pull Request Validation
 
 on:
-  pull_request:
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+  # Created by pr-vouch.yml after it has established that the PR author is
+  # trusted. Repository-dispatch workflows execute from the default branch.
+  repository_dispatch:
+    types: [trusted-pr-validation]
+  # Maintainers may deliberately validate an unvouched PR by its number.
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        description: Pull request number to validate manually.
+        required: true
+        type: string
 
 permissions:
   contents: read
+  issues: read
   pull-requests: read
 
 concurrency:
-  group: pr-validation-${{ github.event.pull_request.number }}
+  group: pr-validation-${{ github.event_name == 'workflow_dispatch' && github.event.inputs['pr-number'] || github.event.client_payload.pr }}
   cancel-in-progress: true
 
 jobs:
-  # Decide which of the expensive, opt-in jobs a PR actually needs. Filters are
-  # deliberately broad (any package/, lockfile, or CI infra change trips them)
-  # so a check is never wrongly skipped; the savings come from app-scoped PRs
-  # (server-only, docs-only, config-only) that don't touch the web or desktop
-  # surfaces. Uses the PR file list via the API — no checkout, ~seconds.
-  changes:
-    name: Detect changes
-    runs-on: ubuntu-24.04
+  # repository_dispatch does not include pull_request data. Fetch one
+  # authoritative PR record here for both trust checks and the current
+  # path-scope / Turbo inputs.
+  gate:
+    name: Gate
+    runs-on: [self-hosted, ryco-validation]
     timeout-minutes: 5
     outputs:
-      web: ${{ steps.filter.outputs.web }}
-      desktop: ${{ steps.filter.outputs.desktop }}
+      checkout-ref: ${{ steps.gate.outputs.checkout-ref }}
+      affected-base: ${{ steps.gate.outputs.affected-base }}
+      web: ${{ steps.gate.outputs.web }}
+      desktop: ${{ steps.gate.outputs.desktop }}
+      should-validate: ${{ steps.gate.outputs.should-validate }}
     steps:
-      - id: filter
-        uses: dorny/paths-filter@v3
+      - id: gate
+        name: Check trust and validation scope
+        uses: actions/github-script@v8
         with:
-          filters: |
-            shared: &shared
-              - 'packages/**'
-              - 'package.json'
-              - 'bun.lock'
-              - 'turbo.json'
-              - 'tsconfig*.json'
-              - '.github/actions/**'
-              - '.github/workflows/_validation.yml'
-              - '.github/workflows/pull-request-validation.yml'
-            web:
-              - *shared
-              - 'apps/web/**'
-            desktop:
-              - *shared
-              - 'apps/desktop/**'
-              - 'apps/server/**'
-              - 'apps/web/**'
+          script: |
+            if (context.repo.owner !== "sak0a" || context.repo.repo !== "ryco") {
+              core.info(`Skipping validation outside sak0a/ryco: ${context.repo.owner}/${context.repo.repo}`);
+              core.setOutput("should-validate", "false");
+              return;
+            }
+
+            const prNumber =
+              context.eventName === "workflow_dispatch"
+                ? Number(context.payload.inputs?.["pr-number"])
+                : Number(context.payload.client_payload?.pr);
+            if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              throw new Error(`Invalid pull request number: ${prNumber}`);
+            }
+
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            if (pullRequest.base.repo?.full_name !== "sak0a/ryco") {
+              core.info(`Skipping PR #${prNumber}; base repository is ${pullRequest.base.repo?.full_name ?? "unknown"}.`);
+              core.setOutput("should-validate", "false");
+              return;
+            }
+
+            const labels = new Set(pullRequest.labels.map((label) => label.name));
+            const trusted = labels.has("vouch:trusted");
+            const denounced = labels.has("vouch:denounced");
+            const manualApproval = context.eventName === "workflow_dispatch";
+            if (denounced) {
+              core.info(`Skipping PR #${prNumber}; author is denounced.`);
+              core.setOutput("should-validate", "false");
+              return;
+            }
+            if (!trusted && !manualApproval) {
+              core.info(`Skipping PR #${prNumber}; repository dispatch requires vouch:trusted.`);
+              core.setOutput("should-validate", "false");
+              return;
+            }
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+            // A rename touches both its former and current locations, matching
+            // the conservative behavior of dorny/paths-filter.
+            const paths = files.flatMap((file) =>
+              file.previous_filename ? [file.filename, file.previous_filename] : [file.filename],
+            );
+            const shared = (path) =>
+              path.startsWith("packages/") ||
+              [
+                "package.json",
+                "bun.lock",
+                "turbo.json",
+                ".github/workflows/_validation.yml",
+                ".github/workflows/pull-request-validation.yml",
+              ].includes(path) ||
+              /^tsconfig.*\.json$/.test(path) ||
+              path.startsWith(".github/actions/");
+            const web = paths.some((path) => shared(path) || path.startsWith("apps/web/"));
+            const desktop = paths.some(
+              (path) =>
+                shared(path) ||
+                path.startsWith("apps/desktop/") ||
+                path.startsWith("apps/server/") ||
+                path.startsWith("apps/web/"),
+            );
+
+            core.info(
+              manualApproval && !trusted
+                ? `Validating PR #${prNumber} by manual approval.`
+                : `Validating trusted PR #${prNumber}.`,
+            );
+            core.setOutput("checkout-ref", `refs/pull/${prNumber}/merge`);
+            core.setOutput("affected-base", pullRequest.base.sha);
+            core.setOutput("web", web);
+            core.setOutput("desktop", desktop);
+            core.setOutput("should-validate", "true");
 
   validate:
     name: Pull Request
-    needs: changes
+    needs: gate
+    if: ${{ needs.gate.outputs.should-validate == 'true' }}
     uses: ./.github/workflows/_validation.yml
     with:
-      run-browser-tests: ${{ needs.changes.outputs.web == 'true' }}
-      run-desktop-build: ${{ needs.changes.outputs.desktop == 'true' }}
+      checkout-ref: ${{ needs.gate.outputs.checkout-ref }}
+      affected-base: ${{ needs.gate.outputs.affected-base }}
+      run-browser-tests: ${{ needs.gate.outputs.web == 'true' }}
+      run-desktop-build: ${{ needs.gate.outputs.desktop == 'true' }}
       run-release-smoke: true
-      # Scope typecheck/test/build to packages this PR's diff touches. Base
-      # branch tip; Turbo diffs base...HEAD (merge-base) to find the change set.
-      affected-base: ${{ github.event.pull_request.base.sha }}
