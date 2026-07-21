@@ -87,7 +87,7 @@ export const BranchToolbar = memo(function BranchToolbar({
         </div>
       )}
 
-      <div className="hidden flex-1 items-center justify-center gap-1 md:flex">
+      <div className="flex flex-1 items-center justify-center gap-1 phone:hidden">
         <Tooltip>
           <TooltipTrigger
             render={

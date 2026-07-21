@@ -195,7 +195,7 @@ function ArchivedWorktreeRow(props: {
   const isProjectRoot = isProjectRootWorktree(props.worktree.worktree, props.projectCwd);
   return (
     <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
-      <div className="ml-3 flex h-7 max-md:pointer-coarse:min-h-11 items-center gap-1.5 max-md:pointer-coarse:gap-3 rounded-md px-2 text-muted-foreground">
+      <div className="ml-3 flex h-7 phone:pointer-coarse:min-h-11 items-center gap-1.5 phone:pointer-coarse:gap-3 rounded-md px-2 text-muted-foreground">
         <ArchiveIcon className="size-3.5 shrink-0" />
         <span className="min-w-0 flex-1 truncate text-xs">
           {getWorktreeDisplayTitle(props.worktree)}
@@ -344,7 +344,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                 role="button"
                 tabIndex={0}
                 aria-expanded={!isCollapsed}
-                className="group/worktree flex h-7 max-md:pointer-coarse:min-h-11 w-full items-center gap-1.5 max-md:pointer-coarse:gap-3 rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                className="group/worktree flex h-7 phone:pointer-coarse:min-h-11 w-full items-center gap-1.5 phone:pointer-coarse:gap-3 rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                 onClick={toggleCollapsed}
                 onKeyDown={(event) => {
                   if (event.key === "ArrowLeft") {
@@ -478,7 +478,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
             <button
               type="button"
               aria-label={`New session in ${props.worktree.worktree.branch}`}
-              className={`ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/55 opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover/worktree:opacity-100 group-focus-within/worktree:opacity-100 max-sm:opacity-100 ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
+              className={`ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/55 opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover/worktree:opacity-100 group-focus-within/worktree:opacity-100 phone:opacity-100 ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -643,7 +643,7 @@ function WorktreeMenu(props: {
   return (
     <Menu>
       <MenuTrigger
-        className={`inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/55 opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover/worktree:opacity-100 group-focus-within/worktree:opacity-100 max-sm:opacity-100 ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
+        className={`inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/55 opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover/worktree:opacity-100 group-focus-within/worktree:opacity-100 phone:opacity-100 ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();

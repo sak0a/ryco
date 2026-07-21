@@ -20,16 +20,16 @@ export const SIDEBAR_AUTO_ANIMATE_PROJECT_LIMIT = 80;
 export const SIDEBAR_AUTO_ANIMATE_VISIBLE_THREAD_LIMIT = 120;
 // 44px effective touch target for compact sidebar row actions on coarse
 // pointers, using the same after-pseudo hit-area expansion as ui/button.tsx.
-// Gated on max-md AND pointer-coarse: coarse-pointer tablets (>=768px) render
-// the persistent desktop sidebar and must keep desktop density until the
-// presentation tier lands. Callers must keep adjacent action centers >=44px
-// apart (visible size + gap) so hit areas do not overlap. The anchored
-// variant is for controls that are already positioned (absolute); in-flow
-// controls also need relative so the hit area centers on the control instead
-// of the row.
+// Gated on the phone tier AND pointer-coarse: coarse-pointer tablets
+// (>=768px, desktop tier) render the persistent desktop sidebar and keep
+// desktop density, while coarse-pointer landscape phones (phone tier) get the
+// touch density. Callers must keep adjacent action centers >=44px apart
+// (visible size + gap) so hit areas do not overlap. The anchored variant is
+// for controls that are already positioned (absolute); in-flow controls also
+// need relative so the hit area centers on the control instead of the row.
 export const SIDEBAR_ROW_ACTION_COARSE_ANCHORED_CLASS_NAME =
-  "max-md:pointer-coarse:size-8 max-md:pointer-coarse:after:absolute max-md:pointer-coarse:after:top-1/2 max-md:pointer-coarse:after:left-1/2 max-md:pointer-coarse:after:size-11 max-md:pointer-coarse:after:-translate-x-1/2 max-md:pointer-coarse:after:-translate-y-1/2";
-export const SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME = `max-md:pointer-coarse:relative ${SIDEBAR_ROW_ACTION_COARSE_ANCHORED_CLASS_NAME}`;
+  "phone:pointer-coarse:size-8 phone:pointer-coarse:after:absolute phone:pointer-coarse:after:top-1/2 phone:pointer-coarse:after:left-1/2 phone:pointer-coarse:after:size-11 phone:pointer-coarse:after:-translate-x-1/2 phone:pointer-coarse:after:-translate-y-1/2";
+export const SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME = `phone:pointer-coarse:relative ${SIDEBAR_ROW_ACTION_COARSE_ANCHORED_CLASS_NAME}`;
 export type SidebarNewThreadEnvMode = "local" | "worktree";
 type SidebarProject = {
   id: string;

@@ -52,13 +52,13 @@ function AlertDialogPopup({
     <AlertDialogPortal>
       <AlertDialogBackdrop />
       <AlertDialogViewport
-        className={cn(bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12")}
+        className={cn(bottomStickOnMobile && "phone:grid-rows-[1fr_auto] phone:p-0 phone:pt-12")}
       >
         <AlertDialogPrimitive.Popup
           className={cn(
             "app-surface pointer-events-auto -translate-y-[calc(1.25rem*var(--nested-dialogs))] relative row-start-2 flex max-h-full min-h-0 w-full min-w-0 max-w-lg scale-[calc(1-0.1*var(--nested-dialogs))] flex-col rounded-2xl border not-dark:bg-clip-padding text-popover-foreground opacity-[calc(1-0.1*var(--nested-dialogs))] shadow-lg/5 transition-[scale,opacity,translate] duration-[240ms] ease-out will-change-transform before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] data-nested:data-ending-style:translate-y-8 data-nested:data-starting-style:translate-y-8 data-nested-dialog-open:origin-top data-ending-style:translate-y-2 data-starting-style:translate-y-3 data-ending-style:scale-97 data-starting-style:scale-96 data-ending-style:opacity-0 data-starting-style:opacity-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
             bottomStickOnMobile &&
-              "max-sm:max-w-none max-sm:rounded-none max-sm:border-x-0 max-sm:border-t max-sm:border-b-0 max-sm:opacity-[calc(1-min(var(--nested-dialogs),1))] max-sm:data-ending-style:translate-y-4 max-sm:data-starting-style:translate-y-4 max-sm:before:hidden max-sm:before:rounded-none",
+              "phone:max-w-none phone:rounded-none phone:border-x-0 phone:border-t phone:border-b-0 phone:opacity-[calc(1-min(var(--nested-dialogs),1))] phone:data-ending-style:translate-y-4 phone:data-starting-style:translate-y-4 phone:before:hidden phone:before:rounded-none",
             className,
           )}
           data-slot="alert-dialog-popup"

@@ -54,7 +54,7 @@ export function DiffPanelHeaderSkeleton() {
         <div className="flex gap-1 overflow-hidden px-8 py-0.5">
           <Skeleton className="h-6 w-16 shrink-0 rounded-md" />
           <Skeleton className="h-6 w-24 shrink-0 rounded-md" />
-          <Skeleton className="h-6 w-24 shrink-0 rounded-md max-sm:hidden" />
+          <Skeleton className="h-6 w-24 shrink-0 rounded-md phone:hidden" />
         </div>
       </div>
       <div className="flex shrink-0 gap-1">

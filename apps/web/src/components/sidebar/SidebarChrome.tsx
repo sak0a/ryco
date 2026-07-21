@@ -74,7 +74,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 
   const wordmark = (
     <div className="@container/sidebar-header flex w-full min-w-0 items-center gap-2">
-      <SidebarTrigger className="shrink-0 md:hidden" />
+      <SidebarTrigger className="shrink-0 not-phone:hidden" />
       <Tooltip>
         <TooltipTrigger
           render={

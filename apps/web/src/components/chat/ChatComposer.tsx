@@ -99,7 +99,7 @@ import type { SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
-import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { usePresentationTier } from "../../hooks/usePresentationTier";
 
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-slot="popover-popup"]',
@@ -636,7 +636,10 @@ export const ChatComposer = memo(
     const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
     const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
     const [isComposerFocused, setIsComposerFocused] = useState(false);
-    const isMobileViewport = useMediaQuery("max-sm");
+    // The collapse-to-pill behavior follows the presentation tier (not the
+    // old <640 px query), so 640-767 px viewports and coarse-pointer
+    // landscape phones collapse consistently with the rest of the phone UI.
+    const isMobileViewport = usePresentationTier() === "phone";
     const isComposerCollapsedMobile = isMobileViewport && !isComposerFocused;
 
     // ------------------------------------------------------------------
