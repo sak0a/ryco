@@ -7,6 +7,7 @@ import {
   ArrowLeftIcon,
   CheckIcon,
   EllipsisVerticalIcon,
+  GitBranchIcon,
   PanelRightIcon,
   SearchIcon,
 } from "lucide-react";
@@ -43,6 +44,12 @@ export interface PhoneThreadAppBarProps {
   readonly workspacePanelOpen: boolean;
   readonly onToggleWorkspacePanel: () => void;
   readonly onOpenFindInThread: () => void;
+  /**
+   * Opens the overview (source-control) surface full-screen. Null on draft
+   * threads: a draft has no turns, checkpoints, or worktree yet, so the
+   * surface would only render empty states.
+   */
+  readonly onOpenSourceControl: (() => void) | null;
   readonly sessionTabs: ReadonlyArray<ChatSessionTabsItem>;
   readonly activeSessionTabKey: string | null;
   readonly onSelectSessionTab: ((key: string) => void) | null;
@@ -169,6 +176,18 @@ export function PhoneThreadAppBar(props: PhoneThreadAppBarProps) {
               >
                 <SearchIcon aria-hidden className="size-4" /> Find in thread
               </button>
+              {props.onOpenSourceControl ? (
+                <button
+                  type="button"
+                  className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    props.onOpenSourceControl?.();
+                  }}
+                >
+                  <GitBranchIcon aria-hidden className="size-4" /> Source control
+                </button>
+              ) : null}
             </div>
             {props.sessionTabs.length > 0 && props.onSelectSessionTab ? (
               <div

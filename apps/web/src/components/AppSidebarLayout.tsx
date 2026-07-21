@@ -16,9 +16,15 @@ const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 const LazySettingsDialog = lazy(() =>
   import("./settings/SettingsDialog").then((module) => ({ default: module.SettingsDialog })),
 );
+const LazyPhoneSettingsSurface = lazy(() =>
+  import("./shell/phone/PhoneSettingsSurface").then((module) => ({
+    default: module.PhoneSettingsSurface,
+  })),
+);
 
 export function LazySettingsDialogMount() {
   const open = useSettingsDialogStore((s) => s.open);
+  const presentationTier = usePresentationTier();
   const [hasOpened, setHasOpened] = useState(open);
 
   useEffect(() => {
@@ -31,9 +37,14 @@ export function LazySettingsDialogMount() {
     return null;
   }
 
+  // The settings presentation forks at the tier seam: the desktop dialog
+  // stays exactly as it is, while the phone tier renders the full-screen
+  // paged settings surface. The settings dialog store (open state and
+  // section) is shared, so a mid-open tier flip re-presents the same section
+  // in the other presentation.
   return (
     <Suspense fallback={null}>
-      <LazySettingsDialog />
+      {presentationTier === "phone" ? <LazyPhoneSettingsSurface /> : <LazySettingsDialog />}
     </Suspense>
   );
 }

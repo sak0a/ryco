@@ -2056,6 +2056,24 @@ export default function ChatView(props: ChatViewProps) {
     if (latestTurnId && activePlan.turnId !== latestTurnId) return;
     const turnKey = activePlan.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
     if (planSidebarDismissedForTurnRef.current === turnKey) return;
+    // On the phone tier the overview is a full-screen takeover, so a plan
+    // arriving while the user is composing must not steal focus or close the
+    // keyboard. Smallest honest behavior: drop the auto-open for this turn
+    // (recorded as dismissed so later plan updates in the same turn cannot
+    // re-trigger a surprise takeover after blur). The plan stays reachable
+    // through the composer plan banner and the thread kebab's "Source
+    // control" entry. Tier is read through the ref so a tier flip alone never
+    // re-runs this decision.
+    if (presentationTierRef.current === "phone") {
+      const activeElement = document.activeElement;
+      const composerFocused =
+        activeElement instanceof HTMLElement &&
+        activeElement.closest('[data-chat-composer-form="true"]') !== null;
+      if (composerFocused) {
+        planSidebarDismissedForTurnRef.current = turnKey;
+        return;
+      }
+    }
     setPlanSidebarOpen(true);
   }, [
     activePlan,
@@ -3066,7 +3084,9 @@ export default function ChatView(props: ChatViewProps) {
       {/* Top bar */}
       <header
         className={cn(
-          "border-b border-border bg-muted/24",
+          // The phone tier pads the top safe area itself (the root-level
+          // inset is disabled for the phone tier in index.css).
+          "border-b border-border bg-muted/24 phone:pt-safe",
           isElectron
             ? cn(
                 "drag-region flex min-h-[52px] items-stretch px-3 sm:px-5 wco:min-h-[env(titlebar-area-height)]",
@@ -3094,6 +3114,7 @@ export default function ChatView(props: ChatViewProps) {
             workspacePanelOpen={workspacePanelOpen}
             onToggleWorkspacePanel={onToggleWorkspacePanel}
             onOpenFindInThread={openThreadMessageSearch}
+            onOpenSourceControl={routeKind === "draft" ? null : () => toggleOverviewSidebar(true)}
             sessionTabs={activeWorktreeSessionTabs}
             activeSessionTabKey={activeSessionTabKey}
             onSelectSessionTab={handleSelectSessionTab}

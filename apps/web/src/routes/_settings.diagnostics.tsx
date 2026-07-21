@@ -14,7 +14,7 @@ function DiagnosticsRouteView() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-        <header className="flex items-center gap-2 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
+        <header className="flex items-center gap-2 border-b border-border px-3 py-2 sm:px-5 sm:py-3 phone:pt-[calc(env(safe-area-inset-top)+0.5rem)] phone:pl-[calc(env(safe-area-inset-left)+0.75rem)] phone:pr-[calc(env(safe-area-inset-right)+0.75rem)]">
           <Button
             size="xs"
             variant="ghost"

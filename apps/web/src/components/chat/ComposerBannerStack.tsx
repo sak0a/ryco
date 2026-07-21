@@ -3,6 +3,7 @@ import { XIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
+import { PREFERS_REDUCED_MOTION_QUERY } from "~/lib/perf/motion";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
 import { Button } from "../ui/button";
 
@@ -46,6 +47,9 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
   // becomes a button that expands the hidden banners; fine pointers keep the
   // original decorative cap and hover/focus reveal unchanged.
   const isCoarsePointer = useMediaQuery({ pointer: "coarse" });
+  // Reduced motion drops the translate/opacity exit animation entirely (the
+  // dismissal itself never depends on the animation — it runs on a timer).
+  const prefersReducedMotion = useMediaQuery(PREFERS_REDUCED_MOTION_QUERY);
   const [isStackExpanded, setIsStackExpanded] = useState(false);
   const dismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -89,11 +93,15 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
     if (dismissTimeoutRef.current) {
       clearTimeout(dismissTimeoutRef.current);
     }
-    dismissTimeoutRef.current = setTimeout(() => {
-      dismissTimeoutRef.current = null;
-      item.onDismiss?.();
-    }, DISMISS_TRANSITION_MS);
+    dismissTimeoutRef.current = setTimeout(
+      () => {
+        dismissTimeoutRef.current = null;
+        item.onDismiss?.();
+      },
+      prefersReducedMotion ? 0 : DISMISS_TRANSITION_MS,
+    );
   };
+  const activeExitTransitionStyle = prefersReducedMotion ? undefined : exitTransitionStyle;
 
   return (
     <div className={cn("group/banner-stack mx-auto mb-2 max-w-208", className)}>
@@ -137,7 +145,7 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
               className={cn(
                 "pointer-events-none absolute inset-x-0 -top-3 z-0 mx-auto h-3 rounded-t-xl",
                 "border border-b-0 border-warning/24 bg-background/96 shadow-[0_6px_18px_rgba(0,0,0,0.06)]",
-                "transition-opacity duration-150 ease-out",
+                "transition-opacity duration-150 ease-out motion-reduce:transition-none",
                 "group-hover/banner-stack:opacity-0 group-focus-within/banner-stack:opacity-0",
               )}
               style={{ width: "96%" }}
@@ -151,7 +159,7 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
             exitingItemId === frontItem.id ? "pointer-events-none" : null,
           )}
           style={{
-            ...exitTransitionStyle,
+            ...activeExitTransitionStyle,
             ...(exitingItemId === frontItem.id ? frontExitStyle : restingStyle),
           }}
         >
@@ -166,7 +174,7 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
             data-composer-banner-stack-rest="true"
             className={cn(
               "pointer-events-none absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-20 space-y-2 opacity-0",
-              "transition-[opacity,transform] duration-150 ease-out",
+              "transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none motion-reduce:translate-y-0",
               "translate-y-1",
               "group-hover/banner-stack:pointer-events-auto group-hover/banner-stack:translate-y-0 group-hover/banner-stack:opacity-100",
               "group-focus-within/banner-stack:pointer-events-auto group-focus-within/banner-stack:translate-y-0 group-focus-within/banner-stack:opacity-100",
@@ -178,7 +186,7 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
                 key={item.id}
                 className={cn(exitingItemId === item.id ? "pointer-events-none" : null)}
                 style={{
-                  ...exitTransitionStyle,
+                  ...activeExitTransitionStyle,
                   ...(exitingItemId === item.id ? stackedExitStyle : restingStyle),
                 }}
               >

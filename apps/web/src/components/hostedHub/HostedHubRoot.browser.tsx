@@ -99,6 +99,82 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     }
   });
 
+  it("keeps sign-in and node-selection screen-reader traversal named with status regions", async () => {
+    await page.viewport(390, 844);
+    const accessibleName = (control: HTMLElement): string => {
+      const ariaLabel = control.getAttribute("aria-label")?.trim();
+      if (ariaLabel) return ariaLabel;
+      const labelledBy = control.getAttribute("aria-labelledby");
+      if (labelledBy) {
+        const text = labelledBy
+          .split(/\s+/)
+          .map((id) => document.getElementById(id)?.textContent?.trim() ?? "")
+          .join(" ")
+          .trim();
+        if (text) return text;
+      }
+      const content = control.textContent?.trim();
+      if (content) return content;
+      return control.getAttribute("title")?.trim() ?? "";
+    };
+    const unnamedVisibleControls = () =>
+      [...document.querySelectorAll<HTMLElement>('button, [role="button"]')]
+        .filter((control) => control.checkVisibility?.() ?? true)
+        .filter((control) => accessibleName(control) === "")
+        .map((control) => control.outerHTML.slice(0, 160));
+
+    try {
+      // Sign-in: every visible control is named, and the passkey ceremony has
+      // a polite in-progress announcement region.
+      useHostedHubStore.setState({ bootstrapAvailable: true });
+      mounted = await render(<HostedHubRoot />);
+      await expect
+        .element(page.getByRole("button", { name: "Sign in with passkey" }))
+        .toBeVisible();
+      expect(unnamedVisibleControls()).toEqual([]);
+      const signInLiveRegion = document.querySelector<HTMLElement>('[aria-live="polite"]');
+      expect(signInLiveRegion).not.toBeNull();
+      useHostedHubStore.setState({ accountStatus: "authenticating" });
+      await vi.waitFor(() => {
+        expect(signInLiveRegion!.textContent).toContain("Passkey authentication is in progress");
+      });
+      await mounted.unmount();
+      mounted = null;
+      hostedHubController.resetForTests();
+
+      // Node selection: rows and controls are named, presence reads as text
+      // (never color alone), and stale directory data announces as a status.
+      useHostedHubStore.setState({
+        accountStatus: "authenticated",
+        account,
+        session,
+        directoryStatus: "ready",
+        browserStatus: "current",
+        nodes: [
+          node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator"),
+          node("node_bbbbbbbbbbbbbbbbbbbbbb", false, "viewer"),
+        ],
+      });
+      mounted = await render(<HostedHubRoot />);
+      const onlineRow = page.getByRole("button", { name: /Studio online/ });
+      await expect.element(onlineRow).toBeVisible();
+      expect(unnamedVisibleControls()).toEqual([]);
+      expect(onlineRow.element().textContent).toContain("Online");
+      const offlineRow = page.getByRole("button", { name: /Travel offline/ });
+      expect(offlineRow.element().textContent).toContain("Offline");
+
+      useHostedHubStore.setState({ directoryStatus: "stale" });
+      await vi.waitFor(() => {
+        const status = [...document.querySelectorAll<HTMLElement>('[role="status"]')].find(
+          (region) => region.textContent?.includes("Directory data is stale"),
+        );
+        expect(status).not.toBeUndefined();
+      });
+    } finally {
+      await page.viewport(1_280, 720);
+    }
+  });
+
   it("provides keyboard-labelled authentication and registration controls with focus management", async () => {
     useHostedHubStore.setState({ bootstrapAvailable: true });
     mounted = await render(<HostedHubRoot />);
