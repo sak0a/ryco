@@ -49,11 +49,12 @@ class FakeVisualViewport extends EventTarget {
 
 let style: FakeStyle;
 let viewport: FakeVisualViewport;
-let pendingFrames: Array<(time: number) => void>;
+let pendingFrames: Map<number, (time: number) => void>;
+let nextFrameId: number;
 
 function flushFrames(): void {
-  const callbacks = pendingFrames;
-  pendingFrames = [];
+  const callbacks = [...pendingFrames.values()];
+  pendingFrames.clear();
   for (const callback of callbacks) {
     callback(0);
   }
@@ -63,18 +64,20 @@ function stubEnvironment(options: { withVisualViewport?: boolean } = {}): void {
   const { withVisualViewport = true } = options;
   style = new FakeStyle();
   viewport = new FakeVisualViewport();
-  pendingFrames = [];
+  pendingFrames = new Map();
+  nextFrameId = 0;
   vi.stubGlobal("document", { documentElement: { style } });
   vi.stubGlobal("window", {
     innerHeight: 844,
     innerWidth: 390,
     visualViewport: withVisualViewport ? viewport : null,
     requestAnimationFrame: (callback: (time: number) => void) => {
-      pendingFrames.push(callback);
-      return pendingFrames.length;
+      nextFrameId += 1;
+      pendingFrames.set(nextFrameId, callback);
+      return nextFrameId;
     },
-    cancelAnimationFrame: () => {
-      pendingFrames = [];
+    cancelAnimationFrame: (frameId: number) => {
+      pendingFrames.delete(frameId);
     },
   });
 }
@@ -170,11 +173,29 @@ describe("syncDocumentVisualViewportInsets", () => {
     viewport.dispatchEvent(new Event("resize"));
     viewport.dispatchEvent(new Event("scroll"));
     viewport.dispatchEvent(new Event("resize"));
-    expect(pendingFrames).toHaveLength(1);
+    expect(pendingFrames.size).toBe(1);
 
     flushFrames();
     expect(style.setPropertyCallCount).toBe(2);
     teardown();
+  });
+
+  it("returns the active teardown instead of subscribing a second time", () => {
+    const first = syncDocumentVisualViewportInsets();
+    const second = syncDocumentVisualViewportInsets();
+
+    expect(second).toBe(first);
+    expect(viewport.listenerCounts.get("resize")).toBe(1);
+    expect(viewport.listenerCounts.get("scroll")).toBe(1);
+
+    first();
+    expect(viewport.listenerCounts.get("resize")).toBe(0);
+
+    // A fresh activation after teardown subscribes again.
+    const third = syncDocumentVisualViewportInsets();
+    expect(third).not.toBe(first);
+    expect(viewport.listenerCounts.get("resize")).toBe(1);
+    third();
   });
 
   it("removes listeners and variables on teardown", () => {
@@ -192,6 +213,6 @@ describe("syncDocumentVisualViewportInsets", () => {
     expect(viewport.listenerCounts.get("scroll")).toBe(0);
 
     viewport.dispatchEvent(new Event("resize"));
-    expect(pendingFrames).toHaveLength(0);
+    expect(pendingFrames.size).toBe(0);
   });
 });

@@ -7029,9 +7029,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
     const viewportStub = installVisualViewportStub();
     const stopAdapter = syncDocumentVisualViewportInsets();
     try {
-      for (const { viewport, keyboardInset } of [
-        { viewport: PHONE_VIEWPORT, keyboardInset: 300 },
-        { viewport: NARROW_PHONE_VIEWPORT, keyboardInset: 250 },
+      for (const { viewport, keyboardInset, expectTopWithinViewport } of [
+        { viewport: PHONE_VIEWPORT, keyboardInset: 300, expectTopWithinViewport: true },
+        { viewport: NARROW_PHONE_VIEWPORT, keyboardInset: 250, expectTopWithinViewport: true },
+        // Landscape with the keyboard open leaves less visible height than
+        // the clamp allowance; the 4.5rem floor must keep the menu usable
+        // instead of collapsing it to 0px, even if its top edge is cropped.
+        { viewport: PHONE_LANDSCAPE_VIEWPORT, keyboardInset: 160, expectTopWithinViewport: false },
       ]) {
         await mounted.setViewport(viewport);
         await expandPhoneComposerIfCollapsed();
@@ -7043,7 +7047,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
           () => document.querySelector<HTMLElement>('[data-slot="command-list"]'),
           "Unable to find the composer command menu list.",
         );
-        // Keyboard-closed baseline: the historical 18rem cap applies.
+        // Keyboard-closed baseline: the historical 18rem cap applies on every
+        // viewport because the fallback never engages without the adapter.
         expect(getComputedStyle(menuList).maxHeight).toBe("288px");
 
         viewportStub.setKeyboardInset(keyboardInset);
@@ -7051,13 +7056,15 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
         const visibleHeight = viewport.height - keyboardInset;
         // 18rem cap clamped by the visible height minus the 12.5rem composer
-        // allowance (see ComposerCommandMenu).
-        const expectedMaxHeight = Math.min(288, visibleHeight - 200);
+        // allowance, floored at 4.5rem (see ComposerCommandMenu).
+        const expectedMaxHeight = Math.min(288, Math.max(72, visibleHeight - 200));
         await vi.waitFor(() => {
           expect(getComputedStyle(menuList).maxHeight).toBe(`${expectedMaxHeight}px`);
           const menuRect = menuList.getBoundingClientRect();
-          expect(menuRect.height).toBeGreaterThan(0);
-          expect(menuRect.top).toBeGreaterThanOrEqual(-0.5);
+          expect(menuRect.height).toBeGreaterThan(40);
+          if (expectTopWithinViewport) {
+            expect(menuRect.top).toBeGreaterThanOrEqual(-0.5);
+          }
           expect(menuRect.bottom).toBeLessThanOrEqual(visibleHeight + 0.5);
         });
 

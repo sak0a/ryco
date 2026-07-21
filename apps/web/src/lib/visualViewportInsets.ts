@@ -55,6 +55,8 @@ function setVarPx(style: CSSStyleDeclaration, name: string, value: number): void
   }
 }
 
+let activeTeardown: (() => void) | null = null;
+
 /**
  * The single `VisualViewport` subscription for the app (delivery step 3 of the
  * focused mobile workspace design). Publishes two bounded CSS custom
@@ -68,13 +70,20 @@ function setVarPx(style: CSSStyleDeclaration, name: string, value: number): void
  *   clamped to `[0, innerHeight]`.
  *
  * Both variables are removed whenever there is no inset, so desktop and
- * keyboard-closed layouts resolve their existing `env()`/`dvh` fallbacks with
- * zero behavioral difference. Components must consume these variables from CSS
+ * keyboard-closed layouts resolve their existing `env()` fallbacks with zero
+ * behavioral difference. Components must consume these variables from CSS
  * only and must not add their own `visualViewport`/resize listeners.
+ *
+ * The subscription is a singleton: while one activation is live, further
+ * calls return its teardown instead of double-subscribing and corrupting the
+ * shared document-level variables.
  */
 export function syncDocumentVisualViewportInsets(): () => void {
   if (typeof window === "undefined" || typeof document === "undefined") {
     return () => {};
+  }
+  if (activeTeardown) {
+    return activeTeardown;
   }
 
   const viewport = window.visualViewport ?? null;
@@ -119,7 +128,7 @@ export function syncDocumentVisualViewportInsets(): () => void {
   update();
   viewport.addEventListener("resize", scheduleUpdate);
   viewport.addEventListener("scroll", scheduleUpdate);
-  return () => {
+  const teardown = () => {
     viewport.removeEventListener("resize", scheduleUpdate);
     viewport.removeEventListener("scroll", scheduleUpdate);
     if (frame !== null) {
@@ -127,5 +136,10 @@ export function syncDocumentVisualViewportInsets(): () => void {
       frame = null;
     }
     clearVars();
+    if (activeTeardown === teardown) {
+      activeTeardown = null;
+    }
   };
+  activeTeardown = teardown;
+  return teardown;
 }

@@ -66,6 +66,9 @@ export function installVisualViewportStub(
 ): InstalledVisualViewportStub {
   const stub = new VisualViewportStub();
   stub.apply(initial);
+  // `visualViewport` is an own configurable accessor on `window`; capture it
+  // so restore() can reinstate the native accessor instead of deleting it.
+  const originalDescriptor = Object.getOwnPropertyDescriptor(window, "visualViewport");
   Object.defineProperty(window, "visualViewport", {
     configurable: true,
     get: () => stub as unknown as VisualViewport,
@@ -89,7 +92,11 @@ export function installVisualViewportStub(
       stub.dispatchEvent(new Event("resize"));
     },
     restore: () => {
-      Reflect.deleteProperty(window, "visualViewport");
+      if (originalDescriptor) {
+        Object.defineProperty(window, "visualViewport", originalDescriptor);
+      } else {
+        Reflect.deleteProperty(window, "visualViewport");
+      }
     },
   };
 }
