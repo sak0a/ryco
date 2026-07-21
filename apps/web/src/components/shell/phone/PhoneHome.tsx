@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { ProjectId } from "@ryco/contracts";
 import {
@@ -48,7 +48,7 @@ import { formatRelativeTimeLabel } from "../../../timestampFormat";
 import { useUiStateStore } from "../../../uiStateStore";
 import { cn } from "~/lib/utils";
 import { useLongPress } from "~/hooks/useLongPress";
-import { useSettings } from "~/hooks/useSettings";
+import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import {
   orderItemsByPreferredIds,
   resolveSidebarNewThreadEnvMode,
@@ -64,6 +64,16 @@ import {
   type SidebarTreeThread,
   type SidebarTreeWorktree,
 } from "../../sidebar/hooks/useSidebarTree";
+import { useSidebarProjectActions } from "../../sidebar/hooks/useSidebarProjectActions";
+import { useSidebarProjectContextMenu } from "../../sidebar/hooks/useSidebarProjectContextMenu";
+import { useSidebarProjectGroupingDialog } from "../../sidebar/hooks/useSidebarProjectGroupingDialog";
+import { useSidebarProjectRenameDialog } from "../../sidebar/hooks/useSidebarProjectRenameDialog";
+import { useSidebarProjectSettingsDialog } from "../../sidebar/hooks/useSidebarProjectSettingsDialog";
+import { useThreadClipboardActions } from "../../sidebar/hooks/useThreadClipboardActions";
+import { ProjectExplorerDialog } from "../../projectExplorer/ProjectExplorerDialog";
+import { ProjectSettingsDialog } from "../../sidebar/ProjectSettingsDialog";
+import { SidebarProjectGroupingDialog } from "../../sidebar/SidebarProjectGroupingDialog";
+import { SidebarProjectRenameDialog } from "../../sidebar/SidebarProjectRenameDialog";
 import { HostedConnectionPill } from "../../hostedHub/HostedConnectionControls";
 import {
   ThreadRowLeadingStatus,
@@ -83,6 +93,11 @@ import {
 } from "../../ui/sheet";
 import { PhoneThreadActionsSheet, PhoneThreadRenameDialog } from "./PhoneThreadActionsSheet";
 import { usePhoneThreadActions } from "./usePhoneThreadActions";
+
+// Jira project links are resolved by the desktop explorer visibility
+// machinery; the phone project menu omits the "Open Jira project" entry
+// rather than porting that fetch pipeline.
+const EMPTY_JIRA_PROJECT_LINKS: ReadonlyMap<string, string> = new Map();
 
 /**
  * Phone Home ("Threads"): the first-class phone route at the logical root — a
@@ -448,6 +463,60 @@ function PhoneHomeProjectSection({
       ? treeProject.worktrees
       : null;
 
+  // Project-management actions (issue criterion: no right-click-only
+  // actions on phone): the header kebab and a header long-press present the
+  // EXISTING desktop project context-menu inventory through the shared
+  // action sheet, reusing the desktop dialogs and handlers unchanged.
+  const { updateSettings } = useUpdateSettings();
+  const projectGroupingSettings = useSettings((settings) => ({
+    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
+    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
+  }));
+  const { copyPathToClipboard } = useThreadClipboardActions();
+  const [explorerDialogOpen, setExplorerDialogOpen] = useState(false);
+  const settingsDialog = useSidebarProjectSettingsDialog();
+  const renameDialog = useSidebarProjectRenameDialog();
+  const groupingDialog = useSidebarProjectGroupingDialog({
+    projectGroupingSettings,
+    updateSettings,
+  });
+  const memberThreadCountByPhysicalKey = useMemo(() => {
+    const counts = new Map<string, number>(
+      project.memberProjects.map((member) => [member.physicalProjectKey, 0] as const),
+    );
+    for (const thread of threads) {
+      const member = memberProjectByScopedKey.get(
+        scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
+      );
+      if (!member) continue;
+      counts.set(member.physicalProjectKey, (counts.get(member.physicalProjectKey) ?? 0) + 1);
+    }
+    return counts;
+  }, [memberProjectByScopedKey, project.memberProjects, threads]);
+  const { openProjectRemoteLink, openProjectJiraLink, handleRemoveProject } =
+    useSidebarProjectActions({
+      memberThreadCountByPhysicalKey,
+      jiraProjectOpenUrlByProjectKey: EMPTY_JIRA_PROJECT_LINKS,
+    });
+  const suppressProjectClickForContextMenuRef = useRef(false);
+  const openProjectOverview = useCallback(() => {
+    setExplorerDialogOpen(true);
+  }, []);
+  const { openProjectMenu } = useSidebarProjectContextMenu({
+    project,
+    jiraProjectOpenUrlByProjectKey: EMPTY_JIRA_PROJECT_LINKS,
+    suppressProjectClickForContextMenuRef,
+    onOpenOverview: openProjectOverview,
+    openProjectSettingsDialog: settingsDialog.openProjectSettingsDialog,
+    openProjectRemoteLink,
+    openProjectJiraLink,
+    openProjectRenameDialog: renameDialog.openProjectRenameDialog,
+    openProjectGroupingDialog: groupingDialog.openProjectGroupingDialog,
+    copyPathToClipboard,
+    handleRemoveProject,
+  });
+  const projectLongPress = useLongPress((point) => openProjectMenu(point));
+
   const renderThreadRow = (thread: SidebarTreeThread) => {
     const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
     return (
@@ -470,20 +539,31 @@ function PhoneHomeProjectSection({
 
   return (
     <section aria-label={project.displayName} className={cn(nested && "pl-3")}>
-      <button
-        type="button"
-        className="flex min-h-11 w-full items-center gap-2 px-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring hover:bg-accent/40"
-        aria-expanded={expanded}
-        onClick={() => toggleProject(project.projectKey)}
-      >
-        {expanded ? (
-          <ChevronDownIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRightIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-        )}
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{project.displayName}</span>
-        <span className="shrink-0 text-xs text-muted-foreground">{sortedThreads.length}</span>
-      </button>
+      <div className="flex items-stretch">
+        <button
+          type="button"
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring hover:bg-accent/40"
+          aria-expanded={expanded}
+          onClick={() => toggleProject(project.projectKey)}
+          {...projectLongPress}
+        >
+          {expanded ? (
+            <ChevronDownIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRightIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+          )}
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{project.displayName}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">{sortedThreads.length}</span>
+        </button>
+        <button
+          type="button"
+          aria-label={`Project actions for ${project.displayName}`}
+          className="flex w-11 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          onClick={(event) => openProjectMenu({ x: event.clientX, y: event.clientY })}
+        >
+          <EllipsisVerticalIcon aria-hidden className="size-4" />
+        </button>
+      </div>
       {expanded ? (
         worktreeSections ? (
           <div className="pl-3">
@@ -527,6 +607,53 @@ function PhoneHomeProjectSection({
         setRenamingTitle={threadActions.setRenamingTitle}
         commitRename={threadActions.commitRename}
         cancelRename={threadActions.cancelRename}
+      />
+      {/* The desktop project dialogs, reused unchanged behind the phone
+          project menu. They render nothing while closed. */}
+      <ProjectExplorerDialog
+        open={explorerDialogOpen}
+        projectName={project.displayName}
+        memberProjects={project.memberProjects}
+        initialTab="overview"
+        onOpenChange={setExplorerDialogOpen}
+      />
+      <ProjectSettingsDialog
+        open={settingsDialog.projectSettingsOpen}
+        target={settingsDialog.projectSettingsTarget}
+        title={settingsDialog.projectSettingsTitle}
+        customAvatarContentHash={settingsDialog.projectSettingsCustomAvatarContentHash}
+        projectAvatarUploadUnavailableReason={settingsDialog.projectAvatarUploadUnavailableReason}
+        preferredRemoteName={settingsDialog.projectSettingsPreferredRemoteName}
+        workspaceRoot={settingsDialog.projectSettingsWorkspaceRoot}
+        customSystemPrompt={settingsDialog.projectSettingsCustomSystemPrompt}
+        defaultModelSelection={settingsDialog.projectSettingsDefaultModelSelection}
+        saving={settingsDialog.projectSettingsSaving}
+        onClose={settingsDialog.closeProjectSettingsDialog}
+        onSave={() => void settingsDialog.submitProjectSettings()}
+        onTitleChange={settingsDialog.setProjectSettingsTitle}
+        onWorkspaceRootChange={settingsDialog.setProjectSettingsWorkspaceRoot}
+        onCustomSystemPromptChange={settingsDialog.setProjectSettingsCustomSystemPrompt}
+        onDefaultModelSelectionChange={settingsDialog.setProjectSettingsDefaultModelSelection}
+        onPreferredRemoteChange={settingsDialog.setProjectSettingsPreferredRemoteName}
+        onPickWorkspaceRoot={() => void settingsDialog.pickProjectSettingsWorkspaceRoot()}
+        onOpenRemote={settingsDialog.openProjectRemoteByName}
+        onUploadAvatar={settingsDialog.uploadProjectAvatar}
+        onRemoveAvatar={settingsDialog.removeProjectAvatar}
+      />
+      <SidebarProjectRenameDialog
+        target={renameDialog.projectRenameTarget}
+        title={renameDialog.projectRenameTitle}
+        onTitleChange={renameDialog.setProjectRenameTitle}
+        onClose={renameDialog.closeProjectRenameDialog}
+        onSubmit={() => void renameDialog.submitProjectRename()}
+      />
+      <SidebarProjectGroupingDialog
+        target={groupingDialog.projectGroupingTarget}
+        selection={groupingDialog.projectGroupingSelection}
+        globalGroupingMode={projectGroupingSettings.sidebarProjectGroupingMode}
+        onSelectionChange={groupingDialog.setProjectGroupingSelection}
+        onClose={groupingDialog.closeProjectGroupingDialog}
+        onSave={groupingDialog.saveProjectGroupingPreference}
       />
     </section>
   );

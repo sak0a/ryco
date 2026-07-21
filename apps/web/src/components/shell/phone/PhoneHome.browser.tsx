@@ -30,6 +30,7 @@ vi.mock("../../../lib/gitStatusState", () => ({
   resetGitStatusStateForTests: () => undefined,
 }));
 
+import { __resetContextMenuSheetForTests } from "../../../contextMenuSheetState";
 import {
   __resetEnvironmentApiOverridesForTests,
   __setEnvironmentApiOverrideForTests,
@@ -40,6 +41,7 @@ import { useStore, type EnvironmentState } from "../../../store";
 import type { SidebarThreadSummary } from "../../../types";
 import { useUiStateStore } from "../../../uiStateStore";
 import { SidebarProvider } from "../../ui/sidebar";
+import { ContextMenuActionSheetHost } from "./ContextMenuActionSheetHost";
 import { PhoneHome } from "./PhoneHome";
 
 const ENV_ID = EnvironmentId.make("environment-local");
@@ -243,6 +245,7 @@ describe("PhoneHome", () => {
   });
 
   afterEach(async () => {
+    __resetContextMenuSheetForTests();
     await mounted?.unmount();
     mounted = null;
     __resetEnvironmentApiOverridesForTests();
@@ -433,6 +436,69 @@ describe("PhoneHome", () => {
     await expect.element(page.getByRole("button", { name: "Unpin thread" })).toBeVisible();
     // The long-press did not also navigate into the thread.
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("exposes the desktop project action inventory from the header kebab through the shared sheet", async () => {
+    const clipboardWriteText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardWriteText },
+    });
+
+    try {
+      mounted = await render(
+        <SidebarProvider>
+          <ContextMenuActionSheetHost />
+          <PhoneHome />
+        </SidebarProvider>,
+      );
+
+      const sheetRow = (label: string): HTMLButtonElement | null => {
+        const popup = document.querySelector<HTMLElement>('[data-slot="sheet-popup"]');
+        if (!popup) return null;
+        return (
+          [...popup.querySelectorAll<HTMLButtonElement>("button")].find(
+            (button) => button.textContent?.trim() === label,
+          ) ?? null
+        );
+      };
+
+      // The kebab presents the existing desktop project context-menu
+      // inventory through the shared bottom sheet.
+      await page.getByRole("button", { name: "Project actions for Alpha" }).click();
+      for (const label of [
+        "Project overview",
+        "Project settings",
+        "Rename project",
+        "Project grouping…",
+        "Copy Project Path",
+        "Remove project",
+      ]) {
+        await vi.waitFor(() => {
+          expect(sheetRow(label), `project menu row "${label}"`).not.toBeNull();
+        });
+        expect(sheetRow(label)!.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      }
+      expect(sheetRow("Remove project")!.className).toContain("text-destructive");
+
+      // Non-destructive round-trip through the shared clipboard handler.
+      sheetRow("Copy Project Path")!.click();
+      await vi.waitFor(() => {
+        expect(clipboardWriteText).toHaveBeenCalledWith("/repo/alpha");
+      });
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-slot="sheet-popup"]')).toBeNull();
+      });
+
+      // A long-press on the project header opens the same menu.
+      const header = page.getByRole("button", { name: /^Alpha 1$/ }).element() as HTMLButtonElement;
+      await dispatchLongPress(header);
+      await vi.waitFor(() => {
+        expect(sheetRow("Project overview")).not.toBeNull();
+      });
+    } finally {
+      delete (navigator as unknown as Record<string, unknown>)["clipboard"];
+    }
   });
 
   it("layers worktree sections into project groups with collapsed-by-default touch and keyboard rows", async () => {
