@@ -6,16 +6,20 @@ interface ComposerPendingApprovalPanelProps {
   pendingCount: number;
 }
 
+/** Bounded approval summary, shared with the approval card's live region. */
+export function pendingApprovalSummaryLabel(approval: PendingApproval): string {
+  return approval.requestKind === "command"
+    ? "Command approval requested"
+    : approval.requestKind === "file-read"
+      ? "File-read approval requested"
+      : "File-change approval requested";
+}
+
 export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprovalPanel({
   approval,
   pendingCount,
 }: ComposerPendingApprovalPanelProps) {
-  const approvalSummary =
-    approval.requestKind === "command"
-      ? "Command approval requested"
-      : approval.requestKind === "file-read"
-        ? "File-read approval requested"
-        : "File-change approval requested";
+  const approvalSummary = pendingApprovalSummaryLabel(approval);
 
   return (
     <div className="px-4 py-3.5 sm:px-5 sm:py-4">
