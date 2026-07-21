@@ -236,7 +236,7 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
       >
         <header className="flex items-center justify-between border-border/60 border-b py-3 pl-5 pr-14">
           <DialogTitle className="truncate text-base">{dialogTitle}</DialogTitle>
-          <span className="shrink-0 text-muted-foreground text-xs">
+          <span className="shrink-0 text-muted-foreground text-xs pointer-coarse:hidden">
             ⌘1 issues · ⌘2 PRs · ⌘3 Actions · ⌘4 Jira · / focus search · Esc close
           </span>
         </header>
