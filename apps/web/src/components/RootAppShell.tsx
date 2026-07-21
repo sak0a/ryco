@@ -6,6 +6,7 @@ import { useEffect, useEffectEvent, useRef } from "react";
 import { AppSidebarLayout } from "./AppSidebarLayout";
 import { CommandPalette } from "./CommandPalette";
 import { shouldApplyBootstrapThreadRedirect } from "./RootAppShell.logic";
+import { ContextMenuActionSheetHost } from "./shell/phone/ContextMenuActionSheetHost";
 import { SshPasswordPromptDialog } from "./desktop/SshPasswordPromptDialog";
 import { ProviderUpdateLaunchNotification } from "./ProviderUpdateLaunchNotification";
 import {
@@ -71,6 +72,7 @@ export function RootAppShell({ authGateState }: RootAppShellProps) {
         {localTracingAllowed ? <AuthenticatedTracingBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
         <EnvironmentConnectionManagerBootstrap />
+        <ContextMenuActionSheetHost />
         <SshPasswordPromptDialog />
         {authGateState.status === "hosted-static" ? <HostedStaticEnvironmentBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
