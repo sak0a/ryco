@@ -3,6 +3,19 @@
 Ryco keeps CI entrypoints small and routes shared checks through
 `.github/workflows/_validation.yml`.
 
+## Temporary self-hosted-only mode
+
+All Linux CI and PR-support jobs use the repository-scoped
+`[self-hosted, ryco-validation]` pool while GitHub-hosted capacity is
+unavailable. Browser, desktop, and release-smoke validation run on that pool
+too.
+
+Desktop release publishing still needs macOS and Windows runners. Until
+suitable private runners exist, `release.yml` fails at its private preflight
+and does not queue any hosted job. After hosted capacity returns, set the
+repository Actions variable `RYCO_ENABLE_HOSTED_RELEASES` to `true` to restore
+the existing release runner matrix.
+
 - `ci.yml` validates `main` and manual CI runs with the full suite.
 - `pull-request-validation.yml` is the single automatic source of truth for
   branches. It runs the validation suite for PR review; a `changes` preflight

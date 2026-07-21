@@ -24,7 +24,7 @@ jobs:
   # surfaces. Uses the PR file list via the API — no checkout, ~seconds.
   changes:
     name: Detect changes
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ryco-validation]
     timeout-minutes: 5
     outputs:
       web: ${{ steps.filter.outputs.web }}
