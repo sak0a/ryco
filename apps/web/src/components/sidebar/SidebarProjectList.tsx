@@ -275,7 +275,7 @@ const SidebarProjectFolderRow = memo(function SidebarProjectFolderRow(
       <SidebarMenuButton
         ref={props.isManualProjectSorting ? props.dragHandleProps?.setActivatorNodeRef : undefined}
         size="sm"
-        className={`gap-2 px-2 py-1.5 pr-9 max-md:pointer-coarse:pr-12 text-left hover:bg-accent group-hover/folder-row:bg-accent group-hover/folder-row:text-sidebar-accent-foreground ${
+        className={`gap-2 px-2 py-1.5 pr-9 phone:pointer-coarse:pr-12 text-left hover:bg-accent group-hover/folder-row:bg-accent group-hover/folder-row:text-sidebar-accent-foreground ${
           props.isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
         }`}
         {...(props.isManualProjectSorting && props.dragHandleProps
@@ -303,7 +303,7 @@ const SidebarProjectFolderRow = memo(function SidebarProjectFolderRow(
             render={
               <MenuTrigger
                 aria-label={`Open folder settings for ${props.folderName}`}
-                className={`pointer-events-none absolute top-1 right-1.5 max-md:pointer-coarse:top-1/2 max-md:pointer-coarse:-translate-y-1/2 max-md:pointer-coarse:right-1 inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-opacity duration-150 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring max-sm:pointer-events-auto max-sm:opacity-100 group-hover/folder-row:pointer-events-auto group-hover/folder-row:opacity-100 group-focus-within/folder-row:pointer-events-auto group-focus-within/folder-row:opacity-100 ${SIDEBAR_ROW_ACTION_COARSE_ANCHORED_CLASS_NAME}`}
+                className={`pointer-events-none absolute top-1 right-1.5 phone:pointer-coarse:top-1/2 phone:pointer-coarse:-translate-y-1/2 phone:pointer-coarse:right-1 inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-opacity duration-150 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring phone:pointer-events-auto phone:opacity-100 group-hover/folder-row:pointer-events-auto group-hover/folder-row:opacity-100 group-focus-within/folder-row:pointer-events-auto group-focus-within/folder-row:opacity-100 ${SIDEBAR_ROW_ACTION_COARSE_ANCHORED_CLASS_NAME}`}
               />
             }
           >
@@ -526,7 +526,7 @@ export const SidebarProjectsContent = memo(function SidebarProjectsContent(
             <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
               Projects
             </span>
-            <div className="flex items-center gap-1 max-md:pointer-coarse:gap-3">
+            <div className="flex items-center gap-1 phone:pointer-coarse:gap-3">
               <ProjectSortMenu
                 projectSortOrder={projectSortOrder}
                 threadSortOrder={threadSortOrder}

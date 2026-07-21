@@ -61,6 +61,10 @@ export type MediaQueryInput = {
   pointer?: "coarse" | "fine";
 };
 
+/**
+ * Cosmetic width/pointer media queries only. Phone/desktop presentation
+ * decisions must come from `usePresentationTier` instead of raw width.
+ */
 export function useMediaQuery(query: BreakpointQuery | MediaQueryInput | (string & {})): boolean {
   const mediaQuery = parseQuery(query);
 
@@ -80,8 +84,4 @@ export function useMediaQuery(query: BreakpointQuery | MediaQueryInput | (string
   }, [mediaQuery]);
 
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-}
-
-export function useIsMobile(): boolean {
-  return useMediaQuery("max-md");
 }

@@ -230,7 +230,7 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup
-        className="project-glass-surface flex h-[88vh] max-h-[1060px] w-[90vw] max-w-[1340px] flex-col p-0 max-sm:h-[100dvh] max-sm:w-screen"
+        className="project-glass-surface flex h-[88vh] max-h-[1060px] w-[90vw] max-w-[1340px] flex-col p-0 phone:h-[100dvh] phone:w-screen"
         onKeyDown={handleKeyDown}
         surface="glass"
       >

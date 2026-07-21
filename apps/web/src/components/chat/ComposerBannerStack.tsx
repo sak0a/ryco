@@ -216,7 +216,7 @@ function ComposerBannerStackAlert({
         <AlertAction
           className={
             dismissOnly
-              ? "max-sm:col-start-3 max-sm:row-start-1 max-sm:mt-0 max-sm:self-start"
+              ? "phone:col-start-3 phone:row-start-1 phone:mt-0 phone:self-start"
               : undefined
           }
         >

@@ -569,7 +569,10 @@ export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooter
       className={cn(
         "flex min-w-0 flex-nowrap items-center justify-between gap-1.5 overflow-visible px-2 pb-2 sm:px-2.5 sm:pb-2.5",
         props.isFooterCompact ? "gap-1.5" : "sm:gap-0",
-        props.hideOnMobilePendingAnswers && "hidden sm:flex",
+        // The flag is only set on the phone tier; the tier-keyed hide keeps
+        // the footer's primary actions from doubling the absolute mobile
+        // pending-answer overlay at >=640px phone-tier widths.
+        props.hideOnMobilePendingAnswers && "phone:hidden",
       )}
     >
       <div className="-m-0.5 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto p-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">

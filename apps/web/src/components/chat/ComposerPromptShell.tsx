@@ -265,7 +265,7 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
             !isComposerApprovalState && pendingUserInputCount === 0 ? composerTerminalContexts : []
           }
           skills={skills}
-          {...(showMobilePendingAnswerActions ? { className: "max-sm:pb-11" } : {})}
+          {...(showMobilePendingAnswerActions ? { className: "phone:pb-11" } : {})}
           onRemoveTerminalContext={onRemoveTerminalContext}
           onChange={onPromptChange}
           onCommandKeyDown={onComposerCommandKey}

@@ -523,10 +523,10 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
     <Toast.Portal data-slot="toast-portal">
       <Toast.Viewport
         className={cn(
-          // Below md (where the mobile chat header renders the session tab
-          // strip) the header offset also clears the tab strip; md and up
-          // keep the original desktop offset.
-          "fixed z-100 mx-auto flex w-[calc(100%-var(--toast-inset)*2)] max-w-90 max-md:[--toast-header-offset:76px] md:[--toast-header-offset:52px] [--toast-inset:--spacing(4)] sm:[--toast-inset:--spacing(8)]",
+          // On the phone tier (where the mobile chat header renders the
+          // session tab strip) the header offset also clears the tab strip;
+          // the desktop tier keeps the original offset.
+          "fixed z-100 mx-auto flex w-[calc(100%-var(--toast-inset)*2)] max-w-90 phone:[--toast-header-offset:76px] not-phone:[--toast-header-offset:52px] [--toast-inset:--spacing(4)] sm:[--toast-inset:--spacing(8)]",
           // Vertical positioning
           "data-[position*=top]:top-[calc(var(--toast-inset)+var(--toast-header-offset))]",
           "data-[position*=bottom]:bottom-(--toast-inset)",

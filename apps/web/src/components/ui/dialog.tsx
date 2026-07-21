@@ -65,11 +65,12 @@ function DialogPopup({
       <DialogViewport
         className={cn(
           surface === "glass" && "bg-transparent backdrop-blur-none dark:bg-transparent",
-          // Bottom-stuck mobile dialogs pad by the keyboard inset published by
-          // the visual-viewport adapter so their action rows stay above an
-          // open software keyboard; the variable is unset (0) otherwise.
+          // Bottom-stuck phone-tier dialogs pad by the keyboard inset
+          // published by the visual-viewport adapter so their action rows stay
+          // above an open software keyboard; the variable is unset (0)
+          // otherwise.
           bottomStickOnMobile &&
-            "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12 max-sm:pb-[var(--app-keyboard-inset,0px)]",
+            "phone:grid-rows-[1fr_auto] phone:p-0 phone:pt-12 phone:pb-[var(--app-keyboard-inset,0px)]",
         )}
       >
         <DialogPrimitive.Popup
@@ -79,7 +80,7 @@ function DialogPopup({
               ? "selection-glass-surface"
               : "app-surface not-dark:bg-clip-padding shadow-lg/5 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
             bottomStickOnMobile &&
-              "max-sm:max-w-none max-sm:rounded-none max-sm:border-x-0 max-sm:border-t max-sm:border-b-0 max-sm:opacity-[calc(1-min(var(--nested-dialogs),1))] max-sm:data-ending-style:translate-y-4 max-sm:data-starting-style:translate-y-4 max-sm:before:hidden max-sm:before:rounded-none",
+              "phone:max-w-none phone:rounded-none phone:border-x-0 phone:border-t phone:border-b-0 phone:opacity-[calc(1-min(var(--nested-dialogs),1))] phone:data-ending-style:translate-y-4 phone:data-starting-style:translate-y-4 phone:before:hidden phone:before:rounded-none",
             className,
           )}
           data-slot="dialog-popup"
