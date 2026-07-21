@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { ProjectId } from "@ryco/contracts";
 import {
@@ -13,6 +13,7 @@ import {
   ChevronRightIcon,
   EllipsisVerticalIcon,
   FolderIcon,
+  GitBranchIcon,
   PinIcon,
   PlusIcon,
   SearchIcon,
@@ -39,12 +40,14 @@ import {
   selectProjectsAcrossEnvironments,
   selectSidebarThreadsAcrossEnvironments,
   selectSidebarThreadsForProjectRefs,
+  selectSidebarWorktreesForProjectRefs,
   useStore,
   type AppState,
 } from "../../../store";
 import { formatRelativeTimeLabel } from "../../../timestampFormat";
 import { useUiStateStore } from "../../../uiStateStore";
 import { cn } from "~/lib/utils";
+import { useLongPress } from "~/hooks/useLongPress";
 import { useSettings } from "~/hooks/useSettings";
 import {
   orderItemsByPreferredIds,
@@ -52,10 +55,21 @@ import {
   sortProjectsForSidebar,
   sortThreadsWithPinned,
 } from "../../Sidebar.logic";
-import { createSidebarProjectDraftThreadsSelector } from "../../sidebar/sidebarTreeAdapters";
-import type { SidebarTreeThread } from "../../sidebar/hooks/useSidebarTree";
+import {
+  adaptProjectForSidebarTree,
+  createSidebarProjectDraftThreadsSelector,
+} from "../../sidebar/sidebarTreeAdapters";
+import {
+  useSidebarTree,
+  type SidebarTreeThread,
+  type SidebarTreeWorktree,
+} from "../../sidebar/hooks/useSidebarTree";
 import { HostedConnectionPill } from "../../hostedHub/HostedConnectionControls";
-import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "../../ThreadStatusIndicators";
+import {
+  ThreadRowLeadingStatus,
+  ThreadRowTrailingStatus,
+  ThreadStatusDetailLine,
+} from "../../ThreadStatusIndicators";
 import { Button } from "../../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../../ui/empty";
 import { SidebarInset } from "../../ui/sidebar";
@@ -401,6 +415,59 @@ function PhoneHomeProjectSection({
     ? (threadByKey.get(threadActions.renamingThreadKey) ?? null)
     : null;
 
+  // The same worktree tree the desktop sidebar composes (adapters unchanged):
+  // projects with more than one worktree layer their sessions into
+  // collapsed-by-default worktree sections; simple projects keep the flat
+  // list.
+  const worktreeSummaries = useStore(
+    useShallow(
+      useMemo(
+        () => (state: AppState) =>
+          selectSidebarWorktreesForProjectRefs(state, project.memberProjectRefs),
+        [project.memberProjectRefs],
+      ),
+    ),
+  );
+  const sidebarTreeInput = useMemo(
+    () =>
+      adaptProjectForSidebarTree({
+        project,
+        threads: sortedThreads,
+        worktrees: worktreeSummaries,
+      }),
+    [project, sortedThreads, worktreeSummaries],
+  );
+  const sidebarTree = useSidebarTree({
+    projects: [sidebarTreeInput.project],
+    threads: sidebarTreeInput.threads,
+    worktrees: sidebarTreeInput.worktrees,
+  });
+  const treeProject = sidebarTree.projects[0] ?? null;
+  const worktreeSections =
+    treeProject && treeProject.isGitRepo && treeProject.worktrees.length > 1
+      ? treeProject.worktrees
+      : null;
+
+  const renderThreadRow = (thread: SidebarTreeThread) => {
+    const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+    return (
+      <PhoneHomeThreadRow
+        key={threadKey}
+        thread={thread}
+        pinned={pinnedThreadKeys.has(threadKey)}
+        onOpen={() => {
+          const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+          if (thread.draftId) {
+            threadActions.navigateToDraft(thread.draftId, threadRef);
+            return;
+          }
+          threadActions.navigateToThread(threadRef);
+        }}
+        onMenu={() => setMenuThreadKey(threadKey)}
+      />
+    );
+  };
+
   return (
     <section aria-label={project.displayName} className={cn(nested && "pl-3")}>
       <button
@@ -418,31 +485,25 @@ function PhoneHomeProjectSection({
         <span className="shrink-0 text-xs text-muted-foreground">{sortedThreads.length}</span>
       </button>
       {expanded ? (
-        <div role="list" aria-label={`Threads in ${project.displayName}`}>
-          {sortedThreads.length === 0 ? (
-            <p className="px-3 pb-3 text-sm text-muted-foreground">No threads yet.</p>
-          ) : (
-            sortedThreads.map((thread) => {
-              const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-              return (
-                <PhoneHomeThreadRow
-                  key={threadKey}
-                  thread={thread}
-                  pinned={pinnedThreadKeys.has(threadKey)}
-                  onOpen={() => {
-                    const threadRef = scopeThreadRef(thread.environmentId, thread.id);
-                    if (thread.draftId) {
-                      threadActions.navigateToDraft(thread.draftId, threadRef);
-                      return;
-                    }
-                    threadActions.navigateToThread(threadRef);
-                  }}
-                  onMenu={() => setMenuThreadKey(threadKey)}
-                />
-              );
-            })
-          )}
-        </div>
+        worktreeSections ? (
+          <div className="pl-3">
+            {worktreeSections.map((worktreeNode) => (
+              <PhoneHomeWorktreeSection
+                key={worktreeNode.worktree.worktreeId}
+                worktreeNode={worktreeNode}
+                renderThreadRow={renderThreadRow}
+              />
+            ))}
+          </div>
+        ) : (
+          <div role="list" aria-label={`Threads in ${project.displayName}`}>
+            {sortedThreads.length === 0 ? (
+              <p className="px-3 pb-3 text-sm text-muted-foreground">No threads yet.</p>
+            ) : (
+              sortedThreads.map((thread) => renderThreadRow(thread))
+            )}
+          </div>
+        )
       ) : null}
       <PhoneThreadActionsSheet
         open={menuThread !== null}
@@ -451,6 +512,7 @@ function PhoneHomeProjectSection({
         }}
         title={menuThread?.title ?? "Thread"}
         items={menuThreadKey ? threadActions.listThreadMenuActions(menuThreadKey) : []}
+        leadingSections={menuThread ? <ThreadStatusDetailLine thread={menuThread} /> : undefined}
         onAction={(actionId) => {
           const threadRef = menuThreadKey ? parseScopedThreadKey(menuThreadKey) : null;
           setMenuThreadKey(null);
@@ -470,6 +532,61 @@ function PhoneHomeProjectSection({
   );
 }
 
+/**
+ * A worktree section inside a phone Home project group, mirroring the
+ * desktop sidebar's worktree rows: collapsed by default, expand/collapse by
+ * tap or keyboard, sessions listed inside in the shared tree order.
+ */
+function PhoneHomeWorktreeSection({
+  worktreeNode,
+  renderThreadRow,
+}: {
+  readonly worktreeNode: SidebarTreeWorktree;
+  readonly renderThreadRow: (thread: SidebarTreeThread) => ReactNode;
+}) {
+  const [collapsed, setCollapsed] = useState(true);
+  const title = worktreeNode.worktree.title ?? worktreeNode.worktree.branch;
+  return (
+    <section aria-label={title}>
+      <button
+        type="button"
+        aria-expanded={!collapsed}
+        className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm text-muted-foreground hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        onClick={() => setCollapsed((value) => !value)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            setCollapsed(true);
+            return;
+          }
+          if (event.key === "ArrowRight") {
+            event.preventDefault();
+            setCollapsed(false);
+          }
+        }}
+      >
+        {collapsed ? (
+          <ChevronRightIcon aria-hidden className="size-4 shrink-0" />
+        ) : (
+          <ChevronDownIcon aria-hidden className="size-4 shrink-0" />
+        )}
+        <GitBranchIcon aria-hidden className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <span className="shrink-0 text-xs">{worktreeNode.sessions.length}</span>
+      </button>
+      {collapsed ? null : (
+        <div role="list" aria-label={`Sessions in ${title}`}>
+          {worktreeNode.sessions.length === 0 ? (
+            <p className="px-3 pb-3 text-sm text-muted-foreground">No sessions yet.</p>
+          ) : (
+            worktreeNode.sessions.map((thread) => renderThreadRow(thread))
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function PhoneHomeThreadRow({
   thread,
   pinned,
@@ -483,12 +600,16 @@ function PhoneHomeThreadRow({
 }) {
   const timestamp =
     thread.latestTurn?.completedAt ?? thread.latestUserMessageAt ?? thread.createdAt;
+  // Long-press mirrors the kebab: it opens the same thread action sheet
+  // without hijacking scroll (a >10px drag cancels) or text selection.
+  const longPress = useLongPress(() => onMenu());
   return (
     <div role="listitem" className="flex items-stretch">
       <button
         type="button"
         className="flex min-h-11 min-w-0 flex-1 items-center gap-2 py-1 pl-3 text-left hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         onClick={onOpen}
+        {...longPress}
       >
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1 text-sm">
