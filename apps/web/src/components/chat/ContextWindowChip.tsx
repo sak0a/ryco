@@ -12,6 +12,8 @@ export interface ContextWindowChipProps {
   descriptor: SelectDescriptor;
   descriptors: ReadonlyArray<ProviderOptionDescriptor>;
   onChangeDescriptors: (next: ReadonlyArray<ProviderOptionDescriptor>) => void;
+  /** Gated by mutation capability at the call site. */
+  disabled?: boolean;
 }
 
 export const ContextWindowChip = memo(function ContextWindowChip(props: ContextWindowChipProps) {
@@ -24,6 +26,7 @@ export const ContextWindowChip = memo(function ContextWindowChip(props: ContextW
         render={
           <Button
             size="xs"
+            disabled={props.disabled ?? false}
             variant="ghost"
             aria-label={`Context window: ${label}`}
             title="Context window"

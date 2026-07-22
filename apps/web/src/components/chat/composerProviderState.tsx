@@ -45,6 +45,14 @@ type TraitsRenderInput = {
   modelOptions: ReadonlyArray<ProviderOptionSelection> | undefined;
   prompt: string;
   onPromptChange: (prompt: string) => void;
+  /**
+   * Renders both traits presentations disabled and blocks every option change.
+   * Threaded from the composer's read-only mutation capability so the traits
+   * gate matches the model pill and the session-policy control beside them.
+   */
+  disabled?: boolean;
+  /** Bounded, operator-facing reason. Never a raw error or payload. */
+  disabledReason?: string | null;
 };
 
 export function getComposerProviderState(input: ComposerProviderStateInput): ComposerProviderState {
@@ -86,6 +94,8 @@ export function renderProviderTraitsMenuContent(input: TraitsRenderInput): React
     modelOptions,
     prompt,
     onPromptChange,
+    disabled,
+    disabledReason,
   } = input;
   const hasTarget = threadRef !== undefined || draftId !== undefined;
   if (
@@ -96,6 +106,8 @@ export function renderProviderTraitsMenuContent(input: TraitsRenderInput): React
   }
   return (
     <TraitsMenuContent
+      disabled={disabled ?? false}
+      {...(disabledReason ? { disabledReason } : {})}
       provider={provider}
       {...(instanceId ? { instanceId } : {})}
       models={models}
@@ -120,6 +132,8 @@ export function renderProviderTraitsChips(input: TraitsRenderInput): ReactNode {
     modelOptions,
     prompt,
     onPromptChange,
+    disabled,
+    disabledReason,
   } = input;
   const hasTarget = threadRef !== undefined || draftId !== undefined;
   if (
@@ -130,6 +144,8 @@ export function renderProviderTraitsChips(input: TraitsRenderInput): ReactNode {
   }
   return (
     <TraitsChips
+      disabled={disabled ?? false}
+      {...(disabledReason ? { disabledReason } : {})}
       provider={provider}
       {...(instanceId ? { instanceId } : {})}
       models={models}

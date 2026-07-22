@@ -13,7 +13,7 @@ import type {
   ThreadId,
   TurnId,
 } from "@ryco/contracts";
-import { ProviderDriverKind, ProviderInstanceId } from "@ryco/contracts";
+import { ORCHESTRATION_WS_METHODS, ProviderDriverKind, ProviderInstanceId } from "@ryco/contracts";
 import { createModelSelection, normalizeModelSlug } from "@ryco/shared/model";
 import {
   forwardRef,
@@ -34,6 +34,7 @@ import {
   expandCollapsedComposerCursor,
   replaceTextRange,
 } from "../../composer-logic";
+import { useHostedRpcCapability } from "../../hostedHub/capabilities";
 import { serializeComposerMentionPath } from "../../composerMentionSyntax";
 import { readFileAsDataUrl } from "../ChatView.logic";
 import {
@@ -774,6 +775,16 @@ export const ChatComposer = memo(
       [composerDraftTarget, promptRef, scheduleComposerFocus, setComposerDraftPrompt],
     );
 
+    // The same read-only mutation capability the footer consumes. Traits are
+    // draft-local, so an ungated chip is an inconsistent gate rather than a
+    // privilege escape — but leaving it live beside a disabled model pill and a
+    // disabled policy control is exactly the retrofit this step exists to avoid.
+    const traitsMutationCapability = useHostedRpcCapability(
+      ORCHESTRATION_WS_METHODS.dispatchCommand,
+    );
+    const traitsDisabled = !traitsMutationCapability.allowed;
+    const traitsDisabledReason = traitsMutationCapability.reason;
+
     const providerTraitsMenuContent = renderProviderTraitsMenuContent({
       provider: selectedProvider,
       instanceId: selectedInstanceId,
@@ -784,6 +795,8 @@ export const ChatComposer = memo(
       modelOptions: composerModelOptions?.[selectedInstanceId],
       prompt,
       onPromptChange: setPromptFromTraits,
+      disabled: traitsDisabled,
+      disabledReason: traitsDisabledReason,
     });
     const providerTraitsChips = renderProviderTraitsChips({
       provider: selectedProvider,
@@ -795,6 +808,8 @@ export const ChatComposer = memo(
       modelOptions: composerModelOptions?.[selectedInstanceId],
       prompt,
       onPromptChange: setPromptFromTraits,
+      disabled: traitsDisabled,
+      disabledReason: traitsDisabledReason,
     });
     const pendingPrimaryAction = useMemo(
       () =>

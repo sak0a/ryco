@@ -12,6 +12,8 @@ export interface AgentChipProps {
   descriptor: AgentDescriptor;
   descriptors: ReadonlyArray<ProviderOptionDescriptor>;
   onChangeDescriptors: (next: ReadonlyArray<ProviderOptionDescriptor>) => void;
+  /** Gated by mutation capability at the call site. */
+  disabled?: boolean;
 }
 
 export const AgentChip = memo(function AgentChip(props: AgentChipProps) {
@@ -24,6 +26,7 @@ export const AgentChip = memo(function AgentChip(props: AgentChipProps) {
         render={
           <Button
             size="xs"
+            disabled={props.disabled ?? false}
             variant="ghost"
             aria-label={`Agent: ${label}`}
             title="Agent"

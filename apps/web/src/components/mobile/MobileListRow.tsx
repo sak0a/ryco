@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from "react";
 
+import { boundedDisabledReason } from "~/lib/boundedReason";
 import { cn } from "~/lib/utils";
 
 /**
@@ -12,16 +13,11 @@ import { cn } from "~/lib/utils";
  */
 
 /**
- * Disabled reasons are operator-facing text, so they are bounded here rather
- * than trusted to be short. Nothing longer is rendered or announced.
+ * Re-exported so the existing `components/mobile/` call sites keep one import,
+ * while the bound itself is shared with the traits controls and the model
+ * picker rather than copied per surface.
  */
-const MAX_DISABLED_REASON_LENGTH = 120;
-
-export function boundedDisabledReason(reason: string): string {
-  const collapsed = reason.replace(/\s+/gu, " ").trim();
-  if (collapsed.length <= MAX_DISABLED_REASON_LENGTH) return collapsed;
-  return `${collapsed.slice(0, MAX_DISABLED_REASON_LENGTH - 1)}…`;
-}
+export { boundedDisabledReason };
 
 export interface MobileListRowProps {
   readonly label: ReactNode;

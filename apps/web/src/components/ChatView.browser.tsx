@@ -7912,9 +7912,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
         await waitForLayout();
 
         const visibleHeight = viewport.height - keyboardInset;
-        // 18rem cap clamped by the visible height minus the 12.5rem composer
-        // allowance, floored at 4.5rem (see ComposerCommandMenu).
-        const expectedMaxHeight = Math.min(288, Math.max(72, visibleHeight - 200));
+        // 18rem cap clamped by the visible height minus the composer allowance,
+        // floored at 4.5rem (see ComposerCommandMenu). The phone tier's control
+        // row carries 44px touch targets instead of 28px `xs` controls, so it
+        // takes the 13.5rem allowance rather than 12.5rem.
+        const composerAllowance =
+          document.documentElement.getAttribute("data-tier") === "phone" ? 216 : 200;
+        const expectedMaxHeight = Math.min(288, Math.max(72, visibleHeight - composerAllowance));
         await vi.waitFor(() => {
           expect(getComputedStyle(menuList).maxHeight).toBe(`${expectedMaxHeight}px`);
           const menuRect = menuList.getBoundingClientRect();

@@ -79,6 +79,8 @@ export interface ReasoningChipProps {
   ultrathinkInBodyText: boolean;
   ultrathinkPromptControlled: boolean;
   onChangeDescriptors: (next: ReadonlyArray<ProviderOptionDescriptor>) => void;
+  /** Gated by mutation capability at the call site. */
+  disabled?: boolean;
   onPromptChange: (prompt: string) => void;
 }
 
@@ -126,6 +128,7 @@ export const ReasoningChip = memo(function ReasoningChip(props: ReasoningChipPro
         render={
           <Button
             size="xs"
+            disabled={props.disabled ?? false}
             variant="ghost"
             aria-label={`Reasoning: ${abbreviation}`}
             title={`Reasoning: ${abbreviation}`}

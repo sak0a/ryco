@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from "react";
 import {
   defaultInstanceIdForDriver,
   ProviderDriverKind,
+  WS_METHODS,
   type ProviderInstanceConfig,
   type ProviderInstanceId,
 } from "@ryco/contracts";
@@ -12,6 +13,7 @@ import { Equal } from "effect";
 
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
+import { useHostedRpcCapability } from "../../hostedHub/capabilities";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import {
   getCustomModelOptionsByInstance,
@@ -93,6 +95,12 @@ function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }
 export function ProvidersSettingsPanel() {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
+  // The read-only mutation capability again, not a connectivity probe: the
+  // text-generation model and its traits are settings writes, so they are
+  // gated by the settings-update method rather than by sensing the transport.
+  const settingsCapability = useHostedRpcCapability(WS_METHODS.serverUpdateSettings);
+  const settingsBlocked = !settingsCapability.allowed;
+  const settingsBlockedReason = settingsCapability.reason;
   const serverProviders = useServerProviders();
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
   const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false);
@@ -433,6 +441,8 @@ export function ProvidersSettingsPanel() {
                 modelOptionsByInstance={gitModelOptionsByInstance}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                disabled={settingsBlocked}
+                {...(settingsBlockedReason ? { disabledReason: settingsBlockedReason } : {})}
                 onInstanceModelChange={(instanceId, model) => {
                   updateSettings({
                     textGenerationModelSelection: resolveAppModelSelectionState(
@@ -461,6 +471,8 @@ export function ProvidersSettingsPanel() {
                 allowPromptInjectedEffort={false}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                disabled={settingsBlocked}
+                {...(settingsBlockedReason ? { disabledReason: settingsBlockedReason } : {})}
                 onModelOptionsChange={(nextOptions) => {
                   updateSettings({
                     textGenerationModelSelection: resolveAppModelSelectionState(

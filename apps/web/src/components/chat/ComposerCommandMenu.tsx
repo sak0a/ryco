@@ -168,8 +168,14 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
             smaller than the allowance (phone landscape with the keyboard
             open). Without a keyboard the variable is unset and the 9999px
             fallback never engages, preserving the historical 18rem cap on
-            every viewport. */}
-        <CommandList className="max-h-[clamp(4.5rem,calc(var(--app-visible-viewport-height,9999px)-12.5rem),18rem)]">
+            every viewport.
+
+            The phone tier takes a 1rem larger allowance: its composer control
+            row carries 44px touch targets rather than the 28px `xs` controls
+            the desktop row uses, so the region this menu anchors above is
+            exactly that much taller. Without it the menu keeps its height and
+            is pushed off the top of the visible viewport instead. */}
+        <CommandList className="max-h-[clamp(4.5rem,calc(var(--app-visible-viewport-height,9999px)-12.5rem),18rem)] phone:max-h-[clamp(4.5rem,calc(var(--app-visible-viewport-height,9999px)-13.5rem),18rem)]">
           {groups.map((group, groupIndex) => (
             <div key={group.id}>
               {groupIndex > 0 ? <CommandSeparator className="my-0.5" /> : null}

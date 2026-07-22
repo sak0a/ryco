@@ -29,6 +29,7 @@ import {
 import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { applyDescriptorSelection, replaceDescriptorCurrentValue } from "./traitsMenuLogic";
+import { boundedDisabledReason } from "~/lib/boundedReason";
 import { cn } from "~/lib/utils";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
@@ -182,6 +183,18 @@ export interface TraitsMenuContentProps {
   onPromptChange: (prompt: string) => void;
   modelOptions?: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
+  /**
+   * Renders the disabled presentation and blocks every option change. The
+   * traits-side equivalent of `ProviderModelPicker`'s `disabled`: call sites
+   * pass the read-only mutation capability's negation rather than sensing
+   * connectivity themselves.
+   */
+  disabled?: boolean;
+  /**
+   * Bounded, operator-facing reason shown when `disabled`. Never a raw error,
+   * identifier, ticket, or payload.
+   */
+  disabledReason?: string;
   triggerSize?: VariantProps<typeof buttonVariants>["size"];
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
@@ -196,6 +209,8 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   onPromptChange,
   modelOptions,
   allowPromptInjectedEffort = true,
+  disabled = false,
+  disabledReason,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
@@ -233,7 +248,11 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     modelOptions,
     allowPromptInjectedEffort,
   });
+  const boundedReason = disabled && disabledReason ? boundedDisabledReason(disabledReason) : null;
   const updateDescriptors = (nextDescriptors: ReadonlyArray<ProviderOptionDescriptor>) => {
+    // Fail closed: the items are already disabled, so this only matters if a
+    // change ever reaches here another way.
+    if (disabled) return;
     updateModelOptions(buildProviderOptionSelectionsFromDescriptors(nextDescriptors));
   };
 
@@ -241,6 +260,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>,
     value: string,
   ) => {
+    if (disabled) return;
     applyDescriptorSelection({
       descriptors,
       descriptor,
@@ -260,6 +280,14 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
 
   return (
     <>
+      {boundedReason ? (
+        <div
+          className="px-2 pt-1.5 pb-1 text-muted-foreground/80 text-xs"
+          data-slot="traits-disabled-reason"
+        >
+          {boundedReason}
+        </div>
+      ) : null}
       {selectDescriptors.map((descriptor, index) => (
         <div key={descriptor.id}>
           {index > 0 ? <MenuDivider /> : null}
@@ -285,7 +313,10 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
                 <MenuRadioItem
                   key={option.id}
                   value={option.id}
-                  disabled={ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id}
+                  disabled={
+                    disabled ||
+                    (ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id)
+                  }
                 >
                   {option.label}
                   {option.isDefault ? " (default)" : ""}
@@ -310,8 +341,12 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
                 );
               }}
             >
-              <MenuRadioItem value="on">On</MenuRadioItem>
-              <MenuRadioItem value="off">Off</MenuRadioItem>
+              <MenuRadioItem value="on" disabled={disabled}>
+                On
+              </MenuRadioItem>
+              <MenuRadioItem value="off" disabled={disabled}>
+                Off
+              </MenuRadioItem>
             </MenuRadioGroup>
           </MenuGroup>
         </div>
@@ -329,6 +364,8 @@ export const TraitsPicker = memo(function TraitsPicker({
   onPromptChange,
   modelOptions,
   allowPromptInjectedEffort = true,
+  disabled = false,
+  disabledReason,
   triggerSize,
   triggerVariant,
   triggerClassName,
@@ -380,6 +417,10 @@ export const TraitsPicker = memo(function TraitsPicker({
     <Menu
       open={isMenuOpen}
       onOpenChange={(open) => {
+        if (disabled) {
+          setIsMenuOpen(false);
+          return;
+        }
         setIsMenuOpen(open);
       }}
     >
@@ -388,6 +429,10 @@ export const TraitsPicker = memo(function TraitsPicker({
           <Button
             size={triggerSize ?? "sm"}
             variant={triggerVariant ?? "ghost"}
+            disabled={disabled}
+            {...(disabled && disabledReason
+              ? { title: boundedDisabledReason(disabledReason) }
+              : {})}
             className={cn(
               isCodexStyle
                 ? "min-w-0 max-w-40 shrink justify-start overflow-hidden whitespace-nowrap px-1.5 text-muted-foreground/70 hover:text-foreground/80 sm:max-w-44 sm:px-2 [&_svg]:mx-0"
@@ -419,6 +464,8 @@ export const TraitsPicker = memo(function TraitsPicker({
           onPromptChange={onPromptChange}
           modelOptions={modelOptions}
           allowPromptInjectedEffort={allowPromptInjectedEffort}
+          disabled={disabled}
+          {...(disabledReason ? { disabledReason } : {})}
           {...persistence}
         />
       </MenuPopup>

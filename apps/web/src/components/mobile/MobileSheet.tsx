@@ -70,6 +70,15 @@ export interface MobileSheetProps {
    * each time the sheet is dismissed.
    */
   readonly onDetentChange?: ((detent: MobileSheetDetent | null) => void) | undefined;
+  /**
+   * Controls the active detent. Omit it — the common case — and the sheet is
+   * uncontrolled: it opens at `detent` and the gesture owns it from there.
+   * Passing it lets a call site move the sheet itself, which the select sheet
+   * does when its search field takes focus and the keyboard needs somewhere to
+   * go. A controlled call site must mirror `onDetentChange` back into this
+   * prop, or a swipe will be reverted on the next render.
+   */
+  readonly activeDetent?: MobileSheetDetent | null | undefined;
   readonly className?: string | undefined;
   readonly children?: ReactNode | undefined;
 }
@@ -80,6 +89,7 @@ export function MobileSheet({
   label,
   detent = "large",
   onDetentChange,
+  activeDetent,
   className,
   children,
 }: MobileSheetProps) {
@@ -90,6 +100,9 @@ export function MobileSheet({
       swipeDirection="down"
       snapPoints={SNAP_POINTS}
       defaultSnapPoint={snapPointForDetent(detent)}
+      {...(activeDetent === undefined
+        ? {}
+        : { snapPoint: activeDetent === null ? null : snapPointForDetent(activeDetent) })}
       onSnapPointChange={(snapPoint) => onDetentChange?.(detentForSnapPoint(snapPoint))}
     >
       <Drawer.Portal>

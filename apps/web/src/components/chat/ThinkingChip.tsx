@@ -12,6 +12,8 @@ export interface ThinkingChipProps {
   descriptor: ThinkingDescriptor;
   descriptors: ReadonlyArray<ProviderOptionDescriptor>;
   onChangeDescriptors: (next: ReadonlyArray<ProviderOptionDescriptor>) => void;
+  /** Gated by mutation capability at the call site. */
+  disabled?: boolean;
 }
 
 export const ThinkingChip = memo(function ThinkingChip(props: ThinkingChipProps) {
@@ -19,6 +21,7 @@ export const ThinkingChip = memo(function ThinkingChip(props: ThinkingChipProps)
   return (
     <Button
       size="xs"
+      disabled={props.disabled ?? false}
       variant="ghost"
       aria-label="Thinking"
       aria-pressed={isOn}

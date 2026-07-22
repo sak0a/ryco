@@ -96,8 +96,15 @@ emulation the page reports `pointer: fine`, and every coarse-gated finding would
 ### Desktop-pattern leakage
 
 - The model picker renders a desktop combobox and listbox on phone: option rows measure **35 px**,
-  and **all eight `⌘1`–`⌘8` shortcut hints are rendered under `pointer: coarse`**, which the prior
-  design explicitly requires be hidden on coarse-pointer devices.
+  against the 44 px requirement.
+- **Correction to an earlier revision of this document.** It claimed all eight `⌘1`–`⌘8` shortcut
+  hints render under `pointer: coarse`. That was wrong. `ModelListRow.tsx:100` carries
+  `pointer-coarse:hidden` and it works — the hints remain in the DOM but are not rendered on a
+  coarse pointer. The original measurement was invalid because the browser-automation tool resets
+  CDP emulation on each interaction, so the reading was taken under `pointer: fine`, where showing
+  the hints is correct. The phone sheet renders no shortcut hints by construction, and asserts their
+  absence from the DOM rather than their visibility. Recorded because a measured claim that turns
+  out to be an artifact of the measuring instrument is worth more as a caution than as a deletion.
 - The picker's search input autofocuses on open (`ModelPickerContent.tsx:127-139`), raising the
   keyboard immediately over an already height-capped list.
 - The branch selector renders as a native-style combobox beneath the composer.
@@ -460,6 +467,26 @@ so icon-only cannot distinguish states without new glyphs.
 
 - ≥44 px effective touch targets for every phone control, measured as the composite of border box and
   any hit-slop, without changing desktop density.
+
+  **Measure this with a hit test, never with a bounding box.** `getBoundingClientRect()` cannot see
+  an `::after` hit-slop pseudo-element, so a bounding-box assertion passes against a control whose
+  slop is present but inert. Walk outward from the control's centre with `document.elementFromPoint`
+  until the hit stops resolving to it, as `ui/toggle.browser.tsx` does.
+
+  **Hit-slop is not reliable, because ancestors clip it.** The composer's model pill shipped as a
+  28 px target despite carrying slop: `overflow-hidden` on the trigger made the button the
+  containing block for its own absolutely positioned `::after` and clipped it to the border box, and
+  removing that clip only recovered 30 px because the control row is `overflow-x-auto`, which forces
+  the block axis to `auto` and clips whatever escapes. Two ancestors clipped it, so no slop-based fix
+  could reach 44. **Prefer sizing the real box** (`min-h-11 min-w-11`) on the phone tier, which
+  depends on no ancestor. The `overflow-hidden` plus `relative` combination is latent on every
+  `Button` call site that adds `overflow-hidden`; only the control this design owns has been
+  corrected, and an audit of the rest is follow-up work.
+
+  Sizing a control up changes the layout around it. The 44 px pill grew the phone composer control
+  row by 16 px and pushed the mention and command menu off-screen, because that menu reserves a fixed
+  composer allowance. Raising a touch target means re-checking whatever anchors against it.
+
 - Safe-area padding on every surface. `MobileSheet` and `MobileDock` apply it themselves rather than
   relying on call sites, correcting the current pattern where all six bottom-sheet call sites
   hand-roll `pb-safe`.
