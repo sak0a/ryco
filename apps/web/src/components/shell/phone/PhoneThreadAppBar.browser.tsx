@@ -1,8 +1,8 @@
-// Production CSS is part of the behavior under test: sheet row heights drive
-// the touch-target assertions.
+// Production CSS is part of the behavior under test: the phone tier variants
+// drive the app bar's density.
 import "../../../index.css";
 
-import { EnvironmentId, type ProjectId, type ThreadId } from "@ryco/contracts";
+import { EnvironmentId, type ThreadId } from "@ryco/contracts";
 import { page } from "vite-plus/test/browser";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
@@ -22,70 +22,16 @@ vi.mock("../../../lib/gitStatusState", () => ({
   resetGitStatusStateForTests: () => undefined,
 }));
 
-import { DraftId, useComposerDraftStore } from "../../../composerDraftStore";
 import { syncDocumentPresentationTier } from "../../../lib/presentationTier";
 import { SidebarProvider } from "../../ui/sidebar";
 import { PhoneThreadAppBar } from "./PhoneThreadAppBar";
 
 const ENV_ID = EnvironmentId.make("environment-local");
-const DRAFT_ID = DraftId.make("draft-1");
-const DRAFT_THREAD_ID = "thread-draft-1" as ThreadId;
-const PROJECT_ID = "project-a" as ProjectId;
-const NOW_ISO = "2026-07-20T00:00:00.000Z";
-
-function seedDraft() {
-  useComposerDraftStore.setState({
-    draftThreadsByThreadKey: {
-      [DRAFT_ID]: {
-        threadId: DRAFT_THREAD_ID,
-        environmentId: ENV_ID,
-        projectId: PROJECT_ID,
-        logicalProjectKey: `${ENV_ID}:${PROJECT_ID}`,
-        createdAt: NOW_ISO,
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        branch: null,
-        worktreePath: null,
-        envMode: "local",
-      },
-    },
-  });
-}
-
-function sheetRow(label: string): HTMLButtonElement | null {
-  const popup = document.querySelector<HTMLElement>('[data-slot="sheet-popup"]');
-  if (!popup) return null;
-  return (
-    [...popup.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent?.trim() === label,
-    ) ?? null
-  );
-}
-
-function renderAppBar(onOpenFindInThread: () => void) {
-  return render(
-    <SidebarProvider>
-      <PhoneThreadAppBar
-        environmentId={ENV_ID}
-        threadId={DRAFT_THREAD_ID}
-        title="Empty Session"
-        projectCwd="/repo/alpha"
-        draft={{ draftId: DRAFT_ID, projectId: PROJECT_ID, createdAt: NOW_ISO }}
-        workspacePanelOpen={false}
-        onToggleWorkspacePanel={() => {}}
-        onOpenFindInThread={onOpenFindInThread}
-        onOpenSourceControl={null}
-        sessionTabs={[]}
-        activeSessionTabKey={null}
-        onSelectSessionTab={null}
-      />
-    </SidebarProvider>,
-  );
-}
+const THREAD_ID = "thread-draft-1" as ThreadId;
 
 let mounted: Awaited<ReturnType<typeof render>> | null = null;
 
-describe("PhoneThreadAppBar (draft thread)", () => {
+describe("PhoneThreadAppBar", () => {
   beforeAll(() => {
     syncDocumentPresentationTier();
   });
@@ -94,54 +40,37 @@ describe("PhoneThreadAppBar (draft thread)", () => {
     await page.viewport(390, 844);
     localStorage.clear();
     navigate.mockClear();
-    seedDraft();
   });
 
   afterEach(async () => {
     await mounted?.unmount();
     mounted = null;
-    useComposerDraftStore.setState({ draftThreadsByThreadKey: {} });
     vi.restoreAllMocks();
     document.body.innerHTML = "";
     await page.viewport(1_280, 720);
   });
 
-  it("exposes Close session for drafts in the kebab sheet and clears the draft through the shared dispatcher", async () => {
-    mounted = await renderAppBar(() => {});
+  it("reduces to back, title, and the connection indicator", async () => {
+    mounted = await render(
+      <SidebarProvider>
+        <PhoneThreadAppBar environmentId={ENV_ID} threadId={THREAD_ID} title="Empty Session" />
+      </SidebarProvider>,
+    );
 
-    await page.getByRole("button", { name: "Thread actions" }).click();
-    const closeRow = await vi.waitFor(() => {
-      const row = sheetRow("Close session");
-      expect(row).not.toBeNull();
-      return row!;
-    });
-    expect(closeRow.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
-    // The draft inventory is exactly the shared draft inventory: no
-    // rename/pin/archive entries for a session that only exists locally, and
-    // no source-control entry — a draft has no turns or checkpoints, so the
-    // overview surface would only render empty states.
-    expect(sheetRow("Rename thread")).toBeNull();
-    expect(sheetRow("Archive session")).toBeNull();
-    expect(sheetRow("Source control")).toBeNull();
+    await expect.element(page.getByRole("button", { name: "Back to threads" })).toBeVisible();
+    await expect.element(page.getByText("Empty Session")).toBeVisible();
 
-    closeRow.click();
-    await vi.waitFor(() => {
-      expect(useComposerDraftStore.getState().draftThreadsByThreadKey[DRAFT_ID]).toBeUndefined();
-    });
-  });
+    // The two controls the audit found in the top-right corner are gone from
+    // the bar. They live in `PhoneThreadDock` at the bottom of the screen now,
+    // which is what `PhoneThreadDock.browser.tsx` asserts.
+    expect(document.querySelector('button[aria-label="Toggle workspace panel"]')).toBeNull();
+    expect(document.querySelector('button[aria-label="Thread actions"]')).toBeNull();
 
-  it("keeps find-in-thread reachable from the kebab sheet", async () => {
-    const onOpenFindInThread = vi.fn();
-    mounted = await renderAppBar(onOpenFindInThread);
-
-    await page.getByRole("button", { name: "Thread actions" }).click();
-    const findRow = await vi.waitFor(() => {
-      const row = sheetRow("Find in thread");
-      expect(row).not.toBeNull();
-      return row!;
-    });
-    expect(findRow.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
-    findRow.click();
-    expect(onOpenFindInThread).toHaveBeenCalledTimes(1);
+    // Back is top-anchored chrome by design, and stays a 44px target.
+    const back = page.getByRole("button", { name: "Back to threads" }).element() as HTMLElement;
+    const rect = back.getBoundingClientRect();
+    expect(Math.min(rect.width, rect.height)).toBeGreaterThan(0);
+    back.click();
+    expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ to: "/" }));
   });
 });

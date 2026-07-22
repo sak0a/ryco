@@ -14,6 +14,7 @@ export const APPEARANCE_PREFERENCE_KEYS = [
   "surfaceTransparency",
   "panelLayout",
   "motion",
+  "dockDensity",
 ] as const;
 
 export type AppearancePreferenceKey = (typeof APPEARANCE_PREFERENCE_KEYS)[number];
@@ -146,6 +147,20 @@ export const PHONE_DEFAULT_SURFACE_TRANSPARENCY = "medium";
  */
 export const SOLID_SURFACE_TRANSPARENCY = "default";
 
+/**
+ * The phone dock's density. One key, two explicit choices, honoured exactly —
+ * there is deliberately no second scale and no automatic derivation from the
+ * type size.
+ *
+ * Compact reduces the capsule's padding only. The 44 px control floor is a
+ * fixed pixel minimum in `MobileDock`, so neither density can shrink a touch
+ * target; that is asserted in `MobileDock.browser.tsx` at both densities.
+ */
+export const DOCK_DENSITY_OPTIONS = [
+  { value: "comfortable", label: "Comfortable", description: "Roomier capsule" },
+  { value: "compact", label: "Compact", description: "Tighter capsule" },
+] as const satisfies ReadonlyArray<AppearancePreferenceOption>;
+
 export const MOTION_OPTIONS = [
   { value: "system", label: "System", description: "Follow OS" },
   { value: "reduce", label: "Reduced", description: "Minimal" },
@@ -184,6 +199,7 @@ export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
   surfaceTransparency: "default",
   panelLayout: PANEL_LAYOUT_OPTIONS[0].value,
   motion: MOTION_OPTIONS[0].value,
+  dockDensity: DOCK_DENSITY_OPTIONS[0].value,
 };
 
 const RADIUS_TOKEN_OFFSETS_PX = {
@@ -206,6 +222,7 @@ const OPTION_VALUES: Record<AppearancePreferenceKey, ReadonlySet<string>> = {
   surfaceTransparency: new Set(SURFACE_TRANSPARENCY_OPTIONS.map((option) => option.value)),
   panelLayout: new Set(PANEL_LAYOUT_OPTIONS.map((option) => option.value)),
   motion: new Set(MOTION_OPTIONS.map((option) => option.value)),
+  dockDensity: new Set(DOCK_DENSITY_OPTIONS.map((option) => option.value)),
 };
 
 /**
@@ -359,7 +376,7 @@ export function applyAppearancePreferencesToDocument(): void {
   if (typeof document === "undefined" || typeof document.getElementById !== "function") return;
   const preferences = getEffectiveAppearancePreferences();
   const style = ensureAppearancePreferencesStyleElement();
-  style.textContent = `:root { --font-family-sans: ${preferences.fontFamilySans}; --font-family-mono: ${preferences.fontFamilyMono}; --font-size-base: ${preferences.fontSizeBase}; ${buildRadiusCssVariables(preferences.radius)} ${buildSurfaceTransparencyCssVariables(preferences.surfaceTransparency)} ${buildMotionCssVariables(isReducedMotionEffective())} }${buildPrimaryColorCssRule(preferences)}`;
+  style.textContent = `:root { --font-family-sans: ${preferences.fontFamilySans}; --font-family-mono: ${preferences.fontFamilyMono}; --font-size-base: ${preferences.fontSizeBase}; ${buildRadiusCssVariables(preferences.radius)} ${buildSurfaceTransparencyCssVariables(preferences.surfaceTransparency)} ${buildMotionCssVariables(isReducedMotionEffective())} ${buildDockDensityCssVariables(preferences.dockDensity)} }${buildPrimaryColorCssRule(preferences)}`;
   dispatchAppearancePreferencesChangeEvent();
 }
 
@@ -441,16 +458,24 @@ function formatRemLength(rem: number): string {
  * sits in the elevation model; the active Material step decides *how* that tier
  * guarantees contrast.
  *
- * `dock` is deliberately absent: it ships with its consumer.
+ * `dock` ships with its consumer, the floating dock capsule.
  */
-export const GLASS_SURFACE_TIERS = ["sheet", "chip"] as const;
+export const GLASS_SURFACE_TIERS = ["sheet", "chip", "dock"] as const;
 export type GlassSurfaceTier = (typeof GLASS_SURFACE_TIERS)[number];
 
 /** Backdrop blur radius in px per unit of transparency, so `Solid` blurs by 0. */
-const GLASS_TIER_BLUR_SCALE: Record<GlassSurfaceTier, number> = { sheet: 100, chip: 50 };
+const GLASS_TIER_BLUR_SCALE: Record<GlassSurfaceTier, number> = {
+  sheet: 100,
+  chip: 50,
+  dock: 75,
+};
 
 /** Backdrop saturation boost in percentage points per unit of transparency. */
-const GLASS_TIER_SATURATION_SCALE: Record<GlassSurfaceTier, number> = { sheet: 150, chip: 115 };
+const GLASS_TIER_SATURATION_SCALE: Record<GlassSurfaceTier, number> = {
+  sheet: 150,
+  chip: 115,
+  dock: 130,
+};
 
 /**
  * Minimum **composited** background coverage, in percent, that a tier must
@@ -472,10 +497,19 @@ const GLASS_TIER_SATURATION_SCALE: Record<GlassSurfaceTier, number> = { sheet: 1
  *   binds harder (88 %) because `--muted-foreground` is enforced at 4.5:1
  *   there, while in dark it is exempt to 3:1 (82 %) — see the exemption rule in
  *   `GlassSurface.browser.tsx`.
+ * - `dock` is the floating capsule, whose only text is its action labels at the
+ *   inherited `--foreground` — no secondary, destructive, or presence colour is
+ *   reachable inside it, so `--foreground` at 4.5:1 is the binding role in both
+ *   schemes. Derived against the same worst-case backdrops that gives 34 %
+ *   light and 43 % dark, both far **below** every Material step's own coverage
+ *   (Glass is 72 %), so on the shipped scale the step binds and the floor never
+ *   does. It is still recorded and asserted: it is what stops a future step, or
+ *   a future palette, from taking the dock below AA.
  */
 const GLASS_TIER_COVERAGE_FLOORS: Record<GlassSurfaceTier, { light: number; dark: number }> = {
   sheet: { light: 90, dark: 96 },
   chip: { light: 88, dark: 82 },
+  dock: { light: 34, dark: 43 },
 };
 
 /**
@@ -580,6 +614,20 @@ function buildMotionCssVariables(reducedMotion: boolean): string {
   ]
     .map(([name, value]) => `${name}: ${value};`)
     .join(" ");
+}
+
+/**
+ * The dock capsule's padding, in px so it is independent of the type scale.
+ * Only the padding moves between densities: `MobileDock` pins every control to
+ * a 44 px minimum in px as well, so no density and no text size can shrink a
+ * touch target. `index.css` derives `.app-dock-scroll-clearance` from this same
+ * variable, so a surface's bottom scroll padding always clears the real dock.
+ */
+const DOCK_DENSITY_PADDING_PX: Record<string, number> = { comfortable: 8, compact: 4 };
+
+function buildDockDensityCssVariables(dockDensity: string): string {
+  const padding = DOCK_DENSITY_PADDING_PX[dockDensity] ?? DOCK_DENSITY_PADDING_PX["comfortable"]!;
+  return `--app-dock-padding: ${padding}px;`;
 }
 
 /** Generate CSS rule for custom primary color, including the computed foreground color for contrast. */

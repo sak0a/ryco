@@ -6675,25 +6675,37 @@ describe("ChatView timeline estimator parity (full app)", () => {
         () => document.querySelector<HTMLElement>('button[aria-label="Back to threads"]'),
         "Unable to find the phone app bar back affordance.",
       );
-      await waitForElement(
+      // The thread-actions overflow left the app bar's top-right corner for
+      // the dock row above the composer.
+      const threadActions = await waitForElement(
         () => document.querySelector<HTMLElement>('button[aria-label="Thread actions"]'),
-        "Unable to find the phone app bar kebab.",
+        "Unable to find the thread-actions overflow.",
       );
       expect(document.querySelector('[data-slot="sidebar-container"]')).toBeNull();
       expect(document.querySelector('[data-slot="sidebar"][data-mobile="true"]')).toBeNull();
+      expect(
+        threadActions.closest('[data-slot="phone-thread-dock"]'),
+        "the thread-actions overflow is still in the app bar",
+      ).not.toBeNull();
+      expect(threadActions.getBoundingClientRect().top).toBeGreaterThan(
+        backButton.getBoundingClientRect().bottom,
+      );
 
       await withCoarsePointer(async () => {
-        // App bar controls expand to 44px hit areas on coarse pointers.
-        for (const selector of [
-          'button[aria-label="Back to threads"]',
-          'button[aria-label="Thread actions"]',
-        ]) {
-          const control = document.querySelector<HTMLElement>(selector)!;
-          const hitArea = getComputedStyle(control, "::after");
-          expect(hitArea.position).toBe("absolute");
-          expect(parseFloat(hitArea.width)).toBeGreaterThanOrEqual(44);
-          expect(parseFloat(hitArea.height)).toBeGreaterThanOrEqual(44);
-        }
+        // Back keeps the shared button's coarse-pointer hit-area expansion; the
+        // dock's overflow meets the floor with its own border box instead, so
+        // each is measured the way it actually resolves.
+        const back = document.querySelector<HTMLElement>('button[aria-label="Back to threads"]')!;
+        const backHitArea = getComputedStyle(back, "::after");
+        expect(backHitArea.position).toBe("absolute");
+        expect(parseFloat(backHitArea.width)).toBeGreaterThanOrEqual(44);
+        expect(parseFloat(backHitArea.height)).toBeGreaterThanOrEqual(44);
+
+        const overflowRect = document
+          .querySelector<HTMLElement>('button[aria-label="Thread actions"]')!
+          .getBoundingClientRect();
+        expect(overflowRect.width).toBeGreaterThanOrEqual(44);
+        expect(overflowRect.height).toBeGreaterThanOrEqual(44);
       });
 
       // Back navigates the URL-driven stack to Home (the thread list).
@@ -8411,7 +8423,159 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("opens the overview surface from the thread kebab's Source control entry", async () => {
+  /**
+   * The reachability assertion measured on the REAL phone thread surface, not
+   * on a replica: `mountChatView` renders the router, so the column comes
+   * through `ChatThreadRouteView` → `SidebarInset` exactly as production does.
+   *
+   * The enumerated set is every control the dock row actually renders — the
+   * workspace toggle, the thread-actions overflow, and every context-strip
+   * pill — read out of the DOM rather than listed, so it cannot be quietly
+   * narrowed and it covers whatever the real surface puts there. The two
+   * named controls are additionally asserted present so the set can never
+   * become empty and pass vacuously.
+   */
+  async function expectThreadDockInBottomThird(viewport: ViewportSpec): Promise<void> {
+    const dock = await waitForElement(
+      () => document.querySelector<HTMLElement>('[data-slot="phone-thread-dock"]'),
+      "Unable to find the phone thread dock.",
+    );
+    await waitForLayout();
+
+    // The column is viewport-wide, so the horizontal assertions below are not
+    // vacuous. A content-sized column would make them meaningless.
+    const column = dock.closest('[data-slot="sidebar-inset"]') as HTMLElement | null;
+    expect(column, "the dock is not inside the route's SidebarInset column").not.toBeNull();
+    expect(column!.getBoundingClientRect().width).toBeGreaterThanOrEqual(viewport.width - 0.5);
+
+    const controls = [
+      ...dock.querySelectorAll<HTMLElement>(
+        'button[aria-label], [data-slot="mobile-context-strip-pill"]',
+      ),
+    ];
+    for (const label of ["Toggle workspace panel", "Thread actions"]) {
+      expect(
+        controls.some((control) => control.getAttribute("aria-label") === label),
+        `the dock no longer renders "${label}"`,
+      ).toBe(true);
+    }
+    expect(controls.length).toBeGreaterThanOrEqual(3);
+
+    const twoThirds = (viewport.height * 2) / 3;
+    for (const control of controls) {
+      control.scrollIntoView({ block: "nearest", inline: "nearest" });
+      const rect = control.getBoundingClientRect();
+      const name = control.getAttribute("aria-label") ?? control.textContent?.trim();
+      const where = `"${name}" at ${viewport.width}x${viewport.height}`;
+      expect(rect.top + rect.height / 2, `${where}: centre above the bottom third`).toBeGreaterThan(
+        twoThirds,
+      );
+      expect(rect.width, `${where}: width`).toBeGreaterThanOrEqual(44);
+      expect(rect.height, `${where}: height`).toBeGreaterThanOrEqual(44);
+      expect(rect.left, `${where}: off-screen left`).toBeGreaterThanOrEqual(-0.5);
+      expect(rect.right, `${where}: off-screen right`).toBeLessThanOrEqual(viewport.width + 0.5);
+    }
+
+    // The app bar's top-right corner holds none of them, hit-tested over the
+    // region rather than derived from the centres above.
+    for (let column2 = 0; column2 <= 10; column2 += 1) {
+      for (let row = 0; row <= 10; row += 1) {
+        const x = viewport.width / 2 + ((viewport.width / 2 - 1) * column2) / 10;
+        const y = (((viewport.height / 3) * row) / 10) | 0;
+        const hit = document.elementFromPoint(x, y);
+        const owner = controls.find((control) => hit !== null && control.contains(hit));
+        expect(
+          owner === undefined,
+          `a dock control answers the top-right corner at (${Math.round(x)}, ${y})`,
+        ).toBe(true);
+      }
+    }
+
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(viewport.width);
+  }
+
+  for (const viewport of [PHONE_VIEWPORT, NARROW_PHONE_VIEWPORT]) {
+    it(`keeps every thread dock control in the bottom third at ${viewport.width}x${viewport.height}`, async () => {
+      const mounted = await mountChatView({
+        viewport,
+        snapshot: createSnapshotForTargetUser({
+          targetMessageId: `msg-user-reach-${viewport.name}` as MessageId,
+          targetText: `reachability ${viewport.name} thread`,
+        }),
+      });
+
+      try {
+        await withCoarsePointer(async () => {
+          await expectThreadDockInBottomThird(viewport);
+        });
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
+    // KNOWN DEFECT, pinned rather than papered over. The assertion below is the
+    // same full-strength one the two passing tests above use; `it.fails` records
+    // that the product does not currently satisfy it while a pending approval is
+    // open, so the gate stays honest and the defect cannot be forgotten. Fixing
+    // the product makes this test fail (because it passes) and forces the
+    // annotation to be removed.
+    //
+    // Cause: `ApprovalCard` and `ComposerPendingUserInputPanel` render INSIDE
+    // `ChatComposer` (above the prompt editor), i.e. BELOW the dock row, so an
+    // open approval grows the composer upward and carries the dock with it.
+    // Measured centres of the dock's controls against the two-thirds line:
+    //   390x844 — y=305 against 562.7
+    //   320x568 — y=75  against 378.7 (back in the TOP third)
+    // It is still an improvement on the audited baseline, where these two
+    // controls sat at y=8-26 in the app bar in every state — but it does not
+    // clear the bar in this one. The fix is to render the dock row beneath the
+    // approval/pending panels instead of above the whole composer form, which
+    // means moving it inside `ChatComposer` and is deliberately not attempted
+    // here: that is the exact container whose focus handling the first-tap
+    // composer fix depends on.
+    it.fails(`keeps every thread dock control in the bottom third with an approval open at ${viewport.width}x${viewport.height}`, async () => {
+      const mounted = await mountChatView({
+        viewport,
+        snapshot: createSnapshotWithPendingApproval(),
+      });
+
+      try {
+        await waitForElement(
+          () => document.querySelector<HTMLElement>('[data-testid="pending-approval-detail"]'),
+          "Unable to find the pending approval detail block.",
+        );
+        await withCoarsePointer(async () => {
+          await expectThreadDockInBottomThird(viewport);
+        });
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+  }
+
+  it("mounts no phone thread dock on the desktop tier", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-desktop-no-dock" as MessageId,
+        targetText: "desktop no dock thread",
+      }),
+    });
+
+    try {
+      await waitForLayout();
+      expect(document.documentElement.getAttribute("data-tier")).toBe("desktop");
+      // The real desktop path: the dock, its strip, and the two controls it
+      // owns are absent, and the desktop header keeps them instead.
+      expect(document.querySelector('[data-slot="phone-thread-dock"]')).toBeNull();
+      expect(document.querySelector('[data-slot="mobile-context-strip"]')).toBeNull();
+      expect(document.querySelector('[data-slot="mobile-dock"]')).toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens the overview surface from the thread dock's Source control pill", async () => {
     const mounted = await mountChatView({
       viewport: PHONE_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
@@ -8421,16 +8585,22 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      await page.getByRole("button", { name: "Thread actions" }).click();
-      const sourceControlRow = await waitForElement(
+      // Source control is a context-strip pill on the dock row now, not an
+      // entry buried one level down inside the overflow sheet.
+      const sourceControlPill = await waitForElement(
         () =>
           [
-            ...document.querySelectorAll<HTMLButtonElement>('[data-slot="sheet-popup"] button'),
-          ].find((button) => button.textContent?.trim() === "Source control") ?? null,
-        "Unable to find the Source control kebab entry.",
+            ...document.querySelectorAll<HTMLButtonElement>(
+              '[data-slot="phone-thread-dock"] [data-slot="mobile-context-strip-pill"]',
+            ),
+          ].find((pill) => pill.textContent?.startsWith("Source control")) ?? null,
+        "Unable to find the Source control pill.",
       );
-      expect(sourceControlRow.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
-      sourceControlRow.click();
+      const pillRect = sourceControlPill.getBoundingClientRect();
+      expect(pillRect.height).toBeGreaterThanOrEqual(44);
+      expect(pillRect.width).toBeGreaterThanOrEqual(44);
+      sourceControlPill.scrollIntoView({ block: "nearest", inline: "nearest" });
+      sourceControlPill.click();
 
       const popup = await waitForElement(
         () => queryPhoneSurfacePopup("Overview"),

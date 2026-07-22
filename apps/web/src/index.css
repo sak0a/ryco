@@ -278,6 +278,37 @@
   --app-glass-chip-light-scrim-alpha: 0%;
   --app-glass-chip-dark-alpha: 100%;
   --app-glass-chip-dark-scrim-alpha: 0%;
+  --app-glass-dock-filter: none;
+  --app-glass-dock-light-alpha: 100%;
+  --app-glass-dock-light-scrim-alpha: 0%;
+  --app-glass-dock-dark-alpha: 100%;
+  --app-glass-dock-dark-scrim-alpha: 0%;
+  /* The phone dock's geometry. `--app-dock-padding` is the Dock density
+     preference's only output (`themes/appearancePreferences.ts` rewrites it);
+     this is the pre-script Comfortable value.
+
+     `--app-dock-inset` is the gap between the capsule and the bottom of the
+     layout viewport. It takes the LARGER of the keyboard inset and the bottom
+     safe area, never their sum, because `--app-keyboard-inset` is measured as
+     layout-viewport overlap and therefore already spans the home indicator.
+     Summing them floats the dock a full safe area too high whenever the
+     keyboard is open, and over-pads `.app-dock-scroll-clearance` by the same
+     amount. This is the same `max()` every other bottom-anchored surface uses
+     (the composer's input bar, `MobileSheet`, the command palette, the phone
+     work surfaces), which is what "rides the keyboard exactly as the composer
+     does" has to mean.
+
+     The safe area travels through its own variable so a test can substitute a
+     real device inset; emulation reports zero, under which the sum and the
+     max() are indistinguishable. */
+  --app-dock-padding: 8px;
+  --app-dock-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --app-dock-inset: calc(
+    max(var(--app-keyboard-inset, 0px), max(var(--app-dock-safe-area-bottom, 0px), 0px)) + 1rem
+  );
+  /* The 44 px touch-target floor the dock pins its controls to, in px so no
+     type scale and no density can shrink it. */
+  --app-dock-control-size: 44px;
   /* The house motion curve and durations. `appearancePreferences.ts` rewrites
      the durations to 0s when motion is reduced by the OS or by the phone
      Motion preference; these are the pre-script defaults. */
@@ -551,6 +582,29 @@ code {
   .dark .app-glass-surface-chip {
     --app-glass-alpha: var(--app-glass-chip-dark-alpha);
     --app-glass-scrim-alpha: var(--app-glass-chip-dark-scrim-alpha);
+  }
+
+  .app-glass-surface-dock {
+    --app-glass-filter: var(--app-glass-dock-filter);
+    --app-glass-alpha: var(--app-glass-dock-light-alpha);
+    --app-glass-scrim-alpha: var(--app-glass-dock-light-scrim-alpha);
+  }
+
+  .dark .app-glass-surface-dock {
+    --app-glass-alpha: var(--app-glass-dock-dark-alpha);
+    --app-glass-scrim-alpha: var(--app-glass-dock-dark-scrim-alpha);
+  }
+
+  /* Bottom scroll padding for a surface the floating dock overlays. The dock
+     is an overlay, not layout, so content runs full-bleed underneath it and
+     each scroll container adds exactly this much room for the capsule to sit
+     over — the dock's own offset, its control floor, its density padding, and
+     a small visual gap — so the last row can always clear it. Derived from the
+     same variables the capsule uses, so a density change moves both. */
+  .app-dock-scroll-clearance {
+    padding-bottom: calc(
+      var(--app-dock-inset) + var(--app-dock-control-size) + var(--app-dock-padding) * 2 + 0.5rem
+    );
   }
 
   @supports not (backdrop-filter: blur(1px)) {

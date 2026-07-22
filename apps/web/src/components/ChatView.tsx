@@ -142,6 +142,7 @@ import {
 import type { ThreadMessageSearchOccurrence } from "./chat/ThreadMessageSearch.logic";
 import { ChatHeader } from "./chat/ChatHeader";
 import { PhoneThreadAppBar } from "./shell/phone/PhoneThreadAppBar";
+import { PhoneThreadDock } from "./shell/phone/PhoneThreadDock";
 import { PhoneSurfaceScaffold, PhoneWorkSurfaceSheet } from "./shell/phone/PhoneWorkSurface";
 import { type ChatSessionTabsItem } from "./chat/ChatSessionTabs";
 import { useChatSessionTabsPrefetch } from "./chat/useChatSessionTabsPrefetch";
@@ -3111,23 +3112,6 @@ export default function ChatView(props: ChatViewProps) {
             environmentId={activeThread.environmentId}
             threadId={activeThread.id}
             title={activeThread.title}
-            projectCwd={gitCwd}
-            draft={
-              routeKind === "draft" && draftId
-                ? {
-                    draftId,
-                    projectId: activeThread.projectId,
-                    createdAt: activeThread.createdAt,
-                  }
-                : null
-            }
-            workspacePanelOpen={workspacePanelOpen}
-            onToggleWorkspacePanel={onToggleWorkspacePanel}
-            onOpenFindInThread={openThreadMessageSearch}
-            onOpenSourceControl={routeKind === "draft" ? null : () => toggleOverviewSidebar(true)}
-            sessionTabs={activeWorktreeSessionTabs}
-            activeSessionTabKey={activeSessionTabKey}
-            onSelectSessionTab={handleSelectSessionTab}
           />
         ) : (
           <ChatHeader
@@ -3334,6 +3318,37 @@ export default function ChatView(props: ChatViewProps) {
                 onRemove={handleRemoveQueuedMessage}
                 onMove={handleMoveQueuedMessage}
               />
+              {/* The thread dock: the workspace toggle and the thread-actions
+                  overflow that used to sit in the app bar's top-right corner,
+                  with the contextual strip between them. It rides the same
+                  bottom padding as the composer capsule below it. */}
+              {isPhoneTier ? (
+                <PhoneThreadDock
+                  environmentId={activeThread.environmentId}
+                  threadId={activeThread.id}
+                  title={activeThread.title}
+                  projectCwd={gitCwd}
+                  branch={activeWorktreeSummary?.branch ?? activeThread.branch ?? null}
+                  draft={
+                    routeKind === "draft" && draftId
+                      ? {
+                          draftId,
+                          projectId: activeThread.projectId,
+                          createdAt: activeThread.createdAt,
+                        }
+                      : null
+                  }
+                  workspacePanelOpen={workspacePanelOpen}
+                  onToggleWorkspacePanel={onToggleWorkspacePanel}
+                  onOpenFindInThread={openThreadMessageSearch}
+                  onOpenSourceControl={
+                    routeKind === "draft" ? null : () => toggleOverviewSidebar(true)
+                  }
+                  sessionTabs={activeWorktreeSessionTabs}
+                  activeSessionTabKey={activeSessionTabKey}
+                  onSelectSessionTab={handleSelectSessionTab}
+                />
+              ) : null}
               <div className="relative z-10">
                 <ChatComposer
                   ref={composerRef}

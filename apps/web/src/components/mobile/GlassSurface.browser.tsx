@@ -56,21 +56,34 @@ const BODY: Record<ColorScheme, number> = { light: BODY_TEXT_CONTRAST, dark: BOD
  * `text-emerald-600 dark:text-emerald-400` (`NodePresence`'s "Online", rendered
  * as a `MobileListRow` trailing element inside the connection sheet).
  *
- * **`chip`** — the connection pill is the only `glassSurfaceClassName("chip")`
- * call site, and its markup is fixed: an `aria-hidden` Wi-Fi glyph, the node
- * label with no colour class (so it inherits `--foreground`), and the status
- * text at `text-muted-foreground`. That status span carries **every** bounded
- * state — Online, Reconnecting, Checking access, Synchronizing, Offline, Stale,
- * Delivery unknown, Revoked, Authorization removed, Incompatible — in the one
- * colour, because `connectionStatus.ts` returns plain strings and no state
- * changes the class. So the pill can render exactly two text colours.
+ * **`chip`** — two call sites, the connection pill and `MobileContextStrip`'s
+ * pills, and both render the same two colours. The pill's markup is fixed: an
+ * `aria-hidden` Wi-Fi glyph, the node label with no colour class (so it
+ * inherits `--foreground`), and the status text at `text-muted-foreground`.
+ * That status span carries **every** bounded state — Online, Reconnecting,
+ * Checking access, Synchronizing, Offline, Stale, Delivery unknown, Revoked,
+ * Authorization removed, Incompatible — in the one colour, because
+ * `connectionStatus.ts` returns plain strings and no state changes the class.
+ * The strip pill is the same pair: an uncoloured label and a
+ * `text-muted-foreground` value, plus an `aria-hidden` icon. So the tier can
+ * render exactly two text colours.
  *
- * The pill notably does **not** render presence text or destructive text:
- * `NodePresence` appears only in the connection sheet's node rows
+ * Neither call site renders presence text or destructive text: `NodePresence`
+ * appears only in the connection sheet's node rows
  * (`HostedConnectionControls.tsx:177`, `:284`) and the hosted directory, never
  * inside the pill button. Including either in the chip's set would over-constrain
  * it exactly as the shared set did (presence would move the chip's light floor
  * from 86.5 % to 88.5 %).
+ *
+ * **`dock`** — `MobileDock`'s capsule is the only `glassSurfaceClassName("dock")`
+ * call site, and it renders exactly one text role: the action label, which
+ * carries no colour class and so inherits the capsule's `text-foreground`. The
+ * decorative `aria-hidden` icon beside it inherits the same `currentColor`, so
+ * it is covered by that one assertion rather than exempted. The dock renders no
+ * secondary, destructive, or presence colour — nothing in its subtree can — and
+ * its disabled label at `text-muted-foreground/60` is WCAG-exempt like the other
+ * disabled text below. The strip a dock may host is on the `chip` tier and
+ * carries its own floor, so it does not widen this set.
  *
  * Two roles carry a scheme-specific exemption, on one rule: a role is held to
  * the body threshold in the scheme where the material is what makes it fail,
@@ -104,6 +117,12 @@ const SECONDARY_TEXT: TextRole = {
   minimum: { light: BODY_TEXT_CONTRAST, dark: ICON_CONTRAST },
 };
 
+const PRIMARY_TEXT: TextRole = {
+  name: "primary text",
+  color: { light: "var(--foreground)", dark: "var(--foreground)" },
+  minimum: BODY,
+};
+
 const TIER_TEXT_ROLES: Record<GlassSurfaceTier, ReadonlyArray<TextRole>> = {
   sheet: [
     SHEET_BODY_TEXT,
@@ -119,14 +138,19 @@ const TIER_TEXT_ROLES: Record<GlassSurfaceTier, ReadonlyArray<TextRole>> = {
       minimum: { light: ICON_CONTRAST, dark: BODY_TEXT_CONTRAST },
     },
   ],
-  chip: [
-    {
-      name: "pill node label",
-      color: { light: "var(--foreground)", dark: "var(--foreground)" },
-      minimum: BODY,
-    },
-    SECONDARY_TEXT,
-  ],
+  chip: [PRIMARY_TEXT, SECONDARY_TEXT],
+  dock: [PRIMARY_TEXT],
+};
+
+/**
+ * The floors, restated here so the derivation is asserted rather than trusted.
+ * Kept in step with `GLASS_TIER_COVERAGE_FLOORS` in `appearancePreferences.ts`
+ * by `derives each tier's floor from its own roles` below.
+ */
+const TIER_COVERAGE_FLOORS: Record<GlassSurfaceTier, Record<ColorScheme, number>> = {
+  sheet: { light: 90, dark: 96 },
+  chip: { light: 88, dark: 82 },
+  dock: { light: 34, dark: 43 },
 };
 
 /**
@@ -416,6 +440,68 @@ describe("GlassSurface material tiers", () => {
         // more transparent than the step the user asked for.
         expect(coverageOf(glass.material, glass.scrim)).toBeGreaterThanOrEqual(0.72 - 0.0001);
         expect(coverageOf(standard.material, standard.scrim)).toBeGreaterThanOrEqual(0.84 - 0.0001);
+      }
+    }
+  });
+
+  it("derives each tier's floor from its own roles, and pins it as the minimum", () => {
+    // The floors are the whole contrast argument, so they are derived here
+    // rather than asserted only where they happen to bind. For each tier and
+    // scheme this composites `--popover` at a candidate coverage over the
+    // worst-case backdrop and asks whether every role that tier renders clears
+    // its threshold — then checks the recorded floor is exactly the smallest
+    // whole percent that does. A floor that is too high is over-constraint; one
+    // that is too low is a contrast defect. Both fail here.
+    for (const scheme of ["light", "dark"] as const) {
+      setColorScheme(scheme);
+      applyMaterialStep("default");
+      const backdrop = worstCaseBackdrop(scheme, host);
+      const popover = resolveColor("var(--popover)", host);
+      const rolesClearAt = (tier: GlassSurfaceTier, coverage: number) => {
+        const base = composite({ ...popover, a: coverage / 100 }, backdrop);
+        return TIER_TEXT_ROLES[tier].every(
+          (role) =>
+            contrastRatio(resolveColor(role.color[scheme], host), base) >= role.minimum[scheme],
+        );
+      };
+      const derivedFloor = (tier: GlassSurfaceTier) => {
+        for (let coverage = 0; coverage <= 100; coverage += 1) {
+          if (rolesClearAt(tier, coverage)) return coverage;
+        }
+        return Number.POSITIVE_INFINITY;
+      };
+
+      for (const tier of GLASS_SURFACE_TIERS) {
+        expect(
+          rolesClearAt(tier, TIER_COVERAGE_FLOORS[tier][scheme]),
+          `${tier} tier, ${scheme} scheme, at the floor`,
+        ).toBe(true);
+      }
+      // Minimality is pinned for `dock` only, the tier derived here. The sheet
+      // and chip floors were derived with the same method one step earlier and
+      // carry a point of rounding margin; asserting minimality on them would
+      // re-open two shipped numbers this change has no reason to move.
+      expect(derivedFloor("dock"), `dock tier, ${scheme} scheme`).toBe(
+        TIER_COVERAGE_FLOORS.dock[scheme],
+      );
+    }
+  });
+
+  it("keeps the dock's derived floor below every shipped Material step", () => {
+    // The dock renders one text role, so its derived floor lands far under the
+    // sheet's and the chip's — and under the coverage every Material step
+    // already contributes. On the shipped scale the step therefore binds and
+    // the floor never does; it exists so a future step or palette cannot take
+    // the dock below AA unnoticed. Recorded so the claim is not an assumption.
+    for (const scheme of ["light", "dark"] as const) {
+      setColorScheme(scheme);
+      for (const step of SURFACE_TRANSPARENCY_OPTIONS) {
+        applyMaterialStep(step.value);
+        const dock = sampleTier("dock", host);
+        expect(
+          coverageOf(dock.material, dock.scrim) * 100,
+          `dock tier, ${step.label} step, ${scheme} scheme`,
+        ).toBeGreaterThan(TIER_COVERAGE_FLOORS.dock[scheme]);
       }
     }
   });

@@ -96,7 +96,7 @@ describe("PhoneAppearanceSettings", () => {
   it("defaults Material to Standard on the phone tier without storing anything", async () => {
     mounted = await render(<PhoneAppearanceSettings />);
 
-    expect(groupRows()).toHaveLength(3);
+    expect(groupRows()).toHaveLength(4);
     for (const row of groupRows()) {
       expect(row.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
     }
@@ -209,6 +209,27 @@ describe("PhoneAppearanceSettings", () => {
     }
   });
 
+  it("writes Dock density as its own key and moves only the capsule padding", async () => {
+    mounted = await render(<PhoneAppearanceSettings />);
+    // Comfortable is the unstored default, and it is what renders.
+    expect(groupRow("Dock density").textContent).toContain("Comfortable");
+    expect(storedPreferences().dockDensity).toBeUndefined();
+    expect(rootVariable("--app-dock-padding")).toBe("8px");
+    // The control floor is a fixed pixel minimum, so no density touches it.
+    const controlSize = rootVariable("--app-dock-control-size");
+    expect(controlSize).toBe("44px");
+
+    await openSheet("Dock density");
+    await chooseOption("Compact");
+    // One key, no second scale: nothing else moved.
+    expect(storedPreferences()).toEqual({ dockDensity: "compact" });
+    await vi.waitFor(() => {
+      expect(groupRow("Dock density").textContent).toContain("Compact");
+    });
+    expect(rootVariable("--app-dock-padding")).toBe("4px");
+    expect(rootVariable("--app-dock-control-size")).toBe(controlSize);
+  });
+
   it("collapses the motion durations beyond the OS setting", async () => {
     mounted = await render(<PhoneAppearanceSettings />);
     expect(rootVariable("--app-motion-duration-sheet")).toBe("200ms");
@@ -233,7 +254,7 @@ describe("PhoneAppearanceSettings", () => {
       expect(rootVariable("--font-size-base")).toBe("20px");
     });
 
-    expect(groupRows()).toHaveLength(3);
+    expect(groupRows()).toHaveLength(4);
     for (const row of groupRows()) {
       const rect = row.getBoundingClientRect();
       expect(rect.height).toBeGreaterThanOrEqual(44);

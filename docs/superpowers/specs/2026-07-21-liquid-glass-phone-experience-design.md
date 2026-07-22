@@ -575,7 +575,16 @@ not the merge order.
 4. **Composer focus correction** — the structural change, the type-size fix, the sibling focus sites,
    and the tightened focus tests.
 5. **Dock and context strip** — Home and Thread relayout, chrome reduction, reachability assertions.
-6. **Model and session-policy sheets** — including mutation gating on both.
+6. **Model and session-policy sheets** — including mutation gating on both. Also relocates the
+   thread dock beneath the approval and pending-input panels, closing the defect step 5's own
+   reachability assertions found: because `ApprovalCard` renders inside `ChatComposer` above the
+   prompt editor and therefore below the dock row, an open approval grows the composer upward and
+   carries the dock with it, leaving the bottom third — measured at y≈305 against 562.7 at 390×844,
+   and y≈75 against 378.7 at 320×568, which is back in the top third. The defect is pinned by a
+   full-strength `it.fails` assertion carrying those numbers, so fixing the product makes that test
+   fail until the annotation is removed. The relocation touches the container the first-tap composer
+   focus correction depends on, which is why it is sequenced here rather than attempted alongside
+   the relayout.
 7. **Connection indicator** — minimal chip and expanded sheet.
 8. **Work surfaces, hosted entry surfaces, and settings** — full-screen layouts and the phone sweep.
 9. **Acceptance matrix consolidation.**
