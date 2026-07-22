@@ -921,39 +921,55 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const headerRow = (
     <>
       <div className="relative min-w-0 flex-1 [-webkit-app-region:no-drag]">
-        <button
-          type="button"
-          className={cn(
-            "absolute left-0 top-1/2 z-20 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md border bg-background/90 text-muted-foreground transition-colors",
-            canScrollTurnStripLeft
-              ? "border-border/70 hover:border-border hover:text-foreground"
-              : "cursor-not-allowed border-border/40 text-muted-foreground/40",
-          )}
-          onClick={() => scrollTurnStripBy(-180)}
-          disabled={!canScrollTurnStripLeft}
-          aria-label="Scroll turn list left"
-        >
-          <ChevronLeftIcon className="size-3.5" />
-        </button>
-        <button
-          type="button"
-          className={cn(
-            "absolute right-0 top-1/2 z-20 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md border bg-background/90 text-muted-foreground transition-colors",
-            canScrollTurnStripRight
-              ? "border-border/70 hover:border-border hover:text-foreground"
-              : "cursor-not-allowed border-border/40 text-muted-foreground/40",
-          )}
-          onClick={() => scrollTurnStripBy(180)}
-          disabled={!canScrollTurnStripRight}
-          aria-label="Scroll turn list right"
-        >
-          <ChevronRightIcon className="size-3.5" />
-        </button>
+        {/* The overlaid scroll arrows and the `px-8` gutter they need are a
+            fine-pointer affordance. On the phone surface the arrows measured
+            24x24 — below the touch floor — and their gutter is what makes the
+            strip unusable under text scaling: `px-8` resolves to 64px per side
+            at a 32px root, which at 320px left the rail a 16px content window
+            for an 87px chip (and, before the toolbar floor below was pinned in
+            px rather than rem, no content window at all). The strip is
+            touch-scrollable without the arrows. */}
+        {isPhonePresentation ? null : (
+          <>
+            <button
+              type="button"
+              className={cn(
+                "absolute left-0 top-1/2 z-20 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md border bg-background/90 text-muted-foreground transition-colors",
+                canScrollTurnStripLeft
+                  ? "border-border/70 hover:border-border hover:text-foreground"
+                  : "cursor-not-allowed border-border/40 text-muted-foreground/40",
+              )}
+              onClick={() => scrollTurnStripBy(-180)}
+              disabled={!canScrollTurnStripLeft}
+              aria-label="Scroll turn list left"
+            >
+              <ChevronLeftIcon className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "absolute right-0 top-1/2 z-20 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md border bg-background/90 text-muted-foreground transition-colors",
+                canScrollTurnStripRight
+                  ? "border-border/70 hover:border-border hover:text-foreground"
+                  : "cursor-not-allowed border-border/40 text-muted-foreground/40",
+              )}
+              onClick={() => scrollTurnStripBy(180)}
+              disabled={!canScrollTurnStripRight}
+              aria-label="Scroll turn list right"
+            >
+              <ChevronRightIcon className="size-3.5" />
+            </button>
+          </>
+        )}
         <div
           ref={turnStripRef}
-          className="turn-chip-strip flex gap-1 overflow-x-auto px-8 py-0.5"
+          className={cn(
+            "turn-chip-strip flex gap-1 overflow-x-auto py-0.5",
+            isPhonePresentation ? "px-1" : "px-8",
+          )}
           style={
-            canScrollTurnStripLeft || canScrollTurnStripRight
+            // The fade mask marks the arrow gutters, so it goes with them.
+            !isPhonePresentation && (canScrollTurnStripLeft || canScrollTurnStripRight)
               ? {
                   maskImage: `linear-gradient(to right, ${canScrollTurnStripLeft ? "transparent 24px, black 72px" : "black"}, ${canScrollTurnStripRight ? "black calc(100% - 72px), transparent calc(100% - 24px)" : "black"})`,
                 }
@@ -963,13 +979,18 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         >
           <button
             type="button"
-            className="shrink-0 rounded-md"
+            className={cn("shrink-0 rounded-md", isPhonePresentation && "min-h-[44px]")}
             onClick={selectWholeConversation}
             data-turn-chip-selected={selectedTurnId === null}
           >
             <div
               className={cn(
                 "rounded-md border px-2 py-1 text-left transition-colors",
+                // The chip is the tap target, so the phone surface sizes the
+                // real box to the touch floor. Slop cannot do it here: the
+                // strip is `overflow-x: auto`, which forces the block axis to
+                // `auto` too and clips anything escaping the chip's border box.
+                isPhonePresentation && "flex min-h-[44px] items-center",
                 selectedTurnId === null
                   ? "border-border bg-accent text-accent-foreground"
                   : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
@@ -982,7 +1003,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
             <button
               key={summary.turnId}
               type="button"
-              className="shrink-0 rounded-md"
+              className={cn("shrink-0 rounded-md", isPhonePresentation && "min-h-[44px]")}
               onClick={() => selectTurn(summary.turnId)}
               title={summary.turnId}
               data-turn-chip-selected={summary.turnId === selectedTurn?.turnId}
@@ -990,6 +1011,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
               <div
                 className={cn(
                   "rounded-md border px-2 py-1 text-left transition-colors",
+                  isPhonePresentation && "flex min-h-[44px] items-center",
                   summary.turnId === selectedTurn?.turnId
                     ? "border-border bg-accent text-accent-foreground"
                     : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
@@ -1035,11 +1057,16 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
             </Toggle>
           </ToggleGroup>
         )}
+        {/* The shared `pointer-coarse` hit slop on `Toggle` does not reach the
+            floor here: this row is the flex sibling of an `overflow-x: auto`
+            strip, and the measured outward reach from the 28px box was 32px
+            wide. The phone surface therefore sizes the real box. */}
         <Toggle
           aria-label={diffWordWrap ? "Disable diff line wrapping" : "Enable diff line wrapping"}
           title={diffWordWrap ? "Disable line wrapping" : "Enable line wrapping"}
           variant="outline"
           size="xs"
+          className={cn(isPhonePresentation && "min-h-[44px] min-w-[44px]")}
           pressed={diffWordWrap}
           onPressedChange={(pressed) => {
             setDiffWordWrap(Boolean(pressed));
@@ -1052,6 +1079,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           title={diffIgnoreWhitespace ? "Show whitespace changes" : "Hide whitespace changes"}
           variant="outline"
           size="xs"
+          className={cn(isPhonePresentation && "min-h-[44px] min-w-[44px]")}
           pressed={diffIgnoreWhitespace}
           onPressedChange={(pressed) => {
             setDiffIgnoreWhitespace(Boolean(pressed));
@@ -1122,7 +1150,10 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                     }}
                     placeholder="Search files or hunks..."
                     aria-label="Search diff"
-                    className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/55"
+                    className={cn(
+                      "min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/55",
+                      isPhonePresentation && "min-h-[44px]",
+                    )}
                   />
                   {normalizedDiffSearchQuery && (
                     <>
@@ -1135,7 +1166,10 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                           type="button"
                           onClick={() => goToDiffMatch(-1)}
                           disabled={diffSearchMatches.length === 0}
-                          className="inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70"
+                          className={cn(
+                            "inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70",
+                            isPhonePresentation && "size-[44px]",
+                          )}
                           aria-label="Previous match"
                           title="Previous match (Shift+Enter)"
                         >
@@ -1145,7 +1179,10 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                           type="button"
                           onClick={() => goToDiffMatch(1)}
                           disabled={diffSearchMatches.length === 0}
-                          className="inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70"
+                          className={cn(
+                            "inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70",
+                            isPhonePresentation && "size-[44px]",
+                          )}
                           aria-label="Next match"
                           title="Next match (Enter)"
                         >
@@ -1161,7 +1198,10 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                         setDiffSearchQuery("");
                         diffSearchInputRef.current?.focus();
                       }}
-                      className="inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
+                      className={cn(
+                        "inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground",
+                        isPhonePresentation && "size-[44px]",
+                      )}
                       aria-label="Clear search"
                       title="Clear search"
                     >
@@ -1175,7 +1215,18 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                   </div>
                 ) : (
                   <Virtualizer
-                    className="diff-render-surface min-h-0 flex-1 overflow-auto px-2 pb-2"
+                    className={cn(
+                      "diff-render-surface min-h-0 flex-1 overflow-auto px-2 pb-2",
+                      // Horizontal diff overflow belongs to the code block the
+                      // renderer scrolls itself. On the phone surface the file
+                      // list must not become a second horizontal scroller and
+                      // must not chain a horizontal swipe outward to the page
+                      // (which is a back-navigation gesture on a phone), so it
+                      // scrolls on one axis and contains overscroll on the
+                      // other. Desktop keeps `overflow: auto` on both axes.
+                      isPhonePresentation &&
+                        "overflow-x-hidden overflow-y-auto overscroll-x-contain",
+                    )}
                     config={{
                       overscrollSize: 600,
                       intersectionObserverMargin: 1200,
@@ -1217,10 +1268,15 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                                 type="button"
                                 className={cn(
                                   "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
-                                  // Phone: expand the collapse tap target to
-                                  // the 44px floor (step-7 coarse pattern).
-                                  isPhonePresentation &&
-                                    "relative after:absolute after:top-1/2 after:left-1/2 after:size-11 after:-translate-x-1/2 after:-translate-y-1/2",
+                                  // Phone: the 44px floor comes from the real
+                                  // box, not from hit slop. The previous
+                                  // `after:size-11` expansion measured 32x32
+                                  // of outward reach here, because
+                                  // `.diff-render-file` is `overflow: clip`
+                                  // and the file header row clips again — a
+                                  // bounding-box or computed-style assertion
+                                  // on the pseudo-element cannot see that.
+                                  isPhonePresentation && "size-[44px]",
                                   getDiffCollapseIconClassName(fileDiff),
                                 )}
                                 aria-label={
