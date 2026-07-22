@@ -31,7 +31,10 @@ function AlertDialogViewport({ className, ...props }: AlertDialogPrimitive.Viewp
   return (
     <AlertDialogPrimitive.Viewport
       className={cn(
-        "app-dialog-viewport-scrim pointer-events-auto fixed inset-0 z-50 grid grid-rows-[1fr_auto_3fr] justify-items-center p-4 backdrop-blur-[2px]",
+        // Pads by the keyboard inset published by the visual-viewport adapter,
+        // matching `ui/sheet.tsx` and `ui/dialog.tsx`, so action rows stay
+        // above an open software keyboard; the variable is unset (0) otherwise.
+        "app-dialog-viewport-scrim pointer-events-auto fixed inset-0 z-50 grid grid-rows-[1fr_auto_3fr] justify-items-center p-4 pb-[calc(--spacing(4)+var(--app-keyboard-inset,0px))] backdrop-blur-[2px]",
         className,
       )}
       data-slot="alert-dialog-viewport"
@@ -52,7 +55,10 @@ function AlertDialogPopup({
     <AlertDialogPortal>
       <AlertDialogBackdrop />
       <AlertDialogViewport
-        className={cn(bottomStickOnMobile && "phone:grid-rows-[1fr_auto] phone:p-0 phone:pt-12")}
+        className={cn(
+          bottomStickOnMobile &&
+            "phone:grid-rows-[1fr_auto] phone:p-0 phone:pt-12 phone:pb-[var(--app-keyboard-inset,0px)]",
+        )}
       >
         <AlertDialogPrimitive.Popup
           className={cn(

@@ -11,15 +11,14 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../../ui/dialog";
+import { MobileListRow } from "../../mobile/MobileListRow";
 import {
-  Sheet,
-  SheetDescription,
-  SheetHeader,
-  SheetPanel,
-  SheetPopup,
-  SheetTitle,
-} from "../../ui/sheet";
-import { cn } from "~/lib/utils";
+  MobileSheet,
+  MobileSheetDescription,
+  MobileSheetHeader,
+  MobileSheetPanel,
+  MobileSheetTitle,
+} from "../../mobile/MobileSheet";
 import type {
   ThreadMenuActionId,
   ThreadMenuActionItem,
@@ -48,35 +47,28 @@ export function PhoneThreadActionsSheet({
   readonly leadingSections?: ReactNode;
 }) {
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetPopup side="bottom" aria-label="Thread actions">
-        <SheetHeader>
-          <SheetTitle className="truncate text-base">{title}</SheetTitle>
-          <SheetDescription className="sr-only">Thread actions</SheetDescription>
-        </SheetHeader>
-        <SheetPanel className="pb-safe">
-          {leadingSections}
-          <div role="group" aria-label="Thread actions" className="space-y-0.5">
-            {items.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={cn(
-                  "flex min-h-11 w-full items-center rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  item.destructive && "text-destructive",
-                )}
-                onClick={() => {
-                  onOpenChange(false);
-                  onAction(item.id);
-                }}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </SheetPanel>
-      </SheetPopup>
-    </Sheet>
+    <MobileSheet open={open} onOpenChange={onOpenChange} label="Thread actions">
+      <MobileSheetHeader>
+        <MobileSheetTitle>{title}</MobileSheetTitle>
+        <MobileSheetDescription className="sr-only">Thread actions</MobileSheetDescription>
+      </MobileSheetHeader>
+      <MobileSheetPanel>
+        {leadingSections}
+        <div role="group" aria-label="Thread actions" className="space-y-0.5">
+          {items.map((item) => (
+            <MobileListRow
+              key={item.id}
+              label={item.label}
+              destructive={item.destructive === true}
+              onClick={() => {
+                onOpenChange(false);
+                onAction(item.id);
+              }}
+            />
+          ))}
+        </div>
+      </MobileSheetPanel>
+    </MobileSheet>
   );
 }
 

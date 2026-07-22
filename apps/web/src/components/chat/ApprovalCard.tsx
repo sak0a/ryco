@@ -6,14 +6,13 @@ import { type PendingApproval } from "../../session-logic";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { Button } from "../ui/button";
 import {
-  Sheet,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetPanel,
-  SheetPopup,
-  SheetTitle,
-} from "../ui/sheet";
+  MobileSheet,
+  MobileSheetDescription,
+  MobileSheetFooter,
+  MobileSheetHeader,
+  MobileSheetPanel,
+  MobileSheetTitle,
+} from "../mobile/MobileSheet";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import {
   ComposerPendingApprovalPanel,
@@ -91,35 +90,35 @@ export const ApprovalCard = memo(function ApprovalCard({
           {actions}
         </div>
       )}
-      <Sheet
+      <MobileSheet
         open={sheetOpen}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) setExpandedRequestId(null);
         }}
+        label="Approval detail"
       >
-        <SheetPopup side="bottom" aria-label="Approval detail">
-          <SheetHeader>
-            <SheetTitle className="text-base">{pendingApprovalSummaryLabel(approval)}</SheetTitle>
-            {pendingCount > 1 ? (
-              <SheetDescription>1/{pendingCount} pending approvals</SheetDescription>
-            ) : (
-              <SheetDescription className="sr-only">Full approval detail</SheetDescription>
-            )}
-          </SheetHeader>
-          <SheetPanel>
-            <div className="whitespace-pre-wrap wrap-break-word text-sm text-muted-foreground select-text">
-              {approval.detail}
-            </div>
-          </SheetPanel>
-          <SheetFooter
-            variant="bare"
-            className="flex-row flex-wrap justify-end gap-2 pb-safe"
-            data-testid="approval-card-actions"
-          >
-            {actions}
-          </SheetFooter>
-        </SheetPopup>
-      </Sheet>
+        <MobileSheetHeader>
+          <MobileSheetTitle>{pendingApprovalSummaryLabel(approval)}</MobileSheetTitle>
+          {pendingCount > 1 ? (
+            <MobileSheetDescription>1/{pendingCount} pending approvals</MobileSheetDescription>
+          ) : (
+            <MobileSheetDescription className="sr-only">
+              Full approval detail
+            </MobileSheetDescription>
+          )}
+        </MobileSheetHeader>
+        <MobileSheetPanel>
+          <div className="whitespace-pre-wrap wrap-break-word text-sm text-muted-foreground select-text">
+            {approval.detail}
+          </div>
+        </MobileSheetPanel>
+        <MobileSheetFooter
+          className="flex-row flex-wrap justify-end gap-2"
+          data-testid="approval-card-actions"
+        >
+          {actions}
+        </MobileSheetFooter>
+      </MobileSheet>
     </div>
   );
 });

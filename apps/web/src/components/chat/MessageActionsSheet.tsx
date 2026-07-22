@@ -2,23 +2,20 @@ import { CopyIcon, Undo2Icon } from "lucide-react";
 
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import { MobileListRow } from "../mobile/MobileListRow";
 import {
-  Sheet,
-  SheetDescription,
-  SheetHeader,
-  SheetPanel,
-  SheetPopup,
-  SheetTitle,
-} from "../ui/sheet";
+  MobileSheet,
+  MobileSheetDescription,
+  MobileSheetHeader,
+  MobileSheetPanel,
+  MobileSheetTitle,
+} from "../mobile/MobileSheet";
 
 export interface MessageActionsSheetTarget {
   readonly role: "user" | "assistant";
   readonly copyText: string | null;
   readonly canRevert: boolean;
 }
-
-const ROW_CLASS_NAME =
-  "flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:text-muted-foreground/60";
 
 /**
  * Phone bottom-sheet for message actions opened by long-pressing a message.
@@ -53,44 +50,39 @@ export function MessageActionsSheet({
   });
 
   return (
-    <Sheet open={target !== null} onOpenChange={onOpenChange}>
-      <SheetPopup side="bottom" aria-label="Message actions">
-        <SheetHeader>
-          <SheetTitle className="text-base">Message actions</SheetTitle>
-          <SheetDescription className="sr-only">Actions for the selected message</SheetDescription>
-        </SheetHeader>
-        <SheetPanel className="pb-safe">
-          <div role="group" aria-label="Message actions" className="space-y-0.5">
-            {target?.copyText ? (
-              <button
-                type="button"
-                className={ROW_CLASS_NAME}
-                onClick={() => {
-                  onOpenChange(false);
-                  copyToClipboard(target.copyText ?? "");
-                }}
-              >
-                <CopyIcon aria-hidden className="size-4 shrink-0" />
-                {target.role === "assistant" ? "Copy response" : "Copy message"}
-              </button>
-            ) : null}
-            {target?.role === "user" && target.canRevert ? (
-              <button
-                type="button"
-                className={ROW_CLASS_NAME}
-                disabled={revertDisabled}
-                onClick={() => {
-                  onOpenChange(false);
-                  onRevert();
-                }}
-              >
-                <Undo2Icon aria-hidden className="size-4 shrink-0" />
-                Revert to this message
-              </button>
-            ) : null}
-          </div>
-        </SheetPanel>
-      </SheetPopup>
-    </Sheet>
+    <MobileSheet open={target !== null} onOpenChange={onOpenChange} label="Message actions">
+      <MobileSheetHeader>
+        <MobileSheetTitle>Message actions</MobileSheetTitle>
+        <MobileSheetDescription className="sr-only">
+          Actions for the selected message
+        </MobileSheetDescription>
+      </MobileSheetHeader>
+      <MobileSheetPanel>
+        <div role="group" aria-label="Message actions" className="space-y-0.5">
+          {target?.copyText ? (
+            <MobileListRow
+              label={target.role === "assistant" ? "Copy response" : "Copy message"}
+              icon={<CopyIcon aria-hidden className="size-4 shrink-0" />}
+              onClick={() => {
+                onOpenChange(false);
+                copyToClipboard(target.copyText ?? "");
+              }}
+            />
+          ) : null}
+          {target?.role === "user" && target.canRevert ? (
+            <MobileListRow
+              label="Revert to this message"
+              icon={<Undo2Icon aria-hidden className="size-4 shrink-0" />}
+              disabled={revertDisabled}
+              disabledReason="Reverting is unavailable while the session is busy."
+              onClick={() => {
+                onOpenChange(false);
+                onRevert();
+              }}
+            />
+          ) : null}
+        </div>
+      </MobileSheetPanel>
+    </MobileSheet>
   );
 }

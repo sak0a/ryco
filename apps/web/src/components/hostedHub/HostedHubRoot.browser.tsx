@@ -70,6 +70,20 @@ afterEach(async () => {
   document.body.innerHTML = "";
 });
 
+/**
+ * The nearest ancestor a person could actually scroll. `overflow: hidden`
+ * boxes still respond to programmatic scrolling, so they do not count.
+ */
+function userScrollableAncestor(element: HTMLElement): HTMLElement | null {
+  let current: HTMLElement | null = element.parentElement;
+  while (current) {
+    const { overflowY } = getComputedStyle(current);
+    if (overflowY === "auto" || overflowY === "scroll") return current;
+    current = current.parentElement;
+  }
+  return null;
+}
+
 describe("HostedHubRoot accessibility and responsive flows", () => {
   it("contains hosted admission and node selection at 320 CSS pixels", async () => {
     await page.viewport(320, 568);
@@ -94,6 +108,42 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
       expect(box.left).toBeGreaterThanOrEqual(0);
       expect(box.right).toBeLessThanOrEqual(window.innerWidth);
       expect(box.height).toBeGreaterThanOrEqual(44);
+    } finally {
+      await page.viewport(1_280, 720);
+    }
+  });
+
+  it("keeps the primary hosted entry action reachable by scrolling at 320x568", async () => {
+    // Regression: the hosted entry surface used to be a `min-h-dvh` centred
+    // card inside a non-scrolling root, so at the narrowest supported phone
+    // the primary action fell below the fold with no way to reach it.
+    await page.viewport(320, 568);
+    try {
+      useHostedHubStore.setState({ bootstrapAvailable: true });
+      mounted = await render(<HostedHubRoot />);
+
+      const signIn = page.getByRole("button", { name: "Sign in with passkey" });
+      await expect.element(signIn).toBeVisible();
+      const button = signIn.element() as HTMLElement;
+
+      // The content is taller than the viewport here, so reachability depends
+      // on a *user*-scrollable ancestor. `overflow: hidden` would still answer
+      // `scrollIntoView`, which is why the ancestor's computed overflow is
+      // asserted rather than the scroll result alone.
+      const scroller = userScrollableAncestor(button);
+      expect(scroller, "the hosted entry surface must be user-scrollable").not.toBeNull();
+      expect(scroller!.scrollHeight).toBeGreaterThan(scroller!.clientHeight);
+
+      scroller!.scrollTop = scroller!.scrollHeight;
+      await vi.waitFor(() => {
+        const rect = button.getBoundingClientRect();
+        expect(rect.top).toBeGreaterThanOrEqual(0);
+        expect(rect.bottom).toBeLessThanOrEqual(window.innerHeight);
+      });
+
+      // Reaching it never costs horizontal overflow.
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+      expect(scroller!.scrollWidth).toBeLessThanOrEqual(scroller!.clientWidth);
     } finally {
       await page.viewport(1_280, 720);
     }

@@ -9,15 +9,14 @@ import {
   subscribeToContextMenuSheet,
   type ContextMenuSheetRequest,
 } from "../../../contextMenuSheetState";
-import { cn } from "~/lib/utils";
+import { MobileListRow } from "../../mobile/MobileListRow";
 import {
-  Sheet,
-  SheetDescription,
-  SheetHeader,
-  SheetPanel,
-  SheetPopup,
-  SheetTitle,
-} from "../../ui/sheet";
+  MobileSheet,
+  MobileSheetDescription,
+  MobileSheetHeader,
+  MobileSheetPanel,
+  MobileSheetTitle,
+} from "../../mobile/MobileSheet";
 
 function getServerSnapshot(): ContextMenuSheetRequest | null {
   return null;
@@ -50,19 +49,29 @@ export function ContextMenuActionSheetHost() {
   }
 
   return (
-    <Sheet
+    <MobileSheet
       open={request !== null}
       onOpenChange={(open) => {
         if (!open) {
           settleContextMenuSheet(displayedRequest.id, null);
         }
       }}
+      label="Actions"
     >
       <ContextMenuActionSheetContent key={displayedRequest.id} request={displayedRequest} />
-    </Sheet>
+    </MobileSheet>
   );
 }
 
+/**
+ * Submenu presentation decision: drill-in stays an **in-sheet view stack**, not
+ * a stack of real sheets. One `api.contextMenu.show(...)` request has exactly
+ * one settlement, and a nested `MobileSheet` would introduce a second modal
+ * whose own dismissal (Escape, backdrop, swipe) would have to be reconciled
+ * with that single resolution. Swapping the rows inside one sheet keeps
+ * dismissal, focus restoration, and settlement in one place; the level change
+ * is announced by moving focus to the new level's first row.
+ */
 function ContextMenuActionSheetContent({ request }: { readonly request: ContextMenuSheetRequest }) {
   const [submenuStack, setSubmenuStack] = useState<
     ReadonlyArray<{
@@ -88,22 +97,20 @@ function ContextMenuActionSheetContent({ request }: { readonly request: ContextM
   }, [submenuStack.length]);
 
   return (
-    <SheetPopup side="bottom" aria-label="Actions">
-      <SheetHeader>
-        <SheetTitle className="truncate text-base">{currentLevel?.label ?? "Actions"}</SheetTitle>
-        <SheetDescription className="sr-only">Context actions</SheetDescription>
-      </SheetHeader>
-      <SheetPanel className="pb-safe">
+    <>
+      <MobileSheetHeader>
+        <MobileSheetTitle>{currentLevel?.label ?? "Actions"}</MobileSheetTitle>
+        <MobileSheetDescription className="sr-only">Context actions</MobileSheetDescription>
+      </MobileSheetHeader>
+      <MobileSheetPanel>
         <div ref={rowsRef} role="group" aria-label="Context actions" className="space-y-0.5">
           {currentLevel ? (
-            <button
-              type="button"
-              className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            <MobileListRow
+              label="Back"
+              className="text-muted-foreground"
+              icon={<ChevronLeftIcon aria-hidden className="size-4 shrink-0" />}
               onClick={() => setSubmenuStack((stack) => stack.slice(0, -1))}
-            >
-              <ChevronLeftIcon aria-hidden className="size-4 shrink-0" />
-              Back
-            </button>
+            />
           ) : null}
           {items.map((item) => {
             const hasChildren = Array.isArray(item.children) && item.children.length > 0;
@@ -112,14 +119,19 @@ function ContextMenuActionSheetContent({ request }: { readonly request: ContextM
             const isDestructive =
               !hasChildren && (item.destructive === true || item.id === "delete");
             return (
-              <button
+              <MobileListRow
                 key={item.id}
-                type="button"
+                label={item.label}
                 disabled={item.disabled === true}
-                className={cn(
-                  "flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:text-muted-foreground/60",
-                  isDestructive && "text-destructive",
-                )}
+                destructive={isDestructive}
+                trailing={
+                  hasChildren ? (
+                    <ChevronRightIcon
+                      aria-hidden
+                      className="size-4 shrink-0 text-muted-foreground/70"
+                    />
+                  ) : undefined
+                }
                 onClick={() => {
                   if (hasChildren) {
                     setSubmenuStack((stack) => [
@@ -130,19 +142,11 @@ function ContextMenuActionSheetContent({ request }: { readonly request: ContextM
                   }
                   settleContextMenuSheet(request.id, item.id);
                 }}
-              >
-                <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                {hasChildren ? (
-                  <ChevronRightIcon
-                    aria-hidden
-                    className="size-4 shrink-0 text-muted-foreground/70"
-                  />
-                ) : null}
-              </button>
+              />
             );
           })}
         </div>
-      </SheetPanel>
-    </SheetPopup>
+      </MobileSheetPanel>
+    </>
   );
 }

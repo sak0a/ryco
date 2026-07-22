@@ -15,8 +15,8 @@ import {
 import type { DraftId } from "../../../composerDraftStore";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../../store";
 import { DEFAULT_INTERACTION_MODE, type SidebarThreadSummary } from "../../../types";
-import { cn } from "~/lib/utils";
 import type { ChatSessionTabsItem } from "../../chat/ChatSessionTabs";
+import { MobileListRow } from "../../mobile/MobileListRow";
 import { HostedConnectionPill } from "../../hostedHub/HostedConnectionControls";
 import { ThreadRowLeadingStatus, ThreadStatusDetailLine } from "../../ThreadStatusIndicators";
 import { Button } from "../../ui/button";
@@ -166,27 +166,23 @@ export function PhoneThreadAppBar(props: PhoneThreadAppBarProps) {
           <>
             {summary ? <ThreadStatusDetailLine thread={summary} /> : null}
             <div role="group" aria-label="Thread tools" className="space-y-0.5">
-              <button
-                type="button"
-                className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              <MobileListRow
+                label="Find in thread"
+                icon={<SearchIcon aria-hidden className="size-4 shrink-0" />}
                 onClick={() => {
                   setMenuOpen(false);
                   props.onOpenFindInThread();
                 }}
-              >
-                <SearchIcon aria-hidden className="size-4" /> Find in thread
-              </button>
+              />
               {props.onOpenSourceControl ? (
-                <button
-                  type="button"
-                  className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                <MobileListRow
+                  label="Source control"
+                  icon={<GitBranchIcon aria-hidden className="size-4 shrink-0" />}
                   onClick={() => {
                     setMenuOpen(false);
                     props.onOpenSourceControl?.();
                   }}
-                >
-                  <GitBranchIcon aria-hidden className="size-4" /> Source control
-                </button>
+                />
               ) : null}
             </div>
             {props.sessionTabs.length > 0 && props.onSelectSessionTab ? (
@@ -197,23 +193,20 @@ export function PhoneThreadAppBar(props: PhoneThreadAppBarProps) {
               >
                 <p className="px-2 pb-1 text-xs font-medium text-muted-foreground">Sessions</p>
                 {props.sessionTabs.map((tab) => (
-                  <button
+                  <MobileListRow
                     key={tab.key}
-                    type="button"
-                    className={cn(
-                      "flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      tab.key === props.activeSessionTabKey && "bg-accent/60 font-medium",
-                    )}
+                    label={tab.title}
+                    selected={tab.key === props.activeSessionTabKey}
+                    trailing={
+                      tab.key === props.activeSessionTabKey ? (
+                        <CheckIcon aria-hidden className="size-4 shrink-0" />
+                      ) : undefined
+                    }
                     onClick={() => {
                       setMenuOpen(false);
                       props.onSelectSessionTab?.(tab.key);
                     }}
-                  >
-                    <span className="min-w-0 flex-1 truncate">{tab.title}</span>
-                    {tab.key === props.activeSessionTabKey ? (
-                      <CheckIcon aria-hidden className="size-4 shrink-0" />
-                    ) : null}
-                  </button>
+                  />
                 ))}
               </div>
             ) : null}

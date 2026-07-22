@@ -121,11 +121,19 @@ function Surface({ children }: { readonly children: React.ReactNode }) {
   // Phone layout system: safe-area-aware edge padding so hosted entry
   // surfaces stay fully reachable on notched, edge-to-edge phone viewports.
   // The gating order of the surfaces themselves is unchanged.
+  //
+  // `#root` is `overflow-y: hidden`, so a card taller than the viewport used to
+  // be clipped with no way to reach its primary action (at 320x568 "Sign in
+  // with passkey" fell below the fold). The surface owns its own vertical
+  // scroll, and the card is centred with `my-auto` on a `min-h-full` track
+  // instead of `items-center`, which would clip the overflowing top edge.
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-10 text-foreground sm:px-6 phone:px-[max(1rem,env(safe-area-inset-left),env(safe-area-inset-right))] phone:pt-[max(2.5rem,calc(env(safe-area-inset-top)+1rem))] phone:pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1rem))]">
-      <section className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-lg shadow-black/5 sm:p-8">
-        {children}
-      </section>
+    <main className="h-dvh overflow-x-hidden overflow-y-auto overscroll-contain bg-background text-foreground">
+      <div className="flex min-h-full flex-col px-4 py-10 sm:px-6 phone:px-[max(1rem,env(safe-area-inset-left),env(safe-area-inset-right))] phone:pt-[max(2.5rem,calc(env(safe-area-inset-top)+1rem))] phone:pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1rem))]">
+        <section className="my-auto w-full max-w-lg self-center rounded-2xl border border-border bg-card p-5 shadow-lg shadow-black/5 sm:p-8">
+          {children}
+        </section>
+      </div>
     </main>
   );
 }
