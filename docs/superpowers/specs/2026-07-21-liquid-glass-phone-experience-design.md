@@ -309,6 +309,12 @@ anticipated reuse.
 subscription, no connectivity sensing. Props in, callbacks out. This makes the prohibition on a
 second authentication, relay, readiness, or feature-state implementation enforceable by inspection.
 
+**Extraction order.** Only `MobileSheet` and `MobileListRow` have consumers today — six bottom-sheet
+call sites and seven duplicated touch-row class strings respectively — so only those two ship with
+the primitives step. `MobileSelectSheet`, `MobileSegmentedControl`, `MobileDock`,
+`MobileContextStrip`, and `MobileStatusChip` have no consumer until delivery steps 5–7 and ship with
+them. Building them earlier would be speculative scaffolding, which this design rules out above.
+
 `ui/sheet.tsx` is retained unchanged as the **desktop side-panel primitive**. The two do not merge.
 
 Adopting `Drawer` requires raising the declared floor at `apps/web/package.json:16` from `^1.2.0` to
@@ -447,13 +453,27 @@ exemption in the reachability test family, not a silent skip.
 
 ## Pre-existing defects folded in
 
-Four defects are adjacent to this work, are a few lines each, and will otherwise be misattributed to
-the redesign. They ship with the primitives change:
+These are adjacent to this work, are a few lines each, and would otherwise be misattributed to the
+redesign.
 
-- `ui/toggle.tsx:9` — mis-anchored hit-slop.
+Shipped with the composer correction:
+
 - `ComposerPromptEditor.tsx:1647`, `:1658` — the `sm:text-[14px]` iOS zoom bug.
-- `HostedHubRoot.tsx:125` against `index.css:348`, `:357` — unscrollable hosted entry surfaces.
-- `ui/alert-dialog.tsx:55` — missing keyboard inset.
+
+Ships with the primitives change:
+
+- `HostedHubRoot.tsx:125` against `index.css:348`, `:357` — unscrollable hosted entry surfaces. At
+  320×568 the primary sign-in action falls below the fold with no way to reach it.
+- `ui/alert-dialog.tsx:55` — missing keyboard inset, which its `sheet.tsx:50` and `dialog.tsx:73`
+  siblings apply.
+
+**Not a defect, corrected on implementation.** An earlier revision of this document listed
+`ui/toggle.tsx:9` as a mis-anchored coarse-pointer hit-slop. That was a static-analysis error. For
+an absolutely positioned `::after` with auto offsets inside a `justify-center items-center` flex
+container, CSS Flexbox §4.1 places the static position as though the box were the sole flex item, so
+the expansion is already centred; measurement confirmed roughly 22 px of outward reach on each axis
+before the change. A centring anchor is still applied for engine independence and consistency with
+`ui/button.tsx`, but it is hardening, not a fix, and no test can discriminate it in Chromium.
 
 ## Verification
 
@@ -520,8 +540,12 @@ fabricated or inferred from emulation.
 
 ## Delivery sequence (public)
 
+The composer correction was pulled ahead of the primitives layer on implementation: it shares no
+code with it and cost two taps on every follow-up message. The list below is the dependency order,
+not the merge order.
+
 1. **Spec PR:** this document.
-2. **Mobile primitives layer** — `components/mobile/`, Base UI declared floor `^1.3.0`, and the four
+2. **Mobile primitives layer** — `components/mobile/`, Base UI declared floor `^1.3.0`, and the
    folded-in pre-existing defects.
 3. **Material system and phone appearance settings** — tokens, `GlassSurface`, the Material axis on
    the existing preference key, and the contrast assertions.

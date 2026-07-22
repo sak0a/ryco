@@ -83,14 +83,14 @@ import {
 import { Button } from "../../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../../ui/empty";
 import { SidebarInset } from "../../ui/sidebar";
+import { MobileListRow } from "../../mobile/MobileListRow";
 import {
-  Sheet,
-  SheetDescription,
-  SheetHeader,
-  SheetPanel,
-  SheetPopup,
-  SheetTitle,
-} from "../../ui/sheet";
+  MobileSheet,
+  MobileSheetDescription,
+  MobileSheetHeader,
+  MobileSheetPanel,
+  MobileSheetTitle,
+} from "../../mobile/MobileSheet";
 import { PhoneThreadActionsSheet, PhoneThreadRenameDialog } from "./PhoneThreadActionsSheet";
 import { usePhoneThreadActions } from "./usePhoneThreadActions";
 
@@ -311,28 +311,23 @@ export function PhoneHome() {
           )}
         </div>
       </div>
-      <Sheet open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
-        <SheetPopup side="bottom" aria-label="New thread">
-          <SheetHeader>
-            <SheetTitle className="text-base">New thread</SheetTitle>
-            <SheetDescription>Choose a project for the new thread.</SheetDescription>
-          </SheetHeader>
-          <SheetPanel className="pb-safe">
-            <div role="group" aria-label="Projects" className="space-y-0.5">
-              {sortedProjects.map((project) => (
-                <button
-                  key={project.projectKey}
-                  type="button"
-                  className="flex min-h-11 w-full items-center rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => startThreadInProject(project)}
-                >
-                  <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
-                </button>
-              ))}
-            </div>
-          </SheetPanel>
-        </SheetPopup>
-      </Sheet>
+      <MobileSheet open={projectPickerOpen} onOpenChange={setProjectPickerOpen} label="New thread">
+        <MobileSheetHeader>
+          <MobileSheetTitle>New thread</MobileSheetTitle>
+          <MobileSheetDescription>Choose a project for the new thread.</MobileSheetDescription>
+        </MobileSheetHeader>
+        <MobileSheetPanel>
+          <div role="group" aria-label="Projects" className="space-y-0.5">
+            {sortedProjects.map((project) => (
+              <MobileListRow
+                key={project.projectKey}
+                label={project.displayName}
+                onClick={() => startThreadInProject(project)}
+              />
+            ))}
+          </div>
+        </MobileSheetPanel>
+      </MobileSheet>
     </SidebarInset>
   );
 }

@@ -10,14 +10,14 @@ import {
 import { useState } from "react";
 
 import { Button } from "../ui/button";
+import { MobileListRow } from "../mobile/MobileListRow";
 import {
-  Sheet,
-  SheetDescription,
-  SheetHeader,
-  SheetPanel,
-  SheetPopup,
-  SheetTitle,
-} from "../ui/sheet";
+  MobileSheet,
+  MobileSheetDescription,
+  MobileSheetHeader,
+  MobileSheetPanel,
+  MobileSheetTitle,
+} from "../mobile/MobileSheet";
 import { deriveHostedConnectionStatusText } from "../../hostedHub/connectionStatus";
 import {
   leaveHostedNodeRouteToDirectory,
@@ -234,86 +234,84 @@ export function HostedConnectionSheet({
   const switchingDisabled = directory !== "ready" || browserStatus !== "current";
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetPopup side="bottom" aria-label="Connection">
-        <SheetHeader>
-          <SheetTitle className="flex items-center gap-2">
-            {transport === "online" ? (
-              <WifiIcon aria-hidden className="size-4 text-emerald-500" />
-            ) : (
-              <WifiOffIcon aria-hidden className="size-4 text-amber-500" />
-            )}
-            <span className="truncate">{node.label}</span>
-          </SheetTitle>
-          <SheetDescription className="capitalize">
-            {role ?? "Role unavailable"} · {statusText}
-          </SheetDescription>
-          <p className="sr-only" aria-live="polite">
-            Node {node.label}: {statusText}.
+    <MobileSheet open={open} onOpenChange={onOpenChange} label="Connection">
+      <MobileSheetHeader>
+        <MobileSheetTitle className="flex items-center gap-2">
+          {transport === "online" ? (
+            <WifiIcon aria-hidden className="size-4 text-emerald-500" />
+          ) : (
+            <WifiOffIcon aria-hidden className="size-4 text-amber-500" />
+          )}
+          <span className="truncate">{node.label}</span>
+        </MobileSheetTitle>
+        <MobileSheetDescription className="capitalize">
+          {role ?? "Role unavailable"} · {statusText}
+        </MobileSheetDescription>
+        <p className="sr-only" aria-live="polite">
+          Node {node.label}: {statusText}.
+        </p>
+      </MobileSheetHeader>
+      <MobileSheetPanel>
+        {error ? (
+          <p role="status" className="text-xs text-muted-foreground">
+            {error}
           </p>
-        </SheetHeader>
-        <SheetPanel className="pb-safe">
-          {error ? (
-            <p role="status" className="text-xs text-muted-foreground">
-              {error}
-            </p>
-          ) : null}
-          <DeliveryUnknownAcknowledgement />
-          <div className="mt-3 space-y-1 border-t border-border pt-3">
-            <button
-              type="button"
-              className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => {
-                onOpenChange(false);
-                void returnToAllNodes();
-              }}
-            >
-              <LayoutGridIcon aria-hidden className="size-4" /> All nodes
-            </button>
-            {nodes
-              .filter((candidate) => candidate.id !== node.id)
-              .map((candidate) => (
-                <button
-                  key={candidate.id}
-                  type="button"
-                  disabled={switchingDisabled || candidate.revokedAt !== null}
-                  className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                  onClick={() => {
-                    onOpenChange(false);
-                    void switchNode(candidate);
-                  }}
-                >
-                  <span className="truncate">{candidate.label}</span>
-                  <NodePresence node={candidate} />
-                </button>
-              ))}
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
-            <Button
-              size="sm"
-              variant="outline"
-              className="min-h-11"
-              disabled={directory === "loading"}
-              onClick={() => void hostedHubController.refreshDirectory()}
-            >
-              <RefreshCwIcon aria-hidden /> Refresh nodes
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="min-h-11"
-              onClick={() => void hostedHubController.signOut()}
-            >
-              <LogOutIcon aria-hidden /> Sign out
-            </Button>
-          </div>
-          <div className="mt-3 space-y-3 border-t border-border pt-3">
-            <HostedRelayTrustNotice compact />
-            <HostedPwaControls compact />
-          </div>
-        </SheetPanel>
-      </SheetPopup>
-    </Sheet>
+        ) : null}
+        <DeliveryUnknownAcknowledgement />
+        <div className="mt-3 space-y-1 border-t border-border pt-3">
+          <MobileListRow
+            label="All nodes"
+            icon={<LayoutGridIcon aria-hidden className="size-4 shrink-0" />}
+            onClick={() => {
+              onOpenChange(false);
+              void returnToAllNodes();
+            }}
+          />
+          {nodes
+            .filter((candidate) => candidate.id !== node.id)
+            .map((candidate) => (
+              <MobileListRow
+                key={candidate.id}
+                label={candidate.label}
+                disabled={switchingDisabled || candidate.revokedAt !== null}
+                disabledReason={
+                  candidate.revokedAt !== null
+                    ? "Access to this node was revoked."
+                    : "Node switching is unavailable until the directory and this browser are current."
+                }
+                trailing={<NodePresence node={candidate} />}
+                onClick={() => {
+                  onOpenChange(false);
+                  void switchNode(candidate);
+                }}
+              />
+            ))}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
+          <Button
+            size="sm"
+            variant="outline"
+            className="min-h-11"
+            disabled={directory === "loading"}
+            onClick={() => void hostedHubController.refreshDirectory()}
+          >
+            <RefreshCwIcon aria-hidden /> Refresh nodes
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="min-h-11"
+            onClick={() => void hostedHubController.signOut()}
+          >
+            <LogOutIcon aria-hidden /> Sign out
+          </Button>
+        </div>
+        <div className="mt-3 space-y-3 border-t border-border pt-3">
+          <HostedRelayTrustNotice compact />
+          <HostedPwaControls compact />
+        </div>
+      </MobileSheetPanel>
+    </MobileSheet>
   );
 }
 
