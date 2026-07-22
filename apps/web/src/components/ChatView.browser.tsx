@@ -7501,6 +7501,156 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  /**
+   * The state whose layout the dock relocation changed: the dock now renders
+   * inside `ChatComposer`, beneath the approval panel and above the prompt row.
+   * The collapsed composer's activating tap must still reach the editor — the
+   * dock must not overlay it, intercept the gesture, or remount it.
+   *
+   * An approval disables the editor (`contenteditable="false"`, pre-existing:
+   * the approval must be answered before typing), so this state expands through
+   * the surface's explicit onClick path rather than through native focus. The
+   * unconditional first-tap focus guarantee is asserted separately by "focuses
+   * the phone composer editor in the activating task on the first tap".
+   */
+  it("expands the collapsed phone composer on a single tap with an approval open", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotWithPendingApproval(),
+    });
+
+    try {
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="pending-approval-detail"]'),
+        "Unable to find the pending approval detail block.",
+      );
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-mobile-collapsed="true"]'),
+        "Unable to find the collapsed phone composer.",
+      );
+      const dock = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-slot="phone-thread-dock"]'),
+        "Unable to find the phone thread dock.",
+      );
+      const editor = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="composer-editor"]'),
+        "Unable to find the composer editor.",
+      );
+      await waitForLayout();
+
+      // The editor is presented, not swapped out: a display:none or zero-size
+      // editor could not receive the activating tap at all.
+      expect(getComputedStyle(editor).display).not.toBe("none");
+      expect(editor.offsetParent).not.toBeNull();
+      const editorRect = editor.getBoundingClientRect();
+      expect(editorRect.height).toBeGreaterThan(0);
+
+      // The dock is laid out above the prompt row, not over it, and nothing it
+      // renders answers a hit test anywhere across the editor's tap target.
+      const dockRect = dock.getBoundingClientRect();
+      expect(dockRect.bottom).toBeLessThanOrEqual(editorRect.top + 0.5);
+      for (let step = 0; step <= 10; step += 1) {
+        const x = editorRect.left + (editorRect.width * step) / 10;
+        const y = editorRect.top + editorRect.height / 2;
+        const hit = document.elementFromPoint(
+          Math.min(Math.max(x, editorRect.left + 0.5), editorRect.right - 0.5),
+          y,
+        );
+        expect(
+          hit !== null && dock.contains(hit),
+          `the thread dock answers the collapsed editor's tap target at (${Math.round(x)}, ${Math.round(y)})`,
+        ).toBe(false);
+      }
+
+      await page.getByTestId("composer-editor").click();
+
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-composer-mobile-collapsed="false"]'),
+        ).not.toBeNull();
+      });
+      // The same editor node, never remounted by the expansion — that identity
+      // is what lets the activating tap's focus survive in the enabled case.
+      expect(document.querySelector('[data-testid="composer-editor"]')).toBe(editor);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  /**
+   * The dock is now a descendant of the composer surface, so the surface's
+   * collapse check has to treat focus landing on it as *not* composer focus.
+   * Otherwise tapping the workspace toggle blurs the editor — the software
+   * keyboard leaves — while the composer keeps its full expanded height, and
+   * nothing ever moves focus back out of the surface to correct it.
+   */
+  it("collapses the expanded phone composer when focus lands on a thread dock control", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-dock-focus-collapse" as MessageId,
+        targetText: "dock focus collapse thread",
+      }),
+    });
+
+    try {
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-mobile-collapsed="true"]'),
+        "Unable to find the collapsed phone composer.",
+      );
+      await page.getByTestId("composer-editor").click();
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-composer-mobile-collapsed="false"]'),
+        ).not.toBeNull();
+      });
+
+      const toggle = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>(
+            '[data-slot="phone-thread-dock"] button[aria-label="Toggle workspace panel"]',
+          ),
+        "Unable to find the dock's workspace toggle.",
+      );
+      // The toggle is a descendant of the composer surface, which is exactly
+      // why the collapse check would otherwise keep the composer expanded.
+      expect(toggle.closest("[data-chat-composer-mobile-collapsed]")).not.toBeNull();
+      expect(toggle.getAttribute("aria-pressed")).toBe("false");
+
+      // Focus is moved explicitly rather than by clicking: engines differ on
+      // whether a click focuses a button (Chromium on Android does, Chromium on
+      // macOS — where this suite runs — does not), and it is the focus landing,
+      // not the click, that this asserts.
+      toggle.focus();
+      expect(document.activeElement).toBe(toggle);
+
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-composer-mobile-collapsed="true"]'),
+        ).not.toBeNull();
+      });
+
+      // The tap that moved focus there must still land: the dock renders
+      // identically in both states, so the collapse relayout cannot unmount the
+      // control out from under it.
+      await page.getByTestId("composer-editor").click();
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-chat-composer-mobile-collapsed="false"]'),
+        ).not.toBeNull();
+      });
+      await page.getByRole("button", { name: "Toggle workspace panel" }).click();
+      // The collapse relayout must not steal the tap it was triggered by: the
+      // dock renders identically in both states, so the control stays mounted
+      // and the toggle still lands.
+      await vi.waitFor(() => {
+        expect(toggle.getAttribute("aria-pressed")).toBe("true");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps a 16px composer type size across the whole phone tier", async () => {
     const mounted = await mountChatView({
       viewport: NARROW_TABLET_VIEWPORT,
@@ -8513,27 +8663,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
       }
     });
 
-    // KNOWN DEFECT, pinned rather than papered over. The assertion below is the
-    // same full-strength one the two passing tests above use; `it.fails` records
-    // that the product does not currently satisfy it while a pending approval is
-    // open, so the gate stays honest and the defect cannot be forgotten. Fixing
-    // the product makes this test fail (because it passes) and forces the
-    // annotation to be removed.
-    //
-    // Cause: `ApprovalCard` and `ComposerPendingUserInputPanel` render INSIDE
-    // `ChatComposer` (above the prompt editor), i.e. BELOW the dock row, so an
-    // open approval grows the composer upward and carries the dock with it.
-    // Measured centres of the dock's controls against the two-thirds line:
-    //   390x844 — y=305 against 562.7
-    //   320x568 — y=75  against 378.7 (back in the TOP third)
-    // It is still an improvement on the audited baseline, where these two
-    // controls sat at y=8-26 in the app bar in every state — but it does not
-    // clear the bar in this one. The fix is to render the dock row beneath the
-    // approval/pending panels instead of above the whole composer form, which
-    // means moving it inside `ChatComposer` and is deliberately not attempted
-    // here: that is the exact container whose focus handling the first-tap
-    // composer fix depends on.
-    it.fails(`keeps every thread dock control in the bottom third with an approval open at ${viewport.width}x${viewport.height}`, async () => {
+    // The same full-strength assertion as the two tests above, in the state
+    // that used to break it: `ApprovalCard` and `ComposerPendingUserInputPanel`
+    // render inside `ChatComposer`, so while the dock row sat above the whole
+    // composer form an open approval grew the composer upward and carried the
+    // dock with it (measured y=305 against 562.7 at 390x844, and y=75 against
+    // 378.7 at 320x568 — back in the top third). The dock now renders inside
+    // the composer beneath those panels, so the panel grows past it instead.
+    it(`keeps every thread dock control in the bottom third with an approval open at ${viewport.width}x${viewport.height}`, async () => {
       const mounted = await mountChatView({
         viewport,
         snapshot: createSnapshotWithPendingApproval(),
