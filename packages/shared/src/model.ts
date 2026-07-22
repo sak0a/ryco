@@ -11,6 +11,26 @@ import {
 } from "@ryco/contracts";
 
 const DEFAULT_PROVIDER_DRIVER_KIND = ProviderDriverKind.make("codex");
+const GEMINI_DRIVER_KIND = ProviderDriverKind.make("gemini");
+
+export type GeminiThinkingConfigKind = "budget" | "level";
+export type GeminiThinkingLevel = "LOW" | "HIGH";
+export type GeminiThinkingBudget = -1 | 512 | 0;
+
+export interface GeminiModelOptions {
+  readonly thinkingLevel?: GeminiThinkingLevel | undefined;
+  readonly thinkingBudget?: GeminiThinkingBudget | undefined;
+}
+
+const GEMINI_3_MODEL_PATTERN = /^(?:auto-)?gemini-3(?:[.-]|$)/i;
+const GEMINI_2_5_MODEL_PATTERN = /^(?:auto-)?gemini-2\.5(?:[.-]|$)/i;
+const GEMINI_THINKING_LEVEL_SET = new Set<GeminiThinkingLevel>(["LOW", "HIGH"]);
+const GEMINI_THINKING_BUDGET_MAP = new Map<string, GeminiThinkingBudget>([
+  ["-1", -1],
+  ["512", 512],
+  ["0", 0],
+]);
+const GEMINI_REASONING_DESCRIPTOR_ID = "reasoning";
 
 export interface SelectableModelOption {
   slug: string;
@@ -23,6 +43,86 @@ export function createModelCapabilities(input: {
   return {
     optionDescriptors: input.optionDescriptors.map(cloneDescriptor),
   };
+}
+
+function isGeminiThinkingLevel(value: string): value is GeminiThinkingLevel {
+  return GEMINI_THINKING_LEVEL_SET.has(value as GeminiThinkingLevel);
+}
+
+function isGeminiThinkingBudget(value: string): value is `${GeminiThinkingBudget}` {
+  return GEMINI_THINKING_BUDGET_MAP.has(value);
+}
+
+function sanitizeGeminiAliasSegment(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export const GEMINI_3_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
+  optionDescriptors: [
+    {
+      id: GEMINI_REASONING_DESCRIPTOR_ID,
+      label: "Reasoning",
+      type: "select",
+      options: [
+        { id: "HIGH", label: "High", isDefault: true },
+        { id: "LOW", label: "Low" },
+      ],
+      currentValue: "HIGH",
+    },
+  ],
+});
+
+export const GEMINI_2_5_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
+  optionDescriptors: [
+    {
+      id: GEMINI_REASONING_DESCRIPTOR_ID,
+      label: "Reasoning",
+      type: "select",
+      options: [
+        { id: "-1", label: "Dynamic", isDefault: true },
+        { id: "512", label: "512 Tokens" },
+      ],
+      currentValue: "-1",
+    },
+  ],
+});
+
+export const DEFAULT_GEMINI_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
+  optionDescriptors: [],
+});
+
+export function getGeminiThinkingConfigKind(
+  model: string | null | undefined,
+): GeminiThinkingConfigKind | null {
+  const normalized = normalizeModelSlug(model, GEMINI_DRIVER_KIND);
+  if (!normalized) {
+    return null;
+  }
+  if (GEMINI_3_MODEL_PATTERN.test(normalized)) {
+    return "level";
+  }
+  if (GEMINI_2_5_MODEL_PATTERN.test(normalized)) {
+    return "budget";
+  }
+  return null;
+}
+
+export function geminiCapabilitiesForModel(
+  model: string | null | undefined,
+  fallback: ModelCapabilities = DEFAULT_GEMINI_MODEL_CAPABILITIES,
+): ModelCapabilities {
+  switch (getGeminiThinkingConfigKind(model)) {
+    case "level":
+      return GEMINI_3_MODEL_CAPABILITIES;
+    case "budget":
+      return GEMINI_2_5_MODEL_CAPABILITIES;
+    default:
+      return fallback;
+  }
 }
 
 function getRawSelectionValueById(
@@ -347,6 +447,101 @@ export function resolvePromptInjectedEffort(
     }
   }
   return null;
+}
+
+export function hasProviderSelectOptionValue(caps: ModelCapabilities, value: string): boolean {
+  return getProviderOptionDescriptors({ caps }).some(
+    (descriptor) =>
+      descriptor.type === "select" && descriptor.options.some((option) => option.id === value),
+  );
+}
+
+export function getDefaultSelectOptionValue(
+  caps: ModelCapabilities,
+  descriptorId: string,
+): string | null {
+  const descriptor = getProviderOptionDescriptors({ caps }).find(
+    (candidate) => candidate.type === "select" && candidate.id === descriptorId,
+  );
+  if (!descriptor || descriptor.type !== "select") {
+    return null;
+  }
+  return (getProviderOptionCurrentValue(descriptor) as string | undefined) ?? null;
+}
+
+export function getGeminiThinkingSelectionValue(
+  caps: ModelCapabilities,
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+): string | undefined {
+  const descriptors = getProviderOptionDescriptors({ caps, selections });
+  const descriptor = descriptors.find(
+    (candidate) => candidate.type === "select" && candidate.id === GEMINI_REASONING_DESCRIPTOR_ID,
+  );
+  if (!descriptor || descriptor.type !== "select") {
+    return undefined;
+  }
+  const value = getProviderOptionCurrentValue(descriptor);
+  return typeof value === "string" ? value : undefined;
+}
+
+export function geminiModelOptionsFromEffortValue(
+  value: string | null | undefined,
+): GeminiModelOptions | undefined {
+  const trimmed = trimOrNull(value);
+  if (!trimmed) {
+    return undefined;
+  }
+  if (isGeminiThinkingLevel(trimmed)) {
+    return { thinkingLevel: trimmed };
+  }
+  if (isGeminiThinkingBudget(trimmed)) {
+    return {
+      thinkingBudget: GEMINI_THINKING_BUDGET_MAP.get(trimmed) as GeminiThinkingBudget,
+    };
+  }
+  return undefined;
+}
+
+export function getGeminiThinkingModelAlias(
+  model: string,
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+): string | null {
+  const kind = getGeminiThinkingConfigKind(model);
+  if (!kind) {
+    return null;
+  }
+
+  const caps = geminiCapabilitiesForModel(model);
+  const effort = getGeminiThinkingSelectionValue(caps, selections);
+  if (!effort || !hasProviderSelectOptionValue(caps, effort)) {
+    return null;
+  }
+
+  const nextOptions = geminiModelOptionsFromEffortValue(effort);
+  if (!nextOptions) {
+    return null;
+  }
+
+  const base = sanitizeGeminiAliasSegment(model);
+  if (!base) {
+    return null;
+  }
+  if (kind === "level" && nextOptions.thinkingLevel) {
+    return `ryco-gemini-${base}-thinking-level-${nextOptions.thinkingLevel.toLowerCase()}`;
+  }
+  if (kind === "budget" && nextOptions.thinkingBudget !== undefined) {
+    const budget =
+      nextOptions.thinkingBudget === -1 ? "dynamic" : String(nextOptions.thinkingBudget);
+    return `ryco-gemini-${base}-thinking-budget-${budget}`;
+  }
+  return null;
+}
+
+export function resolveGeminiApiModelId(
+  model: string,
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+): string {
+  return getGeminiThinkingModelAlias(model, selections) ?? model;
 }
 
 export function applyClaudePromptEffortPrefix(

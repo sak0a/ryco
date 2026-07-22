@@ -25,6 +25,7 @@ import {
   CodexSettings,
   CopilotSettings,
   CursorSettings,
+  GeminiSettings,
   OpenCodeSettings,
   ProviderDriverKind,
 } from "@ryco/contracts";
@@ -34,6 +35,7 @@ import type { ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
 import type { CodexDriverEnv } from "./Drivers/CodexDriver.ts";
 import type { CopilotDriverEnv } from "./Drivers/CopilotDriver.ts";
 import type { CursorDriverEnv } from "./Drivers/CursorDriver.ts";
+import type { GeminiDriverEnv } from "./Drivers/GeminiDriver.ts";
 import type { OpenCodeDriverEnv } from "./Drivers/OpenCodeDriver.ts";
 import { ProviderDriverError } from "./Errors.ts";
 import type {
@@ -52,12 +54,14 @@ export type BuiltInDriversEnv =
   | CodexDriverEnv
   | CopilotDriverEnv
   | CursorDriverEnv
+  | GeminiDriverEnv
   | OpenCodeDriverEnv;
 
 const codexDriverKind = ProviderDriverKind.make("codex");
 const claudeDriverKind = ProviderDriverKind.make("claudeAgent");
 const copilotDriverKind = ProviderDriverKind.make("copilot");
 const cursorDriverKind = ProviderDriverKind.make("cursor");
+const geminiDriverKind = ProviderDriverKind.make("gemini");
 const openCodeDriverKind = ProviderDriverKind.make("opencode");
 
 const driverImportError = (
@@ -132,6 +136,21 @@ const CursorLazyDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
     }).pipe(Effect.flatMap(({ CursorDriver }) => CursorDriver.create(input))),
 };
 
+const GeminiLazyDriver: ProviderDriver<GeminiSettings, GeminiDriverEnv> = {
+  driverKind: geminiDriverKind,
+  metadata: {
+    displayName: "Gemini",
+    supportsMultipleInstances: true,
+  },
+  configSchema: GeminiSettings,
+  defaultConfig: (): GeminiSettings => Schema.decodeSync(GeminiSettings)({}),
+  create: (input) =>
+    Effect.tryPromise({
+      try: () => import("./Drivers/GeminiDriver.ts"),
+      catch: (cause) => driverImportError(geminiDriverKind, input, cause),
+    }).pipe(Effect.flatMap(({ GeminiDriver }) => GeminiDriver.create(input))),
+};
+
 const OpenCodeLazyDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv> = {
   driverKind: openCodeDriverKind,
   metadata: {
@@ -157,5 +176,6 @@ export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv
   ClaudeLazyDriver,
   CopilotLazyDriver,
   CursorLazyDriver,
+  GeminiLazyDriver,
   OpenCodeLazyDriver,
 ];
