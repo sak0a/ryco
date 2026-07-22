@@ -29,6 +29,13 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   tokenMode?: AgentTokenMode;
   showInteractionModeToggle: boolean;
   askModeSupported: boolean;
+  /**
+   * Renders the mode, access, token, and plan sections. The phone tier passes
+   * `false`: those axes move to the session-policy sheet there, and the
+   * overflow is left carrying provider traits alone. Defaults to `true`, so
+   * the compact desktop menu is unchanged.
+   */
+  showSessionPolicy?: boolean;
   traitsMenuContent?: ReactNode;
   onInteractionModeChange: (mode: ProviderInteractionMode) => void;
   onTogglePlanSidebar: () => void;
@@ -36,6 +43,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   onTokenModeChange?: (mode: AgentTokenMode) => void;
 }) {
   const tokenMode = props.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE;
+  const showSessionPolicy = props.showSessionPolicy ?? true;
   return (
     <Menu>
       <MenuTrigger
@@ -59,71 +67,75 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         {props.traitsMenuContent ? (
           <>
             {props.traitsMenuContent}
-            <MenuDivider />
+            {showSessionPolicy ? <MenuDivider /> : null}
           </>
         ) : null}
-        {props.showInteractionModeToggle ? (
+        {showSessionPolicy ? (
           <>
-            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
+            {props.showInteractionModeToggle ? (
+              <>
+                <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
+                <MenuRadioGroup
+                  value={props.interactionMode}
+                  onValueChange={(value) => {
+                    if (!value || value === props.interactionMode) return;
+                    props.onInteractionModeChange(value as ProviderInteractionMode);
+                  }}
+                >
+                  <MenuRadioItem value="default">Chat</MenuRadioItem>
+                  <MenuRadioItem value="plan">Plan</MenuRadioItem>
+                  <MenuRadioItem value="ask" disabled={!props.askModeSupported}>
+                    {props.askModeSupported ? (
+                      "Ask"
+                    ) : (
+                      <span className="grid gap-0.5">
+                        <span>Ask</span>
+                        <span className="text-muted-foreground text-xs leading-4">
+                          {ASK_MODE_UNSUPPORTED_DESCRIPTION}
+                        </span>
+                      </span>
+                    )}
+                  </MenuRadioItem>
+                </MenuRadioGroup>
+                <MenuDivider />
+              </>
+            ) : null}
+            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
             <MenuRadioGroup
-              value={props.interactionMode}
+              value={props.runtimeMode}
               onValueChange={(value) => {
-                if (!value || value === props.interactionMode) return;
-                props.onInteractionModeChange(value as ProviderInteractionMode);
+                if (!value || value === props.runtimeMode) return;
+                props.onRuntimeModeChange(value as RuntimeMode);
               }}
             >
-              <MenuRadioItem value="default">Chat</MenuRadioItem>
-              <MenuRadioItem value="plan">Plan</MenuRadioItem>
-              <MenuRadioItem value="ask" disabled={!props.askModeSupported}>
-                {props.askModeSupported ? (
-                  "Ask"
-                ) : (
-                  <span className="grid gap-0.5">
-                    <span>Ask</span>
-                    <span className="text-muted-foreground text-xs leading-4">
-                      {ASK_MODE_UNSUPPORTED_DESCRIPTION}
-                    </span>
-                  </span>
-                )}
-              </MenuRadioItem>
+              <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
+              <MenuRadioItem value="auto-accept-edits">Auto-accept edits</MenuRadioItem>
+              <MenuRadioItem value="full-access">Full access</MenuRadioItem>
             </MenuRadioGroup>
             <MenuDivider />
-          </>
-        ) : null}
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
-        <MenuRadioGroup
-          value={props.runtimeMode}
-          onValueChange={(value) => {
-            if (!value || value === props.runtimeMode) return;
-            props.onRuntimeModeChange(value as RuntimeMode);
-          }}
-        >
-          <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
-          <MenuRadioItem value="auto-accept-edits">Auto-accept edits</MenuRadioItem>
-          <MenuRadioItem value="full-access">Full access</MenuRadioItem>
-        </MenuRadioGroup>
-        <MenuDivider />
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Tokens</div>
-        <MenuRadioGroup
-          value={tokenMode}
-          onValueChange={(value) => {
-            if (!value || value === tokenMode) return;
-            props.onTokenModeChange?.(value as AgentTokenMode);
-          }}
-        >
-          <MenuRadioItem value="off">Off</MenuRadioItem>
-          <MenuRadioItem value="balanced">Balanced</MenuRadioItem>
-          <MenuRadioItem value="aggressive">Aggressive</MenuRadioItem>
-        </MenuRadioGroup>
-        {props.activePlan ? (
-          <>
-            <MenuDivider />
-            <MenuItem onClick={props.onTogglePlanSidebar}>
-              <ListTodoIcon className="size-4 shrink-0" />
-              {props.planSidebarOpen
-                ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
-                : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`}
-            </MenuItem>
+            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Tokens</div>
+            <MenuRadioGroup
+              value={tokenMode}
+              onValueChange={(value) => {
+                if (!value || value === tokenMode) return;
+                props.onTokenModeChange?.(value as AgentTokenMode);
+              }}
+            >
+              <MenuRadioItem value="off">Off</MenuRadioItem>
+              <MenuRadioItem value="balanced">Balanced</MenuRadioItem>
+              <MenuRadioItem value="aggressive">Aggressive</MenuRadioItem>
+            </MenuRadioGroup>
+            {props.activePlan ? (
+              <>
+                <MenuDivider />
+                <MenuItem onClick={props.onTogglePlanSidebar}>
+                  <ListTodoIcon className="size-4 shrink-0" />
+                  {props.planSidebarOpen
+                    ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
+                    : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`}
+                </MenuItem>
+              </>
+            ) : null}
           </>
         ) : null}
       </MenuPopup>

@@ -12,6 +12,8 @@ export interface GenericSelectChipProps {
   descriptor: SelectDescriptor;
   descriptors: ReadonlyArray<ProviderOptionDescriptor>;
   onChangeDescriptors: (next: ReadonlyArray<ProviderOptionDescriptor>) => void;
+  /** Gated by mutation capability at the call site. */
+  disabled?: boolean;
 }
 
 // Fallback chip for any select descriptor that doesn't have a dedicated
@@ -28,6 +30,7 @@ export const GenericSelectChip = memo(function GenericSelectChip(props: GenericS
         render={
           <Button
             size="xs"
+            disabled={props.disabled ?? false}
             variant="ghost"
             aria-label={ariaLabel}
             title={props.descriptor.label}

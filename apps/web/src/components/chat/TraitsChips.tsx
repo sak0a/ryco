@@ -15,6 +15,7 @@ import { memo, useCallback } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
+import { boundedDisabledReason } from "~/lib/boundedReason";
 
 import { AgentChip } from "./AgentChip";
 import { ContextWindowChip } from "./ContextWindowChip";
@@ -50,12 +51,24 @@ export type TraitsChipsProps = {
   prompt: string;
   onPromptChange: (prompt: string) => void;
   modelOptions?: ProviderOptions | null | undefined;
+  /**
+   * Renders the disabled presentation and blocks every option change. The
+   * chips sit beside the model pill and the session-policy control in the
+   * composer, so they gate on the same read-only mutation capability those do
+   * rather than staying live next to two disabled controls.
+   */
+  disabled?: boolean;
+  /** Bounded, operator-facing reason shown when `disabled`. */
+  disabledReason?: string;
 } & Persistence;
 
 export const TraitsChips = memo(function TraitsChips(props: TraitsChipsProps) {
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
   const updateModelOptions = useCallback(
     (nextOptions: ProviderOptions | undefined) => {
+      // Fail closed: the chips are already disabled, so this only matters if a
+      // change ever reaches here another way.
+      if (props.disabled) return;
       if ("onModelOptionsChange" in props && typeof props.onModelOptionsChange === "function") {
         props.onModelOptionsChange(nextOptions);
         return;
@@ -124,6 +137,10 @@ export const TraitsChips = memo(function TraitsChips(props: TraitsChipsProps) {
       !REASONING_DESCRIPTOR_IDS.has(descriptor.id),
   );
 
+  const disabled = props.disabled ?? false;
+  const reason =
+    disabled && props.disabledReason ? boundedDisabledReason(props.disabledReason) : null;
+
   return (
     <div className="flex flex-wrap items-center gap-1">
       {effort ? (
@@ -136,6 +153,7 @@ export const TraitsChips = memo(function TraitsChips(props: TraitsChipsProps) {
           ultrathinkPromptControlled={ultrathinkPromptControlled}
           onChangeDescriptors={onChangeDescriptors}
           onPromptChange={props.onPromptChange}
+          disabled={disabled}
         />
       ) : null}
       {fastMode ? (
@@ -143,6 +161,7 @@ export const TraitsChips = memo(function TraitsChips(props: TraitsChipsProps) {
           descriptor={fastMode}
           descriptors={descriptors}
           onChangeDescriptors={onChangeDescriptors}
+          disabled={disabled}
         />
       ) : null}
       {contextWindow ? (
@@ -150,6 +169,7 @@ export const TraitsChips = memo(function TraitsChips(props: TraitsChipsProps) {
           descriptor={contextWindow}
           descriptors={descriptors}
           onChangeDescriptors={onChangeDescriptors}
+          disabled={disabled}
         />
       ) : null}
       {thinking ? (
@@ -157,6 +177,7 @@ export const TraitsChips = memo(function TraitsChips(props: TraitsChipsProps) {
           descriptor={thinking}
           descriptors={descriptors}
           onChangeDescriptors={onChangeDescriptors}
+          disabled={disabled}
         />
       ) : null}
       {agent ? (
@@ -164,6 +185,7 @@ export const TraitsChips = memo(function TraitsChips(props: TraitsChipsProps) {
           descriptor={agent}
           descriptors={descriptors}
           onChangeDescriptors={onChangeDescriptors}
+          disabled={disabled}
         />
       ) : null}
       {extraSelects.map((descriptor) => (
@@ -172,8 +194,14 @@ export const TraitsChips = memo(function TraitsChips(props: TraitsChipsProps) {
           descriptor={descriptor}
           descriptors={descriptors}
           onChangeDescriptors={onChangeDescriptors}
+          disabled={disabled}
         />
       ))}
+      {reason ? (
+        <span className="text-muted-foreground/80 text-xs" data-slot="traits-disabled-reason">
+          {reason}
+        </span>
+      ) : null}
     </div>
   );
 });

@@ -1,25 +1,17 @@
-import type {
-  AgentTokenMode,
-  ChangeRequest,
-  EnvironmentId,
-  ProviderInteractionMode,
-  ResolvedKeybindingsConfig,
-  RuntimeMode,
-  ServerProvider,
-  SourceControlIssueSummary,
+import {
+  ORCHESTRATION_WS_METHODS,
+  type AgentTokenMode,
+  type ChangeRequest,
+  type EnvironmentId,
+  type ProviderInteractionMode,
+  type ResolvedKeybindingsConfig,
+  type RuntimeMode,
+  type ServerProvider,
+  type SourceControlIssueSummary,
 } from "@ryco/contracts";
 import type { ProviderDriverKind, ProviderInstanceId } from "@ryco/contracts";
 import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import {
-  ClipboardListIcon,
-  HammerIcon,
-  ListTodoIcon,
-  type LucideIcon,
-  LockIcon,
-  LockOpenIcon,
-  MessageCircleQuestionMarkIcon,
-  PenLineIcon,
-} from "lucide-react";
+import { ListTodoIcon } from "lucide-react";
 import { ComposerExpandableLabelControl } from "./ComposerExpandableLabelControl";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import {
@@ -28,68 +20,25 @@ import {
 } from "./CompactComposerControlsMenu";
 import { ContextPickerButton } from "./ContextPickerButton";
 import { ContextWindowMeter } from "./ContextWindowMeter";
+import { PhoneSessionPolicyControl } from "./PhoneSessionPolicySheet";
 import { ProviderModelPicker } from "./ProviderModelPicker";
+import {
+  interactionModeConfig,
+  interactionModeOptions,
+  runtimeModeConfig,
+  runtimeModeOptions,
+} from "./sessionPolicyPresentation";
 import { Separator } from "../ui/separator";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { cn } from "~/lib/utils";
+import { useHostedRpcCapability } from "../../hostedHub/capabilities";
+import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import type { AppModelOption } from "../../modelSelection";
 import { useUiStateStore } from "../../uiStateStore";
 import { tokenModeOptions, tokenModePresentation } from "../../tokenModePresentation";
-
-const runtimeModeConfig: Record<
-  RuntimeMode,
-  { label: string; triggerLabel: string; description: string; icon: LucideIcon }
-> = {
-  "approval-required": {
-    label: "Supervised",
-    triggerLabel: "Supervised",
-    description: "Ask before commands and file changes.",
-    icon: LockIcon,
-  },
-  "auto-accept-edits": {
-    label: "Auto-accept edits",
-    triggerLabel: "Auto-accept",
-    description: "Auto-approve edits, ask before other actions.",
-    icon: PenLineIcon,
-  },
-  "full-access": {
-    label: "Full access",
-    triggerLabel: "Full access",
-    description: "Allow commands and edits without prompts.",
-    icon: LockOpenIcon,
-  },
-};
-
-const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
-
-const interactionModeConfig: Record<
-  ProviderInteractionMode,
-  { label: string; triggerLabel: string; description: string; icon: LucideIcon }
-> = {
-  default: {
-    label: "Build",
-    triggerLabel: "Build",
-    description: "Make changes and run commands.",
-    icon: HammerIcon,
-  },
-  plan: {
-    label: "Plan",
-    triggerLabel: "Plan",
-    description: "Chat toward a plan before making changes.",
-    icon: ClipboardListIcon,
-  },
-  ask: {
-    label: "Ask",
-    triggerLabel: "Ask",
-    description: "Read-only — answer questions without editing files.",
-    icon: MessageCircleQuestionMarkIcon,
-  },
-};
-
-const interactionModeOptions = Object.keys(interactionModeConfig) as ProviderInteractionMode[];
 
 const SELECT_OPEN_SUPPRESSION_MS = 300;
 
@@ -562,6 +511,13 @@ export interface ComposerFooterProps {
 }
 
 export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooterProps) {
+  // The read-only mutation capability, not a connectivity probe: the composer
+  // asks whether the dispatch method is available and renders accordingly. No
+  // second readiness or authorization implementation lives here.
+  const mutationCapability = useHostedRpcCapability(ORCHESTRATION_WS_METHODS.dispatchCommand);
+  const mutationsBlocked = !mutationCapability.allowed;
+  const mutationsBlockedReason = mutationCapability.reason;
+  const isPhoneTier = usePresentationTier() === "phone";
   return (
     <div
       data-chat-composer-footer="true"
@@ -597,6 +553,9 @@ export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooter
           terminalOpen={props.terminalOpen}
           open={props.isModelPickerOpen}
           triggerSize="xs"
+          phoneSheet
+          disabled={mutationsBlocked}
+          {...(mutationsBlockedReason ? { disabledReason: mutationsBlockedReason } : {})}
           {...(props.modelPickerIconClassName
             ? { activeProviderIconClassName: props.modelPickerIconClassName }
             : {})}
@@ -604,7 +563,49 @@ export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooter
           onInstanceModelChange={props.onProviderModelSelect}
         />
 
-        {props.isFooterCompact ? (
+        {isPhoneTier ? (
+          <>
+            {/* Session policy gets its own control on the phone tier: mode,
+                access, and token budget are not model options, and full access
+                must not be buried under a model list. */}
+            <PhoneSessionPolicyControl
+              interactionMode={props.interactionMode}
+              runtimeMode={props.runtimeMode}
+              tokenMode={props.tokenMode}
+              showInteractionModeToggle={props.showInteractionModeToggle}
+              askModeSupported={props.askModeSupported}
+              showPlanToggle={props.showPlanSidebarToggle}
+              planSidebarLabel={props.planSidebarLabel}
+              planSidebarOpen={props.planSidebarOpen}
+              disabled={mutationsBlocked}
+              {...(mutationsBlockedReason ? { disabledReason: mutationsBlockedReason } : {})}
+              onInteractionModeChange={props.onInteractionModeChange}
+              onRuntimeModeChange={props.onRuntimeModeChange}
+              onTokenModeChange={props.onTokenModeChange}
+              onTogglePlanSidebar={props.onTogglePlanSidebar}
+            />
+            {/* The overflow survives only to carry provider traits, which the
+                policy sheet does not own. Without traits it would be empty. */}
+            {props.providerTraitsMenuContent ? (
+              <CompactComposerControlsMenu
+                activePlan={props.showPlanSidebarToggle}
+                interactionMode={props.interactionMode}
+                planSidebarLabel={props.planSidebarLabel}
+                planSidebarOpen={props.planSidebarOpen}
+                runtimeMode={props.runtimeMode}
+                tokenMode={props.tokenMode}
+                showInteractionModeToggle={props.showInteractionModeToggle}
+                askModeSupported={props.askModeSupported}
+                showSessionPolicy={false}
+                traitsMenuContent={props.providerTraitsMenuContent}
+                onInteractionModeChange={props.onInteractionModeChange}
+                onTogglePlanSidebar={props.onTogglePlanSidebar}
+                onRuntimeModeChange={props.onRuntimeModeChange}
+                onTokenModeChange={props.onTokenModeChange}
+              />
+            ) : null}
+          </>
+        ) : props.isFooterCompact ? (
           <CompactComposerControlsMenu
             activePlan={props.showPlanSidebarToggle}
             interactionMode={props.interactionMode}
