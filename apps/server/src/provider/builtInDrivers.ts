@@ -21,6 +21,7 @@
  * @module provider/builtInDrivers
  */
 import {
+  AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
   CopilotSettings,
@@ -35,6 +36,7 @@ import type { CodexDriverEnv } from "./Drivers/CodexDriver.ts";
 import type { CopilotDriverEnv } from "./Drivers/CopilotDriver.ts";
 import type { CursorDriverEnv } from "./Drivers/CursorDriver.ts";
 import type { OpenCodeDriverEnv } from "./Drivers/OpenCodeDriver.ts";
+import type { AntigravityDriverEnv } from "./Drivers/AntigravityDriver.ts";
 import { ProviderDriverError } from "./Errors.ts";
 import type {
   AnyProviderDriver,
@@ -52,13 +54,15 @@ export type BuiltInDriversEnv =
   | CodexDriverEnv
   | CopilotDriverEnv
   | CursorDriverEnv
-  | OpenCodeDriverEnv;
+  | OpenCodeDriverEnv
+  | AntigravityDriverEnv;
 
 const codexDriverKind = ProviderDriverKind.make("codex");
 const claudeDriverKind = ProviderDriverKind.make("claudeAgent");
 const copilotDriverKind = ProviderDriverKind.make("copilot");
 const cursorDriverKind = ProviderDriverKind.make("cursor");
 const openCodeDriverKind = ProviderDriverKind.make("opencode");
+const antigravityDriverKind = ProviderDriverKind.make("antigravity");
 
 const driverImportError = (
   driver: ProviderDriverKind,
@@ -147,6 +151,21 @@ const OpenCodeLazyDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv> = 
     }).pipe(Effect.flatMap(({ OpenCodeDriver }) => OpenCodeDriver.create(input))),
 };
 
+const AntigravityLazyDriver: ProviderDriver<AntigravitySettings, AntigravityDriverEnv> = {
+  driverKind: antigravityDriverKind,
+  metadata: {
+    displayName: "Antigravity",
+    supportsMultipleInstances: true,
+  },
+  configSchema: AntigravitySettings,
+  defaultConfig: (): AntigravitySettings => Schema.decodeSync(AntigravitySettings)({}),
+  create: (input) =>
+    Effect.tryPromise({
+      try: () => import("./Drivers/AntigravityDriver.ts"),
+      catch: (cause) => driverImportError(antigravityDriverKind, input, cause),
+    }).pipe(Effect.flatMap(({ AntigravityDriver }) => AntigravityDriver.create(input))),
+};
+
 /**
  * Ordered list of built-in drivers. Order matters only for tie-breaking in
  * UI presentation — the registry itself is keyed by `driverKind`, so
@@ -158,4 +177,5 @@ export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv
   CopilotLazyDriver,
   CursorLazyDriver,
   OpenCodeLazyDriver,
+  AntigravityLazyDriver,
 ];
