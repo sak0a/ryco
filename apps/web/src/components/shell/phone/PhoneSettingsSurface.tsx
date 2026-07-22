@@ -38,6 +38,7 @@ import {
 import { Button } from "../../ui/button";
 import { ScrollArea } from "../../ui/scroll-area";
 import { Sheet, SheetPopup } from "../../ui/sheet";
+import { PhoneAppearanceSettings } from "./PhoneAppearanceSettings";
 
 interface PhoneSettingsItem {
   id: SettingsSectionId;
@@ -450,6 +451,17 @@ export function PhoneSettingsSurface() {
                   ) : null}
                 </div>
               ) : null}
+              {/* The phone appearance group: tier-specific presentation
+                  controls that stay on the list rather than inside a section
+                  page, because they are the ones a phone user changes on the
+                  device. They write the same appearance preference keys the
+                  desktop Appearance section writes. */}
+              <div className="mt-2 border-t border-border pt-2">
+                <h2 className="px-2 py-1 font-medium text-muted-foreground text-xs">
+                  Phone appearance
+                </h2>
+                <PhoneAppearanceSettings />
+              </div>
             </nav>
           </div>
         )}

@@ -20,6 +20,11 @@ import {
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
+import {
+  applyAppearancePreferencesToDocument,
+  resetAppearancePreference,
+  setAppearancePreference,
+} from "../../themes/appearancePreferences";
 import { SidebarProvider } from "../ui/sidebar";
 import { ChatHeader } from "../chat/ChatHeader";
 import {
@@ -87,6 +92,12 @@ function seedConnectedState() {
 
 function rectsIntersect(a: DOMRect, b: DOMRect): boolean {
   return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+/** The alpha channel of a computed colour, in whichever syntax it serialises. */
+function computedAlpha(color: string): number {
+  const numbers = color.match(/[\d.]+/gu)?.map(Number) ?? [];
+  return numbers.length === 4 ? numbers[3]! : 1;
 }
 
 let mounted: Awaited<ReturnType<typeof render>> | null = null;
@@ -230,6 +241,16 @@ describe("hosted connection controls", () => {
     expect(pillElement.textContent).toContain("Studio node");
     expect(pillElement.textContent).toContain("Online");
     expect(pillElement.querySelector("svg")).not.toBeNull();
+    // The pill renders on the `chip` material tier: at the Glass step it is
+    // translucent and blurred, with the tier's own (smaller) blur radius. The
+    // contrast that makes this safe is asserted in `GlassSurface.browser.tsx`.
+    setAppearancePreference("surfaceTransparency", "glass");
+    applyAppearancePreferencesToDocument();
+    const pillStyle = getComputedStyle(pillElement);
+    expect(pillStyle.backdropFilter).toContain("blur(14px)");
+    expect(computedAlpha(pillStyle.backgroundColor)).toBeLessThan(1);
+    resetAppearancePreference("surfaceTransparency");
+    applyAppearancePreferencesToDocument();
 
     await pill.click();
     const sheet = document.querySelector<HTMLElement>('[data-slot="sheet-popup"]');

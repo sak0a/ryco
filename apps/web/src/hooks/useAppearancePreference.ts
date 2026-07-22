@@ -4,6 +4,8 @@ import {
   APPEARANCE_PREFERENCES_CHANGE_EVENT,
   APPEARANCE_PREFERENCES_STORAGE_KEY,
   getAppearancePreferences,
+  getEffectiveAppearancePreferences,
+  isSurfaceTransparencyReducedBySystem,
   type AppearancePreferenceKey,
 } from "../themes/appearancePreferences";
 
@@ -25,8 +27,34 @@ function subscribe(onChange: () => void): () => void {
  * preference changes in this tab (via {@link APPEARANCE_PREFERENCES_CHANGE_EVENT})
  * or another tab (via the `storage` event). Returns the resolved string value,
  * which falls back to the default when no override is stored.
+ *
+ * With `{ effective: true }` the value is the selection that actually drives the
+ * document variables: `surfaceTransparency` then carries the phone tier's
+ * unstored default instead of the desktop one. It is republished through the
+ * same change event, so the same subscription covers it.
  */
-export function useAppearancePreference(key: AppearancePreferenceKey): string {
-  const getSnapshot = useCallback(() => getAppearancePreferences()[key], [key]);
+export function useAppearancePreference(
+  key: AppearancePreferenceKey,
+  options?: { readonly effective?: boolean },
+): string {
+  const effective = options?.effective ?? false;
+  const getSnapshot = useCallback(
+    () => (effective ? getEffectiveAppearancePreferences() : getAppearancePreferences())[key],
+    [effective, key],
+  );
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+/**
+ * Whether the OS is currently forcing translucent surfaces opaque. This never
+ * changes the selected value — it is a presentation override enforced in CSS —
+ * so a settings control must report it alongside the selection rather than
+ * displaying the forced step as though it had been chosen.
+ */
+export function useSurfaceTransparencyReducedBySystem(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    isSurfaceTransparencyReducedBySystem,
+    isSurfaceTransparencyReducedBySystem,
+  );
 }

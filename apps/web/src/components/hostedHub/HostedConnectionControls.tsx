@@ -10,6 +10,7 @@ import {
 import { useState } from "react";
 
 import { Button } from "../ui/button";
+import { glassSurfaceClassName } from "../mobile/GlassSurface";
 import { MobileListRow } from "../mobile/MobileListRow";
 import {
   MobileSheet,
@@ -26,6 +27,7 @@ import {
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
+import { cn } from "../../lib/utils";
 import { HostedPwaControls } from "./HostedPwaControls";
 import { HostedRelayTrustNotice } from "./HostedRelayTrustNotice";
 
@@ -368,7 +370,13 @@ export function HostedConnectionPill() {
         // min-w-0 + shrink (not shrink-0): under 200% text scaling on narrow
         // phones the pill truncates its labels instead of pushing the app-bar
         // controls after it out of the viewport.
-        className="flex min-h-9 min-w-0 max-w-44 shrink items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-xs outline-none pointer-coarse:min-h-11 focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn(
+          // The chip material tier: the smallest blur and the tightest
+          // coverage floor, because a pill is small and sits directly over
+          // scrolling content.
+          glassSurfaceClassName("chip"),
+          "flex min-h-9 min-w-0 max-w-44 shrink items-center gap-1.5 rounded-full border border-border px-2.5 text-xs outline-none pointer-coarse:min-h-11 focus-visible:ring-2 focus-visible:ring-ring",
+        )}
         onClick={() => setOpen(true)}
       >
         {transport === "online" ? (

@@ -12,6 +12,7 @@ import { getRouter } from "./router";
 import { APP_DISPLAY_NAME } from "./branding";
 import { syncDocumentPresentationTier } from "./lib/presentationTier";
 import { syncDocumentVisualViewportInsets } from "./lib/visualViewportInsets";
+import { syncAppearancePreferenceEnvironment } from "./themes/appearancePreferences";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
@@ -37,6 +38,11 @@ syncDocumentPresentationTier();
 // The single VisualViewport subscription: publishes bounded keyboard-inset CSS
 // variables that phone input surfaces consume from CSS only.
 syncDocumentVisualViewportInsets();
+
+// Reapplies the appearance variables when an environment input that feeds the
+// effective preferences changes — the presentation tier, reduced transparency,
+// reduced motion — without ever writing a stored value.
+syncAppearancePreferenceEnvironment();
 
 document.title = APP_DISPLAY_NAME;
 

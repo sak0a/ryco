@@ -35,6 +35,13 @@ export interface MobileListRowProps {
   /** Shown and announced as the row's description when the row is disabled. */
   readonly disabledReason?: string | undefined;
   readonly destructive?: boolean | undefined;
+  /**
+   * Selected state for a row that is one of a set of choices. Passing it — even
+   * as `false` — makes the row announce its state through `aria-pressed`;
+   * omitting it leaves the row a plain button, which is what a navigation or
+   * action row is. The check glyph call sites render alongside is decorative,
+   * so it is not what conveys the state.
+   */
   readonly selected?: boolean | undefined;
   readonly onClick?: (() => void) | undefined;
   readonly className?: string | undefined;
@@ -48,7 +55,7 @@ export function MobileListRow({
   disabled = false,
   disabledReason,
   destructive = false,
-  selected = false,
+  selected,
   onClick,
   className,
 }: MobileListRowProps) {
@@ -75,6 +82,11 @@ export function MobileListRow({
       disabled={disabled}
       aria-labelledby={reason ? nameIds : undefined}
       aria-describedby={reason ? reasonId : undefined}
+      // `aria-pressed` rather than `aria-checked`: these rows are buttons, and
+      // `aria-checked` would require a `radiogroup`/`listbox` container role
+      // that call sites do not have. Without it a reader announces a set of
+      // choices as identical plain buttons.
+      aria-pressed={selected}
       // `min-h-11` is the 44px effective touch target; the row is full width,
       // so the smaller axis is always the height.
       className={cn(

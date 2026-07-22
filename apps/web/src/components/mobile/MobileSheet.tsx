@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
+import { glassSurfaceClassName } from "~/components/mobile/GlassSurface";
 
 /**
  * The phone bottom-sheet primitive, built on `@base-ui/react`'s `Drawer`.
@@ -106,7 +107,7 @@ export function MobileSheet({
             // fully transparent scrim over a page that is still focus-trapped,
             // scroll-locked and pointer-blocked. Base UI exposes no true
             // dismissal-progress signal, so none is faked here.
-            "transition-opacity duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none",
+            "transition-opacity duration-[var(--app-motion-duration-sheet)] ease-[var(--app-motion-ease)] data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none",
           )}
           data-slot="mobile-sheet-backdrop"
         />
@@ -122,7 +123,12 @@ export function MobileSheet({
           <Drawer.Popup
             aria-label={label}
             className={cn(
-              "app-surface pointer-events-auto relative flex max-h-full min-h-0 w-full min-w-0 flex-col rounded-t-2xl border-t not-dark:bg-clip-padding text-popover-foreground shadow-lg/5",
+              // The sheet material tier: the largest blur, and the coverage
+              // floor that keeps its text above AA over the worst-case
+              // backdrop. It replaces `app-surface`, which carried the same
+              // popover colour but no floor, blur or scrim.
+              glassSurfaceClassName("sheet"),
+              "pointer-events-auto flex max-h-full min-h-0 w-full min-w-0 flex-col rounded-t-2xl border-t not-dark:bg-clip-padding text-popover-foreground shadow-lg/5",
               // Full-width sheets render edge to edge, so they pad the
               // landscape side insets and the bottom safe area themselves —
               // call sites must not repeat `pb-safe`.
@@ -130,7 +136,7 @@ export function MobileSheet({
               // Detent offset and live swipe movement share the `translate`
               // property with the enter/exit position.
               "translate-y-[calc(var(--drawer-snap-point-offset,0px)+var(--drawer-swipe-movement-y,0px))] data-ending-style:translate-y-full data-starting-style:translate-y-full",
-              "transition-[translate,scale] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transition-none",
+              "transition-[translate,scale] duration-[var(--app-motion-duration-sheet)] ease-[var(--app-motion-ease)] will-change-transform motion-reduce:transition-none",
               // Stacking, not nesting: a sheet opened from this one pushes this
               // one back instead of rendering inside it.
               "data-nested-drawer-open:scale-96",
