@@ -17,6 +17,12 @@ import {
   resetPrimaryEnvironmentDescriptorForTests,
   writePrimaryEnvironmentDescriptor,
 } from "../../environments/primary";
+import { resetPointerEmulation, setCoarsePointerEmulation } from "../../../test/browserPointer";
+import { HOSTED_CONNECTION_STATUS_INDICATORS } from "../../hostedHub/connectionStatus";
+import {
+  hostedConnectionConnectedByGateOrder,
+  hostedConnectionStatusRepresentatives,
+} from "../../../test/hostedConnectionVocabulary";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
@@ -88,6 +94,28 @@ function seedConnectedState() {
     sessionStatus: "ready",
     sessionEstablished: true,
   });
+}
+
+/**
+ * Walks outward from a point until the hit test stops resolving to the
+ * control. `getBoundingClientRect` cannot see an `::after` hit slop, so only
+ * this proves the effective target — see `ui/toggle.browser.tsx`.
+ */
+function hitReach(
+  element: HTMLElement,
+  fromX: number,
+  fromY: number,
+  stepX: number,
+  stepY: number,
+  limit = 200,
+): number {
+  for (let distance = 1; distance <= limit; distance += 1) {
+    const target = document.elementFromPoint(fromX + stepX * distance, fromY + stepY * distance);
+    if (!target || (target !== element && !element.contains(target))) {
+      return distance - 1;
+    }
+  }
+  return limit;
 }
 
 function rectsIntersect(a: DOMRect, b: DOMRect): boolean {
@@ -237,9 +265,10 @@ describe("hosted connection controls", () => {
     const pill = page.getByTestId("hosted-connection-pill");
     await expect.element(pill).toBeVisible();
     const pillElement = pill.element() as HTMLElement;
-    // Bounded pill: node label plus status as text (with icon), inside the bar.
-    expect(pillElement.textContent).toContain("Studio node");
+    // Collapsed indicator: the state as text (with icon), and node identity in
+    // the accessible name rather than in pixels the app-bar title needs.
     expect(pillElement.textContent).toContain("Online");
+    expect(pillElement.getAttribute("aria-label")).toBe("Connection: Studio node, Online");
     expect(pillElement.querySelector("svg")).not.toBeNull();
     // The pill renders on the `chip` material tier: at the Glass step it is
     // translucent and blurred, with the tier's own (smaller) blur radius. The
@@ -380,6 +409,208 @@ describe("hosted connection controls", () => {
       expect(document.querySelector('[data-slot="sheet-popup"]')).toBeNull();
       expect(announcer()).not.toBeNull();
     });
+  });
+
+  it("renders every bounded status as its own short label and an agreeing icon at 320px", async () => {
+    await page.viewport(320, 568);
+    seedConnectedState();
+    mounted = await render(
+      // A 320px app bar, so every state is measured where the space is
+      // tightest rather than in an unconstrained container.
+      <div className="flex items-center gap-1.5 px-3">
+        <h1 className="min-w-0 flex-1 truncate text-base font-semibold">Threads</h1>
+        <HostedConnectionPill />
+      </div>,
+    );
+
+    const representatives = hostedConnectionStatusRepresentatives();
+    expect(representatives.size).toBeGreaterThanOrEqual(18);
+
+    const chip = () =>
+      document.querySelector<HTMLElement>('[data-testid="hosted-connection-pill"]')!;
+    const statusPart = () =>
+      document.querySelector<HTMLElement>('[data-slot="mobile-status-chip-status"]')!;
+    const icon = () =>
+      document.querySelector<HTMLElement>('[data-testid="hosted-connection-icon"]')!;
+    const rendered = new Set<string>();
+
+    for (const [text, input] of representatives) {
+      const { shortLabel, connected } = HOSTED_CONNECTION_STATUS_INDICATORS[text];
+      useHostedHubStore.setState({
+        browserStatus: input.browserStatus,
+        sessionStatus: input.sessionStatus,
+        selectionStatus: input.selectionStatus,
+        transportStatus: input.transportStatus,
+      });
+      await vi.waitFor(() => {
+        expect(statusPart().textContent, `collapsed label for "${text}"`).toBe(shortLabel);
+      });
+      rendered.add(shortLabel);
+
+      // Text AND icon in every state — never colour alone.
+      expect(chip().querySelector("svg"), `icon for "${text}"`).not.toBeNull();
+      // The glyph agrees with the state, judged from the raw inputs in the
+      // derivation's own gate order rather than from the transport alone.
+      expect(icon().getAttribute("data-connected"), `glyph for "${text}"`).toBe(
+        String(hostedConnectionConnectedByGateOrder(input)),
+      );
+      expect(connected, `indicator connectedness for "${text}"`).toBe(
+        hostedConnectionConnectedByGateOrder(input),
+      );
+
+      // The label is never truncated at the narrowest phone. This only means
+      // something because the sweep reaches the long states — measured, the
+      // full text would run to 118px for `Authorization removed` and 126px for
+      // `authenticating` against a chip that caps at 136px.
+      expect(statusPart().scrollWidth, `truncation of "${shortLabel}"`).toBeLessThanOrEqual(
+        statusPart().clientWidth,
+      );
+      expect(chip().getBoundingClientRect().width, `chip width for "${text}"`).toBeLessThanOrEqual(
+        136.5,
+      );
+      // …and the title keeps the larger share of the bar in every state.
+      const titleWidth = document.querySelector("h1")!.getBoundingClientRect().width;
+      expect(titleWidth, `title width beside "${shortLabel}"`).toBeGreaterThan(
+        chip().getBoundingClientRect().width,
+      );
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(320);
+
+      // The accessible label keeps node identity AND the complete bounded
+      // state — which the collapsed label deliberately no longer spells out.
+      const label = chip().getAttribute("aria-label") ?? "";
+      expect(label, `accessible label for "${text}"`).toContain(selectedNode.label);
+      expect(label, `accessible label for "${text}"`).toContain(text);
+      // Bounded vocabulary only: no raw identifier, ticket, or payload.
+      expect(label).not.toContain(selectedNode.id);
+      expect(label).not.toContain(selectedNode.environmentId);
+    }
+
+    // Every state rendered a label no other state renders, so no two states
+    // are told apart by colour alone. No case folding: `Online` and `online`
+    // are different states and merging them is the defect this pins.
+    expect(rendered.size, "two states rendered the same collapsed label").toBe(
+      representatives.size,
+    );
+  });
+
+  it("never shows a connected glyph while the ryco session is not ready", async () => {
+    // The three states the transport-only glyph rule got wrong. Each is
+    // reachable with the relay transport online, which is exactly why the
+    // glyph cannot be chosen from the transport.
+    await page.viewport(320, 568);
+    seedConnectedState();
+    mounted = await render(<HostedConnectionPill />);
+
+    const icon = () =>
+      document.querySelector<HTMLElement>('[data-testid="hosted-connection-icon"]')!;
+    const statusPart = () =>
+      document.querySelector<HTMLElement>('[data-slot="mobile-status-chip-status"]')!;
+
+    for (const [patch, label] of [
+      [{ sessionStatus: "delivery-unknown", selectionStatus: "online" }, "Unconfirmed"],
+      [{ sessionStatus: "stale", selectionStatus: "authorization-removed" }, "No access"],
+      [{ sessionStatus: "closed", selectionStatus: "online" }, "Not ready"],
+    ] as const) {
+      // Every field is restated: the store merges partials, so an omitted one
+      // would carry the previous case's state into this one.
+      useHostedHubStore.setState({ browserStatus: "current", transportStatus: "online", ...patch });
+      await vi.waitFor(() => {
+        expect(statusPart().textContent).toBe(label);
+      });
+      expect(useHostedHubStore.getState().transportStatus, "the transport is up").toBe("online");
+      expect(icon().getAttribute("data-connected"), `glyph beside "${label}"`).toBe("false");
+    }
+
+    // …and the connected glyph is still reachable, so the assertion above is
+    // not passing by never being connected.
+    seedConnectedState();
+    await vi.waitFor(() => {
+      expect(statusPart().textContent).toBe("Online");
+    });
+    expect(icon().getAttribute("data-connected")).toBe("true");
+  });
+
+  it("keeps both live regions mounted while the indicator is collapsed", async () => {
+    await page.viewport(320, 568);
+    seedConnectedState();
+    useHostedHubStore.setState({ sessionStatus: "delivery-unknown" });
+    mounted = await render(<HostedConnectionPill />);
+
+    // Pinned to the specific regions and their `aria-live` values: a bare
+    // `[aria-live]` or `[role=alert]` query passes against any other region on
+    // the page and would not fail if the indicator dropped its own.
+    const polite = await vi.waitFor(() => {
+      const element = document.querySelector<HTMLElement>(
+        '[data-testid="hosted-connection-status-announcer"]',
+      );
+      expect(element, "the polite connection-state region").not.toBeNull();
+      return element!;
+    });
+    expect(polite.getAttribute("aria-live")).toBe("polite");
+    expect(polite.getAttribute("role")).toBe("status");
+    expect(polite.textContent).toContain(selectedNode.label);
+    expect(polite.textContent).toContain("Delivery unknown");
+
+    const assertive = [...document.querySelectorAll<HTMLElement>('[role="alert"]')].filter(
+      (element) => element.textContent?.includes("Delivery unknown"),
+    );
+    expect(assertive, "the assertive delivery-unknown region").toHaveLength(1);
+    // `role="alert"` carries an implicit `aria-live: assertive`; assert the
+    // computed value so an override cannot silently downgrade it.
+    expect(
+      assertive[0]!.getAttribute("aria-live") ?? "assertive",
+      "the delivery-unknown region stays assertive",
+    ).toBe("assertive");
+
+    // Both are mounted while the indicator is COLLAPSED — no sheet is open.
+    expect(document.querySelector('[data-slot="sheet-popup"]')).toBeNull();
+    expect(polite.closest('[data-slot="sheet-popup"]')).toBeNull();
+    expect(assertive[0]!.closest('[data-slot="sheet-popup"]')).toBeNull();
+    // …and neither lives inside the chip, so shrinking the chip cannot take
+    // them with it.
+    const chip = document.querySelector<HTMLElement>('[data-testid="hosted-connection-pill"]')!;
+    expect(chip.contains(polite)).toBe(false);
+    expect(chip.contains(assertive[0]!)).toBe(false);
+  });
+
+  it("measures at least 44px by hit test at collapsed size on a coarse phone", async () => {
+    await page.viewport(320, 568);
+    await setCoarsePointerEmulation(true);
+    try {
+      seedConnectedState();
+      mounted = await render(
+        // The clipping ancestors a phone app bar puts around the indicator: a
+        // `::after` hit slop would be inert inside either of these, which is
+        // why the chip sizes its real border box instead.
+        <div className="flex h-screen items-center overflow-hidden px-3">
+          <h1 className="min-w-0 flex-1 truncate text-base font-semibold">Threads</h1>
+          <div className="flex min-w-0 items-center overflow-x-auto">
+            <HostedConnectionPill />
+          </div>
+        </div>,
+      );
+
+      const chip = page.getByTestId("hosted-connection-pill").element() as HTMLElement;
+      const rect = chip.getBoundingClientRect();
+      const centreX = rect.left + rect.width / 2;
+      const centreY = rect.top + rect.height / 2;
+      expect(document.elementFromPoint(centreX, centreY)?.closest("button")).toBe(chip);
+
+      const up = hitReach(chip, centreX, centreY, 0, -1);
+      const down = hitReach(chip, centreX, centreY, 0, 1);
+      const left = hitReach(chip, centreX, centreY, -1, 0);
+      const right = hitReach(chip, centreX, centreY, 1, 0);
+      expect(up + down + 1, "hit-tested vertical target").toBeGreaterThanOrEqual(44);
+      expect(left + right + 1, "hit-tested horizontal target").toBeGreaterThanOrEqual(44);
+
+      // The audited pill measured 176px wide and pushed the title out of a
+      // 320px bar. The collapsed chip has to leave the title the larger share.
+      const titleWidth = document.querySelector("h1")!.getBoundingClientRect().width;
+      expect(rect.width, "collapsed indicator width").toBeLessThan(titleWidth);
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(320);
+    } finally {
+      await resetPointerEmulation();
+    }
   });
 
   it("announces delivery-unknown assertively while the connection sheet is closed", async () => {

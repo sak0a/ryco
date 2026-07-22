@@ -37,6 +37,10 @@ import {
   __setEnvironmentApiOverrideForTests,
 } from "../../../environmentApi";
 import { clearHostedNodeScopedState } from "../../../hostedHub/environment";
+import { HOSTED_CONNECTION_STATUS_INDICATORS } from "../../../hostedHub/connectionStatus";
+import { hostedConnectionStatusRepresentatives } from "../../../../test/hostedConnectionVocabulary";
+import { hostedHubController, useHostedHubStore } from "../../../hostedHub/state";
+import type { HostedHubNode } from "../../../hostedHub/types";
 import { syncDocumentPresentationTier } from "../../../lib/presentationTier";
 import { useStore, type EnvironmentState } from "../../../store";
 import type { SidebarThreadSummary } from "../../../types";
@@ -249,6 +253,7 @@ describe("PhoneHome", () => {
     __resetContextMenuSheetForTests();
     await mounted?.unmount();
     mounted = null;
+    hostedHubController.resetForTests();
     __resetEnvironmentApiOverridesForTests();
     useStore.setState({ activeEnvironmentId: null, environmentStateById: {} });
     useUiStateStore.setState({ pinnedThreadKeys: {}, projectExpandedById: {} });
@@ -339,6 +344,91 @@ describe("PhoneHome", () => {
       await assertHomeContained(844);
     } finally {
       await setCoarsePointerEmulation(false);
+    }
+  });
+
+  it("keeps the Home title readable beside the collapsed indicator at 320px in every bounded state", async () => {
+    // The audited Home bar: a 176px connection pill that crowded the title out
+    // entirely at 320px, rendering a truncated node label and a truncated
+    // state in the space it took.
+    //
+    // Seeding only ready/online would make the width bounds meaningless — that
+    // is the ONE state whose short label is also its full text. The whole
+    // vocabulary is swept instead.
+    const hostedNode: HostedHubNode = {
+      id: "node_aaaaaaaaaaaaaaaaaaaaaa",
+      environmentId: EnvironmentId.make("env_aaaaaaaaaaaaaaaaaaaaaa"),
+      label: "MacBook Pro M5",
+      platformOs: "linux",
+      platformArch: "x64",
+      clientVersion: "0.9.0",
+      createdAt: 1,
+      updatedAt: 1,
+      lastAuthenticatedAt: 1,
+      revokedAt: null,
+      revocationReasonCode: null,
+      grant: { id: "grant_a", role: "operator" },
+      effectiveRole: "operator",
+      presence: { online: true, lastHeartbeatAt: 1 },
+    };
+    await page.viewport(320, 568);
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      browserStatus: "current",
+      nodes: [hostedNode],
+      selectedNode: hostedNode,
+      selectionStatus: "online",
+      effectiveRole: "operator",
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+    });
+    mounted = await render(
+      <SidebarProvider>
+        <PhoneHome />
+      </SidebarProvider>,
+    );
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="hosted-connection-pill"]')).not.toBeNull();
+    });
+    await expect.element(page.getByRole("heading", { name: "Threads" })).toBeVisible();
+    const chip = () =>
+      document.querySelector<HTMLElement>('[data-testid="hosted-connection-pill"]')!;
+    const status = () =>
+      document.querySelector<HTMLElement>('[data-slot="mobile-status-chip-status"]')!;
+    const title = () => document.querySelector<HTMLElement>("h1")!;
+
+    for (const [text, statusInput] of hostedConnectionStatusRepresentatives()) {
+      const { shortLabel } = HOSTED_CONNECTION_STATUS_INDICATORS[text];
+      useHostedHubStore.setState({
+        browserStatus: statusInput.browserStatus,
+        sessionStatus: statusInput.sessionStatus,
+        selectionStatus: statusInput.selectionStatus,
+        transportStatus: statusInput.transportStatus,
+      });
+      await vi.waitFor(() => {
+        expect(status().textContent, `collapsed label for "${text}"`).toBe(shortLabel);
+      });
+
+      // The title renders in full — not truncated, not dropped.
+      expect(
+        title().scrollWidth,
+        `the title renders without truncation beside "${shortLabel}"`,
+      ).toBeLessThanOrEqual(title().clientWidth);
+      expect(
+        title().getBoundingClientRect().width,
+        `title width beside "${shortLabel}"`,
+      ).toBeGreaterThan(160);
+      expect(
+        chip().getBoundingClientRect().width,
+        `indicator width for "${shortLabel}"`,
+      ).toBeLessThanOrEqual(136.5);
+      expect(chip().getBoundingClientRect().right).toBeLessThanOrEqual(320.5);
+      // Node identity is still announced, and the state is visible text.
+      expect(chip().getAttribute("aria-label")).toBe(`Connection: MacBook Pro M5, ${text}`);
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(320);
     }
   });
 
