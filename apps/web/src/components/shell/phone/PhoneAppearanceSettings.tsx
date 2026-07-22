@@ -6,6 +6,7 @@ import {
   useSurfaceTransparencyReducedBySystem,
 } from "../../../hooks/useAppearancePreference";
 import {
+  DOCK_DENSITY_OPTIONS,
   FONT_SIZE_OPTIONS,
   MOTION_OPTIONS,
   PHONE_MATERIAL_OPTIONS,
@@ -56,10 +57,13 @@ const SYSTEM_TRANSPARENCY_OVERRIDE = `System reduce transparency is on, showing 
  * size** writes the same `fontSizeBase` key the desktop control writes.
  * **Motion** reduces the sheet and stack-push animation beyond the OS setting.
  *
+ * **Dock density** writes its own `dockDensity` key: one key, two explicit
+ * choices honoured exactly, no second scale. It moves the dock capsule's
+ * padding only — the 44 px control floor is pinned in px in `MobileDock`, so
+ * neither density can shrink a touch target.
+ *
  * Every row displays and writes the same source of truth — the selected value —
  * so a system override can never be persisted as though it were a choice.
- *
- * Dock density ships with the dock.
  */
 const PHONE_APPEARANCE_CONTROLS: ReadonlyArray<PhoneAppearanceControl> = [
   {
@@ -75,6 +79,13 @@ const PHONE_APPEARANCE_CONTROLS: ReadonlyArray<PhoneAppearanceControl> = [
     description: "The base type size for the whole interface.",
     options: FONT_SIZE_OPTIONS,
     scale: FONT_SIZE_OPTIONS,
+  },
+  {
+    key: "dockDensity",
+    label: "Dock density",
+    description: "How much padding the dock capsule carries around its controls.",
+    options: DOCK_DENSITY_OPTIONS,
+    scale: DOCK_DENSITY_OPTIONS,
   },
   {
     key: "motion",

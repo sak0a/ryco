@@ -25,18 +25,17 @@ import { GLASS_SURFACE_TIERS, type GlassSurfaceTier } from "~/themes/appearanceP
  * The floors that make the guarantee hold are asserted over resolved,
  * composited colours in `GlassSurface.browser.tsx`.
  *
- * There is deliberately no wrapper component: both consumers apply the material
- * to an element they do not own — a Base UI `Drawer.Popup` and the connection
- * pill's own `button` — so a wrapper would add a box that has to be made
- * transparent again. The tier is applied as a class instead.
- *
- * The spec's third tier, `dock`, ships with the dock itself.
+ * There is deliberately no wrapper component: consumers apply the material to
+ * an element they do not own — a Base UI `Drawer.Popup`, the connection pill's
+ * own `button`, the dock capsule — so a wrapper would add a box that has to be
+ * made transparent again. The tier is applied as a class instead.
  */
 export { GLASS_SURFACE_TIERS, type GlassSurfaceTier };
 
 const GLASS_SURFACE_TIER_CLASS_NAMES: Record<GlassSurfaceTier, string> = {
   sheet: "app-glass-surface-sheet",
   chip: "app-glass-surface-chip",
+  dock: "app-glass-surface-dock",
 };
 
 /** The class pair that renders a surface on the given material tier. */

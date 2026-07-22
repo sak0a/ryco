@@ -80,9 +80,9 @@ import {
   ThreadRowTrailingStatus,
   ThreadStatusDetailLine,
 } from "../../ThreadStatusIndicators";
-import { Button } from "../../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../../ui/empty";
 import { SidebarInset } from "../../ui/sidebar";
+import { MobileDock } from "../../mobile/MobileDock";
 import { MobileListRow } from "../../mobile/MobileListRow";
 import {
   MobileSheet,
@@ -228,47 +228,24 @@ export function PhoneHome() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {/* The app bar is title plus the connection indicator. Search, New
+            thread and settings were the three controls stranded in the
+            top-right corner; they are in the dock now. */}
         <header className="flex items-center gap-1.5 border-b border-border pr-[calc(env(safe-area-inset-right)+0.5rem)] pb-2 pl-[calc(env(safe-area-inset-left)+0.75rem)] pt-[calc(env(safe-area-inset-top)+0.5rem)]">
           <h1 className="min-w-0 flex-1 truncate text-base font-semibold">Threads</h1>
           <HostedConnectionPill />
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label="Search threads"
-            onClick={() => openCommandPalette(true)}
-          >
-            <SearchIcon />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label="Open settings"
-            onClick={() => openSettings()}
-          >
-            <SettingsIcon />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label="New thread"
-            disabled={sortedProjects.length === 0}
-            onClick={() => {
-              if (sortedProjects.length === 1 && sortedProjects[0]) {
-                startThreadInProject(sortedProjects[0]);
-                return;
-              }
-              setProjectPickerOpen(true);
-            }}
-          >
-            <PlusIcon />
-          </Button>
         </header>
         <div
           data-testid="phone-home-list"
-          className="min-h-0 flex-1 overflow-y-auto pb-[max(env(safe-area-inset-bottom),0.5rem)]"
+          // The list takes the full height the app bar used to waste, and the
+          // dock is an overlay, so the bottom scroll padding — not a layout
+          // reservation — is what lets the last row clear the capsule.
+          className="app-dock-scroll-clearance flex min-h-0 flex-1 flex-col overflow-y-auto"
         >
           {projectTreeRows.length === 0 ? (
-            <Empty className="flex-1 py-16">
+            // Centred in the content region rather than pinned under the app
+            // bar, now that the region is the whole screen.
+            <Empty className="flex-1">
               <EmptyHeader>
                 <EmptyTitle className="text-base">No projects yet</EmptyTitle>
                 <EmptyDescription className="mt-1 text-sm">
@@ -311,6 +288,38 @@ export function PhoneHome() {
           )}
         </div>
       </div>
+      <MobileDock
+        label="Home actions"
+        actions={[
+          {
+            id: "search",
+            label: "Search threads",
+            shortLabel: "Search",
+            icon: <SearchIcon aria-hidden className="size-4 shrink-0" />,
+            onSelect: () => openCommandPalette(true),
+          },
+          {
+            id: "new-thread",
+            label: "New thread",
+            icon: <PlusIcon aria-hidden className="size-4 shrink-0" />,
+            disabled: sortedProjects.length === 0,
+            onSelect: () => {
+              if (sortedProjects.length === 1 && sortedProjects[0]) {
+                startThreadInProject(sortedProjects[0]);
+                return;
+              }
+              setProjectPickerOpen(true);
+            },
+          },
+          {
+            id: "settings",
+            label: "Open settings",
+            shortLabel: "Settings",
+            icon: <SettingsIcon aria-hidden className="size-4 shrink-0" />,
+            onSelect: () => openSettings(),
+          },
+        ]}
+      />
       <MobileSheet open={projectPickerOpen} onOpenChange={setProjectPickerOpen} label="New thread">
         <MobileSheetHeader>
           <MobileSheetTitle>New thread</MobileSheetTitle>
