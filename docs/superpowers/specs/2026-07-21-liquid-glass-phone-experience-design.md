@@ -247,6 +247,29 @@ alpha, plus its scrim where the active Material step applies one — over the **
 not over the page background. Contrast is therefore a property of the material token and is
 independent of whatever content scrolls beneath. This is asserted, not assumed — see _Verification_.
 
+Role sets are **per tier**, derived from what each tier's consumers actually render rather than
+shared. This matters: the sheet renders destructive row labels and the connection pill does not, so
+holding both to one set over-constrains the pill by a colour it cannot display.
+
+**Measured outcome, and the honest consequence.** Applied to the current palette the floors land at
+sheet 90 % light / 96 % dark, and chip 88 % light / 82 % dark. The two schemes invert between tiers,
+which follows from the exemption rule rather than from a mistake: the sheet is bound by
+`--destructive` in dark, the chip by `--muted-foreground` in light.
+
+At those floors the sheet's Standard and Glass steps differ mainly by blur radius and the
+thin-material-plus-scrim split, not by translucency. The binding constraints are **palette facts,
+not material choices** — light `--destructive` resolves to 3.82:1 on white and light `emerald-600`
+presence text to 3.60:1, both already below AA with no material present, and dark `--destructive`
+at 4.5:1 is what forces 96 %. Recovering more translucency requires raising those palette values,
+which changes desktop colours and is therefore a separate change with its own justification and
+desktop review. It is deliberately not folded into this workstream.
+
+Where a role already fails AA opaque, it is exempted to the 3:1 icon threshold under one stated
+rule: **enforce the body threshold in the scheme where the material is the cause, exempt where the
+palette already fails.** Decorative icon colours are exempt as `aria-hidden` and redundant with
+adjacent text, and their measured baselines are pinned so none can be quietly promoted to a text
+role.
+
 ### Geometry
 
 Radii follow a phone scale: chips fully rounded, dock capsule 22 px, sheets 16 px on their leading

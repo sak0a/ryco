@@ -264,6 +264,27 @@
   --app-glass-dark-start-alpha: 0%;
   --app-glass-dark-end-alpha: 0%;
   --app-glass-dark-popover-alpha: 100%;
+  /* Phone material tiers. These are the `Solid` step: opaque, unblurred, no
+     scrim. `themes/appearancePreferences.ts` rewrites all of them from the
+     active Material step (the same `surfaceTransparency` axis the desktop
+     control writes), so these values are what renders before that runs. */
+  --app-glass-sheet-filter: none;
+  --app-glass-sheet-light-alpha: 100%;
+  --app-glass-sheet-light-scrim-alpha: 0%;
+  --app-glass-sheet-dark-alpha: 100%;
+  --app-glass-sheet-dark-scrim-alpha: 0%;
+  --app-glass-chip-filter: none;
+  --app-glass-chip-light-alpha: 100%;
+  --app-glass-chip-light-scrim-alpha: 0%;
+  --app-glass-chip-dark-alpha: 100%;
+  --app-glass-chip-dark-scrim-alpha: 0%;
+  /* The house motion curve and durations. `appearancePreferences.ts` rewrites
+     the durations to 0s when motion is reduced by the OS or by the phone
+     Motion preference; these are the pre-script defaults. */
+  --app-motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --app-motion-duration-sheet: 200ms;
+  --app-motion-duration-stack: 260ms;
+  --app-motion-duration-chip: 120ms;
   --background: var(--color-white);
   --app-chrome-background: var(--background);
   --foreground: var(--color-neutral-800);
@@ -328,6 +349,17 @@
     --scrollbar-thumb-hover: rgba(255, 255, 255, 0.18);
     --scrollbar-thumb-thin: rgba(255, 255, 255, 0.08);
     --scrollbar-thumb-thin-hover: rgba(255, 255, 255, 0.15);
+  }
+}
+
+/* Pre-script default for the OS setting: `appearancePreferences.ts` resolves
+   the same collapse (and the phone Motion preference) into the injected style
+   element, which wins once it is written. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --app-motion-duration-sheet: 0s;
+    --app-motion-duration-stack: 0s;
+    --app-motion-duration-chip: 0s;
   }
 }
 
@@ -467,6 +499,70 @@ code {
     );
   }
 
+  /* The phone material system. A tier resolves to a token triple — backdrop
+     blur radius, backdrop saturation, background alpha — plus the scrim alpha
+     the active Material step applies. The blur and the saturation travel as one
+     `backdrop-filter` token so the `Solid` step can resolve to `none` rather
+     than to a zero-radius filter, which would still force a backdrop root.
+     Consumers select a tier through `components/mobile/GlassSurface.tsx` and
+     never name a blur, alpha, radius or shadow themselves. */
+  .app-glass-surface {
+    position: relative;
+    /* Guarantees a stacking context so the scrim's `z-index: -1` lands above
+       this element's own background and below its content, in every engine and
+       also in the no-backdrop-filter fallback below. */
+    isolation: isolate;
+    background-color: color-mix(in srgb, var(--popover) var(--app-glass-alpha), transparent);
+    -webkit-backdrop-filter: var(--app-glass-filter);
+    backdrop-filter: var(--app-glass-filter);
+  }
+
+  /* The scrim: the second layer of the `Glass` step, sitting between the
+     blurred material and the content so text reads against a guaranteed base
+     rather than against whatever scrolls beneath. Zero-alpha at every other
+     step, which is the single-layer alpha-floor path. */
+  .app-glass-surface::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    border-radius: inherit;
+    background-color: color-mix(in srgb, var(--popover) var(--app-glass-scrim-alpha), transparent);
+  }
+
+  .app-glass-surface-sheet {
+    --app-glass-filter: var(--app-glass-sheet-filter);
+    --app-glass-alpha: var(--app-glass-sheet-light-alpha);
+    --app-glass-scrim-alpha: var(--app-glass-sheet-light-scrim-alpha);
+  }
+
+  .dark .app-glass-surface-sheet {
+    --app-glass-alpha: var(--app-glass-sheet-dark-alpha);
+    --app-glass-scrim-alpha: var(--app-glass-sheet-dark-scrim-alpha);
+  }
+
+  .app-glass-surface-chip {
+    --app-glass-filter: var(--app-glass-chip-filter);
+    --app-glass-alpha: var(--app-glass-chip-light-alpha);
+    --app-glass-scrim-alpha: var(--app-glass-chip-light-scrim-alpha);
+  }
+
+  .dark .app-glass-surface-chip {
+    --app-glass-alpha: var(--app-glass-chip-dark-alpha);
+    --app-glass-scrim-alpha: var(--app-glass-chip-dark-scrim-alpha);
+  }
+
+  @supports not (backdrop-filter: blur(1px)) {
+    .app-glass-surface {
+      background-color: var(--popover);
+    }
+
+    .app-glass-surface::before {
+      background-color: transparent;
+    }
+  }
+
   .selection-glass-surface {
     background-color: color-mix(
       in srgb,
@@ -533,6 +629,41 @@ code {
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
     }
+
+    /* The material tiers. This block is the *only* place the OS setting is
+       enforced: `appearancePreferences.ts` keeps deriving its variables from
+       the selected Material step, so the stored choice survives and the
+       settings UI can report the override instead of displaying it as the
+       selection. */
+    .app-glass-surface {
+      background-color: var(--popover);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+
+    .app-glass-surface::before {
+      background-color: transparent;
+    }
+
+    /* The scrims this block did not previously reach. Each is pinned to the
+       alpha the `Solid` step produces — the most opaque value on the scale, and
+       the same numbers `:root` declares above — so a transparency step chosen
+       before the OS setting was turned on cannot leave a scrim see-through. */
+    .app-dialog-viewport-scrim {
+      background-color: rgb(255 255 255 / 48%);
+    }
+
+    .dark .app-dialog-viewport-scrim {
+      background-color: rgb(0 0 0 / 28%);
+    }
+
+    .app-sheet-backdrop {
+      background-color: rgb(0 0 0 / 32%);
+    }
+
+    .app-command-backdrop {
+      background-color: color-mix(in srgb, var(--background) 60%, transparent);
+    }
   }
 
   @media (forced-colors: active) {
@@ -548,6 +679,16 @@ code {
       box-shadow: none;
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
+    }
+
+    .app-glass-surface {
+      background-color: Canvas;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+
+    .app-glass-surface::before {
+      background-color: transparent;
     }
   }
 

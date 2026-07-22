@@ -15,6 +15,11 @@ import {
 import { installVisualViewportStub } from "../../../test/browserVisualViewport";
 import { syncDocumentVisualViewportInsets } from "../../lib/visualViewportInsets";
 import {
+  APPEARANCE_PREFERENCES_STORAGE_KEY,
+  applyAppearancePreferencesToDocument,
+  setAppearancePreference,
+} from "../../themes/appearancePreferences";
+import {
   MobileSheet,
   MobileSheetHeader,
   MobileSheetPanel,
@@ -36,6 +41,12 @@ function viewportElement(): HTMLElement | null {
 
 function grabberElement(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[data-slot="mobile-sheet-grabber"]');
+}
+
+/** The alpha channel of a computed colour, in whichever syntax it serialises. */
+function computedAlpha(color: string): number {
+  const numbers = color.match(/[\d.]+/gu)?.map(Number) ?? [];
+  return numbers.length === 4 ? numbers[3]! : 1;
 }
 
 function Harness({
@@ -196,6 +207,10 @@ describe("MobileSheet", () => {
     await cdpSession().send("Emulation.setEmulatedMedia", {
       features: [{ name: "prefers-reduced-motion", value: "" }],
     });
+    // Reapplied only after the emulated media is reverted: the injected style
+    // element resolves the effective (OS-merged) motion setting at write time.
+    localStorage.removeItem(APPEARANCE_PREFERENCES_STORAGE_KEY);
+    applyAppearancePreferencesToDocument();
     await page.viewport(1_280, 720);
   });
 
@@ -396,6 +411,37 @@ describe("MobileSheet", () => {
     await vi.waitFor(() => {
       expect(popupElement()).toBeNull();
     });
+  });
+
+  it("renders on the sheet material tier and takes its motion from the tokens", async () => {
+    await page.viewport(PHONE_VIEWPORT.width, PHONE_VIEWPORT.height);
+    applyAppearancePreferencesToDocument();
+    mounted = await render(<Harness />);
+    await page.getByTestId("sheet-trigger").click();
+    const popup = await waitForSettledPopup();
+
+    // The house curve and duration come from the motion tokens, not from an
+    // inline curve on the component.
+    expect(getComputedStyle(popup).transitionTimingFunction).toBe("cubic-bezier(0.16, 1, 0.3, 1)");
+    expect(getComputedStyle(popup).transitionDuration).toBe("0.2s");
+
+    // The `sheet` tier: opaque and unblurred at Solid, translucent and blurred
+    // at Glass, with the tier's own (largest) blur radius. The contrast that
+    // makes this safe is asserted in `GlassSurface.browser.tsx`.
+    setAppearancePreference("surfaceTransparency", "default");
+    applyAppearancePreferencesToDocument();
+    expect(computedAlpha(getComputedStyle(popup).backgroundColor)).toBe(1);
+
+    setAppearancePreference("surfaceTransparency", "glass");
+    applyAppearancePreferencesToDocument();
+    const glassStyle = getComputedStyle(popup);
+    expect(glassStyle.backdropFilter).toContain("blur(28px)");
+    expect(computedAlpha(glassStyle.backgroundColor)).toBeLessThan(1);
+
+    // The Motion preference collapses the transition beyond the OS setting.
+    setAppearancePreference("motion", "reduce");
+    applyAppearancePreferencesToDocument();
+    expect(getComputedStyle(popup).transitionDuration).toBe("0s");
   });
 
   it("traps focus, locks page scroll, and restores focus to the trigger", async () => {

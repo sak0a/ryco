@@ -419,6 +419,49 @@ describe("PhoneSettingsSurface", () => {
     });
   });
 
+  it("opens the phone appearance group's option sheet from inside the settings surface", async () => {
+    mounted = await mountSurface();
+    useSettingsDialogStore.getState().openSettings();
+
+    const materialRow = await vi.waitFor(() => {
+      const row = [
+        ...(settingsPopup()?.querySelectorAll<HTMLButtonElement>(
+          '[aria-label="Phone appearance"] [data-slot="mobile-list-row"]',
+        ) ?? []),
+      ].find((candidate) => candidate.textContent?.startsWith("Material"));
+      expect(row, "Missing the phone appearance Material row.").toBeDefined();
+      return row!;
+    });
+    expect(materialRow.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+
+    // The option sheet is a real bottom sheet nested inside the full-screen
+    // settings surface, not a desktop select.
+    materialRow.click();
+    const option = await vi.waitFor(() => {
+      const rows = [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          '[data-mobile-sheet] [data-slot="mobile-list-row"]',
+        ),
+      ];
+      expect(rows.map((row) => row.textContent?.replace(/([a-z])([A-Z])/gu, "$1|$2"))).toEqual([
+        "Solid|Opaque, no blur",
+        "Standard|Single layer",
+        "Glass|Thin material",
+      ]);
+      return rows[2]!;
+    });
+
+    option.click();
+    await vi.waitFor(() => {
+      expect(document.querySelector("[data-mobile-sheet]")).toBeNull();
+      expect(JSON.parse(localStorage.getItem("ryco:appearance-preferences") ?? "{}")).toEqual({
+        surfaceTransparency: "glass",
+      });
+    });
+    // The settings surface itself stays open behind the dismissed sheet.
+    expect(settingsPopup()).not.toBeNull();
+  });
+
   it("lands directly on the section page for open-to-section deep links", async () => {
     mounted = await mountSurface();
 

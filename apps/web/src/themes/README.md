@@ -30,8 +30,12 @@ apps/web/src/
 1. `useTheme` reads `ryco:theme` (light/dark/system) → toggles `.dark` class on `<html>`
 2. `useTheme` reads `ryco:active-theme` → looks up theme in registry → calls `applyThemeToDocument`
 3. `applyThemeToDocument` writes a `<style id="ryco-active-theme">` tag containing `:root { --x: ... } :root.dark { --y: ... }`
-4. `applyAppearancePreferencesToDocument` writes `<style id="ryco-appearance-preferences">` for global controls like `--font-family-sans`, `--font-family-mono`, `--font-size-base`, `--radius`, optional `--primary`/`--ring`, and the `--app-*` surface transparency variables
+4. `applyAppearancePreferencesToDocument` writes `<style id="ryco-appearance-preferences">` for global controls like `--font-family-sans`, `--font-family-mono`, `--font-size-base`, `--radius`, optional `--primary`/`--ring`, the `--app-*` surface transparency variables, the phone material tiers (`--app-glass-{sheet,chip}-*`) and the motion tokens (`--app-motion-*`)
 5. Because these style tags are appended after `index.css`, their variables win — but only ones the theme or preference layer defines, so partial themes work.
+
+**Effective vs stored preferences.** Two values are resolved from the environment rather than read straight out of storage: through `getEffectiveAppearancePreferences`, `surfaceTransparency` takes the phone tier's own unstored default (`medium`) instead of the desktop one, and the motion durations collapse under `prefers-reduced-motion`. `syncAppearancePreferenceEnvironment` (wired in `main.tsx`) republishes the variables when the tier or a media query changes.
+
+`prefers-reduced-transparency` is deliberately **not** part of that derivation. It is enforced in the `prefers-reduced-transparency` block in `index.css`, so the emitted `--app-*` values are identical whether or not the OS setting is on. Folding it into the derivation would move desktop scrims the setting never used to touch, and would make the phone settings UI display — and on the next tap persist — a value the user never chose. `isSurfaceTransparencyReducedBySystem` exists so the UI can report the override instead.
 
 **Key invariant:** `index.css` always contains the _full_ default token set. Any theme is a _patch_ on top, never a replacement. Global appearance preferences are a second patch after themes, so palette changes cannot unexpectedly change typography, resize, or reshape the UI.
 

@@ -1,3 +1,5 @@
+import { getPresentationTier, subscribeToPresentationTier } from "../lib/presentationTier";
+
 export const APPEARANCE_PREFERENCES_STORAGE_KEY = "ryco:appearance-preferences";
 export const APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID = "ryco-appearance-preferences";
 export const APPEARANCE_PREFERENCES_CHANGE_EVENT = "ryco:appearance-preferences-change";
@@ -11,6 +13,7 @@ export const APPEARANCE_PREFERENCE_KEYS = [
   "primaryColor",
   "surfaceTransparency",
   "panelLayout",
+  "motion",
 ] as const;
 
 export type AppearancePreferenceKey = (typeof APPEARANCE_PREFERENCE_KEYS)[number];
@@ -114,6 +117,40 @@ export const SURFACE_TRANSPARENCY_OPTIONS = [
   { value: "glass", label: "Glass", description: "28%" },
 ] as const satisfies ReadonlyArray<AppearancePreferenceOption>;
 
+/**
+ * The phone tier's Material control: a three-option subset of
+ * {@link SURFACE_TRANSPARENCY_OPTIONS} writing the same `surfaceTransparency`
+ * key. There is deliberately no second transparency preference — the phone
+ * exposes fewer steps of one axis, not a competing axis.
+ */
+export const PHONE_MATERIAL_OPTIONS = [
+  { value: "default", label: "Solid", description: "Opaque, no blur" },
+  { value: "medium", label: "Standard", description: "Single layer" },
+  { value: "glass", label: "Glass", description: "Thin material" },
+] as const satisfies ReadonlyArray<AppearancePreferenceOption>;
+
+/**
+ * The step the phone tier resolves to when no `surfaceTransparency` override is
+ * stored. This is a tier **default**, not a floor: an explicit selection is
+ * honoured exactly on both tiers, including a deliberate `default` (Solid).
+ * `Standard` is the phone default because it is the single-layer path, and a
+ * first run on a mid-range device is where a dropped-frame impression costs
+ * most.
+ */
+export const PHONE_DEFAULT_SURFACE_TRANSPARENCY = "medium";
+
+/**
+ * The opaque step. `prefers-reduced-transparency` renders every material as
+ * though this step were active — enforced in CSS, without changing the stored
+ * selection or any emitted variable.
+ */
+export const SOLID_SURFACE_TRANSPARENCY = "default";
+
+export const MOTION_OPTIONS = [
+  { value: "system", label: "System", description: "Follow OS" },
+  { value: "reduce", label: "Reduced", description: "Minimal" },
+] as const satisfies ReadonlyArray<AppearancePreferenceOption>;
+
 export const PRIMARY_COLOR_MODE_OPTIONS = [
   { value: "theme", label: "Theme", description: "Use palette" },
   { value: "custom", label: "Custom", description: "Override" },
@@ -146,6 +183,7 @@ export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
   primaryColor: PRIMARY_COLOR_OPTIONS[0].value,
   surfaceTransparency: "default",
   panelLayout: PANEL_LAYOUT_OPTIONS[0].value,
+  motion: MOTION_OPTIONS[0].value,
 };
 
 const RADIUS_TOKEN_OFFSETS_PX = {
@@ -167,7 +205,18 @@ const OPTION_VALUES: Record<AppearancePreferenceKey, ReadonlySet<string>> = {
   primaryColor: new Set(PRIMARY_COLOR_OPTIONS.map((option) => option.value)),
   surfaceTransparency: new Set(SURFACE_TRANSPARENCY_OPTIONS.map((option) => option.value)),
   panelLayout: new Set(PANEL_LAYOUT_OPTIONS.map((option) => option.value)),
+  motion: new Set(MOTION_OPTIONS.map((option) => option.value)),
 };
+
+/**
+ * Keys whose unstored default depends on the presentation tier. An explicit
+ * selection of one of these must persist even when it equals the desktop
+ * default, otherwise choosing Solid on a phone would be indistinguishable from
+ * "never chose" and would silently resolve back to the phone default.
+ */
+const TIER_DEPENDENT_DEFAULT_KEYS: ReadonlySet<AppearancePreferenceKey> = new Set([
+  "surfaceTransparency",
+]);
 
 const SURFACE_TRANSPARENCY_STEPS: Record<string, number> = {
   default: 0,
@@ -176,6 +225,17 @@ const SURFACE_TRANSPARENCY_STEPS: Record<string, number> = {
   high: 0.22,
   glass: 0.28,
 };
+
+export const REDUCED_TRANSPARENCY_MEDIA_QUERY = "(prefers-reduced-transparency: reduce)";
+export const REDUCED_MOTION_MEDIA_QUERY = "(prefers-reduced-motion: reduce)";
+
+function matchesMedia(query: string): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(query).matches
+  );
+}
 
 /** Check if localStorage is available in the current environment. */
 function hasStorage(): boolean {
@@ -232,12 +292,56 @@ export function hasAppearancePreferenceOverride(key: AppearancePreferenceKey): b
   return parseStoredOverrides()[key] !== undefined;
 }
 
+/**
+ * The `surfaceTransparency` step the user has selected: the stored override, or
+ * the tier's unstored default. With no override stored the phone tier resolves
+ * to {@link PHONE_DEFAULT_SURFACE_TRANSPARENCY} and the desktop tier keeps the
+ * unstored `default`; an explicit selection is never overridden on either tier.
+ *
+ * `prefers-reduced-transparency` is deliberately **not** applied here. It is
+ * enforced in CSS (see the `prefers-reduced-transparency` block in
+ * `index.css`), for two reasons: forcing it into this derivation would change
+ * the desktop scrim variables that the OS setting never used to touch, and it
+ * would make the settings UI display and write a value the user never chose.
+ * See {@link isSurfaceTransparencyReducedBySystem}.
+ */
+export function getEffectiveSurfaceTransparency(): string {
+  const stored = parseStoredOverrides().surfaceTransparency;
+  if (stored !== undefined) return stored;
+  return getPresentationTier() === "phone"
+    ? PHONE_DEFAULT_SURFACE_TRANSPARENCY
+    : DEFAULT_APPEARANCE_PREFERENCES.surfaceTransparency;
+}
+
+/**
+ * Whether the OS is currently forcing every translucent surface opaque. The
+ * selection is untouched — it is presentation that changes, in CSS — so this
+ * exists purely so the settings UI can say so instead of silently displaying
+ * {@link SOLID_SURFACE_TRANSPARENCY} as though it were the user's choice.
+ */
+export function isSurfaceTransparencyReducedBySystem(): boolean {
+  return matchesMedia(REDUCED_TRANSPARENCY_MEDIA_QUERY);
+}
+
+/** Whether motion is reduced, by the stored preference or by the OS setting. */
+export function isReducedMotionEffective(): boolean {
+  return getAppearancePreferences().motion === "reduce" || matchesMedia(REDUCED_MOTION_MEDIA_QUERY);
+}
+
+/** The stored preferences with the environment-dependent values resolved. */
+export function getEffectiveAppearancePreferences(): AppearancePreferences {
+  return { ...getAppearancePreferences(), surfaceTransparency: getEffectiveSurfaceTransparency() };
+}
+
 export function setAppearancePreference(key: AppearancePreferenceKey, value: string): void {
   if (!isValidPreferenceValue(key, value)) return;
   const normalizedValue = key === "primaryColor" ? normalizePrimaryColor(value) : value;
   if (!normalizedValue) return;
   const overrides = parseStoredOverrides();
-  if (normalizedValue === DEFAULT_APPEARANCE_PREFERENCES[key]) {
+  if (
+    normalizedValue === DEFAULT_APPEARANCE_PREFERENCES[key] &&
+    !TIER_DEPENDENT_DEFAULT_KEYS.has(key)
+  ) {
     delete overrides[key];
   } else {
     overrides[key] = normalizedValue;
@@ -253,10 +357,42 @@ export function resetAppearancePreference(key: AppearancePreferenceKey): void {
 
 export function applyAppearancePreferencesToDocument(): void {
   if (typeof document === "undefined" || typeof document.getElementById !== "function") return;
-  const preferences = getAppearancePreferences();
+  const preferences = getEffectiveAppearancePreferences();
   const style = ensureAppearancePreferencesStyleElement();
-  style.textContent = `:root { --font-family-sans: ${preferences.fontFamilySans}; --font-family-mono: ${preferences.fontFamilyMono}; --font-size-base: ${preferences.fontSizeBase}; ${buildRadiusCssVariables(preferences.radius)} ${buildSurfaceTransparencyCssVariables(preferences.surfaceTransparency)} }${buildPrimaryColorCssRule(preferences)}`;
+  style.textContent = `:root { --font-family-sans: ${preferences.fontFamilySans}; --font-family-mono: ${preferences.fontFamilyMono}; --font-size-base: ${preferences.fontSizeBase}; ${buildRadiusCssVariables(preferences.radius)} ${buildSurfaceTransparencyCssVariables(preferences.surfaceTransparency)} ${buildMotionCssVariables(isReducedMotionEffective())} }${buildPrimaryColorCssRule(preferences)}`;
   dispatchAppearancePreferencesChangeEvent();
+}
+
+/**
+ * Republishes the appearance state when an environment input changes, without
+ * ever touching a stored value:
+ *
+ * - the presentation tier, which selects the unstored `surfaceTransparency`
+ *   default and therefore changes the emitted variables;
+ * - `prefers-reduced-motion`, which collapses the emitted motion durations;
+ * - `prefers-reduced-transparency`, which changes no variable at all — it is
+ *   enforced in CSS — but must still reach the settings UI so it can report
+ *   that a system setting is overriding the selected material.
+ *
+ * Returns a teardown, and is a no-op outside a browser.
+ */
+export function syncAppearancePreferenceEnvironment(): () => void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+  const onChange = () => applyAppearancePreferencesToDocument();
+  const mediaQueryLists = [REDUCED_TRANSPARENCY_MEDIA_QUERY, REDUCED_MOTION_MEDIA_QUERY].map(
+    (query) => window.matchMedia(query),
+  );
+  for (const mediaQueryList of mediaQueryLists) {
+    mediaQueryList.addEventListener("change", onChange);
+  }
+  const unsubscribeTier = subscribeToPresentationTier(onChange);
+  applyAppearancePreferencesToDocument();
+  return () => {
+    for (const mediaQueryList of mediaQueryLists) {
+      mediaQueryList.removeEventListener("change", onChange);
+    }
+    unsubscribeTier();
+  };
 }
 
 export function normalizePrimaryColor(value: unknown): string | null {
@@ -300,6 +436,104 @@ function formatRemLength(rem: number): string {
   return `${Number(rem.toFixed(4))}rem`;
 }
 
+/**
+ * The material tiers of the phone glass system. A tier says *where* a surface
+ * sits in the elevation model; the active Material step decides *how* that tier
+ * guarantees contrast.
+ *
+ * `dock` is deliberately absent: it ships with its consumer.
+ */
+export const GLASS_SURFACE_TIERS = ["sheet", "chip"] as const;
+export type GlassSurfaceTier = (typeof GLASS_SURFACE_TIERS)[number];
+
+/** Backdrop blur radius in px per unit of transparency, so `Solid` blurs by 0. */
+const GLASS_TIER_BLUR_SCALE: Record<GlassSurfaceTier, number> = { sheet: 100, chip: 50 };
+
+/** Backdrop saturation boost in percentage points per unit of transparency. */
+const GLASS_TIER_SATURATION_SCALE: Record<GlassSurfaceTier, number> = { sheet: 150, chip: 115 };
+
+/**
+ * Minimum **composited** background coverage, in percent, that a tier must
+ * contribute over whatever scrolls beneath it. These are the floors that make
+ * the contrast guarantee hold: they are asserted, per tier, per Material step
+ * and per colour scheme, in `GlassSurface.browser.tsx`, which composites the
+ * resolved colours over the app's worst-case content surfaces and computes the
+ * WCAG contrast ratio. Raise a floor rather than the assertion threshold.
+ *
+ * Each number is the minimum its **own tier's** text roles permit — a tier is
+ * never capped by a colour it cannot render — which is why they do not move
+ * together:
+ *
+ * - `sheet` renders destructive row labels, so dark binds hardest (96 %,
+ *   `--destructive` at 4.5:1 over the amber status colour); light is set by
+ *   `--muted-foreground` at 4.5:1 and the presence text at 3:1 (90 %).
+ * - `chip` is the connection pill alone, whose only two text colours are
+ *   `--foreground` and `--muted-foreground`. That inverts the schemes: light
+ *   binds harder (88 %) because `--muted-foreground` is enforced at 4.5:1
+ *   there, while in dark it is exempt to 3:1 (82 %) — see the exemption rule in
+ *   `GlassSurface.browser.tsx`.
+ */
+const GLASS_TIER_COVERAGE_FLOORS: Record<GlassSurfaceTier, { light: number; dark: number }> = {
+  sheet: { light: 90, dark: 96 },
+  chip: { light: 88, dark: 82 },
+};
+
+/**
+ * Share of the guaranteed coverage carried by the material layer itself at a
+ * step that applies a scrim. The remainder is contributed by the scrim, so the
+ * blurred layer stays genuinely thin while the guaranteed base is unchanged.
+ */
+const GLASS_MATERIAL_SHARE = 0.75;
+
+/**
+ * The only step that composes a scrim beneath the tier's content. `Standard` is
+ * a single layer at the coverage floor and `Solid` is opaque, so both leave the
+ * scrim at zero.
+ */
+const SCRIM_SURFACE_TRANSPARENCY_STEPS: ReadonlySet<string> = new Set(["glass"]);
+
+/**
+ * Split a tier's guaranteed coverage into the material layer and the scrim
+ * layer painted over it, such that `1 - (1 - material)(1 - scrim) = coverage`.
+ */
+function splitGlassCoverage(
+  coverage: number,
+  hasScrim: boolean,
+): { material: number; scrim: number } {
+  if (!hasScrim) return { material: coverage, scrim: 0 };
+  const material = coverage * GLASS_MATERIAL_SHARE;
+  if (material >= 100) return { material: coverage, scrim: 0 };
+  return { material, scrim: ((coverage - material) / (100 - material)) * 100 };
+}
+
+/** Generate the per-tier material tokens for one Material step. */
+function buildGlassTierVariables(
+  tier: GlassSurfaceTier,
+  transparency: number,
+  surfaceOpacity: number,
+  hasScrim: boolean,
+): Array<[string, string]> {
+  // Emitted as one value rather than as separate blur and saturation tokens so
+  // the `Solid` step can resolve to `none`: a `blur(0px)` backdrop filter still
+  // forces a backdrop root and an offscreen pass, which is exactly the cost
+  // `Solid` exists to avoid.
+  const blur = transparency * GLASS_TIER_BLUR_SCALE[tier];
+  const saturation = 100 + transparency * GLASS_TIER_SATURATION_SCALE[tier];
+  const variables: Array<[string, string]> = [
+    [
+      `--app-glass-${tier}-filter`,
+      blur <= 0 ? "none" : `blur(${formatPx(blur)}) saturate(${formatPercent(saturation)})`,
+    ],
+  ];
+  for (const scheme of ["light", "dark"] as const) {
+    const coverage = Math.max(GLASS_TIER_COVERAGE_FLOORS[tier][scheme], surfaceOpacity);
+    const { material, scrim } = splitGlassCoverage(coverage, hasScrim);
+    variables.push([`--app-glass-${tier}-${scheme}-alpha`, formatPercent(material)]);
+    variables.push([`--app-glass-${tier}-${scheme}-scrim-alpha`, formatPercent(scrim)]);
+  }
+  return variables;
+}
+
 /** Generate CSS variables for surface transparency and glass-effect opacity values. */
 function buildSurfaceTransparencyCssVariables(surfaceTransparency: string): string {
   const transparency = SURFACE_TRANSPARENCY_STEPS[surfaceTransparency] ?? 0;
@@ -318,6 +552,31 @@ function buildSurfaceTransparencyCssVariables(surfaceTransparency: string): stri
     ["--app-glass-dark-start-alpha", formatPercent(transparency * 18)],
     ["--app-glass-dark-end-alpha", formatPercent(transparency * 5)],
     ["--app-glass-dark-popover-alpha", formatPercent(surfaceOpacity)],
+    ...GLASS_SURFACE_TIERS.flatMap((tier) =>
+      buildGlassTierVariables(
+        tier,
+        transparency,
+        surfaceOpacity,
+        SCRIM_SURFACE_TRANSPARENCY_STEPS.has(surfaceTransparency),
+      ),
+    ),
+  ]
+    .map(([name, value]) => `${name}: ${value};`)
+    .join(" ");
+}
+
+/**
+ * The house motion tokens. Reduced motion collapses every duration to zero, so
+ * a transition that consumes them becomes an instantaneous state change; no
+ * correctness depends on a transition completing.
+ */
+function buildMotionCssVariables(reducedMotion: boolean): string {
+  const scale = reducedMotion ? 0 : 1;
+  return [
+    ["--app-motion-ease", "cubic-bezier(0.16, 1, 0.3, 1)"],
+    ["--app-motion-duration-sheet", `${200 * scale}ms`],
+    ["--app-motion-duration-stack", `${260 * scale}ms`],
+    ["--app-motion-duration-chip", `${120 * scale}ms`],
   ]
     .map(([name, value]) => `${name}: ${value};`)
     .join(" ");
@@ -350,6 +609,11 @@ function resolvePrimaryForeground(hex: string): string {
 /** Format a number as a percentage string with 2 decimal places. */
 function formatPercent(percent: number): string {
   return `${Number(percent.toFixed(2))}%`;
+}
+
+/** Format a number as a px length with 2 decimal places. */
+function formatPx(px: number): string {
+  return `${Number(px.toFixed(2))}px`;
 }
 
 /** Get or create the style element where appearance preferences CSS is injected into the document head. */
