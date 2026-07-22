@@ -82,6 +82,7 @@ import {
 } from "./composerProviderState";
 import { type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ComposerPromptShell } from "./ComposerPromptShell";
+import { PhoneThreadDock, type PhoneThreadDockProps } from "../shell/phone/PhoneThreadDock";
 import { useComposerImageAttachments } from "./useComposerImageAttachments";
 import { cn, randomUUID } from "~/lib/utils";
 import { proposedPlanTitle } from "../../proposedPlan";
@@ -253,6 +254,14 @@ export interface ChatComposerProps {
   // Context window
   activeThreadActivities: Thread["activities"] | undefined;
 
+  /**
+   * The phone thread dock, rendered inside the composer surface beneath the
+   * approval and pending-input panels so an open panel cannot carry it out of
+   * the bottom third. `null` on every other tier — the tier decision stays
+   * with `ChatView`, and the dock itself remains props in / callbacks out.
+   */
+  phoneThreadDock: PhoneThreadDockProps | null;
+
   // Misc
   resolvedTheme: "light" | "dark";
   settings: UnifiedSettings;
@@ -344,6 +353,7 @@ export const ChatComposer = memo(
       activeProjectDefaultModelSelection,
       activeThreadModelSelection,
       activeThreadActivities,
+      phoneThreadDock,
       resolvedTheme,
       settings,
       keybindings,
@@ -1492,10 +1502,19 @@ export const ChatComposer = memo(
         if (activeElement instanceof Element && isInsideComposerFloatingLayer(activeElement)) {
           return;
         }
+        // Focus that landed on a control the composer does not own — the
+        // thread dock, the approval panel, the pending-input panel — is not
+        // composer focus, even though those controls are descendants of the
+        // surface. Without the exclusion, focusing the dock's workspace toggle
+        // blurs the editor (the software keyboard leaves) while the composer
+        // keeps its full expanded height, because nothing ever moves focus back
+        // out of the surface. Controls that open a sheet self-correct, since
+        // the portal takes focus outside the surface; the plain toggle does not.
         if (
           composerSurface &&
-          activeElement instanceof Node &&
-          composerSurface.contains(activeElement)
+          activeElement instanceof Element &&
+          composerSurface.contains(activeElement) &&
+          activeElement.closest('[data-chat-composer-collapsed-controls="true"]') === null
         ) {
           return;
         }
@@ -1683,13 +1702,19 @@ export const ChatComposer = memo(
             onFocusCapture={(event) => {
               const activeElement = event.target;
               // Still required after the collapsed pills were removed: the
-              // container also holds the approval actions and the pending
-              // user-input panel. Focusing one of those is an answer to that
-              // panel, not a request to open the composer, so it must not
-              // expand the composer under the user's finger. Focus reaching
-              // the editor itself is outside this container and does expand.
+              // container also holds the approval actions, the pending
+              // user-input panel, and the thread dock. Focusing one of those is
+              // an answer to that panel or an action on the thread, not a
+              // request to open the composer, so it must not expand the
+              // composer under the user's finger — and, when the composer is
+              // already expanded, must not cancel the pending collapse check
+              // either, or the editor blurs (the software keyboard leaves)
+              // while the composer keeps its full expanded height. Focus
+              // reaching the editor itself is outside this container and does
+              // expand. Unconditional on the collapsed state: the approval and
+              // pending-input panels only carry the marker while collapsed, so
+              // this widens nothing but the dock.
               if (
-                isComposerCollapsedMobile &&
                 activeElement instanceof HTMLElement &&
                 activeElement.closest('[data-chat-composer-collapsed-controls="true"]')
               ) {
@@ -1806,6 +1831,28 @@ export const ChatComposer = memo(
                     </div>
                   </div>
                 ) : null}
+              </div>
+            ) : null}
+
+            {/* The thread dock: the workspace toggle and the thread-actions
+                overflow that used to sit in the app bar's top-right corner,
+                with the contextual strip between them. It renders here, below
+                the approval and pending-input panels and above the prompt row,
+                so an open panel grows the composer upward *past* the dock
+                instead of carrying it out of the bottom third.
+
+                It carries the collapsed-controls marker for the same reason
+                the panels above it do: focusing or tapping a dock control is
+                an action on the thread, not a request to open the composer,
+                so it must neither expand the composer under the user's finger
+                nor — since it is now a descendant of the composer surface —
+                hold an expanded composer open after the editor has blurred.
+                The dock is laid out in normal flow above the prompt row and
+                never overlays the collapsed editor, so the editor still takes
+                the activating tap natively. */}
+            {phoneThreadDock ? (
+              <div className="px-3 pt-2 sm:px-4" data-chat-composer-collapsed-controls="true">
+                <PhoneThreadDock {...phoneThreadDock} />
               </div>
             ) : null}
 

@@ -142,7 +142,7 @@ import {
 import type { ThreadMessageSearchOccurrence } from "./chat/ThreadMessageSearch.logic";
 import { ChatHeader } from "./chat/ChatHeader";
 import { PhoneThreadAppBar } from "./shell/phone/PhoneThreadAppBar";
-import { PhoneThreadDock } from "./shell/phone/PhoneThreadDock";
+import type { PhoneThreadDockProps } from "./shell/phone/PhoneThreadDock";
 import { PhoneSurfaceScaffold, PhoneWorkSurfaceSheet } from "./shell/phone/PhoneWorkSurface";
 import { type ChatSessionTabsItem } from "./chat/ChatSessionTabs";
 import { useChatSessionTabsPrefetch } from "./chat/useChatSessionTabsPrefetch";
@@ -2075,6 +2075,13 @@ export default function ChatView(props: ChatViewProps) {
     // through the composer plan banner and the thread kebab's "Source
     // control" entry. Tier is read through the ref so a tier flip alone never
     // re-runs this decision.
+    // The thread dock is inside the composer form, so focus parked on a dock
+    // control — where `MobileSheet` restores it when the thread-actions or
+    // sessions sheet closes — suppresses the takeover for this turn too. That
+    // is intended, not incidental: without it a plan arriving in that moment
+    // would slam a full-screen surface over the sheet the user just used. The
+    // containment test is what makes it work, so moving the dock back out of
+    // the form would silently change this behavior.
     if (presentationTierRef.current === "phone") {
       const activeElement = document.activeElement;
       const composerFocused =
@@ -3085,6 +3092,50 @@ export default function ChatView(props: ChatViewProps) {
       : OVERVIEW_SIDEBAR_EXIT_DURATION_MS,
   );
 
+  // The thread dock renders inside the composer, beneath the approval and
+  // pending-input panels (see `ChatComposer`), so an open panel cannot carry it
+  // out of the bottom third. The phone-tier gate stays here; the dock stays
+  // props in / callbacks out. Memoised so the composer's `memo` still holds.
+  const phoneThreadDock = useMemo<PhoneThreadDockProps | null>(() => {
+    if (!isPhoneTier || !activeThread) return null;
+    return {
+      environmentId: activeThread.environmentId,
+      threadId: activeThread.id,
+      title: activeThread.title,
+      projectCwd: gitCwd,
+      branch: activeWorktreeSummary?.branch ?? activeThread.branch ?? null,
+      draft:
+        routeKind === "draft" && draftId
+          ? {
+              draftId,
+              projectId: activeThread.projectId,
+              createdAt: activeThread.createdAt,
+            }
+          : null,
+      workspacePanelOpen,
+      onToggleWorkspacePanel,
+      onOpenFindInThread: openThreadMessageSearch,
+      onOpenSourceControl: routeKind === "draft" ? null : () => toggleOverviewSidebar(true),
+      sessionTabs: activeWorktreeSessionTabs,
+      activeSessionTabKey,
+      onSelectSessionTab: handleSelectSessionTab,
+    };
+  }, [
+    activeSessionTabKey,
+    activeThread,
+    activeWorktreeSessionTabs,
+    activeWorktreeSummary?.branch,
+    draftId,
+    gitCwd,
+    handleSelectSessionTab,
+    isPhoneTier,
+    onToggleWorkspacePanel,
+    openThreadMessageSearch,
+    routeKind,
+    toggleOverviewSidebar,
+    workspacePanelOpen,
+  ]);
+
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
@@ -3318,37 +3369,6 @@ export default function ChatView(props: ChatViewProps) {
                 onRemove={handleRemoveQueuedMessage}
                 onMove={handleMoveQueuedMessage}
               />
-              {/* The thread dock: the workspace toggle and the thread-actions
-                  overflow that used to sit in the app bar's top-right corner,
-                  with the contextual strip between them. It rides the same
-                  bottom padding as the composer capsule below it. */}
-              {isPhoneTier ? (
-                <PhoneThreadDock
-                  environmentId={activeThread.environmentId}
-                  threadId={activeThread.id}
-                  title={activeThread.title}
-                  projectCwd={gitCwd}
-                  branch={activeWorktreeSummary?.branch ?? activeThread.branch ?? null}
-                  draft={
-                    routeKind === "draft" && draftId
-                      ? {
-                          draftId,
-                          projectId: activeThread.projectId,
-                          createdAt: activeThread.createdAt,
-                        }
-                      : null
-                  }
-                  workspacePanelOpen={workspacePanelOpen}
-                  onToggleWorkspacePanel={onToggleWorkspacePanel}
-                  onOpenFindInThread={openThreadMessageSearch}
-                  onOpenSourceControl={
-                    routeKind === "draft" ? null : () => toggleOverviewSidebar(true)
-                  }
-                  sessionTabs={activeWorktreeSessionTabs}
-                  activeSessionTabKey={activeSessionTabKey}
-                  onSelectSessionTab={handleSelectSessionTab}
-                />
-              ) : null}
               <div className="relative z-10">
                 <ChatComposer
                   ref={composerRef}
@@ -3390,6 +3410,7 @@ export default function ChatView(props: ChatViewProps) {
                   activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
                   activeThreadModelSelection={activeThread?.modelSelection}
                   activeThreadActivities={threadActivities}
+                  phoneThreadDock={phoneThreadDock}
                   resolvedTheme={resolvedTheme}
                   settings={settings}
                   keybindings={keybindings}
