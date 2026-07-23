@@ -70,23 +70,17 @@ const rootConfig = {
           "no-restricted-imports": [
             "error",
             {
-              paths: [
-                {
-                  name: "react",
-                  message: "@ryco/client-runtime is platform-neutral.",
-                },
-                {
-                  name: "react-dom",
-                  message: "@ryco/client-runtime is platform-neutral.",
-                },
-                {
-                  name: "@effect/atom-react",
-                  message: "React bindings belong in the app.",
-                },
-              ],
               patterns: [
                 {
-                  group: ["node:*"],
+                  group: ["react", "react/*", "react-dom", "react-dom/*"],
+                  message: "@ryco/client-runtime is platform-neutral.",
+                },
+                {
+                  group: ["@effect/atom-react", "@effect/atom-react/*"],
+                  message: "React bindings belong in the app.",
+                },
+                {
+                  group: ["node:*", "node:*/**"],
                   message: "Node built-ins are not available in @ryco/client-runtime.",
                 },
               ],

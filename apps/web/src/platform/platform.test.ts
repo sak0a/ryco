@@ -11,6 +11,7 @@ import type {
   PairingCredentialSourceService,
   PasskeyCeremonyService,
   SecretKVService,
+  SessionCredentialsService,
   SocketService,
 } from "@ryco/client-runtime/platform";
 
@@ -42,7 +43,7 @@ describe("web platform adapters", () => {
       webPasskeyCeremony satisfies PasskeyCeremonyService,
       webSecretKV satisfies SecretKVService,
       webSocket satisfies SocketService,
-      webSessionCredentials,
+      webSessionCredentials satisfies SessionCredentialsService,
       readWebClientRuntimeConfig() satisfies ClientRuntimeConfigService,
     ];
 
