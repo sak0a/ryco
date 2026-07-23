@@ -1,120 +1,33 @@
-import {
-  attachEnvironmentDescriptor,
-  createKnownEnvironment,
-  type KnownEnvironment,
-} from "@ryco/client-runtime/knownEnvironment";
+import { createPrimaryEnvironmentContext } from "@ryco/client-runtime/connection";
 import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@ryco/contracts";
-import { create } from "zustand";
+import { useSyncExternalStore } from "react";
 
+import { webEndpoint } from "../../platform/endpoint";
+import { webHttpClient } from "../../platform/httpClient";
 import { BootstrapHttpError, retryTransientBootstrap } from "./auth";
 
-import { readPrimaryEnvironmentTarget, resolvePrimaryEnvironmentHttpUrl } from "./target";
+const context = createPrimaryEnvironmentContext({
+  endpoint: webEndpoint,
+  httpClient: webHttpClient,
+  retryTransientBootstrap,
+  createBootstrapHttpError: (input) => new BootstrapHttpError(input),
+});
 
-const SERVER_ENVIRONMENT_DESCRIPTOR_PATH = "/.well-known/ryco/environment";
+export const readPrimaryEnvironmentDescriptor = context.readPrimaryEnvironmentDescriptor;
+export const writePrimaryEnvironmentDescriptor = context.writePrimaryEnvironmentDescriptor;
+export const getPrimaryKnownEnvironment = context.getPrimaryKnownEnvironment;
+export const resolveInitialPrimaryEnvironmentDescriptor =
+  context.resolveInitialPrimaryEnvironmentDescriptor;
+export const __resetPrimaryEnvironmentBootstrapForTests = context.resetForTests;
+export const resetPrimaryEnvironmentDescriptorForTests = context.resetForTests;
+export const __resetPrimaryEnvironmentDescriptorBootstrapForTests = context.resetForTests;
 
-interface PrimaryEnvironmentBootstrapState {
-  readonly descriptor: ExecutionEnvironmentDescriptor | null;
-  readonly setDescriptor: (descriptor: ExecutionEnvironmentDescriptor | null) => void;
-  readonly reset: () => void;
-}
-
-const usePrimaryEnvironmentBootstrapStore = create<PrimaryEnvironmentBootstrapState>()((set) => ({
-  descriptor: null,
-  setDescriptor: (descriptor) => set({ descriptor }),
-  reset: () => set({ descriptor: null }),
-}));
-
-let primaryEnvironmentDescriptorPromise: Promise<ExecutionEnvironmentDescriptor> | null = null;
-
-function createPrimaryKnownEnvironment(input: {
-  readonly source: KnownEnvironment["source"];
-  readonly target: KnownEnvironment["target"];
-}): KnownEnvironment | null {
-  const descriptor = readPrimaryEnvironmentDescriptor();
-  if (!descriptor) {
-    return null;
-  }
-
-  return attachEnvironmentDescriptor(
-    createKnownEnvironment({
-      id: descriptor.environmentId,
-      label: descriptor.label,
-      source: input.source,
-      target: input.target,
-    }),
-    descriptor,
+export function usePrimaryEnvironmentId(): EnvironmentId | null {
+  return useSyncExternalStore(
+    context.store.subscribe,
+    () => context.store.getState().descriptor?.environmentId ?? null,
+    () => null,
   );
 }
 
-async function fetchPrimaryEnvironmentDescriptor(): Promise<ExecutionEnvironmentDescriptor> {
-  return retryTransientBootstrap(async () => {
-    const response = await fetch(
-      resolvePrimaryEnvironmentHttpUrl(SERVER_ENVIRONMENT_DESCRIPTOR_PATH),
-    );
-    if (!response.ok) {
-      throw new BootstrapHttpError({
-        message: `Failed to load server environment descriptor (${response.status}).`,
-        status: response.status,
-      });
-    }
-
-    const descriptor = (await response.json()) as ExecutionEnvironmentDescriptor;
-    writePrimaryEnvironmentDescriptor(descriptor);
-    return descriptor;
-  });
-}
-
-export function readPrimaryEnvironmentDescriptor(): ExecutionEnvironmentDescriptor | null {
-  return usePrimaryEnvironmentBootstrapStore.getState().descriptor;
-}
-
-export function usePrimaryEnvironmentId(): EnvironmentId | null {
-  return usePrimaryEnvironmentBootstrapStore((state) => state.descriptor?.environmentId ?? null);
-}
-
-export function writePrimaryEnvironmentDescriptor(
-  descriptor: ExecutionEnvironmentDescriptor | null,
-): void {
-  usePrimaryEnvironmentBootstrapStore.getState().setDescriptor(descriptor);
-}
-
-export function getPrimaryKnownEnvironment(): KnownEnvironment | null {
-  const primaryTarget = readPrimaryEnvironmentTarget();
-  if (!primaryTarget) {
-    return null;
-  }
-
-  return createPrimaryKnownEnvironment({
-    source: primaryTarget.source,
-    target: primaryTarget.target,
-  });
-}
-
-export function resolveInitialPrimaryEnvironmentDescriptor(): Promise<ExecutionEnvironmentDescriptor> {
-  const descriptor = readPrimaryEnvironmentDescriptor();
-  if (descriptor) {
-    return Promise.resolve(descriptor);
-  }
-
-  if (primaryEnvironmentDescriptorPromise) {
-    return primaryEnvironmentDescriptorPromise;
-  }
-
-  const nextPromise = fetchPrimaryEnvironmentDescriptor();
-  primaryEnvironmentDescriptorPromise = nextPromise;
-  return nextPromise.finally(() => {
-    if (primaryEnvironmentDescriptorPromise === nextPromise) {
-      primaryEnvironmentDescriptorPromise = null;
-    }
-  });
-}
-
-export function __resetPrimaryEnvironmentBootstrapForTests(): void {
-  primaryEnvironmentDescriptorPromise = null;
-  usePrimaryEnvironmentBootstrapStore.getState().reset();
-}
-
-export const resetPrimaryEnvironmentDescriptorForTests = __resetPrimaryEnvironmentBootstrapForTests;
-
-export const __resetPrimaryEnvironmentDescriptorBootstrapForTests =
-  __resetPrimaryEnvironmentBootstrapForTests;
+export type { ExecutionEnvironmentDescriptor };

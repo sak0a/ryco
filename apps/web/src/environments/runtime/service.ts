@@ -16,6 +16,12 @@ import {
   createKnownEnvironment,
   getKnownEnvironmentWsBaseUrl,
 } from "@ryco/client-runtime/knownEnvironment";
+import {
+  classifyProjectionSnapshot,
+  createProjectionTracker,
+  shouldApplyProjectionEvent,
+  shouldApplyProjectionSnapshot,
+} from "@ryco/client-runtime/connection";
 
 import {
   markPromotedDraftThreadByRef,
@@ -84,6 +90,7 @@ import {
   orderSavedEnvironmentConnectionQueue,
   runSavedEnvironmentConnectionQueue,
 } from "./savedEnvironmentConnectionScheduler";
+import { createWebEnvironmentStateSink } from "./environmentStateSink";
 
 type EnvironmentServiceState = {
   readonly queryInvalidationThrottler: Throttler<() => void>;
@@ -126,16 +133,21 @@ const pendingSavedEnvironmentConnections = new Map<
 >();
 const environmentConnectionListeners = new Set<() => void>();
 const threadDetailSubscriptions = new Map<string, ThreadDetailSubscriptionEntry>();
-const lastAppliedProjectionVersionByEnvironment = new Map<
-  EnvironmentId,
-  {
-    readonly sequence: number;
-    readonly updatedAt: string | null;
-  }
->();
+const projectionTracker = createProjectionTracker();
 
 let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
+const environmentStateSink = createWebEnvironmentStateSink({
+  markProviderInvalidationNeeded: () => {
+    needsProviderInvalidation = true;
+    void activeService?.queryInvalidationThrottler.maybeExecute();
+  },
+  flushProviderInvalidation: () => {
+    needsProviderInvalidation = false;
+    invalidateAllCheckpointDiffs();
+    invalidateProjectSearchEntries();
+  },
+});
 let lastBrowserHiddenAt: number | null = null;
 let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
 
@@ -243,113 +255,7 @@ function createSavedEnvironmentSyncScheduler() {
     return activeSync;
   };
 }
-function compareAppliedProjectionVersion(
-  left: { readonly sequence: number; readonly updatedAt: string | null },
-  right: { readonly sequence: number; readonly updatedAt: string | null },
-): number {
-  if (left.sequence !== right.sequence) {
-    return left.sequence - right.sequence;
-  }
-
-  const leftUpdatedAt = left.updatedAt ?? "";
-  const rightUpdatedAt = right.updatedAt ?? "";
-  if (leftUpdatedAt === rightUpdatedAt) {
-    return 0;
-  }
-
-  return leftUpdatedAt < rightUpdatedAt ? -1 : 1;
-}
-
-function toAppliedProjectionVersion(
-  snapshot: Pick<OrchestrationShellSnapshot, "snapshotSequence" | "updatedAt">,
-): {
-  readonly sequence: number;
-  readonly updatedAt: string;
-} {
-  return {
-    sequence: snapshot.snapshotSequence,
-    updatedAt: snapshot.updatedAt,
-  };
-}
-
-export function shouldApplyProjectionSnapshot(input: {
-  readonly current: {
-    readonly sequence: number;
-    readonly updatedAt: string | null;
-  } | null;
-  readonly next: Pick<OrchestrationShellSnapshot, "snapshotSequence" | "updatedAt">;
-}): boolean {
-  return classifyProjectionSnapshot(input) === "newer";
-}
-
-export function classifyProjectionSnapshot(input: {
-  readonly current: {
-    readonly sequence: number;
-    readonly updatedAt: string | null;
-  } | null;
-  readonly next: Pick<OrchestrationShellSnapshot, "snapshotSequence" | "updatedAt">;
-}): "newer" | "current" | "stale" {
-  if (input.current === null) {
-    return "newer";
-  }
-
-  const comparison = compareAppliedProjectionVersion(
-    input.current,
-    toAppliedProjectionVersion(input.next),
-  );
-  if (comparison < 0) return "newer";
-  if (comparison === 0) return "current";
-  return "stale";
-}
-
-export function shouldApplyProjectionEvent(input: {
-  readonly current: {
-    readonly sequence: number;
-    readonly updatedAt: string | null;
-  } | null;
-  readonly sequence: number;
-}): boolean {
-  if (input.current === null) {
-    return true;
-  }
-
-  return input.sequence > input.current.sequence;
-}
-
-function readLastAppliedProjectionVersion(environmentId: EnvironmentId): {
-  readonly sequence: number;
-  readonly updatedAt: string | null;
-} | null {
-  return lastAppliedProjectionVersionByEnvironment.get(environmentId) ?? null;
-}
-
-function markAppliedProjectionSnapshot(
-  environmentId: EnvironmentId,
-  snapshot: Pick<OrchestrationShellSnapshot, "snapshotSequence" | "updatedAt">,
-): void {
-  const nextVersion = toAppliedProjectionVersion(snapshot);
-  const currentVersion = readLastAppliedProjectionVersion(environmentId);
-  if (
-    currentVersion !== null &&
-    compareAppliedProjectionVersion(currentVersion, nextVersion) >= 0
-  ) {
-    return;
-  }
-
-  lastAppliedProjectionVersionByEnvironment.set(environmentId, nextVersion);
-}
-
-function markAppliedProjectionEvent(environmentId: EnvironmentId, sequence: number): void {
-  const currentVersion = readLastAppliedProjectionVersion(environmentId);
-  if (currentVersion !== null && sequence <= currentVersion.sequence) {
-    return;
-  }
-
-  lastAppliedProjectionVersionByEnvironment.set(environmentId, {
-    sequence,
-    updatedAt: currentVersion?.updatedAt ?? null,
-  });
-}
+export { classifyProjectionSnapshot, shouldApplyProjectionEvent, shouldApplyProjectionSnapshot };
 function getThreadDetailSubscriptionKey(environmentId: EnvironmentId, threadId: ThreadId): string {
   return scopedThreadKey(scopeThreadRef(environmentId, threadId));
 }
@@ -1028,53 +934,36 @@ function applyRecoveredEventBatch(
   );
 
   if (batchEffects.needsProviderInvalidation) {
-    needsProviderInvalidation = true;
-    void activeService?.queryInvalidationThrottler.maybeExecute();
+    environmentStateSink.markProviderInvalidationNeeded();
   }
 
-  useStore.getState().applyOrchestrationEvents(uiEvents, environmentId);
+  environmentStateSink.applyOrchestrationEvents(environmentId, uiEvents);
   if (needsProjectUiSync) {
-    const projects = selectProjectsAcrossEnvironments(useStore.getState());
-    const clientSettings = getClientSettings();
-    useUiStateStore.getState().syncProjects(
-      projects.map((project) => ({
-        key: derivePhysicalProjectKey(project),
-        logicalKey: deriveLogicalProjectKeyFromSettings(project, clientSettings),
-        cwd: project.cwd,
-      })),
-    );
+    environmentStateSink.syncProjects(environmentId);
   }
 
   const needsThreadUiSync = events.some(
     (event) => event.type === "thread.created" || event.type === "thread.deleted",
   );
   if (needsThreadUiSync) {
-    const threads = selectThreadsAcrossEnvironments(useStore.getState());
-    useUiStateStore.getState().syncThreads(
-      threads.map((thread) => ({
-        key: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        seedVisitedAt: thread.updatedAt ?? thread.createdAt,
-      })),
-    );
+    environmentStateSink.syncThreads(environmentId);
   }
 
-  const draftStore = useComposerDraftStore.getState();
   for (const threadId of batchEffects.promoteDraftThreadIds) {
     markPromotedDraftThreadByRef(scopeThreadRef(environmentId, threadId));
   }
   for (const threadId of batchEffects.clearDeletedThreadIds) {
-    draftStore.clearDraftThread(scopeThreadRef(environmentId, threadId));
-    useUiStateStore
-      .getState()
-      .clearThreadUi(scopedThreadKey(scopeThreadRef(environmentId, threadId)));
+    environmentStateSink.clearThreadDraft(scopeThreadRef(environmentId, threadId));
   }
   for (const event of events) {
     if (event.type === "project.deleted") {
-      draftStore.clearProjectDraftThreadId(scopeProjectRef(environmentId, event.payload.projectId));
+      environmentStateSink.clearProjectDraftThread(
+        scopeProjectRef(environmentId, event.payload.projectId),
+      );
     }
   }
   for (const threadId of batchEffects.removeTerminalStateThreadIds) {
-    useTerminalStateStore.getState().removeTerminalState(scopeThreadRef(environmentId, threadId));
+    environmentStateSink.clearTerminalState(scopeThreadRef(environmentId, threadId));
   }
 
   reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
@@ -1090,7 +979,7 @@ export function applyEnvironmentThreadDetailEvent(
 function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) {
   if (
     !shouldApplyProjectionEvent({
-      current: readLastAppliedProjectionVersion(environmentId),
+      current: projectionTracker.read(environmentId),
       sequence: event.sequence,
     })
   ) {
@@ -1107,7 +996,7 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
   const previousThread = threadRef ? selectThreadByRef(useStore.getState(), threadRef) : undefined;
 
   useStore.getState().applyShellEvent(event, environmentId);
-  markAppliedProjectionEvent(environmentId, event.sequence);
+  projectionTracker.markEvent(environmentId, event.sequence);
 
   switch (event.kind) {
     case "project-upserted":
@@ -1155,7 +1044,7 @@ function createEnvironmentConnectionHandlers(hostedGeneration: number | null = n
         markStartupPhase("primary-shell-snapshot-received");
       }
       const snapshotClassification = classifyProjectionSnapshot({
-        current: readLastAppliedProjectionVersion(environmentId),
+        current: projectionTracker.read(environmentId),
         next: snapshot,
       });
       if (snapshotClassification === "current") {
@@ -1168,7 +1057,7 @@ function createEnvironmentConnectionHandlers(hostedGeneration: number | null = n
         return;
       }
 
-      useStore.getState().syncServerShellSnapshot(snapshot, environmentId);
+      environmentStateSink.syncServerShellSnapshot(environmentId, snapshot);
       if (environmentId === primaryEnvironmentId) {
         markStartupPhase("primary-shell-snapshot-applied");
         measureStartupPhase(
@@ -1184,7 +1073,7 @@ function createEnvironmentConnectionHandlers(hostedGeneration: number | null = n
         );
         markPrimaryShellSnapshotApplied();
       }
-      markAppliedProjectionSnapshot(environmentId, snapshot);
+      projectionTracker.markSnapshot(environmentId, snapshot);
       if (hostedGeneration !== null) markHostedSessionReady(environmentId, hostedGeneration);
       reconcileThreadDetailSubscriptionsForEnvironment(
         environmentId,
@@ -1377,7 +1266,7 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
     return false;
   }
 
-  lastAppliedProjectionVersionByEnvironment.delete(environmentId);
+  projectionTracker.clearEnvironment(environmentId);
   environmentConnections.delete(environmentId);
   emitEnvironmentConnectionRegistryChange();
   detachThreadDetailSubscriptionsForEnvironment(environmentId);
@@ -1901,9 +1790,7 @@ export function startEnvironmentConnectionService(): () => void {
       if (!needsProviderInvalidation) {
         return;
       }
-      needsProviderInvalidation = false;
-      invalidateAllCheckpointDiffs();
-      invalidateProjectSearchEntries();
+      environmentStateSink.flushProviderInvalidation();
     },
     {
       wait: 100,
@@ -1961,7 +1848,7 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
   primaryShellSnapshotAppliedPromise = new Promise<void>((resolve) => {
     resolvePrimaryShellSnapshotApplied = resolve;
   });
-  lastAppliedProjectionVersionByEnvironment.clear();
+  projectionTracker.clear();
   pendingSavedEnvironmentConnections.clear();
   for (const key of Array.from(threadDetailSubscriptions.keys())) {
     disposeThreadDetailSubscriptionByKey(key);

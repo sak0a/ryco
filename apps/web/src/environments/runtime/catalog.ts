@@ -1,251 +1,82 @@
+import type { EnvironmentId } from "@ryco/contracts";
+import {
+  createSavedEnvironmentCatalog,
+  toPersistedSavedEnvironmentRecord,
+  type SavedEnvironmentRegistryState,
+  type SavedEnvironmentRuntimeStoreState,
+  type StoreApi,
+} from "@ryco/client-runtime/connection";
 import { getKnownEnvironmentHttpBaseUrl } from "@ryco/client-runtime/knownEnvironment";
-import type {
-  AuthSessionRole,
-  EnvironmentId,
-  ExecutionEnvironmentDescriptor,
-  PersistedSavedEnvironmentRecord,
-  ServerConfig,
-} from "@ryco/contracts";
-import { create } from "zustand";
+import { useSyncExternalStore } from "react";
 
 import { isHostedHubMode } from "../../env";
 import { ensureLocalApi } from "../../localApi";
+import { rewriteEnvironmentHttpBaseUrlInDev } from "../../platform/endpoint";
+import { webSecretKV } from "../../platform/secretKv";
 import { getPrimaryKnownEnvironment } from "../primary";
 
-export interface SavedEnvironmentRecord {
-  readonly environmentId: EnvironmentId;
-  readonly label: string;
-  readonly wsBaseUrl: string;
-  readonly httpBaseUrl: string;
-  readonly createdAt: string;
-  readonly lastConnectedAt: string | null;
-  readonly desktopSsh?: PersistedSavedEnvironmentRecord["desktopSsh"];
+export type {
+  SavedEnvironmentAuthState,
+  SavedEnvironmentConnectionState,
+  SavedEnvironmentRecord,
+  SavedEnvironmentRuntimeState,
+} from "@ryco/client-runtime/connection";
+export { toPersistedSavedEnvironmentRecord } from "@ryco/client-runtime/connection";
+
+interface BoundStore<S> {
+  <T>(selector: (state: S) => T): T;
+  getState: StoreApi<S>["getState"];
+  setState: StoreApi<S>["setState"];
+  subscribe: StoreApi<S>["subscribe"];
 }
 
-interface SavedEnvironmentRegistryState {
-  readonly byId: Record<EnvironmentId, SavedEnvironmentRecord>;
+function bindStore<S>(store: StoreApi<S>): BoundStore<S> {
+  const bound = (<T>(selector: (state: S) => T): T =>
+    useSyncExternalStore(
+      store.subscribe,
+      () => selector(store.getState()),
+      () => selector(store.getState()),
+    )) as BoundStore<S>;
+  bound.getState = store.getState;
+  bound.setState = store.setState;
+  bound.subscribe = store.subscribe;
+  return bound;
 }
 
-interface SavedEnvironmentRegistryStore extends SavedEnvironmentRegistryState {
-  readonly upsert: (record: SavedEnvironmentRecord) => void;
-  readonly remove: (environmentId: EnvironmentId) => void;
-  readonly markConnected: (environmentId: EnvironmentId, connectedAt: string) => void;
-  readonly rename: (environmentId: EnvironmentId, label: string) => void;
-  readonly reset: () => void;
-}
-
-let savedEnvironmentRegistryHydrated = false;
-let savedEnvironmentRegistryHydrationPromise: Promise<void> | null = null;
-
-export function toPersistedSavedEnvironmentRecord(
-  record: SavedEnvironmentRecord,
-): PersistedSavedEnvironmentRecord {
-  return {
-    environmentId: record.environmentId,
-    label: record.label,
-    httpBaseUrl: record.httpBaseUrl,
-    wsBaseUrl: record.wsBaseUrl,
-    createdAt: record.createdAt,
-    lastConnectedAt: record.lastConnectedAt,
-    ...(record.desktopSsh ? { desktopSsh: record.desktopSsh } : {}),
-  };
-}
-
-function valuesOfSavedEnvironmentRegistry(
-  byId: Record<EnvironmentId, SavedEnvironmentRecord>,
-): ReadonlyArray<SavedEnvironmentRecord> {
-  return Object.values(byId) as ReadonlyArray<SavedEnvironmentRecord>;
-}
-
-function persistSavedEnvironmentRegistryState(
-  byId: Record<EnvironmentId, SavedEnvironmentRecord>,
-): void {
-  try {
-    void ensureLocalApi()
-      .persistence.setSavedEnvironmentRegistry(
-        valuesOfSavedEnvironmentRegistry(byId).map((record) =>
-          toPersistedSavedEnvironmentRecord(record),
-        ),
-      )
-      .catch((error) => {
-        console.error("[SAVED_ENVIRONMENTS] persist failed", error);
-      });
-  } catch (error) {
-    console.error("[SAVED_ENVIRONMENTS] persist failed", error);
-  }
-}
-
-function replaceSavedEnvironmentRegistryState(
-  records: ReadonlyArray<SavedEnvironmentRecord>,
-): void {
-  const currentById = useSavedEnvironmentRegistryStore.getState().byId;
-  const hydratedById = Object.fromEntries(records.map((record) => [record.environmentId, record]));
-  useSavedEnvironmentRegistryStore.setState({
-    byId: {
-      ...hydratedById,
-      ...currentById,
-    },
-  });
-}
-
-async function hydrateSavedEnvironmentRegistry(): Promise<void> {
-  if (savedEnvironmentRegistryHydrated) {
-    return;
-  }
-  if (savedEnvironmentRegistryHydrationPromise) {
-    return savedEnvironmentRegistryHydrationPromise;
-  }
-
-  const nextHydration = (async () => {
-    try {
-      const persistedRecords = await ensureLocalApi().persistence.getSavedEnvironmentRegistry();
-      replaceSavedEnvironmentRegistryState(persistedRecords);
-    } catch (error) {
-      console.error("[SAVED_ENVIRONMENTS] hydrate failed", error);
-    } finally {
-      savedEnvironmentRegistryHydrated = true;
-    }
-  })();
-
-  const hydrationPromise = nextHydration.finally(() => {
-    if (savedEnvironmentRegistryHydrationPromise === hydrationPromise) {
-      savedEnvironmentRegistryHydrationPromise = null;
-    }
-  });
-  savedEnvironmentRegistryHydrationPromise = hydrationPromise;
-
-  return savedEnvironmentRegistryHydrationPromise;
-}
-
-export const useSavedEnvironmentRegistryStore = create<SavedEnvironmentRegistryStore>()((set) => ({
-  byId: {},
-  upsert: (record) =>
-    set((state) => {
-      const byId = {
-        ...state.byId,
-        [record.environmentId]: record,
-      };
-      persistSavedEnvironmentRegistryState(byId);
-      return { byId };
-    }),
-  remove: (environmentId) =>
-    set((state) => {
-      const { [environmentId]: _removed, ...remaining } = state.byId;
-      persistSavedEnvironmentRegistryState(remaining);
-      return {
-        byId: remaining,
-      };
-    }),
-  markConnected: (environmentId, connectedAt) =>
-    set((state) => {
-      const existing = state.byId[environmentId];
-      if (!existing) {
-        return state;
-      }
-      const byId = {
-        ...state.byId,
-        [environmentId]: {
-          ...existing,
-          lastConnectedAt: connectedAt,
-        },
-      };
-      persistSavedEnvironmentRegistryState(byId);
-      return { byId };
-    }),
-  rename: (environmentId, label) =>
-    set((state) => {
-      const existing = state.byId[environmentId];
-      const nextLabel = label.trim();
-      if (!existing || nextLabel.length === 0 || existing.label === nextLabel) {
-        return state;
-      }
-      const byId = {
-        ...state.byId,
-        [environmentId]: {
-          ...existing,
-          label: nextLabel,
-        },
-      };
-      persistSavedEnvironmentRegistryState(byId);
-      return { byId };
-    }),
-  reset: () => {
-    persistSavedEnvironmentRegistryState({});
-    set({
-      byId: {},
-    });
+const catalog = createSavedEnvironmentCatalog({
+  kv: {
+    getRegistry: () => ensureLocalApi().persistence.getSavedEnvironmentRegistry(),
+    setRegistry: (records) =>
+      ensureLocalApi().persistence.setSavedEnvironmentRegistry(
+        records.map((record) => toPersistedSavedEnvironmentRecord(record)),
+      ),
   },
-}));
+  secretKV: webSecretKV,
+});
 
-export function hasSavedEnvironmentRegistryHydrated(): boolean {
-  return savedEnvironmentRegistryHydrated;
-}
-
-export function waitForSavedEnvironmentRegistryHydration(): Promise<void> {
-  if (hasSavedEnvironmentRegistryHydrated()) {
-    return Promise.resolve();
-  }
-
-  return hydrateSavedEnvironmentRegistry();
-}
-
-export function listSavedEnvironmentRecords(): ReadonlyArray<SavedEnvironmentRecord> {
-  return Object.values(useSavedEnvironmentRegistryStore.getState().byId).toSorted((left, right) =>
-    left.label.localeCompare(right.label),
-  );
-}
-
-export function getSavedEnvironmentRecord(
-  environmentId: EnvironmentId,
-): SavedEnvironmentRecord | null {
-  return useSavedEnvironmentRegistryStore.getState().byId[environmentId] ?? null;
-}
+export const useSavedEnvironmentRegistryStore = bindStore<SavedEnvironmentRegistryState>(
+  catalog.registryStore,
+);
+export const useSavedEnvironmentRuntimeStore = bindStore<SavedEnvironmentRuntimeStoreState>(
+  catalog.runtimeStore,
+);
+export const hasSavedEnvironmentRegistryHydrated = catalog.hasHydrated;
+export const waitForSavedEnvironmentRegistryHydration = catalog.waitForHydration;
+export const listSavedEnvironmentRecords = catalog.list;
+export const getSavedEnvironmentRecord = catalog.get;
+export const persistSavedEnvironmentRecord = catalog.persistRecord;
+export const readSavedEnvironmentBearerToken = catalog.readBearerToken;
+export const writeSavedEnvironmentBearerToken = catalog.writeBearerToken;
+export const removeSavedEnvironmentBearerToken = catalog.removeBearerToken;
+export const resetSavedEnvironmentRegistryStoreForTests = catalog.resetForTests;
+export const resetSavedEnvironmentRuntimeStoreForTests = catalog.resetRuntimeForTests;
+export const getSavedEnvironmentRuntimeState = catalog.getRuntime;
 
 export function getEnvironmentHttpBaseUrl(environmentId: EnvironmentId): string | null {
-  if (isHostedHubMode()) {
-    return null;
-  }
-  const primaryEnvironment = getPrimaryKnownEnvironment();
-  if (primaryEnvironment?.environmentId === environmentId) {
-    return getKnownEnvironmentHttpBaseUrl(primaryEnvironment);
-  }
-
+  if (isHostedHubMode()) return null;
+  const primary = getPrimaryKnownEnvironment();
+  if (primary?.environmentId === environmentId) return getKnownEnvironmentHttpBaseUrl(primary);
   return getSavedEnvironmentRecord(environmentId)?.httpBaseUrl ?? null;
-}
-
-const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
-
-function isLoopbackHostname(hostname: string): boolean {
-  return LOOPBACK_HOSTNAMES.has(
-    hostname
-      .trim()
-      .toLowerCase()
-      .replace(/^\[(.*)\]$/, "$1"),
-  );
-}
-
-function rewriteToCurrentOriginInDev(httpBaseUrl: string): string {
-  const configuredDevServerUrl = import.meta.env.VITE_DEV_SERVER_URL?.trim();
-  if (!configuredDevServerUrl) {
-    return httpBaseUrl;
-  }
-  const currentUrl = new URL(window.location.href);
-  const targetUrl = new URL(httpBaseUrl);
-  const devServerUrl = new URL(configuredDevServerUrl, currentUrl.origin);
-
-  const isCurrentOriginDevServer =
-    (currentUrl.protocol === "http:" || currentUrl.protocol === "https:") &&
-    currentUrl.origin === devServerUrl.origin;
-
-  if (
-    !isCurrentOriginDevServer ||
-    currentUrl.origin === targetUrl.origin ||
-    !isLoopbackHostname(currentUrl.hostname) ||
-    !isLoopbackHostname(targetUrl.hostname)
-  ) {
-    return httpBaseUrl;
-  }
-  return currentUrl.origin;
 }
 
 export function resolveEnvironmentHttpUrl(input: {
@@ -253,148 +84,11 @@ export function resolveEnvironmentHttpUrl(input: {
   readonly pathname: string;
   readonly searchParams?: Record<string, string>;
 }): string {
-  const httpBaseUrl = getEnvironmentHttpBaseUrl(input.environmentId);
-  if (!httpBaseUrl) {
+  const baseUrl = getEnvironmentHttpBaseUrl(input.environmentId);
+  if (!baseUrl)
     throw new Error(`Unable to resolve HTTP base URL for environment ${input.environmentId}.`);
-  }
-
-  const url = new URL(rewriteToCurrentOriginInDev(httpBaseUrl));
+  const url = new URL(rewriteEnvironmentHttpBaseUrlInDev(baseUrl));
   url.pathname = input.pathname;
-  if (input.searchParams) {
-    url.search = new URLSearchParams(input.searchParams).toString();
-  }
+  if (input.searchParams) url.search = new URLSearchParams(input.searchParams).toString();
   return url.toString();
-}
-
-export function resetSavedEnvironmentRegistryStoreForTests() {
-  savedEnvironmentRegistryHydrated = false;
-  savedEnvironmentRegistryHydrationPromise = null;
-  useSavedEnvironmentRegistryStore.setState({ byId: {} });
-}
-
-export async function persistSavedEnvironmentRecord(record: SavedEnvironmentRecord): Promise<void> {
-  const byId = {
-    ...useSavedEnvironmentRegistryStore.getState().byId,
-    [record.environmentId]: record,
-  };
-
-  await ensureLocalApi().persistence.setSavedEnvironmentRegistry(
-    valuesOfSavedEnvironmentRegistry(byId).map((entry) => toPersistedSavedEnvironmentRecord(entry)),
-  );
-}
-
-export async function readSavedEnvironmentBearerToken(
-  environmentId: EnvironmentId,
-): Promise<string | null> {
-  return ensureLocalApi().persistence.getSavedEnvironmentSecret(environmentId);
-}
-
-export async function writeSavedEnvironmentBearerToken(
-  environmentId: EnvironmentId,
-  bearerToken: string,
-): Promise<boolean> {
-  return ensureLocalApi().persistence.setSavedEnvironmentSecret(environmentId, bearerToken);
-}
-
-export async function removeSavedEnvironmentBearerToken(
-  environmentId: EnvironmentId,
-): Promise<void> {
-  await ensureLocalApi().persistence.removeSavedEnvironmentSecret(environmentId);
-}
-
-export type SavedEnvironmentConnectionState = "connecting" | "connected" | "disconnected" | "error";
-
-export type SavedEnvironmentAuthState = "authenticated" | "requires-auth" | "unknown";
-
-export interface SavedEnvironmentRuntimeState {
-  readonly connectionState: SavedEnvironmentConnectionState;
-  readonly authState: SavedEnvironmentAuthState;
-  readonly lastError: string | null;
-  readonly lastErrorAt: string | null;
-  readonly role: AuthSessionRole | null;
-  readonly descriptor: ExecutionEnvironmentDescriptor | null;
-  readonly serverConfig: ServerConfig | null;
-  readonly connectedAt: string | null;
-  readonly disconnectedAt: string | null;
-}
-
-interface SavedEnvironmentRuntimeStoreState {
-  readonly byId: Record<EnvironmentId, SavedEnvironmentRuntimeState>;
-  readonly ensure: (environmentId: EnvironmentId) => void;
-  readonly patch: (
-    environmentId: EnvironmentId,
-    patch: Partial<SavedEnvironmentRuntimeState>,
-  ) => void;
-  readonly clear: (environmentId: EnvironmentId) => void;
-  readonly reset: () => void;
-}
-
-const DEFAULT_SAVED_ENVIRONMENT_RUNTIME_STATE: SavedEnvironmentRuntimeState = Object.freeze({
-  connectionState: "disconnected",
-  authState: "unknown",
-  lastError: null,
-  lastErrorAt: null,
-  role: null,
-  descriptor: null,
-  serverConfig: null,
-  connectedAt: null,
-  disconnectedAt: null,
-});
-
-function createDefaultSavedEnvironmentRuntimeState(): SavedEnvironmentRuntimeState {
-  return {
-    ...DEFAULT_SAVED_ENVIRONMENT_RUNTIME_STATE,
-  };
-}
-
-export const useSavedEnvironmentRuntimeStore = create<SavedEnvironmentRuntimeStoreState>()(
-  (set) => ({
-    byId: {},
-    ensure: (environmentId) =>
-      set((state) => {
-        if (state.byId[environmentId]) {
-          return state;
-        }
-        return {
-          byId: {
-            ...state.byId,
-            [environmentId]: createDefaultSavedEnvironmentRuntimeState(),
-          },
-        };
-      }),
-    patch: (environmentId, patch) =>
-      set((state) => ({
-        byId: {
-          ...state.byId,
-          [environmentId]: {
-            ...(state.byId[environmentId] ?? createDefaultSavedEnvironmentRuntimeState()),
-            ...patch,
-          },
-        },
-      })),
-    clear: (environmentId) =>
-      set((state) => {
-        const { [environmentId]: _removed, ...remaining } = state.byId;
-        return {
-          byId: remaining,
-        };
-      }),
-    reset: () =>
-      set({
-        byId: {},
-      }),
-  }),
-);
-
-export function getSavedEnvironmentRuntimeState(
-  environmentId: EnvironmentId,
-): SavedEnvironmentRuntimeState {
-  return (
-    useSavedEnvironmentRuntimeStore.getState().byId[environmentId] ??
-    DEFAULT_SAVED_ENVIRONMENT_RUNTIME_STATE
-  );
-}
-
-export function resetSavedEnvironmentRuntimeStoreForTests() {
-  useSavedEnvironmentRuntimeStore.getState().reset();
 }

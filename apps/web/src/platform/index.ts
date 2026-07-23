@@ -3,6 +3,7 @@ export { webAttachmentCodec } from "./attachmentCodec";
 export { readWebClientRuntimeConfig } from "./config";
 export { webEndpoint } from "./endpoint";
 export { webClock, webFrameScheduler } from "./frame";
+export { webHttpClient } from "./httpClient";
 export { createWebKV, webKV } from "./kv";
 export { webObservability } from "./observability";
 export { webPairingCredentialSource } from "./pairingCredentialSource";
