@@ -1,0 +1,269 @@
+import type {
+  AuthBootstrapInput,
+  AuthBootstrapResult,
+  AuthClientMetadata,
+  AuthCreatePairingCredentialInput,
+  AuthPairingCredentialResult,
+  AuthRevokeClientSessionInput,
+  AuthRevokePairingLinkInput,
+  AuthSessionId,
+  AuthSessionState,
+  AuthWebSocketTokenResult,
+} from "@ryco/contracts";
+import { Data, Predicate } from "effect";
+
+import type {
+  EndpointService,
+  HttpClientService,
+  PairingCredentialSourceService,
+  SessionCredentialsService,
+} from "../platform/index.ts";
+
+export class BootstrapHttpError extends Data.TaggedError("BootstrapHttpError")<{
+  readonly message: string;
+  readonly status: number;
+}> {}
+const isBootstrapHttpError = (value: unknown): value is BootstrapHttpError =>
+  Predicate.isTagged(value, "BootstrapHttpError");
+
+export interface ServerPairingLinkRecord {
+  readonly id: string;
+  readonly credential: string;
+  readonly role: "owner" | "client";
+  readonly subject: string;
+  readonly label?: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+}
+
+export interface ServerClientSessionRecord {
+  readonly sessionId: AuthSessionId;
+  readonly subject: string;
+  readonly role: "owner" | "client";
+  readonly method: "browser-session-cookie" | "bearer-session-token";
+  readonly client: AuthClientMetadata;
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+  readonly lastConnectedAt: string | null;
+  readonly connected: boolean;
+  readonly current: boolean;
+}
+
+export type ServerAuthGateState =
+  | { status: "authenticated" }
+  | { status: "requires-auth"; auth: AuthSessionState["auth"]; errorMessage?: string };
+
+export interface PrimaryAuthDependencies {
+  readonly endpoint: EndpointService;
+  readonly httpClient: HttpClientService;
+  readonly sessionCredentials: SessionCredentialsService;
+  readonly pairingCredentialSource: PairingCredentialSourceService;
+  readonly readBootstrapCredential: () => string | null;
+  readonly now?: () => number;
+  readonly sleep?: (milliseconds: number) => Promise<void>;
+}
+
+const AUTH_SESSION_ESTABLISH_TIMEOUT_MS = 2_000;
+const AUTH_SESSION_ESTABLISH_STEP_MS = 100;
+const BOOTSTRAP_RETRY_TIMEOUT_MS = 15_000;
+const BOOTSTRAP_RETRY_STEP_MS = 500;
+const TRANSIENT_BOOTSTRAP_STATUS_CODES = new Set([502, 503, 504]);
+const INVALID_BOOTSTRAP_CREDENTIAL_MESSAGES = new Set([
+  "Invalid bootstrap credential.",
+  "Unknown bootstrap credential.",
+]);
+
+export function createPrimaryAuth(deps: PrimaryAuthDependencies) {
+  let bootstrapPromise: Promise<ServerAuthGateState> | null = null;
+  let resolvedAuthenticatedGateState: ServerAuthGateState | null = null;
+  const now = deps.now ?? Date.now;
+  const sleep =
+    deps.sleep ??
+    ((milliseconds) =>
+      new Promise<void>((resolve) => {
+        setTimeout(() => resolve(), milliseconds);
+      }));
+  const credentials =
+    deps.sessionCredentials.mode === "cookie" ? { credentials: "include" as const } : {};
+  const retryTransientBootstrap = async <T>(operation: () => Promise<T>): Promise<T> => {
+    const startedAt = now();
+    for (;;) {
+      try {
+        return await operation();
+      } catch (error) {
+        const transient = isBootstrapHttpError(error)
+          ? TRANSIENT_BOOTSTRAP_STATUS_CODES.has(error.status)
+          : error instanceof TypeError ||
+            (error as { readonly name?: unknown } | null)?.name === "AbortError";
+        if (!transient || now() - startedAt >= BOOTSTRAP_RETRY_TIMEOUT_MS) throw error;
+        await sleep(BOOTSTRAP_RETRY_STEP_MS);
+      }
+    }
+  };
+  const readErrorMessage = async (
+    response: Awaited<ReturnType<HttpClientService["fetch"]>>,
+    fallbackMessage: string,
+  ) => (await response.text()) || fallbackMessage;
+  const fetchSessionState = async (): Promise<AuthSessionState> =>
+    retryTransientBootstrap(async () => {
+      const response = await deps.httpClient.fetch(
+        deps.endpoint.resolveHttpUrl("/api/auth/session"),
+        credentials,
+      );
+      if (!response.ok) {
+        throw new BootstrapHttpError({
+          message: `Failed to load server auth session state (${response.status}).`,
+          status: response.status,
+        });
+      }
+      return (await response.json()) as AuthSessionState;
+    });
+  const issuePrimaryWebSocketToken = async (): Promise<AuthWebSocketTokenResult> => {
+    const response = await deps.httpClient.fetch(
+      deps.endpoint.resolveHttpUrl("/api/auth/ws-token"),
+      { ...credentials, method: "POST" },
+    );
+    if (!response.ok)
+      throw new BootstrapHttpError({
+        message: `Failed to issue websocket token (${response.status}).`,
+        status: response.status,
+      });
+    return (await response.json()) as AuthWebSocketTokenResult;
+  };
+  const exchangeBootstrapCredential = async (credential: string): Promise<AuthBootstrapResult> =>
+    retryTransientBootstrap(async () => {
+      const response = await deps.httpClient.fetch(
+        deps.endpoint.resolveHttpUrl("/api/auth/bootstrap"),
+        {
+          ...credentials,
+          body: JSON.stringify({ credential } satisfies AuthBootstrapInput),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      );
+      if (!response.ok) {
+        const raw = await response.text();
+        let message = raw.trim();
+        try {
+          const parsed = JSON.parse(message) as { error?: unknown };
+          if (typeof parsed.error === "string" && parsed.error.trim())
+            message = parsed.error.trim();
+        } catch {
+          /* plain text */
+        }
+        if (response.status === 401 && INVALID_BOOTSTRAP_CREDENTIAL_MESSAGES.has(message))
+          message = "Invalid pairing token. Check the token and try again.";
+        throw new BootstrapHttpError({
+          message: message || `Failed to bootstrap auth session (${response.status}).`,
+          status: response.status,
+        });
+      }
+      return (await response.json()) as AuthBootstrapResult;
+    });
+  const waitForAuthenticatedSessionAfterBootstrap = async (): Promise<AuthSessionState> => {
+    const startedAt = now();
+    for (;;) {
+      const session = await fetchSessionState();
+      if (session.authenticated) return session;
+      if (now() - startedAt >= AUTH_SESSION_ESTABLISH_TIMEOUT_MS)
+        throw new Error("Timed out waiting for authenticated session after bootstrap.");
+      await sleep(AUTH_SESSION_ESTABLISH_STEP_MS);
+    }
+  };
+  const bootstrapServerAuth = async (): Promise<ServerAuthGateState> => {
+    const bootstrapCredential = deps.readBootstrapCredential();
+    const currentSession = await fetchSessionState();
+    if (currentSession.authenticated) return { status: "authenticated" };
+    if (!bootstrapCredential) return { status: "requires-auth", auth: currentSession.auth };
+    try {
+      await exchangeBootstrapCredential(bootstrapCredential);
+      await waitForAuthenticatedSessionAfterBootstrap();
+      return { status: "authenticated" };
+    } catch (error) {
+      return {
+        status: "requires-auth",
+        auth: currentSession.auth,
+        errorMessage: error instanceof Error ? error.message : "Authentication failed.",
+      };
+    }
+  };
+  const post = async <T>(pathname: string, body?: unknown): Promise<T> => {
+    const response = await deps.httpClient.fetch(deps.endpoint.resolveHttpUrl(pathname), {
+      ...credentials,
+      ...(body === undefined
+        ? {}
+        : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
+      method: "POST",
+    });
+    if (!response.ok)
+      throw new Error(await readErrorMessage(response, `Request failed (${response.status}).`));
+    return (await response.json()) as T;
+  };
+  const get = async <T>(pathname: string, fallback: string): Promise<T> => {
+    const response = await deps.httpClient.fetch(
+      deps.endpoint.resolveHttpUrl(pathname),
+      credentials,
+    );
+    if (!response.ok) throw new Error(await readErrorMessage(response, fallback));
+    return (await response.json()) as T;
+  };
+  return {
+    fetchSessionState,
+    issuePrimaryWebSocketToken,
+    retryTransientBootstrap,
+    takePairingCredential: () => deps.pairingCredentialSource.take(),
+    submitServerAuthCredential: async (credential: string) => {
+      const trimmedCredential = credential.trim();
+      if (!trimmedCredential) throw new Error("Enter a pairing token to continue.");
+      resolvedAuthenticatedGateState = null;
+      await exchangeBootstrapCredential(trimmedCredential);
+      bootstrapPromise = null;
+    },
+    createServerPairingCredential: (label?: string) =>
+      post<AuthPairingCredentialResult>(
+        "/api/auth/pairing-token",
+        label?.trim() ? ({ label: label.trim() } satisfies AuthCreatePairingCredentialInput) : {},
+      ),
+    listServerPairingLinks: () =>
+      get<ReadonlyArray<ServerPairingLinkRecord>>(
+        "/api/auth/pairing-links",
+        "Failed to load pairing links.",
+      ),
+    revokeServerPairingLink: async (id: string) =>
+      void (await post<void>("/api/auth/pairing-links/revoke", {
+        id,
+      } satisfies AuthRevokePairingLinkInput)),
+    listServerClientSessions: () =>
+      get<ReadonlyArray<ServerClientSessionRecord>>(
+        "/api/auth/clients",
+        "Failed to load paired clients.",
+      ),
+    revokeServerClientSession: async (sessionId: AuthSessionId) =>
+      void (await post<void>("/api/auth/clients/revoke", {
+        sessionId,
+      } satisfies AuthRevokeClientSessionInput)),
+    revokeOtherServerClientSessions: async () =>
+      (await post<{ revokedCount?: number }>("/api/auth/clients/revoke-others")).revokedCount ?? 0,
+    resolveInitialServerAuthGateState: (): Promise<ServerAuthGateState> => {
+      if (resolvedAuthenticatedGateState?.status === "authenticated")
+        return Promise.resolve(resolvedAuthenticatedGateState);
+      if (bootstrapPromise) return bootstrapPromise;
+      const nextPromise = bootstrapServerAuth();
+      bootstrapPromise = nextPromise;
+      return nextPromise
+        .then((result) => {
+          if (result.status === "authenticated") resolvedAuthenticatedGateState = result;
+          return result;
+        })
+        .finally(() => {
+          if (bootstrapPromise === nextPromise) bootstrapPromise = null;
+        });
+    },
+    resetForTests: () => {
+      bootstrapPromise = null;
+      resolvedAuthenticatedGateState = null;
+    },
+  };
+}
+
+export type PrimaryAuth = ReturnType<typeof createPrimaryAuth>;

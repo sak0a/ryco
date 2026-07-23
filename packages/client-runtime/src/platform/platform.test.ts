@@ -29,14 +29,20 @@ describe("platform contracts", () => {
     };
     const secretKv: SecretKVService = {
       get: async (key) => values.get(key) ?? null,
-      set: async (key, value) => void values.set(key, value),
+      set: async (key, value) => {
+        values.set(key, value);
+        return true;
+      },
       remove: async (key) => void values.delete(key),
     };
     const endpoint: EndpointService = {
       origin: () => "https://example.test",
       readPrimaryTarget: () => ({
-        httpBaseUrl: "https://example.test",
-        wsBaseUrl: "wss://example.test",
+        source: "configured",
+        target: {
+          httpBaseUrl: "https://example.test",
+          wsBaseUrl: "wss://example.test",
+        },
       }),
       resolveHttpUrl: (pathname) => `https://example.test${pathname}`,
       resolveWsUrl: (url) => url,

@@ -36,11 +36,16 @@ declare class TextDecoder {
 }
 
 declare class URL {
-  constructor(url: string);
+  constructor(url: string, base?: string | URL);
   host: string;
   hostname: string;
   pathname: string;
   protocol: string;
+  search: string;
+  hash: string;
+  searchParams: {
+    set(name: string, value: string): void;
+  };
   toString(): string;
 }
 
@@ -61,4 +66,5 @@ declare function clearTimeout(timeoutId: number): void;
 
 declare const console: {
   warn(...data: ReadonlyArray<unknown>): void;
+  error(...data: ReadonlyArray<unknown>): void;
 };
