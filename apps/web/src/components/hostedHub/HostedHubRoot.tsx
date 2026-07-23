@@ -25,6 +25,8 @@ import {
 } from "../../hostedHub/nodeRouteOrchestrator";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { useHostedBrowserLifecycle } from "../../hostedHub/useHostedBrowserLifecycle";
+import { usePresentationTier } from "../../hooks/usePresentationTier";
+import { PHONE_ANCHORED_ACTIONS_CLASS_NAME } from "../mobile/phoneAnchoredActions";
 import { HostedConnectionControl, NodePresence } from "./HostedConnectionControls";
 import { HostedNodeEnrollmentFlow } from "./HostedNodeEnrollment";
 import { HostedPwaControls } from "./HostedPwaControls";
@@ -117,7 +119,25 @@ function HostedNodeStartingSurface({ node }: { readonly node: HostedHubNode }) {
   );
 }
 
-function Surface({ children }: { readonly children: React.ReactNode }) {
+function Surface({
+  children,
+  actions,
+  trailing,
+}: {
+  readonly children: React.ReactNode;
+  /**
+   * The surface's action group. Bottom-anchored on the phone tier by its own
+   * `phone:` classes; it may be absent in a state that has no action group.
+   */
+  readonly actions?: React.ReactNode;
+  /**
+   * Content that must mount in **every** state of the surface and must stay
+   * last in the DOM — live regions and recovery affordances. Kept separate
+   * from `actions` precisely so it cannot be swallowed by a conditional that
+   * only applies to the action group.
+   */
+  readonly trailing?: React.ReactNode;
+}) {
   // Phone layout system: safe-area-aware edge padding so hosted entry
   // surfaces stay fully reachable on notched, edge-to-edge phone viewports.
   // The gating order of the surfaces themselves is unchanged.
@@ -127,11 +147,17 @@ function Surface({ children }: { readonly children: React.ReactNode }) {
   // with passkey" fell below the fold). The surface owns its own vertical
   // scroll, and the card is centred with `my-auto` on a `min-h-full` track
   // instead of `items-center`, which would clip the overflowing top edge.
+  //
+  // On the phone tier the card chrome recedes and the surface fills the
+  // viewport instead: no rounded floating card, no centring, and the content
+  // column grows so the action group below it can be bottom-anchored.
   return (
     <main className="h-dvh overflow-x-hidden overflow-y-auto overscroll-contain bg-background text-foreground">
       <div className="flex min-h-full flex-col px-4 py-10 sm:px-6 phone:px-[max(1rem,env(safe-area-inset-left),env(safe-area-inset-right))] phone:pt-[max(2.5rem,calc(env(safe-area-inset-top)+1rem))] phone:pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1rem))]">
-        <section className="my-auto w-full max-w-lg self-center rounded-2xl border border-border bg-card p-5 shadow-lg shadow-black/5 sm:p-8">
+        <section className="my-auto w-full max-w-lg self-center rounded-2xl border border-border bg-card p-5 shadow-lg shadow-black/5 sm:p-8 phone:my-0 phone:flex phone:max-w-none phone:flex-1 phone:flex-col phone:rounded-none phone:border-0 phone:bg-transparent phone:p-0 phone:shadow-none">
           {children}
+          {actions}
+          {trailing}
         </section>
       </div>
     </main>
@@ -151,8 +177,88 @@ function HostedAuthenticationSurface() {
     else headingRef.current?.focus();
   }, [registrationMode]);
 
+  // The action group keeps the exact DOM order and desktop styling it had —
+  // the primary stack, then the Hub retry, then the polite announcement — so
+  // the desktop card is unchanged. Only the outer wrapper is phone-gated.
+  //
+  // The stack itself is the only part gated on registration mode: while the
+  // registration form is open it owns the primary action. The Hub retry and
+  // the polite announcement are NOT part of this group — see `signInTrailing`.
+  const signInActions = registrationMode ? null : (
+    <div className={`phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
+      <div className="mt-6 flex flex-col gap-3">
+        <Button
+          size="lg"
+          className="phone:min-h-11"
+          disabled={status === "authenticating" || status === "signing-out"}
+          onClick={() => void hostedHubController.signIn()}
+        >
+          <KeyRoundIcon aria-hidden />
+          {status === "authenticating" ? "Waiting for passkey…" : "Sign in with passkey"}
+        </Button>
+        {status === "authenticating" ? (
+          <Button
+            variant="outline"
+            size="lg"
+            className="phone:min-h-11"
+            onClick={() => hostedHubController.cancelAuthentication()}
+          >
+            Cancel
+          </Button>
+        ) : (
+          <>
+            <Button
+              variant="outline"
+              size="lg"
+              className="phone:min-h-11"
+              onClick={() => setRegistrationMode("invitation")}
+            >
+              Redeem invitation
+            </Button>
+            {bootstrapAvailable ? (
+              <Button
+                variant="outline"
+                size="lg"
+                className="phone:min-h-11"
+                onClick={() => setRegistrationMode("bootstrap")}
+              >
+                Set up first owner
+              </Button>
+            ) : null}
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  // Both of these must mount in EVERY account state, including while the
+  // registration form is open. Redeeming an invitation and bootstrapping the
+  // first owner both drive `accountStatus` to `authenticating` exactly as
+  // sign-in does, and the WebAuthn ceremony then runs for seconds: without a
+  // mounted polite region a screen-reader user is told nothing at all, and the
+  // form's `role="alert"` only speaks on failure. `Retry Hub` is the recovery
+  // path out of an unavailable Hub and must not disappear either. They live in
+  // `trailing` rather than inside the action group so no future conditional on
+  // the group can take them out of the DOM again.
+  const signInTrailing = (
+    <>
+      {status === "unavailable" ? (
+        <Button
+          className="mt-3 phone:min-h-11"
+          variant="ghost"
+          onClick={() => void hostedHubController.bootstrap()}
+        >
+          <RefreshCwIcon aria-hidden /> Retry Hub
+        </Button>
+      ) : null}
+      <p className="sr-only" aria-live="polite">
+        {status === "authenticating" ? "Passkey authentication is in progress." : ""}
+      </p>
+    </>
+  );
+
   return (
-    <Surface>
+    <Surface actions={signInActions} trailing={signInTrailing}>
       <div className="mb-6 flex size-11 items-center justify-center rounded-xl border border-border bg-background text-primary">
         <ShieldCheckIcon aria-hidden className="size-5" />
       </div>
@@ -184,62 +290,7 @@ function HostedAuthenticationSurface() {
           credentialRef={registrationInputRef}
           onBack={() => setRegistrationMode(null)}
         />
-      ) : (
-        <div className="mt-6 flex flex-col gap-3">
-          <Button
-            size="lg"
-            className="phone:min-h-11"
-            disabled={status === "authenticating" || status === "signing-out"}
-            onClick={() => void hostedHubController.signIn()}
-          >
-            <KeyRoundIcon aria-hidden />
-            {status === "authenticating" ? "Waiting for passkey…" : "Sign in with passkey"}
-          </Button>
-          {status === "authenticating" ? (
-            <Button
-              variant="outline"
-              size="lg"
-              className="phone:min-h-11"
-              onClick={() => hostedHubController.cancelAuthentication()}
-            >
-              Cancel
-            </Button>
-          ) : (
-            <>
-              <Button
-                variant="outline"
-                size="lg"
-                className="phone:min-h-11"
-                onClick={() => setRegistrationMode("invitation")}
-              >
-                Redeem invitation
-              </Button>
-              {bootstrapAvailable ? (
-                <Button
-                  variant="outline"
-                  size="lg"
-                  className="phone:min-h-11"
-                  onClick={() => setRegistrationMode("bootstrap")}
-                >
-                  Set up first owner
-                </Button>
-              ) : null}
-            </>
-          )}
-        </div>
-      )}
-      {status === "unavailable" ? (
-        <Button
-          className="mt-3"
-          variant="ghost"
-          onClick={() => void hostedHubController.bootstrap()}
-        >
-          <RefreshCwIcon aria-hidden /> Retry Hub
-        </Button>
       ) : null}
-      <p className="sr-only" aria-live="polite">
-        {status === "authenticating" ? "Passkey authentication is in progress." : ""}
-      </p>
     </Surface>
   );
 }
@@ -280,7 +331,11 @@ function RegistrationForm({
   };
 
   return (
-    <form className="mt-6 space-y-4" onSubmit={(event) => void submit(event)} autoComplete="off">
+    <form
+      className="mt-6 space-y-4 phone:flex phone:flex-1 phone:flex-col"
+      onSubmit={(event) => void submit(event)}
+      autoComplete="off"
+    >
       <div>
         <label htmlFor="hub-registration-credential" className="text-sm font-medium">
           {mode === "invitation" ? "Invitation code" : "Bootstrap credential"}
@@ -321,13 +376,14 @@ function RegistrationForm({
           className="mt-1 h-10 w-full rounded-lg border border-input bg-background px-3 outline-none focus-visible:ring-2 focus-visible:ring-ring phone:h-11"
         />
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Button type="submit" disabled={status === "authenticating"}>
+      <div className={`flex flex-wrap gap-2 phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
+        <Button type="submit" className="phone:min-h-11" disabled={status === "authenticating"}>
           {mode === "invitation" ? "Create account and passkey" : "Create owner and passkey"}
         </Button>
         <Button
           type="button"
           variant="outline"
+          className="phone:min-h-11"
           onClick={
             status === "authenticating" ? () => hostedHubController.cancelAuthentication() : onBack
           }
@@ -342,7 +398,18 @@ function RegistrationForm({
 function RecoveryCodesSurface() {
   const recoveryCodes = useHostedHubStore((state) => state.recoveryCodes);
   return (
-    <Surface>
+    <Surface
+      actions={
+        <div className={`phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
+          <Button
+            className="mt-5 phone:min-h-11 phone:w-full"
+            onClick={() => hostedHubController.dismissRecoveryCodes()}
+          >
+            I saved the codes
+          </Button>
+        </div>
+      }
+    >
       <ShieldCheckIcon aria-hidden className="size-8 text-primary" />
       <h1 className="mt-4 text-2xl font-semibold">Save your recovery codes</h1>
       <p className="mt-2 text-sm text-muted-foreground">
@@ -356,12 +423,6 @@ function RecoveryCodesSurface() {
           <li key={code}>{code}</li>
         ))}
       </ul>
-      <Button
-        className="mt-5 phone:min-h-11"
-        onClick={() => hostedHubController.dismissRecoveryCodes()}
-      >
-        I saved the codes
-      </Button>
     </Surface>
   );
 }
@@ -375,6 +436,7 @@ function HostedNodeDirectory() {
   const selection = useHostedHubStore((state) => state.selectionStatus);
   const routeNotice = useHostedNodeRouteNotice();
   const navigate = useNavigate();
+  const isPhoneTier = usePresentationTier() === "phone";
   const [enrolling, setEnrolling] = useState(false);
 
   if (enrolling) {
@@ -394,7 +456,39 @@ function HostedNodeDirectory() {
   };
 
   return (
-    <Surface>
+    <Surface
+      actions={
+        <div className={`phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
+          <Button
+            className="mt-5 phone:min-h-11"
+            variant="outline"
+            disabled={status === "loading"}
+            onClick={() => void hostedHubController.refreshDirectory()}
+          >
+            <RefreshCwIcon aria-hidden /> Refresh nodes
+          </Button>
+          {account?.role === "owner" ? (
+            <Button className="mt-3 phone:min-h-11" onClick={() => setEnrolling(true)}>
+              <ServerIcon aria-hidden /> Enroll node
+            </Button>
+          ) : null}
+          {/* The phone tier renders sign-out here as a labelled action rather
+              than as the icon-only control in the card's top-right corner, so
+              exactly one sign-out control exists per tier. It stays enabled
+              regardless of directory freshness: the fail-closed rules gate
+              node switching, never signing out. */}
+          {isPhoneTier ? (
+            <Button
+              className="mt-3 min-h-11"
+              variant="outline"
+              onClick={() => void hostedHubController.signOut()}
+            >
+              <LogOutIcon aria-hidden /> Sign out
+            </Button>
+          ) : null}
+        </div>
+      }
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
@@ -405,14 +499,16 @@ function HostedNodeDirectory() {
             Signed in as {account?.displayName ?? "Hub account"}.
           </p>
         </div>
-        <Button
-          size="icon"
-          variant="ghost"
-          aria-label="Sign out"
-          onClick={() => void hostedHubController.signOut()}
-        >
-          <LogOutIcon aria-hidden />
-        </Button>
+        {isPhoneTier ? null : (
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label="Sign out"
+            onClick={() => void hostedHubController.signOut()}
+          >
+            <LogOutIcon aria-hidden />
+          </Button>
+        )}
       </div>
       {status === "stale" ? (
         <p
@@ -480,19 +576,6 @@ function HostedNodeDirectory() {
         <HostedRelayTrustNotice />
       </div>
       <HostedPwaControls />
-      <Button
-        className="mt-5"
-        variant="outline"
-        disabled={status === "loading"}
-        onClick={() => void hostedHubController.refreshDirectory()}
-      >
-        <RefreshCwIcon aria-hidden /> Refresh nodes
-      </Button>
-      {account?.role === "owner" ? (
-        <Button className="mt-3" onClick={() => setEnrolling(true)}>
-          <ServerIcon aria-hidden /> Enroll node
-        </Button>
-      ) : null}
     </Surface>
   );
 }

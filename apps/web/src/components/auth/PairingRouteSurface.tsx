@@ -11,28 +11,48 @@ import {
 import { readHostedPairingRequest } from "../../hostedPairing";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { PHONE_ANCHORED_ACTIONS_CLASS_NAME } from "../mobile/phoneAnchoredActions";
 
-export function PairingPendingSurface() {
+/**
+ * The shared pairing-surface shell. `#root` is `overflow-y: hidden`, so the
+ * previous `min-h-screen items-center justify-center overflow-hidden` card
+ * clipped anything taller than the viewport with no way to reach it — the same
+ * defect the hosted entry surfaces carried, and it bites hardest at 320x568
+ * with a pairing error rendered. The surface now owns its own vertical scroll,
+ * centres the card with `my-auto` on a `min-h-full` track, and lets the phone
+ * tier fill the viewport instead of floating a card. The decorative wash moves
+ * to `fixed` so it no longer depends on a clipping ancestor.
+ */
+function PairingSurface({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6 phone:px-[max(1rem,env(safe-area-inset-left),env(safe-area-inset-right))] phone:pt-[max(2.5rem,calc(env(safe-area-inset-top)+1rem))] phone:pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1rem))]">
-      <div className="pointer-events-none absolute inset-0 opacity-80">
+    <div className="relative h-dvh overflow-x-hidden overflow-y-auto overscroll-contain bg-background text-foreground">
+      <div className="pointer-events-none fixed inset-0 opacity-80">
         <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-emerald-500)_14%,transparent),transparent)]" />
         <div className="absolute inset-y-0 left-0 w-72 bg-[radial-gradient(28rem_18rem_at_left,color-mix(in_srgb,var(--color-sky-500)_10%,transparent),transparent)]" />
         <div className="absolute inset-0 bg-[linear-gradient(145deg,color-mix(in_srgb,var(--background)_90%,var(--color-black))_0%,var(--background)_55%)]" />
       </div>
-
-      <section className="relative w-full max-w-xl rounded-2xl border border-border/80 bg-card/90 p-6 shadow-2xl shadow-black/20 backdrop-blur-md sm:p-8">
-        <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-          {APP_DISPLAY_NAME}
-        </p>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-          Pairing with this environment
-        </h1>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          Validating the pairing link and preparing your session.
-        </p>
-      </section>
+      <div className="relative flex min-h-full flex-col px-4 py-10 sm:px-6 phone:px-[max(1rem,env(safe-area-inset-left),env(safe-area-inset-right))] phone:pt-[max(2.5rem,calc(env(safe-area-inset-top)+1rem))] phone:pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1rem))]">
+        <section className="relative my-auto w-full max-w-xl self-center rounded-2xl border border-border/80 bg-card/90 p-6 shadow-2xl shadow-black/20 backdrop-blur-md sm:p-8 phone:my-0 phone:flex phone:max-w-none phone:flex-1 phone:flex-col phone:rounded-none phone:border-0 phone:bg-transparent phone:p-0 phone:shadow-none phone:backdrop-blur-none">
+          {children}
+        </section>
+      </div>
     </div>
+  );
+}
+
+export function PairingPendingSurface() {
+  return (
+    <PairingSurface>
+      <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
+        {APP_DISPLAY_NAME}
+      </p>
+      <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
+        Pairing with this environment
+      </h1>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        Validating the pairing link and preparing your session.
+      </p>
+    </PairingSurface>
   );
 }
 
@@ -95,69 +115,68 @@ export function PairingRouteSurface({
   }, [submitCredential]);
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6 phone:px-[max(1rem,env(safe-area-inset-left),env(safe-area-inset-right))] phone:pt-[max(2.5rem,calc(env(safe-area-inset-top)+1rem))] phone:pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1rem))]">
-      <div className="pointer-events-none absolute inset-0 opacity-80">
-        <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-emerald-500)_14%,transparent),transparent)]" />
-        <div className="absolute inset-y-0 left-0 w-72 bg-[radial-gradient(28rem_18rem_at_left,color-mix(in_srgb,var(--color-sky-500)_10%,transparent),transparent)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(145deg,color-mix(in_srgb,var(--background)_90%,var(--color-black))_0%,var(--background)_55%)]" />
-      </div>
+    <PairingSurface>
+      <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
+        {APP_DISPLAY_NAME}
+      </p>
+      <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
+        Pair with this environment
+      </h1>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        {describeAuthGate(auth.bootstrapMethods)}
+      </p>
 
-      <section className="relative w-full max-w-xl rounded-2xl border border-border/80 bg-card/90 p-6 shadow-2xl shadow-black/20 backdrop-blur-md sm:p-8">
-        <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-          {APP_DISPLAY_NAME}
-        </p>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-          Pair with this environment
-        </h1>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          {describeAuthGate(auth.bootstrapMethods)}
-        </p>
-
-        <form className="mt-6 space-y-4" onSubmit={(event) => void handleSubmit(event)}>
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="pairing-token">
-              Pairing token
-            </label>
-            <Input
-              id="pairing-token"
-              autoCapitalize="none"
-              autoComplete="off"
-              autoCorrect="off"
-              disabled={isSubmitting}
-              nativeInput
-              onChange={(event) => setCredential(event.currentTarget.value)}
-              placeholder="Paste a one-time token or pairing secret"
-              spellCheck={false}
-              value={credential}
-            />
-          </div>
-
-          {errorMessage ? (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/6 px-3 py-2 text-sm text-destructive">
-              {errorMessage}
-            </div>
-          ) : null}
-
-          <div className="flex flex-wrap gap-2">
-            <Button disabled={isSubmitting} size="sm" type="submit">
-              {isSubmitting ? "Pairing..." : "Continue"}
-            </Button>
-            <Button
-              disabled={isSubmitting}
-              onClick={() => window.location.reload()}
-              size="sm"
-              variant="outline"
-            >
-              Reload app
-            </Button>
-          </div>
-        </form>
-
-        <div className="mt-6 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
-          {describeSupportedMethods(auth.bootstrapMethods)}
+      <form
+        className="mt-6 space-y-4 phone:flex phone:flex-1 phone:flex-col"
+        onSubmit={(event) => void handleSubmit(event)}
+      >
+        <div className="space-y-2">
+          <label className="text-sm font-medium" htmlFor="pairing-token">
+            Pairing token
+          </label>
+          <Input
+            id="pairing-token"
+            autoCapitalize="none"
+            autoComplete="off"
+            autoCorrect="off"
+            // `Input` forwards `className` to its wrapper, so the phone touch
+            // floor is applied to the control it wraps.
+            className="phone:[&_input]:min-h-11"
+            disabled={isSubmitting}
+            nativeInput
+            onChange={(event) => setCredential(event.currentTarget.value)}
+            placeholder="Paste a one-time token or pairing secret"
+            spellCheck={false}
+            value={credential}
+          />
         </div>
-      </section>
-    </div>
+
+        {errorMessage ? (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/6 px-3 py-2 text-sm text-destructive">
+            {errorMessage}
+          </div>
+        ) : null}
+
+        <div className={`flex flex-wrap gap-2 phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
+          <Button className="phone:min-h-11" disabled={isSubmitting} size="sm" type="submit">
+            {isSubmitting ? "Pairing..." : "Continue"}
+          </Button>
+          <Button
+            className="phone:min-h-11"
+            disabled={isSubmitting}
+            onClick={() => window.location.reload()}
+            size="sm"
+            variant="outline"
+          >
+            Reload app
+          </Button>
+        </div>
+      </form>
+
+      <div className="mt-6 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
+        {describeSupportedMethods(auth.bootstrapMethods)}
+      </div>
+    </PairingSurface>
   );
 }
 
@@ -228,57 +247,60 @@ export function HostedPairingRouteSurface() {
   const request = hostedPairingRequestRef.current;
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6 phone:px-[max(1rem,env(safe-area-inset-left),env(safe-area-inset-right))] phone:pt-[max(2.5rem,calc(env(safe-area-inset-top)+1rem))] phone:pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1rem))]">
-      <div className="pointer-events-none absolute inset-0 opacity-80">
-        <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-emerald-500)_14%,transparent),transparent)]" />
-        <div className="absolute inset-y-0 left-0 w-72 bg-[radial-gradient(28rem_18rem_at_left,color-mix(in_srgb,var(--color-sky-500)_10%,transparent),transparent)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(145deg,color-mix(in_srgb,var(--background)_90%,var(--color-black))_0%,var(--background)_55%)]" />
-      </div>
+    <PairingSurface>
+      <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
+        {APP_DISPLAY_NAME}
+      </p>
+      <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
+        {status === "paired"
+          ? "Backend paired"
+          : status === "error"
+            ? "Pairing failed"
+            : "Pairing backend"}
+      </h1>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{message}</p>
 
-      <section className="relative w-full max-w-xl rounded-2xl border border-border/80 bg-card/90 p-6 shadow-2xl shadow-black/20 backdrop-blur-md sm:p-8">
-        <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-          {APP_DISPLAY_NAME}
-        </p>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-          {status === "paired"
-            ? "Backend paired"
-            : status === "error"
-              ? "Pairing failed"
-              : "Pairing backend"}
-        </h1>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{message}</p>
-
-        {request ? (
-          <div className="mt-5 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
-            Host: <span className="font-mono text-foreground/80">{request.host}</span>
-          </div>
-        ) : null}
-
-        {status === "error" ? (
-          <div className="mt-5 rounded-lg border border-destructive/30 bg-destructive/6 px-3 py-2 text-sm text-destructive">
-            Verify the backend is reachable from this browser, supports CORS for hosted clients, and
-            is served over HTTPS when opening this page from HTTPS.
-          </div>
-        ) : null}
-
-        <div className="mt-6 flex flex-wrap gap-2">
-          {status === "pairing" ? (
-            <Button disabled size="sm">
-              Pairing...
-            </Button>
-          ) : canRetry ? (
-            <Button size="sm" onClick={() => void submitHostedPairingRequest()}>
-              Try again
-            </Button>
-          ) : null}
-          {status === "paired" ? (
-            <Button size="sm" variant="outline" onClick={() => (window.location.href = "/")}>
-              Open app
-            </Button>
-          ) : null}
+      {request ? (
+        <div className="mt-5 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
+          Host: <span className="font-mono text-foreground/80">{request.host}</span>
         </div>
-      </section>
-    </div>
+      ) : null}
+
+      {status === "error" ? (
+        <div className="mt-5 rounded-lg border border-destructive/30 bg-destructive/6 px-3 py-2 text-sm text-destructive">
+          Verify the backend is reachable from this browser, supports CORS for hosted clients, and
+          is served over HTTPS when opening this page from HTTPS.
+        </div>
+      ) : null}
+
+      <div
+        className={`mt-6 flex flex-wrap gap-2 phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}
+      >
+        {status === "pairing" ? (
+          <Button className="phone:min-h-11" disabled size="sm">
+            Pairing...
+          </Button>
+        ) : canRetry ? (
+          <Button
+            className="phone:min-h-11"
+            size="sm"
+            onClick={() => void submitHostedPairingRequest()}
+          >
+            Try again
+          </Button>
+        ) : null}
+        {status === "paired" ? (
+          <Button
+            className="phone:min-h-11"
+            size="sm"
+            variant="outline"
+            onClick={() => (window.location.href = "/")}
+          >
+            Open app
+          </Button>
+        ) : null}
+      </div>
+    </PairingSurface>
   );
 }
 
