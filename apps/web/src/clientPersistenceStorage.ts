@@ -6,12 +6,17 @@ import {
   type PersistedSavedEnvironmentRecord,
 } from "@ryco/contracts";
 import * as Schema from "effect/Schema";
+import {
+  BROWSER_SAVED_ENVIRONMENT_BEARER_TOKEN_MAX_AGE_MS,
+  computeBearerTokenExpiresAt,
+  isBearerTokenUsable,
+} from "@ryco/client-runtime/state/settings";
 
 import { getLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
 
 export const CLIENT_SETTINGS_STORAGE_KEY = "ryco:client-settings:v1";
 export const SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY = "ryco:saved-environment-registry:v1";
-export const BROWSER_SAVED_ENVIRONMENT_BEARER_TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+export { BROWSER_SAVED_ENVIRONMENT_BEARER_TOKEN_MAX_AGE_MS };
 
 const BrowserSavedEnvironmentRecordSchema = Schema.Struct({
   environmentId: EnvironmentId,
@@ -59,30 +64,12 @@ function toPersistedSavedEnvironmentRecord(
   return record.desktopSsh ? { ...nextRecord, desktopSsh: record.desktopSsh } : nextRecord;
 }
 
-function computeBearerTokenExpiresAt(nowMs: number): string {
-  return new Date(nowMs + BROWSER_SAVED_ENVIRONMENT_BEARER_TOKEN_MAX_AGE_MS).toISOString();
-}
-
-function readTimestampMs(value: string | undefined): number | null {
-  if (!value) {
-    return null;
-  }
-  const timestampMs = Date.parse(value);
-  return Number.isFinite(timestampMs) ? timestampMs : null;
-}
-
 function isRecordBearerTokenUsable(record: BrowserSavedEnvironmentRecord, nowMs: number): boolean {
-  if (!record.bearerToken || record.bearerToken.trim().length === 0) {
-    return false;
-  }
-  const expiresAtMs = readTimestampMs(record.bearerTokenExpiresAt);
-  if (record.bearerTokenExpiresAt !== undefined && expiresAtMs === null) {
-    return false;
-  }
-  if (expiresAtMs === null) {
-    return true;
-  }
-  return expiresAtMs > nowMs;
+  return isBearerTokenUsable({
+    token: record.bearerToken,
+    expiresAt: record.bearerTokenExpiresAt,
+    nowMs,
+  });
 }
 
 function withBrowserBearerTokenLifetime(

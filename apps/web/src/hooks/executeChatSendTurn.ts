@@ -1,5 +1,4 @@
 import {
-  DEFAULT_MODEL,
   type AgentTokenMode,
   type ComposerSourceControlContext,
   type EnvironmentApi,
@@ -13,9 +12,15 @@ import {
   type ThreadId,
 } from "@ryco/contracts";
 import { scopeThreadRef } from "@ryco/client-runtime/scoped";
-import { createModelSelection } from "@ryco/shared/model";
+import {
+  IMAGE_ONLY_BOOTSTRAP_PROMPT,
+  buildSendTurnBootstrap,
+  buildSendTurnDispatchAttachment,
+  commitSendTurnDispatch,
+  resolveThreadCreateModelSelection,
+} from "@ryco/client-runtime/state/composer";
 import { truncate } from "@ryco/shared/String";
-import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";
+import { webAttachmentCodec } from "../platform/attachmentCodec";
 
 import type { ComposerImageAttachment, DraftId } from "../composerDraftStore";
 import type { ChatMessage } from "../types";
@@ -34,13 +39,9 @@ import {
   buildChatSendTitleSeed,
   buildExpiredTerminalContextToastCopy,
   cloneComposerImageForRetry,
-  readFileAsDataUrl,
   refreshStaleSourceControlContexts,
   revokeUserMessagePreviewUrls,
 } from "../components/ChatView.logic";
-
-const IMAGE_ONLY_BOOTSTRAP_PROMPT =
-  "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -249,75 +250,7 @@ export function rollbackSendTurn(input: {
 // Bootstrap building
 // ---------------------------------------------------------------------------
 
-export function buildSendTurnBootstrap(input: {
-  isLocalDraftThread: boolean;
-  baseBranchForWorktree: string | null;
-  shouldMaterializeLegacyBranchWorktree: boolean;
-  projectId: ProjectId;
-  projectCwd: string;
-  title: string;
-  threadCreateModelSelection: ModelSelection;
-  runtimeMode: RuntimeMode;
-  interactionMode: ProviderInteractionMode;
-  tokenMode: AgentTokenMode;
-  activeThreadBranch: string | null;
-  worktreePath: string | null;
-  threadCreatedAt: string;
-}):
-  | {
-      createThread?: {
-        projectId: ProjectId;
-        title: string;
-        modelSelection: ModelSelection;
-        runtimeMode: RuntimeMode;
-        interactionMode: ProviderInteractionMode;
-        tokenMode: AgentTokenMode;
-        branch: string | null;
-        worktreePath: string | null;
-        createdAt: string;
-      };
-      prepareWorktree?: {
-        projectCwd: string;
-        baseBranch: string;
-        branch?: string;
-      };
-      runSetupScript?: boolean;
-    }
-  | undefined {
-  if (!input.isLocalDraftThread && !input.baseBranchForWorktree) {
-    return undefined;
-  }
-
-  return {
-    ...(input.isLocalDraftThread
-      ? {
-          createThread: {
-            projectId: input.projectId,
-            title: input.title,
-            modelSelection: input.threadCreateModelSelection,
-            runtimeMode: input.runtimeMode,
-            interactionMode: input.interactionMode,
-            tokenMode: input.tokenMode,
-            branch: input.activeThreadBranch,
-            worktreePath: input.worktreePath,
-            createdAt: input.threadCreatedAt,
-          },
-        }
-      : {}),
-    ...(input.baseBranchForWorktree
-      ? {
-          prepareWorktree: {
-            projectCwd: input.projectCwd,
-            baseBranch: input.baseBranchForWorktree,
-            ...(input.shouldMaterializeLegacyBranchWorktree
-              ? {}
-              : { branch: buildTemporaryWorktreeBranchName() }),
-          },
-          runSetupScript: true,
-        }
-      : {}),
-  };
-}
+export { buildSendTurnBootstrap } from "@ryco/client-runtime/state/composer";
 
 // ---------------------------------------------------------------------------
 // Core send turn
@@ -364,14 +297,16 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
     text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
   });
 
+  // Attachment-neutral send path: the web boundary encodes each DOM `File` to a
+  // neutral `ComposerAttachment` via the AttachmentCodec, and the package builds
+  // the outgoing turn attachment from the union alone (no `.file` in the engine).
   const turnAttachmentsPromise = Promise.all(
-    imagesSnapshot.map(async (image) => ({
-      type: "image" as const,
-      name: image.name,
-      mimeType: image.mimeType,
-      sizeBytes: image.sizeBytes,
-      dataUrl: await readFileAsDataUrl(image.file),
-    })),
+    imagesSnapshot.map(async (image) =>
+      buildSendTurnDispatchAttachment({
+        attachment: await webAttachmentCodec.encode({ id: image.id, file: image.file }),
+        name: image.name,
+      }),
+    ),
   );
 
   const optimisticAttachments = imagesSnapshot.map((image) => ({
@@ -451,11 +386,11 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
     );
 
     const defaultModel = project.defaultModelSelection?.model ?? null;
-    const threadCreateModelSelection = createModelSelection(
-      composer.selectedModelSelection.instanceId,
-      composer.selectedModel || defaultModel || DEFAULT_MODEL,
-      composer.selectedModelSelection.options,
-    );
+    const threadCreateModelSelection = resolveThreadCreateModelSelection({
+      selectedModelSelection: composer.selectedModelSelection,
+      selectedModel: composer.selectedModel,
+      defaultModel,
+    });
 
     const turnAttachments = await turnAttachmentsPromise;
 
@@ -494,49 +429,29 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
       }
     }
 
-    // Server-side writes derived from this message must only run once the send
-    // commits; otherwise an undone first send leaves orphan title/settings.
-    if (thread.isFirstMessage && thread.isServerThread) {
-      await api.orchestration.dispatchCommand({
-        type: "thread.meta.update",
-        commandId: newCommandId(),
-        threadId: thread.threadId,
-        title,
-      });
-    }
-
-    if (thread.isServerThread) {
-      await persistSettingsDeps.persistThreadSettingsForNextTurn({
-        threadId: thread.threadId,
-        createdAt: messageCreatedAt,
-        ...(composer.selectedModel ? { modelSelection: composer.selectedModelSelection } : {}),
-        runtimeMode: settings.runtimeMode,
-        interactionMode: settings.interactionMode,
-        tokenMode: settings.tokenMode,
-      });
-    }
-
-    beginLocalDispatch({ preparingWorktree: false });
-    await api.orchestration.dispatchCommand({
-      type: "thread.turn.start",
-      commandId: newCommandId(),
+    // Provider-independent dispatch assembly (title update, next-turn settings,
+    // and `thread.turn.start`). Runs only once the turn commits — an undone
+    // first send must not leave orphan title/settings.
+    await commitSendTurnDispatch({
+      api,
       threadId: thread.threadId,
-      message: {
-        messageId: messageIdForSend,
-        role: "user",
-        text: outgoingMessageText,
-        attachments: turnAttachments,
-      },
+      isFirstMessage: thread.isFirstMessage,
+      isServerThread: thread.isServerThread,
+      title,
+      messageId: messageIdForSend,
+      outgoingMessageText,
+      turnAttachments,
       modelSelection: composer.selectedModelSelection,
-      titleSeed: title,
+      hasSelectedModel: Boolean(composer.selectedModel),
       runtimeMode: settings.runtimeMode,
       interactionMode: settings.interactionMode,
       tokenMode: settings.tokenMode,
-      ...(bootstrap ? { bootstrap } : {}),
-      ...(freshSourceControlContexts.length > 0
-        ? { sourceControlContexts: freshSourceControlContexts }
-        : {}),
+      bootstrap,
+      sourceControlContexts: freshSourceControlContexts,
       createdAt: messageCreatedAt,
+      newCommandId,
+      beginLocalDispatch,
+      persistThreadSettingsForNextTurn: persistSettingsDeps.persistThreadSettingsForNextTurn,
     });
     turnStartSucceeded = true;
   })().catch(async (err: unknown) => {
