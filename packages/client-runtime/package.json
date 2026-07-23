@@ -55,6 +55,22 @@
     "./state/user-input": {
       "types": "./src/state/user-input/index.ts",
       "import": "./src/state/user-input/index.ts"
+    },
+    "./state/message-queue": {
+      "types": "./src/state/message-queue/index.ts",
+      "import": "./src/state/message-queue/index.ts"
+    },
+    "./state/settings": {
+      "types": "./src/state/settings/index.ts",
+      "import": "./src/state/settings/index.ts"
+    },
+    "./state/terminal": {
+      "types": "./src/state/terminal/index.ts",
+      "import": "./src/state/terminal/index.ts"
+    },
+    "./state/composer": {
+      "types": "./src/state/composer/index.ts",
+      "import": "./src/state/composer/index.ts"
     }
   },
   "scripts": {
