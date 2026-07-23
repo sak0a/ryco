@@ -79,9 +79,11 @@ export interface HttpResponse {
 
 export interface HttpRequestInit {
   readonly method?: string;
-  readonly headers?: Readonly<Record<string, string>>;
+  readonly headers?: unknown;
   readonly body?: string;
-  readonly credentials?: "include";
+  readonly credentials?: "include" | "same-origin";
+  readonly cache?: "no-store";
+  readonly signal?: AbortSignal;
 }
 
 export interface HttpClientService {

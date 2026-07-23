@@ -4,5 +4,6 @@
     "lib": ["ES2023"],
     "types": []
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.integration.test.ts"]
 }
