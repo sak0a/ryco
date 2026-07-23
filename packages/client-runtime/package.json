@@ -39,6 +39,22 @@
     "./relay": {
       "types": "./src/relay/index.ts",
       "import": "./src/relay/index.ts"
+    },
+    "./state/orchestration": {
+      "types": "./src/state/orchestration/index.ts",
+      "import": "./src/state/orchestration/index.ts"
+    },
+    "./state/threads": {
+      "types": "./src/state/threads/index.ts",
+      "import": "./src/state/threads/index.ts"
+    },
+    "./state/session": {
+      "types": "./src/state/session/index.ts",
+      "import": "./src/state/session/index.ts"
+    },
+    "./state/user-input": {
+      "types": "./src/state/user-input/index.ts",
+      "import": "./src/state/user-input/index.ts"
     }
   },
   "scripts": {
@@ -48,7 +64,8 @@
   "dependencies": {
     "@ryco/contracts": "workspace:*",
     "@ryco/shared": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "zustand": "^5.0.11"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",

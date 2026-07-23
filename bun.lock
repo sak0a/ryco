@@ -149,6 +149,7 @@
       "dependencies": {
         "@ryco/contracts": "workspace:*",
         "effect": "catalog:",
+        "zustand": "^5.0.11",
       },
       "devDependencies": {
         "@effect/language-service": "catalog:",
