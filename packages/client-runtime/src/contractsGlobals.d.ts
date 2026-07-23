@@ -1,9 +1,13 @@
 /**
  * This package excludes the DOM lib so browser globals cannot creep into the
  * platform-neutral runtime. The `@ryco/contracts` sources compiled into this
- * program reference three cross-platform web-interop globals; declare them
- * minimally here instead of readmitting the entire DOM lib. These shims are
- * visible only to this package's typecheck program.
+ * program and the runtime's own transport modules reference a small set of
+ * cross-platform web-interop globals (File/TextEncoder/TextDecoder for
+ * contracts; URL, timers, console, and structural WebSocket/CloseEvent shapes
+ * for the transport); declare them minimally here instead of readmitting the
+ * entire DOM lib. The WebSocket interface deliberately has no constructor —
+ * sockets can only enter through the platform Socket contract. These shims
+ * are visible only to this package's typecheck program.
  */
 
 interface File extends Blob {
@@ -30,3 +34,31 @@ declare class TextDecoder {
   constructor(label?: string, options?: { readonly fatal?: boolean; readonly ignoreBOM?: boolean });
   decode(input?: ArrayBuffer | ArrayBufferView, options?: { readonly stream?: boolean }): string;
 }
+
+declare class URL {
+  constructor(url: string);
+  host: string;
+  hostname: string;
+  pathname: string;
+  protocol: string;
+  toString(): string;
+}
+
+interface CloseEvent {
+  readonly code: number;
+  readonly reason: string;
+}
+
+interface WebSocket {
+  addEventListener(type: string, listener: (event: CloseEvent) => void, options?: unknown): void;
+}
+
+declare function setTimeout(
+  callback: (...args: ReadonlyArray<unknown>) => void,
+  delay?: number,
+): number;
+declare function clearTimeout(timeoutId: number): void;
+
+declare const console: {
+  warn(...data: ReadonlyArray<unknown>): void;
+};
