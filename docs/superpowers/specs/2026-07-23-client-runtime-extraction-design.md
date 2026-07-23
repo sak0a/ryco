@@ -44,7 +44,7 @@ scope.
 
 - **The mobile app itself.** No `apps/mobile`, no Metro/Expo scaffold, no native modules. This
   spec produces the package the app will consume; the app is workstream B.
-- **Any Hub-side auth change.** The runtime's `authorization` surface defines *contracts*. Today's
+- **Any Hub-side auth change.** The runtime's `authorization` surface defines _contracts_. Today's
   hosted session is an HttpOnly same-origin cookie plus an in-memory CSRF token
   (`hostedHub/api.ts:113,449`); React Native cookie behavior is unreliable, so a native client
   needs a bearer-style Hub session that **does not exist yet**. That is new Hub control-plane work
@@ -64,26 +64,26 @@ barrel**, each entry pointing at raw `./src` TypeScript (`packages/shared/packag
 current `src/index.ts` barrel (`export * from "./advertisedEndpoint.ts"` …) is retired once the
 existing four modules gain their own subpath entries; nothing is added to a barrel thereafter.
 
-| Subpath | Responsibility |
-| --- | --- |
-| `./scoped` | Pure environment-scoped project/thread ref key derivation (exists; ~40 web importers). |
-| `./knownEnvironment` | `KnownEnvironment` model + http/ws base-URL derivation (exists). |
-| `./platform` | App-provided service contracts (Effect `Context` tags) + injected config — the entire platform surface below. |
-| `./errors` | Shared error inspection: transport error classification, message normalization, bounded reasons. |
-| `./pairing` | Pairing-token URL codecs and hosted pairing parse/build, all URLs passed explicitly. |
-| `./rpc` | Effect RPC transport core: protocol layer, `WsTransport`, `WsRpcClient` facade, status atoms, `serverState`, `invalidation`, `keyedQuery`, atom registry, query client. |
-| `./connection` | Environment connection registry + supervision: `connection`, saved-env scheduler, catalog stores, `environmentApi`, primary/remote target+auth flows, the supervision half of `service.ts`. |
-| `./authorization` | Hosted account/lifecycle controller (single owner), capabilities, session/ticket policy, auth-gate + bearer flows. |
-| `./relay` | Relay frame protocol engine (re-hosted on an injected socket), reconnect policy, connection-status derivation, attempt factory, WebAuthn option/response codecs, base64url. |
-| `./state/threads` | Thread/orchestration read-model reducers + selectors + view-model types. |
-| `./state/orchestration` | Zero-dependency resync state machine + orchestration event-effect derivation. |
-| `./state/session` | Pure thread-activity derivation (`session-logic`, workspace view model). |
-| `./state/user-input` | Pending user-input answer logic. |
-| `./state/composer` | Composer draft/model-selection/promotion logic + Schema migrations (v1–v7). |
-| `./state/message-queue` | Follow-up send queue logic + store. |
-| `./state/terminal` | Terminal event folding + per-thread terminal domain state. |
-| `./state/settings` | Client-settings + saved-environment token-lifetime policy. |
-| `./state/vcs` | Git status + source-control discovery managers (the existing template). |
+| Subpath                 | Responsibility                                                                                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./scoped`              | Pure environment-scoped project/thread ref key derivation (exists; ~40 web importers).                                                                                                      |
+| `./knownEnvironment`    | `KnownEnvironment` model + http/ws base-URL derivation (exists).                                                                                                                            |
+| `./platform`            | App-provided service contracts (Effect `Context` tags) + injected config — the entire platform surface below.                                                                               |
+| `./errors`              | Shared error inspection: transport error classification, message normalization, bounded reasons.                                                                                            |
+| `./pairing`             | Pairing-token URL codecs and hosted pairing parse/build, all URLs passed explicitly.                                                                                                        |
+| `./rpc`                 | Effect RPC transport core: protocol layer, `WsTransport`, `WsRpcClient` facade, status atoms, `serverState`, `invalidation`, `keyedQuery`, atom registry, query client.                     |
+| `./connection`          | Environment connection registry + supervision: `connection`, saved-env scheduler, catalog stores, `environmentApi`, primary/remote target+auth flows, the supervision half of `service.ts`. |
+| `./authorization`       | Hosted account/lifecycle controller (single owner), capabilities, session/ticket policy, auth-gate + bearer flows.                                                                          |
+| `./relay`               | Relay frame protocol engine (re-hosted on an injected socket), reconnect policy, connection-status derivation, attempt factory, WebAuthn option/response codecs, base64url.                 |
+| `./state/threads`       | Thread/orchestration read-model reducers + selectors + view-model types.                                                                                                                    |
+| `./state/orchestration` | Zero-dependency resync state machine + orchestration event-effect derivation.                                                                                                               |
+| `./state/session`       | Pure thread-activity derivation (`session-logic`, workspace view model).                                                                                                                    |
+| `./state/user-input`    | Pending user-input answer logic.                                                                                                                                                            |
+| `./state/composer`      | Composer draft/model-selection/promotion logic + Schema migrations (v1–v7).                                                                                                                 |
+| `./state/message-queue` | Follow-up send queue logic + store.                                                                                                                                                         |
+| `./state/terminal`      | Terminal event folding + per-thread terminal domain state.                                                                                                                                  |
+| `./state/settings`      | Client-settings + saved-environment token-lifetime policy.                                                                                                                                  |
+| `./state/vcs`           | Git status + source-control discovery managers (the existing template).                                                                                                                     |
 
 `./authorization` and `./relay` are introduced together as one indivisible unit (Decision c,
 Slice 4). `./state/*` mirrors the reference implementation's per-domain state layout so the app
@@ -212,8 +212,8 @@ seam that already exists in the web code.
 
 Each carries a recommendation and rationale; the owner may veto any.
 
-**(a) `advertisedEndpoint`'s home → move to `@ryco/shared`.** *Correction to the discovery
-synthesis:* `apps/server` and `apps/desktop` do **not** production-depend on
+**(a) `advertisedEndpoint`'s home → move to `@ryco/shared`.** _Correction to the discovery
+synthesis:_ `apps/server` and `apps/desktop` do **not** production-depend on
 `@ryco/client-runtime`. It is a **devDependency** in both (`apps/server/package.json:47`,
 `apps/desktop/package.json:25`), bundled at build time by `tsdown`, and each imports **only**
 `createAdvertisedEndpoint` (`AdvertisedEndpointRegistry.ts:3`, `serverExposure.ts:2`,
@@ -221,7 +221,7 @@ synthesis:* `apps/server` and `apps/desktop` do **not** production-depend on
 `URL` global, so it fits `@ryco/shared` cleanly. Moving it there severs the build-time edge
 entirely: as the runtime grows client transport and state code, the server/desktop bundlers never
 resolve `@ryco/client-runtime` at all, and the platform-neutral invariant stays trivially true.
-*Alternative (owner veto):* keep it in the runtime under strict subpath discipline so the server
+_Alternative (owner veto):_ keep it in the runtime under strict subpath discipline so the server
 only ever imports `./advertisedEndpoint`; workable, but leaves the edge and relies on convention.
 
 **(b) The two parallel RPC paths → extract the `WsRpcClient` facade as-is; keep the AtomRpc
@@ -283,50 +283,54 @@ the slices below) to bound flake on the reconnect/lifecycle-adjacent slices; the
 policy, not an AGENTS mandate.
 
 **Slice 1 — Packaging + platform contracts.**
-*In:* per-subpath `exports` map, retire the barrel, tsconfig types discipline; define `./platform`
+_In:_ per-subpath `exports` map, retire the barrel, tsconfig types discipline; define `./platform`
 (all contracts above) and injected config; move `advertisedEndpoint` to `@ryco/shared` (Decision a)
 and repoint the server/desktop imports; add `@ryco/shared` to the web install filter if absent;
 wire `apps/web` as the first platform provider (a `connection/platform` adapter dir).
-*Out:* no behavior moves yet.
-*Contracts introduced:* the entire platform surface (as tags), plus injected config.
-*Regression gate:* full gate set; `bun run build:desktop` (the `advertisedEndpoint` move touches the
+_Out:_ no behavior moves yet.
+_Contracts introduced:_ the entire platform surface (as tags), plus injected config.
+_Regression gate:_ full gate set; `bun run build:desktop` (the `advertisedEndpoint` move touches the
 desktop pipeline); existing `client-runtime` tests.
-*Exit:* the package exposes contracts + config; `createAdvertisedEndpoint` imports from
+_Exit:_ the package exposes contracts + config; `createAdvertisedEndpoint` imports from
 `@ryco/shared`; server/desktop no longer resolve `@ryco/client-runtime`; web builds green.
 
 **Slice 2 — RPC transport core (neutral atom state; React bindings stay app-side).**
 The rpc modules are not uniformly neutral: `rpc/atomRegistry.tsx:1-8` imports React +
 `@effect/atom-react`, `rpc/queryClient.ts:1-8` imports React hooks, `rpc/serverState.ts:1-15`
-imports both, and `rpc/wsConnectionState.ts:1` imports `useAtomValue`. So the slice **splits each
-mixed module** into a neutral core (moves) and an app-side binding (stays), consistent with the
-no-React-in-runtime rule.
-*Moves to `./rpc` (neutral):* `protocol`, `wsTransport`, `wsRpcClient` (the facade — effect-only),
-`requestLatencyState` (timers + atoms), `invalidation`, `keyedQuery`; the **neutral halves** of the
-split modules — `atomRegistry.tsx`'s `appAtomRegistry = AtomRegistry.make()` (an
+imports both, and `rpc/wsConnectionState.ts:1` and `rpc/requestLatencyState.ts:1` import
+`useAtomValue`. So the slice **splits each mixed module** into a neutral core (moves) and an
+app-side binding (stays), consistent with the no-React-in-runtime rule.
+_Moves to `./rpc` (neutral):_ `protocol`, `wsTransport`, `wsRpcClient` (the facade — effect-only),
+`invalidation`, `keyedQuery`; the **neutral halves** of the split modules —
+`atomRegistry.tsx`'s `appAtomRegistry = AtomRegistry.make()` (an
 `effect/unstable/reactivity` value), `wsConnectionState`'s atoms + backoff constants/math +
-lifecycle **recorder functions**, and `serverState`'s atoms + `applyServerConfigEvent` reducer +
+lifecycle **recorder functions**, `requestLatencyState`'s tracking atoms + timer recorders,
+and `serverState`'s atoms + `applyServerConfigEvent` reducer +
 `startServerStateSync`. `transportError` moves to `./errors`.
-*Stays in `apps/web` (app-side bindings):* `atomRegistry.tsx`'s `AppAtomRegistryProvider`/
+_Stays in `apps/web` (app-side bindings):_ `atomRegistry.tsx`'s `AppAtomRegistryProvider`/
 `RegistryContext.Provider` JSX; the `use*` hooks split out of `wsConnectionState`
-(`useWsConnectionStatus`) and `serverState` (the `useAtomSubscribe`/`useAtomValue` selectors);
-`queryClient.ts` in whole (a React-hook-based legacy query cache, used only via
-`lib/sourceControlContextRpc`, being replaced by atoms — it does not move).
-*Deferred to Slice 3:* `rpc/client.ts` (AtomRpc). Endpoint injection alone is insufficient — it
+(`useWsConnectionStatus`), `requestLatencyState` (`useSlowRpcAckRequests`,
+`requestLatencyState.ts:131`), and `serverState` (the `useAtomSubscribe`/`useAtomValue`
+selectors); `queryClient.ts` in whole (a React-hook-based legacy query cache with direct
+consumers across the app — `lib/sourceControlContextRpc`, `ChatView`, the hosted teardown's
+`defaultQueryClient` reset, and the work-item/settings/source-control panels — being replaced
+by atoms; it does not move).
+_Deferred to Slice 3:_ `rpc/client.ts` (AtomRpc). Endpoint injection alone is insufficient — it
 imports `ensurePrimaryEnvironmentReady`/`getPrimaryKnownEnvironment` from `~/environments/primary`
 (`rpc/client.ts:6`) and `appAtomRegistry` from `./atomRegistry` (`:8`). It moves in Slice 3, once
 `./connection` provides the primary target, behind an injected primary-target/readiness service
 plus the (now in-package) registry.
-*Out:* domain atoms (they depend on `./connection`).
-*Contracts introduced:* `Socket`, `Observability` (no-op default), `AppLifecycle` (online). Web
+_Out:_ domain atoms (they depend on `./connection`).
+_Contracts introduced:_ `Socket`, `Observability` (no-op default), `AppLifecycle` (online). Web
 adapters supply today's defaults verbatim (`globalThis.WebSocket`, `ClientTracingLive`,
 `navigator.onLine`).
-*Regression gate:* full gate set; the string-classification pinning tests (below); browser suite
+_Regression gate:_ full gate set; the string-classification pinning tests (below); browser suite
 (status atoms are UI-adjacent — see gate policy).
-*Exit:* the web transport runs through the package rpc core with the app binding layer on top;
+_Exit:_ the web transport runs through the package rpc core with the app binding layer on top;
 reconnect and heartbeat semantics identical.
 
 **Slice 3 — Connection / environment registry.**
-*In:* `connection`, `savedEnvironmentConnectionScheduler`, catalog stores, `environmentApi`,
+_In:_ `connection`, `savedEnvironmentConnectionScheduler`, catalog stores, `environmentApi`,
 `primary/context` + auth flows, `remote/api` + `remote/target`, `rpc/client.ts` (deferred from
 Slice 2, behind an injected primary-target/readiness service + the in-package registry), and the
 **supervision half** of `service.ts` (connection registry, projection versioning, thread-detail
@@ -334,8 +338,8 @@ subscription cache, resume-reconnect policy) with its module-level singletons (D
 writes are inverted through an explicit **`EnvironmentStateSink`** and the existing handler
 interfaces (`OrchestrationHandlers`, `createEnvironmentConnectionHandlers`); `pushSequenceMonitor`
 injected.
-*`EnvironmentStateSink` operations (grounded in `service.ts`'s actual writes at `:1037-1079` and
-`:1153-1195`):* `applyOrchestrationEvents(envId, events)` and `syncServerShellSnapshot(envId,
+_`EnvironmentStateSink` operations (grounded in `service.ts`'s actual writes at `:1037-1079` and
+`:1153-1195`):_ `applyOrchestrationEvents(envId, events)` and `syncServerShellSnapshot(envId,
 snapshot)` (thread store, `:1037,:1173`); `syncProjects(envId, …)` / `syncThreads(envId, …)`
 driven off `selectProjectsAcrossEnvironments`/`selectThreadsAcrossEnvironments` (UI state,
 `:1041-1055`); `clearThreadDraft(ref)` / `clearProjectDraftThread(ref)` (composer drafts,
@@ -346,19 +350,19 @@ stays on the **separate** hosted handler interface, not the generic sink. The we
 sink to today's zustand stores unchanged; when `./state/threads` moves (Slice 5a) the thread-store
 operations are satisfied in-package while the UI/composer/terminal operations remain sink calls
 into app-side presentation stores.
-*Out:* `primary/target` source resolution (becomes the web `Endpoint` impl),
+_Out:_ `primary/target` source resolution (becomes the web `Endpoint` impl),
 `WebSocketConnectionSurface` + toasts, `localApi` browser/desktop impls (keeps `cachedApi`), the
 store-clearing catalog.
-*Contracts:* `Endpoint`, `KV`, `SecretKV`, `SessionCredentials`, `PairingCredentialSource`, plus
+_Contracts:_ `Endpoint`, `KV`, `SecretKV`, `SessionCredentials`, `PairingCredentialSource`, plus
 the injected primary-target/readiness service for `rpc/client.ts`.
-*Regression gate:* full gate set; `authBootstrap.test.ts` behavior re-landed against platform fakes;
+_Regression gate:_ full gate set; `authBootstrap.test.ts` behavior re-landed against platform fakes;
 browser suite. This is the riskiest single edit — the sink inversion cuts through a hot path — so
 it is isolated in its own slice.
-*Exit:* web supervision runs through the package with a state-sink adapter; hosted mode still NOOPs
+_Exit:_ web supervision runs through the package with a state-sink adapter; hosted mode still NOOPs
 the generic reconnect/sync paths (`service.ts:1921,1934`); behavior identical.
 
 **Slice 4 — Hosted lifecycle unit (moved whole, single slice).**
-The hosted unit **moves as one indivisible unit or not at all**. *In:* `hostedHub/state.ts`
+The hosted unit **moves as one indivisible unit or not at all**. _In:_ `hostedHub/state.ts`
 controller + `types` + `transport.ts` attempt factory + `reconnectPolicy` + `connectionStatus` +
 `capabilities` + `logging`; the relay protocol state machine from `relaySocket.ts` **re-hosted on
 an injected `Socket`** (drop the browser-`WebSocket`/`EventTarget`/`CloseEvent` facade —
@@ -377,20 +381,21 @@ clear called in the core-owned teardown order). The unit moves **with its integr
 `lifecycle.integration.test.ts`, `nodeRouteRestore.integration.test.ts`,
 `returnToDirectory.integration.test.ts` — plus every unit test (`state`, `transport`, `relaySocket`,
 `api`, `capabilities`, `connectionStatus`, `environment`, `logging`, `reconnectPolicy`, `webauthn`).
-*Out:* `useHostedBrowserLifecycle` (web `AppLifecycle` impl); `nodeRoutes` +
+_Out:_ `useHostedBrowserLifecycle` (web `AppLifecycle` impl); `nodeRoutes` +
 `nodeRouteOrchestrator` history wiring (extract only the fail-closed validation decision tree, keep
 the TanStack history adapter web-side); and the **app-UI-store portion** of
 `clearHostedNodeScopedState` — `commandPaletteStore`, `settingsDialogStore`, `modelPickerOpenState`,
 `shortcutModifierState`, `threadSelectionStore`, `uiStateStore`, `composerDraftStore`,
 `messageQueueStore`, `terminalStateStore` (`environment.ts:3-24`) — passed in as an injected
 `clearNodeScopedState` hook whose **teardown order is owned by the core**, never forked.
-*Contracts:* `SessionCredentials`, `PasskeyCeremony`, `Socket` (relay), `AppLifecycle`,
+_Contracts:_ `SessionCredentials`, `PasskeyCeremony`, `Socket` (relay), `AppLifecycle`,
 hosted-node lifecycle (activate/suspend/deactivate) with `clearNodeScopedState`.
-*Regression gate:* full gate set; the three integration tests; browser suite (hosted reconnect).
-*Exit:* the hosted unit runs from the package; the controller no longer imports a retained module;
+_Regression gate:_ full gate set; the three integration tests; browser suite (hosted reconnect).
+_Exit:_ the hosted unit runs from the package; the controller no longer imports a retained module;
 the invariants below all hold; integration tests green with unchanged behavior.
 
-*Package-level invariants (restated from AGENTS.md, enforced here):*
+_Package-level invariants (restated from AGENTS.md, enforced here):_
+
 - **Single authoritative owner.** The hosted lifecycle has exactly one owner. Generation fencing is
   cross-module — the counter is owned by `state.ts` (bumped in `selectNode`/`resume`/`retry`/
   deactivate) and threaded through `transport.ts` (`#activeGeneration`) and `service.ts` handlers
@@ -422,12 +427,12 @@ the invariants below all hold; integration tests green with unchanged behavior.
   documents. Offline behavior is unchanged.
 
 **Slice 5 — State domains (incremental).**
-*5a (mobile MVP first):* `orchestrationRecovery` + `orchestrationEventEffects`
+_5a (mobile MVP first):_ `orchestrationRecovery` + `orchestrationEventEffects`
 (`./state/orchestration`); `store.ts` reducers + `threadDerivation` + `storeSelectors`
 (`./state/threads`); `session-logic` + `threadWorkspaceViewModel` (`./state/session`);
 `pendingUserInput` (`./state/user-input`). zustand kept (Decision d), written via the state-sink
 adapter from Slice 3.
-*Stranded dependencies assigned:* the view-model `types.ts` and `lib/threadSort.ts` are shared
+_Stranded dependencies assigned:_ the view-model `types.ts` and `lib/threadSort.ts` are shared
 substrate — `threadDerivation.ts:2-11`, `session-logic.ts:1-23`, and `storeSelectors.ts:3-6`
 import them — so both **move into `./state/threads`** with this slice. `store.ts:42-50` imports four
 non-neutral things, each resolved by an earlier contract: `isHostedHubMode` (`./env`) → injected
@@ -435,36 +440,37 @@ config (Slice 1); `sanitizeThreadErrorMessage` (`./rpc/transportError`) → `./e
 the `perf/perfInstrumentation` reads → `Observability` (Slice 1/2); and `resolveEnvironmentHttpUrl`
 (`./environments/runtime`, used only for attachment `previewUrl` at `store.ts:191-198`) → an
 injected attachment-preview URL resolver on the `Endpoint`/`AttachmentCodec` surface.
-*5b (after the attachment abstraction):* the `composerDraftStore` draft/model-selection/promotion
+_5b (after the attachment abstraction):_ the `composerDraftStore` draft/model-selection/promotion
 logic + `composerDraftPersistence` **Schema migrations** (`./state/composer`), `messageQueue.logic`
-+ `messageQueueStore` (`./state/message-queue`), `terminalStateStore` folding (`./state/terminal`),
-and the `clientPersistenceStorage` token-lifetime policy (`./state/settings`), all behind
-`AttachmentCodec` + `KV` + `SecretKV`. Domain helpers `modelSelection`, `providerInstances`,
-`providerModels`, and `composer-logic` move alongside.
-*`executeChatSendTurn` is split, not moved whole.* It imports UI at `hooks/executeChatSendTurn.ts:
+
+- `messageQueueStore` (`./state/message-queue`), `terminalStateStore` folding (`./state/terminal`),
+  and the `clientPersistenceStorage` token-lifetime policy (`./state/settings`), all behind
+  `AttachmentCodec` + `KV` + `SecretKV`. Domain helpers `modelSelection`, `providerInstances`,
+  `providerModels`, and `composer-logic` move alongside.
+  _`executeChatSendTurn` is split, not moved whole._ It imports UI at `hooks/executeChatSendTurn.ts:
 20-40` — `ChatComposerHandle` (`components/chat/ChatComposer`), `toastManager`/`stackedThreadToast`
-(`components/ui/toast`), and `components/ChatView.logic`. The **pure send engine** (model/provider/
-runtime-mode resolution, worktree/branch naming, `EnvironmentApi` dispatch, `newCommandId`/
-`newMessageId`) moves into `./state/composer`; the **UI adapters** (composer focus/handle, toasts,
-`ChatView.logic`) stay app-side and are injected into or invoked around the engine by the caller.
-*Browser-persistence stays app-side.* `composerDraftPersistence.ts:29-62` binds `localStorage` and
-registers `window.beforeunload` at module scope; those bindings stay in `apps/web` as the web `KV`
-adapter and an `AppLifecycle` flush, while the Schema migrations and key builders move.
-*Out:* `threadSelectionStore`, `threadWorkspaceTabs`, the `uiStateStore` presentation half, the
-`proposedPlan` download helper. `historyBootstrap` is **deferred** — it has no runtime consumer
-(verified: only its own test references it).
-*Contracts:* `Clock` + `FrameScheduler`, `AttachmentCodec`, `KV`, `SecretKV`.
-*Regression gate:* full gate set; every moved module keeps its tests; the composer Schema-migration
-v1–v7 pinning tests; 3× browser suite for composer/queue/terminal.
-*Exit:* threads + orchestration state served from the package (5a), then composer/queue/terminal
-(5b); persisted shapes and migrations unchanged.
+  (`components/ui/toast`), and `components/ChatView.logic`. The **pure send engine** (model/provider/
+  runtime-mode resolution, worktree/branch naming, `EnvironmentApi` dispatch, `newCommandId`/
+  `newMessageId`) moves into `./state/composer`; the **UI adapters** (composer focus/handle, toasts,
+  `ChatView.logic`) stay app-side and are injected into or invoked around the engine by the caller.
+  _Browser-persistence stays app-side._ `composerDraftPersistence.ts:29-62` binds `localStorage` and
+  registers `window.beforeunload` at module scope; those bindings stay in `apps/web` as the web `KV`
+  adapter and an `AppLifecycle` flush, while the Schema migrations and key builders move.
+  _Out:_ `threadSelectionStore`, `threadWorkspaceTabs`, the `uiStateStore` presentation half, the
+  `proposedPlan` download helper. `historyBootstrap` is **deferred** — it has no runtime consumer
+  (verified: only its own test references it).
+  _Contracts:_ `Clock` + `FrameScheduler`, `AttachmentCodec`, `KV`, `SecretKV`.
+  _Regression gate:_ full gate set; every moved module keeps its tests; the composer Schema-migration
+  v1–v7 pinning tests; 3× browser suite for composer/queue/terminal.
+  _Exit:_ threads + orchestration state served from the package (5a), then composer/queue/terminal
+  (5b); persisted shapes and migrations unchanged.
 
 **Slice 6 — Cleanup and boundary lock.**
-*In:* retire the now-duplicated web paths; lock the boundary with lint/dep rules (no `react`/DOM/
+_In:_ retire the now-duplicated web paths; lock the boundary with lint/dep rules (no `react`/DOM/
 `node` in the runtime; per-subpath imports only; forbid barrel additions; forbid the server
 importing any non-neutral subpath). Delete the legacy RPC facade **only if** the AtomRpc migration
 has independently completed — expected to remain, per Decision b, so this is a conditional no-op.
-*Exit:* the boundary is machine-enforced; no dual-home singletons remain; gates green.
+_Exit:_ the boundary is machine-enforced; no dual-home singletons remain; gates green.
 
 Workstream B's mobile scaffold can consume the package from Slice 2 onward; the mobile MVP needs
 Slices 1–5a, with 5b as the composer/terminal follow-up.
@@ -485,8 +491,8 @@ Slices 1–5a, with 5b as the composer/terminal follow-up.
   error text; an effect bump silently changes reconnect semantics. Preserve and pin, with tests
   asserting exact strings: the transport patterns `/\bSocketCloseError\b/i`, `/\bSocketOpenError\b/i`,
   `/\bping timeout\b/i` (`transportError.ts:2-5`); the literal `"Unable to connect to the Ryco
-  server WebSocket."` (`protocol.ts:217`); `THREAD_NOT_FOUND_ERROR_RE = /^Thread\s.+\swas not
-  found$/u` (`wsTransport.ts:39`); and `isSubscriptionStreamDoneError` matching
+server WebSocket."` (`protocol.ts:217`); `THREAD_NOT_FOUND_ERROR_RE = /^Thread\s.+\swas not
+found$/u` (`wsTransport.ts:39`); and `isSubscriptionStreamDoneError` matching
   `"SchemaError(Expected array"` (`wsTransport.ts:66-72`). Effect stays pinned at catalog
   `4.0.0-beta.59` + patch; any future mobile app joins the same catalog (a duplicate `effect`
   instance fractures atoms and Schema brands).
@@ -514,7 +520,7 @@ Slices 1–5a, with 5b as the composer/terminal follow-up.
 4. **String-based error classification.** → Preserve verbatim, pin effect, add the pinning tests
    above.
 5. **`import.meta.env` — mostly ambient function reads, two genuine import-time sites.** `env.ts:
-   12-14`, `target.ts:40-68`, `catalog.ts:227-234`, and `hostedPairing.ts:11-16` read `VITE_*`
+12-14`, `target.ts:40-68`, `catalog.ts:227-234`, and `hostedPairing.ts:11-16` read `VITE_*`
    **inside functions**, so they become injected-config lookups without reordering init. The real
    import-time hazards are `perf/perfInstrumentation.ts:10` (module-scope `const`) and
    `composerDraftPersistence.ts:53` (module-scope `const` calling `isHostedHubMode()` plus a
