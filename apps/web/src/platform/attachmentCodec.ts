@@ -1,17 +1,20 @@
 import type { AttachmentCodecService, ComposerAttachment } from "@ryco/client-runtime/platform";
 
-import type { ComposerImageAttachment } from "../composerDraftStore";
+export interface WebAttachmentInput {
+  readonly id: string;
+  readonly file: File;
+}
 
-function asComposerImageAttachment(value: unknown): ComposerImageAttachment {
+function asWebAttachmentInput(value: unknown): WebAttachmentInput {
   if (typeof value !== "object" || value === null || !("file" in value)) {
     throw new Error("Expected a composer image attachment.");
   }
-  return value as ComposerImageAttachment;
+  return value as WebAttachmentInput;
 }
 
 export const webAttachmentCodec: AttachmentCodecService = {
   encode: async (value) => {
-    const attachment = asComposerImageAttachment(value);
+    const attachment = asWebAttachmentInput(value);
     return {
       id: attachment.id,
       mime: attachment.file.type,

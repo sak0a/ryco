@@ -1,8 +1,1 @@
-const SIMPLE_MENTION_PATH_REGEX = /^[^\s@"\\]+$/;
-
-export function serializeComposerMentionPath(path: string): string {
-  if (SIMPLE_MENTION_PATH_REGEX.test(path)) {
-    return path;
-  }
-  return `"${path.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
-}
+export { serializeComposerMentionPath } from "@ryco/client-runtime/state/composer";

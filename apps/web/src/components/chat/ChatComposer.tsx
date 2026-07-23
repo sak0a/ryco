@@ -36,7 +36,8 @@ import {
 } from "../../composer-logic";
 import { useHostedRpcCapability } from "../../hostedHub/capabilities";
 import { serializeComposerMentionPath } from "../../composerMentionSyntax";
-import { readFileAsDataUrl } from "../ChatView.logic";
+import { encodeComposerAttachmentDataUrl } from "@ryco/client-runtime/state/composer";
+import { webAttachmentCodec } from "../../platform/attachmentCodec";
 import {
   deriveComposerFooterActionLayoutKey,
   deriveComposerSendState,
@@ -1050,7 +1051,12 @@ export const ChatComposer = memo(
           await Promise.all(
             composerImages.map(async (image) => {
               try {
-                const dataUrl = await readFileAsDataUrl(image.file);
+                // Encode from the neutral union via the AttachmentCodec so the
+                // persisted dataUrl is produced through the same attachment path
+                // as the send pipeline.
+                const dataUrl = encodeComposerAttachmentDataUrl(
+                  await webAttachmentCodec.encode(image),
+                );
                 stagedAttachmentById.set(image.id, {
                   id: image.id,
                   name: image.name,

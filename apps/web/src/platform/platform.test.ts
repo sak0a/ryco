@@ -78,4 +78,17 @@ describe("web platform adapters", () => {
 
     await new Promise<void>((resolve) => webFrameScheduler.scheduleFrame(resolve));
   });
+
+  it("converts a File through the neutral flat attachment value", async () => {
+    const file = new File([new Uint8Array([1, 2, 3])], "image.png", { type: "image/png" });
+    const attachment = await webAttachmentCodec.encode({ id: "image-1", file });
+
+    expect(attachment).toEqual({
+      id: "image-1",
+      mime: "image/png",
+      size: 3,
+      bytes: new Uint8Array([1, 2, 3]),
+    });
+    await expect(webAttachmentCodec.decode(attachment)).resolves.toBeInstanceOf(File);
+  });
 });
