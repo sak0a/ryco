@@ -204,7 +204,16 @@ export class FrameScheduler extends Context.Service<FrameScheduler, FrameSchedul
 
 export interface ObservabilityService {
   readonly tracingLayer: Layer.Layer<never, never, never>;
-  readonly recordPerformance: (label: string, value?: unknown) => void;
+  /**
+   * Cheap gate consulted before building performance payloads so inert
+   * observability adds no work to hot paths.
+   */
+  readonly performanceEnabled: () => boolean;
+  readonly recordPerformance: (
+    label: string,
+    value?: unknown,
+    record?: { readonly count?: number; readonly durationMs?: number },
+  ) => void;
 }
 
 const noopTracer = Tracer.make({
@@ -216,6 +225,7 @@ const noopTracer = Tracer.make({
 /** The default emits no telemetry and records no performance payloads. */
 export const NOOP_OBSERVABILITY: ObservabilityService = {
   tracingLayer: Layer.succeed(Tracer.Tracer, noopTracer),
+  performanceEnabled: () => false,
   recordPerformance: () => undefined,
 };
 
