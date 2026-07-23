@@ -6,155 +6,22 @@
 // preservation), 768×1024, and the desktop baseline, across the hosted entry
 // surfaces, Home, thread/composer, approvals, diff, files, terminal,
 // settings, and the connection controls — is proven by the per-step suites
-// plus the gap-fill sweeps in this file. This doc block is the canonical
-// cell → proving-test mapping; the tests below cover only cells no per-step
-// suite already proves (no duplicate re-testing).
+// plus the gap-fill sweeps in this file.
 //
-// File aliases used in the mapping:
-//   AM = this file
-//   CV = ChatView.browser.tsx
-//   HR = hostedHub/HostedHubRoot.browser.tsx
-//   HN = hostedHub/HostedNodeRoutes.browser.tsx
-//   HC = hostedHub/HostedConnectionControls.browser.tsx
-//   HP = hostedHub/HostedPwaControls.browser.tsx
-//   PT = PresentationTier.browser.tsx
-//   PH = shell/phone/PhoneHome.browser.tsx
-//   PA = shell/phone/PhoneThreadAppBar.browser.tsx
-//   PS = shell/phone/PhoneSettingsSurface.browser.tsx
-//   CS = shell/phone/ContextMenuActionSheetHost.browser.tsx
-//   AC = chat/ApprovalCard.browser.tsx
-//   MT = chat/MessageTouchActions.browser.tsx
-//   CB = chat/ComposerBannerStack.browser.tsx
-//   SH = ui/sheet.browser.tsx
-//   DL = ui/dialog.browser.tsx
-//   WP = ThreadWorkspacePanel.browser.tsx
-//   DP = DiffPanel.browser.tsx
+// This narrative is a reading aid. The AUTHORITATIVE mapping is the
+// `PROVING_TESTS` array at the foot of this file, and the "executable cell →
+// proving-test mapping" suite there asserts — against each suite's real
+// source — that every referenced proving test still exists and that every
+// phone-primitive suite is represented. Rename or delete a proving test and
+// this file fails, which a doc-block-only mapping could never do. The tests
+// below cover only cells no per-step suite already proves (no duplicate
+// re-testing).
 //
-// ── Surface × viewport mapping ───────────────────────────────────────────
-//
-// Hosted sign-in
-//   320×568      HR "contains hosted admission and node selection at 320 CSS pixels"
-//   390×844      HR "keeps sign-in and node-selection screen-reader traversal named…"
-//                AM "survives 200% text scaling on the sign-in and node directory surfaces"
-//   844×390+co   AM "contains every hosted entry surface on a coarse landscape phone"
-//   600–800 rot  AM "preserves invitation form input across a mid-size rotation tier flip"
-//   768×1024     AM "keeps the hosted entry surfaces on the desktop tier at 768×1024"
-//   desktop      HR "provides keyboard-labelled authentication and registration controls…"
-// Invitation (redeem + first-owner bootstrap)
-//   320×568      AM "contains the invitation, recovery, connecting, and failure surfaces at 320…"
-//   844×390+co   AM "contains every hosted entry surface on a coarse landscape phone"
-//   600–800 rot  AM "preserves invitation form input across a mid-size rotation tier flip"
-//   desktop      HR "provides keyboard-labelled authentication and registration controls…",
-//                HR "submits first-owner bootstrap without retaining its credential in the form"
-// Recovery codes
-//   320×568      AM "contains the invitation, recovery, connecting, and failure surfaces at 320…"
-//   844×390+co   AM "contains every hosted entry surface on a coarse landscape phone"
-//   desktop      HR "keeps one-time recovery material out of browser storage"
-// Node directory (incl. connecting/failure/restoring companions)
-//   320×568      HR "contains hosted admission and node selection at 320 CSS pixels";
-//                connecting/failure at 320: AM "contains the invitation, recovery, connecting…"
-//   390×844      HR "keeps sign-in and node-selection screen-reader traversal named…"
-//                AM "survives 200% text scaling on the sign-in and node directory surfaces"
-//   844×390+co   AM "contains every hosted entry surface on a coarse landscape phone"
-//   768×1024     AM "keeps the hosted entry surfaces on the desktop tier at 768×1024"
-//   desktop      HR nodes/enrollment/failure/restoring tests; route restore + fail-closed:
-//                HN (all six tests) + hostedHub/nodeRouteRestore.integration.test.ts
-// Home
-//   320×568      PH "contains the Home surface at 320px and on a coarse landscape phone"
-//   390×844      PH (all tests); CV "navigates the phone stack from the thread app bar to Home…"
-//   844×390+co   PH "contains the Home surface at 320px and on a coarse landscape phone"
-//   600–800 rot  CV "promotes the workspace panel to a full-screen phone surface…" (history
-//                unwind to Home) + CV rotation tests below (Home participates via route "/")
-//   desktop      CV desktop-baseline guards (sidebar shell; Home renders phone-only)
-// Thread + composer (collapsed/expanded, stubbed keyboard)
-//   320×568      CV "contains the active chat and composer at 320 CSS pixels",
-//                CV "keeps the composer and send action above a stubbed software keyboard…"
-//   390×844      CV keyboard, approval-visibility, menu-clamp, and expanded-composer tests (by name)
-//   844×390+co   CV "serves the phone structural presentation to a wide coarse-pointer…",
-//                CV "shows exactly one set of pending-answer actions on a coarse landscape…",
-//                CV "tracks keyboard insets across orientation changes…"
-//   600–800 rot  CV "preserves route, draft, and panel search state across a mid-size rotation…",
-//                CV "collapses the composer across the whole phone tier, including 640-767px…"
-//   768×1024     CV "keeps tablet-width sidebar density unchanged on coarse pointers"
-//   desktop      CV "publishes no keyboard variables and changes no composer geometry…",
-//                CV footer-compaction tests (by name)
-// Approvals (card + sheet)
-//   320×568      CV "renders the full approval detail scrollable with all actions visible…",
-//                AC "stays readable and actionable at 320px with stubbed software keyboard"
-//   390×844      CV "keeps approval actions visible when an approval arrives…",
-//                CV "keeps approval detail and actions visible above a stubbed software keyboard",
-//                AC 390px twin + "expands long detail into bottom sheet…"
-//   844×390+co   CV "shows exactly one set of pending-answer actions on a coarse landscape phone"
-//   desktop      AC "keeps expand affordance off desktop tier + single inline action set"
-// Diff / review
-//   320×568      CV "renders desktop-shaped workspace links full-screen at 320px…"
-//   390×844      CV "promotes the workspace panel to a full-screen phone surface…"
-//   844×390+co   CV "contains the review and files surfaces on a coarse landscape phone"
-//   600–800 rot  CV "preserves the open review surface across a mid-size rotation tier flip"
-//   desktop      CV "keeps the desktop inline panel and the sub-980 sheet presentation…";
-//                DP "keeps settings-driven wrap default on desktop presentations"
-// Files
-//   320×568      CV "renders desktop-shaped workspace links full-screen at 320px…" (files push)
-//   844×390+co   CV "contains the review and files surfaces on a coarse landscape phone"
-//   600–800 rot  CV "preserves the open review surface across a mid-size rotation tier flip"
-//                (same surface container and URL params present the files tab)
-//   desktop      CV "keeps the desktop inline panel and the sub-980 sheet presentation…";
-//                WP desktop-width geometry test
-// Terminal
-//   320×568      CV "contains the terminal surface at 320px and on a coarse landscape phone"
-//   390×844      CV "renders the terminal surface full-screen with a 44px toolbar…"
-//   844×390+co   CV "contains the terminal surface at 320px and on a coarse landscape phone"
-//   desktop      ThreadTerminalDrawer.browser.tsx (desktop drawer behavior)
-// Settings
-//   320×568      PS "lists every section as a labeled 44px row at 320px…",
-//                PS "survives 200% text scaling at 320px without hiding controls or overflow"
-//   390×844      PS focus/Escape/deep-link/safe-area tests; CV "presents phone settings
-//                full-screen from Home with the labeled section list"
-//   844×390+co   PS "keeps the settings surface full-screen on a coarse landscape phone"
-//   600–800 rot  CV "preserves open settings across a mid-size rotation tier flip"
-//   desktop      CV "keeps the desktop settings dialog presentation on desktop viewports";
-//                settings/SettingsPanels.browser.tsx (desktop panel behavior)
-// Connection pill + sheet
-//   320×568      AM "contains the connection sheet at 320px and on a coarse landscape phone"
-//   390×844      HC sheet/pill tests (focus trap + restore, live regions, fail-closed)
-//   844×390+co   AM "contains the connection sheet at 320px and on a coarse landscape phone"
-//   desktop      HC "renders inside the workspace header without a fixed overlay…" (1280/1024/820),
-//                HC "offers the All nodes return action from the desktop menu"
-//
-// ── Cross-cutting assertion mapping ──────────────────────────────────────
-// Tier classification + coarse landscape + QA override:
-//   PT "classifies viewports and pointers into the phone/desktop matrix",
-//   PT "forces the tier via the dev-only diagnostics override…"
-// Hidden shortcut hints on coarse pointers:
-//   CV "hides keyboard-shortcut hints in the command palette on coarse pointers"
-// Focus retention across drawer/sheet open-close:
-//   HC pill/sheet focus trap + Escape restore; PH kebab-sheet keyboard flow;
-//   PS "moves focus to section on push and back to originating row on pop";
-//   CS "traps focus while open and resolves null on Escape";
-//   CV "defers the plan auto-open while the phone composer is focused"
-// Long-press / kebab action parity:
-//   CS descriptor inventory; MT long-press suite; PH long-press tests
-// Reduced motion:
-//   CB "dismisses immediately without exit-transition styles under reduced motion"
-//   (behavioral, emulated media); AM connection-sheet emulated-media check;
-//   PS/HC/CV motion-reduce class guards
-// 200% text scaling:
-//   CV "keeps phone app-bar controls visible at 200% text scale at 320px and 390px";
-//   PS 200% test; AM entry-surface 200% test
-// Safe areas:
-//   CV "pads phone surfaces from the safe-area insets directly…"; PS safe-area classes
-// Route restore, fail-closed node routes, no-token-in-URL/persistence:
-//   HN all tests; HR bootstrap/recovery persistence tests;
-//   hostedHub/nodeRouteRestore.integration.test.ts,
-//   hostedHub/returnToDirectory.integration.test.ts (relay-session close proof)
-// Desktop-tier regression guards on the desktop baseline:
-//   CV sidebar-density/settings-dialog/inline-panel/keyboard-noop guards;
-//   HC header-collision computed-style guard; AC/MT/CS desktop guards
-// PWA / lifecycle / reconnect / cache-policy / hosted-state suites (must stay
-// green and behaviorally unmodified):
-//   HP; pwa/lifecycle.test.ts; pwa/serviceWorkerPolicy.test.ts;
-//   pwa/buildArtifacts.test.ts; hostedHub/lifecycle.integration.test.ts;
-//   hostedHub/reconnectPolicy.test.ts; hostedHub/state.test.ts and siblings.
+// The full cell -> proving-test mapping, its file-alias legend, and the
+// supporting-suite list are the executable `PROVING_TESTS`, `SUITE_FILES`, and
+// `SUPPORTING_SUITES` bindings at the foot of this file. They are asserted
+// against each suite's real source there, so nothing in this header can
+// silently drift.
 //
 // Production CSS is part of the behavior under test for every sweep below.
 import "../index.css";
@@ -178,6 +45,7 @@ import {
   resetPointerEmulation,
   setCoarsePointerEmulation,
 } from "../../test/browserPointer";
+import { SUITE_SOURCES } from "./AcceptanceMatrix.sources";
 import { HostedConnectionPill } from "./hostedHub/HostedConnectionControls";
 import { HostedHubRoot } from "./hostedHub/HostedHubRoot";
 
@@ -667,6 +535,707 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
         features: [{ name: "prefers-reduced-motion", value: "" }],
       });
       await setCoarsePointerEmulation(false);
+    }
+  });
+});
+
+// ── Executable cell → proving-test mapping ───────────────────────────────
+//
+// The doc block at the top of this file reads as complete even when a proving
+// test has been renamed or deleted — a coverage claim that cannot fail. This
+// is the executable form of that mapping: every cell names its suite and a
+// distinctive substring of the proving test's name, and the tests below assert
+// against each suite's real source (loaded with `?raw`, never executed) that
+// the referenced name still exists. That makes a rename a suite failure.
+//
+// `SUITE_SOURCES` is globbed from a sibling module because `import.meta.glob`
+// excludes its own caller; see `AcceptanceMatrix.sources.ts`.
+
+// alias → path in glob-key form (relative to this file). The code map replaces
+// the comment legend so an alias cannot drift from the file it points at.
+const SUITE_FILES = {
+  AM: "./AcceptanceMatrix.browser.tsx",
+  CV: "./ChatView.browser.tsx",
+  HR: "./hostedHub/HostedHubRoot.browser.tsx",
+  HN: "./hostedHub/HostedNodeRoutes.browser.tsx",
+  HC: "./hostedHub/HostedConnectionControls.browser.tsx",
+  HP: "./hostedHub/HostedPwaControls.browser.tsx",
+  HES: "./hostedHub/HostedEntrySurfaces.browser.tsx",
+  PRP: "./auth/PairingRouteSurface.browser.tsx",
+  PT: "./PresentationTier.browser.tsx",
+  PH: "./shell/phone/PhoneHome.browser.tsx",
+  PA: "./shell/phone/PhoneThreadAppBar.browser.tsx",
+  PS: "./shell/phone/PhoneSettingsSurface.browser.tsx",
+  PRC: "./shell/phone/PhoneReachability.browser.tsx",
+  CS: "./shell/phone/ContextMenuActionSheetHost.browser.tsx",
+  AC: "./chat/ApprovalCard.browser.tsx",
+  MT: "./chat/MessageTouchActions.browser.tsx",
+  CB: "./chat/ComposerBannerStack.browser.tsx",
+  WP: "./ThreadWorkspacePanel.browser.tsx",
+  TD: "./ThreadTerminalDrawer.browser.tsx",
+  DP: "./DiffPanel.browser.tsx",
+  SH: "./ui/sheet.browser.tsx",
+  SP: "./settings/SettingsPanels.browser.tsx",
+  MSHEET: "./mobile/MobileSheet.browser.tsx",
+  MSEL: "./mobile/MobileSelectSheet.browser.tsx",
+  MSEG: "./mobile/MobileSegmentedControl.browser.tsx",
+  MSTAT: "./mobile/MobileStatusChip.browser.tsx",
+  GS: "./mobile/GlassSurface.browser.tsx",
+  MLROW: "./mobile/MobileListRow.browser.tsx",
+  MDOCK: "./mobile/MobileDock.browser.tsx",
+  MCSTRIP: "./mobile/MobileContextStrip.browser.tsx",
+} as const;
+type SuiteAlias = keyof typeof SUITE_FILES;
+
+const TEST_DECLARATION_SOURCE =
+  "\\b(?:it|test)(?:\\.(?:fails|skip|only|each))?\\s*\\(\\s*([\"'`])((?:\\\\.|(?!\\1).)*)\\1";
+
+/** The real `it`/`test` names declared in a suite, read from its source. */
+function testNamesIn(alias: SuiteAlias): readonly string[] {
+  const source = SUITE_SOURCES[SUITE_FILES[alias]];
+  if (source === undefined) {
+    throw new Error(`No globbed source for ${alias} (${SUITE_FILES[alias]}).`);
+  }
+  // Fresh RegExp per call: /g carries a stateful lastIndex and this runs per
+  // alias. The `s` flag lets a multi-line (backtick) test name match.
+  const pattern = new RegExp(TEST_DECLARATION_SOURCE, "gs");
+  const names: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(source)) !== null) {
+    const name = match[2];
+    if (name !== undefined) {
+      names.push(name.replace(/\s+/g, " ").trim());
+    }
+  }
+  return names;
+}
+
+interface ProvingCell {
+  /** Human label for the spec cell or cross-cutting property. */
+  readonly cell: string;
+  readonly file: SuiteAlias;
+  /**
+   * A distinctive substring of the proving test's name — a substring, not the
+   * exact name, so a template-literal name like `…at ${w}px` maps on its static
+   * prefix. Still falsifiable: renaming the test drops the substring.
+   */
+  readonly test: string;
+}
+
+const PROVING_TESTS: readonly ProvingCell[] = [
+  // ── Surface × viewport (focused mobile workspace) ──────────────────────
+  {
+    cell: "sign-in @320",
+    file: "HR",
+    test: "contains hosted admission and node selection at 320 CSS pixels",
+  },
+  {
+    cell: "sign-in @390 screen-reader",
+    file: "HR",
+    test: "keeps sign-in and node-selection screen-reader traversal named",
+  },
+  {
+    cell: "sign-in @390 200%",
+    file: "AM",
+    test: "survives 200% text scaling on the sign-in and node directory surfaces",
+  },
+  {
+    cell: "sign-in coarse landscape",
+    file: "AM",
+    test: "contains every hosted entry surface on a coarse landscape phone",
+  },
+  {
+    cell: "sign-in rotation",
+    file: "AM",
+    test: "preserves invitation form input across a mid-size rotation tier flip",
+  },
+  {
+    cell: "sign-in @768",
+    file: "AM",
+    test: "keeps the hosted entry surfaces on the desktop tier at 768",
+  },
+  {
+    cell: "sign-in desktop",
+    file: "HR",
+    test: "provides keyboard-labelled authentication and registration controls",
+  },
+  {
+    cell: "invitation @320",
+    file: "AM",
+    test: "contains the invitation, recovery, connecting, and failure surfaces at 320 CSS pixels",
+  },
+  {
+    cell: "invitation desktop bootstrap",
+    file: "HR",
+    test: "submits first-owner bootstrap without retaining its credential in the form",
+  },
+  {
+    cell: "recovery codes desktop",
+    file: "HR",
+    test: "keeps one-time recovery material out of browser storage",
+  },
+  {
+    cell: "node directory desktop route",
+    file: "HN",
+    test: "selects a node by navigating into its node-scoped route",
+  },
+  {
+    cell: "node directory route back",
+    file: "HN",
+    test: "returns to the directory when history navigates back from a node route",
+  },
+  {
+    cell: "node directory no-secret-in-url",
+    file: "HN",
+    test: "keeps session and account material out of the URL, history, and browser storage",
+  },
+  {
+    cell: "home @320 + coarse landscape",
+    file: "PH",
+    test: "contains the Home surface at 320px and on a coarse landscape phone",
+  },
+  {
+    cell: "home navigation",
+    file: "CV",
+    test: "navigates the phone stack from the thread app bar to Home",
+  },
+  {
+    cell: "thread @320",
+    file: "CV",
+    test: "contains the active chat and composer at 320 CSS pixels",
+  },
+  {
+    cell: "thread keyboard",
+    file: "CV",
+    test: "keeps the composer and send action above a stubbed software keyboard on phones",
+  },
+  {
+    cell: "thread coarse landscape single action",
+    file: "CV",
+    test: "shows exactly one set of pending-answer actions on a coarse landscape phone",
+  },
+  {
+    cell: "thread keyboard insets rotation",
+    file: "CV",
+    test: "tracks keyboard insets across orientation changes and removes them when closed",
+  },
+  {
+    cell: "thread rotation state",
+    file: "CV",
+    test: "preserves route, draft, and panel search state across a mid-size rotation tier flip",
+  },
+  {
+    cell: "thread desktop no keyboard vars",
+    file: "CV",
+    test: "publishes no keyboard variables and changes no composer geometry without an inset",
+  },
+  {
+    cell: "approval @320",
+    file: "CV",
+    test: "renders the full approval detail scrollable with all actions visible on a phone",
+  },
+  { cell: "approval @320 keyboard", file: "AC", test: "stays readable and actionable at " },
+  {
+    cell: "approval @390 arrival",
+    file: "CV",
+    test: "keeps approval actions visible when an approval arrives while the phone composer is expanded",
+  },
+  {
+    cell: "approval expand sheet",
+    file: "AC",
+    test: "expands long detail into a bottom sheet with the single action set moved into it",
+  },
+  {
+    cell: "approval desktop",
+    file: "AC",
+    test: "keeps the expand affordance off the desktop tier and renders a single inline action set",
+  },
+  {
+    cell: "diff @320",
+    file: "CV",
+    test: "renders desktop-shaped workspace links full-screen at 320px with contained diff scrolling and a files push",
+  },
+  {
+    cell: "diff @390 full-screen",
+    file: "CV",
+    test: "promotes the workspace panel to a full-screen phone surface with history-coherent back",
+  },
+  {
+    cell: "diff/files coarse landscape",
+    file: "CV",
+    test: "contains the review and files surfaces on a coarse landscape phone",
+  },
+  {
+    cell: "diff rotation",
+    file: "CV",
+    test: "preserves the open review surface across a mid-size rotation tier flip",
+  },
+  {
+    cell: "diff desktop wrap default",
+    file: "DP",
+    test: "keeps the settings-driven wrap default on desktop presentations",
+  },
+  {
+    cell: "files desktop geometry",
+    file: "WP",
+    test: "stretches its root to the full right-panel width",
+  },
+  {
+    cell: "terminal @320 + coarse landscape",
+    file: "CV",
+    test: "contains the terminal surface at 320px and on a coarse landscape phone",
+  },
+  {
+    cell: "terminal @390 toolbar",
+    file: "CV",
+    test: "renders the terminal surface full-screen with a 44px toolbar above a stubbed keyboard",
+  },
+  {
+    cell: "terminal desktop",
+    file: "TD",
+    test: "uses the drawer surface colors for the terminal theme",
+  },
+  { cell: "settings @320", file: "PS", test: "lists every section as a labeled 44px row at 320px" },
+  {
+    cell: "settings @320 200%",
+    file: "PS",
+    test: "survives 200% text scaling at 320px without hiding controls or page overflow",
+  },
+  {
+    cell: "settings @390 from Home",
+    file: "CV",
+    test: "presents phone settings full-screen from Home with the labeled section list",
+  },
+  {
+    cell: "settings coarse landscape",
+    file: "PS",
+    test: "keeps the settings surface full-screen on a coarse landscape phone",
+  },
+  {
+    cell: "settings rotation",
+    file: "CV",
+    test: "preserves open settings across a mid-size rotation tier flip",
+  },
+  {
+    cell: "settings desktop dialog",
+    file: "CV",
+    test: "keeps the desktop settings dialog presentation on desktop viewports",
+  },
+  { cell: "settings desktop panels", file: "SP", test: "persists the diff behavior toggles" },
+  {
+    cell: "connection @320 + coarse landscape sheet",
+    file: "AM",
+    test: "contains the connection sheet at 320px and on a coarse landscape phone",
+  },
+  {
+    cell: "connection @390 pill",
+    file: "HC",
+    test: "opens the phone connection sheet from the pill with the full bounded control set",
+  },
+  {
+    cell: "connection desktop header",
+    file: "HC",
+    test: "renders inside the workspace header without a fixed overlay or control overlap",
+  },
+  {
+    cell: "connection desktop all-nodes",
+    file: "HC",
+    test: "offers the All nodes return action from the desktop menu",
+  },
+
+  // ── Cross-cutting properties ───────────────────────────────────────────
+  {
+    cell: "tier classification",
+    file: "PT",
+    test: "classifies viewports and pointers into the phone/desktop matrix",
+  },
+  {
+    cell: "tier diagnostics override",
+    file: "PT",
+    test: "forces the tier via the dev-only diagnostics override",
+  },
+  {
+    cell: "coarse-pointer hidden shortcut hints",
+    file: "CV",
+    test: "hides keyboard-shortcut hints in the command palette on coarse pointers",
+  },
+  {
+    cell: "focus retention — settings",
+    file: "PS",
+    test: "moves focus to the section on push and back to the originating row on pop",
+  },
+  {
+    cell: "focus retention — context sheet",
+    file: "CS",
+    test: "traps focus while open and resolves null on Escape",
+  },
+  {
+    cell: "long-press parity — messages",
+    file: "MT",
+    test: "opens the message action sheet from a long-press and round-trips copy and revert",
+  },
+  {
+    cell: "long-press parity — context menu",
+    file: "CS",
+    test: "presents every desktop context-menu descriptor set with touch-sized rows",
+  },
+  {
+    cell: "reduced motion — banners",
+    file: "CB",
+    test: "dismisses immediately without exit-transition styles under reduced motion",
+  },
+  {
+    cell: "200% text — app bar",
+    file: "CV",
+    test: "keeps phone app-bar controls visible at 200% text scale at 320px and 390px",
+  },
+  {
+    cell: "safe areas — surfaces",
+    file: "CV",
+    test: "pads phone surfaces from the safe-area insets directly instead of the root inset",
+  },
+  {
+    cell: "fail-closed node routes",
+    file: "HN",
+    test: "fails an unknown routed node closed to the directory with a bounded explanation",
+  },
+  {
+    cell: "desktop regression — sidebar density",
+    file: "CV",
+    test: "keeps tablet-width sidebar density unchanged on coarse pointers",
+  },
+  {
+    cell: "desktop regression — connection header",
+    file: "HC",
+    test: "renders inside the workspace header without a fixed overlay or control overlap",
+  },
+  {
+    cell: "PWA install guidance",
+    file: "HP",
+    test: "shows iOS installation steps and the relay trust boundary",
+  },
+  {
+    cell: "icon-only accessible names",
+    file: "CV",
+    test: "gives every visible phone control an accessible name across Home, thread, and sheets",
+  },
+
+  // ── Liquid Glass properties (delivery steps 2-8) ───────────────────────
+  {
+    cell: "step2 sheet — detents",
+    file: "MSHEET",
+    test: "opens at the requested detent and snaps between them",
+  },
+  {
+    cell: "step2 sheet — swipe to dismiss",
+    file: "MSHEET",
+    test: "dismisses on a downward swipe and commits the dismissal on gesture resolution",
+  },
+  {
+    cell: "step2 sheet — focus trap, scroll lock, restore",
+    file: "MSHEET",
+    test: "traps focus, locks page scroll, and restores focus to the trigger",
+  },
+  {
+    cell: "step2 sheet — safe area + keyboard inset",
+    file: "MSHEET",
+    test: "applies the safe-area padding and the keyboard inset itself",
+  },
+  {
+    cell: "step2 sheet — reduced motion",
+    file: "MSHEET",
+    test: "collapses its transitions under prefers-reduced-motion",
+  },
+  {
+    cell: "step3 material — AA on every tier/step/scheme",
+    file: "GS",
+    test: "clears WCAG AA on every tier, every Material step and both colour schemes",
+  },
+  {
+    cell: "step3 material — guaranteed base",
+    file: "GS",
+    test: "guarantees the same base regardless of what scrolls beneath",
+  },
+  {
+    cell: "step3 material — per-tier floor pinned",
+    file: "GS",
+    test: "derives each tier's floor from its own roles, and pins it as the minimum",
+  },
+  {
+    cell: "step4 composer — one-tap focus in activation task",
+    file: "CV",
+    test: "focuses the phone composer editor in the activating task on the first tap",
+  },
+  {
+    cell: "step4 composer — 16px type across tier",
+    file: "CV",
+    test: "keeps a 16px composer type size across the whole phone tier",
+  },
+  {
+    cell: "step4 composer — collapse across 640-767",
+    file: "CV",
+    test: "collapses the composer across the whole phone tier, including 640-767px viewports",
+  },
+  {
+    cell: "step5 reachability — bottom third Home+Thread",
+    file: "PRC",
+    test: "puts every primary and frequent action's centre in the bottom third on Home and Thread",
+  },
+  {
+    cell: "step5 reachability — coarse landscape exemption",
+    file: "PRC",
+    test: "asserts the coarse-landscape exemption rather than skipping it",
+  },
+  {
+    cell: "step5 reachability — last row clears dock",
+    file: "PRC",
+    test: "lets the last list row clear the dock instead of resting permanently behind it",
+  },
+  {
+    cell: "step5 reachability — no dock on desktop",
+    file: "PRC",
+    test: "mounts no dock on the desktop tier",
+  },
+  {
+    cell: "step6 select sheet — browse-first partial detent",
+    file: "MSEL",
+    test: "opens browse-first at the partial detent with search unfocused, and expands on focus",
+  },
+  {
+    cell: "step6 select sheet — 44px rows + selected state",
+    file: "MSEL",
+    test: "renders every row as a 44px target with its selected state exposed to assistive tech",
+  },
+  {
+    cell: "step6 model gating — bounded reason when disabled",
+    file: "MSEL",
+    test: "renders a bounded reason and commits nothing when it is disabled",
+  },
+  {
+    cell: "step6 session gating — bounded reason when disabled",
+    file: "MSEG",
+    test: "renders a bounded reason and commits nothing when it is disabled",
+  },
+  {
+    cell: "step6 session — consequential option is deliberate",
+    file: "MSEG",
+    test: "keeps the consequential option a deliberate activation, not something a swipe reaches",
+  },
+  {
+    cell: "step7 indicator — text and icon at 320",
+    file: "HC",
+    test: "renders every bounded status as its own short label and an agreeing icon at 320px",
+  },
+  {
+    cell: "step7 indicator — both live regions collapsed",
+    file: "HC",
+    test: "keeps both live regions mounted while the indicator is collapsed",
+  },
+  {
+    cell: "step7 indicator — assertive delivery-unknown",
+    file: "HC",
+    test: "announces delivery-unknown assertively while the connection sheet is closed",
+  },
+  {
+    cell: "step7 indicator — polite status changes",
+    file: "HC",
+    test: "announces every bounded status change politely from the pill while the sheet is closed",
+  },
+  {
+    cell: "step7 indicator — 44px collapsed by hit test",
+    file: "HC",
+    test: "measures at least 44px by hit test at collapsed size on a coarse phone",
+  },
+  {
+    cell: "step7 chip — word and icon, no colour-only",
+    file: "MSTAT",
+    test: "renders the status word and an icon, so no state is carried by colour alone",
+  },
+  {
+    cell: "step7 chip — 44px inside clipping ancestors",
+    file: "MSTAT",
+    test: "reaches 44px on both axes by hit test even inside clipping ancestors",
+  },
+  {
+    cell: "step8 diff — 44px by hit test",
+    file: "DP",
+    test: "gives every phone diff control a 44px effective touch target, measured by hit test",
+  },
+  {
+    cell: "step8 diff — scroll containment",
+    file: "DP",
+    test: "contains unwrapped diff overflow inside the phone surface instead of the page",
+  },
+  {
+    cell: "step8 diff — 200% turn chips",
+    file: "DP",
+    test: "keeps every turn chip reachable at 200% text scaling on the phone surface",
+  },
+  {
+    cell: "step8 diff — desktop unchanged",
+    file: "DP",
+    test: "keeps the desktop diff toolbar, turn-strip arrows, and two-axis scrolling unchanged",
+  },
+  {
+    cell: "step8 entry — primary action within fold",
+    file: "HES",
+    test: "keeps every entry surface's primary action within the fold at rest on a phone",
+  },
+  {
+    cell: "step8 entry — sign-out out of top-right",
+    file: "HES",
+    test: "moves sign-out out of the node directory's top-right corner on the phone tier",
+  },
+  {
+    cell: "step8 entry — 44px by hit test",
+    file: "HES",
+    test: "meets the 44px touch floor on every operable entry control, measured by hit test",
+  },
+  {
+    cell: "step8 entry — bottom-anchored registration",
+    file: "HES",
+    test: "bottom-anchors the registration form's action group on a phone",
+  },
+  {
+    cell: "step8 entry — live region in registration mode",
+    file: "HES",
+    test: "keeps the polite ceremony announcement and Hub recovery mounted in registration mode",
+  },
+  {
+    cell: "step8 entry — desktop unchanged",
+    file: "HES",
+    test: "leaves the desktop entry card, its top-right sign-out, and its static actions unchanged",
+  },
+  {
+    cell: "step8 pairing — reachable + 44px",
+    file: "PRP",
+    test: "keeps the pairing action reachable and 44px on a phone at 320x568",
+  },
+  {
+    cell: "step8 pairing — bottom-anchored",
+    file: "PRP",
+    test: "bottom-anchors the pairing action row when the surface fits at 390x844",
+  },
+  {
+    cell: "step8 pairing — desktop unchanged",
+    file: "PRP",
+    test: "keeps the desktop pairing card centred with its actions in flow",
+  },
+  {
+    cell: "primitive — list row 44px",
+    file: "MLROW",
+    test: "measures at least 44px on its smaller axis under coarse-pointer emulation",
+  },
+  {
+    cell: "primitive — list row bounded disabled reason",
+    file: "MLROW",
+    test: "renders a disabled presentation with a bounded reason that is a description, not the name",
+  },
+  {
+    cell: "primitive — dock 44px every density",
+    file: "MDOCK",
+    test: "measures at least 44px on both axes at every density under coarse-pointer emulation",
+  },
+  {
+    cell: "primitive — dock inset is max, never sum",
+    file: "MDOCK",
+    test: "takes the larger of the keyboard inset and the bottom safe area, never their sum",
+  },
+  {
+    cell: "primitive — context strip scroll + 44px pills",
+    file: "MCSTRIP",
+    test: "scrolls the rail rather than the page at 320px, with every pill a 44px target",
+  },
+];
+
+// Phone-tier primitive suites the Liquid Glass workstream introduced. Every one
+// must be represented in the matrix, so a new phone primitive cannot ship
+// acceptance coverage the matrix does not point at.
+const PHONE_PRIMITIVE_SUITES: readonly SuiteAlias[] = [
+  "MSHEET",
+  "MSEL",
+  "MSEG",
+  "MSTAT",
+  "GS",
+  "MLROW",
+  "MDOCK",
+  "MCSTRIP",
+];
+
+// Supporting suites the matrix leans on at file granularity: they must stay
+// present and green, but the mapping references them as whole suites rather
+// than by an individual test name.
+const SUPPORTING_SUITES: readonly string[] = [
+  "../hostedHub/nodeRouteRestore.integration.test.ts",
+  "../hostedHub/returnToDirectory.integration.test.ts",
+  "../hostedHub/lifecycle.integration.test.ts",
+  "../hostedHub/reconnectPolicy.test.ts",
+  "../hostedHub/state.test.ts",
+  "../pwa/lifecycle.test.ts",
+  "../pwa/serviceWorkerPolicy.test.ts",
+  "../pwa/buildArtifacts.test.ts",
+];
+
+// What Chromium emulation cannot prove. Physical qualification owns these; they
+// are listed so qualification has a checklist rather than an inference, and so
+// no automated cell can quietly claim to cover them.
+const PHYSICAL_QUALIFICATION_DEFERRED: readonly string[] = [
+  "Real iOS software-keyboard raise on first tap and real VisualViewport keyboard geometry.",
+  "True safe-area insets on hardware.",
+  "WebKit backdrop-filter scroll performance with stacked material — the Glass Material step's specific risk.",
+  "Real momentum, detent feel, and swipe physics on a touchscreen.",
+  "Screen-reader announcement order and timing for the polite and assertive live regions.",
+  "Real thumb reach against the asserted lower-third geometry.",
+];
+
+describe("acceptance matrix — executable cell → proving-test mapping", () => {
+  it("references only suite files that exist in the build", () => {
+    const missing = [
+      ...(Object.keys(SUITE_FILES) as SuiteAlias[]).map((alias) => SUITE_FILES[alias]),
+      ...SUPPORTING_SUITES,
+    ].filter((path) => typeof SUITE_SOURCES[path] !== "string");
+    expect(missing, `Referenced suite files absent from the build:\n${missing.join("\n")}`).toEqual(
+      [],
+    );
+  });
+
+  it("maps every cell to a proving test that still exists in its suite", () => {
+    const stale = PROVING_TESTS.filter(
+      ({ file, test }) => !testNamesIn(file).some((name) => name.includes(test)),
+    ).map(({ cell, file, test }) => `${cell} → ${file}: no test name contains "${test}"`);
+    expect(stale, `Stale mapping entries:\n${stale.join("\n")}`).toEqual([]);
+  });
+
+  it("represents every phone-primitive suite in the matrix", () => {
+    const referenced = new Set(PROVING_TESTS.map((cell) => cell.file));
+    const unreferenced = PHONE_PRIMITIVE_SUITES.filter((alias) => !referenced.has(alias));
+    expect(
+      unreferenced,
+      `Phone-primitive suites with no mapped cell: ${unreferenced.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("maps every reachability acceptance test to a cell (scoped reverse)", () => {
+    // Full test-level bidirectionality over every primitive's internal unit
+    // tests is intentionally not enforced — that is noise, since a primitive's
+    // unit tests are not spec cells. The reverse is asserted where it is a
+    // genuine completeness claim: PhoneReachability, whose every test is a
+    // lower-third, dock-clearance, or coarse-landscape acceptance property.
+    const mapped = PROVING_TESTS.filter((cell) => cell.file === "PRC").map((cell) => cell.test);
+    const unmapped = testNamesIn("PRC").filter(
+      (name) => !mapped.some((substring) => name.includes(substring)),
+    );
+    expect(
+      unmapped,
+      `PhoneReachability tests not mapped to a cell: ${unmapped.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("records what physical qualification must still prove", () => {
+    // A live artifact, not a comment: physical qualification reads this list.
+    expect(PHYSICAL_QUALIFICATION_DEFERRED.length).toBeGreaterThanOrEqual(5);
+    for (const item of PHYSICAL_QUALIFICATION_DEFERRED) {
+      expect(item.length, item).toBeGreaterThan(20);
     }
   });
 });
