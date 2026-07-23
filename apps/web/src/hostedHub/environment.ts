@@ -1,12 +1,13 @@
-import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@ryco/contracts";
+import {
+  activateHostedNode,
+  clearHostedNodeScopedState as clearCoreHostedNodeScopedState,
+  deactivateHostedNode,
+  suspendHostedNode,
+} from "@ryco/client-runtime/authorization";
+import type { EnvironmentId } from "@ryco/contracts";
 
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useCommandPaletteStore } from "../commandPaletteStore";
-import {
-  connectPrimaryEnvironment,
-  disconnectPrimaryEnvironment,
-} from "../environments/runtime/service";
-import { writePrimaryEnvironmentDescriptor } from "../environments/primary";
 import { useMessageQueueStore } from "../messageQueueStore";
 import { setModelPickerOpen } from "../modelPickerOpenState";
 import { clearKeyedQueriesForEnvironment } from "../rpc/keyedQuery";
@@ -16,26 +17,15 @@ import { clearOverviewAtomState } from "../rpc/overviewAtoms";
 import { clearCheckpointDiffState } from "../rpc/providerAtoms";
 import { defaultQueryClient } from "../rpc/queryClient";
 import { clearServerState } from "../rpc/serverState";
-import { useStore } from "../store";
 import { useSettingsDialogStore } from "../settingsDialogStore";
 import { clearShortcutModifierState } from "../shortcutModifierState";
+import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useUiStateStore } from "../uiStateStore";
-import { resetHostedRelayAttemptFactory } from "./transport";
-import type { HostedHubNode } from "./types";
 
-function descriptorForNode(node: HostedHubNode): ExecutionEnvironmentDescriptor {
-  return {
-    environmentId: node.environmentId,
-    label: node.label,
-    platform: { os: node.platformOs, arch: node.platformArch },
-    serverVersion: node.clientVersion,
-    capabilities: { repositoryIdentity: false },
-  };
-}
-
-export function clearHostedNodeScopedState(environmentId: EnvironmentId): void {
+/** Browser/UI clearing catalog only. Core lifecycle owns the call ordering. */
+export function clearWebHostedNodeScopedState(environmentId: EnvironmentId): void {
   clearKeyedQueriesForEnvironment(environmentId);
   clearProjectAtomState();
   clearGitAtomState();
@@ -77,63 +67,9 @@ export function clearHostedNodeScopedState(environmentId: EnvironmentId): void {
   clearServerState();
 }
 
-let activeHostedEnvironmentId: EnvironmentId | null = null;
-let hostedTransportSuspended = false;
-let transition: Promise<void> = Promise.resolve();
-
-function enqueueTransition(work: () => Promise<void>): Promise<void> {
-  const next = transition.catch(() => undefined).then(work);
-  transition = next.catch(() => undefined);
-  return next;
-}
-
-async function deactivateCurrentHostedNode(environmentId: EnvironmentId): Promise<void> {
-  resetHostedRelayAttemptFactory();
-  await disconnectPrimaryEnvironment();
-  clearHostedNodeScopedState(environmentId);
-  writePrimaryEnvironmentDescriptor(null);
-  if (activeHostedEnvironmentId === environmentId) activeHostedEnvironmentId = null;
-  hostedTransportSuspended = false;
-}
-
-export async function deactivateHostedNode(environmentId: EnvironmentId): Promise<void> {
-  await enqueueTransition(async () => {
-    await deactivateCurrentHostedNode(activeHostedEnvironmentId ?? environmentId);
-  });
-}
-
-export async function suspendHostedNode(environmentId: EnvironmentId): Promise<void> {
-  await enqueueTransition(async () => {
-    const activeEnvironmentId = activeHostedEnvironmentId ?? environmentId;
-    if (activeEnvironmentId !== environmentId || hostedTransportSuspended) return;
-    hostedTransportSuspended = true;
-    resetHostedRelayAttemptFactory();
-    await disconnectPrimaryEnvironment();
-  });
-}
-
-export async function activateHostedNode(
-  node: HostedHubNode,
-  previousEnvironmentId: EnvironmentId | null,
-  signal?: AbortSignal,
-): Promise<void> {
-  await enqueueTransition(async () => {
-    if (signal?.aborted) return;
-    const previous = activeHostedEnvironmentId ?? previousEnvironmentId;
-    if (previous === node.environmentId) {
-      if (!hostedTransportSuspended) {
-        resetHostedRelayAttemptFactory();
-        await disconnectPrimaryEnvironment();
-      }
-      if (signal?.aborted) return;
-    } else if (previous) {
-      await deactivateCurrentHostedNode(previous);
-      if (signal?.aborted) return;
-    }
-    writePrimaryEnvironmentDescriptor(descriptorForNode(node));
-    useStore.getState().setActiveEnvironmentId(node.environmentId);
-    activeHostedEnvironmentId = node.environmentId;
-    hostedTransportSuspended = false;
-    connectPrimaryEnvironment();
-  });
-}
+export {
+  activateHostedNode,
+  deactivateHostedNode,
+  suspendHostedNode,
+  clearCoreHostedNodeScopedState as clearHostedNodeScopedState,
+};

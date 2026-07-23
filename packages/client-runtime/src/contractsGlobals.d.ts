@@ -41,6 +41,7 @@ declare class URL {
   hostname: string;
   pathname: string;
   protocol: string;
+  origin: string;
   search: string;
   hash: string;
   searchParams: {
@@ -68,3 +69,20 @@ declare const console: {
   warn(...data: ReadonlyArray<unknown>): void;
   error(...data: ReadonlyArray<unknown>): void;
 };
+
+/**
+ * Cross-platform runtimes provide the standard base64 primitives (or a
+ * compatible polyfill). Keeping these narrow declarations avoids importing
+ * the DOM library into the neutral runtime.
+ */
+declare function atob(value: string): string;
+declare function btoa(value: string): string;
+
+interface AbortSignal {
+  readonly aborted: boolean;
+}
+
+declare class AbortController {
+  readonly signal: AbortSignal;
+  abort(): void;
+}

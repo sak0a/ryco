@@ -1,33 +1,123 @@
-import type { HostedHubNode, HostedHubSessionResponse } from "./types";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId } from "@ryco/contracts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+
+import type {
+  EndpointService,
+  HttpClientService,
+  PasskeyCeremonyService,
+  SessionCredentialsService,
+} from "@ryco/client-runtime/platform";
+
+import type { HostedHubNode, HostedHubSessionResponse } from "./types";
 
 const originalDocument = globalThis.document;
 
-const {
-  activateHostedNode,
-  deactivateHostedNode,
-  suspendHostedNode,
-  hasHostedRelayPendingRequests,
-  resetHostedRelayAttemptFactory,
-} = vi.hoisted(() => ({
-  activateHostedNode: vi.fn(
-    async (
-      _node?: HostedHubNode,
-      _previousEnvironmentId?: EnvironmentId | null,
-      _signal?: AbortSignal,
-    ): Promise<void> => undefined,
-  ),
-  deactivateHostedNode: vi.fn(async () => undefined),
-  suspendHostedNode: vi.fn(async () => undefined),
-  hasHostedRelayPendingRequests: vi.fn(() => false),
-  resetHostedRelayAttemptFactory: vi.fn(),
-}));
+// The lifecycle transition queue is injected as fakes: state.ts imports these
+// directly, and mocking the module is how the controller's lifecycle
+// dependency is stubbed. The relay-attempt reset is owned solely by the
+// transition queue (see environment.test.ts for the ordered-teardown contract);
+// the deactivate fake below mirrors that contract — deactivation resets the
+// relay attempt — so state-level teardown can still assert the reset occurs.
+const { activateHostedNode, deactivateHostedNode, suspendHostedNode, resetRelayAttemptFactory } =
+  vi.hoisted(() => {
+    const resetRelayAttemptFactory = vi.fn();
+    return {
+      activateHostedNode: vi.fn(
+        async (
+          _node?: HostedHubNode,
+          _previousEnvironmentId?: EnvironmentId | null,
+          _signal?: AbortSignal,
+        ): Promise<void> => undefined,
+      ),
+      deactivateHostedNode: vi.fn(async (_environmentId?: EnvironmentId): Promise<void> => {
+        resetRelayAttemptFactory();
+      }),
+      suspendHostedNode: vi.fn(async (_environmentId?: EnvironmentId): Promise<void> => undefined),
+      resetRelayAttemptFactory,
+    };
+  });
 vi.mock("./environment", () => ({ activateHostedNode, deactivateHostedNode, suspendHostedNode }));
-vi.mock("./transport", () => ({ hasHostedRelayPendingRequests, resetHostedRelayAttemptFactory }));
 
-import { hostedHubApi, HostedHubApiError } from "./api";
-import { hostedHubController, markHostedSessionReady, useHostedHubStore } from "./state";
+import { HostedHubApiError, type HostedHubApi } from "./api";
+import {
+  configureHostedRuntime,
+  type HostedNodeLifecycle,
+  type HostedRuntimeConfiguration,
+} from "./runtime";
+import { hostedHubController, hostedHubStore, markHostedSessionReady } from "./state";
+
+const hasHostedRelayPendingRequests = vi.fn(() => false);
+
+/** Configurable Hub API instance the controller reads through the runtime. */
+const hostedHubApi = {
+  restoreSession: vi.fn(),
+  getBootstrapAvailability: vi.fn(),
+  signIn: vi.fn(),
+  signOut: vi.fn(),
+  bootstrapOwner: vi.fn(),
+  redeemInvitation: vi.fn(),
+  listNodes: vi.fn(),
+  clearSessionMaterial: vi.fn(),
+} as unknown as HostedHubApi;
+
+const unusedService = new Proxy(
+  {},
+  {
+    get() {
+      throw new Error("platform service is not used by the hosted controller tests");
+    },
+  },
+);
+
+const nodeLifecycle: HostedNodeLifecycle = {
+  activate: vi.fn(async () => undefined),
+  suspend: vi.fn(async () => undefined),
+  deactivate: vi.fn(async () => undefined),
+  clearNodeScopedState: vi.fn(),
+  writePrimaryEnvironmentDescriptor: vi.fn(),
+  connectPrimaryEnvironment: vi.fn(),
+  disconnectPrimaryEnvironment: vi.fn(async () => undefined),
+  setActiveEnvironmentId: vi.fn(),
+};
+
+function fakeRuntime(): HostedRuntimeConfiguration {
+  return {
+    endpoint: unusedService as EndpointService,
+    httpClient: unusedService as HttpClientService,
+    passkeyCeremony: unusedService as PasskeyCeremonyService,
+    sessionCredentials: unusedService as SessionCredentialsService,
+    nodeLifecycle,
+    timers: {
+      now: () => Date.now(),
+      setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+      clearTimeout: (timer) => globalThis.clearTimeout(timer),
+      queueMicrotask: (callback) => globalThis.queueMicrotask(callback),
+    },
+    // Mirror the web AppLifecycle foreground signals so the visibility-gated
+    // directory scheduling behaves as it does in the browser.
+    isForeground: () =>
+      (globalThis.document as { visibilityState?: string } | undefined)?.visibilityState !==
+      "hidden",
+    subscribeForeground: (listener) => {
+      const doc = globalThis.document as
+        | {
+            visibilityState?: string;
+            addEventListener: (type: string, handler: () => void, options?: unknown) => void;
+            removeEventListener: (type: string, handler: () => void) => void;
+          }
+        | undefined;
+      const onVisibility = () => {
+        if (doc?.visibilityState === "visible") listener();
+      };
+      doc?.addEventListener("visibilitychange", onVisibility, { once: true });
+      return () => doc?.removeEventListener("visibilitychange", onVisibility);
+    },
+    hasPendingRelayRequests: hasHostedRelayPendingRequests,
+    resetRelayAttemptFactory,
+    relayUrl: () => "wss://hub.example.test/v1/relay/client",
+    createRelaySocket: () => ({}),
+  };
+}
 
 const sessionResponse: HostedHubSessionResponse = {
   account: {
@@ -71,6 +161,12 @@ function node(
   };
 }
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  hasHostedRelayPendingRequests.mockReturnValue(false);
+  configureHostedRuntime(fakeRuntime(), hostedHubApi);
+});
+
 afterEach(() => {
   hostedHubController.resetForTests();
   activateHostedNode.mockClear();
@@ -90,7 +186,7 @@ describe("hosted account state", () => {
     );
     vi.spyOn(hostedHubApi, "getBootstrapAvailability").mockResolvedValue(true);
     await hostedHubController.bootstrap();
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       accountStatus: "signed-out",
       bootstrapAvailable: true,
     });
@@ -104,7 +200,7 @@ describe("hosted account state", () => {
       new HostedHubApiError("unavailable", 0),
     );
     await hostedHubController.bootstrap();
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       accountStatus: "signed-out",
       bootstrapAvailable: false,
     });
@@ -115,23 +211,23 @@ describe("hosted account state", () => {
     vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
     vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([]);
     await hostedHubController.bootstrap();
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       accountStatus: "authenticated",
       directoryStatus: "ready",
     });
 
     vi.spyOn(hostedHubApi, "signOut").mockResolvedValue();
     await hostedHubController.signOut();
-    expect(useHostedHubStore.getState().accountStatus).toBe("signed-out");
-    expect(JSON.stringify(useHostedHubStore.getState())).not.toContain("csrf-sensitive-canary");
+    expect(hostedHubStore.getState().accountStatus).toBe("signed-out");
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("csrf-sensitive-canary");
 
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       account: sessionResponse.account,
       session: sessionResponse.session,
     });
     await hostedHubController.expireSession();
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       accountStatus: "session-expired",
       effectiveRole: null,
       selectedNode: null,
@@ -145,7 +241,7 @@ describe("hosted account state", () => {
   ])("handles passkey %s with a bounded signed-out error", async (_label, failure) => {
     vi.spyOn(hostedHubApi, "signIn").mockRejectedValue(failure);
     await hostedHubController.signIn();
-    const state = useHostedHubStore.getState();
+    const state = hostedHubStore.getState();
     expect(state.accountStatus).toBe("signed-out");
     expect(state.errorMessage).not.toContain("undefined");
   });
@@ -162,7 +258,7 @@ describe("hosted account state", () => {
     const pending = hostedHubController.signIn();
     hostedHubController.cancelAuthentication();
     await pending;
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       accountStatus: "signed-out",
       errorMessage: null,
     });
@@ -181,7 +277,7 @@ describe("hosted account state", () => {
     const first = hostedHubController.signIn();
     const replacement = hostedHubController.signIn();
     await Promise.all([first, replacement]);
-    expect(useHostedHubStore.getState().accountStatus).toBe("authenticated");
+    expect(hostedHubStore.getState().accountStatus).toBe("authenticated");
   });
 });
 
@@ -194,21 +290,19 @@ describe("hosted registration and directory state", () => {
     });
     vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([]);
 
-    useHostedHubStore.setState({ bootstrapAvailable: true });
+    hostedHubStore.setState({ bootstrapAvailable: true });
     await hostedHubController.bootstrapOwner({
       credential: "bootstrap-sensitive-canary",
       displayName: "Ada",
       passkeyLabel: "Primary",
     });
 
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       accountStatus: "authenticated",
       recoveryCodes: ["recovery-sensitive-canary"],
       bootstrapAvailable: false,
     });
-    expect(JSON.stringify(useHostedHubStore.getState())).not.toContain(
-      "bootstrap-sensitive-canary",
-    );
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("bootstrap-sensitive-canary");
   });
 
   it("handles unavailable owner bootstrap without reflecting the credential", async () => {
@@ -222,8 +316,8 @@ describe("hosted registration and directory state", () => {
       passkeyLabel: null,
     });
 
-    expect(useHostedHubStore.getState()).toMatchObject({ accountStatus: "signed-out" });
-    expect(useHostedHubStore.getState().errorMessage).not.toContain("bootstrap-sensitive-canary");
+    expect(hostedHubStore.getState()).toMatchObject({ accountStatus: "signed-out" });
+    expect(hostedHubStore.getState().errorMessage).not.toContain("bootstrap-sensitive-canary");
   });
 
   it("redeems an invitation and keeps one-time recovery codes only in memory", async () => {
@@ -238,12 +332,10 @@ describe("hosted registration and directory state", () => {
       displayName: "Ada",
       passkeyLabel: null,
     });
-    expect(useHostedHubStore.getState().recoveryCodes).toEqual(["recovery-sensitive-canary"]);
-    expect(JSON.stringify(useHostedHubStore.getState())).not.toContain(
-      "invitation-sensitive-canary",
-    );
+    expect(hostedHubStore.getState().recoveryCodes).toEqual(["recovery-sensitive-canary"]);
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("invitation-sensitive-canary");
     hostedHubController.dismissRecoveryCodes();
-    expect(useHostedHubStore.getState().recoveryCodes).toEqual([]);
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
   });
 
   it.each([
@@ -257,8 +349,8 @@ describe("hosted registration and directory state", () => {
       displayName: "Ada",
       passkeyLabel: null,
     });
-    expect(useHostedHubStore.getState()).toMatchObject({ accountStatus: "signed-out" });
-    expect(useHostedHubStore.getState().errorMessage).not.toContain("invitation-sensitive-canary");
+    expect(hostedHubStore.getState()).toMatchObject({ accountStatus: "signed-out" });
+    expect(hostedHubStore.getState().errorMessage).not.toContain("invitation-sensitive-canary");
   });
 
   it("cancels invitation registration without retaining its secret", async () => {
@@ -277,15 +369,13 @@ describe("hosted registration and directory state", () => {
     });
     hostedHubController.cancelAuthentication();
     await pending;
-    expect(JSON.stringify(useHostedHubStore.getState())).not.toContain(
-      "invitation-sensitive-canary",
-    );
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("invitation-sensitive-canary");
   });
 
   it("preserves an identity-matched selection and clears it when authorization is removed", async () => {
     vi.useFakeTimers();
     const first = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       account: sessionResponse.account,
       session: sessionResponse.session,
@@ -298,12 +388,12 @@ describe("hosted registration and directory state", () => {
     });
     vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([{ ...first, label: "Refreshed" }]);
     await hostedHubController.refreshDirectory();
-    expect(useHostedHubStore.getState().selectedNode?.label).toBe("Refreshed");
+    expect(hostedHubStore.getState().selectedNode?.label).toBe("Refreshed");
 
     vi.mocked(hostedHubApi.listNodes).mockResolvedValue([]);
     await hostedHubController.refreshDirectory();
     expect(deactivateHostedNode).toHaveBeenCalledWith(first.environmentId);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       selectedNode: null,
       selectionStatus: "authorization-removed",
       effectiveRole: null,
@@ -313,7 +403,7 @@ describe("hosted registration and directory state", () => {
   it("tears down a selected node as soon as the directory marks it revoked", async () => {
     vi.useFakeTimers();
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       account: sessionResponse.account,
       session: sessionResponse.session,
@@ -331,7 +421,7 @@ describe("hosted registration and directory state", () => {
     await hostedHubController.refreshDirectory();
 
     expect(deactivateHostedNode).toHaveBeenCalledWith(selected.environmentId);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       selectedNode: null,
       selectionStatus: "revoked",
       effectiveRole: null,
@@ -344,7 +434,7 @@ describe("hosted registration and directory state", () => {
   it("marks retained directory data stale and fails role checks closed", async () => {
     vi.useFakeTimers();
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       directoryStatus: "ready",
       nodes: [selected],
@@ -353,7 +443,7 @@ describe("hosted registration and directory state", () => {
     });
     vi.spyOn(hostedHubApi, "listNodes").mockRejectedValue(new HostedHubApiError("unavailable", 0));
     await hostedHubController.refreshDirectory();
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       directoryStatus: "stale",
       effectiveRole: null,
       selectedNode: selected,
@@ -374,7 +464,7 @@ describe("hosted registration and directory state", () => {
         removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
       },
     });
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       account: sessionResponse.account,
       session: sessionResponse.session,
@@ -397,7 +487,7 @@ describe("hosted registration and directory state", () => {
   it("keeps mutations stale until browser resume revalidates access and node state", async () => {
     const selected = node();
     const order: string[] = [];
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       account: sessionResponse.account,
       session: sessionResponse.session,
@@ -426,24 +516,24 @@ describe("hosted registration and directory state", () => {
 
     hostedHubController.suspendBrowser("hidden");
     await vi.waitFor(() => expect(suspendHostedNode).toHaveBeenCalledWith(selected.environmentId));
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "suspended",
       sessionStatus: "stale",
       generation: 5,
     });
     hostedHubController.markSessionReady(selected.environmentId);
-    expect(useHostedHubStore.getState().browserStatus).toBe("suspended");
+    expect(hostedHubStore.getState().browserStatus).toBe("suspended");
 
     await hostedHubController.resumeBrowser();
     expect(order).toEqual(["session", "directory", "relay"]);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "synchronizing",
       sessionStatus: "synchronizing",
       generation: 6,
     });
 
     hostedHubController.markSessionReady(selected.environmentId);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "current",
       sessionStatus: "ready",
     });
@@ -451,7 +541,7 @@ describe("hosted registration and directory state", () => {
 
   it("ignores readiness from a superseded hosted connection generation", () => {
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       selectedNode: selected,
       transportStatus: "online",
@@ -462,14 +552,14 @@ describe("hosted registration and directory state", () => {
     });
 
     markHostedSessionReady(selected.environmentId, 4);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "synchronizing",
       sessionStatus: "synchronizing",
       sessionEstablished: false,
     });
 
     markHostedSessionReady(selected.environmentId, 5);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "current",
       sessionStatus: "ready",
       sessionEstablished: true,
@@ -478,7 +568,7 @@ describe("hosted registration and directory state", () => {
 
   it("preserves delivery uncertainty when resume replaces a relay with a pending mutation", async () => {
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       account: sessionResponse.account,
       session: sessionResponse.session,
@@ -500,14 +590,14 @@ describe("hosted registration and directory state", () => {
     hostedHubController.suspendBrowser("hidden");
     await hostedHubController.resumeBrowser();
 
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "synchronizing",
       sessionStatus: "delivery-unknown",
       sessionRecoveredAfterUnknown: false,
       generation: 6,
     });
     hostedHubController.markSessionReady(selected.environmentId);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "current",
       sessionStatus: "delivery-unknown",
       sessionRecoveredAfterUnknown: true,
@@ -517,7 +607,7 @@ describe("hosted registration and directory state", () => {
   it("preserves resumed delivery uncertainty when synchronization times out", async () => {
     vi.useFakeTimers();
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       account: sessionResponse.account,
       session: sessionResponse.session,
@@ -540,7 +630,7 @@ describe("hosted registration and directory state", () => {
     await hostedHubController.resumeBrowser();
     await vi.advanceTimersByTimeAsync(30_000);
 
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       transportStatus: "terminal-failure",
       sessionStatus: "delivery-unknown",
       sessionEstablished: false,
@@ -550,7 +640,7 @@ describe("hosted registration and directory state", () => {
   });
 
   it("starts a fresh access check when suspension cancels an in-flight resume", async () => {
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       account: sessionResponse.account,
       session: sessionResponse.session,
@@ -576,7 +666,7 @@ describe("hosted registration and directory state", () => {
     await Promise.all([interrupted, resumed]);
 
     expect(restoreCalls).toBe(2);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "current",
       directoryStatus: "ready",
       errorMessage: null,
@@ -585,7 +675,7 @@ describe("hosted registration and directory state", () => {
 
   it("coalesces repeated browser resume events into one access check and relay activation", async () => {
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       account: sessionResponse.account,
       session: sessionResponse.session,
@@ -612,7 +702,7 @@ describe("hosted registration and directory state", () => {
     expect(second).toBe(third);
     await Promise.all([first, second, third]);
     expect(activateHostedNode).toHaveBeenCalledOnce();
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "synchronizing",
       sessionStatus: "synchronizing",
       generation: 6,
@@ -621,7 +711,7 @@ describe("hosted registration and directory state", () => {
 
   it("expires authority during resume without opening another hosted connection", async () => {
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       account: sessionResponse.account,
       session: sessionResponse.session,
@@ -644,8 +734,12 @@ describe("hosted registration and directory state", () => {
     await hostedHubController.resumeBrowser();
 
     expect(activateHostedNode).not.toHaveBeenCalled();
-    expect(resetHostedRelayAttemptFactory).toHaveBeenCalledOnce();
-    expect(useHostedHubStore.getState()).toMatchObject({
+    // Account clear must reset the relay attempt via the deactivation path
+    // (the deactivate fake mirrors the transition-queue reset contract; the
+    // ordered teardown itself is proven in environment.test.ts).
+    expect(deactivateHostedNode).toHaveBeenCalledWith(selected.environmentId);
+    expect(resetRelayAttemptFactory).toHaveBeenCalledOnce();
+    expect(hostedHubStore.getState()).toMatchObject({
       accountStatus: "session-expired",
       selectedNode: null,
       effectiveRole: null,
@@ -654,7 +748,7 @@ describe("hosted registration and directory state", () => {
   });
 
   it("replaces an in-flight directory refresh with a post-resume access check", async () => {
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       account: sessionResponse.account,
       session: sessionResponse.session,
@@ -682,7 +776,7 @@ describe("hosted registration and directory state", () => {
 
     expect(firstSignal?.aborted).toBe(true);
     expect(listNodes).toHaveBeenCalledTimes(2);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "current",
       directoryStatus: "ready",
     });
@@ -691,7 +785,7 @@ describe("hosted registration and directory state", () => {
   it("aborts same-node activation when the browser is suspended again", async () => {
     vi.useFakeTimers();
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       account: sessionResponse.account,
       session: sessionResponse.session,
@@ -722,16 +816,16 @@ describe("hosted registration and directory state", () => {
     await vi.advanceTimersByTimeAsync(30_000);
 
     expect(firstSignal?.aborted).toBe(true);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "suspended",
       sessionStatus: "stale",
       generation: 7,
     });
-    expect(useHostedHubStore.getState().transportStatus).not.toBe("terminal-failure");
+    expect(hostedHubStore.getState().transportStatus).not.toBe("terminal-failure");
 
     await hostedHubController.resumeBrowser();
     expect(activateHostedNode).toHaveBeenCalledTimes(2);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "synchronizing",
       sessionStatus: "synchronizing",
       generation: 8,
@@ -741,7 +835,7 @@ describe("hosted registration and directory state", () => {
   it("restarts full resume after a stale directory retry recovers", async () => {
     vi.useFakeTimers();
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       account: sessionResponse.account,
       session: sessionResponse.session,
@@ -766,7 +860,7 @@ describe("hosted registration and directory state", () => {
 
     hostedHubController.suspendBrowser("hidden");
     await hostedHubController.resumeBrowser();
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "stale",
       directoryStatus: "stale",
       effectiveRole: null,
@@ -777,19 +871,19 @@ describe("hosted registration and directory state", () => {
     await vi.waitFor(() => expect(activateHostedNode).toHaveBeenCalledOnce());
 
     expect(listNodes).toHaveBeenCalledTimes(3);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "synchronizing",
       directoryStatus: "ready",
       sessionStatus: "synchronizing",
     });
     hostedHubController.markSessionReady(selected.environmentId);
-    expect(useHostedHubStore.getState().browserStatus).toBe("current");
+    expect(hostedHubStore.getState().browserStatus).toBe("current");
   });
 
   it("switches nodes through the ordered environment teardown boundary", async () => {
     const first = node();
     const second = node("node_bbbbbbbbbbbbbbbbbbbbbb", "owner");
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       directoryStatus: "ready",
       nodes: [first, second],
@@ -798,20 +892,20 @@ describe("hosted registration and directory state", () => {
     });
     await hostedHubController.selectNode(second.id);
     expect(activateHostedNode).toHaveBeenCalledWith(second, first.environmentId);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       selectedNode: second,
       sessionStatus: "synchronizing",
       generation: 1,
     });
     hostedHubController.markSessionReplaying(second.environmentId);
-    expect(useHostedHubStore.getState().sessionStatus).toBe("replaying");
+    expect(hostedHubStore.getState().sessionStatus).toBe("replaying");
     hostedHubController.markSessionReady(second.environmentId);
-    expect(useHostedHubStore.getState().sessionStatus).toBe("ready");
+    expect(hostedHubStore.getState().sessionStatus).toBe("ready");
   });
 
   it("rejects node selection while browser access is being revalidated", async () => {
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       directoryStatus: "ready",
       browserStatus: "checking-access",
@@ -821,12 +915,12 @@ describe("hosted registration and directory state", () => {
     await hostedHubController.selectNode(selected.id);
 
     expect(activateHostedNode).not.toHaveBeenCalled();
-    expect(useHostedHubStore.getState().selectedNode).toBeNull();
+    expect(hostedHubStore.getState().selectedNode).toBeNull();
   });
 
   it("ends browser synchronization after a terminal relay failure", () => {
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       directoryStatus: "ready",
       browserStatus: "synchronizing",
@@ -841,7 +935,7 @@ describe("hosted registration and directory state", () => {
 
     hostedHubController.failure(5, { kind: "incompatible", retryable: false });
 
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "current",
       selectionStatus: "incompatible",
       effectiveRole: null,
@@ -853,19 +947,19 @@ describe("hosted registration and directory state", () => {
   it("fails initial synchronization after exactly thirty seconds", async () => {
     vi.useFakeTimers();
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       directoryStatus: "ready",
       nodes: [selected],
     });
 
     await hostedHubController.selectNode(selected.id);
-    useHostedHubStore.setState({ browserStatus: "synchronizing" });
+    hostedHubStore.setState({ browserStatus: "synchronizing" });
     await vi.advanceTimersByTimeAsync(29_999);
-    expect(useHostedHubStore.getState().transportStatus).not.toBe("terminal-failure");
+    expect(hostedHubStore.getState().transportStatus).not.toBe("terminal-failure");
 
     await vi.advanceTimersByTimeAsync(1);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "current",
       transportStatus: "terminal-failure",
       sessionStatus: "stale",
@@ -877,7 +971,7 @@ describe("hosted registration and directory state", () => {
   it("cancels the synchronization deadline after the matching snapshot is ready", async () => {
     vi.useFakeTimers();
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       directoryStatus: "ready",
       nodes: [selected],
@@ -887,7 +981,7 @@ describe("hosted registration and directory state", () => {
     hostedHubController.markSessionReady(selected.environmentId);
     await vi.advanceTimersByTimeAsync(30_000);
 
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       transportStatus: "idle",
       sessionStatus: "ready",
       sessionEstablished: true,
@@ -899,7 +993,7 @@ describe("hosted registration and directory state", () => {
     vi.useFakeTimers();
     const first = node("node_aaaaaaaaaaaaaaaaaaaaaa");
     const second = node("node_bbbbbbbbbbbbbbbbbbbbbb");
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       directoryStatus: "ready",
       nodes: [first, second],
@@ -910,23 +1004,56 @@ describe("hosted registration and directory state", () => {
     await hostedHubController.selectNode(second.id);
     await vi.advanceTimersByTimeAsync(20_000);
 
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       selectedNode: second,
       sessionStatus: "synchronizing",
       errorMessage: null,
     });
 
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       selectedNode: second,
       transportStatus: "terminal-failure",
       errorMessage: "Ryco state could not be synchronized.",
     });
   });
 
+  it("ignores a queued session-sync deadline from a superseded generation", async () => {
+    vi.useFakeTimers();
+    const selected = node();
+    hostedHubStore.setState({
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      nodes: [selected],
+    });
+
+    // Arm the 30s synchronization deadline for generation 1.
+    await hostedHubController.selectNode(selected.id);
+    hostedHubStore.setState({ browserStatus: "synchronizing" });
+
+    // A newer generation takes over and its session becomes healthy, but the
+    // generation-1 deadline's callback is still queued (its timer was never
+    // cleared through a controller path here).
+    hostedHubStore.setState({
+      generation: 99,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: false,
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    // The stale deadline must not terminal-fail the superseding session.
+    expect(hostedHubStore.getState()).toMatchObject({
+      generation: 99,
+      transportStatus: "online",
+      sessionStatus: "ready",
+    });
+    expect(hostedHubStore.getState().transportStatus).not.toBe("terminal-failure");
+  });
+
   it("retries the selected node once with a fresh generation", async () => {
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       directoryStatus: "ready",
       nodes: [selected],
@@ -951,7 +1078,7 @@ describe("hosted registration and directory state", () => {
       selected.environmentId,
       expect.any(AbortSignal),
     );
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       generation: 8,
       transportStatus: "idle",
       sessionStatus: "synchronizing",
@@ -963,7 +1090,7 @@ describe("hosted registration and directory state", () => {
   it("fails before readiness and emits only a stable diagnostic after readiness", () => {
     const selected = node();
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       selectedNode: selected,
       browserStatus: "synchronizing",
@@ -974,20 +1101,20 @@ describe("hosted registration and directory state", () => {
     });
 
     hostedHubController.reportShellSnapshotFailure(selected.environmentId);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       browserStatus: "current",
       transportStatus: "terminal-failure",
       errorMessage: "Ryco state could not be synchronized.",
     });
 
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       transportStatus: "online",
       sessionStatus: "ready",
       sessionEstablished: true,
       errorMessage: null,
     });
     hostedHubController.reportShellSnapshotFailure(selected.environmentId);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       transportStatus: "online",
       sessionStatus: "ready",
       errorMessage: null,
@@ -997,7 +1124,7 @@ describe("hosted registration and directory state", () => {
 
   it("keeps delivery uncertainty visible through replay until the user acknowledges it", () => {
     const selected = node();
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       accountStatus: "authenticated",
       selectedNode: selected,
       transportStatus: "online",
@@ -1007,18 +1134,18 @@ describe("hosted registration and directory state", () => {
     hostedHubController.markDeliveryUnknown(7);
     hostedHubController.sessionStatus(7, "synchronizing");
     hostedHubController.markSessionReplaying(selected.environmentId);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       sessionStatus: "delivery-unknown",
       sessionRecoveredAfterUnknown: false,
     });
 
     hostedHubController.markSessionReady(selected.environmentId);
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       sessionStatus: "delivery-unknown",
       sessionRecoveredAfterUnknown: true,
     });
     hostedHubController.acknowledgeDeliveryUnknown();
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       sessionStatus: "ready",
       sessionRecoveredAfterUnknown: false,
     });

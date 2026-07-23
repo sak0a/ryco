@@ -31,6 +31,14 @@
     "./connection": {
       "types": "./src/connection/index.ts",
       "import": "./src/connection/index.ts"
+    },
+    "./authorization": {
+      "types": "./src/authorization/index.ts",
+      "import": "./src/authorization/index.ts"
+    },
+    "./relay": {
+      "types": "./src/relay/index.ts",
+      "import": "./src/relay/index.ts"
     }
   },
   "scripts": {

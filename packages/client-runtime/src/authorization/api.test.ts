@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-const { createPasskeyRegistration } = vi.hoisted(() => ({
-  createPasskeyRegistration: vi.fn(),
-}));
-vi.mock("./webauthn", () => ({
-  createPasskeyRegistration,
-  getPasskeyAuthentication: vi.fn(),
-}));
+import type {
+  EndpointService,
+  HttpClientService,
+  PasskeyCeremonyService,
+  SessionCredentialsService,
+} from "@ryco/client-runtime/platform";
 
 import { HostedHubApi, HostedHubApiError } from "./api";
+import { encodeBase64Url } from "../relay/base64url";
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -17,6 +17,51 @@ function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
+}
+
+/** In-memory CSRF holder mirroring the web `SessionCredentials` adapter. */
+function inMemorySessionCredentials(): SessionCredentialsService {
+  let csrfToken: string | null = null;
+  return {
+    mode: "cookie",
+    readCsrfToken: () => csrfToken,
+    writeCsrfToken: (token) => {
+      csrfToken = token;
+    },
+  };
+}
+
+/** Mirrors the web `HttpClient` adapter: promotes plain headers to `Headers`. */
+const fakeHttpClient: HttpClientService = {
+  fetch: (url, init) =>
+    init === undefined
+      ? globalThis.fetch(url)
+      : globalThis.fetch(url, {
+          ...init,
+          ...(init.headers && typeof init.headers === "object"
+            ? { headers: new Headers(init.headers as Record<string, string>) }
+            : {}),
+        } as RequestInit),
+};
+
+const fakeEndpoint: EndpointService = {
+  origin: () => (globalThis.window as unknown as { location: { origin: string } }).location.origin,
+  readPrimaryTarget: () => null,
+  resolveHttpUrl: (pathname) => pathname,
+  resolveWsUrl: (wsBaseUrl) => wsBaseUrl,
+};
+
+function createApi(passkeyCeremony?: Partial<PasskeyCeremonyService>): HostedHubApi {
+  return new HostedHubApi({
+    endpoint: fakeEndpoint,
+    httpClient: fakeHttpClient,
+    sessionCredentials: inMemorySessionCredentials(),
+    passkeyCeremony: {
+      authenticate: vi.fn(async () => ({ id: "authenticate-not-used" }) as never),
+      register: vi.fn(async () => ({ id: "register-not-used" }) as never),
+      ...passkeyCeremony,
+    },
   });
 }
 
@@ -55,7 +100,7 @@ afterEach(() => {
 
 describe("HostedHubApi", () => {
   it("validates the exact fail-closed bootstrap availability response", async () => {
-    const api = new HostedHubApi();
+    const api = createApi();
     globalThis.fetch = vi.fn(async () => response({ available: true }));
     await expect(api.getBootstrapAvailability()).resolves.toBe(true);
 
@@ -67,15 +112,26 @@ describe("HostedHubApi", () => {
 
   it("uses the existing same-origin first-owner WebAuthn registration endpoints", async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
-    createPasskeyRegistration.mockResolvedValue({ id: "passkey-response-canary" });
+    const register = vi.fn(async () => ({ id: "passkey-response-canary" }) as never);
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({ input, ...(init ? { init } : {}) });
       return requests.length === 1
-        ? response({ options: { challenge: "challenge-sensitive-canary" } })
+        ? response({
+            options: {
+              challenge: encodeBase64Url(new Uint8Array([1, 2, 3])),
+              rp: { name: "Ryco Hub" },
+              user: {
+                id: encodeBase64Url(new Uint8Array([4, 5])),
+                name: "ada",
+                displayName: "Ada",
+              },
+              pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+            },
+          })
         : response({ ...session, recoveryCodes: ["recovery-sensitive-canary"] }, 201);
     });
 
-    const api = new HostedHubApi();
+    const api = createApi({ register });
     const result = await api.bootstrapOwner({
       credential: "bootstrap-sensitive-canary",
       displayName: "Ada",
@@ -91,10 +147,16 @@ describe("HostedHubApi", () => {
       displayName: "Ada",
       passkeyLabel: "Primary",
     });
-    expect(createPasskeyRegistration).toHaveBeenCalledWith(
-      { challenge: "challenge-sensitive-canary" },
-      undefined,
-    );
+    // The fail-closed codec runs in front of the platform ceremony seam: the
+    // ceremony receives already-validated options with a decoded challenge.
+    expect(register).toHaveBeenCalledOnce();
+    const registeredOptions = register.mock.calls[0]![0] as {
+      challenge: Uint8Array;
+      rp: { name: string };
+    };
+    expect([...new Uint8Array(registeredOptions.challenge)]).toEqual([1, 2, 3]);
+    expect(registeredOptions.rp.name).toBe("Ryco Hub");
+    expect(register.mock.calls[0]![1]).toBeUndefined();
     expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({
       response: { id: "passkey-response-canary" },
     });
@@ -125,7 +187,7 @@ describe("HostedHubApi", () => {
             201,
           );
     });
-    const api = new HostedHubApi();
+    const api = createApi();
     await api.restoreSession();
     const issued = await api.issueRelayTicket("node_aaaaaaaaaaaaaaaaaaaaaa");
     expect(issued.ticket).toBe("ticket-sensitive-canary");
@@ -142,7 +204,7 @@ describe("HostedHubApi", () => {
     globalThis.fetch = vi.fn(async () =>
       response({ error: "session_invalid", details: "sensitive-response-canary" }, 401),
     );
-    const api = new HostedHubApi();
+    const api = createApi();
     const error = await api.restoreSession().catch((cause) => cause);
     expect(error).toBeInstanceOf(HostedHubApiError);
     expect((error as Error).message).toBe("Your Hub session has expired.");
@@ -150,7 +212,7 @@ describe("HostedHubApi", () => {
   });
 
   it("rejects disabled accounts and revoked sessions returned by a malformed Hub", async () => {
-    const api = new HostedHubApi();
+    const api = createApi();
     globalThis.fetch = vi.fn(async () =>
       response({
         ...session,
@@ -169,7 +231,7 @@ describe("HostedHubApi", () => {
   });
 
   it("rejects malformed directory and ticket responses", async () => {
-    const api = new HostedHubApi();
+    const api = createApi();
     globalThis.fetch = vi.fn(async () => response(session));
     await api.restoreSession();
     globalThis.fetch = vi.fn(async () => response({ nodes: [{ id: "node_bad" }] }));
@@ -181,7 +243,7 @@ describe("HostedHubApi", () => {
   });
 
   it("rejects unsafe session and relay timestamps", async () => {
-    const api = new HostedHubApi();
+    const api = createApi();
     globalThis.fetch = vi.fn(async () =>
       response({ ...session, account: { ...session.account, createdAt: 1.5 } }),
     );
@@ -203,7 +265,7 @@ describe("HostedHubApi", () => {
   });
 
   it("accepts the bounded directory contract and discards unexpected metadata", async () => {
-    const api = new HostedHubApi();
+    const api = createApi();
     globalThis.fetch = vi.fn(async () => response(session));
     await api.restoreSession();
     globalThis.fetch = vi.fn(async () =>
@@ -264,7 +326,7 @@ describe("HostedHubApi", () => {
       return response({ ok: true });
     });
 
-    const api = new HostedHubApi();
+    const api = createApi();
     await api.restoreSession();
     await expect(api.lookupNodeEnrollment("ABCD-EFGH")).resolves.toEqual(enrollment);
     await expect(api.approveNodeEnrollment("ABCD-EFGH")).resolves.toBeUndefined();
@@ -285,7 +347,7 @@ describe("HostedHubApi", () => {
   });
 
   it("rejects malformed enrollment lookup and approval responses", async () => {
-    const api = new HostedHubApi();
+    const api = createApi();
     globalThis.fetch = vi.fn(async () => response(session));
     await api.restoreSession();
 

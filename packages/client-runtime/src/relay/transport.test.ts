@@ -1,36 +1,103 @@
 import { EnvironmentId, ORCHESTRATION_WS_METHODS, WS_METHODS } from "@ryco/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { WsTransport } from "../rpc/wsTransport";
-import { hostedHubApi, HostedHubApiError } from "./api";
-import { encodeBase64Url } from "./base64url";
-import { hostedHubController, useHostedHubStore } from "./state";
-import { HostedRelayAttemptFactory, ticketFailure } from "./transport";
-import type { HostedHubNode } from "./types";
+import type {
+  EndpointService,
+  HttpClientService,
+  PasskeyCeremonyService,
+  SessionCredentialsService,
+} from "@ryco/client-runtime/platform";
 
-class MockSocket extends EventTarget {
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSING = 2;
-  static readonly CLOSED = 3;
-  readyState = MockSocket.CONNECTING;
-  bufferedAmount = 0;
-  binaryType: BinaryType = "blob";
-  send() {}
-  close() {
-    this.readyState = MockSocket.CLOSED;
+import { HostedHubApi, HostedHubApiError } from "../authorization/api";
+import {
+  configureHostedRuntime,
+  type HostedNodeLifecycle,
+  type HostedRuntimeConfiguration,
+} from "../authorization/runtime";
+import { hostedHubController, hostedHubStore } from "../authorization/state";
+import type { HostedHubNode, HostedRelayFailure } from "../authorization/types";
+import { encodeBase64Url } from "./base64url";
+import { HostedRelayAttemptFactory, ticketFailure } from "./transport";
+
+const RELAY_URL = "wss://hub.example.test/v1/relay/client";
+
+/** Callbacks the attempt factory hands to `createRelaySocket`. */
+interface RelaySocketCallbacks {
+  onTransportStatus(status: string): void;
+  onSessionStatus(status: string): void;
+  onRole(role: string | null): void;
+  onFailure(failure: HostedRelayFailure): void;
+}
+
+/**
+ * Fake relay socket. The real socket (the package relay engine) publishes
+ * "connecting" as soon as it is constructed and surfaces a lost connection via
+ * `onFailure`; the fake reproduces exactly those two callback edges so the
+ * attempt factory's state wiring can be exercised without a browser WebSocket.
+ */
+class MockRelaySocket {
+  constructor(readonly callbacks: RelaySocketCallbacks) {
+    callbacks.onTransportStatus("connecting");
   }
-  fail() {
-    this.dispatchEvent(new Event("error"));
-    this.dispatchEvent(new CloseEvent("close", { code: 1006 }));
+  fail(): void {
+    this.callbacks.onFailure({ kind: "network", retryable: true });
   }
 }
 
-const sockets: MockSocket[] = [];
-const transports: WsTransport[] = [];
+const sockets: MockRelaySocket[] = [];
 
-const originalWindow = globalThis.window;
-const originalWebSocket = globalThis.WebSocket;
+/** A configurable Hub API instance the factory reads via the runtime. */
+const hostedHubApi = {
+  issueRelayTicket: vi.fn(),
+  clearSessionMaterial: vi.fn(),
+} as unknown as HostedHubApi;
+
+const nodeLifecycle: HostedNodeLifecycle = {
+  activate: vi.fn(async () => undefined),
+  suspend: vi.fn(async () => undefined),
+  deactivate: vi.fn(async () => undefined),
+  clearNodeScopedState: vi.fn(),
+  writePrimaryEnvironmentDescriptor: vi.fn(),
+  connectPrimaryEnvironment: vi.fn(),
+  disconnectPrimaryEnvironment: vi.fn(async () => undefined),
+  setActiveEnvironmentId: vi.fn(),
+};
+
+const unusedService = new Proxy(
+  {},
+  {
+    get() {
+      throw new Error("platform service is not used by the relay attempt factory tests");
+    },
+  },
+);
+
+function fakeRuntime(): HostedRuntimeConfiguration {
+  return {
+    endpoint: unusedService as EndpointService,
+    httpClient: unusedService as HttpClientService,
+    passkeyCeremony: unusedService as PasskeyCeremonyService,
+    sessionCredentials: unusedService as SessionCredentialsService,
+    nodeLifecycle,
+    timers: {
+      now: () => Date.now(),
+      setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+      clearTimeout: (timer) => globalThis.clearTimeout(timer),
+      queueMicrotask: (callback) => globalThis.queueMicrotask(callback),
+    },
+    isForeground: () => true,
+    subscribeForeground: () => () => undefined,
+    hasPendingRelayRequests: () => false,
+    resetRelayAttemptFactory: vi.fn(),
+    relayUrl: () => RELAY_URL,
+    createRelaySocket: (input) => {
+      const socket = new MockRelaySocket(input.callbacks as RelaySocketCallbacks);
+      sockets.push(socket);
+      return socket;
+    },
+  };
+}
+
 const selectedNode: HostedHubNode = {
   id: "node_aaaaaaaaaaaaaaaaaaaaaa",
   environmentId: EnvironmentId.make("env_aaaaaaaaaaaaaaaaaaaaaa"),
@@ -48,33 +115,11 @@ const selectedNode: HostedHubNode = {
   presence: { online: true, lastHeartbeatAt: 1 },
 };
 
-async function waitFor(assertion: () => void, timeoutMs = 1_000): Promise<void> {
-  const startedAt = Date.now();
-  for (;;) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      if (Date.now() - startedAt >= timeoutMs) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  }
-}
-
 beforeEach(() => {
+  vi.clearAllMocks();
   sockets.length = 0;
-  transports.length = 0;
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { location: { origin: "https://hub.example.test" } },
-  });
-  globalThis.WebSocket = class extends MockSocket {
-    constructor() {
-      super();
-      sockets.push(this);
-    }
-  } as unknown as typeof WebSocket;
-  useHostedHubStore.setState({
+  configureHostedRuntime(fakeRuntime(), hostedHubApi);
+  hostedHubStore.setState({
     accountStatus: "authenticated",
     selectedNode,
     generation: 4,
@@ -84,13 +129,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(async () => {
-  await Promise.allSettled(transports.map((transport) => transport.dispose()));
-  transports.length = 0;
+afterEach(() => {
   hostedHubController.resetForTests();
-  Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
-  globalThis.WebSocket = originalWebSocket;
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("HostedRelayAttemptFactory", () => {
@@ -144,7 +186,7 @@ describe("HostedRelayAttemptFactory", () => {
       }),
     ).toBe(false);
 
-    useHostedHubStore.setState({ directoryStatus: "stale" });
+    hostedHubStore.setState({ directoryStatus: "stale" });
     expect(
       lifecycle.authorizeRequest?.({
         tag: ORCHESTRATION_WS_METHODS.subscribeShell,
@@ -163,7 +205,7 @@ describe("HostedRelayAttemptFactory", () => {
       tag: ORCHESTRATION_WS_METHODS.subscribeShell,
       stream: true,
     } as const;
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       transportStatus: "online",
       sessionStatus: "ready",
       browserStatus: "current",
@@ -171,7 +213,7 @@ describe("HostedRelayAttemptFactory", () => {
 
     expect(lifecycle.authorizeRequest?.(dispatch)).toBe(true);
     hostedHubController.suspendBrowser("hidden");
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       directoryStatus: "ready",
       effectiveRole: "operator",
       browserStatus: "suspended",
@@ -180,16 +222,17 @@ describe("HostedRelayAttemptFactory", () => {
     expect(lifecycle.authorizeRequest?.(dispatch)).toBe(false);
     expect(lifecycle.authorizeRequest?.(subscribeShell)).toBe(false);
 
-    useHostedHubStore.setState({
+    hostedHubStore.setState({
       browserStatus: "synchronizing",
       sessionStatus: "stale",
     });
     expect(lifecycle.authorizeRequest?.(dispatch)).toBe(false);
     expect(lifecycle.authorizeRequest?.(subscribeShell)).toBe(true);
 
-    useHostedHubStore.setState({ browserStatus: "current", sessionStatus: "ready" });
+    hostedHubStore.setState({ browserStatus: "current", sessionStatus: "ready" });
     expect(lifecycle.authorizeRequest?.(dispatch)).toBe(true);
   });
+
   it("requests and consumes one memory-only ticket per connection attempt", async () => {
     const ticket = encodeBase64Url(new Uint8Array(32).fill(9));
     const issue = vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
@@ -200,14 +243,14 @@ describe("HostedRelayAttemptFactory", () => {
     });
     const factory = new HostedRelayAttemptFactory();
     const firstUrl = await factory.nextUrl();
-    expect(firstUrl).toBe("wss://hub.example.test/v1/relay/client");
+    expect(firstUrl).toBe(RELAY_URL);
     factory.createSocket(firstUrl);
     expect(() => factory.createSocket(firstUrl)).toThrow("fresh relay ticket");
 
     const secondUrl = await factory.nextUrl();
     factory.createSocket(secondUrl);
     expect(issue).toHaveBeenCalledTimes(2);
-    expect(JSON.stringify(useHostedHubStore.getState())).not.toContain(ticket);
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain(ticket);
   });
 
   it("retries transient ticket preflight with fresh attempt material", async () => {
@@ -222,19 +265,17 @@ describe("HostedRelayAttemptFactory", () => {
         protocolMinor: 2,
       });
     const factory = new HostedRelayAttemptFactory();
-    const transport = new WsTransport(() => factory.nextUrl(), {
-      ...factory.lifecycleHandlers(),
-      getReconnectDelayMs: () => 0,
-    });
-    transports.push(transport);
 
-    await waitFor(() => {
-      expect(issue).toHaveBeenCalledTimes(2);
-      expect(sockets).toHaveLength(1);
-    });
+    await expect(factory.nextUrl()).rejects.toBeInstanceOf(HostedHubApiError);
+    expect(hostedHubStore.getState().transportStatus).toBe("reconnecting");
 
-    expect(useHostedHubStore.getState().transportStatus).toBe("connecting");
-    expect(JSON.stringify(useHostedHubStore.getState())).not.toContain(ticket);
+    const url = await factory.nextUrl();
+    factory.createSocket(url);
+
+    expect(issue).toHaveBeenCalledTimes(2);
+    expect(sockets).toHaveLength(1);
+    expect(hostedHubStore.getState().transportStatus).toBe("connecting");
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain(ticket);
   });
 
   it("stops automatic relay reconnects while the browser is suspended", async () => {
@@ -252,9 +293,9 @@ describe("HostedRelayAttemptFactory", () => {
     hostedHubController.suspendBrowser("hidden");
     expect(lifecycle.shouldReconnect?.()).toBe(false);
 
-    useHostedHubStore.setState({ browserStatus: "checking-access" });
+    hostedHubStore.setState({ browserStatus: "checking-access" });
     expect(lifecycle.shouldReconnect?.()).toBe(false);
-    useHostedHubStore.setState({ browserStatus: "synchronizing" });
+    hostedHubStore.setState({ browserStatus: "synchronizing" });
     expect(lifecycle.shouldReconnect?.()).toBe(false);
 
     await factory.nextUrl();
@@ -266,19 +307,11 @@ describe("HostedRelayAttemptFactory", () => {
       .spyOn(hostedHubApi, "issueRelayTicket")
       .mockRejectedValue(new HostedHubApiError("forbidden", 403));
     const factory = new HostedRelayAttemptFactory();
-    const transport = new WsTransport(() => factory.nextUrl(), {
-      ...factory.lifecycleHandlers(),
-      getReconnectDelayMs: () => 0,
-    });
-    transports.push(transport);
 
-    await waitFor(() => {
-      expect(issue).toHaveBeenCalledOnce();
-      expect(useHostedHubStore.getState().transportStatus).toBe("terminal-failure");
-    });
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await expect(factory.nextUrl()).rejects.toBeInstanceOf(HostedHubApiError);
 
     expect(issue).toHaveBeenCalledOnce();
+    expect(hostedHubStore.getState().transportStatus).toBe("terminal-failure");
     expect(sockets).toHaveLength(0);
   });
 
@@ -292,6 +325,7 @@ describe("HostedRelayAttemptFactory", () => {
     const factory = new HostedRelayAttemptFactory();
     const url = await factory.nextUrl();
     expect(() => factory.createSocket(url)).toThrow("fresh relay ticket");
+    expect(sockets).toHaveLength(0);
   });
 
   it("marks any unacknowledged request delivery unknown without replaying it", async () => {
@@ -314,7 +348,7 @@ describe("HostedRelayAttemptFactory", () => {
     lifecycle.onRequestStart?.({ id: "read-1", tag: WS_METHODS.projectsList, stream: false });
     lifecycle.onRequestExit?.({ id: "read-1", tag: WS_METHODS.projectsList, stream: false });
     sockets[0]!.fail();
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       transportStatus: "reconnecting",
       sessionStatus: "delivery-unknown",
     });
@@ -352,7 +386,7 @@ describe("HostedRelayAttemptFactory", () => {
     expect(factory.hasPendingRequests()).toBe(true);
 
     sockets[0]!.fail();
-    expect(useHostedHubStore.getState()).toMatchObject({
+    expect(hostedHubStore.getState()).toMatchObject({
       transportStatus: "reconnecting",
       sessionStatus: "delivery-unknown",
     });
@@ -388,11 +422,11 @@ describe("HostedRelayAttemptFactory", () => {
     const factory = new HostedRelayAttemptFactory();
     const lifecycle = factory.lifecycleHandlers();
     factory.createSocket(await factory.nextUrl());
-    useHostedHubStore.setState({ transportStatus: "online" });
+    hostedHubStore.setState({ transportStatus: "online" });
     const transportStatus = vi.spyOn(hostedHubController, "transportStatus");
 
     expect(lifecycle.getReconnectDelayMs?.(0)).toBeGreaterThan(0);
-    expect(useHostedHubStore.getState().transportStatus).toBe("online");
+    expect(hostedHubStore.getState().transportStatus).toBe("online");
     expect(transportStatus).not.toHaveBeenCalled();
 
     factory.reset();
@@ -410,14 +444,14 @@ describe("HostedRelayAttemptFactory", () => {
     const factory = new HostedRelayAttemptFactory();
     const lifecycle = factory.lifecycleHandlers();
     factory.createSocket(await factory.nextUrl());
-    useHostedHubStore.setState({ transportStatus: "online" });
+    hostedHubStore.setState({ transportStatus: "online" });
 
     lifecycle.onClose?.({ code: 1006, reason: "network" }, { intentional: false });
-    expect(useHostedHubStore.getState().transportStatus).toBe("reconnecting");
+    expect(hostedHubStore.getState().transportStatus).toBe("reconnecting");
 
     factory.reset();
-    useHostedHubStore.setState({ transportStatus: "online" });
+    hostedHubStore.setState({ transportStatus: "online" });
     lifecycle.onClose?.({ code: 1006, reason: "network" }, { intentional: false });
-    expect(useHostedHubStore.getState().transportStatus).toBe("online");
+    expect(hostedHubStore.getState().transportStatus).toBe("online");
   });
 });
