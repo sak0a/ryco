@@ -19,6 +19,14 @@
     "./platform": {
       "types": "./src/platform/index.ts",
       "import": "./src/platform/index.ts"
+    },
+    "./errors": {
+      "types": "./src/errors/transportError.ts",
+      "import": "./src/errors/transportError.ts"
+    },
+    "./rpc": {
+      "types": "./src/rpc/index.ts",
+      "import": "./src/rpc/index.ts"
     }
   },
   "scripts": {
@@ -27,6 +35,7 @@
   },
   "dependencies": {
     "@ryco/contracts": "workspace:*",
+    "@ryco/shared": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

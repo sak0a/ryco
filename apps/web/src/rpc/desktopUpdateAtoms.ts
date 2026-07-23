@@ -3,7 +3,7 @@ import type { DesktopUpdateState } from "@ryco/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { useEffect } from "react";
 
-import { appAtomRegistry } from "./atomRegistry";
+import { appAtomRegistry } from "@ryco/client-runtime/rpc";
 
 /**
  * Writable atom mirroring the desktop updater state. Replaces the previous

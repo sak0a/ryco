@@ -3,7 +3,7 @@ import { Option } from "effect";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import * as environmentApi from "../environmentApi";
-import { appAtomRegistry } from "./atomRegistry";
+import { appAtomRegistry } from "@ryco/client-runtime/rpc";
 import {
   checkpointDiffCacheKey,
   checkpointDiffRetryDelay,

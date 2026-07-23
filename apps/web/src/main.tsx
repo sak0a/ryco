@@ -14,6 +14,7 @@ import { syncDocumentPresentationTier } from "./lib/presentationTier";
 import { syncDocumentVisualViewportInsets } from "./lib/visualViewportInsets";
 import { syncAppearancePreferenceEnvironment } from "./themes/appearancePreferences";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
+import { initializeWsConnectionState } from "./rpc/wsConnectionState";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 // Hosted-hub builds scope browser URLs under the selected node's stable route
@@ -25,6 +26,8 @@ const history = isElectron
     : createBrowserHistory();
 
 const router = getRouter(history);
+
+initializeWsConnectionState();
 
 if (isElectron) {
   syncDocumentWindowControlsOverlayClass();

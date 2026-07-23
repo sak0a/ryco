@@ -3,11 +3,12 @@ import { Data, Duration, Effect, Layer, Schedule } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
 
+import type { SocketService } from "../platform/index.ts";
 import {
   acknowledgeRpcRequest,
   clearAllTrackedRpcRequests,
   trackRpcRequestSent,
-} from "./requestLatencyState";
+} from "./requestLatencyState.ts";
 import {
   getWsReconnectDelayMsForRetry,
   recordWsConnectionAttempt,
@@ -16,7 +17,7 @@ import {
   recordWsConnectionOpened,
   type WsConnectionMetadata,
   WS_RECONNECT_MAX_RETRIES,
-} from "./wsConnectionState";
+} from "./wsConnectionState.ts";
 
 export interface WsProtocolCloseContext {
   readonly intentional: boolean;
@@ -72,6 +73,7 @@ export type WsRpcProtocolClient =
 export type WsRpcProtocolSocketUrlProvider = string | (() => Promise<string>);
 
 const WS_URL_PROVIDER_ERROR_MESSAGE = "Unable to prepare the Ryco server WebSocket connection.";
+export const WS_CONNECTION_ERROR_MESSAGE = "Unable to connect to the Ryco server WebSocket.";
 
 class WsUrlProviderError extends Data.TaggedError("WsUrlProviderError") {}
 
@@ -162,6 +164,7 @@ function composeLifecycleHandlers(
 
 export function createWsRpcProtocolLayer(
   url: WsRpcProtocolSocketUrlProvider,
+  socketService: SocketService,
   handlers?: WsProtocolLifecycleHandlers,
 ) {
   const lifecycle = composeLifecycleHandlers(handlers);
@@ -202,7 +205,8 @@ export function createWsRpcProtocolLayer(
       lifecycle.onAttempt(socketUrl);
       const socket = handlers?.webSocketConstructor
         ? handlers.webSocketConstructor(socketUrl, protocols)
-        : new globalThis.WebSocket(socketUrl, protocols);
+        : // SocketService is intentionally platform-neutral; Effect's browser seam requires this bridge.
+          (socketService.webSocketConstructor(socketUrl, protocols) as globalThis.WebSocket);
 
       socket.addEventListener(
         "open",
@@ -214,7 +218,7 @@ export function createWsRpcProtocolLayer(
       socket.addEventListener(
         "error",
         () => {
-          lifecycle.onError("Unable to connect to the Ryco server WebSocket.");
+          lifecycle.onError(WS_CONNECTION_ERROR_MESSAGE);
         },
         { once: true },
       );

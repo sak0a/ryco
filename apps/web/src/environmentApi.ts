@@ -1,6 +1,6 @@
 import type { EnvironmentId, EnvironmentApi } from "@ryco/contracts";
 
-import type { WsRpcClient } from "./rpc/wsRpcClient";
+import type { WsRpcClient } from "@ryco/client-runtime/rpc";
 import { readEnvironmentConnection } from "./environments/runtime";
 
 const environmentApiOverridesForTests = new Map<EnvironmentId, EnvironmentApi>();

@@ -11,7 +11,7 @@ import {
   resetWsConnectionStateForTests,
   setBrowserOnlineStatus,
   WS_RECONNECT_MAX_ATTEMPTS,
-} from "./wsConnectionState";
+} from "./wsConnectionState.ts";
 
 describe("wsConnectionState", () => {
   beforeEach(() => {

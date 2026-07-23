@@ -35,7 +35,7 @@ import {
 import { invalidateWorkItems, useWorkItemList, useWorkItemSearch } from "~/rpc/useWorkItems";
 import { selectSidebarWorktreesForProjectRef, useStore } from "~/store";
 import { cn } from "~/lib/utils";
-import type { WsRpcClient } from "~/rpc/wsRpcClient";
+import type { WsRpcClient } from "@ryco/client-runtime/rpc";
 import type { SidebarWorktreeSummary } from "~/types";
 import { workItemStateLabel } from "~/lib/workItemState";
 import { AtlassianJiraIcon } from "../Icons";

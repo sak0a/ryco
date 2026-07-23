@@ -2,7 +2,7 @@ import { EnvironmentId } from "@ryco/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createEnvironmentConnection } from "./connection";
-import type { WsRpcClient } from "~/rpc/wsRpcClient";
+import type { WsRpcClient } from "@ryco/client-runtime/rpc";
 
 function createTestClient() {
   const lifecycleListeners = new Set<(event: any) => void>();

@@ -21,7 +21,7 @@ import {
   onWelcome,
   resetServerStateForTests,
   startServerStateSync,
-} from "./serverState";
+} from "./serverState.ts";
 
 function registerListener<T>(listeners: Set<(event: T) => void>, listener: (event: T) => void) {
   listeners.add(listener);

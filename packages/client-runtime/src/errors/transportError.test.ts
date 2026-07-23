@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { isTransportConnectionErrorMessage, sanitizeThreadErrorMessage } from "./transportError";
+import { isTransportConnectionErrorMessage, sanitizeThreadErrorMessage } from "./transportError.ts";
 
 describe("transportError", () => {
   it("detects websocket transport failures", () => {

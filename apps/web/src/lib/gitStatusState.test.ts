@@ -1,8 +1,8 @@
 import { EnvironmentId, type VcsStatusResult } from "@ryco/contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import type { WsRpcClient } from "../rpc/wsRpcClient";
-import { resetAppAtomRegistryForTests } from "../rpc/atomRegistry";
+import type { WsRpcClient } from "@ryco/client-runtime/rpc";
+import { resetAppAtomRegistryForTests } from "@ryco/client-runtime/rpc";
 import {
   getGitStatusSnapshot,
   resetGitStatusStateForTests,

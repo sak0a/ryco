@@ -9,7 +9,7 @@ import type {
 } from "@ryco/contracts";
 
 import { requireEnvironmentConnection } from "~/environments/runtime";
-import { createKeyedQueryRegistry, defineKeyedQueryByKey, KEY_SEP } from "./keyedQuery";
+import { createKeyedQueryRegistry, defineKeyedQueryByKey, KEY_SEP } from "@ryco/client-runtime/rpc";
 
 // ---------------------------------------------------------------------------
 // Atom-backed work-item reads.
@@ -70,7 +70,7 @@ const workItemsRegistry = createKeyedQueryRegistry<WorkItemQueryState<unknown>>(
 
 const { controllers, setQueryState, runController } = workItemsRegistry;
 
-export type WorkItemQuery<TInput, TData> = import("./keyedQuery").KeyedQueryByKey<
+export type WorkItemQuery<TInput, TData> = import("@ryco/client-runtime/rpc").KeyedQueryByKey<
   TInput,
   TData,
   WorkItemQueryState<TData>

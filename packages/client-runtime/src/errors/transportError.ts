@@ -1,4 +1,4 @@
-const TRANSPORT_ERROR_PATTERNS = [
+export const TRANSPORT_ERROR_PATTERNS = [
   /\bSocketCloseError\b/i,
   /\bSocketOpenError\b/i,
   /Unable to connect to the Ryco server WebSocket\./i,

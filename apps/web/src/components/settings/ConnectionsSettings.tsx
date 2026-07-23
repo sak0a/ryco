@@ -82,7 +82,7 @@ import {
   type ServerClientSessionRecord,
   type ServerPairingLinkRecord,
 } from "~/environments/primary";
-import type { WsRpcClient } from "~/rpc/wsRpcClient";
+import type { WsRpcClient } from "@ryco/client-runtime/rpc";
 import {
   type SavedEnvironmentRecord,
   type SavedEnvironmentRuntimeState,

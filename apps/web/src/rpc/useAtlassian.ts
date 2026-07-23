@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "r
 import { Atom } from "effect/unstable/reactivity";
 
 import { requireEnvironmentConnection } from "~/environments/runtime";
-import { appAtomRegistry } from "./atomRegistry";
+import { appAtomRegistry } from "@ryco/client-runtime/rpc";
 import { useAsyncMutation } from "./useWorkItems";
 import { invalidateWorkItems } from "./workItemsAtoms";
 import {

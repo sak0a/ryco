@@ -1,7 +1,7 @@
 import { ORCHESTRATION_WS_METHODS, type RelayEffectiveRole, WS_METHODS } from "@ryco/contracts";
 import { hostedRoleAllows } from "@ryco/shared/rpcAccessPolicy";
 
-import type { WsProtocolLifecycleHandlers } from "../rpc/protocol";
+import type { WsProtocolLifecycleHandlers } from "@ryco/client-runtime/rpc";
 import { hostedHubApi, HostedHubApiError } from "./api";
 import { HostedReconnectPolicy } from "./reconnectPolicy";
 import {

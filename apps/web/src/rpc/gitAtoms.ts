@@ -7,7 +7,7 @@ import {
 import { Atom } from "effect/unstable/reactivity";
 
 import { readEnvironmentApi } from "../environmentApi";
-import { appAtomRegistry } from "./atomRegistry";
+import { appAtomRegistry } from "@ryco/client-runtime/rpc";
 
 // ---------------------------------------------------------------------------
 // Scoped invalidation

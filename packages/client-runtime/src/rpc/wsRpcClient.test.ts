@@ -5,7 +5,7 @@ import type {
 } from "@ryco/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-vi.mock("./wsTransport", () => ({
+vi.mock("./wsTransport.ts", () => ({
   WsTransport: class WsTransport {
     dispose = vi.fn(async () => undefined);
     reconnect = vi.fn(async () => undefined);
@@ -15,8 +15,8 @@ vi.mock("./wsTransport", () => ({
   },
 }));
 
-import { createWsRpcClient } from "./wsRpcClient";
-import { type WsTransport } from "./wsTransport";
+import { createWsRpcClient } from "./wsRpcClient.ts";
+import { type WsTransport } from "./wsTransport.ts";
 
 const baseLocalStatus: VcsStatusLocalResult = {
   isRepo: true,

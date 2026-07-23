@@ -7,7 +7,7 @@ import {
   trackRpcRequestSent,
   SLOW_RPC_ACK_THRESHOLD_MS,
   MAX_TRACKED_RPC_ACK_REQUESTS,
-} from "./requestLatencyState";
+} from "./requestLatencyState.ts";
 
 describe("requestLatencyState", () => {
   beforeEach(() => {

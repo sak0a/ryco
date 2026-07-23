@@ -28,7 +28,7 @@ vi.mock("~/environments/runtime", () => ({
   })),
 }));
 
-import { resetAppAtomRegistryForTests } from "./atomRegistry";
+import { resetAppAtomRegistryForTests } from "@ryco/client-runtime/rpc";
 import {
   invalidateWorkItems,
   resetWorkItemsAtomsForTests,

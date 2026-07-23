@@ -6,7 +6,7 @@ import type {
 import { Atom } from "effect/unstable/reactivity";
 
 import { ensureEnvironmentApi, readEnvironmentApi } from "~/environmentApi";
-import { appAtomRegistry } from "./atomRegistry";
+import { appAtomRegistry } from "@ryco/client-runtime/rpc";
 
 export const DEFAULT_PROJECT_SEARCH_ENTRIES_LIMIT = 80;
 export const DEFAULT_PROJECT_SEARCH_ENTRIES_STALE_TIME_MS = 15_000;

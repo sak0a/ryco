@@ -9,7 +9,7 @@ import { Option, Schema } from "effect";
 import { Atom } from "effect/unstable/reactivity";
 
 import { ensureEnvironmentApi } from "../environmentApi";
-import { appAtomRegistry } from "./atomRegistry";
+import { appAtomRegistry } from "@ryco/client-runtime/rpc";
 
 export interface CheckpointDiffInput {
   readonly environmentId: EnvironmentId | null;

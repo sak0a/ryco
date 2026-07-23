@@ -10,7 +10,7 @@ import {
   defineKeyedQueryByKey,
   KEY_SEP,
   type KeyedQueryByKey,
-} from "./keyedQuery";
+} from "@ryco/client-runtime/rpc";
 
 const LIST_ENTRIES_STALE_TIME_MS = 0;
 const READ_FILE_STALE_TIME_MS = 0;

@@ -28,7 +28,7 @@ import {
   invalidateAtlassian,
   resetAtlassianAtomsForTests,
 } from "./atlassianAtoms";
-import { resetAppAtomRegistryForTests } from "./atomRegistry";
+import { resetAppAtomRegistryForTests } from "@ryco/client-runtime/rpc";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const OTHER_ENVIRONMENT_ID = EnvironmentId.make("environment-other");

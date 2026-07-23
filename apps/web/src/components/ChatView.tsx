@@ -210,7 +210,7 @@ import {
   useServerKeybindings,
 } from "~/rpc/serverState";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
+import { sanitizeThreadErrorMessage } from "@ryco/client-runtime/errors";
 import { useHostedRpcCapability } from "../hostedHub/capabilities";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";

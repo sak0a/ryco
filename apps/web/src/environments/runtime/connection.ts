@@ -12,7 +12,7 @@ import {
   recordPushSequenceEvent,
   recordPushSequenceSnapshot,
 } from "~/diagnostics/pushSequenceMonitor";
-import type { WsRpcClient } from "~/rpc/wsRpcClient";
+import type { WsRpcClient } from "@ryco/client-runtime/rpc";
 
 export interface EnvironmentConnection {
   readonly kind: "primary" | "saved";
