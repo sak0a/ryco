@@ -2,6 +2,7 @@ import type {
   EnvironmentId,
   OrchestrationEvent,
   OrchestrationShellSnapshot,
+  OrchestrationShellStreamEvent,
   ScopedProjectRef,
   ScopedThreadRef,
 } from "@ryco/contracts";
@@ -12,6 +13,19 @@ import type {
  * ownership and its generation fencing remain a separate interface.
  */
 export interface EnvironmentStateSink {
+  readonly prepareShellEvent: (
+    environmentId: EnvironmentId,
+    event: OrchestrationShellStreamEvent,
+  ) => unknown;
+  readonly applyShellEvent: (
+    environmentId: EnvironmentId,
+    event: OrchestrationShellStreamEvent,
+  ) => void;
+  readonly afterShellEventApplied: (
+    environmentId: EnvironmentId,
+    event: OrchestrationShellStreamEvent,
+    context: unknown,
+  ) => void;
   readonly applyOrchestrationEvents: (
     environmentId: EnvironmentId,
     events: ReadonlyArray<OrchestrationEvent>,
@@ -20,6 +34,7 @@ export interface EnvironmentStateSink {
     environmentId: EnvironmentId,
     snapshot: OrchestrationShellSnapshot,
   ) => void;
+  readonly reconcileSnapshotDerivedState: () => void;
   readonly syncProjects: (environmentId: EnvironmentId) => void;
   readonly syncThreads: (environmentId: EnvironmentId) => void;
   readonly clearThreadDraft: (ref: ScopedThreadRef) => void;
