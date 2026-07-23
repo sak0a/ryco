@@ -2,12 +2,13 @@
  * This package excludes the DOM lib so browser globals cannot creep into the
  * platform-neutral runtime. The `@ryco/contracts` sources compiled into this
  * program and the runtime's own transport modules reference a small set of
- * cross-platform web-interop globals (File/TextEncoder/TextDecoder for
- * contracts; URL, timers, console, and structural WebSocket/CloseEvent shapes
- * for the transport); declare them minimally here instead of readmitting the
- * entire DOM lib. The WebSocket interface deliberately has no constructor —
- * sockets can only enter through the platform Socket contract. These shims
- * are visible only to this package's typecheck program.
+ * cross-platform web-interop globals (File/Blob/TextEncoder/TextDecoder for
+ * contracts; URL, timers, console, AbortController/AbortSignal, and structural
+ * WebSocket/CloseEvent shapes for the transport); declare them minimally here
+ * instead of readmitting the entire DOM lib. The WebSocket interface
+ * deliberately has no constructor — sockets can only enter through the
+ * platform Socket contract. These shims are visible only to this package's
+ * typecheck program.
  */
 
 interface File extends Blob {
