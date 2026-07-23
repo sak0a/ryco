@@ -1,6 +1,6 @@
 {
   "buildCommand": "turbo build --filter @ryco/web && bun ../../scripts/apply-web-brand-assets.ts production",
-  "installCommand": "bun add -g turbo && bun install --filter '@ryco/contracts' --filter '@ryco/client-runtime' --filter '@ryco/scripts' --filter '@ryco/web'",
+  "installCommand": "bun add -g turbo && bun install --filter '@ryco/contracts' --filter '@ryco/client-runtime' --filter '@ryco/shared' --filter '@ryco/scripts' --filter '@ryco/web'",
   "rewrites": [
     {
       "source": "/(.*)",
