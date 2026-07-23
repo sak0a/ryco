@@ -9,3 +9,4 @@ export * from "./projectionTracker.ts";
 export * from "./remoteApi.ts";
 export * from "./remoteTarget.ts";
 export * from "./savedEnvironmentConnectionScheduler.ts";
+export * from "./supervision.ts";

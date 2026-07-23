@@ -1,12 +1,21 @@
-import type { EnvironmentStateSink } from "@ryco/client-runtime/connection";
+import type {
+  EnvironmentStateSink,
+  EnvironmentConnectionSupervisor,
+} from "@ryco/client-runtime/connection";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 
-import { useComposerDraftStore } from "~/composerDraftStore";
+import {
+  markPromotedDraftThreadByRef,
+  markPromotedDraftThreadsByRef,
+  useComposerDraftStore,
+} from "~/composerDraftStore";
 import { getClientSettings } from "~/hooks/useSettings";
+import { collectActiveTerminalThreadIds } from "~/lib/terminalStateCleanup";
 import { deriveLogicalProjectKeyFromSettings, derivePhysicalProjectKey } from "~/logicalProject";
 import {
   useStore,
   selectProjectsAcrossEnvironments,
+  selectThreadByRef,
   selectThreadsAcrossEnvironments,
 } from "~/store";
 import { useTerminalStateStore } from "~/terminalStateStore";
@@ -16,12 +25,86 @@ import { useUiStateStore } from "~/uiStateStore";
 export function createWebEnvironmentStateSink(input: {
   readonly markProviderInvalidationNeeded: () => void;
   readonly flushProviderInvalidation: () => void;
+  readonly supervisor?: () => Pick<
+    EnvironmentConnectionSupervisor,
+    | "disposeThreadDetailSubscription"
+    | "evictIdleThreadDetailSubscriptionsToCapacity"
+    | "reconcileThreadDetailSubscriptionEvictionForEnvironment"
+    | "reconcileThreadDetailSubscriptionEvictionForThread"
+  >;
 }): EnvironmentStateSink {
   return {
+    prepareShellEvent: (environmentId, event) => {
+      const threadId =
+        event.kind === "thread-upserted"
+          ? event.thread.id
+          : event.kind === "thread-removed"
+            ? event.threadId
+            : null;
+      const threadRef = threadId ? scopeThreadRef(environmentId, threadId) : null;
+      return {
+        previousThread: threadRef ? selectThreadByRef(useStore.getState(), threadRef) : undefined,
+        threadRef,
+      };
+    },
+    applyShellEvent: (environmentId, event) =>
+      useStore.getState().applyShellEvent(event, environmentId),
+    afterShellEventApplied: (environmentId, event, context) => {
+      const { previousThread, threadRef } = context as {
+        readonly previousThread: ReturnType<typeof selectThreadByRef> | undefined;
+        readonly threadRef: ReturnType<typeof scopeThreadRef> | null;
+      };
+      switch (event.kind) {
+        case "project-upserted":
+        case "project-removed":
+          syncProjectUiFromStore();
+          return;
+        case "worktree-upserted":
+        case "worktree-removed":
+          return;
+        case "thread-upserted":
+          syncThreadUiFromStore();
+          if (!previousThread && threadRef) markPromotedDraftThreadByRef(threadRef);
+          if (
+            previousThread?.archivedAt === null &&
+            event.thread.archivedAt !== null &&
+            threadRef
+          ) {
+            useTerminalStateStore.getState().removeTerminalState(threadRef);
+          }
+          input
+            .supervisor?.()
+            .reconcileThreadDetailSubscriptionEvictionForThread(environmentId, event.thread.id);
+          input.supervisor?.().evictIdleThreadDetailSubscriptionsToCapacity();
+          return;
+        case "thread-removed":
+          if (threadRef) {
+            input.supervisor?.().disposeThreadDetailSubscription(environmentId, event.threadId);
+            useComposerDraftStore.getState().clearDraftThread(threadRef);
+            useUiStateStore.getState().clearThreadUi(scopedThreadKey(threadRef));
+            useTerminalStateStore.getState().removeTerminalState(threadRef);
+          }
+          syncThreadUiFromStore();
+      }
+    },
     applyOrchestrationEvents: (environmentId, events) =>
       useStore.getState().applyOrchestrationEvents(events, environmentId),
     syncServerShellSnapshot: (environmentId, snapshot) =>
       useStore.getState().syncServerShellSnapshot(snapshot, environmentId),
+    reconcileSnapshotDerivedState: () => {
+      syncProjectUiFromStore();
+      syncThreadUiFromStore();
+      const threads = selectThreadsAcrossEnvironments(useStore.getState());
+      const activeThreadKeys = collectActiveTerminalThreadIds({
+        snapshotThreads: threads.map((thread) => ({
+          key: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          deletedAt: null,
+          archivedAt: thread.archivedAt,
+        })),
+        draftThreadKeys: useComposerDraftStore.getState().listDraftThreadKeys(),
+      });
+      useTerminalStateStore.getState().removeOrphanedTerminalStates(activeThreadKeys);
+    },
     syncProjects: () => {
       const clientSettings = getClientSettings();
       useUiStateStore.getState().syncProjects(
@@ -51,4 +134,29 @@ export function createWebEnvironmentStateSink(input: {
     markProviderInvalidationNeeded: input.markProviderInvalidationNeeded,
     flushProviderInvalidation: input.flushProviderInvalidation,
   };
+}
+
+function syncProjectUiFromStore() {
+  const projects = selectProjectsAcrossEnvironments(useStore.getState());
+  const clientSettings = getClientSettings();
+  useUiStateStore.getState().syncProjects(
+    projects.map((project) => ({
+      key: derivePhysicalProjectKey(project),
+      logicalKey: deriveLogicalProjectKeyFromSettings(project, clientSettings),
+      cwd: project.cwd,
+    })),
+  );
+}
+
+function syncThreadUiFromStore() {
+  const threads = selectThreadsAcrossEnvironments(useStore.getState());
+  useUiStateStore.getState().syncThreads(
+    threads.map((thread) => ({
+      key: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      seedVisitedAt: thread.updatedAt ?? thread.createdAt,
+    })),
+  );
+  markPromotedDraftThreadsByRef(
+    threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
+  );
 }

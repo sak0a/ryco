@@ -11,25 +11,23 @@ import {
   ThreadId,
 } from "@ryco/contracts";
 import { Throttler } from "@tanstack/react-pacer";
-import { scopedThreadKey, scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
+import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import {
   createKnownEnvironment,
   getKnownEnvironmentWsBaseUrl,
 } from "@ryco/client-runtime/knownEnvironment";
 import {
+  createEnvironmentConnectionSupervisor,
+  SavedEnvironmentConnectionCancelledError,
+} from "@ryco/client-runtime/connection";
+export {
   classifyProjectionSnapshot,
-  createProjectionTracker,
   shouldApplyProjectionEvent,
   shouldApplyProjectionSnapshot,
 } from "@ryco/client-runtime/connection";
 
-import {
-  markPromotedDraftThreadByRef,
-  markPromotedDraftThreadsByRef,
-  useComposerDraftStore,
-} from "~/composerDraftStore";
+import { markPromotedDraftThreadByRef, useComposerDraftStore } from "~/composerDraftStore";
 import { ensureLocalApi } from "~/localApi";
-import { collectActiveTerminalThreadIds } from "~/lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "~/orchestrationEventEffects";
 import { invalidateProjectSearchEntries } from "~/rpc/projectAtoms";
 import { invalidateAllCheckpointDiffs } from "~/rpc/providerAtoms";
@@ -58,25 +56,13 @@ import {
   writeSavedEnvironmentBearerToken,
 } from "./catalog";
 import { createEnvironmentConnection, type EnvironmentConnection } from "./connection";
-import {
-  useStore,
-  selectProjectsAcrossEnvironments,
-  selectSidebarThreadSummaryByRef,
-  selectThreadByRef,
-  selectThreadsAcrossEnvironments,
-} from "~/store";
+import { useStore, selectSidebarThreadSummaryByRef, selectThreadByRef } from "~/store";
 import { useTerminalStateStore } from "~/terminalStateStore";
-import { useUiStateStore } from "~/uiStateStore";
 import type { WsProtocolCloseContext } from "@ryco/client-runtime/rpc";
 import { getServerConfig } from "../../rpc/serverState";
 import { WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
 import { appendVersionMismatchHint, resolveServerConfigVersionMismatch } from "../../versionSkew";
-import {
-  deriveLogicalProjectKeyFromSettings,
-  derivePhysicalProjectKey,
-} from "../../logicalProject";
-import { getClientSettings } from "~/hooks/useSettings";
 import { markStartupPhase, measureStartupPhase } from "~/perf/startupInstrumentation";
 import { isHostedHubMode } from "~/env";
 import {
@@ -86,35 +72,7 @@ import {
   useHostedHubStore,
 } from "~/hostedHub/state";
 import { getHostedRelayAttemptFactory } from "~/hostedHub/transport";
-import {
-  orderSavedEnvironmentConnectionQueue,
-  runSavedEnvironmentConnectionQueue,
-} from "./savedEnvironmentConnectionScheduler";
 import { createWebEnvironmentStateSink } from "./environmentStateSink";
-
-type EnvironmentServiceState = {
-  readonly queryInvalidationThrottler: Throttler<() => void>;
-  refCount: number;
-  stop: () => void;
-};
-
-type ThreadDetailSubscriptionEntry = {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  unsubscribe: () => void;
-  unsubscribeConnectionListener: (() => void) | null;
-  refCount: number;
-  lastAccessedAt: number;
-  evictionTimeoutId: ReturnType<typeof setTimeout> | null;
-};
-
-const environmentConnections = new Map<EnvironmentId, EnvironmentConnection>();
-class SavedEnvironmentConnectionCancelledError extends Error {
-  constructor(environmentId: EnvironmentId) {
-    super(`Saved environment ${environmentId} connection was cancelled.`);
-    this.name = "SavedEnvironmentConnectionCancelledError";
-  }
-}
 
 function isSavedEnvironmentConnectionCancelledError(
   error: unknown,
@@ -122,56 +80,97 @@ function isSavedEnvironmentConnectionCancelledError(
   return error instanceof SavedEnvironmentConnectionCancelledError;
 }
 
-interface PendingSavedEnvironmentConnection {
-  cancelled: boolean;
-  readonly promise: Promise<EnvironmentConnection>;
-}
-
-const pendingSavedEnvironmentConnections = new Map<
-  EnvironmentId,
-  PendingSavedEnvironmentConnection
->();
-const environmentConnectionListeners = new Set<() => void>();
-const threadDetailSubscriptions = new Map<string, ThreadDetailSubscriptionEntry>();
-const projectionTracker = createProjectionTracker();
-
-let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
 const environmentStateSink = createWebEnvironmentStateSink({
   markProviderInvalidationNeeded: () => {
     needsProviderInvalidation = true;
-    void activeService?.queryInvalidationThrottler.maybeExecute();
+    getEnvironmentSupervisor().requestProviderInvalidation();
   },
   flushProviderInvalidation: () => {
     needsProviderInvalidation = false;
     invalidateAllCheckpointDiffs();
     invalidateProjectSearchEntries();
   },
+  supervisor: getEnvironmentSupervisor,
 });
-let lastBrowserHiddenAt: number | null = null;
-let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
-
-// Thread detail subscription cache policy:
-// - Active consumers keep a subscription retained via refCount.
-// - Released subscriptions stay warm for a longer idle TTL to avoid churn
-//   while moving around the UI.
-// - Threads with active work or pending user action are sticky and are never
-//   evicted while they remain non-idle.
-// - Capacity eviction only targets idle cached subscriptions.
-const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 5 * 60 * 1000;
-const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
-const BROWSER_RESUME_RECONNECT_COOLDOWN_MS = 2_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
-const SAVED_ENVIRONMENT_STARTUP_DELAY_MS = 2500;
-const SAVED_ENVIRONMENT_CONNECT_CONCURRENCY = 2;
 const NOOP = () => undefined;
 const SSH_HTTP_STATUS_RE = /^\[ssh_http:(\d+)\]\s/u;
+let lastBrowserHiddenAt: number | null = null;
 
 let primaryShellSnapshotApplied = false;
 let resolvePrimaryShellSnapshotApplied: (() => void) | null = null;
 let primaryShellSnapshotAppliedPromise = new Promise<void>((resolve) => {
   resolvePrimaryShellSnapshotApplied = resolve;
 });
+let environmentSupervisor: ReturnType<
+  typeof createEnvironmentConnectionSupervisor<SavedEnvironmentRecord>
+> | null = null;
+
+function getEnvironmentSupervisor() {
+  if (environmentSupervisor) {
+    return environmentSupervisor;
+  }
+
+  environmentSupervisor = createEnvironmentConnectionSupervisor({
+    isHostedMode: isHostedHubMode,
+    now: Date.now,
+    setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+    clearTimeout: (timeoutId) => globalThis.clearTimeout(timeoutId),
+    createInvalidationThrottle: () =>
+      new Throttler(
+        () => {
+          if (needsProviderInvalidation) {
+            environmentStateSink.flushProviderInvalidation();
+          }
+        },
+        { wait: 100, leading: false, trailing: true },
+      ),
+    resetProviderInvalidation: () => {
+      needsProviderInvalidation = false;
+    },
+    createPrimaryConnection: () =>
+      getPrimaryKnownEnvironment()?.environmentId ? createPrimaryEnvironmentConnection() : null,
+    listSavedEnvironmentRecords,
+    hasSavedEnvironmentRegistryHydrated,
+    waitForSavedEnvironmentRegistryHydration,
+    subscribeSavedEnvironmentRegistry: useSavedEnvironmentRegistryStore.subscribe,
+    connectSavedEnvironment: (record, isCancelled) =>
+      connectSavedEnvironment(record, undefined, isCancelled),
+    disconnectSavedEnvironment,
+    waitForPrimaryShellSnapshotApplied,
+    subscribeBrowserResume: subscribeBrowserResumeReconnects,
+    isThreadDetailSubscriptionNonIdle: (environmentId, threadId) =>
+      isNonIdleThreadDetailSubscription({ environmentId, threadId }),
+    syncThreadDetailSnapshot: (environmentId, snapshot) =>
+      useStore
+        .getState()
+        .syncServerThreadDetail((snapshot as { readonly thread: never }).thread, environmentId),
+    applyThreadDetailEvent: (environmentId, event) =>
+      applyEnvironmentThreadDetailEvent(event as OrchestrationEvent, environmentId),
+    stateSink: environmentStateSink,
+    onShellSnapshotReceived: (environmentId) => {
+      if (environmentId === getPrimaryKnownEnvironment()?.environmentId) {
+        markStartupPhase("primary-shell-snapshot-received");
+      }
+    },
+    onShellSnapshotCurrent: () => undefined,
+    onShellSnapshotApplied: (environmentId) => {
+      if (environmentId !== getPrimaryKnownEnvironment()?.environmentId) return;
+      markStartupPhase("primary-shell-snapshot-applied");
+      measureStartupPhase(
+        "primary-shell-snapshot",
+        "primary-shell-snapshot-received",
+        "primary-shell-snapshot-applied",
+      );
+      markStartupPhase("primary-shell-usable");
+      measureStartupPhase("primary-shell-ready", "root-before-load-ready", "primary-shell-usable");
+      markPrimaryShellSnapshotApplied();
+    },
+    onShellSnapshotReady: () => undefined,
+  });
+  return environmentSupervisor;
+}
 
 function createDeferredPromise<T>() {
   let resolve: ((value: T) => void) | null = null;
@@ -229,49 +228,11 @@ async function waitForConfigSnapshot(
   });
 }
 
-function createSavedEnvironmentSyncScheduler() {
-  let activeSync: Promise<void> | null = null;
-  let queued = false;
-
-  const run = async (): Promise<void> => {
-    do {
-      queued = false;
-      await syncSavedEnvironmentConnections(listSavedEnvironmentRecords());
-    } while (queued);
-  };
-
-  return () => {
-    if (activeSync) {
-      queued = true;
-      return activeSync;
-    }
-
-    activeSync = run()
-      .catch(() => undefined)
-      .finally(() => {
-        activeSync = null;
-      });
-
-    return activeSync;
-  };
-}
-export { classifyProjectionSnapshot, shouldApplyProjectionEvent, shouldApplyProjectionSnapshot };
-function getThreadDetailSubscriptionKey(environmentId: EnvironmentId, threadId: ThreadId): string {
-  return scopedThreadKey(scopeThreadRef(environmentId, threadId));
-}
-
-function clearThreadDetailSubscriptionEviction(
-  entry: ThreadDetailSubscriptionEntry,
-): ThreadDetailSubscriptionEntry {
-  if (entry.evictionTimeoutId !== null) {
-    clearTimeout(entry.evictionTimeoutId);
-    entry.evictionTimeoutId = null;
-  }
-  return entry;
-}
-
-function isNonIdleThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): boolean {
-  const threadRef = scopeThreadRef(entry.environmentId, entry.threadId);
+function isNonIdleThreadDetailSubscription(input: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+}): boolean {
+  const threadRef = scopeThreadRef(input.environmentId, input.threadId);
   const state = useStore.getState();
   const sidebarThread = selectSidebarThreadSummaryByRef(state, threadRef);
 
@@ -315,243 +276,15 @@ function isNonIdleThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry)
   );
 }
 
-function shouldEvictThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): boolean {
-  return entry.refCount === 0 && !isNonIdleThreadDetailSubscription(entry);
-}
-
-function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): boolean {
-  if (entry.unsubscribeConnectionListener !== null) {
-    entry.unsubscribeConnectionListener();
-    entry.unsubscribeConnectionListener = null;
-  }
-  if (entry.unsubscribe !== NOOP) {
-    return true;
-  }
-
-  const connection = readEnvironmentConnection(entry.environmentId);
-  if (!connection) {
-    return false;
-  }
-
-  entry.unsubscribe = connection.client.orchestration.subscribeThread(
-    { threadId: entry.threadId },
-    (item) => {
-      if (item.kind === "snapshot") {
-        useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
-        return;
-      }
-      applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);
-    },
-  );
-  return true;
-}
-
-function watchThreadDetailSubscriptionConnection(entry: ThreadDetailSubscriptionEntry): void {
-  if (entry.unsubscribeConnectionListener !== null) {
-    return;
-  }
-
-  entry.unsubscribeConnectionListener = subscribeEnvironmentConnections(() => {
-    if (attachThreadDetailSubscription(entry)) {
-      entry.lastAccessedAt = Date.now();
-    }
-  });
-  attachThreadDetailSubscription(entry);
-}
-
-function disposeThreadDetailSubscriptionByKey(key: string): boolean {
-  const entry = threadDetailSubscriptions.get(key);
-  if (!entry) {
-    return false;
-  }
-
-  clearThreadDetailSubscriptionEviction(entry);
-  entry.unsubscribeConnectionListener?.();
-  entry.unsubscribeConnectionListener = null;
-  threadDetailSubscriptions.delete(key);
-  entry.unsubscribe();
-  entry.unsubscribe = NOOP;
-  return true;
-}
-
 function disposeThreadDetailSubscriptionsForEnvironment(environmentId: EnvironmentId): void {
-  for (const [key, entry] of threadDetailSubscriptions) {
-    if (entry.environmentId === environmentId) {
-      disposeThreadDetailSubscriptionByKey(key);
-    }
-  }
-}
-
-function detachThreadDetailSubscriptionsForEnvironment(environmentId: EnvironmentId): void {
-  for (const entry of threadDetailSubscriptions.values()) {
-    if (entry.environmentId !== environmentId) {
-      continue;
-    }
-    entry.unsubscribe();
-    entry.unsubscribe = NOOP;
-    watchThreadDetailSubscriptionConnection(entry);
-  }
-}
-
-function attachThreadDetailSubscriptionsForEnvironment(environmentId: EnvironmentId): void {
-  for (const entry of threadDetailSubscriptions.values()) {
-    if (entry.environmentId === environmentId) {
-      attachThreadDetailSubscription(entry);
-    }
-  }
-}
-
-function reconcileThreadDetailSubscriptionsForEnvironment(
-  environmentId: EnvironmentId,
-  threadIds: ReadonlyArray<ThreadId>,
-): void {
-  const activeThreadIds = new Set(threadIds);
-  for (const [key, entry] of threadDetailSubscriptions) {
-    if (entry.environmentId === environmentId && !activeThreadIds.has(entry.threadId)) {
-      disposeThreadDetailSubscriptionByKey(key);
-    }
-  }
-}
-
-function scheduleThreadDetailSubscriptionEviction(entry: ThreadDetailSubscriptionEntry): void {
-  clearThreadDetailSubscriptionEviction(entry);
-  if (!shouldEvictThreadDetailSubscription(entry)) {
-    return;
-  }
-
-  entry.evictionTimeoutId = setTimeout(() => {
-    const currentEntry = threadDetailSubscriptions.get(
-      getThreadDetailSubscriptionKey(entry.environmentId, entry.threadId),
-    );
-    if (!currentEntry) {
-      return;
-    }
-
-    currentEntry.evictionTimeoutId = null;
-    if (!shouldEvictThreadDetailSubscription(currentEntry)) {
-      return;
-    }
-    disposeThreadDetailSubscriptionByKey(
-      getThreadDetailSubscriptionKey(entry.environmentId, entry.threadId),
-    );
-  }, THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS);
-}
-
-function evictIdleThreadDetailSubscriptionsToCapacity(): void {
-  if (threadDetailSubscriptions.size <= MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS) {
-    return;
-  }
-
-  const idleEntries = [...threadDetailSubscriptions.entries()]
-    .filter(([, entry]) => shouldEvictThreadDetailSubscription(entry))
-    .toSorted(([, left], [, right]) => left.lastAccessedAt - right.lastAccessedAt);
-
-  for (const [key] of idleEntries) {
-    if (threadDetailSubscriptions.size <= MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS) {
-      return;
-    }
-    disposeThreadDetailSubscriptionByKey(key);
-  }
-}
-
-function reconcileThreadDetailSubscriptionEvictionState(
-  entry: ThreadDetailSubscriptionEntry,
-): void {
-  clearThreadDetailSubscriptionEviction(entry);
-  if (!shouldEvictThreadDetailSubscription(entry)) {
-    return;
-  }
-
-  scheduleThreadDetailSubscriptionEviction(entry);
-}
-
-function reconcileThreadDetailSubscriptionEvictionForThread(
-  environmentId: EnvironmentId,
-  threadId: ThreadId,
-): void {
-  const entry = threadDetailSubscriptions.get(
-    getThreadDetailSubscriptionKey(environmentId, threadId),
-  );
-  if (!entry) {
-    return;
-  }
-
-  reconcileThreadDetailSubscriptionEvictionState(entry);
-}
-
-function reconcileThreadDetailSubscriptionEvictionForEnvironment(
-  environmentId: EnvironmentId,
-): void {
-  for (const entry of threadDetailSubscriptions.values()) {
-    if (entry.environmentId === environmentId) {
-      reconcileThreadDetailSubscriptionEvictionState(entry);
-    }
-  }
-  evictIdleThreadDetailSubscriptionsToCapacity();
+  getEnvironmentSupervisor().disposeThreadDetailSubscriptionsForEnvironment(environmentId);
 }
 
 export function retainThreadDetailSubscription(
   environmentId: EnvironmentId,
   threadId: ThreadId,
 ): () => void {
-  const key = getThreadDetailSubscriptionKey(environmentId, threadId);
-  const existing = threadDetailSubscriptions.get(key);
-  if (existing) {
-    clearThreadDetailSubscriptionEviction(existing);
-    existing.refCount += 1;
-    existing.lastAccessedAt = Date.now();
-    if (!attachThreadDetailSubscription(existing)) {
-      watchThreadDetailSubscriptionConnection(existing);
-    }
-    let released = false;
-    return () => {
-      if (released) {
-        return;
-      }
-      released = true;
-      existing.refCount = Math.max(0, existing.refCount - 1);
-      existing.lastAccessedAt = Date.now();
-      if (existing.refCount === 0) {
-        reconcileThreadDetailSubscriptionEvictionState(existing);
-        evictIdleThreadDetailSubscriptionsToCapacity();
-      }
-    };
-  }
-
-  const entry: ThreadDetailSubscriptionEntry = {
-    environmentId,
-    threadId,
-    unsubscribe: NOOP,
-    unsubscribeConnectionListener: null,
-    refCount: 1,
-    lastAccessedAt: Date.now(),
-    evictionTimeoutId: null,
-  };
-  threadDetailSubscriptions.set(key, entry);
-  if (!attachThreadDetailSubscription(entry)) {
-    watchThreadDetailSubscriptionConnection(entry);
-  }
-  evictIdleThreadDetailSubscriptionsToCapacity();
-
-  let released = false;
-  return () => {
-    if (released) {
-      return;
-    }
-    released = true;
-    entry.refCount = Math.max(0, entry.refCount - 1);
-    entry.lastAccessedAt = Date.now();
-    if (entry.refCount === 0) {
-      reconcileThreadDetailSubscriptionEvictionState(entry);
-      evictIdleThreadDetailSubscriptionsToCapacity();
-    }
-  };
-}
-
-function emitEnvironmentConnectionRegistryChange() {
-  for (const listener of environmentConnectionListeners) {
-    listener();
-  }
+  return getEnvironmentSupervisor().retainThreadDetailSubscription(environmentId, threadId);
 }
 
 function getRuntimeErrorFields(error: unknown) {
@@ -864,47 +597,6 @@ function coalesceOrchestrationUiEvents(
   return coalesced;
 }
 
-function syncProjectUiFromStore() {
-  const projects = selectProjectsAcrossEnvironments(useStore.getState());
-  const clientSettings = getClientSettings();
-  useUiStateStore.getState().syncProjects(
-    projects.map((project) => ({
-      key: derivePhysicalProjectKey(project),
-      logicalKey: deriveLogicalProjectKeyFromSettings(project, clientSettings),
-      cwd: project.cwd,
-    })),
-  );
-}
-
-function syncThreadUiFromStore() {
-  const threads = selectThreadsAcrossEnvironments(useStore.getState());
-  useUiStateStore.getState().syncThreads(
-    threads.map((thread) => ({
-      key: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      seedVisitedAt: thread.updatedAt ?? thread.createdAt,
-    })),
-  );
-  markPromotedDraftThreadsByRef(
-    threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
-  );
-}
-
-function reconcileSnapshotDerivedState() {
-  syncProjectUiFromStore();
-  syncThreadUiFromStore();
-
-  const threads = selectThreadsAcrossEnvironments(useStore.getState());
-  const activeThreadKeys = collectActiveTerminalThreadIds({
-    snapshotThreads: threads.map((thread) => ({
-      key: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      deletedAt: null,
-      archivedAt: thread.archivedAt,
-    })),
-    draftThreadKeys: useComposerDraftStore.getState().listDraftThreadKeys(),
-  });
-  useTerminalStateStore.getState().removeOrphanedTerminalStates(activeThreadKeys);
-}
-
 export function shouldApplyTerminalEvent(input: {
   serverThreadArchivedAt: string | null | undefined;
   hasDraftThread: boolean;
@@ -966,7 +658,7 @@ function applyRecoveredEventBatch(
     environmentStateSink.clearTerminalState(scopeThreadRef(environmentId, threadId));
   }
 
-  reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
+  getEnvironmentSupervisor().reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
 }
 
 export function applyEnvironmentThreadDetailEvent(
@@ -976,111 +668,24 @@ export function applyEnvironmentThreadDetailEvent(
   applyRecoveredEventBatch([event], environmentId);
 }
 
-function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) {
-  if (
-    !shouldApplyProjectionEvent({
-      current: projectionTracker.read(environmentId),
-      sequence: event.sequence,
-    })
-  ) {
-    return;
-  }
-
-  const threadId =
-    event.kind === "thread-upserted"
-      ? event.thread.id
-      : event.kind === "thread-removed"
-        ? event.threadId
-        : null;
-  const threadRef = threadId ? scopeThreadRef(environmentId, threadId) : null;
-  const previousThread = threadRef ? selectThreadByRef(useStore.getState(), threadRef) : undefined;
-
-  useStore.getState().applyShellEvent(event, environmentId);
-  projectionTracker.markEvent(environmentId, event.sequence);
-
-  switch (event.kind) {
-    case "project-upserted":
-    case "project-removed":
-      syncProjectUiFromStore();
-      return;
-    case "worktree-upserted":
-    case "worktree-removed":
-      return;
-    case "thread-upserted":
-      syncThreadUiFromStore();
-      if (!previousThread && threadRef) {
-        markPromotedDraftThreadByRef(threadRef);
-      }
-      if (previousThread?.archivedAt === null && event.thread.archivedAt !== null && threadRef) {
-        useTerminalStateStore.getState().removeTerminalState(threadRef);
-      }
-      reconcileThreadDetailSubscriptionEvictionForThread(environmentId, event.thread.id);
-      evictIdleThreadDetailSubscriptionsToCapacity();
-      return;
-    case "thread-removed":
-      if (threadRef) {
-        disposeThreadDetailSubscriptionByKey(scopedThreadKey(threadRef));
-        useComposerDraftStore.getState().clearDraftThread(threadRef);
-        useUiStateStore.getState().clearThreadUi(scopedThreadKey(threadRef));
-        useTerminalStateStore.getState().removeTerminalState(threadRef);
-      }
-      syncThreadUiFromStore();
-      return;
-  }
-}
-
 function createEnvironmentConnectionHandlers(hostedGeneration: number | null = null) {
   const acceptsEvent = () =>
     hostedGeneration === null || useHostedHubStore.getState().generation === hostedGeneration;
   return {
     applyShellEvent: (event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) => {
       if (!acceptsEvent()) return;
-      applyShellEvent(event, environmentId);
+      getEnvironmentSupervisor().applyShellEvent(event, environmentId);
     },
     syncShellSnapshot: (snapshot: OrchestrationShellSnapshot, environmentId: EnvironmentId) => {
       if (!acceptsEvent()) return;
-      const primaryEnvironmentId = getPrimaryKnownEnvironment()?.environmentId;
-      if (environmentId === primaryEnvironmentId) {
-        markStartupPhase("primary-shell-snapshot-received");
-      }
-      const snapshotClassification = classifyProjectionSnapshot({
-        current: projectionTracker.read(environmentId),
-        next: snapshot,
+      getEnvironmentSupervisor().syncShellSnapshot(snapshot, environmentId, {
+        onCurrent: () => {
+          if (hostedGeneration !== null) markHostedSessionReady(environmentId, hostedGeneration);
+        },
+        onReady: () => {
+          if (hostedGeneration !== null) markHostedSessionReady(environmentId, hostedGeneration);
+        },
       });
-      if (snapshotClassification === "current") {
-        if (hostedGeneration !== null) {
-          markHostedSessionReady(environmentId, hostedGeneration);
-        }
-        return;
-      }
-      if (snapshotClassification === "stale") {
-        return;
-      }
-
-      environmentStateSink.syncServerShellSnapshot(environmentId, snapshot);
-      if (environmentId === primaryEnvironmentId) {
-        markStartupPhase("primary-shell-snapshot-applied");
-        measureStartupPhase(
-          "primary-shell-snapshot",
-          "primary-shell-snapshot-received",
-          "primary-shell-snapshot-applied",
-        );
-        markStartupPhase("primary-shell-usable");
-        measureStartupPhase(
-          "primary-shell-ready",
-          "root-before-load-ready",
-          "primary-shell-usable",
-        );
-        markPrimaryShellSnapshotApplied();
-      }
-      projectionTracker.markSnapshot(environmentId, snapshot);
-      if (hostedGeneration !== null) markHostedSessionReady(environmentId, hostedGeneration);
-      reconcileThreadDetailSubscriptionsForEnvironment(
-        environmentId,
-        snapshot.threads.map((thread) => thread.id),
-      );
-      reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
-      reconcileSnapshotDerivedState();
     },
     applyTerminalEvent: (event: TerminalEvent, environmentId: EnvironmentId) => {
       if (!acceptsEvent()) return;
@@ -1250,28 +855,11 @@ async function refreshSavedEnvironmentMetadata(
 }
 
 function registerConnection(connection: EnvironmentConnection): EnvironmentConnection {
-  const existing = environmentConnections.get(connection.environmentId);
-  if (existing && existing !== connection) {
-    throw new Error(`Environment ${connection.environmentId} already has an active connection.`);
-  }
-  environmentConnections.set(connection.environmentId, connection);
-  attachThreadDetailSubscriptionsForEnvironment(connection.environmentId);
-  emitEnvironmentConnectionRegistryChange();
-  return connection;
+  return getEnvironmentSupervisor().register(connection);
 }
 
 async function removeConnection(environmentId: EnvironmentId): Promise<boolean> {
-  const connection = environmentConnections.get(environmentId);
-  if (!connection) {
-    return false;
-  }
-
-  projectionTracker.clearEnvironment(environmentId);
-  environmentConnections.delete(environmentId);
-  emitEnvironmentConnectionRegistryChange();
-  detachThreadDetailSubscriptionsForEnvironment(environmentId);
-  await connection.dispose();
-  return true;
+  return await getEnvironmentSupervisor().remove(environmentId);
 }
 
 function createPrimaryEnvironmentConnection(): EnvironmentConnection {
@@ -1280,7 +868,7 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
     throw new Error("Unable to resolve the primary environment.");
   }
 
-  const existing = environmentConnections.get(knownEnvironment.environmentId);
+  const existing = getEnvironmentSupervisor().read(knownEnvironment.environmentId);
   if (existing) {
     return existing;
   }
@@ -1305,12 +893,13 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
 }
 
 function maybeCreatePrimaryEnvironmentConnection(): EnvironmentConnection | null {
-  return getPrimaryKnownEnvironment()?.environmentId ? createPrimaryEnvironmentConnection() : null;
+  return getPrimaryKnownEnvironment()?.environmentId
+    ? getEnvironmentSupervisor().connectPrimary()
+    : null;
 }
 
 export async function disconnectPrimaryEnvironment(): Promise<void> {
-  const connection = [...environmentConnections.values()].find((entry) => entry.kind === "primary");
-  if (connection) await removeConnection(connection.environmentId).catch(() => false);
+  await getEnvironmentSupervisor().disconnectPrimary();
 }
 
 export function connectPrimaryEnvironment(): EnvironmentConnection | null {
@@ -1326,208 +915,149 @@ async function ensureSavedEnvironmentConnection(
     readonly serverConfig?: ServerConfig | null;
   },
 ): Promise<EnvironmentConnection> {
-  const existing = environmentConnections.get(record.environmentId);
-  if (existing) {
-    return existing;
-  }
+  return await getEnvironmentSupervisor().ensureSavedEnvironmentConnection(record, (isCancelled) =>
+    connectSavedEnvironment(record, options, isCancelled),
+  );
+}
 
-  const pending = pendingSavedEnvironmentConnections.get(record.environmentId);
-  if (pending) {
-    return pending.promise;
-  }
+async function connectSavedEnvironment(
+  record: SavedEnvironmentRecord,
+  options?: {
+    readonly client?: WsRpcClient;
+    readonly bearerToken?: string;
+    readonly role?: AuthSessionRole | null;
+    readonly serverConfig?: ServerConfig | null;
+  },
+  isCancelled: () => boolean = () => false,
+): Promise<EnvironmentConnection> {
+  let activeRecord = record;
+  let roleHint = options?.role ?? null;
+  let bearerToken =
+    options?.bearerToken ?? (await readSavedEnvironmentBearerToken(record.environmentId));
+  let clientOverride = options?.client;
 
-  const pendingEntry: PendingSavedEnvironmentConnection = {
-    cancelled: false,
-    promise: Promise.resolve().then(async () => {
-      let activeRecord = record;
-      let roleHint = options?.role ?? null;
-      let bearerToken =
-        options?.bearerToken ?? (await readSavedEnvironmentBearerToken(record.environmentId));
-      if (!bearerToken) {
-        if (record.desktopSsh) {
-          const issued = await issueDesktopSshBearerSession(record);
-          activeRecord = issued.record;
-          bearerToken = issued.bearerToken;
-          roleHint = issued.role;
-        } else {
-          await removeSavedEnvironmentBearerToken(record.environmentId).catch(() => undefined);
-          useSavedEnvironmentRuntimeStore.getState().patch(record.environmentId, {
-            authState: "requires-auth",
-            role: null,
-            connectionState: "disconnected",
-            lastError: "Saved environment is missing its saved credential. Pair it again.",
-            lastErrorAt: isoNow(),
-          });
-          throw new Error("Saved environment is missing its saved credential.");
-        }
+  for (;;) {
+    if (!bearerToken) {
+      if (record.desktopSsh) {
+        const issued = await issueDesktopSshBearerSession(activeRecord);
+        activeRecord = issued.record;
+        bearerToken = issued.bearerToken;
+        roleHint = issued.role;
       } else {
-        const prepared = await prepareSavedEnvironmentRecordForConnection(record);
-        activeRecord = prepared.record;
+        await removeSavedEnvironmentBearerToken(record.environmentId).catch(() => undefined);
+        useSavedEnvironmentRuntimeStore.getState().patch(record.environmentId, {
+          authState: "requires-auth",
+          role: null,
+          connectionState: "disconnected",
+          lastError: "Saved environment is missing its saved credential. Pair it again.",
+          lastErrorAt: isoNow(),
+        });
+        throw new Error("Saved environment is missing its saved credential.");
       }
+    }
+    const prepared = await prepareSavedEnvironmentRecordForConnection(activeRecord);
+    activeRecord = prepared.record;
 
-      const activeBearerToken = bearerToken;
-      const client =
-        options?.client ??
-        createSavedEnvironmentClient(activeRecord.environmentId, activeBearerToken);
-      const initialConfigSnapshot = createDeferredPromise<ServerConfig>();
-      const knownEnvironment = createKnownEnvironment({
-        id: activeRecord.environmentId,
-        label: activeRecord.label,
-        source: "manual",
-        target: {
-          httpBaseUrl: activeRecord.httpBaseUrl,
-          wsBaseUrl: activeRecord.wsBaseUrl,
-        },
-      });
-      const connection = createEnvironmentConnection({
-        kind: "saved",
-        knownEnvironment: {
-          ...knownEnvironment,
-          environmentId: activeRecord.environmentId,
-        },
-        client,
-        refreshMetadata: async () => {
-          await refreshSavedEnvironmentMetadata(
-            activeRecord.environmentId,
-            activeBearerToken,
-            client,
-          );
-        },
-        onConfigSnapshot: (config) => {
-          initialConfigSnapshot.resolve(config);
-          useSavedEnvironmentRuntimeStore.getState().patch(activeRecord.environmentId, {
-            descriptor: config.environment,
-            serverConfig: config,
-          });
-        },
-        onWelcome: (payload) => {
-          useSavedEnvironmentRuntimeStore.getState().patch(activeRecord.environmentId, {
-            descriptor: payload.environment,
-          });
-        },
-        ...createEnvironmentConnectionHandlers(),
-      });
+    const activeBearerToken = bearerToken;
+    const client =
+      clientOverride ?? createSavedEnvironmentClient(activeRecord.environmentId, activeBearerToken);
+    const initialConfigSnapshot = createDeferredPromise<ServerConfig>();
+    const knownEnvironment = createKnownEnvironment({
+      id: activeRecord.environmentId,
+      label: activeRecord.label,
+      source: "manual",
+      target: {
+        httpBaseUrl: activeRecord.httpBaseUrl,
+        wsBaseUrl: activeRecord.wsBaseUrl,
+      },
+    });
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        ...knownEnvironment,
+        environmentId: activeRecord.environmentId,
+      },
+      client,
+      refreshMetadata: async () => {
+        await refreshSavedEnvironmentMetadata(
+          activeRecord.environmentId,
+          activeBearerToken,
+          client,
+        );
+      },
+      onConfigSnapshot: (config) => {
+        initialConfigSnapshot.resolve(config);
+        useSavedEnvironmentRuntimeStore.getState().patch(activeRecord.environmentId, {
+          descriptor: config.environment,
+          serverConfig: config,
+        });
+      },
+      onWelcome: (payload) => {
+        useSavedEnvironmentRuntimeStore.getState().patch(activeRecord.environmentId, {
+          descriptor: payload.environment,
+        });
+      },
+      ...createEnvironmentConnectionHandlers(),
+    });
 
+    try {
       try {
-        try {
-          const initialServerConfig =
-            options?.serverConfig ??
-            (await waitForConfigSnapshot(
-              initialConfigSnapshot.promise,
-              INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS,
-            ));
-          await refreshSavedEnvironmentMetadata(
-            activeRecord.environmentId,
-            activeBearerToken,
-            client,
-            roleHint,
-            initialServerConfig,
-          );
-        } catch (error) {
-          const isAuthError = activeRecord.desktopSsh
-            ? isSshHttpAuthError(error, 401)
-            : isRemoteEnvironmentAuthHttpError(error) && error.status === 401;
-          if (!isAuthError) {
-            throw error;
-          }
-          if (!activeRecord.desktopSsh) {
-            await removeSavedEnvironmentBearerToken(activeRecord.environmentId);
-            throw new Error("Saved environment credential expired. Pair it again.", {
-              cause: error,
-            });
-          }
-
-          const issued = await issueDesktopSshBearerSession(activeRecord);
-          activeRecord = issued.record;
-          bearerToken = issued.bearerToken;
-          roleHint = issued.role;
-          await connection.dispose().catch(() => undefined);
-          pendingSavedEnvironmentConnections.delete(activeRecord.environmentId);
-          return await ensureSavedEnvironmentConnection(activeRecord, {
-            bearerToken,
-            role: roleHint,
-            serverConfig: options?.serverConfig ?? null,
-          });
-        }
-        if (
-          pendingEntry.cancelled ||
-          pendingSavedEnvironmentConnections.get(activeRecord.environmentId) !== pendingEntry
-        ) {
-          await connection.dispose().catch(() => undefined);
-          throw new SavedEnvironmentConnectionCancelledError(activeRecord.environmentId);
-        }
-        registerConnection(connection);
-        return connection;
+        const initialServerConfig =
+          options?.serverConfig ??
+          (await waitForConfigSnapshot(
+            initialConfigSnapshot.promise,
+            INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS,
+          ));
+        await refreshSavedEnvironmentMetadata(
+          activeRecord.environmentId,
+          activeBearerToken,
+          client,
+          roleHint,
+          initialServerConfig,
+        );
       } catch (error) {
-        if (error instanceof SavedEnvironmentConnectionCancelledError) {
+        const isAuthError = activeRecord.desktopSsh
+          ? isSshHttpAuthError(error, 401)
+          : isRemoteEnvironmentAuthHttpError(error) && error.status === 401;
+        if (!isAuthError) {
           throw error;
         }
-        setRuntimeError(activeRecord.environmentId, error);
-        const removed = await removeConnection(activeRecord.environmentId).catch(() => false);
-        if (!removed) {
-          await connection.dispose().catch(() => undefined);
+        if (!activeRecord.desktopSsh) {
+          await removeSavedEnvironmentBearerToken(activeRecord.environmentId);
+          throw new Error("Saved environment credential expired. Pair it again.", {
+            cause: error,
+          });
         }
+
+        const issued = await issueDesktopSshBearerSession(activeRecord);
+        activeRecord = issued.record;
+        bearerToken = issued.bearerToken;
+        roleHint = issued.role;
+        await connection.dispose().catch(() => undefined);
+        clientOverride = undefined;
+        continue;
+      }
+      if (isCancelled()) {
+        await connection.dispose().catch(() => undefined);
+        throw new SavedEnvironmentConnectionCancelledError(activeRecord.environmentId);
+      }
+      registerConnection(connection);
+      return connection;
+    } catch (error) {
+      if (error instanceof SavedEnvironmentConnectionCancelledError) {
         throw error;
       }
-    }),
-  };
-
-  pendingSavedEnvironmentConnections.set(record.environmentId, pendingEntry);
-  return await pendingEntry.promise.finally(() => {
-    if (pendingSavedEnvironmentConnections.get(record.environmentId) === pendingEntry) {
-      pendingSavedEnvironmentConnections.delete(record.environmentId);
+      setRuntimeError(activeRecord.environmentId, error);
+      const removed = await removeConnection(activeRecord.environmentId).catch(() => false);
+      if (!removed) {
+        await connection.dispose().catch(() => undefined);
+      }
+      throw error;
     }
-  });
-}
-
-async function syncSavedEnvironmentConnections(
-  records: ReadonlyArray<SavedEnvironmentRecord>,
-): Promise<void> {
-  const expectedEnvironmentIds = new Set(records.map((record) => record.environmentId));
-  const staleEnvironmentIds = [...environmentConnections.values()]
-    .filter((connection) => connection.kind === "saved")
-    .map((connection) => connection.environmentId)
-    .filter((environmentId) => !expectedEnvironmentIds.has(environmentId));
-
-  await Promise.all(
-    staleEnvironmentIds.map((environmentId) => disconnectSavedEnvironment(environmentId)),
-  );
-  await waitForPrimaryShellSnapshotApplied(SAVED_ENVIRONMENT_STARTUP_DELAY_MS);
-  await runSavedEnvironmentConnectionQueue(orderSavedEnvironmentConnectionQueue(records), {
-    concurrency: SAVED_ENVIRONMENT_CONNECT_CONCURRENCY,
-    connect: async (record) => {
-      await ensureSavedEnvironmentConnection(record).catch(() => undefined);
-    },
-  });
-}
-
-function stopActiveService() {
-  activeService?.stop();
-  activeService = null;
-}
-
-function reconnectEnvironmentConnectionsAfterBrowserResume(reason: string): void {
-  const now = Date.now();
-  if (now - lastBrowserResumeReconnectAt < BROWSER_RESUME_RECONNECT_COOLDOWN_MS) {
-    return;
-  }
-
-  for (const connection of environmentConnections.values()) {
-    if (connection.client.isHeartbeatFresh()) {
-      continue;
-    }
-    lastBrowserResumeReconnectAt = now;
-    void connection.reconnect().catch((error) => {
-      console.warn("Environment reconnect after browser resume failed", {
-        environmentId: connection.environmentId,
-        reason,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
   }
 }
 
-function subscribeBrowserResumeReconnects(): () => void {
+function subscribeBrowserResumeReconnects(listener: (reason: string) => void): () => void {
   if (typeof document === "undefined" || typeof window === "undefined") {
     return NOOP;
   }
@@ -1539,14 +1069,14 @@ function subscribeBrowserResumeReconnects(): () => void {
     }
     if (document.visibilityState === "visible" && lastBrowserHiddenAt !== null) {
       lastBrowserHiddenAt = null;
-      reconnectEnvironmentConnectionsAfterBrowserResume("visibilitychange");
+      listener("visibilitychange");
     }
   };
 
   const handlePageShow = (event: PageTransitionEvent) => {
     if (event.persisted || lastBrowserHiddenAt !== null) {
       lastBrowserHiddenAt = null;
-      reconnectEnvironmentConnectionsAfterBrowserResume("pageshow");
+      listener("pageshow");
     }
   };
 
@@ -1559,20 +1089,17 @@ function subscribeBrowserResumeReconnects(): () => void {
 }
 
 export function subscribeEnvironmentConnections(listener: () => void): () => void {
-  environmentConnectionListeners.add(listener);
-  return () => {
-    environmentConnectionListeners.delete(listener);
-  };
+  return getEnvironmentSupervisor().subscribe(listener);
 }
 
 export function listEnvironmentConnections(): ReadonlyArray<EnvironmentConnection> {
-  return [...environmentConnections.values()];
+  return getEnvironmentSupervisor().list();
 }
 
 export function readEnvironmentConnection(
   environmentId: EnvironmentId,
 ): EnvironmentConnection | null {
-  return environmentConnections.get(environmentId) ?? null;
+  return getEnvironmentSupervisor().read(environmentId);
 }
 
 export function requireEnvironmentConnection(environmentId: EnvironmentId): EnvironmentConnection {
@@ -1589,12 +1116,8 @@ export function getPrimaryEnvironmentConnection(): EnvironmentConnection {
 
 export async function disconnectSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
   const record = getSavedEnvironmentRecord(environmentId);
-  const pendingConnection = pendingSavedEnvironmentConnections.get(environmentId);
-  if (pendingConnection) {
-    pendingConnection.cancelled = true;
-    pendingSavedEnvironmentConnections.delete(environmentId);
-  }
-  const connection = environmentConnections.get(environmentId);
+  getEnvironmentSupervisor().cancelPendingSavedEnvironmentConnection(environmentId);
+  const connection = getEnvironmentSupervisor().read(environmentId);
 
   if (connection?.kind === "saved") {
     await removeConnection(environmentId).catch(() => false);
@@ -1613,7 +1136,7 @@ export async function reconnectSavedEnvironment(environmentId: EnvironmentId): P
     throw new Error("Saved environment not found.");
   }
 
-  const connection = environmentConnections.get(environmentId);
+  const connection = getEnvironmentSupervisor().read(environmentId);
   if (!connection) {
     setRuntimeConnecting(environmentId);
     try {
@@ -1765,95 +1288,19 @@ export async function connectDesktopSshEnvironment(
 export async function ensureEnvironmentConnectionBootstrapped(
   environmentId: EnvironmentId,
 ): Promise<void> {
-  await environmentConnections.get(environmentId)?.ensureBootstrapped();
+  await getEnvironmentSupervisor().read(environmentId)?.ensureBootstrapped();
 }
 
 export function startEnvironmentConnectionService(): () => void {
-  if (activeService) {
-    const existingService = activeService;
-    existingService.refCount += 1;
-    return () => {
-      if (activeService !== existingService) {
-        return;
-      }
-      activeService.refCount -= 1;
-      if (activeService.refCount === 0) {
-        stopActiveService();
-      }
-    };
-  }
-
-  stopActiveService();
-  needsProviderInvalidation = false;
-  const queryInvalidationThrottler = new Throttler(
-    () => {
-      if (!needsProviderInvalidation) {
-        return;
-      }
-      environmentStateSink.flushProviderInvalidation();
-    },
-    {
-      wait: 100,
-      leading: false,
-      trailing: true,
-    },
-  );
-  const hostedMode = isHostedHubMode();
-  const requestSavedEnvironmentSync = createSavedEnvironmentSyncScheduler();
-
-  maybeCreatePrimaryEnvironmentConnection();
-
-  const unsubscribeSavedEnvironments = hostedMode
-    ? NOOP
-    : useSavedEnvironmentRegistryStore.subscribe(() => {
-        if (!hasSavedEnvironmentRegistryHydrated()) return;
-        void requestSavedEnvironmentSync();
-      });
-
-  if (!hostedMode) {
-    void waitForSavedEnvironmentRegistryHydration()
-      .then(() => requestSavedEnvironmentSync())
-      .catch(() => undefined);
-  }
-
-  const unsubscribeBrowserResumeReconnects = hostedMode ? NOOP : subscribeBrowserResumeReconnects();
-
-  const service: EnvironmentServiceState = {
-    queryInvalidationThrottler,
-    refCount: 1,
-    stop: () => {
-      unsubscribeSavedEnvironments();
-      unsubscribeBrowserResumeReconnects();
-      queryInvalidationThrottler.cancel();
-    },
-  };
-  activeService = service;
-
-  return () => {
-    if (activeService !== service) {
-      return;
-    }
-    activeService.refCount -= 1;
-    if (activeService.refCount === 0) {
-      stopActiveService();
-    }
-  };
+  return getEnvironmentSupervisor().start();
 }
 
 export async function resetEnvironmentServiceForTests(): Promise<void> {
-  stopActiveService();
+  await getEnvironmentSupervisor().resetForTests();
+  environmentSupervisor = null;
   lastBrowserHiddenAt = null;
-  lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
   primaryShellSnapshotApplied = false;
   primaryShellSnapshotAppliedPromise = new Promise<void>((resolve) => {
     resolvePrimaryShellSnapshotApplied = resolve;
   });
-  projectionTracker.clear();
-  pendingSavedEnvironmentConnections.clear();
-  for (const key of Array.from(threadDetailSubscriptions.keys())) {
-    disposeThreadDetailSubscriptionByKey(key);
-  }
-  await Promise.all(
-    [...environmentConnections.keys()].map((environmentId) => removeConnection(environmentId)),
-  );
 }
