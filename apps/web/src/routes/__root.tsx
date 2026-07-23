@@ -4,14 +4,25 @@ import {
   type ErrorComponentProps,
   useLocation,
 } from "@tanstack/react-router";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import type { AuthSessionState } from "@ryco/contracts";
 
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppBootLoadingSurface } from "../components/AppBootLoadingSurface";
 import { Button } from "../components/ui/button";
 import { markStartupPhase, measureStartupPhase } from "../perf/startupInstrumentation";
-import { isHostedHubMode } from "../env";
+import {
+  isElectron,
+  isHostedHubMode,
+  isPhoneAppInterstitialEnabled,
+  readMobileAppUrl,
+} from "../env";
+import { getPresentationTier } from "../lib/presentationTier";
+import {
+  markInterstitialDismissed,
+  readInterstitialDismissed,
+  shouldShowPhoneAppInterstitial,
+} from "../components/shell/phone/phoneAppInterstitial";
 
 const RootAppShell = lazy(() =>
   import("../components/RootAppShell").then((module) => ({ default: module.RootAppShell })),
@@ -19,6 +30,11 @@ const RootAppShell = lazy(() =>
 const HostedHubRoot = lazy(() =>
   import("../components/hostedHub/HostedHubRoot").then((module) => ({
     default: module.HostedHubRoot,
+  })),
+);
+const PhoneGetAppInterstitial = lazy(() =>
+  import("../components/shell/phone/PhoneGetAppInterstitial").then((module) => ({
+    default: module.PhoneGetAppInterstitial,
   })),
 );
 
@@ -145,6 +161,20 @@ function RootRoutePendingView() {
 function RootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const { authGateState } = Route.useRouteContext();
+  const canShowInterstitial =
+    pathname !== "/pair" &&
+    (authGateState.status === "authenticated" ||
+      authGateState.status === "hosted-static" ||
+      authGateState.status === "hosted-hub");
+  const [showInterstitial, setShowInterstitial] = useState(() => {
+    if (!canShowInterstitial || !isPhoneAppInterstitialEnabled()) return false;
+    return shouldShowPhoneAppInterstitial({
+      enabled: true,
+      isElectron,
+      tier: getPresentationTier(),
+      dismissed: readInterstitialDismissed(),
+    });
+  });
 
   useEffect(() => {
     let frame: number | null = null;
@@ -165,15 +195,30 @@ function RootRouteView() {
     };
   }, [pathname]);
 
+  const interstitial = showInterstitial ? (
+    <Suspense fallback={null}>
+      <PhoneGetAppInterstitial
+        appUrl={readMobileAppUrl()!}
+        onDismiss={() => {
+          markInterstitialDismissed();
+          setShowInterstitial(false);
+        }}
+      />
+    </Suspense>
+  ) : null;
+
   if (pathname === "/pair") {
     return <Outlet />;
   }
 
   if (authGateState.status === "hosted-hub") {
     return (
-      <Suspense fallback={<AppBootLoadingSurface />}>
-        <HostedHubRoot />
-      </Suspense>
+      <>
+        {interstitial}
+        <Suspense fallback={<AppBootLoadingSurface />}>
+          <HostedHubRoot />
+        </Suspense>
+      </>
     );
   }
 
@@ -182,9 +227,12 @@ function RootRouteView() {
   }
 
   return (
-    <Suspense fallback={<AppBootLoadingSurface />}>
-      <RootAppShell authGateState={authGateState} />
-    </Suspense>
+    <>
+      {interstitial}
+      <Suspense fallback={<AppBootLoadingSurface />}>
+        <RootAppShell authGateState={authGateState} />
+      </Suspense>
+    </>
   );
 }
 
