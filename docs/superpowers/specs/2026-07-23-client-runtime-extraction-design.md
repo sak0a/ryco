@@ -261,7 +261,8 @@ The `rpc/` layer and `sourceControlDiscoveryState` stay Atom-based (they already
 domain; do not convert opportunistically.
 
 **(e) Attachment abstraction shape → a neutral value type plus the `AttachmentCodec` service.** A
-`ComposerAttachment` carries `{ id, mime, size, source: { bytes } | { uri } }` and flows through
+`ComposerAttachment` carries `{ id, mime, size, bytes } | { id, mime, size, uri }` (the flat
+discriminated union defined in the contract surface above) and flows through
 composer → queue → send pipeline in place of `File`. The web adapter wraps `File`/blob-URL
 lifecycle (`createObjectURL`/`revokeObjectURL` stay web-side); persistence encodes to
 bytes/dataURL exactly as `composerDraftPersistence` does today. Because this type flows widely
