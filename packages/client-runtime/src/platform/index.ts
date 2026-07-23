@@ -1,11 +1,17 @@
 import { Context, Layer, Tracer } from "effect";
 
 import type { KnownEnvironmentConnectionTarget } from "../knownEnvironment.ts";
+import type { KnownEnvironmentSource } from "../knownEnvironment.ts";
+
+export interface PrimaryEnvironmentTarget {
+  readonly source: KnownEnvironmentSource;
+  readonly target: KnownEnvironmentConnectionTarget;
+}
 
 /** Platform-owned primary endpoint resolution. */
 export interface EndpointService {
   readonly origin: () => string;
-  readonly readPrimaryTarget: () => KnownEnvironmentConnectionTarget | null;
+  readonly readPrimaryTarget: () => PrimaryEnvironmentTarget | null;
   readonly resolveHttpUrl: (
     pathname: string,
     searchParams?: Readonly<Record<string, string>>,
@@ -54,12 +60,36 @@ export class KV extends Context.Service<KV, KVService>()("@ryco/client-runtime/p
 /** Separate storage for bearer tokens and other secrets. */
 export interface SecretKVService {
   readonly get: (key: string) => Promise<string | null>;
-  readonly set: (key: string, value: string) => Promise<void>;
+  /** Returns false when the platform could not persist the secret. */
+  readonly set: (key: string, value: string) => Promise<boolean>;
   readonly remove: (key: string) => Promise<void>;
 }
 
 export class SecretKV extends Context.Service<SecretKV, SecretKVService>()(
   "@ryco/client-runtime/platform/SecretKV",
+) {}
+
+/** Minimal platform HTTP seam; runtime code never reads a global fetch implementation. */
+export interface HttpResponse {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly json: () => Promise<unknown>;
+  readonly text: () => Promise<string>;
+}
+
+export interface HttpRequestInit {
+  readonly method?: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly body?: string;
+  readonly credentials?: "include";
+}
+
+export interface HttpClientService {
+  readonly fetch: (url: string, init?: HttpRequestInit) => Promise<HttpResponse>;
+}
+
+export class HttpClient extends Context.Service<HttpClient, HttpClientService>()(
+  "@ryco/client-runtime/platform/HttpClient",
 ) {}
 
 export interface AuthenticationResponseJson {
