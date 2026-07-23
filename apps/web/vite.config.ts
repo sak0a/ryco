@@ -14,6 +14,9 @@ const host = process.env.HOST?.trim() || "localhost";
 const configuredHttpUrl = process.env.VITE_HTTP_URL?.trim();
 const configuredWsUrl = process.env.VITE_WS_URL?.trim();
 const clientMode = process.env.VITE_RYCO_CLIENT_MODE === "hosted-hub" ? "hosted-hub" : "standard";
+const phoneAppInterstitial =
+  process.env.VITE_RYCO_PHONE_APP_INTERSTITIAL === "enabled" ? "enabled" : "disabled";
+const mobileAppUrl = process.env.VITE_RYCO_MOBILE_APP_URL ?? "";
 const configuredHostedAppUrl = (() => {
   if (process.env.VERCEL_ENV === "production" && process.env.VERCEL_PROJECT_PRODUCTION_URL) {
     return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
@@ -59,7 +62,12 @@ const devProxyTarget = resolveDevProxyTarget(configuredWsUrl);
 
 export function createWebViteConfig(
   resolvedClientMode: "hosted-hub" | "standard" = clientMode,
+  resolvedPhoneAppInterstitial: string = phoneAppInterstitial,
+  resolvedMobileAppUrl: string = mobileAppUrl,
 ): UserConfig {
+  const normalizedPhoneAppInterstitial =
+    resolvedPhoneAppInterstitial === "enabled" ? "enabled" : "disabled";
+
   return {
     plugins: [
       tanstackRouter(),
@@ -94,6 +102,10 @@ export function createWebViteConfig(
       "import.meta.env.VITE_WS_URL": JSON.stringify(configuredWsUrl ?? ""),
       "import.meta.env.VITE_HOSTED_APP_URL": JSON.stringify(configuredHostedAppUrl ?? ""),
       "import.meta.env.VITE_RYCO_CLIENT_MODE": JSON.stringify(clientMode),
+      "import.meta.env.VITE_RYCO_PHONE_APP_INTERSTITIAL": JSON.stringify(
+        normalizedPhoneAppInterstitial,
+      ),
+      "import.meta.env.VITE_RYCO_MOBILE_APP_URL": JSON.stringify(resolvedMobileAppUrl),
       "import.meta.env.APP_VERSION": JSON.stringify(pkg.version),
     },
     resolve: {

@@ -6,6 +6,7 @@ type ViteConfigWithOptimizeDeps = {
   readonly optimizeDeps?: {
     readonly include?: readonly string[];
   };
+  readonly define?: Record<string, string>;
 };
 
 function collectPluginNames(value: unknown): ReadonlyArray<string> {
@@ -33,5 +34,31 @@ describe("web Vite config", () => {
       collectPluginNames(createWebViteConfig(clientMode).plugins);
     expect(pluginNames("hosted-hub")).toContain("ryco-hosted-pwa");
     expect(pluginNames("standard")).not.toContain("ryco-hosted-pwa");
+  });
+
+  it("normalizes empty phone app interstitial settings to disabled", () => {
+    const config = createWebViteConfig("standard", "", "") as ViteConfigWithOptimizeDeps;
+
+    expect(config.define?.["import.meta.env.VITE_RYCO_PHONE_APP_INTERSTITIAL"]).toBe('"disabled"');
+    expect(config.define?.["import.meta.env.VITE_RYCO_MOBILE_APP_URL"]).toBe('""');
+  });
+
+  it("passes configured phone app interstitial settings into build defines", () => {
+    const config = createWebViteConfig(
+      "standard",
+      "enabled",
+      "https://example.com/ryco",
+    ) as ViteConfigWithOptimizeDeps;
+
+    expect(config.define?.["import.meta.env.VITE_RYCO_PHONE_APP_INTERSTITIAL"]).toBe('"enabled"');
+    expect(config.define?.["import.meta.env.VITE_RYCO_MOBILE_APP_URL"]).toBe(
+      '"https://example.com/ryco"',
+    );
+  });
+
+  it("normalizes unexpected phone app interstitial flag values to disabled", () => {
+    const config = createWebViteConfig("standard", "unexpected") as ViteConfigWithOptimizeDeps;
+
+    expect(config.define?.["import.meta.env.VITE_RYCO_PHONE_APP_INTERSTITIAL"]).toBe('"disabled"');
   });
 });
