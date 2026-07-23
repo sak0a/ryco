@@ -11,13 +11,11 @@ import {
   ThreadId,
 } from "@ryco/contracts";
 import { Throttler } from "@tanstack/react-pacer";
+import { scopedThreadKey, scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import {
   createKnownEnvironment,
   getKnownEnvironmentWsBaseUrl,
-  scopedThreadKey,
-  scopeProjectRef,
-  scopeThreadRef,
-} from "@ryco/client-runtime";
+} from "@ryco/client-runtime/knownEnvironment";
 
 import {
   markPromotedDraftThreadByRef,

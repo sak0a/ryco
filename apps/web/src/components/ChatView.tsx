@@ -23,7 +23,7 @@ import {
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@ryco/client-runtime";
+} from "@ryco/client-runtime/scoped";
 import { applyClaudePromptEffortPrefix, resolvePromptInjectedEffort } from "@ryco/shared/model";
 import { projectScriptCwd } from "@ryco/shared/projectScripts";
 import { truncate } from "@ryco/shared/String";

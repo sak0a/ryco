@@ -1,5 +1,5 @@
 import type { DesktopEnvironmentBootstrap } from "@ryco/contracts";
-import type { KnownEnvironment } from "@ryco/client-runtime";
+import type { KnownEnvironment } from "@ryco/client-runtime/knownEnvironment";
 import { isHostedHubMode } from "../../env";
 
 export interface PrimaryEnvironmentTarget {

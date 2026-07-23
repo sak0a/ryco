@@ -6,7 +6,7 @@ import type {
   ServerLifecycleWelcomePayload,
   TerminalEvent,
 } from "@ryco/contracts";
-import type { KnownEnvironment } from "@ryco/client-runtime";
+import type { KnownEnvironment } from "@ryco/client-runtime/knownEnvironment";
 
 import {
   recordPushSequenceEvent,

@@ -1,4 +1,4 @@
-import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
+import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@ryco/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import type { DraftThreadState } from "../../composerDraftStore";

@@ -11,7 +11,7 @@ import type {
   WorkItemPriority,
   WorkItemUpdateFields,
 } from "@ryco/contracts";
-import { scopeProjectRef } from "@ryco/client-runtime";
+import { scopeProjectRef } from "@ryco/client-runtime/scoped";
 import { DateTime, Option } from "effect";
 import { useQuery } from "~/rpc/queryClient";
 import { useShallow } from "zustand/react/shallow";

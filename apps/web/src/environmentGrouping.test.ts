@@ -1,5 +1,5 @@
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@ryco/contracts";
-import { scopeProjectRef } from "@ryco/client-runtime";
+import { scopeProjectRef } from "@ryco/client-runtime/scoped";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

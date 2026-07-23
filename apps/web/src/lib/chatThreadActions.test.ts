@@ -1,4 +1,4 @@
-import { scopeProjectRef } from "@ryco/client-runtime";
+import { scopeProjectRef } from "@ryco/client-runtime/scoped";
 import { EnvironmentId, ProjectId } from "@ryco/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {

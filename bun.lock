@@ -26,7 +26,6 @@
         "electron-updater": "^6.6.2",
       },
       "devDependencies": {
-        "@ryco/client-runtime": "workspace:*",
         "@ryco/contracts": "workspace:*",
         "@ryco/shared": "workspace:*",
         "@ryco/ssh": "workspace:*",
@@ -66,7 +65,6 @@
       "devDependencies": {
         "@effect/language-service": "catalog:",
         "@effect/vitest": "catalog:",
-        "@ryco/client-runtime": "workspace:*",
         "@ryco/contracts": "workspace:*",
         "@ryco/shared": "workspace:*",
         "@ryco/tailscale": "workspace:*",

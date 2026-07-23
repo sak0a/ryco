@@ -4,7 +4,7 @@ import {
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@ryco/client-runtime";
+} from "@ryco/client-runtime/scoped";
 import { type ScopedThreadRef, type ThreadEnvMode, type ThreadId } from "@ryco/contracts";
 import { isMacPlatform, newCommandId } from "../../../lib/utils";
 import { readEnvironmentApi } from "../../../environmentApi";

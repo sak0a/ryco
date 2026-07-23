@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { parseScopedThreadKey } from "@ryco/client-runtime";
+import { parseScopedThreadKey } from "@ryco/client-runtime/scoped";
 import { retainThreadDetailSubscription } from "../../environments/runtime/service";
 import { markTabSwitchFirstPaint } from "../../perf/tabSwitchInstrumentation";
 import { createTabPrefetchController } from "./ChatSessionTabsPrefetch";

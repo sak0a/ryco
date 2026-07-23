@@ -20,7 +20,7 @@ import {
   OrchestrationSessionStatus,
   DEFAULT_SERVER_SETTINGS,
 } from "@ryco/contracts";
-import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
+import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { createModelCapabilities, createModelSelection } from "@ryco/shared/model";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { Option } from "effect";

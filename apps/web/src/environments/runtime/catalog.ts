@@ -1,4 +1,4 @@
-import { getKnownEnvironmentHttpBaseUrl } from "@ryco/client-runtime";
+import { getKnownEnvironmentHttpBaseUrl } from "@ryco/client-runtime/knownEnvironment";
 import type {
   AuthSessionRole,
   EnvironmentId,

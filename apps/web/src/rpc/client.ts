@@ -1,4 +1,4 @@
-import { getKnownEnvironmentWsBaseUrl } from "@ryco/client-runtime";
+import { getKnownEnvironmentWsBaseUrl } from "@ryco/client-runtime/knownEnvironment";
 import { WsRpcGroup } from "@ryco/contracts";
 import { Effect } from "effect";
 import { AtomRegistry, AtomRpc } from "effect/unstable/reactivity";

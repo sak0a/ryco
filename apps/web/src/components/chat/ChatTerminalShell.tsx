@@ -1,5 +1,5 @@
 import type { EnvironmentId, ResolvedKeybindingsConfig, ThreadId } from "@ryco/contracts";
-import { scopeProjectRef } from "@ryco/client-runtime";
+import { scopeProjectRef } from "@ryco/client-runtime/scoped";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@ryco/shared/projectScripts";
 import { lazy, memo, Suspense, useCallback, useMemo, useState } from "react";
 import { randomUUID } from "~/lib/utils";

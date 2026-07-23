@@ -2,7 +2,10 @@ import type { NetworkInterfaceInfo } from "node:os";
 
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { createAdvertisedEndpoint, type CreateAdvertisedEndpointInput } from "@ryco/client-runtime";
+import {
+  createAdvertisedEndpoint,
+  type CreateAdvertisedEndpointInput,
+} from "@ryco/shared/advertisedEndpoint";
 import type { AdvertisedEndpoint, AdvertisedEndpointProvider } from "@ryco/contracts";
 import {
   buildTailscaleHttpsBaseUrl,

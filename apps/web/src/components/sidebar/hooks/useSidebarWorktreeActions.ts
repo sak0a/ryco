@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { scopeThreadRef } from "@ryco/client-runtime";
+import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { type ScopedThreadRef, type ThreadEnvMode, WorktreeId } from "@ryco/contracts";
 import { newCommandId } from "../../../lib/utils";
 import { readEnvironmentApi } from "../../../environmentApi";

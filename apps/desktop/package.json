@@ -22,7 +22,6 @@
     "electron-updater": "^6.6.2"
   },
   "devDependencies": {
-    "@ryco/client-runtime": "workspace:*",
     "@ryco/contracts": "workspace:*",
     "@ryco/shared": "workspace:*",
     "@ryco/ssh": "workspace:*",

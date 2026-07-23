@@ -12,7 +12,7 @@ import {
   type ServerProvider,
   type ThreadId,
 } from "@ryco/contracts";
-import { scopeThreadRef } from "@ryco/client-runtime";
+import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { createModelSelection } from "@ryco/shared/model";
 import { truncate } from "@ryco/shared/String";
 import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";

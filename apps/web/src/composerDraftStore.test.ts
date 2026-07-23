@@ -3,7 +3,7 @@ import {
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@ryco/client-runtime";
+} from "@ryco/client-runtime/scoped";
 import * as Schema from "effect/Schema";
 import {
   defaultInstanceIdForDriver,

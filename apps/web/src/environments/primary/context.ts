@@ -2,7 +2,7 @@ import {
   attachEnvironmentDescriptor,
   createKnownEnvironment,
   type KnownEnvironment,
-} from "@ryco/client-runtime";
+} from "@ryco/client-runtime/knownEnvironment";
 import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@ryco/contracts";
 import { create } from "zustand";
 

@@ -1,7 +1,7 @@
 import React, { memo, useEffect, useMemo, useRef } from "react";
 import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react";
 import type { ScopedThreadRef } from "@ryco/contracts";
-import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
+import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { markSidebarExpandFirstPaint } from "../../perf/tabSwitchInstrumentation";
 import { type DraftId } from "../../composerDraftStore";
 import type { SidebarThreadSummary } from "../../types";

@@ -1,4 +1,4 @@
-import { scopeThreadRef } from "@ryco/client-runtime";
+import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import {
   EnvironmentId,
   MessageId,

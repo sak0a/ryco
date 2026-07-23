@@ -1,4 +1,4 @@
-import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime";
+import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
 import { TerminalSquareIcon } from "lucide-react";
 import { memo, useMemo } from "react";

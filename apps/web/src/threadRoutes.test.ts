@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { scopeThreadRef } from "@ryco/client-runtime";
+import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { ThreadId } from "@ryco/contracts";
 import { DraftId } from "./composerDraftStore";
 

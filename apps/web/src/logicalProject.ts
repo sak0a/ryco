@@ -1,4 +1,4 @@
-import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime";
+import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime/scoped";
 import type { ScopedProjectRef, SidebarProjectGroupingMode } from "@ryco/contracts";
 import { normalizeProjectPathForComparison } from "./lib/projectPaths";
 import type { Project } from "./types";

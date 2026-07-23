@@ -1,4 +1,4 @@
-import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
+import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { ThreadId } from "@ryco/contracts";
 import { describe, expect, it } from "vite-plus/test";
 

@@ -22,7 +22,7 @@ import {
   scopeProjectRef,
   scopedThreadKey,
   scopeThreadRef,
-} from "@ryco/client-runtime";
+} from "@ryco/client-runtime/scoped";
 import * as Schema from "effect/Schema";
 import { DeepMutable } from "effect/Types";
 import { createModelSelection, normalizeModelSlug } from "@ryco/shared/model";

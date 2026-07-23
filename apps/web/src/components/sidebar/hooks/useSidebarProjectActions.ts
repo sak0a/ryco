@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime";
+import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime/scoped";
 import { newCommandId } from "../../../lib/utils";
 import { readEnvironmentApi } from "../../../environmentApi";
 import { readLocalApi } from "../../../localApi";

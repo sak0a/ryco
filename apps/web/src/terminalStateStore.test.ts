@@ -1,4 +1,4 @@
-import { scopeThreadRef, scopedThreadKey } from "@ryco/client-runtime";
+import { scopeThreadRef, scopedThreadKey } from "@ryco/client-runtime/scoped";
 import { ThreadId, type TerminalEvent } from "@ryco/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 

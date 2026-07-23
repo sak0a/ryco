@@ -1,6 +1,6 @@
 "use client";
 
-import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime";
+import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import {
   DEFAULT_MODEL,
   ORCHESTRATION_WS_METHODS,

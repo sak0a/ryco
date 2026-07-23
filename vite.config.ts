@@ -63,6 +63,32 @@ const rootConfig = {
       "react/no-unstable-nested-components": "off",
       "unicorn/consistent-function-scoping": "off",
     },
+    overrides: [
+      {
+        files: ["packages/client-runtime/src/**/*.{ts,tsx}"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                {
+                  group: ["react", "react/*", "react-dom", "react-dom/*"],
+                  message: "@ryco/client-runtime is platform-neutral.",
+                },
+                {
+                  group: ["@effect/atom-react", "@effect/atom-react/*"],
+                  message: "React bindings belong in the app.",
+                },
+                {
+                  group: ["node:*", "node:*/**"],
+                  message: "Node built-ins are not available in @ryco/client-runtime.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ],
   },
 };
 
