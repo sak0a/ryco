@@ -23,6 +23,7 @@ import {
   readInterstitialDismissed,
   shouldShowPhoneAppInterstitial,
 } from "../components/shell/phone/phoneAppInterstitial";
+import { PhoneGetAppInterstitialBackdrop } from "../components/shell/phone/PhoneGetAppInterstitialBackdrop";
 
 const RootAppShell = lazy(() =>
   import("../components/RootAppShell").then((module) => ({ default: module.RootAppShell })),
@@ -196,7 +197,7 @@ function RootRouteView() {
   }, [pathname]);
 
   const interstitial = showInterstitial ? (
-    <Suspense fallback={null}>
+    <Suspense fallback={<PhoneGetAppInterstitialBackdrop />}>
       <PhoneGetAppInterstitial
         appUrl={readMobileAppUrl()!}
         onDismiss={() => {

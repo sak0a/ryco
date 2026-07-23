@@ -11,6 +11,7 @@ import {
   setCoarsePointerEmulation,
 } from "../../../../test/browserPointer";
 import { PhoneGetAppInterstitial } from "./PhoneGetAppInterstitial";
+import { PhoneGetAppInterstitialBackdrop } from "./PhoneGetAppInterstitialBackdrop";
 
 const PHONE_VIEWPORT = { width: 390, height: 844 } as const;
 const APP_URL = "https://example.com/ryco";
@@ -127,5 +128,23 @@ describe("PhoneGetAppInterstitial", () => {
 
     getApp.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the shell covered and inert while the interstitial chunk loads", async () => {
+    const root = rootContainer();
+    mounted = await render(<PhoneGetAppInterstitialBackdrop />, { container: root });
+
+    const backdrop = document.querySelector<HTMLElement>(
+      '[data-testid="phone-get-app-interstitial-backdrop"]',
+    )!;
+    expect(backdrop.getAttribute("aria-hidden")).toBe("true");
+    expect(root.hasAttribute("inert")).toBe(true);
+    const rect = backdrop.getBoundingClientRect();
+    expect(rect.width).toBeGreaterThanOrEqual(PHONE_VIEWPORT.width);
+    expect(rect.height).toBeGreaterThanOrEqual(PHONE_VIEWPORT.height);
+
+    await mounted.unmount();
+    mounted = null;
+    expect(root.hasAttribute("inert")).toBe(false);
   });
 });

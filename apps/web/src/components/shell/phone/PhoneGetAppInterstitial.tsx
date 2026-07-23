@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 
 import { BRANDED_APP_LOGO_SRC } from "../../../brandedLogo";
 import { glassSurfaceClassName } from "../../mobile/GlassSurface";
+import { useRootInertWhileMounted } from "./PhoneGetAppInterstitialBackdrop";
 
 export interface PhoneGetAppInterstitialProps {
   readonly appUrl: string;
@@ -13,12 +14,10 @@ export function PhoneGetAppInterstitial({ appUrl, onDismiss }: PhoneGetAppInters
   const getAppRef = useRef<HTMLAnchorElement>(null);
   const continueRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    const root = document.getElementById("root");
-    root?.setAttribute("inert", "");
-    getAppRef.current?.focus();
+  useRootInertWhileMounted();
 
-    return () => root?.removeAttribute("inert");
+  useEffect(() => {
+    getAppRef.current?.focus();
   }, []);
 
   return createPortal(
