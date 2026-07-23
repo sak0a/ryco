@@ -277,6 +277,64 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("returns the same registered primary connection before the service starts", async () => {
+    const {
+      getPrimaryEnvironmentConnection,
+      listEnvironmentConnections,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const first = getPrimaryEnvironmentConnection();
+    const second = getPrimaryEnvironmentConnection();
+
+    expect(second).toBe(first);
+    expect(listEnvironmentConnections()).toEqual([first]);
+    expect(mockCreateEnvironmentConnection).toHaveBeenCalledTimes(1);
+
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("evicts only to capacity and does not reschedule sibling idle timers on thread upsert", async () => {
+    const {
+      retainThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+    const stop = startEnvironmentConnectionService();
+    const environmentId = EnvironmentId.make("env-1");
+    const threadIds = Array.from({ length: 33 }, (_, index) =>
+      ThreadId.make(`thread-capacity-${index}`),
+    );
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    for (const threadId of threadIds) {
+      retainThreadDetailSubscription(environmentId, threadId)();
+      await vi.advanceTimersByTimeAsync(1);
+    }
+    expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(4 * 60 * 1000);
+    const targetThreadId = threadIds.at(-1)!;
+    connectionInput.applyShellEvent(
+      {
+        kind: "thread-upserted",
+        sequence: 1,
+        thread: makeThreadShellSnapshot({ threadId: targetThreadId }).threads[0]!,
+      },
+      environmentId,
+    );
+
+    await vi.advanceTimersByTimeAsync(60 * 1000);
+    expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(32);
+
+    await vi.advanceTimersByTimeAsync(4 * 60 * 1000);
+    expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(33);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
   it("drops shell snapshots after browser suspension invalidates the hosted generation", async () => {
     vi.stubEnv("VITE_RYCO_CLIENT_MODE", "hosted-hub");
     const { hostedHubController, useHostedHubStore } = await import("~/hostedHub/state");
