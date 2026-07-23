@@ -9,7 +9,7 @@ import type {
 import { Atom } from "effect/unstable/reactivity";
 
 import { requireEnvironmentConnection } from "../environments/runtime";
-import { appAtomRegistry } from "./atomRegistry";
+import { appAtomRegistry } from "@ryco/client-runtime/rpc";
 import { invalidateScopes, subscribeInvalidationScope } from "./gitAtoms";
 
 // ---------------------------------------------------------------------------

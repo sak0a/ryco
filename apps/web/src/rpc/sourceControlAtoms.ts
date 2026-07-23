@@ -13,7 +13,11 @@ import type {
   SourceControlWorkflowRunListResult,
 } from "@ryco/contracts";
 import { requireEnvironmentConnection } from "~/environments/runtime";
-import { createKeyedQueryRegistry, defineKeyedQueryByInput, KEY_SEP } from "./keyedQuery";
+import {
+  createKeyedQueryRegistry,
+  defineKeyedQueryByInput,
+  KEY_SEP,
+} from "@ryco/client-runtime/rpc";
 
 // ---------------------------------------------------------------------------
 // Atom-backed source-control context reads.
@@ -84,7 +88,7 @@ const sourceControlRegistry = createKeyedQueryRegistry<SourceControlQueryState<u
 
 const { controllers, runController, clearPollTimer } = sourceControlRegistry;
 
-export type QueryBinding<TInput, TData> = import("./keyedQuery").KeyedQueryByInput<
+export type QueryBinding<TInput, TData> = import("@ryco/client-runtime/rpc").KeyedQueryByInput<
   TInput,
   TData,
   SourceControlQueryState<TData>

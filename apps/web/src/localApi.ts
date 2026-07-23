@@ -14,7 +14,7 @@ import {
   resetEnvironmentServiceForTests,
 } from "./environments/runtime";
 import { getPrimaryKnownEnvironment } from "./environments/primary";
-import { type WsRpcClient } from "./rpc/wsRpcClient";
+import { type WsRpcClient } from "@ryco/client-runtime/rpc";
 import { showContextMenuFallback } from "./contextMenuFallback";
 import { isContextMenuSheetHostMounted, presentContextMenuSheet } from "./contextMenuSheetState";
 import { getPresentationTier } from "./lib/presentationTier";

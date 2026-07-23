@@ -13,7 +13,7 @@ import { Atom } from "effect/unstable/reactivity";
 import { readPrimaryEnvironmentDescriptor } from "../environments/primary";
 import { readEnvironmentConnection } from "../environments/runtime";
 import { readLocalApi } from "../localApi";
-import { appAtomRegistry } from "../rpc/atomRegistry";
+import { appAtomRegistry } from "@ryco/client-runtime/rpc";
 
 const SOURCE_CONTROL_DISCOVERY_TARGET = { key: "primary" } as const;
 const SOURCE_CONTROL_DISCOVERY_STALE_TIME_MS = 30_000;

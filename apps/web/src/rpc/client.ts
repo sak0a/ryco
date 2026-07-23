@@ -5,8 +5,9 @@ import { AtomRegistry, AtomRpc } from "effect/unstable/reactivity";
 
 import { ensurePrimaryEnvironmentReady, getPrimaryKnownEnvironment } from "~/environments/primary";
 
-import { appAtomRegistry } from "./atomRegistry";
-import { createWsRpcProtocolLayer } from "./protocol";
+import { appAtomRegistry } from "@ryco/client-runtime/rpc";
+import { createWsRpcProtocolLayer } from "@ryco/client-runtime/rpc";
+import { webSocket } from "../platform";
 
 async function resolvePrimaryWsBaseUrl(): Promise<string> {
   await ensurePrimaryEnvironmentReady();
@@ -28,7 +29,7 @@ async function resolvePrimaryWsBaseUrl(): Promise<string> {
  */
 export class AtomRpcClient extends AtomRpc.Service<AtomRpcClient>()("AtomRpcClient", {
   group: WsRpcGroup,
-  protocol: createWsRpcProtocolLayer(resolvePrimaryWsBaseUrl),
+  protocol: createWsRpcProtocolLayer(resolvePrimaryWsBaseUrl, webSocket),
   spanPrefix: "AtomRpcClient",
 }) {}
 

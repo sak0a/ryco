@@ -1,7 +1,7 @@
 import type { DesktopUpdateState } from "@ryco/contracts";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { resetAppAtomRegistryForTests } from "./atomRegistry";
+import { resetAppAtomRegistryForTests } from "@ryco/client-runtime/rpc";
 import {
   desktopUpdateStateAtom,
   getDesktopUpdateState,

@@ -13,7 +13,7 @@ vi.mock("../environmentApi", () => ({
   }),
 }));
 
-import { appAtomRegistry, resetAppAtomRegistryForTests } from "./atomRegistry";
+import { appAtomRegistry, resetAppAtomRegistryForTests } from "@ryco/client-runtime/rpc";
 import {
   beginMutationTracking,
   endMutationTracking,

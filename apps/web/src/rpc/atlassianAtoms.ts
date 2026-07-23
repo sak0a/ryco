@@ -5,7 +5,7 @@ import type {
   ProjectId,
 } from "@ryco/contracts";
 import { requireEnvironmentConnection } from "~/environments/runtime";
-import { createKeyedQueryRegistry, defineKeyedQueryByKey, KEY_SEP } from "./keyedQuery";
+import { createKeyedQueryRegistry, defineKeyedQueryByKey, KEY_SEP } from "@ryco/client-runtime/rpc";
 
 // ---------------------------------------------------------------------------
 // Atom-backed Atlassian reads.
@@ -66,7 +66,7 @@ const atlassianRegistry = createKeyedQueryRegistry<AtlassianQueryState<unknown>>
 
 const { controllers, runController } = atlassianRegistry;
 
-export type AtlassianQuery<TInput, TData> = import("./keyedQuery").KeyedQueryByKey<
+export type AtlassianQuery<TInput, TData> = import("@ryco/client-runtime/rpc").KeyedQueryByKey<
   TInput,
   TData,
   AtlassianQueryState<TData>

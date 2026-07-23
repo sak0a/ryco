@@ -41,7 +41,7 @@ import {
 } from "./types";
 import { resolveEnvironmentHttpUrl } from "./environments/runtime";
 import { isHostedHubMode } from "./env";
-import { sanitizeThreadErrorMessage } from "./rpc/transportError";
+import { sanitizeThreadErrorMessage } from "@ryco/client-runtime/errors";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
 import {
   isWebPerfProfileEnabled,

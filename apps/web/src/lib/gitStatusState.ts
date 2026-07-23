@@ -9,12 +9,12 @@ import { Cause } from "effect";
 import { Atom } from "effect/unstable/reactivity";
 import { useEffect } from "react";
 
-import { appAtomRegistry } from "../rpc/atomRegistry";
+import { appAtomRegistry } from "@ryco/client-runtime/rpc";
 import {
   readEnvironmentConnection,
   subscribeEnvironmentConnections,
 } from "../environments/runtime";
-import type { WsRpcClient } from "~/rpc/wsRpcClient";
+import type { WsRpcClient } from "@ryco/client-runtime/rpc";
 import { useSettings } from "~/hooks/useSettings";
 
 export interface GitStatusState {

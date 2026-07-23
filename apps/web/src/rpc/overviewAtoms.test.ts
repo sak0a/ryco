@@ -26,7 +26,7 @@ vi.mock("../environments/runtime", () => ({
   }),
 }));
 
-import { appAtomRegistry, resetAppAtomRegistryForTests } from "./atomRegistry";
+import { appAtomRegistry, resetAppAtomRegistryForTests } from "@ryco/client-runtime/rpc";
 import { invalidateScopes, resetGitAtomsForTests } from "./gitAtoms";
 import {
   getOverviewChangeRequestDetailSnapshot,
