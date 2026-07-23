@@ -10,7 +10,6 @@ import {
 import { useState } from "react";
 
 import { Button } from "../ui/button";
-import { glassSurfaceClassName } from "../mobile/GlassSurface";
 import { MobileListRow } from "../mobile/MobileListRow";
 import {
   MobileSheet,
@@ -19,7 +18,11 @@ import {
   MobileSheetPanel,
   MobileSheetTitle,
 } from "../mobile/MobileSheet";
-import { deriveHostedConnectionStatusText } from "../../hostedHub/connectionStatus";
+import { MobileStatusChip } from "../mobile/MobileStatusChip";
+import {
+  deriveHostedConnectionStatusIndicator,
+  deriveHostedConnectionStatusText,
+} from "../../hostedHub/connectionStatus";
 import {
   leaveHostedNodeRouteToDirectory,
   selectHostedNodeRoute,
@@ -27,7 +30,6 @@ import {
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
-import { cn } from "../../lib/utils";
 import { HostedPwaControls } from "./HostedPwaControls";
 import { HostedRelayTrustNotice } from "./HostedRelayTrustNotice";
 
@@ -227,19 +229,23 @@ export function HostedConnectionSheet({
   const { switchNode, returnToAllNodes } = useHostedConnectionActions();
   if (!node) return null;
 
-  const statusText = deriveHostedConnectionStatusText({
+  const statusInput = {
     browserStatus,
     sessionStatus: session,
     selectionStatus: selection,
     transportStatus: transport,
-  });
+  };
+  const statusText = deriveHostedConnectionStatusText(statusInput);
+  const { connected } = deriveHostedConnectionStatusIndicator(statusInput);
   const switchingDisabled = directory !== "ready" || browserStatus !== "current";
 
   return (
     <MobileSheet open={open} onOpenChange={onOpenChange} label="Connection">
       <MobileSheetHeader>
         <MobileSheetTitle className="flex items-center gap-2">
-          {transport === "online" ? (
+          {/* The glyph follows the derived state, not the transport alone, so
+              it cannot contradict the text under it. */}
+          {connected ? (
             <WifiIcon aria-hidden className="size-4 text-emerald-500" />
           ) : (
             <WifiOffIcon aria-hidden className="size-4 text-amber-500" />
@@ -318,9 +324,20 @@ export function HostedConnectionSheet({
 }
 
 /**
- * The phone connection pill: a bounded status pill (node label + state, text
- * and icon) hosted by the phone app bars. Opens the connection sheet. Returns
+ * The phone connection indicator: the collapsed `MobileStatusChip` hosted by
+ * the phone app bars, which expands into the connection sheet on tap. Returns
  * null while no node is selected, which also covers non-hosted modes.
+ *
+ * The audited pill measured 176×36 and rendered the node label and the state
+ * both truncated to unreadability, crowding the app-bar title out at 320 px.
+ * Collapsed, the chip renders the icon plus a chosen short label for the
+ * derived state: the node label is what yields, because it is the half a
+ * reader still receives — the accessible label carries node identity and the
+ * COMPLETE bounded status text at collapsed size, and the expanded sheet
+ * carries the full text alongside the bounded control set.
+ *
+ * The two live regions are deliberately siblings of the chip rather than
+ * children of it, so shrinking the visible control cannot take them with it.
  */
 export function HostedConnectionPill() {
   const node = useHostedHubStore((state) => state.selectedNode);
@@ -331,12 +348,14 @@ export function HostedConnectionPill() {
   const [open, setOpen] = useState(false);
   if (!node) return null;
 
-  const statusText = deriveHostedConnectionStatusText({
+  const statusInput = {
     browserStatus,
     sessionStatus: session,
     selectionStatus: selection,
     transportStatus: transport,
-  });
+  };
+  const statusText = deriveHostedConnectionStatusText(statusInput);
+  const { shortLabel, connected } = deriveHostedConnectionStatusIndicator(statusInput);
 
   return (
     <>
@@ -363,30 +382,38 @@ export function HostedConnectionPill() {
           ) : null}
         </>
       )}
-      <button
-        type="button"
-        data-testid="hosted-connection-pill"
-        aria-label={`Connection: ${node.label}, ${statusText}`}
-        // min-w-0 + shrink (not shrink-0): under 200% text scaling on narrow
-        // phones the pill truncates its labels instead of pushing the app-bar
-        // controls after it out of the viewport.
-        className={cn(
-          // The chip material tier: the smallest blur and the tightest
-          // coverage floor, because a pill is small and sits directly over
-          // scrolling content.
-          glassSurfaceClassName("chip"),
-          "flex min-h-9 min-w-0 max-w-44 shrink items-center gap-1.5 rounded-full border border-border px-2.5 text-xs outline-none pointer-coarse:min-h-11 focus-visible:ring-2 focus-visible:ring-ring",
-        )}
+      <MobileStatusChip
+        testId="hosted-connection-pill"
+        // Node identity and the COMPLETE bounded status text stay in the
+        // accessible name at collapsed size; the visible word is that text's
+        // leading token, so the visible label remains part of the accessible
+        // name.
+        label={`Connection: ${node.label}, ${statusText}`}
+        status={shortLabel}
+        // The glyph follows the same gate order as the text. Choosing it from
+        // `transport === "online"` alone put a green connected icon beside
+        // `Delivery unknown`, beside `Authorization removed`, and beside a
+        // closed ryco session — the states where the icon is doing the most
+        // work, because the collapsed chip has no room to explain itself.
+        icon={
+          connected ? (
+            <WifiIcon
+              aria-hidden
+              data-testid="hosted-connection-icon"
+              data-connected="true"
+              className="size-3.5 shrink-0 text-emerald-500"
+            />
+          ) : (
+            <WifiOffIcon
+              aria-hidden
+              data-testid="hosted-connection-icon"
+              data-connected="false"
+              className="size-3.5 shrink-0 text-amber-500"
+            />
+          )
+        }
         onClick={() => setOpen(true)}
-      >
-        {transport === "online" ? (
-          <WifiIcon aria-hidden className="size-3.5 shrink-0 text-emerald-500" />
-        ) : (
-          <WifiOffIcon aria-hidden className="size-3.5 shrink-0 text-amber-500" />
-        )}
-        <span className="truncate font-medium">{node.label}</span>
-        <span className="truncate text-muted-foreground">{statusText}</span>
-      </button>
+      />
       <HostedConnectionSheet open={open} onOpenChange={setOpen} />
     </>
   );
