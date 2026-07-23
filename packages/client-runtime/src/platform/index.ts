@@ -90,10 +90,6 @@ export interface HttpClientService {
   readonly fetch: (url: string, init?: HttpRequestInit) => Promise<HttpResponse>;
 }
 
-export class HttpClient extends Context.Service<HttpClient, HttpClientService>()(
-  "@ryco/client-runtime/platform/HttpClient",
-) {}
-
 export interface AuthenticationResponseJson {
   readonly id: string;
   readonly rawId: string;

@@ -83,6 +83,14 @@ const rootConfig = {
                   group: ["node:*", "node:*/**"],
                   message: "Node built-ins are not available in @ryco/client-runtime.",
                 },
+                {
+                  group: ["@tanstack", "@tanstack/*"],
+                  message: "TanStack bindings belong in the app.",
+                },
+                {
+                  group: ["~", "~/*"],
+                  message: "@ryco/client-runtime must not import from the web app.",
+                },
               ],
             },
           ],

@@ -21,4 +21,47 @@ setThreadsRuntimeConfigurator(() => {
   });
 });
 
-export * from "@ryco/client-runtime/state/threads";
+export {
+  applyOrchestrationEvent,
+  applyOrchestrationEvents,
+  applyShellEvent,
+  createEnvironmentFallbackThreadRefSelector,
+  createProjectSelectorByRef,
+  createShellEventCoalescer,
+  createThreadSelectorAcrossEnvironments,
+  createThreadSelectorByRef,
+  getThreadFromEnvironmentState,
+  removeEnvironmentState,
+  removeThreadByRef,
+  selectBootstrapCompleteForActiveEnvironment,
+  selectEnvironmentState,
+  selectProjectByRef,
+  selectProjectsAcrossEnvironments,
+  selectProjectsForEnvironment,
+  selectSidebarThreadSummaryByRef,
+  selectSidebarThreadsAcrossEnvironments,
+  selectSidebarThreadsForProjectRef,
+  selectSidebarThreadsForProjectRefs,
+  selectSidebarWorktreesAcrossEnvironments,
+  selectSidebarWorktreesForProjectRef,
+  selectSidebarWorktreesForProjectRefs,
+  selectThreadByRef,
+  selectThreadExistsByRef,
+  selectThreadIdsByProjectRef,
+  selectThreadShellsAcrossEnvironments,
+  selectThreadsAcrossEnvironments,
+  selectThreadsForEnvironment,
+  setActiveEnvironmentId,
+  setError,
+  setSidebarWorktreeTitle,
+  setThreadBranch,
+  SHELL_COALESCE_THRESHOLD_EVENTS_PER_MS,
+  syncServerShellSnapshot,
+  syncServerThreadDetail,
+  useStore,
+} from "@ryco/client-runtime/state/threads";
+export type {
+  AppState,
+  EnvironmentState,
+  ShellEventCoalescer,
+} from "@ryco/client-runtime/state/threads";
