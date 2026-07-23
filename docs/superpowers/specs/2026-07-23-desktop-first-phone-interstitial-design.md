@@ -44,7 +44,7 @@ Lowest blast radius: nothing is conditionally unmounted, no lifecycle owner is
 displaced, and the phone tier, its CSS variants, and its acceptance matrix
 behave exactly as today.
 
-An earlier draft rendered the interstitial *instead of* the shell; adversarial
+An earlier draft rendered the interstitial _instead of_ the shell; adversarial
 review refuted it: in hosted mode the whole auth/onboarding funnel (sign-in,
 invitation redemption, recovery codes — `HostedHubRoot.tsx:51-58`) lives under
 the single `hosted-hub` gate state, so replacement gated onboarding, and it
@@ -140,17 +140,19 @@ overlay.
 ### Interstitial component
 
 `apps/web/src/components/shell/phone/PhoneGetAppInterstitial.tsx` — a
-full-screen fixed overlay (`inset-0`, top z-index), self-contained (no
+full-screen fixed overlay (`inset-0`, above the toast viewport), self-contained (no
 dependency on app shell, sidebar, or connection state):
 
 - Brand mark + headline ("Ryco is better as an app") + one sentence of copy.
 - Primary action: **Get the app** — a plain `<a href={mobileAppUrl}
-  target="_blank" rel="noreferrer">` (no `window.open`, works under popup
+target="_blank" rel="noreferrer">` (no `window.open`, works under popup
   blockers).
 - Secondary action: **Continue in browser** — records the dismissal and
   removes the overlay, revealing the already-mounted experience.
-- Accessibility: `role="dialog"`, `aria-modal="true"`, focus moved into the
-  dialog on mount and trapped among its controls, `Escape` dismisses.
+- Accessibility: the dialog portals to `document.body`; while open it marks
+  `#root` inert, moves focus into the dialog, traps its controls, and handles
+  `Escape` on the dialog itself. If `#root` is absent, the inert step is
+  skipped.
 - Styling uses the existing phone primitives and conventions
   (`components/mobile/GlassSurface`, safe-area insets, reduced-motion
   compliance, ≥44 px touch targets), matching the frozen phone tier's look.
