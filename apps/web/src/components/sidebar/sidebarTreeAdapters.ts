@@ -3,7 +3,7 @@ import {
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@ryco/client-runtime";
+} from "@ryco/client-runtime/scoped";
 import type { ProjectId } from "@ryco/contracts";
 import type { DraftId, DraftThreadState } from "../../composerDraftStore";
 import {

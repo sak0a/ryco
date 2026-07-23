@@ -7,7 +7,7 @@ import {
   type EditorId,
   type ScopedThreadRef,
 } from "@ryco/contracts";
-import { scopeThreadRef } from "@ryco/client-runtime";
+import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { DEFAULT_UNIFIED_SETTINGS, type GitStatusPollIntervalMs } from "@ryco/contracts/settings";
 import { Equal } from "effect";
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../../branding";

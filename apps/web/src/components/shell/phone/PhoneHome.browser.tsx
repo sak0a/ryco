@@ -10,7 +10,7 @@ import {
   type ThreadId,
   type WorktreeId,
 } from "@ryco/contracts";
-import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
+import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { page, userEvent } from "vite-plus/test/browser";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";

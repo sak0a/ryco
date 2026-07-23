@@ -1,4 +1,4 @@
-import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime";
+import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime/scoped";
 import {
   DEFAULT_AGENT_TOKEN_MODE,
   DEFAULT_RUNTIME_MODE,

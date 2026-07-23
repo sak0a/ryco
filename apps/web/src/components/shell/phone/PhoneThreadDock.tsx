@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { EnvironmentId, ProjectId, ThreadId } from "@ryco/contracts";
-import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
+import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import {
   CheckIcon,
   EllipsisIcon,

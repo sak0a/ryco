@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
+import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { type SidebarThreadSortOrder } from "@ryco/contracts/settings";
 import {
   resolveProjectStatusIndicator,

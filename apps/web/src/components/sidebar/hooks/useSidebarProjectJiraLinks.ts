@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime";
+import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime/scoped";
 import { resolveJiraProjectOpenUrl } from "../../../lib/workItemLocalLinks";
 import { shouldQuerySidebarSourceControlCounts } from "../../Sidebar.logic";
 import type { SidebarProjectSnapshot } from "../../../sidebarProjectGrouping";

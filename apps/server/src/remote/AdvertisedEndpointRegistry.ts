@@ -1,6 +1,9 @@
 import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 
-import { createAdvertisedEndpoint, type CreateAdvertisedEndpointInput } from "@ryco/client-runtime";
+import {
+  createAdvertisedEndpoint,
+  type CreateAdvertisedEndpointInput,
+} from "@ryco/shared/advertisedEndpoint";
 import type { AdvertisedEndpoint, AdvertisedEndpointProvider } from "@ryco/contracts";
 import { isTailscaleIpv4Address } from "@ryco/tailscale";
 import { Effect, Layer } from "effect";

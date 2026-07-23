@@ -19,7 +19,7 @@ import {
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@ryco/client-runtime";
+} from "@ryco/client-runtime/scoped";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";

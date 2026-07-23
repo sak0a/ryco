@@ -1,5 +1,5 @@
 import { type ServerLifecycleWelcomePayload, WS_METHODS } from "@ryco/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime";
+import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime/scoped";
 import { Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
 

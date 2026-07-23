@@ -5,7 +5,7 @@
  * API constrained to store actions/selectors.
  */
 
-import { parseScopedThreadKey, scopedThreadKey } from "@ryco/client-runtime";
+import { parseScopedThreadKey, scopedThreadKey } from "@ryco/client-runtime/scoped";
 import { type ScopedThreadRef, type TerminalEvent } from "@ryco/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";

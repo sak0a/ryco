@@ -1,7 +1,7 @@
 import { ArchiveIcon, CloudIcon, PinIcon, TerminalIcon, XIcon } from "lucide-react";
 import React, { memo, useCallback, useMemo } from "react";
 import type { ScopedThreadRef } from "@ryco/contracts";
-import { scopedThreadKey, scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime";
+import { scopedThreadKey, scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import {
   useSavedEnvironmentRegistryStore,

@@ -1,4 +1,4 @@
-import { scopeProjectRef, scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
+import { scopeProjectRef, scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { VcsStatusResult } from "@ryco/contracts";
 import { CloudIcon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
 import { useMemo } from "react";

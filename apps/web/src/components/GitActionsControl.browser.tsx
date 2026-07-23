@@ -1,4 +1,4 @@
-import { scopeThreadRef } from "@ryco/client-runtime";
+import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { ThreadId } from "@ryco/contracts";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";

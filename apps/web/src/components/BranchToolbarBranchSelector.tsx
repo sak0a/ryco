@@ -1,4 +1,4 @@
-import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime";
+import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { EnvironmentId, VcsRef, ThreadId } from "@ryco/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon } from "lucide-react";

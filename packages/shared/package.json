@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./advertisedEndpoint": {
+      "types": "./src/advertisedEndpoint.ts",
+      "import": "./src/advertisedEndpoint.ts"
+    },
     "./model": {
       "types": "./src/model.ts",
       "import": "./src/model.ts"

@@ -4,9 +4,21 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts"
+    "./scoped": {
+      "types": "./src/scoped.ts",
+      "import": "./src/scoped.ts"
+    },
+    "./knownEnvironment": {
+      "types": "./src/knownEnvironment.ts",
+      "import": "./src/knownEnvironment.ts"
+    },
+    "./sourceControlDiscoveryState": {
+      "types": "./src/sourceControlDiscoveryState.ts",
+      "import": "./src/sourceControlDiscoveryState.ts"
+    },
+    "./platform": {
+      "types": "./src/platform/index.ts",
+      "import": "./src/platform/index.ts"
     }
   },
   "scripts": {

@@ -11,7 +11,7 @@ import {
   RotateCcwIcon,
   Trash2Icon,
 } from "lucide-react";
-import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
+import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { EnvironmentId } from "@ryco/contracts";
 import { cn } from "../../lib/utils";
 import { useGitStatus, type GitStatusState } from "../../lib/gitStatusState";

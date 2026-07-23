@@ -6,7 +6,7 @@ import {
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@ryco/client-runtime";
+} from "@ryco/client-runtime/scoped";
 import { useRouter } from "@tanstack/react-router";
 import { type SidebarThreadSortOrder } from "@ryco/contracts/settings";
 import { isMacPlatform } from "../../lib/utils";

@@ -7,7 +7,7 @@ import {
   ProviderDriverKind,
   ThreadId,
 } from "@ryco/contracts";
-import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
+import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import "../../index.css";
 
 import { page } from "vite-plus/test/browser";

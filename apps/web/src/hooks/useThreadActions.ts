@@ -1,4 +1,4 @@
-import { parseScopedThreadKey, scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime";
+import { parseScopedThreadKey, scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { type ScopedThreadRef, ThreadId } from "@ryco/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback, useRef } from "react";

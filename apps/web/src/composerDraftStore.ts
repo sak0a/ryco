@@ -17,7 +17,7 @@ import {
   ThreadId,
   type ComposerSourceControlContext,
 } from "@ryco/contracts";
-import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime";
+import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import * as Schema from "effect/Schema";
 import * as Equal from "effect/Equal";
 import { createModelSelection, normalizeModelSlug } from "@ryco/shared/model";

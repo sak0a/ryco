@@ -1,4 +1,4 @@
-import { scopeProjectRef } from "@ryco/client-runtime";
+import { scopeProjectRef } from "@ryco/client-runtime/scoped";
 import type { EnvironmentId, ScopedProjectRef } from "@ryco/contracts";
 import {
   deriveLogicalProjectKeyFromSettings,

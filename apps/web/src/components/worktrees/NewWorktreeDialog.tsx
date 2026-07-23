@@ -8,7 +8,7 @@ import type {
   WorkItemStateFilter,
   WorkItemSummary,
 } from "@ryco/contracts";
-import { scopeProjectRef } from "@ryco/client-runtime";
+import { scopeProjectRef } from "@ryco/client-runtime/scoped";
 import { ChevronDownIcon, GitBranchIcon, RotateCwIcon, SparklesIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";

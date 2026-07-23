@@ -1,5 +1,8 @@
 import type { NetworkInterfaceInfo } from "node:os";
-import { createAdvertisedEndpoint, type CreateAdvertisedEndpointInput } from "@ryco/client-runtime";
+import {
+  createAdvertisedEndpoint,
+  type CreateAdvertisedEndpointInput,
+} from "@ryco/shared/advertisedEndpoint";
 import type {
   AdvertisedEndpoint,
   AdvertisedEndpointProvider,

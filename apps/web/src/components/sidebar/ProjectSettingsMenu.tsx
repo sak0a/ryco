@@ -7,7 +7,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import { AtlassianJiraIcon } from "../Icons";
-import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime";
+import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime/scoped";
 import { MenuGroup, MenuItem, MenuSeparator } from "../ui/menu";
 import type {
   SidebarProjectGroupMember,

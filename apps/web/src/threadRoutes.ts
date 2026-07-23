@@ -1,4 +1,4 @@
-import { scopeThreadRef } from "@ryco/client-runtime";
+import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@ryco/contracts";
 import type { DraftId } from "./composerDraftStore";
 

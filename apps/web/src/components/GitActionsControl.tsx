@@ -1,5 +1,5 @@
 import { type ScopedThreadRef, WorktreeId } from "@ryco/contracts";
-import { scopedThreadKey } from "@ryco/client-runtime";
+import { scopedThreadKey } from "@ryco/client-runtime/scoped";
 import type {
   GitActionProgressEvent,
   GitRunStackedActionResult,

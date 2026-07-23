@@ -1,5 +1,5 @@
 import React, { useCallback } from "react";
-import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime";
+import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime/scoped";
 import { type ContextMenuItem } from "@ryco/contracts";
 import { readLocalApi } from "../../../localApi";
 import type {

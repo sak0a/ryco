@@ -7,7 +7,7 @@ import {
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@ryco/client-runtime";
+} from "@ryco/client-runtime/scoped";
 import {
   ChevronDownIcon,
   ChevronRightIcon,

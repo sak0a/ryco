@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { ScopedThreadRef } from "@ryco/contracts";
-import { parseScopedThreadKey } from "@ryco/client-runtime";
+import { parseScopedThreadKey } from "@ryco/client-runtime/scoped";
 
 import { Button } from "../../ui/button";
 import {

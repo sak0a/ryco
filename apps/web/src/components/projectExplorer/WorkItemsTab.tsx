@@ -8,7 +8,7 @@ import type {
   WorkItemStateFilter,
   WorkItemSummary,
 } from "@ryco/contracts";
-import { scopeProjectRef } from "@ryco/client-runtime";
+import { scopeProjectRef } from "@ryco/client-runtime/scoped";
 import { DateTime, Option } from "effect";
 import { useQuery } from "~/rpc/queryClient";
 import { useDebouncedValue } from "@tanstack/react-pacer";
