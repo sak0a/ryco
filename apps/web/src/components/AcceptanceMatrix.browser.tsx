@@ -1164,13 +1164,15 @@ const PHONE_PRIMITIVE_SUITES: readonly SuiteAlias[] = [
 
 // Supporting suites the matrix leans on at file granularity: they must stay
 // present and green, but the mapping references them as whole suites rather
-// than by an individual test name.
+// than by an individual test name. The hosted reconnect-policy and lifecycle
+// controller unit suites moved into @ryco/client-runtime with the hosted unit
+// (packages/client-runtime/src/{relay/reconnectPolicy,authorization/state}.test.ts,
+// run by the workspace test gate); the web-composed integration suites below
+// remain the in-matrix gate for that behavior.
 const SUPPORTING_SUITES: readonly string[] = [
   "../hostedHub/nodeRouteRestore.integration.test.ts",
   "../hostedHub/returnToDirectory.integration.test.ts",
   "../hostedHub/lifecycle.integration.test.ts",
-  "../hostedHub/reconnectPolicy.test.ts",
-  "../hostedHub/state.test.ts",
   "../pwa/lifecycle.test.ts",
   "../pwa/serviceWorkerPolicy.test.ts",
   "../pwa/buildArtifacts.test.ts",

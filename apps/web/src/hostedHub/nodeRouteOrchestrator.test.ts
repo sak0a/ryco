@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId } from "@ryco/contracts";
+import { configureHostedRuntime } from "@ryco/client-runtime/authorization";
 
 import type { HostedHubNode, HostedHubSessionResponse } from "./types";
 import { createFakeHistoryWindow, type FakeHistoryWindow } from "../../test/fakeHistoryWindow";
@@ -18,8 +19,8 @@ const {
       _signal?: AbortSignal,
     ): Promise<void> => undefined,
   ),
-  deactivateHostedNode: vi.fn(async () => undefined),
-  suspendHostedNode: vi.fn(async () => undefined),
+  deactivateHostedNode: vi.fn(async (_environmentId?: EnvironmentId) => undefined),
+  suspendHostedNode: vi.fn(async (_environmentId?: EnvironmentId) => undefined),
   hasHostedRelayPendingRequests: vi.fn(() => false),
   resetHostedRelayAttemptFactory: vi.fn(),
 }));
@@ -104,6 +105,85 @@ function setup(initialUrl: string): {
 async function settle(): Promise<void> {
   for (let hop = 0; hop < 8; hop += 1) await Promise.resolve();
 }
+
+const unusedPlatformService = new Proxy(
+  {},
+  {
+    get() {
+      throw new Error("platform service is not used by the route orchestrator tests");
+    },
+  },
+);
+
+// The hosted controller now reads an injected runtime. Configure it with a
+// node lifecycle that routes the package transition-queue effects to this
+// suite's existing observable fakes — a node activation is one primary
+// connect, a teardown clears node-scoped state — so the historical route
+// assertions keep their meaning without touching the controller internals.
+// The teardown effects also record their order so a Back-driven deactivation
+// can assert the documented reset → disconnect → clear → descriptor sequence.
+const teardownOrder: string[] = [];
+beforeEach(() => {
+  teardownOrder.length = 0;
+  configureHostedRuntime(
+    {
+      endpoint: unusedPlatformService as never,
+      httpClient: unusedPlatformService as never,
+      passkeyCeremony: unusedPlatformService as never,
+      sessionCredentials: unusedPlatformService as never,
+      nodeLifecycle: {
+        activate: async () => undefined,
+        suspend: async () => undefined,
+        deactivate: async () => undefined,
+        clearNodeScopedState: (environmentId) => {
+          teardownOrder.push("clear");
+          void deactivateHostedNode(environmentId);
+        },
+        writePrimaryEnvironmentDescriptor: (descriptor) => {
+          if (descriptor === null) teardownOrder.push("descriptor:null");
+        },
+        connectPrimaryEnvironment: () => {
+          void activateHostedNode();
+        },
+        disconnectPrimaryEnvironment: async () => {
+          teardownOrder.push("disconnect");
+        },
+        setActiveEnvironmentId: () => undefined,
+      },
+      timers: {
+        now: () => Date.now(),
+        setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+        clearTimeout: (timer) => globalThis.clearTimeout(timer),
+        queueMicrotask: (callback) => globalThis.queueMicrotask(callback),
+      },
+      isForeground: () =>
+        (globalThis.document as { visibilityState?: string } | undefined)?.visibilityState !==
+        "hidden",
+      subscribeForeground: (listener) => {
+        const doc = globalThis.document as
+          | {
+              visibilityState?: string;
+              addEventListener: (type: string, handler: () => void, options?: unknown) => void;
+              removeEventListener: (type: string, handler: () => void) => void;
+            }
+          | undefined;
+        const onVisibility = () => {
+          if (doc?.visibilityState === "visible") listener();
+        };
+        doc?.addEventListener("visibilitychange", onVisibility, { once: true });
+        return () => doc?.removeEventListener("visibilitychange", onVisibility);
+      },
+      hasPendingRelayRequests: hasHostedRelayPendingRequests,
+      resetRelayAttemptFactory: () => {
+        teardownOrder.push("reset");
+        resetHostedRelayAttemptFactory();
+      },
+      relayUrl: () => "wss://hub.example.test/v1/relay/client",
+      createRelaySocket: () => ({}),
+    },
+    hostedHubApi,
+  );
+});
 
 afterEach(() => {
   stopOrchestrator?.();
@@ -335,8 +415,14 @@ describe("hosted node route restore pipeline", () => {
     });
     const generationBefore = useHostedHubStore.getState().generation;
 
+    teardownOrder.length = 0;
     win.history.back();
     await vi.waitFor(() => expect(deactivateHostedNode).toHaveBeenCalledWith(target.environmentId));
+    await settle();
+    // The Back-driven deactivation drives the transition queue in the documented
+    // order: reset the relay attempt, disconnect, clear node-scoped state, then
+    // write a null primary descriptor.
+    expect(teardownOrder).toEqual(["reset", "disconnect", "clear", "descriptor:null"]);
     flush();
     const afterBack = useHostedHubStore.getState();
     expect(afterBack.selectedNode).toBeNull();

@@ -3,6 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { encodeBase64Url } from "./base64url";
 import { createPasskeyRegistration, getPasskeyAuthentication } from "./webauthn";
 
+/**
+ * Browser passkey ceremonies. The fail-closed option validation and response
+ * codecs live in `@ryco/client-runtime/relay` (see its `webauthn.test.ts`);
+ * this suite covers the navigator.credentials ceremony and browser
+ * credential-type handling that stays in the web adapter, so stubbing the
+ * navigator globals is expected here.
+ */
+
 const originalNavigator = globalThis.navigator;
 const originalCredential = globalThis.PublicKeyCredential;
 const originalAssertion = globalThis.AuthenticatorAssertionResponse;

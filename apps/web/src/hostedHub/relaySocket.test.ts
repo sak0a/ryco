@@ -1,72 +1,58 @@
-import {
-  RELAY_INITIAL_LIMITS,
-  RelayLimits,
-  type RelayChannelId,
-  type RelayFrame,
-} from "@ryco/contracts";
+import { RELAY_INITIAL_LIMITS, type RelayChannelId, type RelayFrame } from "@ryco/contracts";
+import { encodeBase64Url } from "@ryco/client-runtime/relay";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { encodeBase64Url } from "./base64url";
-import { HostedRelayRpcWebSocket } from "./relaySocket";
-import type { HostedRelaySocketCallbacks } from "./relaySocket";
+import { BrowserHostedRelaySocket, hostedRelayWebSocketUrl } from "./relaySocket";
 
-type Listener = (event: Event | MessageEvent) => void;
+/**
+ * Facade-level tests for the browser relay adapter (the DOM boundary the
+ * package engine cannot cover): destination/expiry validation before a socket
+ * is opened, wire coercion of every browser message type, and the
+ * draining/closed status transitions.
+ */
+
 const CHANNEL_ID = "ch_cccccccccccccccccccccc" as RelayChannelId;
 const VERSION = { protocolMajor: 1, protocolMinor: 2 } as const;
+const originalWindow = globalThis.window;
 
-class MockSocket {
+class MockWebSocket extends EventTarget {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
   static readonly CLOSING = 2;
   static readonly CLOSED = 3;
-  readyState = MockSocket.CONNECTING;
+  readyState = MockWebSocket.CONNECTING;
   bufferedAmount = 0;
   binaryType: BinaryType = "blob";
+  closeCalls = 0;
   readonly sent: ArrayBuffer[] = [];
-  readonly listeners = new Map<string, Set<Listener>>();
 
-  addEventListener(type: string, listener: Listener) {
-    const listeners = this.listeners.get(type) ?? new Set<Listener>();
-    listeners.add(listener);
-    this.listeners.set(type, listeners);
-  }
-  removeEventListener(type: string, listener: Listener) {
-    this.listeners.get(type)?.delete(listener);
-  }
-  send(value: string | ArrayBufferLike | Blob | ArrayBufferView) {
-    const bytes =
-      value instanceof ArrayBuffer
-        ? value.slice(0)
-        : ArrayBuffer.isView(value)
-          ? Uint8Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)).buffer
-          : new ArrayBuffer(0);
-    this.sent.push(bytes);
-  }
-  close() {
-    this.readyState = MockSocket.CLOSED;
-  }
-  open() {
-    this.readyState = MockSocket.OPEN;
-    this.emit("open", new Event("open"));
-  }
-  frame(frame: RelayFrame) {
-    const encoded = encodeRelayFrame(frame);
-    if (!encoded.ok) throw new Error("test frame encoding failed");
-    this.emit(
-      "message",
-      new MessageEvent("message", { data: Uint8Array.from(encoded.value).buffer }),
+  send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
+    this.sent.push(
+      data instanceof ArrayBuffer
+        ? data.slice(0)
+        : ArrayBuffer.isView(data)
+          ? Uint8Array.from(new Uint8Array(data.buffer, data.byteOffset, data.byteLength)).buffer
+          : new ArrayBuffer(0),
     );
   }
-  emit(type: string, event: Event | MessageEvent) {
-    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  close(): void {
+    this.closeCalls += 1;
+    this.readyState = MockWebSocket.CLOSED;
+  }
+  open(): void {
+    this.readyState = MockWebSocket.OPEN;
+    this.dispatchEvent(new Event("open"));
+  }
+  deliver(data: unknown): void {
+    this.dispatchEvent(new MessageEvent("message", { data }));
+  }
+  frame(frame: RelayFrame): void {
+    const encoded = encodeRelayFrame(frame);
+    if (!encoded.ok) throw new Error("test frame encoding failed");
+    this.deliver(Uint8Array.from(encoded.value).buffer);
   }
 }
-
-const originalWindow = globalThis.window;
-const originalWebSocket = globalThis.WebSocket;
-const originalSharedArrayBuffer = globalThis.SharedArrayBuffer;
-const sockets: MockSocket[] = [];
 
 function callbacks() {
   return {
@@ -74,28 +60,27 @@ function callbacks() {
     onSessionStatus: vi.fn(),
     onRole: vi.fn(),
     onFailure: vi.fn(),
-  } satisfies HostedRelaySocketCallbacks;
+  };
 }
 
-function create(callbackSet = callbacks()) {
-  const socket = new HostedRelayRpcWebSocket({
-    url: "ws://localhost:3020/v1/relay/client",
+function create(handlers = callbacks()) {
+  const sockets: MockWebSocket[] = [];
+  const facade = new BrowserHostedRelaySocket({
+    url: hostedRelayWebSocketUrl(),
     ticket: encodeBase64Url(new Uint8Array(32).fill(7)),
     ticketExpiresAt: Date.now() + 60_000,
-    callbacks: callbackSet,
+    callbacks: handlers,
     createSocket: () => {
-      const socket = new MockSocket();
+      const socket = new MockWebSocket();
       sockets.push(socket);
       return socket as unknown as WebSocket;
     },
   });
-  return { client: socket, socket: sockets.at(-1)!, callbacks: callbackSet };
+  return { facade, socket: sockets[0]!, handlers };
 }
 
-function authenticate(socket: MockSocket) {
+function authenticate(socket: MockWebSocket) {
   socket.open();
-  const auth = decodeRelayFrame(new Uint8Array(socket.sent[0]!));
-  expect(auth.ok && auth.value.type === "auth" && auth.value.peer === "client").toBe(true);
   socket.frame({ type: "ready", ...VERSION, limits: RELAY_INITIAL_LIMITS });
   socket.frame({
     type: "channel.open",
@@ -107,179 +92,206 @@ function authenticate(socket: MockSocket) {
   socket.frame({ type: "channel.accept", ...VERSION, channelId: CHANNEL_ID });
 }
 
+function lastPayload(socket: MockWebSocket): number[] | null {
+  const decoded = decodeRelayFrame(new Uint8Array(socket.sent.at(-1)!));
+  return decoded.ok && decoded.value.type === "data" ? [...decoded.value.payload] : null;
+}
+
 beforeEach(() => {
-  sockets.length = 0;
   Object.defineProperty(globalThis, "window", {
     configurable: true,
-    value: { location: { origin: "http://localhost:3020" } },
+    value: { location: { origin: "https://hub.example.test" } },
   });
-  globalThis.WebSocket = MockSocket as unknown as typeof WebSocket;
 });
 
 afterEach(() => {
-  vi.useRealTimers();
   Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
-  globalThis.WebSocket = originalWebSocket;
-  Object.defineProperty(globalThis, "SharedArrayBuffer", {
-    configurable: true,
-    value: originalSharedArrayBuffer,
-  });
   vi.restoreAllMocks();
 });
 
-describe("HostedRelayRpcWebSocket", () => {
-  it("authenticates with a memory-only first frame and forwards RPC bytes exactly", async () => {
-    const { client, socket, callbacks: handlers } = create();
-    const messages: Uint8Array[] = [];
-    client.addEventListener("message", (event) => {
-      messages.push(Uint8Array.from((event as MessageEvent<Uint8Array>).data));
-    });
+describe("BrowserHostedRelaySocket destination validation", () => {
+  it("rejects a non-relay destination before opening a socket or sending the ticket", () => {
+    const sockets: MockWebSocket[] = [];
+    expect(
+      () =>
+        new BrowserHostedRelaySocket({
+          url: "wss://evil.example.test/v1/relay/client",
+          ticket: encodeBase64Url(new Uint8Array(32).fill(7)),
+          ticketExpiresAt: Date.now() + 60_000,
+          callbacks: callbacks(),
+          createSocket: () => {
+            const socket = new MockWebSocket();
+            sockets.push(socket);
+            return socket as unknown as WebSocket;
+          },
+        }),
+    ).toThrow("Relay attempt is no longer valid.");
+    expect(sockets).toHaveLength(0);
+  });
+
+  it("rejects an expired ticket before opening a socket", () => {
+    const sockets: MockWebSocket[] = [];
+    expect(
+      () =>
+        new BrowserHostedRelaySocket({
+          url: hostedRelayWebSocketUrl(),
+          ticket: encodeBase64Url(new Uint8Array(32).fill(7)),
+          ticketExpiresAt: Date.now() - 1,
+          callbacks: callbacks(),
+          createSocket: () => {
+            const socket = new MockWebSocket();
+            sockets.push(socket);
+            return socket as unknown as WebSocket;
+          },
+        }),
+    ).toThrow("Relay attempt is no longer valid.");
+    expect(sockets).toHaveLength(0);
+  });
+
+  it("closes the created socket when engine construction fails after prevalidation", () => {
+    const sockets: MockWebSocket[] = [];
+    // URL and expiry prevalidation pass, so the socket is created — but the
+    // ticket material is undecodable, so the engine constructor throws.
+    expect(
+      () =>
+        new BrowserHostedRelaySocket({
+          url: hostedRelayWebSocketUrl(),
+          ticket: "not valid base64url!!!",
+          ticketExpiresAt: Date.now() + 60_000,
+          callbacks: callbacks(),
+          createSocket: () => {
+            const socket = new MockWebSocket();
+            sockets.push(socket);
+            return socket as unknown as WebSocket;
+          },
+        }),
+    ).toThrow("Invalid encoded material.");
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]!.closeCalls).toBe(1);
+    expect(sockets[0]!.readyState).toBe(MockWebSocket.CLOSED);
+  });
+});
+
+describe("BrowserHostedRelaySocket wire compatibility", () => {
+  it("coerces string, ArrayBuffer, typed-array, and SharedArrayBuffer send inputs", () => {
+    const { facade, socket } = create();
     authenticate(socket);
-    expect(handlers.onFailure.mock.calls).toEqual([]);
-    expect(client.readyState).toBe(WebSocket.OPEN);
-    expect(handlers.onRole).toHaveBeenCalledWith("operator");
 
-    const outbound = new Uint8Array([0, 1, 2, 254, 255]);
-    client.send(outbound);
-    const sent = decodeRelayFrame(new Uint8Array(socket.sent.at(-1)!));
-    expect(sent.ok && sent.value.type === "data" ? [...sent.value.payload] : null).toEqual([
-      ...outbound,
-    ]);
-    expect(sent.ok && sent.value.type === "data" ? sent.value.sequence : null).toBe(0);
+    facade.send(new Uint8Array([1, 2, 3]).buffer);
+    expect(lastPayload(socket)).toEqual([1, 2, 3]);
+    facade.send(new Uint8Array([4, 5, 6]));
+    expect(lastPayload(socket)).toEqual([4, 5, 6]);
+    facade.send(new DataView(new Uint8Array([7, 8, 9]).buffer));
+    expect(lastPayload(socket)).toEqual([7, 8, 9]);
+    facade.send("AB");
+    expect(lastPayload(socket)).toEqual([65, 66]);
+    if (typeof SharedArrayBuffer !== "undefined") {
+      const shared = new SharedArrayBuffer(3);
+      new Uint8Array(shared).set([10, 11, 12]);
+      facade.send(shared);
+      expect(lastPayload(socket)).toEqual([10, 11, 12]);
+    }
+  });
 
-    const inbound = new Uint8Array([9, 8, 7, 0, 255]);
+  it("rejects Blob send inputs", () => {
+    const { facade, socket } = create();
+    authenticate(socket);
+    expect(() => facade.send(new Blob([new Uint8Array([1])]))).toThrow(
+      "Blob RPC writes are unsupported.",
+    );
+  });
+
+  it("throws an InvalidStateError when sending before the channel handshake completes", () => {
+    const { facade } = create();
+    // No authenticate: the engine has no accepted channel yet, and the
+    // WebSocket-API contract requires an InvalidStateError DOMException.
+    let thrown: unknown;
+    try {
+      facade.send(new Uint8Array([1, 2, 3]));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(DOMException);
+    expect((thrown as DOMException).name).toBe("InvalidStateError");
+    expect((thrown as DOMException).message).toBe("Relay channel is not open.");
+  });
+
+  it("delivers ArrayBuffer and typed-array inbound messages", async () => {
+    const { facade, socket } = create();
+    const received: number[][] = [];
+    facade.addEventListener("message", (event) =>
+      received.push([...new Uint8Array((event as MessageEvent).data)]),
+    );
+    authenticate(socket);
+
     socket.frame({
       type: "data",
       ...VERSION,
       channelId: CHANNEL_ID,
       sequence: 0 as never,
-      payload: inbound,
+      payload: new Uint8Array([9, 8, 7]),
     });
-    await Promise.resolve();
-    expect(messages.map((value) => Array.from(value))).toEqual([Array.from(inbound)]);
-  });
-
-  it("honors flow pause and resume with a bounded per-instance queue", () => {
-    const { client, socket } = create();
-    authenticate(socket);
-    socket.frame({ type: "flow.pause", ...VERSION, channelId: CHANNEL_ID });
-    const sentBefore = socket.sent.length;
-    client.send(new Uint8Array([1, 2, 3]));
-    expect(socket.sent).toHaveLength(sentBefore);
-    socket.frame({ type: "flow.resume", ...VERSION, channelId: CHANNEL_ID });
-    expect(socket.sent).toHaveLength(sentBefore + 1);
-  });
-
-  it("forwards typed-array payloads when SharedArrayBuffer is unavailable", () => {
-    Object.defineProperty(globalThis, "SharedArrayBuffer", {
-      configurable: true,
-      value: undefined,
-    });
-    const { client, socket } = create();
-    authenticate(socket);
-    expect(() => client.send(new Uint8Array([1, 2, 3]))).not.toThrow();
-  });
-
-  it("responds to canonical heartbeat pings", () => {
-    const { socket } = create();
-    authenticate(socket);
-    socket.frame({ type: "ping", ...VERSION, nonce: new Uint8Array(8).fill(4) });
-    const response = decodeRelayFrame(new Uint8Array(socket.sent.at(-1)!));
-    expect(response.ok && response.value.type === "pong").toBe(true);
-  });
-
-  it("enforces the five-second client authentication deadline", () => {
-    vi.useFakeTimers();
-    const handlers = callbacks();
-    const { socket } = create(handlers);
-    socket.open();
-    vi.advanceTimersByTime(5_000);
-    expect(handlers.onFailure).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "authentication" }),
-    );
-  });
-
-  it("does not retain or send the authentication frame after a pre-open close", () => {
-    const { client, socket } = create();
-    client.close();
-    socket.open();
-    expect(socket.sent).toEqual([]);
-  });
-
-  it("keeps tabs independent and rejects duplicate inbound sequences", async () => {
-    const firstHandlers = callbacks();
-    const secondHandlers = callbacks();
-    const first = create(firstHandlers);
-    const second = create(secondHandlers);
-    authenticate(first.socket);
-    authenticate(second.socket);
-    first.socket.frame({
+    const secondFrame = encodeRelayFrame({
       type: "data",
       ...VERSION,
       channelId: CHANNEL_ID,
       sequence: 1 as never,
-      payload: new Uint8Array([1]),
+      payload: new Uint8Array([6, 5, 4]),
     });
-    await Promise.resolve();
-    expect(firstHandlers.onFailure).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "protocol" }),
-    );
-    expect(second.client.readyState).toBe(WebSocket.OPEN);
-    expect(secondHandlers.onFailure).not.toHaveBeenCalled();
+    if (!secondFrame.ok) throw new Error("test frame encoding failed");
+    // Deliver the second inbound frame as a typed-array view rather than an
+    // ArrayBuffer, exercising the view branch of the message coercion.
+    socket.deliver(Uint8Array.from(secondFrame.value));
+
+    for (let hop = 0; hop < 6; hop += 1) await Promise.resolve();
+    expect(received).toEqual([
+      [9, 8, 7],
+      [6, 5, 4],
+    ]);
   });
 
-  it("bounds slow-consumer queues using negotiated limits", () => {
-    const handlers = callbacks();
-    const { client, socket } = create(handlers);
-    socket.open();
-    socket.frame({
-      type: "ready",
-      ...VERSION,
-      limits: RelayLimits.make({
-        ...RELAY_INITIAL_LIMITS,
-        maxControlFrameBytes: 1_024,
-        maxDataChunkBytes: 1_024,
-        maxQueuedBytes: 2_048,
-      }),
-    });
-    socket.frame({
-      type: "channel.open",
-      ...VERSION,
-      channelId: CHANNEL_ID,
-      capability: "ryco.rpc",
-      effectiveRole: "operator",
-    });
-    socket.frame({ type: "channel.accept", ...VERSION, channelId: CHANNEL_ID });
-    socket.frame({ type: "flow.pause", ...VERSION, channelId: CHANNEL_ID });
-    expect(() => client.send(new Uint8Array(1_024))).toThrow("queue is full");
-    expect(handlers.onFailure).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "slow-consumer", retryable: true }),
-    );
-  });
-
-  it.each([
-    ["node_offline", "offline", true],
-    ["server_draining", "draining", true],
-    ["connection_replaced", "replacement", true],
-    ["ticket_expired", "authentication", true],
-    ["authentication_required", "authentication", false],
-    ["node_revoked", "revoked", false],
-    ["authorization_failed", "authorization-removed", false],
-    ["protocol_unsupported", "incompatible", false],
-  ] as const)("classifies %s relay failures", (code, kind, retryable) => {
+  it("classifies a non-binary inbound message as an oversized frame, not a dropped payload", () => {
     const handlers = callbacks();
     const { socket } = create(handlers);
+    socket.open();
+    socket.deliver("this is a text frame, not relay bytes");
+    // The original façade classified a message with no relay byte length as
+    // frame_too_large — assert that exact close reason, not protocol_invalid.
+    expect(handlers.onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "protocol",
+        retryable: false,
+        closeReason: "frame_too_large",
+      }),
+    );
+  });
+
+  it("fails closed on a direct inbound SharedArrayBuffer", () => {
+    if (typeof SharedArrayBuffer === "undefined") return;
+    const handlers = callbacks();
+    const { socket } = create(handlers);
+    socket.open();
+    socket.deliver(new SharedArrayBuffer(8));
+    expect(handlers.onFailure).toHaveBeenCalledWith(expect.objectContaining({ kind: "protocol" }));
+    // A raw SharedArrayBuffer is an invalid frame (protocol_invalid), which
+    // carries no close reason — distinct from the oversized-frame case.
+    const failure = handlers.onFailure.mock.calls.at(-1)?.[0] as { closeReason?: string };
+    expect(failure.closeReason).toBeUndefined();
+  });
+
+  it("emits draining on close and guards an already-closed facade", () => {
+    const handlers = callbacks();
+    const { facade, socket } = create(handlers);
     authenticate(socket);
-    socket.frame({
-      type: "error",
-      ...VERSION,
-      code,
-      fatal: !retryable,
-      ...(code === "protocol_unsupported"
-        ? { supported: { protocolMajor: 1, minimumMinor: 0, maximumMinor: 2 } }
-        : {}),
-    });
-    expect(handlers.onFailure).toHaveBeenCalledWith(expect.objectContaining({ kind, retryable }));
-    expect(handlers.onSessionStatus).not.toHaveBeenCalledWith("closed");
+    handlers.onTransportStatus.mockClear();
+
+    facade.close();
+    expect(handlers.onTransportStatus).toHaveBeenCalledWith("draining");
+    expect(facade.readyState).toBe(WebSocket.CLOSED);
+
+    handlers.onTransportStatus.mockClear();
+    facade.close();
+    expect(facade.readyState).toBe(WebSocket.CLOSED);
+    expect(handlers.onTransportStatus).not.toHaveBeenCalled();
   });
 });
