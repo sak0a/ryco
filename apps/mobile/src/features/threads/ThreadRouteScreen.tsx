@@ -1,19 +1,28 @@
-import { View } from "react-native";
 import type { StaticScreenProps } from "@react-navigation/native";
 
-import { EmptyState } from "../../components/EmptyState";
+import { EnvironmentId, ThreadId } from "@ryco/contracts";
 
-// B2 placeholder — replaced by the real screen in a later task. Declares its
-// thread route params so the flat deep-link route stays typed and navigable.
-type RouteProps = StaticScreenProps<{
+import { ThreadDetailScreen } from "./ThreadDetailScreen";
+
+type ThreadRouteScreenProps = StaticScreenProps<{
   readonly environmentId: string;
   readonly threadId: string;
 }>;
 
-export function ThreadRouteScreen(_props: RouteProps) {
+function firstParam(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
+  const environmentIdRaw = firstParam(props.route.params.environmentId);
+  const threadIdRaw = firstParam(props.route.params.threadId);
+  if (!environmentIdRaw || !threadIdRaw) return null;
+
   return (
-    <View className="flex-1 items-center justify-center bg-screen px-6">
-      <EmptyState variant="plain" title="Thread" detail="The chat detail surface arrives in the next build." />
-    </View>
+    <ThreadDetailScreen
+      environmentId={EnvironmentId.make(environmentIdRaw)}
+      threadId={ThreadId.make(threadIdRaw)}
+    />
   );
 }
