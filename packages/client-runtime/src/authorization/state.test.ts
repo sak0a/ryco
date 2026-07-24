@@ -64,7 +64,6 @@ const hostedHubApi = {
   listNodes: vi.fn(),
   listPasskeys: vi.fn(),
   addPasskey: vi.fn(),
-  revokePasskey: vi.fn(),
   getRecoveryCodes: vi.fn(),
   clearSessionMaterial: vi.fn(),
 } as unknown as HostedHubApi;
@@ -1244,18 +1243,6 @@ describe("hosted account management state", () => {
     });
   });
 
-  it("revokes a passkey and refreshes the list from the Hub", async () => {
-    await authenticate();
-    const revokePasskey = vi.spyOn(hostedHubApi, "revokePasskey").mockResolvedValue();
-    const listPasskeys = vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([]);
-
-    await hostedHubController.revokePasskey("credential-aaa");
-
-    expect(revokePasskey).toHaveBeenCalledWith("credential-aaa", expect.anything());
-    expect(listPasskeys).toHaveBeenCalledOnce();
-    expect(hostedAccountStore.getState()).toMatchObject({ passkeys: [], actionStatus: "idle" });
-  });
-
   it("maps an add-passkey failure to a bounded message and stays authenticated", async () => {
     await authenticate();
     vi.spyOn(hostedHubApi, "addPasskey").mockRejectedValue(
@@ -1282,13 +1269,14 @@ describe("hosted account management state", () => {
           release = () => resolve(null);
         }),
     );
-    const revokePasskey = vi.spyOn(hostedHubApi, "revokePasskey").mockResolvedValue();
+    const getRecoveryCodes = vi.spyOn(hostedHubApi, "getRecoveryCodes").mockResolvedValue(["code"]);
     vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([]);
 
     const pending = hostedHubController.addPasskey({ passkeyLabel: null });
     expect(hostedAccountStore.getState().actionStatus).toBe("adding-passkey");
-    await hostedHubController.revokePasskey("credential-aaa");
-    expect(revokePasskey).not.toHaveBeenCalled();
+    await hostedHubController.loadRecoveryCodes();
+    expect(getRecoveryCodes).not.toHaveBeenCalled();
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
 
     release?.();
     await pending;

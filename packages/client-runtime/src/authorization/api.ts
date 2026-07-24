@@ -28,9 +28,8 @@ const MAX_RECOVERY_CODE_LENGTH = 128;
 const MAX_PASSKEY_LABEL_LENGTH = 256;
 
 /**
- * WebAuthn credential ids are base64url. Constraining them here keeps a
- * credential id from ever widening a request path (no `/`, `.`, `?` or `#`
- * survives this test) and bounds what a malformed Hub response can project.
+ * WebAuthn credential ids are base64url. Constraining them bounds what a
+ * malformed Hub response can project into a view model.
  */
 const CREDENTIAL_ID_PATTERN = /^[A-Za-z0-9_-]{1,512}$/;
 
@@ -344,10 +343,13 @@ export class HostedHubApi {
   /**
    * List the passkeys registered against the signed-in account.
    *
-   * `GET /api/account/passkeys` is confirmed registered (it answers 401 without
-   * a session). The response member name and record shape are inferred by
-   * symmetry with `/api/nodes` → `{ nodes: [...] }` and are projected through
-   * {@link passkeyValue}, so an unexpected member can never reach a view model.
+   * `/api/account/passkeys` is confirmed registered and confirmed **GET-only**
+   * (it answers 401 without a session, and 405 to `POST`/`DELETE`). It exposes
+   * no member sub-route on any method, so there is no client-reachable passkey
+   * revocation to implement until the Hub serves one. The response member name
+   * and record shape are inferred by symmetry with `/api/nodes` →
+   * `{ nodes: [...] }` and are projected through {@link passkeyValue}, so an
+   * unexpected member can never reach a view model.
    */
   async listPasskeys(signal?: AbortSignal): Promise<ReadonlyArray<HostedHubPasskey>> {
     const result = await this.#request("/api/account/passkeys", signal ? { signal } : {});
@@ -382,33 +384,15 @@ export class HostedHubApi {
   }
 
   /**
-   * Revoke one of the account's passkeys.
-   *
-   * The revoke shape is **not** part of the observed contract; `DELETE` on the
-   * collection member is the least surprising reading of a registered
-   * `/api/account/passkeys` collection, so that is what this issues. The
-   * credential id is validated against {@link CREDENTIAL_ID_PATTERN} before it
-   * is placed in the path, so a malformed id fails closed without reaching the
-   * wire. The response body is deliberately not projected.
-   */
-  async revokePasskey(credentialId: string, signal?: AbortSignal): Promise<void> {
-    if (!CREDENTIAL_ID_PATTERN.test(credentialId)) {
-      throw new HostedHubApiError("invalid_request", 400);
-    }
-    await this.#request(`/api/account/passkeys/${encodeURIComponent(credentialId)}`, {
-      method: "DELETE",
-      csrf: true,
-      ...(signal ? { signal } : {}),
-    });
-  }
-
-  /**
    * Fetch the account's recovery codes for a single display.
    *
-   * `/api/account/recovery-codes` is confirmed registered and rejects `GET`
-   * (405), so the client issues `POST`. The `recoveryCodes: string[]` member is
-   * the shape the verify responses already use. The codes are returned to the
-   * caller and never persisted, logged, or placed in an error by this client.
+   * `/api/account/recovery-codes` is confirmed registered, rejects `GET` (405),
+   * and is confirmed reachable over the bearer transport: a bare `POST` is
+   * refused by the browser-origin gate (403), while the same `POST` carrying an
+   * `Authorization: DPoP` header reaches authentication instead (401). The
+   * `recoveryCodes: string[]` member is the shape the verify responses already
+   * use. The codes are returned to the caller and never persisted, logged, or
+   * placed in an error by this client.
    */
   async getRecoveryCodes(signal?: AbortSignal): Promise<ReadonlyArray<string>> {
     const result = await this.#request("/api/account/recovery-codes", {
@@ -761,7 +745,7 @@ export class HostedHubApi {
   async #request(
     pathname: string,
     options: {
-      readonly method?: "GET" | "POST" | "DELETE";
+      readonly method?: "GET" | "POST";
       readonly body?: unknown;
       readonly csrf?: boolean;
       /** Bearer mode only: `"mint"` = login/public (no token, proof without `ath`). */
@@ -831,11 +815,6 @@ export class HostedHubApi {
         throw error;
       throw new HostedHubApiError("unavailable", 0);
     }
-    // A successful 204 carries no body by definition. Every caller validates the
-    // record it gets back, so an empty record is rejected by exactly the checks
-    // that reject a malformed body today; only callers that project nothing
-    // (`revokePasskey`) accept it.
-    if (response.ok && response.status === 204) return {};
     return responseJson(response);
   }
 }

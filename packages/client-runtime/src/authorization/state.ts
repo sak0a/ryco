@@ -60,11 +60,7 @@ const initialState: HostedHubState = {
 
 export type HostedPasskeyDirectoryStatus = "idle" | "loading" | "ready" | "stale";
 
-export type HostedAccountActionStatus =
-  | "idle"
-  | "adding-passkey"
-  | "revoking-passkey"
-  | "loading-recovery-codes";
+export type HostedAccountActionStatus = "idle" | "adding-passkey" | "loading-recovery-codes";
 
 /**
  * Account-management surface state. Kept in its own store rather than widened
@@ -318,14 +314,6 @@ class HostedHubController {
   async addPasskey(input: { readonly passkeyLabel: string | null }): Promise<void> {
     const committed = await this.#accountAction("adding-passkey", async (signal) => {
       await getHostedHubApi().addPasskey(input, signal);
-      return () => undefined;
-    });
-    if (committed) await this.refreshPasskeys();
-  }
-
-  async revokePasskey(credentialId: string): Promise<void> {
-    const committed = await this.#accountAction("revoking-passkey", async (signal) => {
-      await getHostedHubApi().revokePasskey(credentialId, signal);
       return () => undefined;
     });
     if (committed) await this.refreshPasskeys();

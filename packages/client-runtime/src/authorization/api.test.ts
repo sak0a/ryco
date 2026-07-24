@@ -474,39 +474,6 @@ describe("HostedHubApi", () => {
     expect(headersOf(requests[3]?.init).get("X-Ryco-CSRF")).toBe("csrf-rotated-canary");
   });
 
-  it("revokes a passkey with a bounded credential id and session-bound CSRF", async () => {
-    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      requests.push({ input, ...(init ? { init } : {}) });
-      return requests.length === 1
-        ? response(session)
-        : new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
-    });
-    const api = createApi();
-    await api.restoreSession();
-
-    await expect(api.revokePasskey("credential-aaa")).resolves.toBeUndefined();
-
-    expect(requests[1]?.input).toBe("/api/account/passkeys/credential-aaa");
-    expect(requests[1]?.init).toMatchObject({ method: "DELETE", credentials: "same-origin" });
-    expect(headersOf(requests[1]?.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
-  });
-
-  it("fails closed on a credential id that could widen the request path", async () => {
-    const api = createApi();
-    globalThis.fetch = vi.fn(async () => response(session));
-    await api.restoreSession();
-
-    const fetchSpy = vi.fn(async () => response({ ok: true }));
-    globalThis.fetch = fetchSpy;
-    for (const credentialId of ["../../api/admin/node-enrollments/deny", "a/b", "a?b", ""]) {
-      await expect(api.revokePasskey(credentialId)).rejects.toMatchObject({
-        code: "invalid_request",
-      });
-    }
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
   it("fetches recovery codes for a single display and rejects malformed lists", async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -850,31 +817,29 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     expect(credentials.current()).toBe("native-token-rotated-canary");
   });
 
-  it("lists, revokes, and fetches recovery codes over DPoP with no CSRF", async () => {
+  it("lists passkeys and fetches recovery codes over DPoP with no CSRF", async () => {
     const { service } = recordingDpopSigner();
     const credentials = inMemoryBearerCredentials();
     credentials.writeBearerToken?.("native-token-canary");
     const requests: Array<{ input: string; init?: RequestInit }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({ input: String(input), ...(init ? { init } : {}) });
-      if (requests.length === 1) return response({ passkeys: [{ id: "credential-aaa" }] });
-      if (requests.length === 2) return response({ ok: true });
-      return response({ recoveryCodes: ["recovery-sensitive-canary"] });
+      return requests.length === 1
+        ? response({ passkeys: [{ id: "credential-aaa" }] })
+        : response({ recoveryCodes: ["recovery-sensitive-canary"] });
     });
     const api = createBearerApi(service, credentials);
 
     await expect(api.listPasskeys()).resolves.toEqual([
       { id: "credential-aaa", label: null, createdAt: null, lastUsedAt: null },
     ]);
-    await expect(api.revokePasskey("credential-aaa")).resolves.toBeUndefined();
     await expect(api.getRecoveryCodes()).resolves.toEqual(["recovery-sensitive-canary"]);
 
     expect(requests.map((request) => request.input)).toEqual([
       "https://hub.example.test/api/account/passkeys",
-      "https://hub.example.test/api/account/passkeys/credential-aaa",
       "https://hub.example.test/api/account/recovery-codes",
     ]);
-    expect(requests.map((request) => request.init?.method)).toEqual(["GET", "DELETE", "POST"]);
+    expect(requests.map((request) => request.init?.method)).toEqual(["GET", "POST"]);
     for (const request of requests) {
       const headers = request.init?.headers as Headers;
       expect(headers.get("Authorization")).toBe("DPoP native-token-canary");
@@ -893,9 +858,6 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     globalThis.fetch = fetchSpy;
     await expect(api.listPasskeys()).rejects.toMatchObject({ code: "session_invalid" });
     await expect(api.getRecoveryCodes()).rejects.toMatchObject({ code: "session_invalid" });
-    await expect(api.revokePasskey("credential-aaa")).rejects.toMatchObject({
-      code: "session_invalid",
-    });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
