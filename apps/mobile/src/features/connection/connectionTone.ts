@@ -20,26 +20,26 @@ export function resolveConnectionTone(state: ConnectionToneState): StatusTone {
     case "connected":
       return {
         label: "Connected",
-        pillClassName: "bg-emerald-500/12 dark:bg-emerald-500/16",
-        textClassName: "text-emerald-700 dark:text-emerald-300",
+        pillClassName: "bg-success-bg border border-success-border",
+        textClassName: "text-success",
       };
     case "reconnecting":
       return {
         label: "Reconnecting",
-        pillClassName: "bg-amber-500/12 dark:bg-amber-500/16",
-        textClassName: "text-amber-700 dark:text-amber-300",
+        pillClassName: "bg-warning-bg border border-warning-border",
+        textClassName: "text-warning",
       };
     case "connecting":
       return {
         label: "Connecting",
-        pillClassName: "bg-sky-500/12 dark:bg-sky-500/16",
-        textClassName: "text-sky-700 dark:text-sky-300",
+        pillClassName: "bg-accent-bg border border-accent-border",
+        textClassName: "text-accent-strong",
       };
     case "error":
       return {
         label: "Connection failed",
-        pillClassName: "bg-rose-500/12 dark:bg-rose-500/16",
-        textClassName: "text-rose-700 dark:text-rose-300",
+        pillClassName: "bg-danger border border-danger-border",
+        textClassName: "text-danger-foreground",
       };
     case "offline":
       return {

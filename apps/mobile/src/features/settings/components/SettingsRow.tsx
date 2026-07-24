@@ -14,10 +14,10 @@ export function SettingsRow(props: {
   const chevronColor = useThemeColor("--color-icon-subtle");
   const content = (
     <View
-      className={`flex-row items-center gap-3 px-4 py-3 ${props.first ? "" : "border-t border-border"}`}
+      className={`flex-row items-center gap-3 px-5 py-3.5 ${props.first ? "" : "border-t border-border-subtle"}`}
     >
       <Text
-        className={`flex-1 font-sans text-base ${props.destructive ? "text-rose-700 dark:text-rose-300" : "text-foreground"}`}
+        className={`flex-1 font-sans text-[17px] ${props.destructive ? "text-danger-foreground" : "text-foreground"}`}
       >
         {props.label}
       </Text>

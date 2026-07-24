@@ -10,9 +10,9 @@ export function SettingsSwitchRow(props: {
 }) {
   return (
     <View
-      className={`flex-row items-center gap-3 px-4 py-2.5 ${props.first ? "" : "border-t border-border"}`}
+      className={`flex-row items-center gap-3 px-5 py-3 ${props.first ? "" : "border-t border-border-subtle"}`}
     >
-      <Text className="flex-1 font-sans text-base text-foreground">{props.label}</Text>
+      <Text className="flex-1 font-sans text-[17px] text-foreground">{props.label}</Text>
       <Switch value={props.value} onValueChange={props.onValueChange} />
     </View>
   );

@@ -15,6 +15,12 @@ export interface GlassSurfaceProps extends Omit<ViewProps, "className"> {
   readonly glassEffectStyle?: "clear" | "regular" | "none";
   readonly tintColor?: ColorValue;
   readonly chrome?: "default" | "none";
+  /**
+   * Corner radius shared by every floating-glass consumer: sheets (~28),
+   * capsules and icon circles (`rounded-full` → pass half the height). Defaults
+   * to the sheet radius so existing callers are unchanged (§3.3).
+   */
+  readonly radius?: number;
 }
 
 export function GlassSurface({
@@ -22,6 +28,7 @@ export function GlassSurface({
   glassEffectStyle = "regular",
   chrome = "default",
   tintColor,
+  radius = 32,
   style,
   ...props
 }: GlassSurfaceProps) {
@@ -29,9 +36,10 @@ export function GlassSurface({
   const borderColor = useThemeColor("--color-border");
   const glassSurface = useThemeColor("--color-glass-surface");
   const glassTint = useThemeColor("--color-glass-tint");
+  const specularColor = useThemeColor("--color-glass-specular");
   const supportsGlass = Platform.OS === "ios" && isGlassEffectAPIAvailable();
   const surfaceStyle: ViewStyle = {
-    borderRadius: 32,
+    borderRadius: radius,
     overflow: "hidden",
     borderWidth: chrome === "none" ? 0 : 1,
     borderColor: chrome === "none" ? "transparent" : borderColor,
@@ -66,8 +74,23 @@ export function GlassSurface({
     );
   }
 
+  // Fallback (Android / pre-iOS-26): opaque fill + a 1px top specular rim to fake
+  // the material's edge highlight — no blur, no heavy shadow (§3.5).
   return (
     <View {...props} style={[surfaceStyle, style]}>
+      {chrome === "none" ? null : (
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 1,
+            backgroundColor: specularColor,
+          }}
+        />
+      )}
       {children}
     </View>
   );

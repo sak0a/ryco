@@ -5,13 +5,13 @@ import { AppText as Text } from "../../../components/AppText";
 
 export function SettingsSection(props: { readonly title?: string; readonly children: ReactNode }) {
   return (
-    <View className="mt-5">
+    <View className="mt-6">
       {props.title ? (
-        <Text className="px-5 pb-2 text-xs font-ryco-bold uppercase tracking-wide text-foreground-muted">
+        <Text className="px-5 pb-2.5 text-sm font-ryco-medium text-foreground-muted">
           {props.title}
         </Text>
       ) : null}
-      <View className="mx-4 overflow-hidden rounded-2xl border border-border bg-card">
+      <View className="mx-5 overflow-hidden rounded-2xl border border-border bg-card">
         {props.children}
       </View>
     </View>

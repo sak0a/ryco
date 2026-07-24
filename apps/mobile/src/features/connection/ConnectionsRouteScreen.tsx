@@ -32,13 +32,13 @@ export function ConnectionsRouteScreen() {
     >
       <Pressable
         onPress={() => navigation.navigate("ConnectionsNew")}
-        className="mx-4 mb-2 items-center rounded-2xl bg-primary px-4 py-3 active:opacity-70"
+        className="mx-5 mb-2 items-center rounded-full bg-primary px-5 py-3.5 active:opacity-80"
       >
-        <Text className="text-sm font-ryco-bold text-primary-foreground">Pair a device</Text>
+        <Text className="text-base font-ryco-bold text-primary-foreground">Pair a device</Text>
       </Pressable>
 
       {rows.length === 0 ? (
-        <View className="px-4 py-16">
+        <View className="px-5 py-16">
           <EmptyState
             variant="plain"
             title="No environments"
@@ -46,11 +46,11 @@ export function ConnectionsRouteScreen() {
           />
         </View>
       ) : (
-        <View className="mx-4 overflow-hidden rounded-2xl border border-border bg-card">
+        <View className="mx-5 mt-3 overflow-hidden rounded-2xl border border-border bg-card">
           {rows.map((row, index) => (
             <View
               key={row.record.environmentId}
-              className={`gap-2 px-4 py-3 ${index > 0 ? "border-t border-border" : ""}`}
+              className={`gap-2.5 px-5 py-4 ${index > 0 ? "border-t border-border-subtle" : ""}`}
             >
               <View className="flex-row items-center gap-3">
                 <Text className="flex-1 font-sans text-base text-foreground" numberOfLines={1}>
@@ -82,11 +82,9 @@ export function ConnectionsRouteScreen() {
                       actions.removeSavedEnvironment(row.record.environmentId),
                     )
                   }
-                  className="rounded-full border border-rose-500/40 px-3 py-1.5 active:opacity-70 disabled:opacity-40"
+                  className="rounded-full border border-danger-border px-3 py-1.5 active:opacity-70 disabled:opacity-40"
                 >
-                  <Text className="text-xs font-ryco-bold text-rose-700 dark:text-rose-300">
-                    Remove
-                  </Text>
+                  <Text className="text-xs font-ryco-bold text-danger-foreground">Remove</Text>
                 </Pressable>
               </View>
             </View>
