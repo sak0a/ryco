@@ -1,4 +1,5 @@
 import { useNavigation } from "@react-navigation/native";
+import { useLayoutEffect } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
@@ -53,6 +54,25 @@ export function HomeScreen() {
   const navigation = useNavigation();
   const groups = useHomeThreadGroups();
 
+  // Home is the initial route; the pairing/settings surfaces are only reachable
+  // from here. Provide header entry points (Connect + Settings) so a paired user
+  // can always add an environment or open settings, and an empty-state action so
+  // a first-run user has an obvious way to pair.
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View className="flex-row items-center gap-5">
+          <Pressable onPress={() => navigation.navigate("ConnectionsNew")} hitSlop={10}>
+            <Text className="text-base font-ryco-bold text-primary">Connect</Text>
+          </Pressable>
+          <Pressable onPress={() => navigation.navigate("SettingsSheet")} hitSlop={10}>
+            <Text className="text-base font-ryco-bold text-primary">Settings</Text>
+          </Pressable>
+        </View>
+      ),
+    });
+  }, [navigation]);
+
   const openThread = (thread: SidebarThreadSummary) => {
     useStore.getState().setActiveEnvironmentId(thread.environmentId);
     navigation.navigate("Thread", {
@@ -69,12 +89,18 @@ export function HomeScreen() {
     >
       <WorkspaceConnectionStatus />
       {groups.length === 0 ? (
-        <View className="px-4 py-16">
+        <View className="items-center gap-6 px-4 py-16">
           <EmptyState
             variant="plain"
             title="No threads yet"
             detail="Pair an environment and start a thread to see it here."
           />
+          <Pressable
+            onPress={() => navigation.navigate("ConnectionsNew")}
+            className="rounded-full bg-primary px-6 py-3 active:opacity-80"
+          >
+            <Text className="text-base font-ryco-bold text-primary-foreground">Pair a device</Text>
+          </Pressable>
         </View>
       ) : (
         groups.map((group) => (
