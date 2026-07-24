@@ -6,8 +6,9 @@ import { loadMobileEnv, resolveAppVariant, type AppVariant } from "./config/env.
 // managed-cloud plane, its EAS project/owner, upstream bundle IDs/schemes, brand
 // assets, the default telemetry endpoint, widgets, share extension, quick
 // actions, and the camera-showcase rig are all stripped per the design spec's
-// strip list. Direct-node bearer pairing is the B1 auth plane; hosted passkeys
-// (associated domains below) are inert until workstream C.
+// strip list. Direct-node bearer pairing is one auth plane; the hosted plane
+// (associated domains + `extra.hosted` below) activates only when a Hub origin
+// is configured.
 const repoEnv = loadMobileEnv();
 Object.assign(process.env, repoEnv);
 
@@ -89,6 +90,33 @@ const dmSansFonts = {
 // never hardcode a team id in the public scaffold.
 const appleTeamId = repoEnv.RYCO_IOS_APPLE_TEAM_ID?.trim();
 
+// Hosted Hub plane. `EXPO_PUBLIC_RYCO_HUB_URL` must be the Hub's *public origin*
+// (the host that serves the API and the relay upgrade), because every DPoP proof
+// signs `htu` against that origin. `EXPO_PUBLIC_RYCO_HUB_APP_URL` is the hosted
+// web app the fallback (registration/recovery) browser session opens.
+const hostedHubBaseUrl = repoEnv.EXPO_PUBLIC_RYCO_HUB_URL?.trim() || null;
+const hostedHubAppUrl = repoEnv.EXPO_PUBLIC_RYCO_HUB_APP_URL?.trim() || null;
+
+// Fail closed at config time: a hosted build whose associated domains can never
+// resolve is worse than no hosted build, because the failure only surfaces on a
+// device at passkey time.
+if (hostedHubBaseUrl) {
+  // `webcredentials:` resolves against TEAMID.BUNDLEID; without a team id the
+  // association document can never name this app.
+  if (!appleTeamId) {
+    throw new Error(
+      "RYCO_IOS_APPLE_TEAM_ID is required when EXPO_PUBLIC_RYCO_HUB_URL is set: the webcredentials association resolves against TEAMID.BUNDLEID, so a hosted build without an Apple Developer Team id can never associate with the relying party.",
+    );
+  }
+  // The personal-team escape hatch rewrites the bundle identifier, which breaks
+  // the association document ↔ bundle binding the passkey ceremony depends on.
+  if (isIosPersonalTeamBuild || personalTeamBundleIdentifier) {
+    throw new Error(
+      "RYCO_IOS_PERSONAL_TEAM / RYCO_IOS_PERSONAL_TEAM_BUNDLE_ID cannot be combined with EXPO_PUBLIC_RYCO_HUB_URL: the personal-team override changes the iOS bundle identifier, so it no longer matches the TEAMID.BUNDLEID entry in the relying party's apple-app-site-association document. Build hosted variants with the real team's bundle identifier, or unset EXPO_PUBLIC_RYCO_HUB_URL for a direct-node-only local build.",
+    );
+  }
+}
+
 const config: ExpoConfig = {
   name: variant.appName,
   slug: "ryco-mobile",
@@ -116,7 +144,8 @@ const config: ExpoConfig = {
     supportsTablet: true,
     bundleIdentifier: iosBundleIdentifier,
     ...(appleTeamId ? { appleTeamId } : {}),
-    // Present but inert for B1: hosted passkeys land with workstream C.
+    // Native passkeys (webcredentials) and universal links (applinks) for the
+    // hosted plane's relying party.
     associatedDomains: [
       `applinks:${variant.relyingParty}`,
       `webcredentials:${variant.relyingParty}`,
@@ -140,6 +169,17 @@ const config: ExpoConfig = {
       monochromeImage: "./assets/android-icon-mark.png",
     },
     predictiveBackGestureEnabled: true,
+    // App Links for the relying party host: `autoVerify` makes Android verify
+    // this package against the host's /.well-known/assetlinks.json, which is the
+    // same document Credential Manager checks for passkeys.
+    intentFilters: [
+      {
+        action: "VIEW",
+        autoVerify: true,
+        category: ["BROWSABLE", "DEFAULT"],
+        data: [{ scheme: "https", host: variant.relyingParty }],
+      },
+    ],
   },
   web: {
     favicon: "./assets/icon.png",
@@ -226,6 +266,13 @@ const config: ExpoConfig = {
     node: {
       httpBaseUrl: repoEnv.EXPO_PUBLIC_RYCO_HTTP_URL ?? null,
       wsBaseUrl: repoEnv.EXPO_PUBLIC_RYCO_WS_URL ?? null,
+    },
+    // Hosted plane. Absent/blank `hubBaseUrl` keeps the app in direct-node mode
+    // (src/platform/config.ts fails closed on anything it cannot validate).
+    hosted: {
+      hubBaseUrl: hostedHubBaseUrl,
+      appUrl: hostedHubAppUrl,
+      relyingParty: variant.relyingParty,
     },
   },
 };

@@ -1,6 +1,10 @@
 export { mobileAppLifecycle } from "./appLifecycle";
 export { mobileAttachmentCodec, type MobileAttachmentInput } from "./attachmentCodec";
-export { readMobileClientRuntimeConfig } from "./config";
+export {
+  readMobileClientRuntimeConfig,
+  readMobileHostedConfig,
+  type MobileHostedConfig,
+} from "./config";
 export { createMobileEndpoint } from "./endpoint";
 export { mobileClock, mobileFrameScheduler } from "./frame";
 export { createMobileHttpClient } from "./httpClient";
