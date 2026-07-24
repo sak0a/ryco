@@ -1,7 +1,9 @@
 import type { EnvironmentId, MessageId, ThreadId } from "@ryco/contracts";
 import { describe, expect, it, vi, beforeEach } from "vite-plus/test";
 
-vi.mock("expo-sqlite/kv-store", () => ({ default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} } }));
+vi.mock("expo-sqlite/kv-store", () => ({
+  default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} },
+}));
 
 import {
   drainThreadOutbox,
@@ -41,7 +43,11 @@ describe("threadOutbox store + drain", () => {
     enqueueThreadOutboxMessage(queued("m2", "2026-07-24T11:00:00.000Z"));
     // re-enqueue m1 replaces rather than duplicates
     enqueueThreadOutboxMessage(queued("m1", "2026-07-24T10:30:00.000Z"));
-    expect(listThreadOutboxMessages().map((m) => m.messageId).sort()).toEqual(["m1", "m2"]);
+    expect(
+      listThreadOutboxMessages()
+        .map((m) => m.messageId)
+        .sort(),
+    ).toEqual(["m1", "m2"]);
   });
 
   it("sends deliverable messages and removes them on success", async () => {

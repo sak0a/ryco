@@ -26,7 +26,11 @@ describe("sessionActions", () => {
     const { api, dispatchCommand } = fakeApi();
     await interruptThreadTurn(api, THREAD_ID);
     expect(dispatchCommand).toHaveBeenCalledTimes(1);
-    const command = dispatchCommand.mock.calls[0]![0] as unknown as { type: string; threadId: ThreadId; commandId: string };
+    const command = dispatchCommand.mock.calls[0]![0] as unknown as {
+      type: string;
+      threadId: ThreadId;
+      commandId: string;
+    };
     expect(command.type).toBe("thread.turn.interrupt");
     expect(command.threadId).toBe(THREAD_ID);
     expect(command.commandId).toBeTruthy();
@@ -34,8 +38,17 @@ describe("sessionActions", () => {
 
   it("dispatches thread.approval.respond with the decision", async () => {
     const { api, dispatchCommand } = fakeApi();
-    await respondToThreadApproval({ api, threadId: THREAD_ID, requestId: REQUEST_ID, decision: "approve" as never });
-    const command = dispatchCommand.mock.calls[0]![0] as unknown as { type: string; requestId: string; decision: string };
+    await respondToThreadApproval({
+      api,
+      threadId: THREAD_ID,
+      requestId: REQUEST_ID,
+      decision: "approve" as never,
+    });
+    const command = dispatchCommand.mock.calls[0]![0] as unknown as {
+      type: string;
+      requestId: string;
+      decision: string;
+    };
     expect(command.type).toBe("thread.approval.respond");
     expect(command.requestId).toBe(REQUEST_ID);
     expect(command.decision).toBe("approve");
@@ -43,8 +56,16 @@ describe("sessionActions", () => {
 
   it("dispatches thread.user-input.respond with the answers", async () => {
     const { api, dispatchCommand } = fakeApi();
-    await respondToThreadUserInput({ api, threadId: THREAD_ID, requestId: REQUEST_ID, answers: { q1: "yes" } });
-    const command = dispatchCommand.mock.calls[0]![0] as unknown as { type: string; answers: Record<string, unknown> };
+    await respondToThreadUserInput({
+      api,
+      threadId: THREAD_ID,
+      requestId: REQUEST_ID,
+      answers: { q1: "yes" },
+    });
+    const command = dispatchCommand.mock.calls[0]![0] as unknown as {
+      type: string;
+      answers: Record<string, unknown>;
+    };
     expect(command.type).toBe("thread.user-input.respond");
     expect(command.answers).toEqual({ q1: "yes" });
   });
@@ -61,13 +82,22 @@ describe("sessionActions", () => {
       confirmMessage: "Revert?",
     };
 
-    const cancelled = await revertThreadCheckpointWithGuards({ ...base, confirm: async () => false });
+    const cancelled = await revertThreadCheckpointWithGuards({
+      ...base,
+      confirm: async () => false,
+    });
     expect(cancelled).toEqual({ ok: false, reason: { type: "user-cancelled" } });
     expect(dispatchCommand).not.toHaveBeenCalled();
 
-    const confirmed = await revertThreadCheckpointWithGuards({ ...base, confirm: async () => true });
+    const confirmed = await revertThreadCheckpointWithGuards({
+      ...base,
+      confirm: async () => true,
+    });
     expect(confirmed).toEqual({ ok: true });
-    const command = dispatchCommand.mock.calls[0]![0] as unknown as { type: string; turnCount: number };
+    const command = dispatchCommand.mock.calls[0]![0] as unknown as {
+      type: string;
+      turnCount: number;
+    };
     expect(command.type).toBe("thread.checkpoint.revert");
     expect(command.turnCount).toBe(3);
   });

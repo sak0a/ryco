@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  MessageId,
-  TurnId,
-  type OrchestrationCheckpointSummary,
-} from "@ryco/contracts";
+import { MessageId, TurnId, type OrchestrationCheckpointSummary } from "@ryco/contracts";
 import type { ReviewDiffPreviewSource } from "./reviewDiffPreviewSource";
 
 import {

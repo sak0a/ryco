@@ -48,7 +48,11 @@ export function isThreadDetailSubscriptionNonIdle(
       return true;
     }
     const orchestrationStatus = sidebarThread.session?.orchestrationStatus;
-    if (orchestrationStatus && orchestrationStatus !== "idle" && orchestrationStatus !== "stopped") {
+    if (
+      orchestrationStatus &&
+      orchestrationStatus !== "idle" &&
+      orchestrationStatus !== "stopped"
+    ) {
       return true;
     }
     if (sidebarThread.latestTurn?.state === "running") {

@@ -14,10 +14,7 @@ export function ConnectionRegistryProvider(props: {
   // Tests inject an isolated registry; the app omits this and gets the singleton.
   readonly registry?: MobileConnectionRegistry;
 }) {
-  const registry = useMemo(
-    () => props.registry ?? initializeMobileRuntime(),
-    [props.registry],
-  );
+  const registry = useMemo(() => props.registry ?? initializeMobileRuntime(), [props.registry]);
   return (
     <ConnectionRegistryContext.Provider value={registry}>
       {props.children}

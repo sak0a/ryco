@@ -29,7 +29,11 @@ export function PendingUserInputCard(props: {
       if (!question) return current;
       return {
         ...current,
-        [questionId]: togglePendingUserInputOptionSelection(question, current[questionId], optionLabel),
+        [questionId]: togglePendingUserInputOptionSelection(
+          question,
+          current[questionId],
+          optionLabel,
+        ),
       };
     });
   };

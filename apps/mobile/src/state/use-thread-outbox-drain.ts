@@ -79,15 +79,44 @@ function readThreadDeliveryState(message: QueuedThreadMessage): {
     threadExists: Boolean(summary ?? thread),
     shellStatus: selectBootstrapCompleteForActiveEnvironment(state) ? "live" : "loading",
     environmentConnected: connected,
-    threadBusy:
-      summary?.latestTurn?.state === "running" || thread?.latestTurn?.state === "running",
+    threadBusy: summary?.latestTurn?.state === "running" || thread?.latestTurn?.state === "running",
+  };
+}
+
+function runOutboxDrain(): void {
+  void drainThreadOutbox({
+    readThreadDeliveryState,
+    sendQueuedMessage: sendQueuedThreadMessage,
+  });
+}
+
+/**
+ * Drain the outbox whenever the threads store changes — a message that waited
+ * because its thread was mid-turn (§3-14) must be delivered when that thread
+ * SETTLES (latestTurn no longer running / pending cleared), not only on the next
+ * socket reconnect. Returns an unsubscribe. Exported for testing; the debounce
+ * coalesces the store's per-event notifications.
+ */
+export function subscribeOutboxSettleDrain(runDrain: () => void, debounceMs = 50): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const unsubscribe = useStore.subscribe(() => {
+    if (timer !== null) return;
+    timer = setTimeout(() => {
+      timer = null;
+      runDrain();
+    }, debounceMs);
+  });
+  return () => {
+    if (timer !== null) clearTimeout(timer);
+    unsubscribe();
   };
 }
 
 /**
  * Mount point (RootStackLayout): hydrate the persisted outbox once, then drain it
- * whenever the socket reaches "connected" — the offline outbox drains on reconnect
- * (spec §Bundling). A bound wrapper; no import-time side effects.
+ * whenever the socket reaches "connected" OR a thread settles — the offline outbox
+ * drains on reconnect AND on turn-settle (spec §Bundling / §3-14). A bound wrapper;
+ * no import-time side effects.
  */
 export function useThreadOutboxDrain(): void {
   const wsStatus = useWsConnectionStatus();
@@ -101,9 +130,9 @@ export function useThreadOutboxDrain(): void {
     const wasConnected = previousPhaseRef.current === "connected";
     previousPhaseRef.current = wsStatus.phase;
     if (wsStatus.phase !== "connected" || wasConnected) return;
-    void drainThreadOutbox({
-      readThreadDeliveryState,
-      sendQueuedMessage: sendQueuedThreadMessage,
-    });
+    runOutboxDrain();
   }, [wsStatus.phase]);
+
+  // Settle-edge: drain when a thread's turn settles while queued messages wait.
+  useEffect(() => subscribeOutboxSettleDrain(runOutboxDrain), []);
 }

@@ -6,7 +6,10 @@ import type {
   SavedEnvironmentRuntimeState,
 } from "@ryco/client-runtime/connection";
 
-import { createEnvironmentActions, type EnvironmentActions } from "../../connection/environmentActions";
+import {
+  createEnvironmentActions,
+  type EnvironmentActions,
+} from "../../connection/environmentActions";
 import { useConnectionRegistry } from "../../providers/ConnectionRegistryProvider";
 import { useWsConnectionStatus } from "../../rpc/wsConnectionState";
 import { connectionToneForEnvironment } from "./connectionTone";
@@ -52,8 +55,7 @@ export function useSavedEnvironments(): {
   const rows = Object.values(registryState.byId).map((record): ConnectionRow => {
     const runtime = catalog.getRuntime(record.environmentId);
     const tone = connectionToneForEnvironment(runtime.connectionState, wsUiState);
-    const statusLabel =
-      runtime.authState === "requires-auth" ? "Needs pairing" : tone.label;
+    const statusLabel = runtime.authState === "requires-auth" ? "Needs pairing" : tone.label;
     return { record, runtime, tone, statusLabel };
   });
   // runtimeState referenced so the store subscription re-renders on runtime change.

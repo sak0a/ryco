@@ -3,10 +3,21 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 // Native modules are stubbed so the sink (which imports the composer/terminal
 // stores and mobileKV) loads under the Node runner.
-vi.mock("react-native", () => ({ AppState: { currentState: "active", addEventListener: () => ({ remove: () => {} }) } }));
-vi.mock("expo-network", () => ({ addNetworkStateListener: () => ({ remove: () => {} }), getNetworkStateAsync: async () => ({ isConnected: true }) }));
-vi.mock("expo-secure-store", () => ({ getItemAsync: async () => null, setItemAsync: async () => {}, deleteItemAsync: async () => {} }));
-vi.mock("expo-sqlite/kv-store", () => ({ default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} } }));
+vi.mock("react-native", () => ({
+  AppState: { currentState: "active", addEventListener: () => ({ remove: () => {} }) },
+}));
+vi.mock("expo-network", () => ({
+  addNetworkStateListener: () => ({ remove: () => {} }),
+  getNetworkStateAsync: async () => ({ isConnected: true }),
+}));
+vi.mock("expo-secure-store", () => ({
+  getItemAsync: async () => null,
+  setItemAsync: async () => {},
+  deleteItemAsync: async () => {},
+}));
+vi.mock("expo-sqlite/kv-store", () => ({
+  default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} },
+}));
 vi.mock("expo-linking", () => ({ getInitialURL: async () => null }));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { extra: {} } } }));
 

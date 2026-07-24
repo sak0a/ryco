@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ScrollView, View } from "react-native";
 
+import { getWsConnectionStatus, getWsConnectionUiState } from "@ryco/client-runtime/rpc";
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { EnvironmentId, ThreadId } from "@ryco/contracts";
 
@@ -9,13 +10,12 @@ import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { ensureEnvironmentApi } from "../../connection/environmentApi";
 import { retainThreadDetailSubscription } from "../../connection/threadDetail";
+import { newCommandId, newMessageId } from "../../lib/ids";
+import { enqueueThreadOutboxMessage } from "../../state/threadOutbox";
 import { useThreadTimeline } from "../../state/threadTimeline";
-import {
-  selectProjectByRef,
-  selectThreadByRef,
-  useStore,
-} from "../../state/threadsRuntime";
+import { selectProjectByRef, selectThreadByRef, useStore } from "../../state/threadsRuntime";
 import { executeSendTurn } from "./executeSendTurn";
+import { sendThreadTurn } from "./sendThreadTurn";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { PendingUserInputCard } from "./PendingUserInputCard";
 import { ThreadComposer } from "./ThreadComposer";
@@ -39,13 +39,13 @@ export function ThreadDetailScreen(props: {
     selectThreadByRef(state, scopeThreadRef(environmentId, threadId)),
   );
 
-  const onSend = async (text: string) => {
+  const onSend = async (text: string): Promise<boolean> => {
     setSendError(null);
     const state = useStore.getState();
     const currentThread = selectThreadByRef(state, scopeThreadRef(environmentId, threadId));
     if (!currentThread) {
       setSendError("Thread is not loaded yet.");
-      return;
+      return false;
     }
     const project = selectProjectByRef(
       state,
@@ -54,41 +54,69 @@ export function ThreadDetailScreen(props: {
     const modelSelection = project?.defaultModelSelection ?? null;
     if (!modelSelection) {
       setSendError("No model is configured for this project.");
-      return;
+      return false;
     }
-    await executeSendTurn({
-      api: ensureEnvironmentApi(environmentId),
-      thread: {
+
+    const tokenMode = currentThread.tokenMode ?? "balanced";
+    // A turn already running (or a disconnected socket) routes the send into the
+    // offline outbox instead of dispatching immediately (§3-14).
+    const threadBusy = currentThread.latestTurn?.state === "running";
+    const connected = getWsConnectionUiState(getWsConnectionStatus()) === "connected";
+
+    return sendThreadTurn(
+      {
+        environmentId,
         threadId,
-        isFirstMessage: currentThread.messages.length === 0,
-        isServerThread: true,
-        isLocalDraftThread: false,
-        activeThreadBranch: currentThread.branch,
-        worktreePath: currentThread.worktreePath,
-        createdAt: currentThread.createdAt,
-      },
-      composer: {
-        prompt: text,
-        images: [],
-        selectedModelSelection: modelSelection,
-        selectedModel: modelSelection.model,
-        hasSelectedModel: true,
-      },
-      project: {
-        projectId: currentThread.projectId,
-        projectCwd: project?.cwd ?? "",
-        defaultModel: modelSelection.model,
-      },
-      settings: {
+        text,
+        attachments: [],
+        modelSelection,
         runtimeMode: currentThread.runtimeMode,
         interactionMode: currentThread.interactionMode,
-        tokenMode: currentThread.tokenMode ?? "balanced",
+        tokenMode,
+        threadBusy,
+        connected,
       },
-      title: currentThread.title,
-      clearDraft: () => {},
-      restoreDraft: () => {},
-      setThreadError: (_id, error) => setSendError(error),
-    });
+      {
+        newMessageId,
+        newCommandId,
+        now: () => new Date().toISOString(),
+        enqueue: enqueueThreadOutboxMessage,
+        dispatch: () =>
+          executeSendTurn({
+            api: ensureEnvironmentApi(environmentId),
+            thread: {
+              threadId,
+              isFirstMessage: currentThread.messages.length === 0,
+              isServerThread: true,
+              isLocalDraftThread: false,
+              activeThreadBranch: currentThread.branch,
+              worktreePath: currentThread.worktreePath,
+              createdAt: currentThread.createdAt,
+            },
+            composer: {
+              prompt: text,
+              images: [],
+              selectedModelSelection: modelSelection,
+              selectedModel: modelSelection.model,
+              hasSelectedModel: true,
+            },
+            project: {
+              projectId: currentThread.projectId,
+              projectCwd: project?.cwd ?? "",
+              defaultModel: modelSelection.model,
+            },
+            settings: {
+              runtimeMode: currentThread.runtimeMode,
+              interactionMode: currentThread.interactionMode,
+              tokenMode,
+            },
+            title: currentThread.title,
+            clearDraft: () => {},
+            restoreDraft: () => {},
+            setThreadError: (_id, error) => setSendError(error),
+          }),
+      },
+    );
   };
 
   const pendingApprovals = built?.viewModel.pendingApprovals ?? [];
@@ -119,7 +147,10 @@ export function ThreadDetailScreen(props: {
             if (entry.kind === "message") {
               const isUser = entry.message.role === "user";
               return (
-                <View key={entry.id} className={`px-4 py-2 ${isUser ? "items-end" : "items-start"}`}>
+                <View
+                  key={entry.id}
+                  className={`px-4 py-2 ${isUser ? "items-end" : "items-start"}`}
+                >
                   <View
                     className={`max-w-[85%] rounded-2xl px-4 py-2.5 ${
                       isUser ? "bg-primary" : "border border-border bg-card"
@@ -136,7 +167,10 @@ export function ThreadDetailScreen(props: {
             }
             if (entry.kind === "proposed-plan") {
               return (
-                <View key={entry.id} className="mx-4 my-2 rounded-2xl border border-violet-500/40 bg-violet-500/10 p-4">
+                <View
+                  key={entry.id}
+                  className="mx-4 my-2 rounded-2xl border border-violet-500/40 bg-violet-500/10 p-4"
+                >
                   <Text className="text-xs font-ryco-bold uppercase tracking-wide text-violet-700 dark:text-violet-300">
                     Proposed plan
                   </Text>

@@ -7,7 +7,11 @@ import { EmptyState } from "../../components/EmptyState";
 export function OnboardingRouteScreen() {
   return (
     <View className="flex-1 items-center justify-center bg-screen px-6">
-      <EmptyState variant="plain" title="Connect" detail="The onboarding surface arrives in the next build." />
+      <EmptyState
+        variant="plain"
+        title="Connect"
+        detail="The onboarding surface arrives in the next build."
+      />
     </View>
   );
 }

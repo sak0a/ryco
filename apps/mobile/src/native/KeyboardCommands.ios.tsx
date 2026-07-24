@@ -11,7 +11,8 @@ interface NativeKeyboardCommandsProps extends ViewProps, PropsWithChildren {
   ) => void;
 }
 
-const NativeKeyboardCommands = requireNativeView<NativeKeyboardCommandsProps>("RycoKeyboardCommands");
+const NativeKeyboardCommands =
+  requireNativeView<NativeKeyboardCommandsProps>("RycoKeyboardCommands");
 
 export function KeyboardCommands(
   props: PropsWithChildren<{

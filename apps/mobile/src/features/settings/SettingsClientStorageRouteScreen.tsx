@@ -8,7 +8,8 @@ import { SettingsSection } from "./components/SettingsSection";
 // active environment; these are the client-only preferences (§3-2, R6).
 export function SettingsClientStorageRouteScreen() {
   const preferences = usePreferences();
-  const groupingLabel = preferences.projectGroupingEnabled === false ? "By project" : "By repository";
+  const groupingLabel =
+    preferences.projectGroupingEnabled === false ? "By project" : "By repository";
 
   return (
     <ScrollView
@@ -18,7 +19,10 @@ export function SettingsClientStorageRouteScreen() {
     >
       <SettingsSection title="Stored on this device">
         <SettingsRow first label="Project grouping" value={groupingLabel} />
-        <SettingsRow label="Base font size" value={preferences.baseFontSize ? `${preferences.baseFontSize}pt` : "Default"} />
+        <SettingsRow
+          label="Base font size"
+          value={preferences.baseFontSize ? `${preferences.baseFontSize}pt` : "Default"}
+        />
       </SettingsSection>
     </ScrollView>
   );

@@ -138,4 +138,3 @@ export async function drainThreadOutbox(deps: ThreadOutboxDrainDeps): Promise<vo
     }
   }
 }
-

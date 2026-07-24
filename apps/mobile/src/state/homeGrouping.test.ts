@@ -9,7 +9,9 @@ import {
   workspaceConnectionStatusLabel,
 } from "../features/home/workspace-connection-status";
 
-function project(overrides: Partial<Project> & Pick<Project, "id" | "environmentId" | "name" | "cwd">): Project {
+function project(
+  overrides: Partial<Project> & Pick<Project, "id" | "environmentId" | "name" | "cwd">,
+): Project {
   return {
     repositoryIdentity: null,
     defaultModelSelection: null,
@@ -44,11 +46,36 @@ describe("buildHomeThreadGroups", () => {
       project({ id: "p2" as never, environmentId: "envB" as never, name: "Beta", cwd: "/b" }),
     ];
     const threads = [
-      thread({ id: "t1" as never, environmentId: "envA" as never, projectId: "p1" as never, title: "Alpha one", createdAt: "2026-07-24T10:00:00.000Z" }),
-      thread({ id: "t2" as never, environmentId: "envA" as never, projectId: "p1" as never, title: "Alpha two", createdAt: "2026-07-24T11:00:00.000Z" }),
-      thread({ id: "t3" as never, environmentId: "envB" as never, projectId: "p2" as never, title: "Beta one", createdAt: "2026-07-24T12:00:00.000Z" }),
+      thread({
+        id: "t1" as never,
+        environmentId: "envA" as never,
+        projectId: "p1" as never,
+        title: "Alpha one",
+        createdAt: "2026-07-24T10:00:00.000Z",
+      }),
+      thread({
+        id: "t2" as never,
+        environmentId: "envA" as never,
+        projectId: "p1" as never,
+        title: "Alpha two",
+        createdAt: "2026-07-24T11:00:00.000Z",
+      }),
+      thread({
+        id: "t3" as never,
+        environmentId: "envB" as never,
+        projectId: "p2" as never,
+        title: "Beta one",
+        createdAt: "2026-07-24T12:00:00.000Z",
+      }),
       // archived thread must be excluded
-      thread({ id: "t4" as never, environmentId: "envB" as never, projectId: "p2" as never, title: "Archived", createdAt: "2026-07-24T09:00:00.000Z", archivedAt: "2026-07-24T09:30:00.000Z" }),
+      thread({
+        id: "t4" as never,
+        environmentId: "envB" as never,
+        projectId: "p2" as never,
+        title: "Archived",
+        createdAt: "2026-07-24T09:00:00.000Z",
+        archivedAt: "2026-07-24T09:30:00.000Z",
+      }),
     ];
 
     const groups = buildHomeThreadGroups({ projects, threads, groupingMode: "separate" });

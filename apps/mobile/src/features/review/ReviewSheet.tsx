@@ -58,7 +58,11 @@ export function ReviewSheet(props: ReviewSheetProps) {
 
       {summaries.length === 0 && !diffState.isLoading ? (
         <View className="px-4 py-16">
-          <EmptyState variant="plain" title="No changes" detail="This thread has no reviewable diffs yet." />
+          <EmptyState
+            variant="plain"
+            title="No changes"
+            detail="This thread has no reviewable diffs yet."
+          />
         </View>
       ) : (
         <>
@@ -75,7 +79,11 @@ export function ReviewSheet(props: ReviewSheetProps) {
             </View>
           ) : !diffState.isLoading ? (
             <View className="px-4 py-8">
-              <EmptyState variant="plain" title="Diff unavailable" detail="The diff could not be loaded." />
+              <EmptyState
+                variant="plain"
+                title="Diff unavailable"
+                detail="The diff could not be loaded."
+              />
             </View>
           ) : null}
         </>

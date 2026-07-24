@@ -22,8 +22,15 @@ export function SettingsRouteScreen() {
         />
       </SettingsSection>
       <SettingsSection title="Preferences">
-        <SettingsRow first label="Appearance" onPress={() => navigation.navigate("SettingsAppearance" as never)} />
-        <SettingsRow label="Client storage" onPress={() => navigation.navigate("SettingsClientStorage" as never)} />
+        <SettingsRow
+          first
+          label="Appearance"
+          onPress={() => navigation.navigate("SettingsAppearance" as never)}
+        />
+        <SettingsRow
+          label="Client storage"
+          onPress={() => navigation.navigate("SettingsClientStorage" as never)}
+        />
       </SettingsSection>
     </ScrollView>
   );

@@ -1,10 +1,21 @@
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
 import { describe, expect, it, vi, beforeEach } from "vite-plus/test";
 
-vi.mock("react-native", () => ({ AppState: { currentState: "active", addEventListener: () => ({ remove: () => {} }) } }));
-vi.mock("expo-network", () => ({ addNetworkStateListener: () => ({ remove: () => {} }), getNetworkStateAsync: async () => ({ isConnected: true }) }));
-vi.mock("expo-secure-store", () => ({ getItemAsync: async () => null, setItemAsync: async () => {}, deleteItemAsync: async () => {} }));
-vi.mock("expo-sqlite/kv-store", () => ({ default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} } }));
+vi.mock("react-native", () => ({
+  AppState: { currentState: "active", addEventListener: () => ({ remove: () => {} }) },
+}));
+vi.mock("expo-network", () => ({
+  addNetworkStateListener: () => ({ remove: () => {} }),
+  getNetworkStateAsync: async () => ({ isConnected: true }),
+}));
+vi.mock("expo-secure-store", () => ({
+  getItemAsync: async () => null,
+  setItemAsync: async () => {},
+  deleteItemAsync: async () => {},
+}));
+vi.mock("expo-sqlite/kv-store", () => ({
+  default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} },
+}));
 vi.mock("expo-linking", () => ({ getInitialURL: async () => null }));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { extra: {} } } }));
 
@@ -96,7 +107,9 @@ describe("checkpointDiffAtoms cache", () => {
 
     await vi.waitFor(() => expect(getFullThreadDiff).toHaveBeenCalledTimes(2));
     await vi.waitFor(() =>
-      expect((readState(input()).data as unknown as { files: { id: string }[] }).files[0]!.id).toBe("call-2"),
+      expect((readState(input()).data as unknown as { files: { id: string }[] }).files[0]!.id).toBe(
+        "call-2",
+      ),
     );
     release();
   });

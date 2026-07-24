@@ -1,8 +1,4 @@
-import type {
-  ModelCapabilities,
-  ModelSelection,
-  ServerConfig,
-} from "@ryco/contracts";
+import type { ModelCapabilities, ModelSelection, ServerConfig } from "@ryco/contracts";
 import {
   buildProviderOptionSelectionsFromDescriptors,
   getProviderOptionDescriptors,

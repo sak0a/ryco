@@ -16,13 +16,23 @@ function Stepper(props: {
   readonly first?: boolean;
 }) {
   return (
-    <View className={`flex-row items-center gap-3 px-4 py-3 ${props.first ? "" : "border-t border-border"}`}>
+    <View
+      className={`flex-row items-center gap-3 px-4 py-3 ${props.first ? "" : "border-t border-border"}`}
+    >
       <Text className="flex-1 font-sans text-base text-foreground">{props.label}</Text>
-      <Pressable onPress={() => props.onStep(-1)} className="h-8 w-8 items-center justify-center rounded-full border border-border active:opacity-70">
+      <Pressable
+        onPress={() => props.onStep(-1)}
+        className="h-8 w-8 items-center justify-center rounded-full border border-border active:opacity-70"
+      >
         <Text className="text-lg font-ryco-bold text-foreground">−</Text>
       </Pressable>
-      <Text className="w-12 text-center font-mono text-sm text-foreground-muted">{props.display}</Text>
-      <Pressable onPress={() => props.onStep(1)} className="h-8 w-8 items-center justify-center rounded-full border border-border active:opacity-70">
+      <Text className="w-12 text-center font-mono text-sm text-foreground-muted">
+        {props.display}
+      </Text>
+      <Pressable
+        onPress={() => props.onStep(1)}
+        className="h-8 w-8 items-center justify-center rounded-full border border-border active:opacity-70"
+      >
         <Text className="text-lg font-ryco-bold text-foreground">+</Text>
       </Pressable>
     </View>
@@ -47,7 +57,9 @@ export function SettingsAppearanceRouteScreen() {
           label="Base font size"
           value={appearance.baseFontSize}
           display={`${appearance.baseFontSize}pt`}
-          onStep={(direction) => setBaseFontSize(stepBaseFontSize(appearance.baseFontSize, direction))}
+          onStep={(direction) =>
+            setBaseFontSize(stepBaseFontSize(appearance.baseFontSize, direction))
+          }
         />
       </SettingsSection>
       <SettingsSection title="Code">
@@ -56,7 +68,9 @@ export function SettingsAppearanceRouteScreen() {
           label="Code font size"
           value={appearance.codeFontSize}
           display={`${appearance.codeFontSize}pt`}
-          onStep={(direction) => setCodeFontSize(stepCodeFontSize(appearance.codeFontSize, direction))}
+          onStep={(direction) =>
+            setCodeFontSize(stepCodeFontSize(appearance.codeFontSize, direction))
+          }
         />
         <SettingsSwitchRow
           label="Wrap long code lines"

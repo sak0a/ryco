@@ -1,6 +1,5 @@
 import {
   createComposerDraftStore,
-  type ComposerDraftImage,
   type ComposerDraftStoreState as RuntimeComposerDraftStoreState,
   type ComposerThreadDraftState as RuntimeComposerThreadDraftState,
 } from "@ryco/client-runtime/state/composer";

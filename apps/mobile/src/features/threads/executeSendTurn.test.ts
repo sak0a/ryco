@@ -8,7 +8,11 @@ import { executeSendTurn, type ExecuteSendTurnInput } from "./executeSendTurn";
 const THREAD_ID = "thread-1" as ThreadId;
 const PROJECT_ID = "project-1" as ProjectId;
 
-const modelSelection = { instanceId: "inst-1", model: "gpt-5", options: [] } as unknown as ModelSelection;
+const modelSelection = {
+  instanceId: "inst-1",
+  model: "gpt-5",
+  options: [],
+} as unknown as ModelSelection;
 
 function baseInput(overrides: Partial<ExecuteSendTurnInput> = {}): {
   input: ExecuteSendTurnInput;
@@ -40,7 +44,11 @@ function baseInput(overrides: Partial<ExecuteSendTurnInput> = {}): {
       hasSelectedModel: true,
     },
     project: { projectId: PROJECT_ID, projectCwd: "/repo", defaultModel: "gpt-5" },
-    settings: { runtimeMode: "default" as never, interactionMode: "code" as never, tokenMode: "default" as never },
+    settings: {
+      runtimeMode: "default" as never,
+      interactionMode: "code" as never,
+      tokenMode: "default" as never,
+    },
     title: "Thread title",
     clearDraft,
     restoreDraft,
@@ -53,12 +61,16 @@ function baseInput(overrides: Partial<ExecuteSendTurnInput> = {}): {
 describe("executeSendTurn", () => {
   it("clears the draft and dispatches thread.meta.update then thread.turn.start on a first server message", async () => {
     const { input, dispatchCommand, clearDraft } = baseInput();
-    await executeSendTurn(input);
+    const result = await executeSendTurn(input);
 
+    // MAJOR 2: a successful send signals true so the composer clears its input.
+    expect(result).toBe(true);
     expect(clearDraft).toHaveBeenCalledTimes(1);
     const types = dispatchCommand.mock.calls.map((call) => (call[0] as { type: string }).type);
     expect(types).toEqual(["thread.meta.update", "thread.turn.start"]);
-    const start = dispatchCommand.mock.calls.find((c) => (c[0] as { type: string }).type === "thread.turn.start")![0] as { threadId: ThreadId };
+    const start = dispatchCommand.mock.calls.find(
+      (c) => (c[0] as { type: string }).type === "thread.turn.start",
+    )![0] as { threadId: ThreadId };
     expect(start.threadId).toBe(THREAD_ID);
   });
 
@@ -81,12 +93,14 @@ describe("executeSendTurn", () => {
 
   it("rolls back the draft and records the error when dispatch fails", async () => {
     const { input, restoreDraft, setThreadError } = baseInput();
-    (input.api.orchestration.dispatchCommand as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error("network down"),
-    );
+    (
+      input.api.orchestration.dispatchCommand as unknown as ReturnType<typeof vi.fn>
+    ).mockRejectedValueOnce(new Error("network down"));
 
-    await executeSendTurn(input);
+    const result = await executeSendTurn(input);
 
+    // MAJOR 2: a failed send signals false so the composer KEEPS the user text.
+    expect(result).toBe(false);
     expect(restoreDraft).toHaveBeenCalledWith({ prompt: "hello world", images: [] });
     expect(setThreadError).toHaveBeenLastCalledWith(THREAD_ID, "network down");
   });

@@ -27,7 +27,12 @@ export function SettingsRow(props: {
         </Text>
       ) : null}
       {props.onPress ? (
-        <SymbolView name={{ ios: "chevron.right", android: "chevron_right" }} size={16} tintColor={chevronColor} type="monochrome" />
+        <SymbolView
+          name={{ ios: "chevron.right", android: "chevron_right" }}
+          size={16}
+          tintColor={chevronColor}
+          type="monochrome"
+        />
       ) : null}
     </View>
   );

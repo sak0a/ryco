@@ -66,7 +66,12 @@ export interface ExecuteSendTurnInput {
   readonly beginLocalDispatch?: (options: { readonly preparingWorktree: boolean }) => void;
 }
 
-export async function executeSendTurn(input: ExecuteSendTurnInput): Promise<void> {
+/**
+ * Returns true when the turn was dispatched, false when it failed (the caller —
+ * e.g. the composer — must keep the user's input on false; web
+ * executeChatSendTurn restores the prompt via rollbackSendTurn on failure).
+ */
+export async function executeSendTurn(input: ExecuteSendTurnInput): Promise<boolean> {
   const promptSnapshot = input.composer.prompt;
   const imagesSnapshot = [...input.composer.images];
   const messageId = newMessageId();
@@ -139,11 +144,13 @@ export async function executeSendTurn(input: ExecuteSendTurnInput): Promise<void
       // Per-thread next-turn settings persistence is deferred (§3-13).
       persistThreadSettingsForNextTurn: () => Promise.resolve(),
     });
+    return true;
   } catch (error) {
     input.restoreDraft({ prompt: promptSnapshot, images: imagesSnapshot });
     input.setThreadError(
       input.thread.threadId,
       error instanceof Error ? error.message : "Failed to send message.",
     );
+    return false;
   }
 }

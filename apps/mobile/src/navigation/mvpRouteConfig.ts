@@ -56,7 +56,11 @@ export const MVP_ROOT_ROUTES = {
     overlay: true,
     headerPreset: "none",
     // Android cannot host the keyboard-driven comment composer inside a formSheet.
-    ios: { presentation: "formSheet", sheetAllowedDetents: [0.55, 0.92], sheetGrabberVisible: true },
+    ios: {
+      presentation: "formSheet",
+      sheetAllowedDetents: [0.55, 0.92],
+      sheetGrabberVisible: true,
+    },
     android: { presentation: "fullScreenModal", sheetGrabberVisible: false },
   },
   Connections: {
@@ -86,7 +90,11 @@ export const MVP_ROOT_ROUTES = {
     overlay: true,
     headerPreset: "sheet-solid",
     ios: { presentation: "formSheet", sheetAllowedDetents: [0.6, 0.95], sheetGrabberVisible: true },
-    android: { presentation: "formSheet", sheetAllowedDetents: [0.6, 0.95], sheetGrabberVisible: true },
+    android: {
+      presentation: "formSheet",
+      sheetAllowedDetents: [0.6, 0.95],
+      sheetGrabberVisible: true,
+    },
   },
   NotFound: {
     // Deep-link catch-all — the one sanctioned route not in the spec's table.

@@ -1,6 +1,6 @@
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useState } from "react";
-import { Pressable, ScrollView, TextInput, View } from "react-native";
+import { Pressable, ScrollView, TextInput } from "react-native";
 
 import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { EnvironmentId, ThreadId } from "@ryco/contracts";

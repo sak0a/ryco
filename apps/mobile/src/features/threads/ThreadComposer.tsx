@@ -8,7 +8,9 @@ import { useThemeColor } from "../../lib/useThemeColor";
 // + draft-store binding are owner-Simulator polish deferred to a follow-up; this
 // keeps the Thread screen functional and sends through the runtime send path.
 export function ThreadComposer(props: {
-  readonly onSend: (text: string) => void | Promise<void>;
+  // Returns false when the send failed (offline/error) so the composer keeps the
+  // user's text; enqueue/dispatch success returns true (or void) and clears it.
+  readonly onSend: (text: string) => boolean | void | Promise<boolean | void>;
   readonly disabled?: boolean;
 }) {
   const [text, setText] = useState("");
@@ -23,8 +25,9 @@ export function ThreadComposer(props: {
     const value = text;
     setSending(true);
     try {
-      await props.onSend(value);
-      setText("");
+      const result = await props.onSend(value);
+      // Keep the input on an explicit failure; clear it on success/enqueue.
+      if (result !== false) setText("");
     } finally {
       setSending(false);
     }

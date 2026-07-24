@@ -2,10 +2,21 @@ import type { EnvironmentId } from "@ryco/contracts";
 import type { SavedEnvironmentRecord } from "@ryco/client-runtime/connection";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-vi.mock("react-native", () => ({ AppState: { currentState: "active", addEventListener: () => ({ remove: () => {} }) } }));
-vi.mock("expo-network", () => ({ addNetworkStateListener: () => ({ remove: () => {} }), getNetworkStateAsync: async () => ({ isConnected: true }) }));
-vi.mock("expo-secure-store", () => ({ getItemAsync: async () => null, setItemAsync: async () => {}, deleteItemAsync: async () => {} }));
-vi.mock("expo-sqlite/kv-store", () => ({ default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} } }));
+vi.mock("react-native", () => ({
+  AppState: { currentState: "active", addEventListener: () => ({ remove: () => {} }) },
+}));
+vi.mock("expo-network", () => ({
+  addNetworkStateListener: () => ({ remove: () => {} }),
+  getNetworkStateAsync: async () => ({ isConnected: true }),
+}));
+vi.mock("expo-secure-store", () => ({
+  getItemAsync: async () => null,
+  setItemAsync: async () => {},
+  deleteItemAsync: async () => {},
+}));
+vi.mock("expo-sqlite/kv-store", () => ({
+  default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} },
+}));
 vi.mock("expo-linking", () => ({ getInitialURL: async () => null }));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { extra: {} } } }));
 
@@ -13,12 +24,18 @@ import { createEnvironmentActions, type EnvironmentActionsDeps } from "./environ
 import { useStore } from "../state/threadsRuntime";
 
 const ENV = "env-a" as EnvironmentId;
-const TARGET = { httpBaseUrl: "http://node.local/", wsBaseUrl: "ws://node.local/", credential: "cred-1" };
+const TARGET = {
+  httpBaseUrl: "http://node.local/",
+  wsBaseUrl: "ws://node.local/",
+  credential: "cred-1",
+};
 
-function fakeRegistry(overrides: {
-  writeBearerToken?: (env: EnvironmentId, token: string) => Promise<boolean>;
-  priorRecord?: SavedEnvironmentRecord | null;
-} = {}) {
+function fakeRegistry(
+  overrides: {
+    writeBearerToken?: (env: EnvironmentId, token: string) => Promise<boolean>;
+    priorRecord?: SavedEnvironmentRecord | null;
+  } = {},
+) {
   const upsert = vi.fn();
   const removeRecord = vi.fn();
   const rename = vi.fn();
@@ -54,7 +71,22 @@ function fakeRegistry(overrides: {
     },
   } as unknown as EnvironmentActionsDeps["registry"];
 
-  return { registry, spies: { upsert, removeRecord, rename, clearRuntime, persistRecord, writeBearerToken, removeBearerToken, supervisorRemove, ensureSavedEnvironmentConnection, disposeForEnv, connectSavedEnvironment } };
+  return {
+    registry,
+    spies: {
+      upsert,
+      removeRecord,
+      rename,
+      clearRuntime,
+      persistRecord,
+      writeBearerToken,
+      removeBearerToken,
+      supervisorRemove,
+      ensureSavedEnvironmentConnection,
+      disposeForEnv,
+      connectSavedEnvironment,
+    },
+  };
 }
 
 function actions(reg: ReturnType<typeof fakeRegistry>) {
@@ -68,7 +100,10 @@ function actions(reg: ReturnType<typeof fakeRegistry>) {
 describe("environmentActions", () => {
   it("persists the record + bearer token, then upserts and connects", async () => {
     const reg = fakeRegistry();
-    const record = await actions(reg).addSavedEnvironment({ label: "My node", pairingUrl: "ryco://pair?host=node.local#token=t" });
+    const record = await actions(reg).addSavedEnvironment({
+      label: "My node",
+      pairingUrl: "ryco://pair?host=node.local#token=t",
+    });
 
     expect(reg.spies.persistRecord).toHaveBeenCalledTimes(1);
     expect(reg.spies.writeBearerToken).toHaveBeenCalledWith(ENV, "bearer-xyz");
@@ -91,9 +126,9 @@ describe("environmentActions", () => {
     } as SavedEnvironmentRecord;
     const reg = fakeRegistry({ writeBearerToken: async () => false, priorRecord: prior });
 
-    await expect(actions(reg).addSavedEnvironment({ label: "My node", pairingUrl: "ryco://x" })).rejects.toThrow(
-      "Unable to persist saved environment credentials.",
-    );
+    await expect(
+      actions(reg).addSavedEnvironment({ label: "My node", pairingUrl: "ryco://x" }),
+    ).rejects.toThrow("Unable to persist saved environment credentials.");
     // The failing path restores the prior record and never upserts.
     expect(reg.spies.persistRecord).toHaveBeenLastCalledWith(prior);
     expect(reg.spies.upsert).not.toHaveBeenCalled();

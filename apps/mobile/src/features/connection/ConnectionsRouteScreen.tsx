@@ -84,7 +84,9 @@ export function ConnectionsRouteScreen() {
                   }
                   className="rounded-full border border-rose-500/40 px-3 py-1.5 active:opacity-70 disabled:opacity-40"
                 >
-                  <Text className="text-xs font-ryco-bold text-rose-700 dark:text-rose-300">Remove</Text>
+                  <Text className="text-xs font-ryco-bold text-rose-700 dark:text-rose-300">
+                    Remove
+                  </Text>
                 </Pressable>
               </View>
             </View>

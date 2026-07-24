@@ -66,13 +66,16 @@ export function createMobileEnvironmentStateSink(
           // promoted to a real server thread — re-key its composer draft.
           if (!previousThread && threadRef) markPromotedDraftThreadByRef(threadRef);
           // A thread that just became archived releases its terminal state.
-          if (previousThread?.archivedAt === null && event.thread.archivedAt !== null && threadRef) {
+          if (
+            previousThread?.archivedAt === null &&
+            event.thread.archivedAt !== null &&
+            threadRef
+          ) {
             useTerminalStateStore.getState().removeTerminalState(threadRef);
           }
-          input.supervisor?.().reconcileThreadDetailSubscriptionEvictionForThread(
-            environmentId,
-            event.thread.id,
-          );
+          input
+            .supervisor?.()
+            .reconcileThreadDetailSubscriptionEvictionForThread(environmentId, event.thread.id);
           input.supervisor?.().evictIdleThreadDetailSubscriptionsToCapacity();
           return;
         }
