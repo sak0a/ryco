@@ -7,8 +7,17 @@ import type { EnvironmentId } from "@ryco/contracts";
 import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusPill } from "../../components/StatusPill";
+import { HubNodeSection } from "../hostedHub/HubNodeSection";
 import { useConnectionActions, useSavedEnvironments } from "./useConnectionController";
 
+/**
+ * The environment switcher (plan Task 8), opened from Home's brand mark.
+ *
+ * Two labeled sections, never merged: "Devices" is the direct plane (saved
+ * environments over the supervisor, multi-connect, no directory poll) and
+ * "Hub nodes" is the hosted plane. The Devices half below reads and writes the
+ * direct catalog only, and keeps working with hosted mode entirely absent.
+ */
 export function ConnectionsRouteScreen() {
   const navigation = useNavigation();
   const { rows } = useSavedEnvironments();
@@ -37,8 +46,12 @@ export function ConnectionsRouteScreen() {
         <Text className="text-base font-ryco-bold text-primary-foreground">Pair a device</Text>
       </Pressable>
 
+      <Text className="px-5 pt-4 pb-2.5 text-sm font-ryco-medium text-foreground-muted">
+        Devices
+      </Text>
+
       {rows.length === 0 ? (
-        <View className="px-5 py-16">
+        <View className="px-5 py-8">
           <EmptyState
             variant="plain"
             title="No environments"
@@ -46,7 +59,7 @@ export function ConnectionsRouteScreen() {
           />
         </View>
       ) : (
-        <View className="mx-5 mt-3 overflow-hidden rounded-2xl border border-border bg-card">
+        <View className="mx-5 overflow-hidden rounded-2xl border border-border bg-card">
           {rows.map((row, index) => (
             <View
               key={row.record.environmentId}
@@ -91,6 +104,8 @@ export function ConnectionsRouteScreen() {
           ))}
         </View>
       )}
+
+      <HubNodeSection />
     </ScrollView>
   );
 }

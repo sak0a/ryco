@@ -1,0 +1,332 @@
+import { useNavigation } from "@react-navigation/native";
+import { Pressable, View } from "react-native";
+
+import type { RelayEffectiveRole } from "@ryco/contracts";
+import {
+  deriveHostedConnectionStatusIndicator,
+  deriveHostedConnectionStatusText,
+  type HostedHubNode,
+  type HostedHubState,
+} from "@ryco/client-runtime/authorization";
+
+import { AppText as Text } from "../../components/AppText";
+import { EmptyState } from "../../components/EmptyState";
+import { StatusPill, type StatusTone } from "../../components/StatusPill";
+import { cn } from "../../lib/cn";
+import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import { hostedStatusTone } from "./hostedAuthModel";
+import { useHostedModeAvailable } from "./useHostedMode";
+
+/**
+ * The hosted plane's half of the environment switcher (plan Task 8).
+ *
+ * Deliberately a *separate* section from the direct saved devices: the two
+ * planes have different selection models (single hosted selection vs. direct
+ * multi-connect), different guards, and different refresh cadence (the hosted
+ * directory re-polls every 20s from the runtime; the direct catalog does not).
+ * Merging them into one list would hide all three.
+ *
+ * This module touches the hosted plane only — never the direct catalog, the
+ * direct registry store, or the direct bearer-token storage. Selection is the
+ * controller's `selectNode`; no hosted state is re-derived here, and no status
+ * string is hand-written (they come from `deriveHostedConnectionStatus*`).
+ */
+
+const ROLE_LABELS: Record<RelayEffectiveRole, string> = {
+  viewer: "Viewer",
+  operator: "Operator",
+  owner: "Owner",
+};
+
+const ONLINE_TONE: StatusTone = {
+  label: "Online",
+  pillClassName: "bg-success-bg border border-success-border",
+  textClassName: "text-success",
+};
+const OFFLINE_TONE: StatusTone = {
+  label: "Offline",
+  pillClassName: "bg-subtle",
+  textClassName: "text-foreground-muted",
+};
+const REVOKED_TONE: StatusTone = {
+  label: "Revoked",
+  pillClassName: "bg-danger border border-danger-border",
+  textClassName: "text-danger-foreground",
+};
+
+/** Actions the section drives. Structural so tests can pass a fake controller. */
+export interface HubNodeSectionActions {
+  readonly selectNode: (nodeId: string) => unknown;
+  readonly returnToDirectory: () => unknown;
+  readonly refreshDirectory: () => unknown;
+  readonly retrySelectedNode: () => unknown;
+}
+
+export interface HubNodeRowModel {
+  readonly nodeId: string;
+  readonly label: string;
+  /** Bounded presence/role summary. Never an id, token, ticket, or raw error. */
+  readonly detail: string;
+  readonly tone: StatusTone;
+  readonly selected: boolean;
+  readonly disabled: boolean;
+  /** `undefined` whenever the row must not be tappable — never a broken handler. */
+  readonly onPress: (() => void) | undefined;
+}
+
+export type HubNodeSectionKind = "unavailable" | "signed-out" | "busy" | "ready";
+
+export interface HubNodeSectionModel {
+  readonly kind: HubNodeSectionKind;
+  /** From `deriveHostedConnectionStatusIndicator` — never hand-written. */
+  readonly statusLabel: string;
+  readonly statusTone: StatusTone;
+  /** The full bounded status text, used as the pill's accessible name. */
+  readonly statusText: string;
+  readonly rows: ReadonlyArray<HubNodeRowModel>;
+  readonly empty: { readonly title: string; readonly detail: string } | null;
+  readonly signIn: (() => void) | undefined;
+  readonly refresh: (() => void) | undefined;
+  readonly allNodes: (() => void) | undefined;
+  readonly retry: (() => void) | undefined;
+}
+
+/**
+ * The controller's own fail-closed selection guard, mirrored so a row that
+ * `selectNode` would silently drop is never presented as tappable
+ * (`authorization/state.ts` `selectNode`: directory ready, browser current,
+ * not revoked). `revokedAt` is compared against `null` rather than tested for
+ * truthiness so an epoch-zero revocation still disables the row.
+ */
+export function canSelectHubNode(state: HostedHubState, node: HostedHubNode): boolean {
+  return (
+    state.accountStatus === "authenticated" &&
+    state.directoryStatus === "ready" &&
+    state.browserStatus === "current" &&
+    node.revokedAt === null
+  );
+}
+
+function rowDetail(node: HostedHubNode): string {
+  const role = ROLE_LABELS[node.effectiveRole];
+  if (node.revokedAt !== null) return `Revoked · ${role}`;
+  return `${node.presence.online ? "Online" : "Offline"} · ${role}`;
+}
+
+function rowTone(node: HostedHubNode): StatusTone {
+  if (node.revokedAt !== null) return REVOKED_TONE;
+  return node.presence.online ? ONLINE_TONE : OFFLINE_TONE;
+}
+
+export function deriveHubNodeSectionModel(input: {
+  readonly state: HostedHubState;
+  /** `useHostedModeAvailable()` — hosted config plus a usable hardware key. */
+  readonly available: boolean;
+  readonly actions: HubNodeSectionActions;
+  readonly onSignIn: () => void;
+}): HubNodeSectionModel {
+  const { state, available, actions, onSignIn } = input;
+  const statusInput = {
+    browserStatus: state.browserStatus,
+    sessionStatus: state.sessionStatus,
+    selectionStatus: state.selectionStatus,
+    transportStatus: state.transportStatus,
+  };
+  const indicator = deriveHostedConnectionStatusIndicator(statusInput);
+  const statusText = deriveHostedConnectionStatusText(statusInput);
+  const base = {
+    statusLabel: indicator.shortLabel,
+    statusText,
+    // Shared with every other hosted surface so a pill here can never contradict
+    // the same state rendered on the sign-in or account screen.
+    statusTone: hostedStatusTone(indicator),
+    rows: [] as ReadonlyArray<HubNodeRowModel>,
+    signIn: undefined,
+    refresh: undefined,
+    allNodes: undefined,
+    retry: undefined,
+  } as const;
+
+  if (!available || state.accountStatus === "unavailable") {
+    return {
+      ...base,
+      kind: "unavailable",
+      empty: {
+        title: "Hub nodes unavailable",
+        detail:
+          "This build has no Hub configured, or this device has no hardware key for a Hub session. Pair a device directly to keep working.",
+      },
+    };
+  }
+
+  if (state.accountStatus === "signed-out" || state.accountStatus === "session-expired") {
+    return {
+      ...base,
+      kind: "signed-out",
+      empty: {
+        title: state.accountStatus === "session-expired" ? "Hub session expired" : "Not signed in",
+        detail:
+          "Sign in to the Hub with your passkey to reach nodes you do not have on this network.",
+      },
+      signIn: onSignIn,
+    };
+  }
+
+  if (state.accountStatus !== "authenticated") {
+    return {
+      ...base,
+      kind: "busy",
+      empty: {
+        title: state.accountStatus === "signing-out" ? "Signing out" : "Signing in",
+        detail: "Finishing the Hub passkey ceremony.",
+      },
+    };
+  }
+
+  const rows = state.nodes.map((node): HubNodeRowModel => {
+    const selectable = canSelectHubNode(state, node);
+    return {
+      nodeId: node.id,
+      label: node.label,
+      detail: rowDetail(node),
+      // The selected node's row shows the live connection status; every other
+      // row shows directory presence, which is all the directory knows.
+      tone:
+        state.selectedNode?.id === node.id && node.revokedAt === null
+          ? base.statusTone
+          : rowTone(node),
+      selected: state.selectedNode?.id === node.id,
+      disabled: !selectable,
+      onPress: selectable ? () => void actions.selectNode(node.id) : undefined,
+    };
+  });
+
+  return {
+    ...base,
+    kind: "ready",
+    rows,
+    empty:
+      rows.length === 0
+        ? {
+            title: "No Hub nodes",
+            detail:
+              state.directoryStatus === "ready"
+                ? "Enroll a Ryco node with your Hub to reach it from anywhere."
+                : "Loading the node directory.",
+          }
+        : null,
+    refresh: () => void actions.refreshDirectory(),
+    allNodes: state.selectedNode ? () => void actions.returnToDirectory() : undefined,
+    retry:
+      state.selectedNode && state.transportStatus === "terminal-failure"
+        ? () => void actions.retrySelectedNode()
+        : undefined,
+  };
+}
+
+function ActionPill(props: { readonly label: string; readonly onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={props.label}
+      onPress={props.onPress}
+      className="rounded-full border border-border px-3 py-1.5 active:opacity-70"
+    >
+      <Text className="text-xs font-ryco-bold text-foreground">{props.label}</Text>
+    </Pressable>
+  );
+}
+
+/** Presentation only — every decision above lives in `deriveHubNodeSectionModel`. */
+export function HubNodeSectionView(props: { readonly model: HubNodeSectionModel }) {
+  const { model } = props;
+  return (
+    <View className="mt-6">
+      <View className="flex-row items-center gap-3 px-5 pb-2.5">
+        <Text className="flex-1 text-sm font-ryco-medium text-foreground-muted">Hub nodes</Text>
+        {model.kind === "ready" ? (
+          <StatusPill
+            size="compact"
+            label={model.statusLabel}
+            pillClassName={model.statusTone.pillClassName}
+            textClassName={model.statusTone.textClassName}
+          />
+        ) : null}
+      </View>
+
+      {model.rows.length > 0 ? (
+        <View className="mx-5 overflow-hidden rounded-2xl border border-border bg-card">
+          {model.rows.map((row, index) => (
+            <Pressable
+              key={row.nodeId}
+              accessibilityRole="button"
+              accessibilityLabel={`${row.label}, ${row.detail}`}
+              accessibilityState={{ disabled: row.disabled, selected: row.selected }}
+              disabled={row.disabled}
+              onPress={row.onPress}
+              className={cn(
+                "flex-row items-center gap-3 px-5 py-4 active:bg-subtle",
+                index > 0 && "border-t border-border-subtle",
+                row.disabled && "opacity-40",
+              )}
+            >
+              <View className="flex-1 gap-1">
+                <Text className="font-sans text-base text-foreground" numberOfLines={1}>
+                  {row.label}
+                </Text>
+                <Text className="text-xs font-ryco-medium text-foreground-muted">{row.detail}</Text>
+              </View>
+              <StatusPill
+                size="compact"
+                label={row.tone.label}
+                pillClassName={row.tone.pillClassName}
+                textClassName={row.tone.textClassName}
+              />
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      {model.empty ? (
+        <View className="px-5 py-8">
+          <EmptyState
+            variant="plain"
+            title={model.empty.title}
+            detail={model.empty.detail}
+            actionLabel={model.signIn ? "Sign in" : undefined}
+            onAction={model.signIn}
+          />
+        </View>
+      ) : null}
+
+      {model.allNodes || model.refresh || model.retry ? (
+        <View className="mx-5 mt-3 flex-row gap-2">
+          {model.allNodes ? <ActionPill label="All nodes" onPress={model.allNodes} /> : null}
+          {model.refresh ? <ActionPill label="Refresh" onPress={model.refresh} /> : null}
+          {model.retry ? <ActionPill label="Retry" onPress={model.retry} /> : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+export function HubNodeSection() {
+  const navigation = useNavigation();
+  const state = useHostedHubStore((current) => current);
+  // Shared with the other hosted surfaces: it drives the single memoized
+  // `ensureMobileHostedSession()` and reports the runtime's own availability
+  // flag, so a direct-only build (or a device with no usable hardware key)
+  // renders the disabled state instead of a tappable-but-broken row.
+  const available = useHostedModeAvailable();
+
+  const model = deriveHubNodeSectionModel({
+    state,
+    available,
+    actions: hostedHubController,
+    // Sign-in lives on the Onboarding sheet (the hosted sign-in surface); this
+    // section never runs a ceremony itself.
+    onSignIn: () => navigation.navigate("Onboarding"),
+  });
+
+  return <HubNodeSectionView model={model} />;
+}

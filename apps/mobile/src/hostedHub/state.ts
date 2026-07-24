@@ -1,0 +1,50 @@
+import {
+  hostedHubController,
+  hostedHubStore,
+  markHostedSessionReady,
+  markHostedSessionReplaying,
+  reportHostedShellSnapshotFailure,
+  setHostedRuntimeConfigurator,
+  HOSTED_SESSION_SYNC_FAILURE_MESSAGE,
+  type HostedHubState,
+} from "@ryco/client-runtime/authorization";
+import { useStore } from "zustand";
+
+import { configureMobileHostedRuntime, ensureMobileHostedSession } from "./runtime";
+
+/**
+ * Register the mobile wiring as a lazy configurator rather than running it at
+ * import. This is the ONE permitted module-scope call: importing the controller
+ * or store for their React bindings must not touch SecureStore, expo-constants,
+ * or the device-key module, so suites can mock those adapters.
+ *
+ * The runtime's configurator seam is synchronous while mobile configuration is
+ * async (it must resolve a hardware key first), so this kicks off configuration
+ * and lets it settle. Screens should call `ensureMobileHostedSession()`, which
+ * awaits configuration and hydrates the session token in the right order.
+ */
+setHostedRuntimeConfigurator(() => {
+  void configureMobileHostedRuntime();
+});
+
+export { ensureMobileHostedSession };
+export { isMobileHostedModeAvailable } from "./runtime";
+
+export {
+  hostedHubController,
+  hostedHubStore,
+  markHostedSessionReady,
+  markHostedSessionReplaying,
+  reportHostedShellSnapshotFailure,
+  HOSTED_SESSION_SYNC_FAILURE_MESSAGE,
+};
+export type { HostedHubState };
+
+type HostedHubSelector<T> = (state: HostedHubState) => T;
+
+/** React binding for the package-owned hosted lifecycle state. */
+export const useHostedHubStore = Object.assign(
+  <T>(selector: HostedHubSelector<T>): T =>
+    useStore(hostedHubStore as never, selector as never) as T,
+  hostedHubStore,
+);

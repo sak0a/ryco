@@ -18,6 +18,7 @@ import { HardwareKeyboardCommandProvider } from "./features/keyboard/HardwareKey
 import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteScreen";
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
+import { HostedAccountRouteScreen } from "./features/hostedHub/HostedAccountRouteScreen";
 import { OnboardingRouteScreen } from "./features/onboarding/OnboardingRouteScreen";
 import { ReviewCommentComposerSheet } from "./features/review/ReviewCommentComposerSheet";
 import { ReviewSheet } from "./features/review/ReviewSheet";
@@ -92,8 +93,8 @@ const SHEET_SOLID_HEADER_OPTIONS: AppScreenOptions = {
 
 // Nested settings navigator hosted inside the SettingsSheet form sheet (a plain
 // formSheet cannot render a stack header — the header + in-sheet pushes come from
-// this nested stack). MVP subset: Settings, environments (+ add), appearance,
-// client storage. Deferred: archive, auth, waitlist, legal.
+// this nested stack). MVP subset: Settings, environments (+ add), Hub account,
+// appearance, client storage. Deferred: archive, waitlist, legal.
 const SettingsSheetStack = createNativeStackNavigator({
   initialRouteName: "Settings",
   screenOptions: {
@@ -116,6 +117,11 @@ const SettingsSheetStack = createNativeStackNavigator({
       screen: ConnectionsNewRouteScreen,
       linking: "environment-new",
       options: { title: "Add Environment" },
+    }),
+    SettingsAccount: createNativeStackScreen({
+      screen: HostedAccountRouteScreen,
+      linking: "account",
+      options: { title: "Hub Account" },
     }),
     SettingsAppearance: createNativeStackScreen({
       screen: SettingsAppearanceRouteScreen,

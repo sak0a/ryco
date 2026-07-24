@@ -98,6 +98,47 @@ function buildProps() {
 }
 
 describe("MessagesTimeline", () => {
+  it("renders the desktop minimap only after a second user message is present", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const firstUserEntry = {
+      id: "user-row-1",
+      kind: "message" as const,
+      createdAt: "2026-07-24T12:00:00.000Z",
+      message: {
+        id: MessageId.make("user-1"),
+        role: "user" as const,
+        text: "First request",
+        createdAt: "2026-07-24T12:00:00.000Z",
+        streaming: false,
+      },
+    };
+    const secondUserEntry = {
+      id: "user-row-2",
+      kind: "message" as const,
+      createdAt: "2026-07-24T12:00:02.000Z",
+      message: {
+        id: MessageId.make("user-2"),
+        role: "user" as const,
+        text: "Second request",
+        createdAt: "2026-07-24T12:00:02.000Z",
+        streaming: false,
+      },
+    };
+
+    const singleMessageMarkup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[firstUserEntry]} />,
+    );
+    const twoMessageMarkup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[firstUserEntry, secondUserEntry]} />,
+    );
+
+    expect(singleMessageMarkup).not.toContain('data-testid="timeline-minimap"');
+    expect(twoMessageMarkup).toContain('data-testid="timeline-minimap"');
+    expect(twoMessageMarkup).toContain('aria-label="Jump to message: User message"');
+    expect(twoMessageMarkup).toContain("[@media(pointer:fine)]:block");
+    expect(twoMessageMarkup.match(/data-minimap-strip=/g)).toHaveLength(2);
+  });
+
   it("renders inline terminal labels with the composer chip UI", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(

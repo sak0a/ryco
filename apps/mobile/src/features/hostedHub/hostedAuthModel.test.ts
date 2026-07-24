@@ -1,0 +1,472 @@
+import type { EnvironmentId } from "@ryco/contracts";
+import {
+  HOSTED_CONNECTION_STATUS_TEXTS,
+  type HostedHubState,
+} from "@ryco/client-runtime/authorization";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+
+const controller = vi.hoisted(() => ({
+  signIn: vi.fn(async () => undefined),
+  signOut: vi.fn(async () => undefined),
+  bootstrap: vi.fn(async () => undefined),
+  cancelAuthentication: vi.fn(),
+  dismissRecoveryCodes: vi.fn(),
+  acknowledgeDeliveryUnknown: vi.fn(),
+}));
+
+const fallback = vi.hoisted(() => ({
+  openHostedFallbackSession: vi.fn(async (_input: unknown) => ({
+    status: "native-sign-in-attempted" as const,
+    returnedVia: "dismissed" as const,
+  })),
+}));
+
+// Mocked rather than injected: the real module configures the hosted runtime,
+// which reaches the enclave device key, SecureStore, and `expo-constants`.
+// Nothing in this suite should touch the native bridge.
+vi.mock("../../hostedHub/state", () => ({ hostedHubController: controller }));
+vi.mock("./HostedFallbackSession", () => ({
+  openHostedFallbackSession: fallback.openHostedFallbackSession,
+}));
+
+import {
+  deriveHostedAccountView,
+  deriveHostedSignInView,
+  hostedStatusTone,
+  type HostedAccountView,
+  type HostedSignInView,
+} from "./hostedAuthModel";
+
+const ENVIRONMENT_ID = "env-1" as EnvironmentId;
+
+/**
+ * A store snapshot. The defaults are the runtime's own initial state; each case
+ * patches only the slots its surface reads, so a surface that starts depending
+ * on a new slot fails loudly rather than silently reading a default.
+ */
+function hostedState(overrides: Partial<HostedHubState> = {}): HostedHubState {
+  return {
+    bootstrapAvailable: false,
+    accountStatus: "signed-out",
+    account: null,
+    session: null,
+    directoryStatus: "idle",
+    nodes: [],
+    selectedNode: null,
+    selectionStatus: "none",
+    effectiveRole: null,
+    transportStatus: "idle",
+    sessionStatus: "closed",
+    sessionEstablished: false,
+    sessionRecoveredAfterUnknown: false,
+    browserStatus: "current",
+    recoveryCodes: [],
+    errorMessage: null,
+    generation: 0,
+    ...overrides,
+  };
+}
+
+const AUTHENTICATED: Partial<HostedHubState> = {
+  accountStatus: "authenticated",
+  account: {
+    id: "acct_01J8ZQ5V2N7X0000000000",
+    displayName: "Ada Lovelace",
+    role: "owner",
+    createdAt: 1_700_000_000_000,
+    disabledAt: null,
+  },
+  session: {
+    id: "sess_01J8ZQ5V2N7X1111111111",
+    accountId: "acct_01J8ZQ5V2N7X0000000000",
+    createdAt: 1_700_000_000_000,
+    expiresAt: 1_700_003_600_000,
+    lastSeenAt: 1_700_000_060_000,
+    revokedAt: null,
+    revocationReasonCode: null,
+  },
+};
+
+const ONLINE_NODE: Partial<HostedHubState> = {
+  directoryStatus: "ready",
+  transportStatus: "online",
+  sessionStatus: "ready",
+  browserStatus: "current",
+  selectionStatus: "online",
+  effectiveRole: "owner",
+  sessionEstablished: true,
+  selectedNode: {
+    id: "node_01J8ZQ5V2N7X2222222222",
+    environmentId: ENVIRONMENT_ID,
+    label: "Studio",
+    platformOs: "darwin",
+    platformArch: "arm64",
+    clientVersion: "1.2.3",
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
+    lastAuthenticatedAt: 1_700_000_000_000,
+    revokedAt: null,
+    revocationReasonCode: null,
+    grant: { id: "grant_01J8ZQ5V2N7X3333333333", role: "owner" },
+    effectiveRole: "owner",
+    presence: { online: true, lastHeartbeatAt: 1_700_000_000_000 },
+  },
+};
+
+function signInView(
+  overrides: Partial<HostedHubState> = {},
+  options: { readonly hostedModeAvailable?: boolean } = {},
+): HostedSignInView {
+  return deriveHostedSignInView({
+    state: hostedState(overrides),
+    hostedModeAvailable: options.hostedModeAvailable ?? true,
+    onPairDevice: vi.fn(),
+    onDone: vi.fn(),
+  });
+}
+
+function accountView(
+  overrides: Partial<HostedHubState> = {},
+  options: { readonly hostedModeAvailable?: boolean } = {},
+): HostedAccountView {
+  return deriveHostedAccountView({
+    state: hostedState(overrides),
+    hostedModeAvailable: options.hostedModeAvailable ?? true,
+    onSignIn: vi.fn(),
+  });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("hosted sign-in surface", () => {
+  it("offers a passkey sign-in when signed out, and calls signIn()", () => {
+    const view = signInView();
+    expect(view.surface).toBe("signed-out");
+    expect(view.primaryAction?.id).toBe("sign-in");
+    view.primaryAction?.run();
+    expect(controller.signIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes first run to the browser rather than a native registration call", () => {
+    const view = signInView({ bootstrapAvailable: true });
+    expect(view.surface).toBe("first-run");
+    expect(view.primaryAction?.id).toBe("open-fallback");
+    view.primaryAction?.run();
+    expect(fallback.openHostedFallbackSession).toHaveBeenCalledTimes(1);
+    // The browser never hands the app a session: the return path is always a
+    // native passkey login.
+    const input = fallback.openHostedFallbackSession.mock.calls[0]?.[0] as {
+      completeWithNativeSignIn: () => void;
+    };
+    input.completeWithNativeSignIn();
+    expect(controller.signIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels an in-flight ceremony through cancelAuthentication()", () => {
+    const view = signInView({ accountStatus: "authenticating" });
+    expect(view.surface).toBe("authenticating");
+    expect(view.busy).toBe(true);
+    expect(view.primaryAction?.id).toBe("cancel-authentication");
+    view.primaryAction?.run();
+    expect(controller.cancelAuthentication).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers sign-in again when the session expired", () => {
+    const view = signInView({ accountStatus: "session-expired" });
+    expect(view.surface).toBe("session-expired");
+    view.primaryAction?.run();
+    expect(controller.signIn).toHaveBeenCalledTimes(1);
+    view.secondaryAction?.run();
+    expect(fallback.openHostedFallbackSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("explains an unreachable Hub and retries through bootstrap()", () => {
+    const view = signInView({ accountStatus: "unavailable" });
+    expect(view.surface).toBe("hub-unreachable");
+    expect(view.primaryAction?.id).toBe("retry-hub");
+    view.primaryAction?.run();
+    expect(controller.bootstrap).toHaveBeenCalledTimes(1);
+    expect(view.secondaryAction?.id).toBe("pair-device");
+  });
+
+  it("offers only the direct-node path when hosted mode is unavailable", () => {
+    const onPairDevice = vi.fn();
+    const view = deriveHostedSignInView({
+      state: hostedState({ accountStatus: "authenticated", ...AUTHENTICATED }),
+      hostedModeAvailable: false,
+      onPairDevice,
+      onDone: vi.fn(),
+    });
+    expect(view.surface).toBe("unavailable");
+    expect(view.primaryAction?.id).toBe("pair-device");
+    expect(view.secondaryAction).toBeNull();
+    view.primaryAction?.run();
+    expect(onPairDevice).toHaveBeenCalledTimes(1);
+    // No hosted controller call is reachable from this surface.
+    expect(controller.signIn).not.toHaveBeenCalled();
+    expect(controller.bootstrap).not.toHaveBeenCalled();
+  });
+
+  it("shows recovery codes ahead of the connected summary and dismisses them", () => {
+    const view = signInView({ ...AUTHENTICATED, recoveryCodes: ["aaaa-bbbb", "cccc-dddd"] });
+    expect(view.surface).toBe("recovery-codes");
+    expect(view.recoveryCodes).toEqual(["aaaa-bbbb", "cccc-dddd"]);
+    expect(view.primaryAction?.id).toBe("dismiss-recovery-codes");
+    view.primaryAction?.run();
+    expect(controller.dismissRecoveryCodes).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the runtime's bounded status once authenticated", () => {
+    const view = signInView({ ...AUTHENTICATED, ...ONLINE_NODE });
+    expect(view.surface).toBe("authenticated");
+    expect(view.statusText).toBe("Online");
+    expect(view.statusIndicator).toEqual({ shortLabel: "Online", connected: true });
+    expect(HOSTED_CONNECTION_STATUS_TEXTS).toContain(view.statusText);
+    expect(view.detail).toBe("Signed in as Ada Lovelace.");
+  });
+
+  it("keeps the delivery-unknown acknowledgement mandatory and never auto-dismisses it", () => {
+    const pending = signInView({
+      ...AUTHENTICATED,
+      ...ONLINE_NODE,
+      sessionStatus: "delivery-unknown",
+      sessionRecoveredAfterUnknown: false,
+    });
+    expect(pending.deliveryUnknown?.action.disabled).toBe(true);
+    pending.deliveryUnknown?.action.run();
+    // A disabled action is inert at the model layer too, not merely greyed out
+    // by whichever surface remembered to pass the flag through.
+    expect(controller.acknowledgeDeliveryUnknown).not.toHaveBeenCalled();
+    // Still offered — a disabled affordance is not a dismissed one.
+    expect(pending.deliveryUnknown).not.toBeNull();
+
+    const recovered = signInView({
+      ...AUTHENTICATED,
+      ...ONLINE_NODE,
+      sessionStatus: "delivery-unknown",
+      sessionRecoveredAfterUnknown: true,
+    });
+    expect(recovered.deliveryUnknown?.action.disabled).toBe(false);
+    expect(recovered.statusText).toBe("Delivery unknown");
+    recovered.deliveryUnknown?.action.run();
+    expect(controller.acknowledgeDeliveryUnknown).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers nothing to press while signing out", () => {
+    const view = signInView({ accountStatus: "signing-out" });
+    expect(view.surface).toBe("signing-out");
+    expect(view.busy).toBe(true);
+    expect(view.primaryAction).toBeNull();
+    expect(view.secondaryAction).toBeNull();
+  });
+
+  it("surfaces the store's error message without inventing one", () => {
+    expect(signInView({ errorMessage: "Hub is temporarily unavailable." }).errorMessage).toBe(
+      "Hub is temporarily unavailable.",
+    );
+  });
+});
+
+describe("hosted account surface", () => {
+  it("is entirely unavailable without hosted mode", () => {
+    const view = accountView({ ...AUTHENTICATED }, { hostedModeAvailable: false });
+    expect(view.available).toBe(false);
+    expect(view.signedIn).toBe(false);
+    expect(view.rows).toEqual([]);
+    expect(view.signInAction).toBeNull();
+    expect(view.deliveryUnknown).toBeNull();
+  });
+
+  it("offers a sign-in route while signed out", () => {
+    const onSignIn = vi.fn();
+    const view = deriveHostedAccountView({
+      state: hostedState(),
+      hostedModeAvailable: true,
+      onSignIn,
+    });
+    expect(view.signedIn).toBe(false);
+    expect(view.rows).toEqual([]);
+    view.signInAction?.run();
+    expect(onSignIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("signs out through signOut(), behind a confirmation", () => {
+    const view = accountView({ ...AUTHENTICATED, ...ONLINE_NODE });
+    const signOut = view.rows.find((row) => row.id === "sign-out");
+    expect(signOut?.destructive).toBe(true);
+    expect(signOut?.confirm?.confirmText).toBe("Sign out");
+    expect(signOut?.confirm?.message).toContain("Studio");
+    signOut?.run();
+    expect(controller.signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands passkey enrollment and recovery codes to the browser", () => {
+    const view = accountView({ ...AUTHENTICATED, ...ONLINE_NODE });
+    view.rows.find((row) => row.id === "add-this-device")?.run();
+    view.rows.find((row) => row.id === "recovery-codes")?.run();
+    expect(fallback.openHostedFallbackSession).toHaveBeenCalledTimes(2);
+    // Neither one mints a session from the browser.
+    expect(controller.signIn).not.toHaveBeenCalled();
+  });
+
+  it("gates node affordances with the runtime's capability resolution", () => {
+    const ready = accountView({ ...AUTHENTICATED, ...ONLINE_NODE });
+    expect(ready.capability).toEqual({ hosted: true, allowed: true, reason: null });
+    expect(ready.capabilityNotice).toBeNull();
+    expect(ready.statusText).toBe("Online");
+    expect(ready.roleLabel).toBe("Owner");
+
+    const stale = accountView({ ...AUTHENTICATED, ...ONLINE_NODE, browserStatus: "stale" });
+    expect(stale.capability.allowed).toBe(false);
+    expect(stale.capabilityNotice).toBe(stale.capability.reason);
+    expect(stale.capabilityNotice).toBeTruthy();
+
+    const viewer = accountView({ ...AUTHENTICATED, ...ONLINE_NODE, effectiveRole: "viewer" });
+    expect(viewer.capability.allowed).toBe(false);
+    expect(viewer.capabilityNotice).toContain("role");
+  });
+
+  it("carries the same mandatory delivery-unknown acknowledgement", () => {
+    const view = accountView({
+      ...AUTHENTICATED,
+      ...ONLINE_NODE,
+      sessionStatus: "delivery-unknown",
+      sessionRecoveredAfterUnknown: true,
+    });
+    view.deliveryUnknown?.action.run();
+    expect(controller.acknowledgeDeliveryUnknown).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("hosted status tone", () => {
+  it("colours only from the runtime's indicator and never relabels it", () => {
+    expect(hostedStatusTone({ shortLabel: "Online", connected: true })).toEqual({
+      label: "Online",
+      pillClassName: "bg-success-bg border border-success-border",
+      textClassName: "text-success",
+    });
+    expect(hostedStatusTone({ shortLabel: "Revoked", connected: false }).textClassName).toBe(
+      "text-danger-foreground",
+    );
+    expect(hostedStatusTone({ shortLabel: "Connecting", connected: false }).textClassName).toBe(
+      "text-foreground-muted",
+    );
+  });
+
+  it("uses only design tokens — no hardcoded colours and no `dark:` prefixes", () => {
+    for (const label of HOSTED_CONNECTION_STATUS_TEXTS) {
+      const tone = hostedStatusTone({ shortLabel: label, connected: false });
+      const classNames = `${tone.pillClassName} ${tone.textClassName}`;
+      expect(classNames).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+      expect(classNames).not.toMatch(/\bdark:/);
+      expect(classNames).not.toMatch(/\brgba?\(/);
+    }
+  });
+});
+
+/**
+ * The falsifiable security assertion for this layer.
+ *
+ * The hosted store holds no bearer token, DPoP proof, `ath`, `jti`, or relay
+ * ticket — those never leave the session-credentials seam, the signer, and the
+ * relay engine. This renders every hosted surface against an authenticated
+ * session and proves the view models reintroduce none of it, and additionally
+ * that they never expose an account id, session id, node id, or grant id: a
+ * view model carries status and display names, nothing else.
+ */
+describe("no secret or identifying material reaches a hosted view model", () => {
+  const SECRET_KEY_PATTERN =
+    /token|proof|jwk|jws|jwt|\bath\b|\bjti\b|ticket|credential|secret|privatekey|challenge|csrf|cookie|bearer|dpop|authorization/i;
+  const IDENTIFIER_VALUES = [
+    "acct_01J8ZQ5V2N7X0000000000",
+    "sess_01J8ZQ5V2N7X1111111111",
+    "node_01J8ZQ5V2N7X2222222222",
+    "grant_01J8ZQ5V2N7X3333333333",
+  ];
+
+  function everySurface(): ReadonlyArray<{ readonly name: string; readonly view: unknown }> {
+    const authenticated = { ...AUTHENTICATED, ...ONLINE_NODE };
+    return [
+      { name: "signed-out", view: signInView() },
+      { name: "first-run", view: signInView({ bootstrapAvailable: true }) },
+      { name: "authenticating", view: signInView({ accountStatus: "authenticating" }) },
+      { name: "session-expired", view: signInView({ accountStatus: "session-expired" }) },
+      { name: "signing-out", view: signInView({ accountStatus: "signing-out" }) },
+      { name: "hub-unreachable", view: signInView({ accountStatus: "unavailable" }) },
+      {
+        name: "unavailable",
+        view: signInView(authenticated, { hostedModeAvailable: false }),
+      },
+      { name: "authenticated", view: signInView(authenticated) },
+      {
+        name: "recovery-codes",
+        view: signInView({ ...authenticated, recoveryCodes: ["aaaa-bbbb"] }),
+      },
+      {
+        name: "delivery-unknown",
+        view: signInView({
+          ...authenticated,
+          sessionStatus: "delivery-unknown",
+          sessionRecoveredAfterUnknown: true,
+        }),
+      },
+      { name: "account signed-out", view: accountView() },
+      { name: "account", view: accountView(authenticated) },
+      {
+        name: "account unavailable",
+        view: accountView(authenticated, { hostedModeAvailable: false }),
+      },
+    ];
+  }
+
+  /** Every string a surface can render, and every key it exposes. */
+  function walk(value: unknown, keys: string[], strings: string[]): void {
+    if (typeof value === "string") {
+      strings.push(value);
+      return;
+    }
+    if (typeof value !== "object" || value === null) return;
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, keys, strings);
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      keys.push(key);
+      walk(child, keys, strings);
+    }
+  }
+
+  it("exposes no credential-shaped key on any surface", () => {
+    for (const { name, view } of everySurface()) {
+      const keys: string[] = [];
+      walk(view, keys, []);
+      const offenders = keys.filter((key) => SECRET_KEY_PATTERN.test(key));
+      expect(offenders, `surface ${name}`).toEqual([]);
+    }
+  });
+
+  it("leaks no account, session, node, or grant identifier into rendered text", () => {
+    for (const { name, view } of everySurface()) {
+      const strings: string[] = [];
+      walk(view, [], strings);
+      const rendered = strings.join(" ");
+      for (const identifier of IDENTIFIER_VALUES) {
+        expect(rendered.includes(identifier), `surface ${name} leaked ${identifier}`).toBe(false);
+      }
+      // Nothing that looks like a bearer/DPoP header or a base64url blob.
+      expect(rendered).not.toMatch(/\bDPoP\b|\bBearer\b/);
+      expect(rendered).not.toMatch(/eyJ[\w-]{6,}/);
+      expect(rendered).not.toMatch(/[A-Za-z0-9_-]{40,}/);
+    }
+  });
+
+  it("only ever emits status text from the runtime's bounded vocabulary", () => {
+    for (const { name, view } of everySurface()) {
+      const statusText = (view as { readonly statusText: string | null }).statusText;
+      if (statusText === null) continue;
+      expect(HOSTED_CONNECTION_STATUS_TEXTS, `surface ${name}`).toContain(statusText);
+    }
+  });
+});

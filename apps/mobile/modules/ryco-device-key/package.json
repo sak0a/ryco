@@ -1,0 +1,33 @@
+{
+  "name": "@ryco/mobile-device-key",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "android",
+    "ios",
+    "index.ts",
+    "expo-module.config.json",
+    "RycoDeviceKey.podspec"
+  ],
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "react-native": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "peerDependencies": {
+    "expo-modules-core": "*"
+  },
+  "expo-module": {
+    "ios": {
+      "modules": [
+        "RycoDeviceKeyModule"
+      ]
+    },
+    "android": {
+      "modules": [
+        "expo.modules.rycodevicekey.RycoDeviceKeyModule"
+      ]
+    }
+  }
+}
