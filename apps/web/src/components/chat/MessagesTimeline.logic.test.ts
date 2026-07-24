@@ -286,7 +286,6 @@ describe("deriveMessagesTimelineRows", () => {
           },
         },
       ],
-      completionDividerBeforeEntryId: "assistant-final-entry",
       turnFoldExpandedById: { "turn-fold:settled:turn-1": true },
       isWorking: false,
       activeTurnStartedAt: null,
@@ -302,7 +301,6 @@ describe("deriveMessagesTimelineRows", () => {
     expect(assistantRows).toHaveLength(2);
     expect(assistantRows[0]?.showAssistantCopyButton).toBe(false);
     expect(assistantRows[1]?.showAssistantCopyButton).toBe(true);
-    expect(assistantRows[1]?.showCompletionDivider).toBe(true);
   });
 
   it("starts a running turn expanded and replaces the standalone working row", () => {
@@ -349,7 +347,6 @@ describe("deriveMessagesTimelineRows", () => {
         completedAt: null,
       },
       runningTurnId: turnId,
-      completionDividerBeforeEntryId: null,
       isWorking: true,
       activeTurnStartedAt: "2026-01-01T00:00:01Z",
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -401,7 +398,6 @@ describe("deriveMessagesTimelineRows", () => {
       },
       runningTurnId: turnId,
       turnFoldExpandedById: { "turn-fold:running:turn-1": false },
-      completionDividerBeforeEntryId: null,
       isWorking: true,
       activeTurnStartedAt: "2026-01-01T00:00:01Z",
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -477,7 +473,6 @@ describe("deriveMessagesTimelineRows", () => {
       },
       runningTurnId: null,
       turnFoldExpandedById: { "turn-fold:running:turn-1": true },
-      completionDividerBeforeEntryId: null,
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -515,7 +510,6 @@ describe("deriveMessagesTimelineRows", () => {
     ];
     const baseInput = {
       timelineEntries,
-      completionDividerBeforeEntryId: null,
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -557,7 +551,6 @@ describe("deriveMessagesTimelineRows", () => {
         startedAt: "2026-01-01T00:00:00Z",
         completedAt: "2026-01-01T00:00:47Z",
       },
-      completionDividerBeforeEntryId: null,
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -604,7 +597,6 @@ describe("deriveMessagesTimelineRows", () => {
         completedAt: "2026-01-01T00:00:10Z",
       },
       runningTurnId: null,
-      completionDividerBeforeEntryId: null,
       isWorking: true,
       activeTurnStartedAt: "2026-01-01T00:01:00Z",
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -659,7 +651,6 @@ describe("deriveMessagesTimelineRows", () => {
           },
         },
       ],
-      completionDividerBeforeEntryId: null,
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map([
@@ -805,7 +796,6 @@ describe("computeStableMessagesTimelineRows", () => {
           message: secondUserMessage,
         },
       ],
-      completionDividerBeforeEntryId: null,
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -856,7 +846,6 @@ describe("computeStableMessagesTimelineRows", () => {
           message: secondUserMessage,
         },
       ],
-      completionDividerBeforeEntryId: null,
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -906,7 +895,6 @@ describe("computeStableMessagesTimelineRows", () => {
     ];
     const firstRows = deriveMessagesTimelineRows({
       timelineEntries,
-      completionDividerBeforeEntryId: null,
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -931,7 +919,6 @@ describe("computeStableMessagesTimelineRows", () => {
           entry: { ...secondWorkEntry },
         },
       ],
-      completionDividerBeforeEntryId: null,
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -986,7 +973,6 @@ describe("computeStableMessagesTimelineRows", () => {
           message: initialAssistantMessage,
         },
       ],
-      completionDividerBeforeEntryId: null,
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -1022,7 +1008,6 @@ describe("computeStableMessagesTimelineRows", () => {
           message: { ...initialAssistantMessage, text: "Working." },
         },
       ],
-      completionDividerBeforeEntryId: null,
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -1042,7 +1027,6 @@ describe("timeline context split", () => {
     "activeTurnId",
     "isWorking",
     "isRevertingCheckpoint",
-    "completionSummary",
     "openDiffTurnId",
   ];
   const STABLE_KEYS = [
@@ -1070,7 +1054,6 @@ describe("timeline context split", () => {
       activeTurnId: TurnId.make("turn-1"),
       isWorking: true,
       isRevertingCheckpoint: false,
-      completionSummary: "done",
       openDiffTurnId: null,
       timestampFormat: "locale",
       routeThreadKey: "environment-local:thread-1",
@@ -1115,7 +1098,6 @@ describe("timeline context split", () => {
     const stable = buildTimelineStableState(input);
 
     expect(streaming.isWorking).toBe(true);
-    expect(streaming.completionSummary).toBe("done");
     expect(stable.routeThreadKey).toBe("environment-local:thread-1");
     expect(stable.onCloseDiff).toBe(input.onCloseDiff);
   });

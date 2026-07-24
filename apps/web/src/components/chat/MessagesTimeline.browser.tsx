@@ -57,8 +57,6 @@ function buildProps() {
     activeTurnId: null,
     activeTurnStartedAt: null,
     listRef: createRef<LegendListRef | null>(),
-    completionDividerBeforeEntryId: null,
-    completionSummary: null,
     turnDiffSummaryByAssistantMessageId: new Map(),
     routeThreadKey: "environment-local:thread-1",
     onOpenTurnDiff: vi.fn(),
@@ -317,6 +315,117 @@ describe("MessagesTimeline", () => {
     }
   });
 
+  it("aligns standard and file-edit tools to one compact base row", async () => {
+    const props = buildProps();
+    const screen = await render(
+      <MessagesTimeline
+        {...props}
+        timelineEntries={[
+          {
+            id: "command-entry",
+            kind: "work",
+            createdAt: "2026-04-13T12:00:00.000Z",
+            entry: {
+              id: "command",
+              createdAt: "2026-04-13T12:00:00.000Z",
+              label: "Command",
+              command: "bun typecheck",
+              tone: "tool",
+            },
+          },
+        ]}
+      />,
+    );
+
+    try {
+      const standardRow = document.querySelector<HTMLElement>(
+        "[data-tool-entry-kind='expandable']",
+      );
+      const standardIcon = standardRow?.querySelector<HTMLElement>("[data-work-entry-icon='true']");
+      expect(standardRow).not.toBeNull();
+      expect(standardIcon).not.toBeNull();
+      const standardRect = standardRow!.getBoundingClientRect();
+      const standardIconRect = standardIcon!.getBoundingClientRect();
+      expect(standardRect.height).toBe(30);
+
+      await screen.rerender(
+        <MessagesTimeline
+          {...props}
+          timelineEntries={[
+            {
+              id: "single-edit-entry",
+              kind: "work",
+              createdAt: "2026-04-13T12:00:01.000Z",
+              entry: {
+                id: "single-edit",
+                createdAt: "2026-04-13T12:00:01.000Z",
+                label: "File change",
+                tone: "tool",
+                itemType: "file_change",
+                requestKind: "file-change",
+                changedFiles: ["src/app.ts"],
+                changedFileStats: [{ path: "src/app.ts", additions: 2, deletions: 1 }],
+                completed: true,
+              },
+            },
+          ]}
+        />,
+      );
+
+      const singleEditRow = document.querySelector<HTMLElement>(
+        "[data-tool-entry-kind='file-edit']",
+      );
+      const singleEditIcon = singleEditRow?.querySelector<HTMLElement>(
+        "[data-work-entry-icon='true']",
+      );
+      expect(singleEditRow).not.toBeNull();
+      expect(singleEditIcon).not.toBeNull();
+      const singleEditRect = singleEditRow!.getBoundingClientRect();
+      const singleEditIconRect = singleEditIcon!.getBoundingClientRect();
+      expect(singleEditRect.height).toBe(standardRect.height);
+      expect(singleEditIconRect.left).toBe(standardIconRect.left);
+
+      await screen.rerender(
+        <MessagesTimeline
+          {...props}
+          timelineEntries={[
+            {
+              id: "multi-edit-entry",
+              kind: "work",
+              createdAt: "2026-04-13T12:00:02.000Z",
+              entry: {
+                id: "multi-edit",
+                createdAt: "2026-04-13T12:00:02.000Z",
+                label: "File change",
+                tone: "tool",
+                itemType: "file_change",
+                requestKind: "file-change",
+                changedFiles: ["src/app.ts", "src/router.ts", "src/styles.css"],
+                changedFileStats: [
+                  { path: "src/app.ts", additions: 2, deletions: 1 },
+                  { path: "src/router.ts", additions: 4, deletions: 0 },
+                  { path: "src/styles.css", additions: 1, deletions: 2 },
+                ],
+                completed: true,
+              },
+            },
+          ]}
+        />,
+      );
+
+      const multiEditRow = document.querySelector<HTMLElement>(
+        "[data-tool-entry-kind='file-edit']",
+      );
+      expect(multiEditRow).not.toBeNull();
+      expect(multiEditRow!.getBoundingClientRect().height).toBeGreaterThan(standardRect.height);
+      await expect.element(page.getByText("app.ts")).toBeVisible();
+      await expect.element(page.getByText("router.ts")).toBeVisible();
+      await expect.element(page.getByText("styles.css")).toBeVisible();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("defers final changed files until the assistant response is complete", async () => {
     const assistantMessageId = MessageId.make("message-assistant-1");
     const turnId = TurnId.make("turn-1");
@@ -547,6 +656,7 @@ describe("MessagesTimeline", () => {
       const settledFold = page.getByRole("button", { name: "Worked for 40s" });
       await expect.element(settledFold).toBeVisible();
       await expect.element(settledFold).toHaveAttribute("aria-expanded", "false");
+      await expect.element(page.getByText("Response • Worked for 40s")).not.toBeInTheDocument();
       await expect.element(page.getByText("The redesign is complete.")).toBeVisible();
       await expect
         .element(page.getByText("I am checking the current implementation."))

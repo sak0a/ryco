@@ -37,7 +37,6 @@ export interface TimelineStreamingState {
   activeTurnId: TurnId | null;
   isWorking: boolean;
   isRevertingCheckpoint: boolean;
-  completionSummary: string | null;
   openDiffTurnId: TurnId | null;
 }
 
@@ -86,7 +85,6 @@ export function buildTimelineStreamingState(input: TimelineStreamingState): Time
     activeTurnId: input.activeTurnId,
     isWorking: input.isWorking,
     isRevertingCheckpoint: input.isRevertingCheckpoint,
-    completionSummary: input.completionSummary,
     openDiffTurnId: input.openDiffTurnId,
   };
 }
@@ -142,7 +140,6 @@ export type MessagesTimelineRow =
       createdAt: string;
       message: ChatMessage;
       durationStart: string;
-      showCompletionDivider: boolean;
       showAssistantCopyButton: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
       revertTurnCount?: number | undefined;
@@ -468,7 +465,6 @@ export function deriveMessagesTimelineRows(input: {
   runningTurnId?: TurnId | null;
   turnFoldExpandedById?: Readonly<Record<string, boolean>>;
   workGroupExpandedById?: Readonly<Record<string, boolean>>;
-  completionDividerBeforeEntryId: string | null;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
@@ -606,9 +602,6 @@ export function deriveMessagesTimelineRows(input: {
       message: timelineEntry.message,
       durationStart:
         durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt,
-      showCompletionDivider:
-        timelineEntry.message.role === "assistant" &&
-        input.completionDividerBeforeEntryId === timelineEntry.id,
       showAssistantCopyButton:
         timelineEntry.message.role === "assistant" &&
         terminalAssistantMessageIds.has(timelineEntry.message.id),
@@ -699,7 +692,6 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return (
         areMessagesUnchanged(a.message, bm.message) &&
         a.durationStart === bm.durationStart &&
-        a.showCompletionDivider === bm.showCompletionDivider &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
         a.revertTurnCount === bm.revertTurnCount
