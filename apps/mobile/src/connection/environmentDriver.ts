@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@ryco/contracts";
+import type { EnvironmentId, ThreadId } from "@ryco/contracts";
 import {
   createEnvironmentConnection,
   createEnvironmentConnectionSupervisor,
@@ -11,13 +11,61 @@ import {
   type SavedEnvironmentRuntimeState,
 } from "@ryco/client-runtime/connection";
 import { createKnownEnvironment } from "@ryco/client-runtime/knownEnvironment";
+import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 
 import { createWsRpcClient, type WsRpcClient } from "../rpc/wsRpcClient";
 import { WsTransport } from "../rpc/wsTransport";
-import { useStore } from "../state/threadsRuntime";
+import {
+  selectSidebarThreadSummaryByRef,
+  selectThreadByRef,
+  useStore,
+} from "../state/threadsRuntime";
 import { subscribeAppStateResume } from "./appStateResume";
 import { createMobileEnvironmentStateSink } from "./environmentStateSink";
 import type { MobileRemoteEnvironmentApi } from "./remoteApi";
+
+// §4 stub closure: the supervisor evicts idle thread-detail subscriptions; a
+// subscription is non-idle while the thread has pending approvals/user-input, an
+// actionable proposed plan, a non-idle orchestration status, a running latest
+// turn, or a pending source proposed plan. Straight port of the web predicate
+// (apps/web/src/environments/runtime/service.ts:231-277) over runtime-A selectors.
+export function isThreadDetailSubscriptionNonIdle(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+): boolean {
+  const threadRef = scopeThreadRef(environmentId, threadId);
+  const state = useStore.getState();
+  const sidebarThread = selectSidebarThreadSummaryByRef(state, threadRef);
+
+  if (sidebarThread) {
+    if (
+      sidebarThread.hasPendingApprovals ||
+      sidebarThread.hasPendingUserInput ||
+      sidebarThread.hasActionableProposedPlan
+    ) {
+      return true;
+    }
+    const orchestrationStatus = sidebarThread.session?.orchestrationStatus;
+    if (orchestrationStatus && orchestrationStatus !== "idle" && orchestrationStatus !== "stopped") {
+      return true;
+    }
+    if (sidebarThread.latestTurn?.state === "running") {
+      return true;
+    }
+  }
+
+  const thread = selectThreadByRef(state, threadRef);
+  if (!thread) return false;
+
+  const orchestrationStatus = thread.session?.orchestrationStatus;
+  return (
+    Boolean(
+      orchestrationStatus && orchestrationStatus !== "idle" && orchestrationStatus !== "stopped",
+    ) ||
+    thread.latestTurn?.state === "running" ||
+    thread.pendingSourceProposedPlan !== undefined
+  );
+}
 
 // Bound wrappers for every injected timer/lifecycle seam (the slice-3b lesson:
 // unbound globals throw "Illegal invocation").
@@ -247,9 +295,7 @@ export function createMobileEnvironmentDriver(
     },
     waitForPrimaryShellSnapshotApplied: () => Promise.resolve(),
     subscribeBrowserResume: (listener) => subscribeResume(listener),
-    // Thread-detail subscriptions are a B2 concern (the pairing surface shows the
-    // thread list, not detail).
-    isThreadDetailSubscriptionNonIdle: () => false,
+    isThreadDetailSubscriptionNonIdle,
     syncThreadDetailSnapshot: (environmentId, snapshot) =>
       useStore
         .getState()
