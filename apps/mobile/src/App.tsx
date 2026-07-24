@@ -1,13 +1,22 @@
+import { useEffect } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
-// B1 scaffold placeholder. The real provider stack (RegistryContext → SafeArea →
-// Keyboard → navigation) and the direct-node pairing surface are wired in the
-// runtime-wiring and pairing-loop tasks.
+import { AppProviders } from "./providers/AppProviders";
+import { initializeMobileRuntime } from "./runtime/bootstrap";
+
+// B1 app root: the provider stack + one-time runtime init. The direct-node
+// pairing surface is mounted here by the pairing-loop task.
 export default function App() {
+  useEffect(() => {
+    initializeMobileRuntime();
+  }, []);
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Ryco</Text>
-    </View>
+    <AppProviders>
+      <View style={styles.container}>
+        <Text style={styles.title}>Ryco</Text>
+      </View>
+    </AppProviders>
   );
 }
 
