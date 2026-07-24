@@ -15,6 +15,9 @@
   "exports": {
     ".": "./index.ts"
   },
+  "peerDependencies": {
+    "expo-modules-core": "*"
+  },
   "expo-module": {
     "ios": {
       "modules": [

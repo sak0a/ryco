@@ -1,6 +1,15 @@
-import type { SecretKVService } from "@ryco/client-runtime/platform";
+import type {
+  EndpointService,
+  HttpClientService,
+  PasskeyCeremonyService,
+  SecretKVService,
+} from "@ryco/client-runtime/platform";
 import { HostedHubApi } from "@ryco/client-runtime/authorization";
-import { createDpopProofSigner, decodeBase64Url } from "@ryco/client-runtime/relay";
+import {
+  createDpopProofSigner,
+  decodeBase64Url,
+  type DpopPublicJwk,
+} from "@ryco/client-runtime/relay";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createMobileSessionCredentials, HOSTED_SESSION_TOKEN_KEY } from "./sessionCredentials";
@@ -40,9 +49,16 @@ function fakeSigningKey() {
   };
 }
 
+const HUB_ORIGIN = "https://hub.example.test";
+
 const apiDependencies = () => ({
-  endpoint: { origin: () => "https://hub.example.test" },
-  httpClient: { fetch: async () => new Response("{}", { status: 200 }) },
+  endpoint: {
+    origin: () => HUB_ORIGIN,
+    readPrimaryTarget: () => null,
+    resolveHttpUrl: (pathname: string) => new URL(pathname, HUB_ORIGIN).toString(),
+    resolveWsUrl: (wsBaseUrl: string) => wsBaseUrl,
+  } satisfies EndpointService,
+  httpClient: { fetch: async () => new Response("{}", { status: 200 }) } as HttpClientService,
   passkeyCeremony: {
     authenticate: async () => {
       throw new Error("unused");
@@ -50,7 +66,7 @@ const apiDependencies = () => ({
     register: async () => {
       throw new Error("unused");
     },
-  },
+  } as unknown as PasskeyCeremonyService,
 });
 
 describe("bearer session credentials", () => {
@@ -256,7 +272,12 @@ describe("DPoP proof construction over the mobile signer shape", () => {
   it("rejects a signing key carrying private JWK material", () => {
     expect(() =>
       createDpopProofSigner(
-        { ...fakeSigningKey(), publicJwk: { kty: "EC", crv: "P-256", x: "eA", y: "eQ", d: "s3" } },
+        {
+          ...fakeSigningKey(),
+          // Deliberately smuggles a private member past the static type: the
+          // runtime guard, not the type system, is what must reject it.
+          publicJwk: { kty: "EC", crv: "P-256", x: "eA", y: "eQ", d: "s3" } as DpopPublicJwk,
+        },
         context,
       ),
     ).toThrow("DPoP proof JWK must not carry private key material.");
