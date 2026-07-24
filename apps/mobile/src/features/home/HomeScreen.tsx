@@ -3,9 +3,10 @@ import { useLayoutEffect } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/AppSymbol";
 import { EmptyState } from "../../components/EmptyState";
-import { GlassIconButton } from "../../components/GlassIconButton";
 import { cn } from "../../lib/cn";
+import { useThemeColor } from "../../lib/useThemeColor";
 import type { SidebarThreadSummary } from "@ryco/client-runtime/state/threads";
 import { useHomeThreadGroups } from "../../state/homeData";
 import { useStore } from "../../state/threadsRuntime";
@@ -59,28 +60,37 @@ function StatusDot({ kind }: { readonly kind: StatusDotKind }) {
 export function HomeScreen() {
   const navigation = useNavigation();
   const groups = useHomeThreadGroups();
+  const iconColor = useThemeColor("--color-icon");
 
   // Home is the initial route; the pairing/settings surfaces are only reachable
-  // from here. Floating glass icon circles (Connect + Settings) let a paired user
-  // add an environment or open settings; the empty-state CTA covers first run.
+  // from here. Plain header symbols (no per-icon glass container) — the native
+  // nav bar provides the chrome; the buttons should read as bare icons.
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <View className="flex-row items-center gap-2.5">
-          <GlassIconButton
-            icon="link"
+        <View className="flex-row items-center gap-6">
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel="Pair a device"
+            hitSlop={12}
+            className="active:opacity-50"
             onPress={() => navigation.navigate("ConnectionsNew")}
-          />
-          <GlassIconButton
-            icon="gearshape"
+          >
+            <SymbolView name="link" size={20} tintColor={iconColor} type="monochrome" />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel="Settings"
+            hitSlop={12}
+            className="active:opacity-50"
             onPress={() => navigation.navigate("SettingsSheet")}
-          />
+          >
+            <SymbolView name="gearshape" size={22} tintColor={iconColor} type="monochrome" />
+          </Pressable>
         </View>
       ),
     });
-  }, [navigation]);
+  }, [navigation, iconColor]);
 
   const openThread = (thread: SidebarThreadSummary) => {
     useStore.getState().setActiveEnvironmentId(thread.environmentId);
