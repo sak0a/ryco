@@ -4,7 +4,7 @@ import { ScrollView } from "react-native";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 
-// Settings hub, stripped of the Clerk/cloud account + push surfaces (the hosted
+// Settings hub, stripped of the hosted-auth / cloud account + push surfaces (the hosted
 // account rows render only when hosted mode is enabled — inert until workstream C).
 export function SettingsRouteScreen() {
   const navigation = useNavigation();
