@@ -15,6 +15,7 @@ import { appBlurTargetRef } from "./lib/appBlurTarget";
 import { useThemeColor } from "./lib/useThemeColor";
 import { ConnectionRegistryProvider } from "./providers/ConnectionRegistryProvider";
 import { AppProviders } from "./providers/AppProviders";
+import { ServerStateBootstrap } from "./state/serverStateSync";
 import { RootStack } from "./Stack";
 
 import "../global.css";
@@ -58,6 +59,7 @@ export default function App() {
       <ConnectionRegistryProvider>
         <AppearancePreferencesProvider>
           <SplashScreenCoordinator />
+          <ServerStateBootstrap />
           <StatusBar
             barStyle={colorScheme === "dark" ? "light-content" : "dark-content"}
             backgroundColor={statusBarBg}
