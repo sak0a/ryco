@@ -105,4 +105,33 @@ describe("createDpopProofSigner", () => {
       ).toThrow(/private key material/i);
     }
   });
+
+  it("serializes only whitelisted public members, defeating a toJSON() private-key smuggle", async () => {
+    // The member check sees only public own-properties, but a naive
+    // JSON.stringify of the object would invoke toJSON() and emit `d`.
+    const smuggling = {
+      kty: "EC",
+      crv: "P-256",
+      x: "x-coordinate",
+      y: "y-coordinate",
+      toJSON() {
+        return {
+          kty: "EC",
+          crv: "P-256",
+          x: "x-coordinate",
+          y: "y-coordinate",
+          d: "PRIVATE-CANARY",
+        };
+      },
+    };
+    const proof = await createDpopProofSigner(
+      fakeKey({ publicJwk: smuggling as never }),
+      context,
+    ).sign({ method: "GET", url: "https://hub.example.test/api/nodes" });
+    // The private field never reaches the header; only the whitelisted public
+    // members are serialized (the header copy has no toJSON to invoke).
+    expect(proof).not.toContain("PRIVATE-CANARY");
+    const header = decodeSegment(proof.split(".")[0]!);
+    expect(header.jwk).toEqual({ kty: "EC", crv: "P-256", x: "x-coordinate", y: "y-coordinate" });
+  });
 });

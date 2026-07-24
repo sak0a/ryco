@@ -52,12 +52,39 @@ export interface DpopProofContext {
   readonly sha256: (bytes: Uint8Array) => Promise<Uint8Array>;
 }
 
-function assertPublicJwk(jwk: DpopPublicJwk): void {
+/**
+ * Reject any private JWK material, then copy ONLY the allowed public members —
+ * read as primitives — into a fresh object literal. The proof header serializes
+ * this copy, never the caller's object, so a JWK with a custom `toJSON()` cannot
+ * smuggle a private field such as `d` into the header even though the member
+ * check (which sees only own-properties) passed.
+ */
+function sanitizePublicJwk(jwk: DpopPublicJwk): DpopPublicJwk {
   for (const member of PRIVATE_JWK_MEMBERS) {
     if (member in jwk) {
       throw new Error("DPoP proof JWK must not carry private key material.");
     }
   }
+  const readString = (member: string, value: string | undefined): string => {
+    if (typeof value !== "string") {
+      throw new Error(`DPoP proof JWK member \`${member}\` must be a string.`);
+    }
+    return value;
+  };
+  const sanitized: {
+    kty: string;
+    crv?: string;
+    x?: string;
+    y?: string;
+    n?: string;
+    e?: string;
+  } = { kty: readString("kty", jwk.kty) };
+  if (jwk.crv !== undefined) sanitized.crv = readString("crv", jwk.crv);
+  if (jwk.x !== undefined) sanitized.x = readString("x", jwk.x);
+  if (jwk.y !== undefined) sanitized.y = readString("y", jwk.y);
+  if (jwk.n !== undefined) sanitized.n = readString("n", jwk.n);
+  if (jwk.e !== undefined) sanitized.e = readString("e", jwk.e);
+  return sanitized;
 }
 
 /** `htu` is the request URL with any query and fragment stripped. */
@@ -85,8 +112,8 @@ export function createDpopProofSigner(
   if (!ALLOWED_DPOP_ALGORITHMS.has(key.algorithm)) {
     throw new Error("DPoP proofs require an asymmetric ES256 or RS256 key.");
   }
-  assertPublicJwk(key.publicJwk);
-  const headerSegment = encodeSegment({ typ: "dpop+jwt", alg: key.algorithm, jwk: key.publicJwk });
+  const publicJwk = sanitizePublicJwk(key.publicJwk);
+  const headerSegment = encodeSegment({ typ: "dpop+jwt", alg: key.algorithm, jwk: publicJwk });
   return {
     sign: async ({ method, url, token }: DpopProofInput): Promise<string> => {
       const payload: Record<string, unknown> = {
