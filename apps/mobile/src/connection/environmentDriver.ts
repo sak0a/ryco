@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@ryco/contracts";
+import type { EnvironmentId, OrchestrationEvent, ThreadId } from "@ryco/contracts";
 import {
   createEnvironmentConnection,
   createEnvironmentConnectionSupervisor,
@@ -11,13 +11,67 @@ import {
   type SavedEnvironmentRuntimeState,
 } from "@ryco/client-runtime/connection";
 import { createKnownEnvironment } from "@ryco/client-runtime/knownEnvironment";
+import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 
 import { createWsRpcClient, type WsRpcClient } from "../rpc/wsRpcClient";
 import { WsTransport } from "../rpc/wsTransport";
-import { useStore } from "../state/threadsRuntime";
+import {
+  selectSidebarThreadSummaryByRef,
+  selectThreadByRef,
+  useStore,
+} from "../state/threadsRuntime";
+import { invalidateAllCheckpointDiffs } from "../rpc/checkpointDiffAtoms";
 import { subscribeAppStateResume } from "./appStateResume";
 import { createMobileEnvironmentStateSink } from "./environmentStateSink";
 import type { MobileRemoteEnvironmentApi } from "./remoteApi";
+import { createThreadDetailEventApplier } from "./threadDetailEvents";
+
+// §4 stub closure: the supervisor evicts idle thread-detail subscriptions; a
+// subscription is non-idle while the thread has pending approvals/user-input, an
+// actionable proposed plan, a non-idle orchestration status, a running latest
+// turn, or a pending source proposed plan. Straight port of the web predicate
+// (apps/web/src/environments/runtime/service.ts:231-277) over runtime-A selectors.
+export function isThreadDetailSubscriptionNonIdle(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+): boolean {
+  const threadRef = scopeThreadRef(environmentId, threadId);
+  const state = useStore.getState();
+  const sidebarThread = selectSidebarThreadSummaryByRef(state, threadRef);
+
+  if (sidebarThread) {
+    if (
+      sidebarThread.hasPendingApprovals ||
+      sidebarThread.hasPendingUserInput ||
+      sidebarThread.hasActionableProposedPlan
+    ) {
+      return true;
+    }
+    const orchestrationStatus = sidebarThread.session?.orchestrationStatus;
+    if (
+      orchestrationStatus &&
+      orchestrationStatus !== "idle" &&
+      orchestrationStatus !== "stopped"
+    ) {
+      return true;
+    }
+    if (sidebarThread.latestTurn?.state === "running") {
+      return true;
+    }
+  }
+
+  const thread = selectThreadByRef(state, threadRef);
+  if (!thread) return false;
+
+  const orchestrationStatus = thread.session?.orchestrationStatus;
+  return (
+    Boolean(
+      orchestrationStatus && orchestrationStatus !== "idle" && orchestrationStatus !== "stopped",
+    ) ||
+    thread.latestTurn?.state === "running" ||
+    thread.pendingSourceProposedPlan !== undefined
+  );
+}
 
 // Bound wrappers for every injected timer/lifecycle seam (the slice-3b lesson:
 // unbound globals throw "Illegal invocation").
@@ -33,9 +87,26 @@ const noopPushSequenceMonitor: PushSequenceMonitor = {
   recordSnapshot: () => undefined,
 };
 
-// B1 has no provider caches to invalidate, so the throttle is inert.
-function createNoopThrottle() {
-  return { maybeExecute: () => undefined, cancel: () => undefined };
+// A real trailing throttle for the checkpoint-diff cache invalidation (§6). On
+// maybeExecute it schedules `onFire` after `waitMs`, coalescing bursts; cancel
+// clears the pending timer. Bound wrapper, no import-time side effects.
+function createTrailingThrottle(onFire: () => void, waitMs: number) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return {
+    maybeExecute: () => {
+      if (timer !== null) return;
+      timer = setTimeout(() => {
+        timer = null;
+        onFire();
+      }, waitMs);
+    },
+    cancel: () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    },
+  };
 }
 
 function nowIso(): string {
@@ -101,7 +172,6 @@ export interface MobileEnvironmentDriver {
 export function createMobileEnvironmentDriver(
   deps: MobileEnvironmentDriverDeps,
 ): MobileEnvironmentDriver {
-  const stateSink = deps.stateSink ?? createMobileEnvironmentStateSink();
   const subscribeResume = deps.subscribeResume ?? subscribeAppStateResume;
   const { catalog, remoteApi } = deps;
 
@@ -109,6 +179,34 @@ export function createMobileEnvironmentDriver(
   // supervisor is running, so the forward reference is safe.
   let supervisor: EnvironmentConnectionSupervisor;
   const getSupervisor = () => supervisor;
+
+  // Coalesced checkpoint-diff cache invalidation (§6): the sink marks it needed
+  // (and pokes the supervisor throttle); the throttle flushes it.
+  let needsProviderInvalidation = false;
+  const flushProviderInvalidation = () => {
+    needsProviderInvalidation = false;
+    invalidateAllCheckpointDiffs();
+  };
+
+  // Give the sink the supervisor handle so live thread-upserted/removed events
+  // drive draft promotion + detail-subscription eviction/dispose (§4), and wire
+  // the checkpoint-diff cache invalidation (§6).
+  const stateSink =
+    deps.stateSink ??
+    createMobileEnvironmentStateSink({
+      supervisor: getSupervisor,
+      markProviderInvalidationNeeded: () => {
+        needsProviderInvalidation = true;
+        getSupervisor().requestProviderInvalidation();
+      },
+      flushProviderInvalidation,
+    });
+  // Recovered/pushed thread-detail events flow through the same batch-effects path
+  // as the shell stream (§4).
+  const applyThreadDetailEvent = createThreadDetailEventApplier({
+    stateSink,
+    getSupervisor,
+  });
 
   const patchRuntime = (
     environmentId: EnvironmentId,
@@ -231,8 +329,13 @@ export function createMobileEnvironmentDriver(
     now: boundNow,
     setTimeout: boundSetTimeout,
     clearTimeout: boundClearTimeout,
-    createInvalidationThrottle: createNoopThrottle,
-    resetProviderInvalidation: () => undefined,
+    createInvalidationThrottle: () =>
+      createTrailingThrottle(() => {
+        if (needsProviderInvalidation) flushProviderInvalidation();
+      }, 100),
+    resetProviderInvalidation: () => {
+      needsProviderInvalidation = false;
+    },
     // Mobile has no window-origin/primary environment; direct-node uses saved
     // environments only.
     createPrimaryConnection: () => null,
@@ -247,14 +350,13 @@ export function createMobileEnvironmentDriver(
     },
     waitForPrimaryShellSnapshotApplied: () => Promise.resolve(),
     subscribeBrowserResume: (listener) => subscribeResume(listener),
-    // Thread-detail subscriptions are a B2 concern (the pairing surface shows the
-    // thread list, not detail).
-    isThreadDetailSubscriptionNonIdle: () => false,
+    isThreadDetailSubscriptionNonIdle,
     syncThreadDetailSnapshot: (environmentId, snapshot) =>
       useStore
         .getState()
         .syncServerThreadDetail((snapshot as { readonly thread: never }).thread, environmentId),
-    applyThreadDetailEvent: () => undefined,
+    applyThreadDetailEvent: (environmentId, event) =>
+      applyThreadDetailEvent(environmentId, event as OrchestrationEvent),
     stateSink,
     onShellSnapshotReceived: () => undefined,
     onShellSnapshotCurrent: () => undefined,

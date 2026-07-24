@@ -1,28 +1,85 @@
-import { useEffect, useMemo } from "react";
+import { BlurTargetView } from "expo-blur";
+import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
+import { useEffect } from "react";
+import { StatusBar, useColorScheme } from "react-native";
+import { createStaticNavigation, DarkTheme, DefaultTheme } from "@react-navigation/native";
 
-import { PairingScreen } from "./features/pairing/PairingScreen";
+import { ConfirmDialogHost } from "./components/ConfirmDialogHost";
+import { OverlayPortalHost } from "./components/OverlayPortal";
+import {
+  AppearancePreferencesProvider,
+  useAppearancePreferences,
+} from "./features/settings/appearance/AppearancePreferencesProvider";
+import { appBlurTargetRef } from "./lib/appBlurTarget";
+import { useThemeColor } from "./lib/useThemeColor";
+import { ConnectionRegistryProvider } from "./providers/ConnectionRegistryProvider";
 import { AppProviders } from "./providers/AppProviders";
-import { initializeMobileRuntime } from "./runtime/bootstrap";
+import { ServerStateBootstrap } from "./state/serverStateSync";
+import { RootStack } from "./Stack";
 
-// Keep the native splash up until the app has mounted, then dismiss it — the
-// current expo-splash-screen does not auto-hide, so without this the (T3-branded
-// placeholder) splash covers the app forever.
-void SplashScreen.preventAutoHideAsync().catch(() => undefined);
+import "../global.css";
 
-// B1 app root: the provider stack, one-time runtime init, and the direct-node
-// pairing surface (the B1 deliverable). The full navigation shell and MVP
-// screens are B2.
-export default function App() {
-  const registry = useMemo(() => initializeMobileRuntime(), []);
+void SplashScreen.preventAutoHideAsync().catch(() => {
+  // The native module can be unavailable in non-native test environments.
+});
+
+// Per-variant plain schemes shipped by B1's app.config.ts (§7 divergence: these
+// supersede the spec's reverse-DNS wording). Deep links carry only
+// environmentId/threadId params — never credentials.
+const appLinking = {
+  prefixes: [Linking.createURL("/"), "ryco://", "ryco-dev://", "ryco-preview://"],
+  // The Expo dev client launches via <scheme>://expo-development-client/?url=...,
+  // which addresses the launcher, not app navigation. Without this filter it
+  // falls through to the NotFound wildcard on every dev launch.
+  filter: (url: string) => !url.includes("expo-development-client"),
+};
+
+const Navigation = createStaticNavigation(RootStack);
+
+function SplashScreenCoordinator() {
+  const { isReady } = useAppearancePreferences();
 
   useEffect(() => {
-    void SplashScreen.hideAsync().catch(() => undefined);
-  }, []);
+    if (isReady) void SplashScreen.hide();
+  }, [isReady]);
+
+  return null;
+}
+
+// B2 app root: B1's provider stack (gesture/atom-registry/safe-area/keyboard) +
+// the connection-registry context + appearance preferences, then the full
+// navigation shell. Cloud auth, incoming-share, and the showcase rig are stripped.
+export default function App() {
+  const colorScheme = useColorScheme();
+  const statusBarBg = useThemeColor("--color-status-bar");
 
   return (
     <AppProviders>
-      <PairingScreen registry={registry} />
+      <ConnectionRegistryProvider>
+        <AppearancePreferencesProvider>
+          <SplashScreenCoordinator />
+          <ServerStateBootstrap />
+          <StatusBar
+            barStyle={colorScheme === "dark" ? "light-content" : "dark-content"}
+            backgroundColor={statusBarBg}
+            translucent
+          />
+          {/* The navigation theme drives the NATIVE header appearance (dark ->
+              overrideUserInterfaceStyle). Blur target hosts Android dropdown
+              backdrops (see appBlurTarget.ts). */}
+          <BlurTargetView ref={appBlurTargetRef} style={{ flex: 1 }}>
+            <Navigation
+              linking={appLinking}
+              theme={colorScheme === "dark" ? DarkTheme : DefaultTheme}
+            />
+            <ConfirmDialogHost />
+          </BlurTargetView>
+          {/* Anchored-menu overlays render here — in-window, so the keyboard
+              stays up while a dropdown is open. */}
+          <OverlayPortalHost />
+        </AppearancePreferencesProvider>
+      </ConnectionRegistryProvider>
     </AppProviders>
   );
 }

@@ -1,6 +1,5 @@
 import {
   createComposerDraftStore,
-  type ComposerDraftImage,
   type ComposerDraftStoreState as RuntimeComposerDraftStoreState,
   type ComposerThreadDraftState as RuntimeComposerThreadDraftState,
 } from "@ryco/client-runtime/state/composer";
@@ -14,8 +13,13 @@ import { mobileKV } from "../platform";
 // on RN so revokePreviewUrl is a no-op.
 export * from "@ryco/client-runtime/state/composer";
 
+import {
+  hydrateMobileComposerImages,
+  type MobileComposerImageAttachment,
+} from "./composerImageHydration";
+
 /** On RN the in-memory composer image needs no DOM File — previewUrl is a uri. */
-export type MobileComposerImageAttachment = ComposerDraftImage;
+export type { MobileComposerImageAttachment } from "./composerImageHydration";
 
 export type ComposerThreadDraftState =
   RuntimeComposerThreadDraftState<MobileComposerImageAttachment>;
@@ -31,9 +35,12 @@ const composerDraftStore = createComposerDraftStore<MobileComposerImageAttachmen
   storage: mobileComposerStorage,
   flushStorage: () => {},
   revokePreviewUrl: () => {},
-  // B1 wires text drafts; persisted image hydration is a B2 concern (no composer
-  // image flow ships in B1), so persisted attachments hydrate to no images.
-  hydrateImages: () => [],
+  // Decode persisted attachments back into in-memory composer images (§4).
+  hydrateImages: hydrateMobileComposerImages,
+  // Deliberate MVP degradation (§4): the store contract wants a SYNCHRONOUS
+  // string[], but `mobileKV.getItem` is async, so we cannot read the persisted
+  // blob here. Returning [] only forgoes cross-reload dedup of re-picked images —
+  // acceptable for the MVP.
   readPersistedAttachmentIds: () => [],
 });
 

@@ -10,6 +10,26 @@ re-themed, and had the T3-proprietary planes (the hosted-auth vendor and managed
 cloud, EAS project/owner, brand assets, telemetry endpoint, widgets, share
 extension, quick actions, and the camera-showcase rig) removed for the Ryco MVP.
 
+The B2 screen layer copied from the same upstream reference at the same commit
+extends this copy: the native JS view wrappers (`src/native/*`), the shared UI
+primitives (`src/components/*`), the shared helpers (`src/lib/*`), the review
+diff/highlighting modules (`src/features/review/*`), the hardware-keyboard
+command registry (`src/features/keyboard/*`), the appearance text-scaling hook
+(`src/features/settings/appearance/*`), and further B2 modules that reuse upstream
+logic verbatim or near-verbatim: the workspace connection-status helpers
+(`src/features/home/workspace-connection-status.ts`), the pairing URL / QR helpers
+(`src/features/connection/pairing.ts`), the terminal font-size preferences
+(`src/features/terminal/terminalPreferences.ts`), and the state helpers ported
+from upstream — the device-preferences `Preferences` shape + `sanitizePreferences`
+(`src/state/preferencesStore.ts`) and the outbox delivery/retry model
+(`src/state/threadOutboxModel.ts`). All were copied and stripped the same way —
+re-namespaced from T3 to Ryco identifiers (including the native view names
+`RycoComposerEditor` / `RycoNativeControls` / `RycoKeyboardCommands` /
+`RycoReviewDiffSurface`), re-themed to the `font-ryco-*` utilities, and with the
+brand marks, cloud plane, showcase rig, and asset-runtime dependencies removed.
+Attribution is kept here (not as in-file headers) so the T3 identifiers do not
+re-enter `src`.
+
 `pingdotgg/t3code` is Copyright (c) 2026 T3 Tools Inc. and licensed under the MIT
 License; that notice is retained below as required. The four vendored native
 modules under `modules/*` carry their own `LICENSE` / `UPSTREAM.md` notices

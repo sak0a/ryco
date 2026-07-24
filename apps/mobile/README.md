@@ -66,3 +66,30 @@ Interactive Simulator QA is the owner's — agents cannot drive the Simulator.
   workstream C lands. Never fabricate device evidence.
 - Bundle IDs/schemes are Ryco placeholders (`dev.ryco.app*`, `ryco*`); the EAS
   project, Apple Team id, and App Store Connect record are wired in B3.
+
+## Dependency divergences (B2)
+
+- **`@pierre/diffs` is pinned to `1.3.0-beta.5` for mobile only** (deliberate
+  divergence). The workspace catalog pins `1.1.20` (shared with `apps/web`); the
+  upstream review/diff patch and the review-canvas code the screens copy were
+  written against `1.3.0-beta.5`. `apps/mobile/package.json` pins the version
+  directly (replacing `catalog:`); `apps/web` stays on the catalog's `1.1.20`
+  untouched. This is a version split inside the existing dependency set — no new
+  npm packages are added for the MVP screens.
+- **`@pierre/diffs>@shikijs/transformers` override was NOT ported.** Upstream
+  (pnpm) forces `@pierre/diffs`'s `@shikijs/transformers` to `^4.2.0`. Bun does
+  not honor pnpm's `parent>child` scoped-override syntax, and a name-scoped
+  override applies by name to _both_ `@pierre/diffs` copies — it would force
+  `apps/web`'s `@pierre/diffs@1.1.20` (which declares `@shikijs/transformers:
+^3.0.0`) to an out-of-range `4.2.0`, violating the "nothing else touching
+  `apps/web`" invariant. `@pierre/diffs@1.3.0-beta.5` declares
+  `^3.0.0 || ^4.0.0` and resolves `@shikijs/transformers@3.23.0`; that dependency
+  is inert on the mobile code path (the native review canvas is fed the app's own
+  `@shikijs/core@4.2.0` tokens, not `@pierre/diffs`'s HTML/transformer render
+  path), so leaving it at its declared resolution is the faithful, web-safe
+  outcome.
+- **`expo-modules-jsi` patch rebased onto `56.0.12`.** Upstream keys the patch at
+  `56.0.10` (its exact pnpm pin); B1's lock resolves `56.0.12`. The patch applies
+  cleanly against `56.0.12`, so the `patchedDependencies` entry is keyed
+  `expo-modules-jsi@56.0.12` (no exact-pin override needed). The patch file keeps
+  its upstream `@56.0.10` filename.
