@@ -1,4 +1,4 @@
-import type { EnvironmentId, ThreadId } from "@ryco/contracts";
+import type { EnvironmentId, OrchestrationEvent, ThreadId } from "@ryco/contracts";
 import {
   createEnvironmentConnection,
   createEnvironmentConnectionSupervisor,
@@ -23,6 +23,7 @@ import {
 import { subscribeAppStateResume } from "./appStateResume";
 import { createMobileEnvironmentStateSink } from "./environmentStateSink";
 import type { MobileRemoteEnvironmentApi } from "./remoteApi";
+import { createThreadDetailEventApplier } from "./threadDetailEvents";
 
 // §4 stub closure: the supervisor evicts idle thread-detail subscriptions; a
 // subscription is non-idle while the thread has pending approvals/user-input, an
@@ -149,7 +150,6 @@ export interface MobileEnvironmentDriver {
 export function createMobileEnvironmentDriver(
   deps: MobileEnvironmentDriverDeps,
 ): MobileEnvironmentDriver {
-  const stateSink = deps.stateSink ?? createMobileEnvironmentStateSink();
   const subscribeResume = deps.subscribeResume ?? subscribeAppStateResume;
   const { catalog, remoteApi } = deps;
 
@@ -157,6 +157,16 @@ export function createMobileEnvironmentDriver(
   // supervisor is running, so the forward reference is safe.
   let supervisor: EnvironmentConnectionSupervisor;
   const getSupervisor = () => supervisor;
+
+  // Give the sink the supervisor handle so live thread-upserted/removed events
+  // drive draft promotion + detail-subscription eviction/dispose (§4).
+  const stateSink = deps.stateSink ?? createMobileEnvironmentStateSink({ supervisor: getSupervisor });
+  // Recovered/pushed thread-detail events flow through the same batch-effects path
+  // as the shell stream (§4).
+  const applyThreadDetailEvent = createThreadDetailEventApplier({
+    stateSink,
+    getSupervisor,
+  });
 
   const patchRuntime = (
     environmentId: EnvironmentId,
@@ -300,7 +310,8 @@ export function createMobileEnvironmentDriver(
       useStore
         .getState()
         .syncServerThreadDetail((snapshot as { readonly thread: never }).thread, environmentId),
-    applyThreadDetailEvent: () => undefined,
+    applyThreadDetailEvent: (environmentId, event) =>
+      applyThreadDetailEvent(environmentId, event as OrchestrationEvent),
     stateSink,
     onShellSnapshotReceived: () => undefined,
     onShellSnapshotCurrent: () => undefined,
