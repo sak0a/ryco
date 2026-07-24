@@ -5,6 +5,7 @@ import { activateHostedNode, deactivateHostedNode, suspendHostedNode } from "./e
 import { getHostedHubApi, getHostedRuntimeConfiguration } from "./runtime.ts";
 import type {
   HostedAccountStatus,
+  HostedAddPasskeyResult,
   HostedBrowserStatus,
   HostedDirectoryStatus,
   HostedHubAccount,
@@ -60,7 +61,7 @@ const initialState: HostedHubState = {
 
 export type HostedPasskeyDirectoryStatus = "idle" | "loading" | "ready" | "stale";
 
-export type HostedAccountActionStatus = "idle" | "adding-passkey" | "loading-recovery-codes";
+export type HostedAccountActionStatus = "idle" | "adding-passkey" | "regenerating-recovery-codes";
 
 /**
  * Account-management surface state. Kept in its own store rather than widened
@@ -69,9 +70,11 @@ export type HostedAccountActionStatus = "idle" | "adding-passkey" | "loading-rec
  * screen, and so an account read never re-renders a relay consumer.
  *
  * No secret material lives here. A passkey `id` is a public credential
- * identifier; recovery codes are deliberately *not* stored here — they go to the
- * existing single-display `hostedHubStore.recoveryCodes` slot that
- * `dismissRecoveryCodes` already clears.
+ * identifier; recovery codes are deliberately *not* stored here — they go to
+ * the existing `hostedHubStore.recoveryCodes` slot, which is in memory only and
+ * is cleared by `dismissRecoveryCodes` and by any account teardown. Showing
+ * them exactly once is the consuming UI's contract: the runtime holds them
+ * until dismissed and cannot enforce a single display.
  */
 export interface HostedAccountState {
   readonly passkeys: ReadonlyArray<HostedHubPasskey>;
@@ -145,6 +148,10 @@ const DIRECTORY_REFRESH_MS = 20_000;
 const DIRECTORY_RETRY_MAX_MS = 60_000;
 const HOSTED_SESSION_SYNC_DEADLINE_MS = 30_000;
 export const HOSTED_SESSION_SYNC_FAILURE_MESSAGE = "Ryco state could not be synchronized.";
+export const HOSTED_ACCOUNT_BUSY_MESSAGE = "Another account change is still in progress.";
+export const HOSTED_ACCOUNT_SIGNED_OUT_MESSAGE = "Sign in to change your account settings.";
+export const HOSTED_PASSKEY_UNCONFIRMED_MESSAGE =
+  "The passkey could not be confirmed. Check your passkeys before relying on it.";
 
 class HostedHubController {
   #operation: AbortController | null = null;
@@ -273,31 +280,47 @@ class HostedHubController {
   }
 
   /**
-   * Load the account's passkeys. Deduplicated like the node directory: a second
-   * caller joins the in-flight read rather than issuing a second request.
+   * Load the account's passkeys.
+   *
+   * Deduplicated like the node directory: a second caller joins the in-flight
+   * read. `force` opts out of that — a read already in flight when a mutation
+   * committed was issued against the pre-mutation state and cannot observe the
+   * change, so joining it would settle the surface on a list that contradicts
+   * what just happened.
    */
-  refreshPasskeys(): Promise<void> {
-    if (this.#passkeysPromise) return this.#passkeysPromise;
+  refreshPasskeys(options?: { readonly force?: boolean }): Promise<void> {
+    const force = options?.force === true;
+    if (this.#passkeysPromise && !force) return this.#passkeysPromise;
+    const state = hostedHubStore.getState();
+    if (state.accountStatus !== "authenticated") return Promise.resolve();
+    if (force) {
+      this.#passkeysOperation?.abort();
+      this.#passkeysPromise = null;
+    }
     const operation = new AbortController();
     this.#passkeysOperation = operation;
-    const promise = this.#refreshPasskeys(operation).finally(() => {
+    const promise = this.#refreshPasskeys(operation, state.session?.id ?? null).finally(() => {
       if (this.#passkeysOperation === operation) this.#passkeysOperation = null;
       if (this.#passkeysPromise === promise) this.#passkeysPromise = null;
     });
+    // Arm the deduplication handle *before* publishing: a listener that
+    // re-enters synchronously from the "loading" notification must join this
+    // read rather than start a second one and desynchronise the two handles.
     this.#passkeysPromise = promise;
-    return promise;
-  }
-
-  async #refreshPasskeys(operation: AbortController): Promise<void> {
-    const state = hostedHubStore.getState();
-    if (state.accountStatus !== "authenticated") return;
-    const sessionId = state.session?.id ?? null;
     if (hostedAccountStore.getState().passkeys.length === 0) {
       patchAccountState({ passkeysStatus: "loading" });
     }
+    return promise;
+  }
+
+  async #refreshPasskeys(operation: AbortController, sessionId: string | null): Promise<void> {
     try {
       const passkeys = await getHostedHubApi().listPasskeys(operation.signal);
-      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) return;
+      if (operation.signal.aborted) return;
+      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) {
+        this.#discardStalePasskeys();
+        return;
+      }
       patchAccountState({ passkeys, passkeysStatus: "ready", errorMessage: null });
     } catch (error) {
       if (operation.signal.aborted) return;
@@ -305,31 +328,84 @@ class HostedHubController {
         await this.expireSession();
         return;
       }
-      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) return;
+      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) {
+        this.#discardStalePasskeys();
+        return;
+      }
       patchAccountState({ passkeysStatus: "stale", errorMessage: errorMessage(error) || null });
     }
   }
 
-  /** Enrol an additional passkey on the signed-in account ("add this device"). */
-  async addPasskey(input: { readonly passkeyLabel: string | null }): Promise<void> {
-    const committed = await this.#accountAction("adding-passkey", async (signal) => {
-      await getHostedHubApi().addPasskey(input, signal);
-      return () => undefined;
-    });
-    if (committed) await this.refreshPasskeys();
+  /**
+   * A read whose session changed under it must not leave a spinner behind. The
+   * surface reverts to "nothing loaded" — never `"loading"` with nothing in
+   * flight — so the next read starts cleanly, and any list carried over from
+   * the previous session is dropped rather than shown as current.
+   */
+  #discardStalePasskeys(): void {
+    patchAccountState({ passkeys: [], passkeysStatus: "idle" });
   }
 
   /**
-   * Fetch recovery codes for a single display. They land in the existing
-   * `recoveryCodes` slot — in memory only, cleared by `dismissRecoveryCodes` and
-   * by any account teardown — and are never written to the account store, an
-   * error message, or a log.
+   * Enrol an additional passkey on the signed-in account ("add this device").
+   *
+   * Success is confirmed against the Hub, not against the ceremony: the Hub's
+   * verify response is not required to describe what it enrolled, so a forced
+   * (never joined) read is the only authority on whether the credential exists.
+   * An unconfirmed enrolment reports a bounded message rather than presenting
+   * the ceremony's completion as proof.
    */
-  async loadRecoveryCodes(): Promise<void> {
-    await this.#accountAction("loading-recovery-codes", async (signal) => {
-      const recoveryCodes = await getHostedHubApi().getRecoveryCodes(signal);
+  async addPasskey(input: { readonly passkeyLabel: string | null }): Promise<void> {
+    const outcome: { result: HostedAddPasskeyResult | null } = { result: null };
+    const before = hostedAccountStore.getState().passkeys.length;
+    const committed = await this.#accountAction("adding-passkey", async (signal) => {
+      const added = await getHostedHubApi().addPasskey(input, signal);
+      return () => {
+        outcome.result = added;
+      };
+    });
+    if (!committed) return;
+    await this.refreshPasskeys({ force: true });
+    const state = hostedAccountStore.getState();
+    // A failed confirming read publishes its own bounded message; do not
+    // overwrite it with a weaker one.
+    if (state.passkeysStatus !== "ready") return;
+    const enrolled = outcome.result?.passkey
+      ? state.passkeys.some((candidate) => candidate.id === outcome.result?.passkey?.id)
+      : state.passkeys.length > before;
+    if (!enrolled) patchAccountState({ errorMessage: HOSTED_PASSKEY_UNCONFIRMED_MESSAGE });
+  }
+
+  /**
+   * **Rotate** the account's recovery codes, invalidating any the user has
+   * already saved, and place the new set in the existing `recoveryCodes` slot —
+   * in memory only, cleared by `dismissRecoveryCodes` and by any account
+   * teardown, never written to the account store, an error message, or a log.
+   *
+   * This is a mutation. Call it only from an explicit, confirmed user action —
+   * never on mount, focus, retry, or reconnect. Showing the returned codes once
+   * is the caller's contract; the runtime holds them until they are dismissed
+   * and does not enforce a single display.
+   */
+  async regenerateRecoveryCodes(): Promise<void> {
+    await this.#accountAction("regenerating-recovery-codes", async (signal) => {
+      const recoveryCodes = await getHostedHubApi().regenerateRecoveryCodes(signal);
       return () => patchState({ recoveryCodes });
     });
+  }
+
+  /**
+   * Abandon an account action that will not finish on its own. A platform
+   * passkey sheet the user leaves open never returns and never rejects, so
+   * without this the surface stays busy for the life of the session and every
+   * later action is refused. `cancelAuthentication` does not cover this: it
+   * aborts the sign-in operation, not the account one.
+   */
+  cancelAccountAction(): void {
+    if (!this.#accountOperation) return;
+    this.#accountOperation.abort();
+    this.#accountOperation = null;
+    patchAccountState({ actionStatus: "idle", errorMessage: null });
   }
 
   /**
@@ -342,9 +418,17 @@ class HostedHubController {
     status: Exclude<HostedAccountActionStatus, "idle">,
     run: (signal: AbortSignal) => Promise<() => void>,
   ): Promise<boolean> {
-    if (hostedAccountStore.getState().actionStatus !== "idle") return false;
+    // A refusal must always say why. Silently resolving leaves a surface whose
+    // taps do nothing and whose state never explains it.
+    if (hostedAccountStore.getState().actionStatus !== "idle") {
+      patchAccountState({ errorMessage: HOSTED_ACCOUNT_BUSY_MESSAGE });
+      return false;
+    }
     const state = hostedHubStore.getState();
-    if (state.accountStatus !== "authenticated") return false;
+    if (state.accountStatus !== "authenticated") {
+      patchAccountState({ errorMessage: HOSTED_ACCOUNT_SIGNED_OUT_MESSAGE });
+      return false;
+    }
     const sessionId = state.session?.id ?? null;
     const operation = new AbortController();
     this.#accountOperation = operation;

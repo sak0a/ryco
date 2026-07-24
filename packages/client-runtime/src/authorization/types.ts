@@ -89,6 +89,18 @@ export interface HostedHubPasskey {
   readonly lastUsedAt: number | null;
 }
 
+/**
+ * The outcome of an add-passkey ceremony. `confirmed` is `true` only when the
+ * Hub's verify response positively described the enrolled credential; when it
+ * is `false` the ceremony was accepted (a non-2xx would have thrown) but
+ * carried no evidence of what was enrolled, so the caller must confirm against
+ * a fresh passkey list before reporting success.
+ */
+export interface HostedAddPasskeyResult {
+  readonly passkey: HostedHubPasskey | null;
+  readonly confirmed: boolean;
+}
+
 export interface HostedNodeEnrollment {
   readonly id: string;
   readonly label: string;

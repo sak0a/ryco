@@ -45,6 +45,9 @@ import {
   type HostedRuntimeConfiguration,
 } from "./runtime";
 import {
+  HOSTED_ACCOUNT_BUSY_MESSAGE,
+  HOSTED_ACCOUNT_SIGNED_OUT_MESSAGE,
+  HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,
   hostedAccountStore,
   hostedHubController,
   hostedHubStore,
@@ -64,7 +67,7 @@ const hostedHubApi = {
   listNodes: vi.fn(),
   listPasskeys: vi.fn(),
   addPasskey: vi.fn(),
-  getRecoveryCodes: vi.fn(),
+  regenerateRecoveryCodes: vi.fn(),
   clearSessionMaterial: vi.fn(),
 } as unknown as HostedHubApi;
 
@@ -1197,6 +1200,26 @@ describe("hosted account management state", () => {
     });
   });
 
+  it("arms deduplication before publishing so a synchronous re-entry joins", async () => {
+    await authenticate();
+    const listPasskeys = vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
+    // A consumer that re-reads on notification — the same shape as the relay
+    // adapter bug found earlier in this codebase. If the "loading" publish
+    // fires before the handle is armed, this starts a second request and the
+    // two handles desynchronise.
+    const unsubscribe = hostedAccountStore.subscribe(() => {
+      void hostedHubController.refreshPasskeys();
+    });
+
+    try {
+      await hostedHubController.refreshPasskeys();
+    } finally {
+      unsubscribe();
+    }
+
+    expect(listPasskeys).toHaveBeenCalledOnce();
+  });
+
   it("does not read passkeys while signed out", async () => {
     const listPasskeys = vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
     await hostedHubController.refreshPasskeys();
@@ -1227,9 +1250,11 @@ describe("hosted account management state", () => {
     expect(hostedAccountStore.getState()).toEqual(hostedAccountStore.getInitialState());
   });
 
-  it("adds a passkey and refreshes the list from the Hub", async () => {
+  it("adds a passkey and confirms it against a fresh Hub read", async () => {
     await authenticate();
-    const addPasskey = vi.spyOn(hostedHubApi, "addPasskey").mockResolvedValue(passkey);
+    const addPasskey = vi
+      .spyOn(hostedHubApi, "addPasskey")
+      .mockResolvedValue({ passkey, confirmed: true });
     const listPasskeys = vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
 
     await hostedHubController.addPasskey({ passkeyLabel: "Studio laptop" });
@@ -1240,6 +1265,67 @@ describe("hosted account management state", () => {
       passkeys: [passkey],
       passkeysStatus: "ready",
       actionStatus: "idle",
+      errorMessage: null,
+    });
+  });
+
+  it("does not confirm an enrolment against a read that predates it", async () => {
+    await authenticate();
+    // A refresh is already in flight when the enrolment lands. It was issued
+    // against the pre-add state and cannot observe the new credential, so
+    // joining it would settle the surface on evidence the add had failed.
+    let releaseStaleRead: ((value: ReadonlyArray<typeof passkey>) => void) | null = null;
+    const listPasskeys = vi
+      .spyOn(hostedHubApi, "listPasskeys")
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseStaleRead = resolve;
+          }),
+      )
+      .mockResolvedValue([passkey]);
+    vi.spyOn(hostedHubApi, "addPasskey").mockResolvedValue({ passkey, confirmed: true });
+
+    const stale = hostedHubController.refreshPasskeys();
+    await hostedHubController.addPasskey({ passkeyLabel: "Studio laptop" });
+    releaseStaleRead?.([]);
+    await stale;
+
+    expect(listPasskeys).toHaveBeenCalledTimes(2);
+    expect(hostedAccountStore.getState()).toMatchObject({
+      passkeys: [passkey],
+      passkeysStatus: "ready",
+      errorMessage: null,
+    });
+  });
+
+  it("reports an enrolment the Hub cannot confirm rather than presenting it as done", async () => {
+    await authenticate();
+    // A 2xx verify that describes nothing, and a list that did not grow: the
+    // ceremony completed but there is no evidence a credential exists.
+    vi.spyOn(hostedHubApi, "addPasskey").mockResolvedValue({ passkey: null, confirmed: false });
+    vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([]);
+
+    await hostedHubController.addPasskey({ passkeyLabel: null });
+
+    expect(hostedAccountStore.getState()).toMatchObject({
+      passkeys: [],
+      passkeysStatus: "ready",
+      actionStatus: "idle",
+      errorMessage: HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,
+    });
+  });
+
+  it("accepts an unconfirmed enrolment the list does vouch for", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "addPasskey").mockResolvedValue({ passkey: null, confirmed: false });
+    vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
+
+    await hostedHubController.addPasskey({ passkeyLabel: null });
+
+    expect(hostedAccountStore.getState()).toMatchObject({
+      passkeys: [passkey],
+      errorMessage: null,
     });
   });
 
@@ -1260,38 +1346,77 @@ describe("hosted account management state", () => {
     });
   });
 
-  it("runs one account action at a time", async () => {
+  it("runs one account action at a time and says so when it refuses", async () => {
     await authenticate();
-    let release: (() => void) | null = null;
+    let release: ((value: { passkey: null; confirmed: false }) => void) | null = null;
     vi.spyOn(hostedHubApi, "addPasskey").mockImplementation(
       () =>
         new Promise((resolve) => {
-          release = () => resolve(null);
+          release = resolve;
         }),
     );
-    const getRecoveryCodes = vi.spyOn(hostedHubApi, "getRecoveryCodes").mockResolvedValue(["code"]);
+    const regenerateRecoveryCodes = vi
+      .spyOn(hostedHubApi, "regenerateRecoveryCodes")
+      .mockResolvedValue(["code"]);
     vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([]);
 
     const pending = hostedHubController.addPasskey({ passkeyLabel: null });
     expect(hostedAccountStore.getState().actionStatus).toBe("adding-passkey");
-    await hostedHubController.loadRecoveryCodes();
-    expect(getRecoveryCodes).not.toHaveBeenCalled();
-    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
 
-    release?.();
+    await hostedHubController.regenerateRecoveryCodes();
+    expect(regenerateRecoveryCodes).not.toHaveBeenCalled();
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
+    // A refused action must never look like a no-op: without a message the
+    // surface has taps that do nothing and state that never explains it.
+    expect(hostedAccountStore.getState().errorMessage).toBe(HOSTED_ACCOUNT_BUSY_MESSAGE);
+
+    release?.({ passkey: null, confirmed: false });
     await pending;
     expect(hostedAccountStore.getState().actionStatus).toBe("idle");
   });
 
-  it("shows recovery codes once and keeps them out of the account surface", async () => {
+  it("cancels an account ceremony that never returns", async () => {
     await authenticate();
-    vi.spyOn(hostedHubApi, "getRecoveryCodes").mockResolvedValue(["recovery-sensitive-canary"]);
+    // A platform passkey sheet the user leaves open never resolves and never
+    // rejects. Without a cancel path the surface stays busy for the session.
+    vi.spyOn(hostedHubApi, "addPasskey").mockImplementation(() => new Promise(() => undefined));
+    const regenerateRecoveryCodes = vi
+      .spyOn(hostedHubApi, "regenerateRecoveryCodes")
+      .mockResolvedValue(["code"]);
+    vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([]);
 
-    await hostedHubController.loadRecoveryCodes();
+    void hostedHubController.addPasskey({ passkeyLabel: null });
+    expect(hostedAccountStore.getState().actionStatus).toBe("adding-passkey");
+
+    hostedHubController.cancelAccountAction();
+    expect(hostedAccountStore.getState()).toMatchObject({
+      actionStatus: "idle",
+      errorMessage: null,
+    });
+
+    // The surface is usable again.
+    await hostedHubController.regenerateRecoveryCodes();
+    expect(regenerateRecoveryCodes).toHaveBeenCalledOnce();
+  });
+
+  it("refuses an account action while signed out with a bounded message", async () => {
+    const addPasskey = vi.spyOn(hostedHubApi, "addPasskey");
+    await hostedHubController.addPasskey({ passkeyLabel: null });
+    expect(addPasskey).not.toHaveBeenCalled();
+    expect(hostedAccountStore.getState().errorMessage).toBe(HOSTED_ACCOUNT_SIGNED_OUT_MESSAGE);
+  });
+
+  it("surfaces regenerated recovery codes and keeps them out of the account store", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockResolvedValue([
+      "recovery-sensitive-canary",
+    ]);
+
+    await hostedHubController.regenerateRecoveryCodes();
 
     expect(hostedHubStore.getState().recoveryCodes).toEqual(["recovery-sensitive-canary"]);
-    // Recovery codes live only in the single-display slot: never in the account
-    // surface, never in an error message, never in a status.
+    // Codes live only in the dedicated slot: never in the account surface,
+    // never in an error message, never in a status.
     expect(JSON.stringify(hostedAccountStore.getState())).not.toContain(
       "recovery-sensitive-canary",
     );
@@ -1303,9 +1428,11 @@ describe("hosted account management state", () => {
   it("drops the account surface and any displayed codes when the account clears", async () => {
     await authenticate();
     vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
-    vi.spyOn(hostedHubApi, "getRecoveryCodes").mockResolvedValue(["recovery-sensitive-canary"]);
+    vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockResolvedValue([
+      "recovery-sensitive-canary",
+    ]);
     await hostedHubController.refreshPasskeys();
-    await hostedHubController.loadRecoveryCodes();
+    await hostedHubController.regenerateRecoveryCodes();
     vi.spyOn(hostedHubApi, "signOut").mockResolvedValue();
 
     await hostedHubController.signOut();
@@ -1319,10 +1446,11 @@ describe("hosted account management state", () => {
     expect(persisted).not.toContain("csrf-sensitive-canary");
   });
 
-  it("discards an account result that outlived its session", async () => {
+  it("fails a read that outlived its session closed, without leaving a spinner", async () => {
     await authenticate();
     vi.spyOn(hostedHubApi, "listPasskeys").mockImplementation(async () => {
-      // The session is replaced while the read is in flight.
+      // A session-id rotation that keeps accountStatus "authenticated" — what
+      // #resumeBrowser does — so no teardown runs to clean up after this read.
       hostedHubStore.setState({
         session: { ...sessionResponse.session, id: "sess_bbbbbbbbbbbbbbbbbbbbbb" },
       });
@@ -1331,9 +1459,27 @@ describe("hosted account management state", () => {
 
     await hostedHubController.refreshPasskeys();
 
+    // Never "loading" with nothing in flight: that is a spinner no retry clears.
     expect(hostedAccountStore.getState()).toMatchObject({
       passkeys: [],
-      passkeysStatus: "loading",
+      passkeysStatus: "idle",
+    });
+  });
+
+  it("fails a failed read that outlived its session closed too", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "listPasskeys").mockImplementation(async () => {
+      hostedHubStore.setState({
+        session: { ...sessionResponse.session, id: "sess_bbbbbbbbbbbbbbbbbbbbbb" },
+      });
+      throw new HostedHubApiError("unavailable", 0);
+    });
+
+    await hostedHubController.refreshPasskeys();
+
+    expect(hostedAccountStore.getState()).toMatchObject({
+      passkeys: [],
+      passkeysStatus: "idle",
     });
   });
 });

@@ -9,6 +9,7 @@ import type {
 } from "../platform/index.ts";
 
 import type {
+  HostedAddPasskeyResult,
   HostedHubNode,
   HostedHubPasskey,
   HostedHubSessionResponse,
@@ -23,13 +24,21 @@ import {
 const JSON_HEADERS = { accept: "application/json", "content-type": "application/json" } as const;
 
 const MAX_BEARER_TOKEN_LENGTH = 4096;
-const MAX_RECOVERY_CODES = 64;
-const MAX_RECOVERY_CODE_LENGTH = 128;
 const MAX_PASSKEY_LABEL_LENGTH = 256;
+const MAX_PASSKEYS = 256;
 
 /**
- * WebAuthn credential ids are base64url. Constraining them bounds what a
- * malformed Hub response can project into a view model.
+ * Bounds for the *newly added* recovery-code route only, set well clear of any
+ * plausible real format. They are deliberately not applied to the pre-existing
+ * session paths — see {@link recoveryCodesValue}.
+ */
+const MAX_RECOVERY_CODES = 256;
+const MAX_RECOVERY_CODE_LENGTH = 512;
+
+/**
+ * WebAuthn credential ids are base64url. This bounds what a malformed Hub
+ * response can project into a view model; no request path is built from a
+ * credential id, so it is a response-projection constraint only.
  */
 const CREDENTIAL_ID_PATTERN = /^[A-Za-z0-9_-]{1,512}$/;
 
@@ -49,8 +58,14 @@ const BROWSER_ONLY_BEARER_PATH_PREFIXES: ReadonlyArray<string> = [
   "/api/auth/native/invitations/registration/",
 ];
 
+/**
+ * Matched case-insensitively so a differently-cased path cannot slip past the
+ * guard. Percent-encoded pathnames are rejected outright by `#request` before
+ * this runs, so an encoded separator cannot evade the prefix comparison either.
+ */
 function isBrowserOnlyPath(pathname: string): boolean {
-  return BROWSER_ONLY_BEARER_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+  const normalized = pathname.toLowerCase();
+  return BROWSER_ONLY_BEARER_PATH_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
 export class HostedHubApiError extends Error {
@@ -137,18 +152,27 @@ function bearerTokenValue(value: unknown): string | null {
 }
 
 /**
- * A bounded recovery-code list, or `null` when the value is not one. Recovery
- * codes are the one deliberate secret-material exception in this client: they
- * are returned for a single display and are never persisted here.
+ * A recovery-code list, or `null` when the value is not one.
+ *
+ * Deliberately unbounded: this runs on the pre-existing sign-in, bootstrap,
+ * invitation and restore paths, where the Hub's real code count and code length
+ * are not known. A mis-guessed cap here would reject a legitimate response —
+ * and on bootstrap that happens *after* the account already exists server-side,
+ * stranding the user. Bounds belong on the newly added route only, where a
+ * rejection costs nothing but a retry; see {@link boundedRecoveryCodesValue}.
  */
 function recoveryCodesValue(value: unknown): ReadonlyArray<string> | null {
-  if (!Array.isArray(value) || value.length > MAX_RECOVERY_CODES) return null;
-  for (const code of value) {
-    if (typeof code !== "string" || code.length === 0 || code.length > MAX_RECOVERY_CODE_LENGTH) {
-      return null;
-    }
-  }
+  if (!Array.isArray(value) || value.some((code) => typeof code !== "string")) return null;
   return value as ReadonlyArray<string>;
+}
+
+/** The bounded form required of the newly added recovery-code route. */
+function boundedRecoveryCodesValue(value: unknown): ReadonlyArray<string> | null {
+  const codes = recoveryCodesValue(value);
+  if (!codes || codes.length === 0 || codes.length > MAX_RECOVERY_CODES) return null;
+  return codes.some((code) => code.length === 0 || code.length > MAX_RECOVERY_CODE_LENGTH)
+    ? null
+    : codes;
 }
 
 /**
@@ -344,16 +368,21 @@ export class HostedHubApi {
    * List the passkeys registered against the signed-in account.
    *
    * `/api/account/passkeys` is confirmed registered and confirmed **GET-only**
-   * (it answers 401 without a session, and 405 to `POST`/`DELETE`). It exposes
-   * no member sub-route on any method, so there is no client-reachable passkey
-   * revocation to implement until the Hub serves one. The response member name
-   * and record shape are inferred by symmetry with `/api/nodes` →
-   * `{ nodes: [...] }` and are projected through {@link passkeyValue}, so an
-   * unexpected member can never reach a view model.
+   * as a collection (401 without a session; 405 to `POST` and `DELETE`), and it
+   * exposes **no per-credential member route** — `/api/account/passkeys/{id}`
+   * is 404 on every method — so there is no client-reachable passkey revocation
+   * to implement until the Hub serves one. Its `registration/*` sub-routes
+   * *do* exist; see {@link addPasskey}.
+   *
+   * The response member name and record shape are inferred by symmetry with
+   * `/api/nodes` → `{ nodes: [...] }` and are projected through
+   * {@link passkeyValue}, so an unexpected member can never reach a view model.
    */
   async listPasskeys(signal?: AbortSignal): Promise<ReadonlyArray<HostedHubPasskey>> {
     const result = await this.#request("/api/account/passkeys", signal ? { signal } : {});
-    if (!Array.isArray(result.passkeys)) throw new HostedHubApiError("invalid_response", 502);
+    if (!Array.isArray(result.passkeys) || result.passkeys.length > MAX_PASSKEYS) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
     return result.passkeys.map((value) => {
       const passkey = passkeyValue(value);
       if (!passkey) throw new HostedHubApiError("invalid_response", 502);
@@ -366,11 +395,18 @@ export class HostedHubApi {
    * "add this device" ceremony. Runs on the existing session (CSRF in cookie
    * mode, `Authorization: DPoP` + an `ath`-bound proof in bearer mode) rather
    * than the pre-session mint used by bootstrap and invitation redemption.
+   *
+   * `confirmed` reports whether the Hub's verify response positively described
+   * the new credential. A non-2xx verify throws, so a resolved call means the
+   * Hub accepted the ceremony — but `confirmed: false` means it returned no
+   * evidence of what it enrolled, and the caller must confirm against a fresh
+   * {@link listPasskeys} read rather than report success on the strength of the
+   * ceremony alone.
    */
   async addPasskey(
     input: { readonly passkeyLabel: string | null },
     signal?: AbortSignal,
-  ): Promise<HostedHubPasskey | null> {
+  ): Promise<HostedAddPasskeyResult> {
     return this.#registerPasskey(
       "/api/account/passkeys/registration/options",
       "/api/account/passkeys/registration/verify",
@@ -384,27 +420,38 @@ export class HostedHubApi {
   }
 
   /**
-   * Fetch the account's recovery codes for a single display.
+   * **Rotate** the account's recovery codes and return the new set.
    *
-   * `/api/account/recovery-codes` is confirmed registered, rejects `GET` (405),
-   * and is confirmed reachable over the bearer transport: a bare `POST` is
+   * This is a mutation, not a read. `/api/account/recovery-codes` is confirmed
+   * registered and confirmed to reject `GET` (405), so the client issues
+   * `POST`; the approved spec calls the capability "fetch/regenerate"; and the
+   * `recoveryCodes` member matches the one the *registration verify* responses
+   * carry, which are freshly minted codes. Every one of those points to a
+   * regenerate, and the Hub's true semantics cannot be settled from outside an
+   * authenticated session — so the client takes the mutating reading, which is
+   * the only safe one on a recovery surface.
+   *
+   * Callers must treat this as **invalidating any codes the user previously
+   * saved**: run it only from an explicit, confirmed user action, never on
+   * mount, focus, retry, or reconnect.
+   *
+   * It is confirmed reachable over the bearer transport: a bare `POST` is
    * refused by the browser-origin gate (403), while the same `POST` carrying an
-   * `Authorization: DPoP` header reaches authentication instead (401). The
-   * `recoveryCodes: string[]` member is the shape the verify responses already
-   * use. The codes are returned to the caller and never persisted, logged, or
-   * placed in an error by this client.
+   * `Authorization: DPoP` header reaches authentication instead (401).
+   *
+   * The codes are returned to the caller and never persisted, logged, or placed
+   * in an error by this client. Showing them once is the caller's contract; the
+   * runtime does not and cannot enforce it.
    */
-  async getRecoveryCodes(signal?: AbortSignal): Promise<ReadonlyArray<string>> {
+  async regenerateRecoveryCodes(signal?: AbortSignal): Promise<ReadonlyArray<string>> {
     const result = await this.#request("/api/account/recovery-codes", {
       method: "POST",
       body: {},
       csrf: true,
       ...(signal ? { signal } : {}),
     });
-    const recoveryCodes = recoveryCodesValue(result.recoveryCodes);
-    if (!recoveryCodes || recoveryCodes.length === 0) {
-      throw new HostedHubApiError("invalid_response", 502);
-    }
+    const recoveryCodes = boundedRecoveryCodesValue(result.recoveryCodes);
+    if (!recoveryCodes) throw new HostedHubApiError("invalid_response", 502);
     return recoveryCodes;
   }
 
@@ -478,28 +525,39 @@ export class HostedHubApi {
    *
    * Unlike bootstrap and invitation registration this must **not** mint a
    * session. The caller is already signed in, and the Hub's verify response is
-   * not required to carry session material, so session material is only
-   * *rotated* here — never demanded, never cleared:
+   * not required to carry session material, so it is never demanded and never
+   * cleared:
    *
    * - Demanding it (what `#finishLogin` does, via `#nativeSessionResponse` /
    *   `#sessionResponse`) would reject a valid Hub response as
    *   `invalid_response` and report a successful enrolment as a failure.
    * - Clearing it would sign the user out for adding a credential.
-   * - Ignoring a token the Hub *did* return would leave the client presenting a
-   *   token the Hub has rotated away from, so a well-formed one is persisted —
-   *   the same rotation-tolerant contract as `#restoreNativeSession`.
    *
-   * Neither the token nor the CSRF token is returned; the caller only ever sees
-   * the bounded passkey view.
+   * **Bearer** additionally tolerates rotation: ignoring a token the Hub did
+   * return would leave the client presenting one the Hub has rotated away from,
+   * and a bounded well-formed replacement is exactly the contract
+   * `#restoreNativeSession` already implements for this transport.
+   *
+   * **Cookie does not rotate.** The only verified way this client learns a CSRF
+   * token is a complete, validated session response; a bare `csrfToken` member
+   * on an add-passkey verify is not part of any contract observed here.
+   * Adopting an unvalidated one would replace working session material with a
+   * value that wedges every later CSRF-bound call in a 403 that
+   * `isSessionFailure` does not match — undiagnosable, and unrecoverable
+   * without a reload. Ignoring it is strictly safer: a genuine Hub-side
+   * rotation surfaces as the same bounded 403, and the next `restoreSession`
+   * re-establishes the correct token.
+   *
+   * No token and no CSRF value is returned; the caller only ever sees the
+   * bounded passkey view.
    */
-  #finishAddPasskey(value: Record<string, unknown>): HostedHubPasskey | null {
+  #finishAddPasskey(value: Record<string, unknown>): HostedAddPasskeyResult {
     if (this.#isBearer) {
       const token = bearerTokenValue(value.token);
       if (token) this.#writeBearerToken(token);
-    } else if (typeof value.csrfToken === "string" && value.csrfToken.length > 0) {
-      this.#sessionCredentials.writeCsrfToken(value.csrfToken);
     }
-    return passkeyValue(value.passkey);
+    const passkey = passkeyValue(value.passkey);
+    return { passkey, confirmed: passkey !== null };
   }
 
   async signOut(signal?: AbortSignal): Promise<void> {
@@ -754,7 +812,15 @@ export class HostedHubApi {
     },
   ): Promise<Record<string, unknown>> {
     const url = new URL(pathname, this.#endpoint.origin());
-    if (url.origin !== this.#endpoint.origin() || url.search || url.hash) {
+    // Every path this runtime issues is a literal with no percent-encoding, so
+    // an encoded pathname is never legitimate — and an encoded separator would
+    // otherwise let a path slip past the browser-only guard below.
+    if (
+      url.origin !== this.#endpoint.origin() ||
+      url.search ||
+      url.hash ||
+      url.pathname.includes("%")
+    ) {
       throw new HostedHubApiError("invalid_request", 400);
     }
     // Fail closed before any I/O — and before any passkey prompt — on routes the

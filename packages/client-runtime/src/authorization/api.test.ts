@@ -404,8 +404,17 @@ describe("HostedHubApi", () => {
     globalThis.fetch = vi.fn(async () => response({ passkeys: {} }));
     await expect(api.listPasskeys()).rejects.toMatchObject({ code: "invalid_response" });
 
-    // A credential id that could widen the request path is not a credential id.
-    globalThis.fetch = vi.fn(async () => response({ passkeys: [{ id: "../../admin" }] }));
+    // The credential-id constraint is a response-projection bound: no request
+    // path is built from an id, so this is about what may reach a view model.
+    globalThis.fetch = vi.fn(async () => response({ passkeys: [{ id: "not a base64url id" }] }));
+    await expect(api.listPasskeys()).rejects.toMatchObject({ code: "invalid_response" });
+
+    // F7: an unbounded list is not a list.
+    globalThis.fetch = vi.fn(async () =>
+      response({
+        passkeys: Array.from({ length: 257 }, (_value, index) => ({ id: `cred${index}` })),
+      }),
+    );
     await expect(api.listPasskeys()).rejects.toMatchObject({ code: "invalid_response" });
   });
 
@@ -438,10 +447,8 @@ describe("HostedHubApi", () => {
       response: { id: "added-passkey-canary" },
     });
     expect(added).toEqual({
-      id: "credential-bbb",
-      label: "Phone",
-      createdAt: null,
-      lastUsedAt: null,
+      passkey: { id: "credential-bbb", label: "Phone", createdAt: null, lastUsedAt: null },
+      confirmed: true,
     });
 
     // The live session is untouched: a subsequent CSRF-bound call still
@@ -454,27 +461,31 @@ describe("HostedHubApi", () => {
     expect(headersOf(requests[3]?.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
   });
 
-  it("rotates the CSRF token when an add-passkey verify returns a fresh one", async () => {
+  it("never adopts an unvalidated CSRF token from an add-passkey verify", async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({ input, ...(init ? { init } : {}) });
       if (requests.length === 1) return response(session);
-      if (requests.length === 2) {
-        return response({ options: registrationOptions });
-      }
-      if (requests.length === 3) return response({ csrfToken: "csrf-rotated-canary" }, 201);
+      if (requests.length === 2) return response({ options: registrationOptions });
+      // A bare csrfToken member is not a validated session response. Adopting it
+      // would wedge every later CSRF-bound call in a 403 that isSessionFailure
+      // does not match, with no way back but a reload.
+      if (requests.length === 3) return response({ csrfToken: "csrf-unvalidated-canary" }, 201);
       return response({ ok: true });
     });
     const api = createApi({ register: vi.fn(async () => ({ id: "added" }) as never) });
     await api.restoreSession();
 
-    await expect(api.addPasskey({ passkeyLabel: null })).resolves.toBeNull();
+    await expect(api.addPasskey({ passkeyLabel: null })).resolves.toEqual({
+      passkey: null,
+      confirmed: false,
+    });
     await api.denyNodeEnrollment("ABCD-EFGH");
 
-    expect(headersOf(requests[3]?.init).get("X-Ryco-CSRF")).toBe("csrf-rotated-canary");
+    expect(headersOf(requests[3]?.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
   });
 
-  it("fetches recovery codes for a single display and rejects malformed lists", async () => {
+  it("regenerates recovery codes as a mutation and rejects malformed lists", async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({ input, ...(init ? { init } : {}) });
@@ -485,7 +496,7 @@ describe("HostedHubApi", () => {
     const api = createApi();
     await api.restoreSession();
 
-    await expect(api.getRecoveryCodes()).resolves.toEqual(["recovery-sensitive-canary"]);
+    await expect(api.regenerateRecoveryCodes()).resolves.toEqual(["recovery-sensitive-canary"]);
 
     expect(requests[1]?.input).toBe("/api/account/recovery-codes");
     expect(requests[1]?.init).toMatchObject({ method: "POST", credentials: "same-origin" });
@@ -494,13 +505,35 @@ describe("HostedHubApi", () => {
     expect(JSON.stringify(requests)).not.toContain("recovery-sensitive-canary");
 
     globalThis.fetch = vi.fn(async () => response({ recoveryCodes: [] }));
-    await expect(api.getRecoveryCodes()).rejects.toMatchObject({ code: "invalid_response" });
+    await expect(api.regenerateRecoveryCodes()).rejects.toMatchObject({ code: "invalid_response" });
     globalThis.fetch = vi.fn(async () => response({ recoveryCodes: [1, 2] }));
-    await expect(api.getRecoveryCodes()).rejects.toMatchObject({ code: "invalid_response" });
+    await expect(api.regenerateRecoveryCodes()).rejects.toMatchObject({ code: "invalid_response" });
     globalThis.fetch = vi.fn(async () =>
-      response({ recoveryCodes: Array.from({ length: 65 }, () => "code") }),
+      response({ recoveryCodes: Array.from({ length: 257 }, () => "code") }),
     );
-    await expect(api.getRecoveryCodes()).rejects.toMatchObject({ code: "invalid_response" });
+    await expect(api.regenerateRecoveryCodes()).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it("does not apply the new recovery-code bounds to the pre-existing session paths", async () => {
+    // A cap guessed for the new route must never reject a real registration
+    // response: on bootstrap that would strand a user whose account already
+    // exists server-side.
+    const api = createApi({ register: vi.fn(async () => ({ id: "registered" }) as never) });
+    const recoveryCodes = Array.from({ length: 300 }, () => "x".repeat(600));
+    let call = 0;
+    globalThis.fetch = vi.fn(async () => {
+      call += 1;
+      return call === 1
+        ? response({ options: registrationOptions })
+        : response({ ...session, recoveryCodes }, 201);
+    });
+
+    const result = await api.bootstrapOwner({
+      credential: "bootstrap-sensitive-canary",
+      displayName: "Ada",
+      passkeyLabel: null,
+    });
+    expect(result.recoveryCodes).toHaveLength(300);
   });
 
   it("keeps browser-only registration reachable on the cookie transport", async () => {
@@ -752,8 +785,20 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(calls).toEqual([]);
     expect(register).not.toHaveBeenCalled();
-    // The guard is scoped: native passkey *login* stays reachable.
+    // The refusal is inert: it consumed no session material.
     expect(credentials.current()).toBe("native-token-canary");
+
+    // The guard is scoped — native passkey *login* is still issued. Asserted by
+    // driving it, not inferred from the token being untouched.
+    let call = 0;
+    globalThis.fetch = vi.fn(async () => {
+      call += 1;
+      return call === 1
+        ? response({ options: { challenge: encodeBase64Url(new Uint8Array([1, 2, 3])) } })
+        : response({ ...accountAndSession, token: "native-token-relogin-canary" });
+    });
+    await expect(api.signIn()).resolves.toMatchObject({ account: session.account });
+    expect(credentials.current()).toBe("native-token-relogin-canary");
   });
 
   it("adds a passkey over DPoP without minting or clearing the native session", async () => {
@@ -787,10 +832,8 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     }
     expect(calls.every((call) => call.token === "native-token-canary")).toBe(true);
     expect(added).toEqual({
-      id: "credential-ccc",
-      label: "Phone",
-      createdAt: 5,
-      lastUsedAt: null,
+      passkey: { id: "credential-ccc", label: "Phone", createdAt: 5, lastUsedAt: null },
+      confirmed: true,
     });
     // The enclave-bound token survives an add-passkey that returns none.
     expect(credentials.current()).toBe("native-token-canary");
@@ -813,7 +856,10 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
       register: vi.fn(async () => ({ id: "added" }) as never),
     });
 
-    await expect(api.addPasskey({ passkeyLabel: null })).resolves.toBeNull();
+    await expect(api.addPasskey({ passkeyLabel: null })).resolves.toEqual({
+      passkey: null,
+      confirmed: false,
+    });
     expect(credentials.current()).toBe("native-token-rotated-canary");
   });
 
@@ -833,7 +879,7 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     await expect(api.listPasskeys()).resolves.toEqual([
       { id: "credential-aaa", label: null, createdAt: null, lastUsedAt: null },
     ]);
-    await expect(api.getRecoveryCodes()).resolves.toEqual(["recovery-sensitive-canary"]);
+    await expect(api.regenerateRecoveryCodes()).resolves.toEqual(["recovery-sensitive-canary"]);
 
     expect(requests.map((request) => request.input)).toEqual([
       "https://hub.example.test/api/account/passkeys",
@@ -857,7 +903,9 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     const fetchSpy = vi.fn(async () => response({ passkeys: [] }));
     globalThis.fetch = fetchSpy;
     await expect(api.listPasskeys()).rejects.toMatchObject({ code: "session_invalid" });
-    await expect(api.getRecoveryCodes()).rejects.toMatchObject({ code: "session_invalid" });
+    await expect(api.regenerateRecoveryCodes()).rejects.toMatchObject({
+      code: "session_invalid",
+    });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
