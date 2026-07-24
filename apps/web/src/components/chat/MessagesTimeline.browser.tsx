@@ -8,7 +8,15 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
 const scrollToEndSpy = vi.fn();
-const getStateSpy = vi.fn(() => ({ isAtEnd: true }));
+const scrollToIndexSpy = vi.fn();
+interface MockLegendListState {
+  isAtEnd: boolean;
+  scroll?: number;
+  scrollLength?: number;
+  positionAtIndex?: (index: number) => number | undefined;
+  sizeAtIndex?: (index: number) => number | undefined;
+}
+const getStateSpy = vi.fn<() => MockLegendListState>(() => ({ isAtEnd: true }));
 
 vi.mock("@legendapp/list/react", async () => {
   const React = await import("react");
@@ -21,6 +29,7 @@ vi.mock("@legendapp/list/react", async () => {
       ListHeaderComponent?: React.ReactNode;
       ListFooterComponent?: React.ReactNode;
       className?: string;
+      onScroll?: () => void;
     },
     ref: React.ForwardedRef<LegendListRef>,
   ) {
@@ -29,9 +38,14 @@ vi.mock("@legendapp/list/react", async () => {
       () =>
         ({
           scrollToEnd: scrollToEndSpy,
+          scrollToIndex: scrollToIndexSpy,
           getState: getStateSpy,
         }) as unknown as LegendListRef,
     );
+
+    React.useEffect(() => {
+      props.onScroll?.();
+    }, [props]);
 
     return (
       <div className={props.className} data-testid="legend-list">
@@ -77,7 +91,9 @@ function buildProps() {
 describe("MessagesTimeline", () => {
   afterEach(() => {
     scrollToEndSpy.mockReset();
-    getStateSpy.mockClear();
+    scrollToIndexSpy.mockReset();
+    getStateSpy.mockReset();
+    getStateSpy.mockReturnValue({ isAtEnd: true });
     vi.restoreAllMocks();
     document.body.innerHTML = "";
   });
@@ -138,6 +154,95 @@ describe("MessagesTimeline", () => {
       const list = document.querySelector<HTMLElement>('[data-testid="legend-list"]');
       expect(list).not.toBeNull();
       expect(list!.className).toContain("[scrollbar-gutter:stable]");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("previews, highlights, and navigates user turns from the desktop minimap", async () => {
+    getStateSpy.mockReturnValue({
+      isAtEnd: false,
+      scroll: 0,
+      scrollLength: 250,
+      positionAtIndex: (index: number) => index * 100,
+      sizeAtIndex: () => 80,
+    });
+
+    const makeMessageEntry = (
+      rowId: string,
+      messageId: string,
+      role: "user" | "assistant",
+      text: string,
+      seconds: number,
+    ) => ({
+      id: rowId,
+      kind: "message" as const,
+      createdAt: `2026-07-24T12:00:0${seconds}.000Z`,
+      message: {
+        id: MessageId.make(messageId),
+        role,
+        text,
+        createdAt: `2026-07-24T12:00:0${seconds}.000Z`,
+        streaming: false,
+      },
+    });
+
+    const screen = await render(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          makeMessageEntry("user-row-1", "user-1", "user", "First request", 0),
+          makeMessageEntry("assistant-row-1", "assistant-1", "assistant", "First response", 1),
+          makeMessageEntry("user-row-2", "user-2", "user", "Second request", 2),
+          makeMessageEntry("assistant-row-2", "assistant-2", "assistant", "Second response", 3),
+          makeMessageEntry("user-row-3", "user-3", "user", "Third request", 4),
+        ]}
+      />,
+    );
+
+    try {
+      const minimap = document.querySelector<HTMLElement>('[data-testid="timeline-minimap"]');
+      const hitStrip = document.querySelector<HTMLButtonElement>(
+        '[data-testid="timeline-minimap-hit-strip"]',
+      );
+      expect(minimap).not.toBeNull();
+      expect(hitStrip).not.toBeNull();
+      expect(minimap!.className).toContain("hidden");
+      expect(minimap!.className).toContain("[@media(pointer:fine)]:block");
+
+      await vi.waitFor(() => {
+        const strips = Array.from(document.querySelectorAll<HTMLElement>("[data-minimap-strip]"));
+        expect(strips.map((strip) => strip.dataset.inView)).toEqual(["true", "true", "false"]);
+      });
+
+      const hitStripRect = hitStrip!.getBoundingClientRect();
+      hitStrip!.dispatchEvent(
+        new MouseEvent("mousemove", {
+          bubbles: true,
+          clientY: hitStripRect.top + hitStripRect.height / 2,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        const preview = document.querySelector<HTMLElement>("[data-minimap-preview]");
+        expect(preview?.textContent).toContain("Second request");
+        expect(preview?.textContent).toContain("Second response");
+      });
+
+      hitStrip!.focus();
+      hitStrip!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "End" }));
+      await vi.waitFor(() => {
+        expect(hitStrip!.getAttribute("aria-label")).toBe("Jump to message: Third request");
+      });
+      hitStrip!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+
+      await vi.waitFor(() => {
+        expect(scrollToIndexSpy).toHaveBeenCalledWith({
+          index: 4,
+          animated: true,
+          viewOffset: 24,
+        });
+      });
     } finally {
       await screen.unmount();
     }

@@ -13,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -45,16 +46,25 @@ import {
   buildTimelineStableState,
   buildTimelineStreamingState,
   computeStableMessagesTimelineRows,
+  deriveTimelineMinimapItems,
   isErroredWorkEntry,
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveTimelineMinimapHasPersistentGutter,
+  resolveTimelineMinimapHeightStyle,
+  resolveTimelineMinimapHitStripWidth,
+  resolveTimelineMinimapIndexFromPointer,
+  resolveTimelineMinimapInteractiveWidth,
+  resolveTimelineMinimapTopPercent,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
+  type TimelineMinimapItem,
   type TimelineMessageActionsRequest,
   type TimelineStableState,
   type TimelineStreamingState,
+  TIMELINE_MINIMAP_MIN_ITEMS,
 } from "./MessagesTimeline.logic";
 import { MessageActionsSheet } from "./MessageActionsSheet";
 import { useLongPress } from "~/hooks/useLongPress";
@@ -203,6 +213,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+  const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
+  const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
+  const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
+    null,
+  );
+  const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
+  const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
   const [highlightedMessageId, setHighlightedMessageId] = useState<MessageId | null>(null);
   // Long-press target for the phone message action sheet.
   const [messageActionsRequest, setMessageActionsRequest] =
@@ -216,7 +233,58 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     if (state) {
       onIsAtEndChange(state.isAtEnd);
     }
-  }, [listRef, onIsAtEndChange]);
+    if (!state || minimapItems.length === 0) {
+      return;
+    }
+
+    const scrollTop = state.scroll ?? 0;
+    const scrollBottom = scrollTop + (state.scrollLength ?? 0);
+
+    for (const item of minimapItems) {
+      const strip = minimapStripMap.get(item.id);
+      if (!strip) {
+        continue;
+      }
+
+      const rowTop = resolveTimelineRowTop(state, item.rowIndex);
+      const rowHeight = resolveTimelineRowHeight(state, item.rowIndex);
+      const inView =
+        rowTop !== null &&
+        rowTop < scrollBottom &&
+        rowTop + Math.max(1, rowHeight ?? 1) > scrollTop;
+
+      strip.dataset.inView = inView ? "true" : "false";
+    }
+  }, [listRef, minimapItems, minimapStripMap, onIsAtEndChange]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(handleScroll);
+    return () => cancelAnimationFrame(frame);
+  }, [handleScroll, rows.length]);
+
+  useEffect(() => {
+    if (!timelineViewportElement) {
+      return;
+    }
+
+    const measure = () => {
+      const viewportWidth = timelineViewportElement.getBoundingClientRect().width;
+      const nextHasPersistentGutter = resolveTimelineMinimapHasPersistentGutter(viewportWidth);
+      setMinimapHasPersistentGutter((current) =>
+        current === nextHasPersistentGutter ? current : nextHasPersistentGutter,
+      );
+      setMinimapHitStripWidth(resolveTimelineMinimapHitStripWidth(viewportWidth));
+    };
+
+    const frame = requestAnimationFrame(measure);
+    const observer = new ResizeObserver(measure);
+    observer.observe(timelineViewportElement);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [timelineViewportElement]);
 
   const previousRowCountRef = useRef(rows.length);
   useEffect(() => {
@@ -372,21 +440,36 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineStableCtx.Provider value={stableState}>
       <TimelineStreamingCtx.Provider value={streamingState}>
-        <LegendList<MessagesTimelineRow>
-          ref={listRef}
-          data={rows}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          estimatedItemSize={90}
-          initialScrollAtEnd
-          maintainScrollAtEnd
-          maintainScrollAtEndThreshold={0.1}
-          maintainVisibleContentPosition
-          onScroll={handleScroll}
-          className="h-full overflow-x-hidden overscroll-y-contain px-3 [scrollbar-gutter:stable] sm:px-5"
-          ListHeaderComponent={TIMELINE_LIST_HEADER}
-          ListFooterComponent={TIMELINE_LIST_FOOTER}
-        />
+        <div ref={setTimelineViewportElement} className="relative h-full min-h-0">
+          <LegendList<MessagesTimelineRow>
+            ref={listRef}
+            data={rows}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            estimatedItemSize={90}
+            initialScrollAtEnd
+            maintainScrollAtEnd
+            maintainScrollAtEndThreshold={0.1}
+            maintainVisibleContentPosition
+            onScroll={handleScroll}
+            className="h-full overflow-x-hidden overscroll-y-contain px-3 [scrollbar-gutter:stable] sm:px-5"
+            ListHeaderComponent={TIMELINE_LIST_HEADER}
+            ListFooterComponent={TIMELINE_LIST_FOOTER}
+          />
+          <TimelineMinimap
+            hasPersistentGutter={minimapHasPersistentGutter}
+            hitStripWidth={minimapHitStripWidth}
+            items={minimapItems}
+            stripMap={minimapStripMap}
+            onSelect={(item) => {
+              void listRef.current?.scrollToIndex({
+                index: item.rowIndex,
+                animated: true,
+                viewOffset: 24,
+              });
+            }}
+          />
+        </div>
         <MessageActionsSheet
           target={messageActionsRequest}
           onOpenChange={(open) => {
@@ -406,6 +489,227 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
 function keyExtractor(item: MessagesTimelineRow) {
   return item.id;
+}
+
+interface TimelinePositionState {
+  readonly scroll?: number;
+  readonly scrollLength?: number;
+  readonly positionAtIndex?: (index: number) => number | undefined;
+  readonly sizeAtIndex?: (index: number) => number | undefined;
+}
+
+function resolveTimelineRowTop(state: TimelinePositionState, rowIndex: number): number | null {
+  const top = state.positionAtIndex?.(rowIndex);
+  return typeof top === "number" && Number.isFinite(top) ? top : null;
+}
+
+function resolveTimelineRowHeight(state: TimelinePositionState, rowIndex: number): number | null {
+  const height = state.sizeAtIndex?.(rowIndex);
+  return typeof height === "number" && Number.isFinite(height) ? height : null;
+}
+
+function timelineMinimapEventTargetsPreview(target: EventTarget): boolean {
+  return target instanceof Element && target.closest("[data-minimap-preview]") !== null;
+}
+
+function TimelineMinimap({
+  hasPersistentGutter,
+  hitStripWidth,
+  items,
+  stripMap,
+  onSelect,
+}: {
+  hasPersistentGutter: boolean;
+  hitStripWidth: number;
+  items: ReadonlyArray<TimelineMinimapItem>;
+  stripMap: Map<string, HTMLSpanElement>;
+  onSelect: (item: TimelineMinimapItem) => void;
+}) {
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+
+  const resolvedActiveIndex =
+    activeIndex !== null && activeIndex < items.length ? activeIndex : null;
+  const activeItem = resolvedActiveIndex === null ? null : (items[resolvedActiveIndex] ?? null);
+  const activeTopPercent =
+    resolvedActiveIndex === null
+      ? 0
+      : resolveTimelineMinimapTopPercent(resolvedActiveIndex, items.length);
+  const activeTooltipTranslate =
+    resolvedActiveIndex === null
+      ? "-50%"
+      : resolvedActiveIndex === 0
+        ? "0%"
+        : resolvedActiveIndex === items.length - 1
+          ? "-100%"
+          : "-50%";
+
+  const resolveActiveIndexFromPointer = useCallback(
+    (event: MouseEvent<HTMLElement>) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      return resolveTimelineMinimapIndexFromPointer({
+        itemCount: items.length,
+        railTop: rect.top,
+        railHeight: rect.height,
+        pointerY: event.clientY,
+      });
+    },
+    [items.length],
+  );
+
+  const updateActiveIndexFromPointer = useCallback(
+    (event: MouseEvent<HTMLElement>) => {
+      setActiveIndex(resolveActiveIndexFromPointer(event));
+    },
+    [resolveActiveIndexFromPointer],
+  );
+
+  const moveActiveIndex = useCallback(
+    (delta: number) => {
+      setActiveIndex((current) => {
+        const base = current ?? 0;
+        return Math.max(0, Math.min(items.length - 1, base + delta));
+      });
+    },
+    [items.length],
+  );
+
+  if (items.length < TIMELINE_MINIMAP_MIN_ITEMS) {
+    return null;
+  }
+
+  return (
+    <div
+      className={cn(
+        "group/minimap pointer-events-none absolute inset-y-0 left-0 z-40 hidden w-18 [@media(pointer:fine)]:block",
+        hasPersistentGutter
+          ? "opacity-100"
+          : "opacity-0 transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100",
+      )}
+      data-persistent-gutter={hasPersistentGutter ? "true" : "false"}
+      data-testid="timeline-minimap"
+    >
+      <div className="relative h-full w-full select-none">
+        <button
+          aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}`}
+          className={cn(
+            "absolute top-1/2 left-3 -translate-y-1/2 cursor-pointer bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+            hitStripWidth > 0 ? "pointer-events-auto" : "pointer-events-none",
+          )}
+          data-testid="timeline-minimap-hit-strip"
+          onBlur={() => setActiveIndex(null)}
+          onClick={(event) => {
+            if (timelineMinimapEventTargetsPreview(event.target)) {
+              return;
+            }
+            const nextIndex = resolveActiveIndexFromPointer(event);
+            const nextItem = nextIndex === null ? null : (items[nextIndex] ?? null);
+            if (nextItem) {
+              onSelect(nextItem);
+            }
+            event.currentTarget.blur();
+          }}
+          onFocus={() => setActiveIndex((current) => current ?? 0)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              moveActiveIndex(1);
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              moveActiveIndex(-1);
+            } else if (event.key === "Home") {
+              event.preventDefault();
+              setActiveIndex(0);
+            } else if (event.key === "End") {
+              event.preventDefault();
+              setActiveIndex(items.length - 1);
+            } else if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              if (activeItem) {
+                onSelect(activeItem);
+              }
+            }
+          }}
+          onMouseDown={(event) => {
+            if (!timelineMinimapEventTargetsPreview(event.target)) {
+              event.preventDefault();
+            }
+          }}
+          onMouseLeave={() => setActiveIndex(null)}
+          onMouseMove={updateActiveIndexFromPointer}
+          style={{
+            height: resolveTimelineMinimapHeightStyle(items.length),
+            width: resolveTimelineMinimapInteractiveWidth(hitStripWidth, activeItem !== null),
+          }}
+          type="button"
+        >
+          <span aria-hidden="true" className="absolute top-0 left-3 h-full w-px bg-border/15" />
+          {items.map((item, index) => {
+            const activeDistance =
+              resolvedActiveIndex === null ? null : Math.abs(index - resolvedActiveIndex);
+
+            return (
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "pointer-events-none absolute left-0 h-0.5 -translate-y-1/2 rounded-full bg-muted-foreground/35 transition-[background-color,width] duration-150 data-[in-view=true]:bg-foreground/90",
+                  activeDistance === 0
+                    ? "w-6 bg-muted-foreground/75"
+                    : activeDistance === 1
+                      ? "w-4"
+                      : activeDistance === 2
+                        ? "w-2.5"
+                        : "w-2",
+                )}
+                data-in-view="false"
+                data-minimap-message-id={item.id}
+                data-minimap-strip
+                key={item.id}
+                ref={(node) => {
+                  if (node) {
+                    stripMap.set(item.id, node);
+                  } else {
+                    stripMap.delete(item.id);
+                  }
+                }}
+                style={{
+                  top: `${resolveTimelineMinimapTopPercent(index, items.length)}%`,
+                }}
+              />
+            );
+          })}
+          {activeItem ? (
+            <span
+              className="pointer-events-auto absolute left-8 w-80 cursor-text select-text"
+              data-minimap-preview
+              onMouseMove={(event) => event.stopPropagation()}
+              style={{
+                top: `${activeTopPercent}%`,
+                transform: `translateY(${activeTooltipTranslate})`,
+              }}
+            >
+              <span className="block rounded-xl border border-border/70 bg-popover/95 p-3 text-left text-popover-foreground shadow-xl shadow-black/25 backdrop-blur">
+                <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium leading-5">
+                  {activeItem.userText ?? "User message"}
+                </span>
+                {activeItem.assistantText ? (
+                  <span
+                    className="mt-1 max-h-[3.75rem] overflow-hidden text-muted-foreground text-sm leading-5"
+                    style={{
+                      display: "-webkit-box",
+                      WebkitBoxOrient: "vertical",
+                      WebkitLineClamp: 3,
+                    }}
+                  >
+                    {activeItem.assistantText}
+                  </span>
+                ) : null}
+              </span>
+            </span>
+          ) : null}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
