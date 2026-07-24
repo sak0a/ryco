@@ -81,7 +81,7 @@ export interface HttpRequestInit {
   readonly method?: string;
   readonly headers?: unknown;
   readonly body?: string;
-  readonly credentials?: "include" | "same-origin";
+  readonly credentials?: "include" | "omit" | "same-origin";
   readonly cache?: "no-store";
   readonly signal?: AbortSignal;
 }
@@ -133,17 +133,55 @@ export class PasskeyCeremony extends Context.Service<PasskeyCeremony, PasskeyCer
   "@ryco/client-runtime/platform/PasskeyCeremony",
 ) {}
 
-/** Cookie or bearer session policy plus the in-memory CSRF token holder. */
+/**
+ * Cookie or bearer session policy. Cookie adapters hold only the in-memory CSRF
+ * token; bearer (native/DPoP) adapters additionally hold the native session
+ * token behind `readBearerToken`/`writeBearerToken`. The bearer accessors are
+ * optional so cookie adapters (web) stay untouched; a `mode:"bearer"` adapter
+ * that omits them is a configuration error the hosted API rejects on
+ * construction.
+ */
 export interface SessionCredentialsService {
   readonly mode: "bearer" | "cookie";
   readonly readCsrfToken: () => string | null;
   readonly writeCsrfToken: (token: string | null) => void;
+  /** Bearer mode only: the persisted native session token (never a cookie). */
+  readonly readBearerToken?: () => string | null;
+  readonly writeBearerToken?: (token: string | null) => void;
 }
 
 export class SessionCredentials extends Context.Service<
   SessionCredentials,
   SessionCredentialsService
 >()("@ryco/client-runtime/platform/SessionCredentials") {}
+
+/**
+ * The per-request DPoP proof input the hosted API hands the signer. `token` is
+ * present on authenticated requests (the proof carries `ath`) and absent on the
+ * login/mint ceremony (the proof carries no `ath`); the branch is driven purely
+ * by whether a native session token is bound yet.
+ */
+export interface DpopProofInput {
+  readonly method: string;
+  readonly url: string;
+  readonly token?: string;
+}
+
+/**
+ * Platform DPoP signer seam (RFC 9449). Returns a compact-JWS proof for the
+ * request. The mobile app supplies a Secure-Enclave/StrongBox-backed
+ * implementation (the private key never enters the runtime); web never
+ * instantiates it. Build one from a hardware key with `createDpopProofSigner`
+ * (`@ryco/client-runtime/relay`) so the proof-construction and asym-alg
+ * allow-list live in one shared place rather than being reimplemented.
+ */
+export interface DpopSignerService {
+  readonly sign: (input: DpopProofInput) => Promise<string>;
+}
+
+export class DpopSigner extends Context.Service<DpopSigner, DpopSignerService>()(
+  "@ryco/client-runtime/platform/DpopSigner",
+) {}
 
 /**
  * Reads a pairing credential once and atomically destroys its source before returning it.

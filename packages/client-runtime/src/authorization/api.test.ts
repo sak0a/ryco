@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type {
+  DpopProofInput,
+  DpopSignerService,
   EndpointService,
   HttpClientService,
   PasskeyCeremonyService,
@@ -360,5 +362,192 @@ describe("HostedHubApi", () => {
     await expect(api.approveNodeEnrollment("ABCD-EFGH")).rejects.toMatchObject({
       code: "invalid_response",
     });
+  });
+});
+
+/** In-memory bearer credentials mirroring a native (DPoP) adapter. */
+function inMemoryBearerCredentials(): SessionCredentialsService & {
+  readonly current: () => string | null;
+} {
+  let bearerToken: string | null = null;
+  return {
+    mode: "bearer",
+    readCsrfToken: () => null,
+    writeCsrfToken: () => undefined,
+    readBearerToken: () => bearerToken,
+    writeBearerToken: (token) => {
+      bearerToken = token;
+    },
+    current: () => bearerToken,
+  };
+}
+
+/** A DPoP signer that records its inputs and returns a deterministic proof. */
+function recordingDpopSigner(): {
+  readonly calls: DpopProofInput[];
+  readonly service: DpopSignerService;
+} {
+  const calls: DpopProofInput[] = [];
+  return {
+    calls,
+    service: {
+      sign: async (input) => {
+        calls.push(input);
+        return `proof:${input.method}:${input.url}:${input.token ? "ath" : "no-ath"}`;
+      },
+    },
+  };
+}
+
+function createBearerApi(
+  service: DpopSignerService,
+  credentials: SessionCredentialsService,
+  passkeyCeremony?: Partial<PasskeyCeremonyService>,
+): HostedHubApi {
+  return new HostedHubApi({
+    endpoint: fakeEndpoint,
+    httpClient: fakeHttpClient,
+    sessionCredentials: credentials,
+    dpopSigner: service,
+    passkeyCeremony: {
+      authenticate: vi.fn(async () => ({ id: "authenticate-not-used" }) as never),
+      register: vi.fn(async () => ({ id: "register-not-used" }) as never),
+      ...passkeyCeremony,
+    },
+  });
+}
+
+const accountAndSession = {
+  account: session.account,
+  session: session.session,
+} as const;
+
+describe("HostedHubApi bearer (native/DPoP) transport", () => {
+  it("fails closed when bearer credentials lack a DPoP signer or token holder", () => {
+    const { service } = recordingDpopSigner();
+    // Missing signer.
+    expect(
+      () =>
+        new HostedHubApi({
+          endpoint: fakeEndpoint,
+          httpClient: fakeHttpClient,
+          sessionCredentials: inMemoryBearerCredentials(),
+          passkeyCeremony: { authenticate: vi.fn(), register: vi.fn() },
+        }),
+    ).toThrow();
+    // Missing bearer-token holder (only the cookie CSRF slots present).
+    expect(
+      () =>
+        new HostedHubApi({
+          endpoint: fakeEndpoint,
+          httpClient: fakeHttpClient,
+          sessionCredentials: {
+            mode: "bearer",
+            readCsrfToken: () => null,
+            writeCsrfToken: () => undefined,
+          },
+          dpopSigner: service,
+          passkeyCeremony: { authenticate: vi.fn(), register: vi.fn() },
+        }),
+    ).toThrow();
+  });
+
+  it("routes login through native passkey endpoints with a mint proof and no CSRF", async () => {
+    const { calls, service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      return requests.length === 1
+        ? response({ options: { challenge: encodeBase64Url(new Uint8Array([1, 2, 3])) } })
+        : response({ ...accountAndSession, token: "native-token-canary" });
+    });
+    const authenticate = vi.fn(async () => ({ id: "assertion-canary" }) as never);
+    const api = createBearerApi(service, credentials, { authenticate });
+
+    const result = await api.signIn();
+
+    // Native endpoints, presented as absolute Hub URLs.
+    expect(requests.map((request) => request.input)).toEqual([
+      "https://hub.example.test/api/auth/native/passkey/options",
+      "https://hub.example.test/api/auth/native/passkey/verify",
+    ]);
+    for (const request of requests) {
+      const headers = request.init?.headers as Headers;
+      expect(headers.get("DPoP")).toMatch(/^proof:POST:/);
+      // Mint ceremony: no bearer token presented, no cookie/CSRF.
+      expect(headers.get("Authorization")).toBeNull();
+      expect(headers.get("X-Ryco-CSRF")).toBeNull();
+      expect(request.init?.credentials).toBe("omit");
+    }
+    // The signer was invoked without a token on both ceremony calls (no ath).
+    expect(calls.every((call) => call.token === undefined)).toBe(true);
+    // The native token is persisted but never surfaced in the returned view.
+    expect(credentials.current()).toBe("native-token-canary");
+    expect(api.hasSessionMaterial).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("native-token-canary");
+    expect(result).toMatchObject({ account: session.account, session: session.session });
+    expect("csrfToken" in result).toBe(false);
+  });
+
+  it("attaches Authorization DPoP + an ath proof on authenticated requests, no CSRF", async () => {
+    const { calls, service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      return response(
+        {
+          ticket: "ticket-sensitive-canary",
+          expiresAt: Date.now() + 60_000,
+          protocolMajor: 1,
+          protocolMinor: 2,
+        },
+        201,
+      );
+    });
+    const api = createBearerApi(service, credentials);
+
+    const issued = await api.issueRelayTicket("node_aaaaaaaaaaaaaaaaaaaaaa");
+
+    expect(issued.ticket).toBe("ticket-sensitive-canary");
+    expect(requests[0]?.input).toBe("https://hub.example.test/api/relay/tickets");
+    const headers = requests[0]?.init?.headers as Headers;
+    expect(headers.get("Authorization")).toBe("DPoP native-token-canary");
+    expect(headers.get("DPoP")).toBe("proof:POST:https://hub.example.test/api/relay/tickets:ath");
+    // Bearer mode drops CSRF and never sends an ambient cookie.
+    expect(headers.get("X-Ryco-CSRF")).toBeNull();
+    expect(requests[0]?.init?.credentials).toBe("omit");
+    // The signer bound the presented token (ath branch) to this request.
+    expect(calls[0]).toEqual({
+      method: "POST",
+      url: "https://hub.example.test/api/relay/tickets",
+      token: "native-token-canary",
+    });
+    // The directory refresh (a GET) works under bearer mode with no CSRF.
+    globalThis.fetch = vi.fn(async () => response({ nodes: [] }));
+    await expect(api.listNodes()).resolves.toEqual([]);
+  });
+
+  it("fails closed on an authenticated bearer request with no persisted token", async () => {
+    const { service } = recordingDpopSigner();
+    const api = createBearerApi(service, inMemoryBearerCredentials());
+    const fetchSpy = vi.fn(async () => response({ nodes: [] }));
+    globalThis.fetch = fetchSpy;
+    await expect(api.listNodes()).rejects.toMatchObject({ code: "session_invalid" });
+    // The request must never reach the wire without a bound token.
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("clears the native token as its session material", () => {
+    const { service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const api = createBearerApi(service, credentials);
+    expect(api.hasSessionMaterial).toBe(true);
+    api.clearSessionMaterial();
+    expect(credentials.current()).toBeNull();
+    expect(api.hasSessionMaterial).toBe(false);
   });
 });
