@@ -1,13 +1,6 @@
-import { View } from "react-native";
+import { HomeScreen } from "./HomeScreen";
 
-import { EmptyState } from "../../components/EmptyState";
-
-// B2 placeholder — replaced by the real screen in a later task. Keeps the
-// navigation tree compiling and navigable in the interim.
+// Home route: the project/thread list on runtime-A state (spec Home row).
 export function HomeRouteScreen() {
-  return (
-    <View className="flex-1 items-center justify-center bg-screen px-6">
-      <EmptyState variant="plain" title="Threads" detail="The home thread list arrives in the next build." />
-    </View>
-  );
+  return <HomeScreen />;
 }
