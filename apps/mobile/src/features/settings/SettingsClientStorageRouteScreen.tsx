@@ -1,13 +1,25 @@
-import { View } from "react-native";
+import { ScrollView } from "react-native";
 
-import { EmptyState } from "../../components/EmptyState";
+import { usePreferences } from "../../state/preferencesStore";
+import { SettingsRow } from "./components/SettingsRow";
+import { SettingsSection } from "./components/SettingsSection";
 
-// B2 placeholder — replaced by the real screen in a later task. Keeps the
-// navigation tree compiling and navigable in the interim.
+// Device-local client settings (mobileKV). Server-owned settings live under the
+// active environment; these are the client-only preferences (§3-2, R6).
 export function SettingsClientStorageRouteScreen() {
+  const preferences = usePreferences();
+  const groupingLabel = preferences.projectGroupingEnabled === false ? "By project" : "By repository";
+
   return (
-    <View className="flex-1 items-center justify-center bg-screen px-6">
-      <EmptyState variant="plain" title="Client Storage" detail="Client storage settings arrive in the next build." />
-    </View>
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      className="flex-1 bg-screen"
+      contentContainerStyle={{ paddingVertical: 12 }}
+    >
+      <SettingsSection title="Stored on this device">
+        <SettingsRow first label="Project grouping" value={groupingLabel} />
+        <SettingsRow label="Base font size" value={preferences.baseFontSize ? `${preferences.baseFontSize}pt` : "Default"} />
+      </SettingsSection>
+    </ScrollView>
   );
 }
