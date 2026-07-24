@@ -1,6 +1,6 @@
 # Ryco Native Mobile App — iOS MVP Design
 
-- **Status:** Draft for owner approval, 2026-07-23
+- **Status:** Owner-approved, 2026-07-23
 - **Scope:** `apps/mobile` (public, `sak0a/ryco`). New Expo/React Native app consuming
   the completed `@ryco/client-runtime`. No changes to `apps/web`, the runtime package,
   the node, or the Hub in this workstream — except the one external dependency called out
