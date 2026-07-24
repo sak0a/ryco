@@ -261,8 +261,18 @@ export class MobileHostedRelaySocket {
       const proof = await signer.sign({ method: "GET", url: this.url, token });
       if (this.#abandoned) return;
 
-      // A `Cookie` header on this upgrade is a hard 403, and `Origin` is
-      // deliberately not set: the Hub does not check it on this branch.
+      // These are the only headers this adapter sets. It deliberately sets no
+      // `Cookie` — one on this upgrade is a hard 403 server-side.
+      //
+      // It cannot *guarantee* the absence of one, and that limit is worth being
+      // precise about: React Native's own WebSocket module attaches a `Cookie`
+      // from the app-global store (Android `ForwardingCookieHandler` →
+      // `CookieManager`; iOS `NSHTTPCookieStorage`) before these headers, and
+      // appends rather than replaces, so nothing passed here can remove it. It
+      // also always sets `Origin`, which the Hub does not check on this branch.
+      // The protection is therefore upstream: no in-app WebView ships, and the
+      // fallback flow uses an ephemeral/Custom Tab session whose cookies never
+      // reach that store. Owner acceptance row 8 is what proves it end to end.
       const socket = (options.createSocket ?? defaultCreateSocket)(this.url, {
         Authorization: `DPoP ${token}`,
         DPoP: proof,

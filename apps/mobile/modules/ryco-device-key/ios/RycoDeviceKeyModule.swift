@@ -23,12 +23,24 @@ public final class RycoDeviceKeyModule: Module {
       // sharing the access group — may be an ordinary software key, and
       // accepting it would silently reduce DPoP to bare bearer assurance.
       var key = try Self.loadKey()
-      if let existing = key, !Self.isSecureEnclaveResident(existing) {
-        Self.deleteKey()
-        key = nil
+      if let existing = key {
+        switch Self.residency(of: existing) {
+        case .secureEnclave:
+          break
+        case .software:
+          // Positively not enclave-resident: replace it.
+          Self.deleteKey()
+          key = nil
+        case .unknown:
+          // Refuse, but never destroy. A probe that cannot read the attribute
+          // must not delete a key that may be a perfectly good enclave key —
+          // that would orphan one on every launch and permanently disable
+          // hosted mode.
+          throw DeviceKeyError.residencyUnverifiable
+        }
       }
       let resolved = try key ?? Self.createKey()
-      guard Self.isSecureEnclaveResident(resolved) else {
+      guard Self.residency(of: resolved) == .secureEnclave else {
         throw DeviceKeyError.enclaveUnavailable(nil)
       }
       return [
@@ -66,15 +78,26 @@ public final class RycoDeviceKeyModule: Module {
     ]
   }
 
-  /// Whether the private key actually lives in the Secure Enclave.
+  enum KeyResidency {
+    case secureEnclave
+    /// Positively determined not to live in the enclave.
+    case software
+    /// The attribute could not be read; residency is undetermined.
+    case unknown
+  }
+
+  /// Where the private key actually lives.
   ///
   /// The keychain query matches on the application tag alone, so this is the
-  /// only thing that distinguishes an enclave key from a software key stored
-  /// under the same tag.
-  private static func isSecureEnclaveResident(_ key: SecKey) -> Bool {
-    guard let attributes = SecKeyCopyAttributes(key) as? [String: Any] else { return false }
-    guard let tokenID = attributes[kSecAttrTokenID as String] as? String else { return false }
-    return tokenID == (kSecAttrTokenIDSecureEnclave as String)
+  /// only thing distinguishing an enclave key from a software key stored under
+  /// the same tag. `unknown` is kept distinct from `software` on purpose: the
+  /// caller may replace a software key, but must never destroy one it merely
+  /// failed to measure.
+  private static func residency(of key: SecKey) -> KeyResidency {
+    guard let attributes = SecKeyCopyAttributes(key) as? [String: Any] else { return .unknown }
+    guard let tokenID = attributes[kSecAttrTokenID as String] else { return .software }
+    guard let tokenString = tokenID as? String else { return .unknown }
+    return tokenString == (kSecAttrTokenIDSecureEnclave as String) ? .secureEnclave : .software
   }
 
   private static func loadKey() throws -> SecKey? {
@@ -175,6 +198,7 @@ private enum DeviceKeyError: Error, LocalizedError {
   case algorithmUnsupported
   case signing(CFError?)
   case invalidPayload
+  case residencyUnverifiable
 
   var errorDescription: String? {
     switch self {
@@ -194,6 +218,8 @@ private enum DeviceKeyError: Error, LocalizedError {
       return "The device key could not sign the request."
     case .invalidPayload:
       return "The signing payload was malformed."
+    case .residencyUnverifiable:
+      return "The device key's hardware backing could not be verified."
     }
   }
 }

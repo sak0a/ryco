@@ -208,19 +208,26 @@ describe("DPoP upgrade", () => {
     // authenticated upgrade when the proof resolves — against an engine that is
     // already closed, so it would never be authenticated or torn down.
     const createSocket = vi.fn();
-    let releaseMint: (() => void) | undefined;
+    // The mint must be genuinely in flight when `close()` lands. The adapter
+    // yields once before reading the token, so the deferred has to be created
+    // up front — capturing it inside the signer would leave it undefined at
+    // close time and the test would pass for the wrong reason.
+    let releaseMint!: () => void;
+    const minting = new Promise<void>((resolve) => {
+      releaseMint = resolve;
+    });
     const harness = build({
       createSocket,
       dpopSigner: async () => {
-        await new Promise<void>((resolve) => {
-          releaseMint = resolve;
-        });
+        await minting;
         return { sign: async () => PROOF } as unknown as DpopSignerService;
       },
     });
 
+    // Let the adapter reach the pending mint before cancelling.
+    await settle();
     harness.facade.close(1000, "cancelled");
-    releaseMint?.();
+    releaseMint();
     await settle();
 
     expect(createSocket).not.toHaveBeenCalled();

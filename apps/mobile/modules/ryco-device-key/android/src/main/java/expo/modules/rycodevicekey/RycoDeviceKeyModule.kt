@@ -37,9 +37,19 @@ class RycoDeviceKeyModule : Module() {
       // present at this alias — left by an earlier build — may be TEE-only, and
       // `setIsStrongBoxBacked(true)` only constrains keys we create.
       var entry = loadPrivateKey()
-      if (entry != null && backingOf(entry) != BACKING_STRONGBOX) {
-        keyStore().deleteEntry(KEY_ALIAS)
-        entry = null
+      if (entry != null) {
+        when (backingOf(entry)) {
+          BACKING_STRONGBOX -> Unit
+          // Positively weaker than required: replace it.
+          BACKING_UNAVAILABLE -> {
+            keyStore().deleteEntry(KEY_ALIAS)
+            entry = null
+          }
+          // Could not measure it. Refuse, but never destroy — a transient
+          // keystore error must not wipe a valid StrongBox key and force a
+          // re-login.
+          else -> throw ResidencyUnverifiableException()
+        }
       }
       val resolved = entry ?: createKey()
       val backing = backingOf(resolved)
@@ -119,7 +129,8 @@ class RycoDeviceKeyModule : Module() {
         KeyFactory.getInstance(privateKey.algorithm, ANDROID_KEYSTORE)
           .getKeySpec(privateKey, KeyInfo::class.java)
       } catch (cause: Exception) {
-        return BACKING_UNAVAILABLE
+        // Undetermined, not "weak": the caller must refuse rather than delete.
+        return BACKING_UNKNOWN
       }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       return when (keyInfo.securityLevel) {
@@ -180,6 +191,7 @@ class RycoDeviceKeyModule : Module() {
     const val UNCOMPRESSED_PREFIX: Byte = 0x04
     const val BACKING_STRONGBOX = "strongbox"
     const val BACKING_UNAVAILABLE = "unavailable"
+    const val BACKING_UNKNOWN = "unknown"
   }
 }
 
@@ -189,6 +201,9 @@ class RycoDeviceKeyModule : Module() {
  */
 private class StrongBoxUnsupportedException :
   CodedException("StrongBox is unavailable on this device.")
+
+private class ResidencyUnverifiableException :
+  CodedException("The device key's hardware backing could not be verified.")
 
 private class KeystoreUnavailableException :
   CodedException("The device key could not be read from the keystore.")
