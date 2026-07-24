@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
+  PlatformColor,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +15,8 @@ import type { MobileConnectionRegistry } from "../../runtime/bootstrap";
 import { resolveRemotePairingTarget } from "../../connection/remoteApi";
 import { getMobileEndpoint } from "../../connection/runtimeConfig";
 import { useWsConnectionStatus } from "../../rpc/wsConnectionState";
+import { useShallow } from "zustand/react/shallow";
+
 import {
   selectBootstrapCompleteForActiveEnvironment,
   selectSidebarThreadsAcrossEnvironments,
@@ -40,7 +43,7 @@ export function PairingScreen({ registry }: { readonly registry: MobileConnectio
   const [status, setStatus] = useState<PairingStatus>({ kind: "idle" });
 
   const wsStatus = useWsConnectionStatus();
-  const threads = useStore(selectSidebarThreadsAcrossEnvironments);
+  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
   const bootstrapComplete = useStore(selectBootstrapCompleteForActiveEnvironment);
 
   const onConnect = useCallback(async () => {
@@ -86,7 +89,7 @@ export function PairingScreen({ registry }: { readonly registry: MobileConnectio
   }, [pairingUrl, registry]);
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.heading}>Connect to a Ryco node</Text>
       <Text style={styles.subheading}>
         Paste a pairing URL from a local or staging node (Settings -&gt; Pair a device).
@@ -172,9 +175,14 @@ function describePairing(status: PairingStatus): string {
 }
 
 const styles = StyleSheet.create({
+  // The provider stack sets no background and the Text has no color, so on a
+  // dark-mode device the default black-on-black renders blank. Anchor an
+  // adaptive system background + label colors (iOS dynamic colors follow the
+  // light/dark trait automatically).
+  container: { flex: 1, backgroundColor: PlatformColor("systemBackground") },
   content: { padding: 20, gap: 12 },
-  heading: { fontSize: 22, fontWeight: "700" },
-  subheading: { fontSize: 14, opacity: 0.7 },
+  heading: { fontSize: 22, fontWeight: "700", color: PlatformColor("label") },
+  subheading: { fontSize: 14, color: PlatformColor("secondaryLabel") },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "#8e8e93",
@@ -182,6 +190,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     fontSize: 15,
+    color: PlatformColor("label"),
   },
   button: {
     backgroundColor: "#0a84ff",
@@ -194,10 +203,15 @@ const styles = StyleSheet.create({
   buttonLabel: { color: "#ffffff", fontSize: 16, fontWeight: "600" },
   statusBlock: { gap: 6, paddingVertical: 8 },
   statusRow: { flexDirection: "row", justifyContent: "space-between" },
-  statusLabel: { fontSize: 14, opacity: 0.6 },
-  statusValue: { fontSize: 14, fontWeight: "600" },
+  statusLabel: { fontSize: 14, color: PlatformColor("secondaryLabel") },
+  statusValue: { fontSize: 14, fontWeight: "600", color: PlatformColor("label") },
   error: { color: "#dc2626", fontSize: 14 },
-  sectionHeading: { fontSize: 16, fontWeight: "700", marginTop: 8 },
-  empty: { fontSize: 14, opacity: 0.6 },
-  threadRow: { fontSize: 15, paddingVertical: 6 },
+  sectionHeading: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: 8,
+    color: PlatformColor("label"),
+  },
+  empty: { fontSize: 14, color: PlatformColor("secondaryLabel") },
+  threadRow: { fontSize: 15, paddingVertical: 6, color: PlatformColor("label") },
 });
