@@ -1,0 +1,10 @@
+import { CommandId, MessageId, ThreadId } from "@ryco/contracts";
+
+import { uuidv4 } from "./uuid";
+
+// §3-11: app-local brand minters. Upstream imported these from `~/lib/utils`;
+// runtime A exposes only the branded schemas, so we mint here over uuidv4
+// (expo-crypto randomUUID).
+export const newMessageId = (): MessageId => MessageId.make(uuidv4());
+export const newCommandId = (): CommandId => CommandId.make(uuidv4());
+export const newThreadId = (): ThreadId => ThreadId.make(uuidv4());
