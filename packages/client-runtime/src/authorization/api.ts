@@ -1,6 +1,7 @@
 import { EnvironmentId } from "@ryco/contracts";
 
 import type {
+  DpopSignerService,
   EndpointService,
   HttpClientService,
   PasskeyCeremonyService,
@@ -128,6 +129,8 @@ export interface HostedHubApiDependencies {
   readonly httpClient: HttpClientService;
   readonly passkeyCeremony: PasskeyCeremonyService;
   readonly sessionCredentials: SessionCredentialsService;
+  /** Required when `sessionCredentials.mode` is `"bearer"`; unused in cookie mode. */
+  readonly dpopSigner?: DpopSignerService;
 }
 
 export class HostedHubApi {
@@ -135,24 +138,58 @@ export class HostedHubApi {
   readonly #httpClient: HttpClientService;
   readonly #passkeyCeremony: PasskeyCeremonyService;
   readonly #sessionCredentials: SessionCredentialsService;
+  readonly #dpopSigner: DpopSignerService | undefined;
 
   constructor(dependencies: HostedHubApiDependencies) {
     this.#endpoint = dependencies.endpoint;
     this.#httpClient = dependencies.httpClient;
     this.#passkeyCeremony = dependencies.passkeyCeremony;
     this.#sessionCredentials = dependencies.sessionCredentials;
+    this.#dpopSigner = dependencies.dpopSigner;
+    if (this.#sessionCredentials.mode === "bearer") {
+      // Fail closed: a bearer (native) session cannot be presented without a
+      // DPoP signer and a token holder, so a misconfigured adapter must not
+      // silently fall back to an unauthenticated or cross-transport request.
+      if (
+        !this.#dpopSigner ||
+        !this.#sessionCredentials.readBearerToken ||
+        !this.#sessionCredentials.writeBearerToken
+      ) {
+        throw new Error(
+          "Bearer session credentials require a DPoP signer and a bearer-token holder.",
+        );
+      }
+    }
+  }
+
+  get #isBearer(): boolean {
+    return this.#sessionCredentials.mode === "bearer";
+  }
+
+  #readBearerToken(): string | null {
+    return this.#sessionCredentials.readBearerToken?.() ?? null;
+  }
+
+  #writeBearerToken(token: string | null): void {
+    this.#sessionCredentials.writeBearerToken?.(token);
   }
 
   get hasSessionMaterial(): boolean {
-    return this.#sessionCredentials.readCsrfToken() !== null;
+    return this.#isBearer
+      ? this.#readBearerToken() !== null
+      : this.#sessionCredentials.readCsrfToken() !== null;
   }
 
   clearSessionMaterial(): void {
-    this.#sessionCredentials.writeCsrfToken(null);
+    if (this.#isBearer) this.#writeBearerToken(null);
+    else this.#sessionCredentials.writeCsrfToken(null);
   }
 
   async getBootstrapAvailability(signal?: AbortSignal): Promise<boolean> {
-    const result = await this.#request("/api/auth/bootstrap-status", signal ? { signal } : {});
+    const result = await this.#request("/api/auth/bootstrap-status", {
+      dpop: "mint",
+      ...(signal ? { signal } : {}),
+    });
     if (Object.keys(result).length !== 1 || typeof result.available !== "boolean") {
       throw new HostedHubApiError("invalid_response", 502);
     }
@@ -160,32 +197,33 @@ export class HostedHubApi {
   }
 
   async restoreSession(signal?: AbortSignal): Promise<HostedHubSessionResponse> {
-    const result = this.#sessionResponse(
-      await this.#request("/api/auth/session", signal ? { signal } : {}),
-    );
+    const value = await this.#request("/api/auth/session", signal ? { signal } : {});
+    if (this.#isBearer) return this.#restoreNativeSession(value);
+    const result = this.#sessionResponse(value);
     this.#sessionCredentials.writeCsrfToken(result.csrfToken);
     return result;
   }
 
   async signIn(signal?: AbortSignal): Promise<HostedHubSessionResponse> {
-    const options = await this.#request("/api/auth/passkey/options", {
+    const base = this.#isBearer ? "/api/auth/native/passkey" : "/api/auth/passkey";
+    const options = await this.#request(`${base}/options`, {
       method: "POST",
       body: {},
+      dpop: "mint",
       ...(signal ? { signal } : {}),
     });
     const response = await this.#passkeyCeremony.authenticate(
       validatePasskeyAuthenticationOptions(options.options),
       signal,
     );
-    const result = this.#sessionResponse(
-      await this.#request("/api/auth/passkey/verify", {
+    return this.#finishLogin(
+      await this.#request(`${base}/verify`, {
         method: "POST",
         body: { response },
+        dpop: "mint",
         ...(signal ? { signal } : {}),
       }),
     );
-    this.#sessionCredentials.writeCsrfToken(result.csrfToken);
-    return result;
   }
 
   async redeemInvitation(
@@ -196,12 +234,10 @@ export class HostedHubApi {
     },
     signal?: AbortSignal,
   ): Promise<HostedHubSessionResponse> {
-    return this.#registerPasskey(
-      "/api/auth/invitations/registration/options",
-      "/api/auth/invitations/registration/verify",
-      input,
-      signal,
-    );
+    const base = this.#isBearer
+      ? "/api/auth/native/invitations/registration"
+      : "/api/auth/invitations/registration";
+    return this.#registerPasskey(`${base}/options`, `${base}/verify`, input, signal);
   }
 
   async bootstrapOwner(
@@ -212,12 +248,10 @@ export class HostedHubApi {
     },
     signal?: AbortSignal,
   ): Promise<HostedHubSessionResponse> {
-    return this.#registerPasskey(
-      "/api/auth/bootstrap/registration/options",
-      "/api/auth/bootstrap/registration/verify",
-      input,
-      signal,
-    );
+    const base = this.#isBearer
+      ? "/api/auth/native/bootstrap/registration"
+      : "/api/auth/bootstrap/registration";
+    return this.#registerPasskey(`${base}/options`, `${base}/verify`, input, signal);
   }
 
   async #registerPasskey(
@@ -229,21 +263,48 @@ export class HostedHubApi {
     const options = await this.#request(optionsPath, {
       method: "POST",
       body: input,
+      dpop: "mint",
       ...(signal ? { signal } : {}),
     });
     const response = await this.#passkeyCeremony.register(
       validatePasskeyRegistrationOptions(options.options),
       signal,
     );
-    const result = this.#sessionResponse(
+    return this.#finishLogin(
       await this.#request(verifyPath, {
         method: "POST",
         body: { response },
+        dpop: "mint",
         ...(signal ? { signal } : {}),
       }),
     );
+  }
+
+  /**
+   * Persist the session material returned by a login/registration verify and
+   * return the account/session view. Cookie mode stores the CSRF token; bearer
+   * mode stores the native token behind the session-credentials seam and never
+   * surfaces it (or a proof) in the returned value.
+   */
+  #finishLogin(value: Record<string, unknown>): HostedHubSessionResponse {
+    if (this.#isBearer) {
+      const { response, token } = this.#nativeSessionResponse(value);
+      this.#writeBearerToken(token);
+      return response;
+    }
+    const result = this.#sessionResponse(value);
     this.#sessionCredentials.writeCsrfToken(result.csrfToken);
     return result;
+  }
+
+  #restoreNativeSession(value: Record<string, unknown>): HostedHubSessionResponse {
+    const response = this.#accountAndSession(value);
+    // A native restore may rotate the token; persist a fresh one if present,
+    // otherwise the existing enclave-bound token stays in force.
+    if (typeof value.token === "string" && value.token.length > 0) {
+      this.#writeBearerToken(value.token);
+    }
+    return response;
   }
 
   async signOut(signal?: AbortSignal): Promise<void> {
@@ -408,13 +469,16 @@ export class HostedHubApi {
     } as HostedRelayTicket;
   }
 
-  #sessionResponse(value: Record<string, unknown>): HostedHubSessionResponse {
+  /**
+   * Validate the account/session (and optional recovery codes) common to both
+   * transports. Returns a bounded {@link HostedHubSessionResponse} with no
+   * transport material attached.
+   */
+  #accountAndSession(value: Record<string, unknown>): HostedHubSessionResponse {
     const account = objectValue(value.account);
     const session = objectValue(value.session);
     const recoveryCodes = value.recoveryCodes;
     if (
-      typeof value.csrfToken !== "string" ||
-      value.csrfToken.length === 0 ||
       typeof account.id !== "string" ||
       typeof account.displayName !== "string" ||
       !roleValue(account.role) ||
@@ -456,9 +520,32 @@ export class HostedHubApi {
         revokedAt: session.revokedAt,
         revocationReasonCode: session.revocationReasonCode,
       },
-      csrfToken: value.csrfToken,
       ...(recoveryCodes === undefined ? {} : { recoveryCodes }),
     } as HostedHubSessionResponse;
+  }
+
+  #sessionResponse(
+    value: Record<string, unknown>,
+  ): HostedHubSessionResponse & { readonly csrfToken: string } {
+    // Reject a malformed CSRF token before the account/session check; both an
+    // invalid token and invalid account/session yield `invalid_response`, and
+    // the only `session_invalid` path (disabled/revoked) is reached only once
+    // both pass — so this preserves the exact error codes of the prior combined
+    // validation.
+    if (typeof value.csrfToken !== "string" || value.csrfToken.length === 0) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
+    return { ...this.#accountAndSession(value), csrfToken: value.csrfToken };
+  }
+
+  #nativeSessionResponse(value: Record<string, unknown>): {
+    readonly response: HostedHubSessionResponse;
+    readonly token: string;
+  } {
+    if (typeof value.token !== "string" || value.token.length === 0 || value.token.length > 4096) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
+    return { response: this.#accountAndSession(value), token: value.token };
   }
 
   async #request(
@@ -467,6 +554,8 @@ export class HostedHubApi {
       readonly method?: "GET" | "POST";
       readonly body?: unknown;
       readonly csrf?: boolean;
+      /** Bearer mode only: `"mint"` = login/public (no token, proof without `ath`). */
+      readonly dpop?: "mint" | "session";
       readonly signal?: AbortSignal;
     },
   ): Promise<Record<string, unknown>> {
@@ -474,17 +563,43 @@ export class HostedHubApi {
     if (url.origin !== this.#endpoint.origin() || url.search || url.hash) {
       throw new HostedHubApiError("invalid_request", 400);
     }
+    const method = options.method ?? "GET";
     const headers: Record<string, string> = { ...JSON_HEADERS };
-    if (options.csrf) {
-      const csrfToken = this.#sessionCredentials.readCsrfToken();
-      if (!csrfToken) throw new HostedHubApiError("session_invalid", 401);
-      headers["X-Ryco-CSRF"] = csrfToken;
+
+    let target: string;
+    let credentials: "include" | "omit" | "same-origin";
+    if (this.#isBearer) {
+      // Native/DPoP transport: no ambient cookie, no CSRF. Present
+      // `Authorization: DPoP <token>` + a proof only on authenticated requests;
+      // the mint/login ceremony (and the public status probe) carries a proof
+      // without `ath` and no token.
+      const signer = this.#dpopSigner;
+      if (!signer) throw new HostedHubApiError("session_invalid", 401);
+      const requestUrl = url.toString();
+      let token: string | undefined;
+      if (options.dpop !== "mint") {
+        token = this.#readBearerToken() ?? undefined;
+        if (!token) throw new HostedHubApiError("session_invalid", 401);
+      }
+      headers["DPoP"] = await signer.sign({ method, url: requestUrl, ...(token ? { token } : {}) });
+      if (token) headers["Authorization"] = `DPoP ${token}`;
+      target = requestUrl;
+      credentials = "omit";
+    } else {
+      if (options.csrf) {
+        const csrfToken = this.#sessionCredentials.readCsrfToken();
+        if (!csrfToken) throw new HostedHubApiError("session_invalid", 401);
+        headers["X-Ryco-CSRF"] = csrfToken;
+      }
+      target = url.pathname;
+      credentials = "same-origin";
     }
+
     let response: Awaited<ReturnType<HttpClientService["fetch"]>>;
     try {
-      response = await this.#httpClient.fetch(url.pathname, {
-        method: options.method ?? "GET",
-        credentials: "same-origin",
+      response = await this.#httpClient.fetch(target, {
+        method,
+        credentials,
         cache: "no-store",
         headers,
         ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),

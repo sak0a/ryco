@@ -66,7 +66,13 @@ export interface HostedHubSession {
 export interface HostedHubSessionResponse {
   readonly account: HostedHubAccount;
   readonly session: HostedHubSession;
-  readonly csrfToken: string;
+  /**
+   * Present in cookie mode (the session-bound CSRF token). Absent in bearer
+   * mode, where request authentication rides `Authorization: DPoP` + a proof
+   * and the native session token is held by the session-credentials seam
+   * rather than returned here.
+   */
+  readonly csrfToken?: string;
   readonly recoveryCodes?: ReadonlyArray<string>;
 }
 
