@@ -78,6 +78,27 @@ const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
 
+// The relying party is the host that serves the association documents, so it is
+// deployment metadata, not a build constant: a staging Hub on its own domain
+// needs its own RP id. It must equal the Hub's configured `RYCO_HUB_WEBAUTHN_RP_ID`,
+// because that is the host the passkey ceremony resolves `webcredentials:`
+// against. Defaults to the canonical hosted origin.
+const HOST_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
+const relyingPartyOverride = repoEnv.EXPO_PUBLIC_RYCO_RELYING_PARTY?.trim();
+
+if (relyingPartyOverride !== undefined && relyingPartyOverride !== "") {
+  if (!HOST_PATTERN.test(relyingPartyOverride)) {
+    throw new Error(
+      `EXPO_PUBLIC_RYCO_RELYING_PARTY must be a bare hostname such as app.ryco.dev — received ${JSON.stringify(relyingPartyOverride)}. It is a WebAuthn RP id, so it carries no scheme, port, or path.`,
+    );
+  }
+}
+
+const relyingParty =
+  relyingPartyOverride !== undefined && relyingPartyOverride !== ""
+    ? relyingPartyOverride
+    : variant.relyingParty;
+
 // Aliases match the fonts' PostScript names on iOS; register the same names on
 // Android so RN and the native composer share one family-name set.
 const dmSansFonts = {
@@ -115,6 +136,24 @@ if (hostedHubBaseUrl) {
       "RYCO_IOS_PERSONAL_TEAM / RYCO_IOS_PERSONAL_TEAM_BUNDLE_ID cannot be combined with EXPO_PUBLIC_RYCO_HUB_URL: the personal-team override changes the iOS bundle identifier, so it no longer matches the TEAMID.BUNDLEID entry in the relying party's apple-app-site-association document. Build hosted variants with the real team's bundle identifier, or unset EXPO_PUBLIC_RYCO_HUB_URL for a direct-node-only local build.",
     );
   }
+  // A Hub on a domain that the relying party does not cover can never serve the
+  // association documents the ceremony reads, and that failure is only visible
+  // on a device at passkey time — so surface it here instead. The RP id must be
+  // the Hub's host or a registrable parent of it.
+  const hubHost = (() => {
+    try {
+      return new URL(hostedHubBaseUrl).hostname;
+    } catch {
+      throw new Error(
+        `EXPO_PUBLIC_RYCO_HUB_URL must be an absolute URL — received ${JSON.stringify(hostedHubBaseUrl)}.`,
+      );
+    }
+  })();
+  if (hubHost !== relyingParty && !hubHost.endsWith(`.${relyingParty}`)) {
+    throw new Error(
+      `EXPO_PUBLIC_RYCO_RELYING_PARTY (${relyingParty}) must equal the Hub host (${hubHost}) or a registrable parent of it, and must match the Hub's RYCO_HUB_WEBAUTHN_RP_ID. Otherwise the passkey ceremony resolves webcredentials: against a host that serves no association document.`,
+    );
+  }
 }
 
 const config: ExpoConfig = {
@@ -146,10 +185,7 @@ const config: ExpoConfig = {
     ...(appleTeamId ? { appleTeamId } : {}),
     // Native passkeys (webcredentials) and universal links (applinks) for the
     // hosted plane's relying party.
-    associatedDomains: [
-      `applinks:${variant.relyingParty}`,
-      `webcredentials:${variant.relyingParty}`,
-    ],
+    associatedDomains: [`applinks:${relyingParty}`, `webcredentials:${relyingParty}`],
     infoPlist: {
       NSAppTransportSecurity: {
         // Allow LAN/tailnet connections to a local or staging node over http.
@@ -177,7 +213,7 @@ const config: ExpoConfig = {
         action: "VIEW",
         autoVerify: true,
         category: ["BROWSABLE", "DEFAULT"],
-        data: [{ scheme: "https", host: variant.relyingParty }],
+        data: [{ scheme: "https", host: relyingParty }],
       },
     ],
   },
@@ -272,7 +308,7 @@ const config: ExpoConfig = {
     hosted: {
       hubBaseUrl: hostedHubBaseUrl,
       appUrl: hostedHubAppUrl,
-      relyingParty: variant.relyingParty,
+      relyingParty: relyingParty,
     },
   },
 };
