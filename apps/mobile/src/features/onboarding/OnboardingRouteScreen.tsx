@@ -1,17 +1,10 @@
-import { View } from "react-native";
+import { HostedSignIn } from "../hostedHub/HostedSignIn";
 
-import { EmptyState } from "../../components/EmptyState";
-
-// B2 placeholder — replaced by the real screen in a later task. Keeps the
-// navigation tree compiling and navigable in the interim.
+/**
+ * The "Connect" form sheet. Hosted-plane authentication is the whole surface:
+ * direct-node pairing has its own route (`ConnectionsNew`), which the sign-in
+ * screen offers as the escape hatch whenever hosted mode is unavailable.
+ */
 export function OnboardingRouteScreen() {
-  return (
-    <View className="flex-1 items-center justify-center bg-screen px-6">
-      <EmptyState
-        variant="plain"
-        title="Connect"
-        detail="The onboarding surface arrives in the next build."
-      />
-    </View>
-  );
+  return <HostedSignIn />;
 }
