@@ -47,6 +47,11 @@ const fakeHttpClient: HttpClientService = {
         } as RequestInit),
 };
 
+/** The promoted `Headers` of a recorded request, without unsafe optional chaining. */
+function headersOf(init: RequestInit | undefined): Headers {
+  return init?.headers as Headers;
+}
+
 const fakeEndpoint: EndpointService = {
   origin: () => (globalThis.window as unknown as { location: { origin: string } }).location.origin,
   readPrimaryTarget: () => null,
@@ -85,6 +90,14 @@ const session = {
     revocationReasonCode: null,
   },
   csrfToken: "csrf-canary",
+} as const;
+
+/** The minimum registration challenge `validatePasskeyRegistrationOptions` accepts. */
+const registrationOptions = {
+  challenge: encodeBase64Url(new Uint8Array([7, 8, 9])),
+  rp: { name: "Ryco Hub" },
+  user: { id: encodeBase64Url(new Uint8Array([4, 5])), name: "ada", displayName: "Ada" },
+  pubKeyCredParams: [{ type: "public-key", alg: -7 }],
 } as const;
 
 beforeEach(() => {
@@ -348,6 +361,206 @@ describe("HostedHubApi", () => {
     }
   });
 
+  it("lists account passkeys over the cookie transport and drops unexpected metadata", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      return requests.length === 1
+        ? response(session)
+        : response({
+            passkeys: [
+              {
+                id: "credential-aaa",
+                label: "Studio laptop",
+                createdAt: 10,
+                lastUsedAt: null,
+                unexpectedSensitiveMetadata: "passkey-sensitive-canary",
+              },
+            ],
+          });
+    });
+    const api = createApi();
+    await api.restoreSession();
+
+    const passkeys = await api.listPasskeys();
+
+    expect(requests[1]?.input).toBe("/api/account/passkeys");
+    expect(requests[1]?.init).toMatchObject({
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    expect(passkeys).toEqual([
+      { id: "credential-aaa", label: "Studio laptop", createdAt: 10, lastUsedAt: null },
+    ]);
+    expect(JSON.stringify(passkeys)).not.toContain("passkey-sensitive-canary");
+  });
+
+  it("rejects malformed passkey lists", async () => {
+    const api = createApi();
+    globalThis.fetch = vi.fn(async () => response(session));
+    await api.restoreSession();
+
+    globalThis.fetch = vi.fn(async () => response({ passkeys: {} }));
+    await expect(api.listPasskeys()).rejects.toMatchObject({ code: "invalid_response" });
+
+    // A credential id that could widen the request path is not a credential id.
+    globalThis.fetch = vi.fn(async () => response({ passkeys: [{ id: "../../admin" }] }));
+    await expect(api.listPasskeys()).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it("adds a passkey on the live session without minting or clobbering one", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    const register = vi.fn(async () => ({ id: "added-passkey-canary" }) as never);
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      if (requests.length === 1) return response(session);
+      if (requests.length === 2) return response({ options: registrationOptions });
+      // The Hub carries no session material on an add-passkey verify.
+      return response({ passkey: { id: "credential-bbb", label: "Phone" } }, 201);
+    });
+    const api = createApi({ register });
+    await api.restoreSession();
+
+    const added = await api.addPasskey({ passkeyLabel: "Phone" });
+
+    expect(requests.slice(1).map(({ input }) => input)).toEqual([
+      "/api/account/passkeys/registration/options",
+      "/api/account/passkeys/registration/verify",
+    ]);
+    for (const request of requests.slice(1)) {
+      // An authenticated ceremony: the session CSRF token rides both calls.
+      expect(headersOf(request.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
+      expect(request.init).toMatchObject({ method: "POST", credentials: "same-origin" });
+    }
+    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ passkeyLabel: "Phone" });
+    expect(JSON.parse(String(requests[2]?.init?.body))).toEqual({
+      response: { id: "added-passkey-canary" },
+    });
+    expect(added).toEqual({
+      id: "credential-bbb",
+      label: "Phone",
+      createdAt: null,
+      lastUsedAt: null,
+    });
+
+    // The live session is untouched: a subsequent CSRF-bound call still
+    // presents the token minted by restoreSession.
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      return response({ ok: true });
+    });
+    await api.denyNodeEnrollment("ABCD-EFGH");
+    expect(headersOf(requests[3]?.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
+  });
+
+  it("rotates the CSRF token when an add-passkey verify returns a fresh one", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      if (requests.length === 1) return response(session);
+      if (requests.length === 2) {
+        return response({ options: registrationOptions });
+      }
+      if (requests.length === 3) return response({ csrfToken: "csrf-rotated-canary" }, 201);
+      return response({ ok: true });
+    });
+    const api = createApi({ register: vi.fn(async () => ({ id: "added" }) as never) });
+    await api.restoreSession();
+
+    await expect(api.addPasskey({ passkeyLabel: null })).resolves.toBeNull();
+    await api.denyNodeEnrollment("ABCD-EFGH");
+
+    expect(headersOf(requests[3]?.init).get("X-Ryco-CSRF")).toBe("csrf-rotated-canary");
+  });
+
+  it("revokes a passkey with a bounded credential id and session-bound CSRF", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      return requests.length === 1
+        ? response(session)
+        : new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
+    });
+    const api = createApi();
+    await api.restoreSession();
+
+    await expect(api.revokePasskey("credential-aaa")).resolves.toBeUndefined();
+
+    expect(requests[1]?.input).toBe("/api/account/passkeys/credential-aaa");
+    expect(requests[1]?.init).toMatchObject({ method: "DELETE", credentials: "same-origin" });
+    expect(headersOf(requests[1]?.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
+  });
+
+  it("fails closed on a credential id that could widen the request path", async () => {
+    const api = createApi();
+    globalThis.fetch = vi.fn(async () => response(session));
+    await api.restoreSession();
+
+    const fetchSpy = vi.fn(async () => response({ ok: true }));
+    globalThis.fetch = fetchSpy;
+    for (const credentialId of ["../../api/admin/node-enrollments/deny", "a/b", "a?b", ""]) {
+      await expect(api.revokePasskey(credentialId)).rejects.toMatchObject({
+        code: "invalid_request",
+      });
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("fetches recovery codes for a single display and rejects malformed lists", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      return requests.length === 1
+        ? response(session)
+        : response({ recoveryCodes: ["recovery-sensitive-canary"] });
+    });
+    const api = createApi();
+    await api.restoreSession();
+
+    await expect(api.getRecoveryCodes()).resolves.toEqual(["recovery-sensitive-canary"]);
+
+    expect(requests[1]?.input).toBe("/api/account/recovery-codes");
+    expect(requests[1]?.init).toMatchObject({ method: "POST", credentials: "same-origin" });
+    expect(headersOf(requests[1]?.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
+    // No code is ever echoed back to the Hub or placed in a URL.
+    expect(JSON.stringify(requests)).not.toContain("recovery-sensitive-canary");
+
+    globalThis.fetch = vi.fn(async () => response({ recoveryCodes: [] }));
+    await expect(api.getRecoveryCodes()).rejects.toMatchObject({ code: "invalid_response" });
+    globalThis.fetch = vi.fn(async () => response({ recoveryCodes: [1, 2] }));
+    await expect(api.getRecoveryCodes()).rejects.toMatchObject({ code: "invalid_response" });
+    globalThis.fetch = vi.fn(async () =>
+      response({ recoveryCodes: Array.from({ length: 65 }, () => "code") }),
+    );
+    await expect(api.getRecoveryCodes()).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it("keeps browser-only registration reachable on the cookie transport", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      return requests.length === 1
+        ? response({ options: registrationOptions })
+        : response(session, 201);
+    });
+    const api = createApi({ register: vi.fn(async () => ({ id: "registered" }) as never) });
+
+    await expect(
+      api.redeemInvitation({
+        secret: "invitation-sensitive-canary",
+        displayName: "Ada",
+        passkeyLabel: null,
+      }),
+    ).resolves.toMatchObject({ account: session.account });
+    expect(requests.map(({ input }) => input)).toEqual([
+      "/api/auth/invitations/registration/options",
+      "/api/auth/invitations/registration/verify",
+    ]);
+    // The pre-session mint ceremony carries no CSRF token.
+    expect(headersOf(requests[0]?.init).get("X-Ryco-CSRF")).toBeNull();
+  });
+
   it("rejects malformed enrollment lookup and approval responses", async () => {
     const api = createApi();
     globalThis.fetch = vi.fn(async () => response(session));
@@ -537,6 +750,152 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     globalThis.fetch = fetchSpy;
     await expect(api.listNodes()).rejects.toMatchObject({ code: "session_invalid" });
     // The request must never reach the wire without a bound token.
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before any I/O on browser-only routes in bearer mode", async () => {
+    const { calls, service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const fetchSpy = vi.fn(async () => response({}));
+    globalThis.fetch = fetchSpy;
+    const register = vi.fn(async () => ({ id: "never-registered" }) as never);
+    const api = createBearerApi(service, credentials, { register });
+
+    await expect(
+      api.bootstrapOwner({
+        credential: "bootstrap-sensitive-canary",
+        displayName: "Ada",
+        passkeyLabel: null,
+      }),
+    ).rejects.toMatchObject({
+      code: "browser_only_transport",
+      message: "This action is only available in a browser.",
+    });
+    await expect(
+      api.redeemInvitation({
+        secret: "invitation-sensitive-canary",
+        displayName: "Ada",
+        passkeyLabel: null,
+      }),
+    ).rejects.toMatchObject({ code: "browser_only_transport" });
+
+    // Nothing reached the wire, no proof was minted, and the user was never
+    // prompted for a passkey they could not have used.
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
+    expect(register).not.toHaveBeenCalled();
+    // The guard is scoped: native passkey *login* stays reachable.
+    expect(credentials.current()).toBe("native-token-canary");
+  });
+
+  it("adds a passkey over DPoP without minting or clearing the native session", async () => {
+    const { calls, service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      return requests.length === 1
+        ? response({ options: registrationOptions })
+        : // No session material on an add-passkey verify.
+          response({ passkey: { id: "credential-ccc", label: "Phone", createdAt: 5 } }, 201);
+    });
+    const register = vi.fn(async () => ({ id: "added-passkey-canary" }) as never);
+    const api = createBearerApi(service, credentials, { register });
+
+    const added = await api.addPasskey({ passkeyLabel: "Phone" });
+
+    expect(requests.map((request) => request.input)).toEqual([
+      "https://hub.example.test/api/account/passkeys/registration/options",
+      "https://hub.example.test/api/account/passkeys/registration/verify",
+    ]);
+    for (const request of requests) {
+      const headers = request.init?.headers as Headers;
+      // Session-bound, not a mint: token presented, proof carries `ath`.
+      expect(headers.get("Authorization")).toBe("DPoP native-token-canary");
+      expect(headers.get("DPoP")).toMatch(/:ath$/);
+      expect(headers.get("X-Ryco-CSRF")).toBeNull();
+      expect(request.init?.credentials).toBe("omit");
+    }
+    expect(calls.every((call) => call.token === "native-token-canary")).toBe(true);
+    expect(added).toEqual({
+      id: "credential-ccc",
+      label: "Phone",
+      createdAt: 5,
+      lastUsedAt: null,
+    });
+    // The enclave-bound token survives an add-passkey that returns none.
+    expect(credentials.current()).toBe("native-token-canary");
+    expect(api.hasSessionMaterial).toBe(true);
+    expect(JSON.stringify(added)).not.toContain("native-token-canary");
+  });
+
+  it("rotates the native token when an add-passkey verify returns a fresh one", async () => {
+    const { service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    let call = 0;
+    globalThis.fetch = vi.fn(async () => {
+      call += 1;
+      return call === 1
+        ? response({ options: registrationOptions })
+        : response({ token: "native-token-rotated-canary" }, 201);
+    });
+    const api = createBearerApi(service, credentials, {
+      register: vi.fn(async () => ({ id: "added" }) as never),
+    });
+
+    await expect(api.addPasskey({ passkeyLabel: null })).resolves.toBeNull();
+    expect(credentials.current()).toBe("native-token-rotated-canary");
+  });
+
+  it("lists, revokes, and fetches recovery codes over DPoP with no CSRF", async () => {
+    const { service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      if (requests.length === 1) return response({ passkeys: [{ id: "credential-aaa" }] });
+      if (requests.length === 2) return response({ ok: true });
+      return response({ recoveryCodes: ["recovery-sensitive-canary"] });
+    });
+    const api = createBearerApi(service, credentials);
+
+    await expect(api.listPasskeys()).resolves.toEqual([
+      { id: "credential-aaa", label: null, createdAt: null, lastUsedAt: null },
+    ]);
+    await expect(api.revokePasskey("credential-aaa")).resolves.toBeUndefined();
+    await expect(api.getRecoveryCodes()).resolves.toEqual(["recovery-sensitive-canary"]);
+
+    expect(requests.map((request) => request.input)).toEqual([
+      "https://hub.example.test/api/account/passkeys",
+      "https://hub.example.test/api/account/passkeys/credential-aaa",
+      "https://hub.example.test/api/account/recovery-codes",
+    ]);
+    expect(requests.map((request) => request.init?.method)).toEqual(["GET", "DELETE", "POST"]);
+    for (const request of requests) {
+      const headers = request.init?.headers as Headers;
+      expect(headers.get("Authorization")).toBe("DPoP native-token-canary");
+      expect(headers.get("DPoP")).toMatch(/:ath$/);
+      expect(headers.get("X-Ryco-CSRF")).toBeNull();
+      expect(request.init?.credentials).toBe("omit");
+    }
+    // No recovery code and no session token is ever echoed onto the wire.
+    expect(JSON.stringify(requests)).not.toContain("recovery-sensitive-canary");
+  });
+
+  it("fails closed on account requests with no persisted native token", async () => {
+    const { service } = recordingDpopSigner();
+    const api = createBearerApi(service, inMemoryBearerCredentials());
+    const fetchSpy = vi.fn(async () => response({ passkeys: [] }));
+    globalThis.fetch = fetchSpy;
+    await expect(api.listPasskeys()).rejects.toMatchObject({ code: "session_invalid" });
+    await expect(api.getRecoveryCodes()).rejects.toMatchObject({ code: "session_invalid" });
+    await expect(api.revokePasskey("credential-aaa")).rejects.toMatchObject({
+      code: "session_invalid",
+    });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

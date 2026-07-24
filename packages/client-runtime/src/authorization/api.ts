@@ -10,6 +10,7 @@ import type {
 
 import type {
   HostedHubNode,
+  HostedHubPasskey,
   HostedHubSessionResponse,
   HostedNodeEnrollment,
   HostedRelayTicket,
@@ -20,6 +21,38 @@ import {
 } from "../relay/webauthn.ts";
 
 const JSON_HEADERS = { accept: "application/json", "content-type": "application/json" } as const;
+
+const MAX_BEARER_TOKEN_LENGTH = 4096;
+const MAX_RECOVERY_CODES = 64;
+const MAX_RECOVERY_CODE_LENGTH = 128;
+const MAX_PASSKEY_LABEL_LENGTH = 256;
+
+/**
+ * WebAuthn credential ids are base64url. Constraining them here keeps a
+ * credential id from ever widening a request path (no `/`, `.`, `?` or `#`
+ * survives this test) and bounds what a malformed Hub response can project.
+ */
+const CREDENTIAL_ID_PATTERN = /^[A-Za-z0-9_-]{1,512}$/;
+
+/**
+ * Hub routes that only accept a browser transport: they require an `Origin` in
+ * the Hub's configured WebAuthn origin list, which a native socket cannot
+ * present. The bearer branch below still derives these paths for owner
+ * bootstrap and invitation redemption, so without an explicit guard a native
+ * caller gets an unexplained 404 instead of an actionable message. Prefixes are
+ * matched against the parsed, normalized pathname.
+ *
+ * The native passkey *login* pair (`/api/auth/native/passkey/…`) is served and
+ * is deliberately absent from this list.
+ */
+const BROWSER_ONLY_BEARER_PATH_PREFIXES: ReadonlyArray<string> = [
+  "/api/auth/native/bootstrap/registration/",
+  "/api/auth/native/invitations/registration/",
+];
+
+function isBrowserOnlyPath(pathname: string): boolean {
+  return BROWSER_ONLY_BEARER_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
 
 export class HostedHubApiError extends Error {
   readonly code: string;
@@ -67,6 +100,8 @@ function messageForCode(code: string): string {
       return "The selected node or Hub uses an incompatible relay version.";
     case "invalid_request":
       return "The response was malformed or expired.";
+    case "browser_only_transport":
+      return "This action is only available in a browser.";
     default:
       return "Hub is temporarily unavailable.";
   }
@@ -93,6 +128,50 @@ function platformOsValue(value: unknown): value is "darwin" | "linux" | "windows
 
 function platformArchValue(value: unknown): value is "arm64" | "x64" | "other" {
   return value === "arm64" || value === "x64" || value === "other";
+}
+
+/** The bounded native session token, or `null` when the value is not one. */
+function bearerTokenValue(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_BEARER_TOKEN_LENGTH
+    ? value
+    : null;
+}
+
+/**
+ * A bounded recovery-code list, or `null` when the value is not one. Recovery
+ * codes are the one deliberate secret-material exception in this client: they
+ * are returned for a single display and are never persisted here.
+ */
+function recoveryCodesValue(value: unknown): ReadonlyArray<string> | null {
+  if (!Array.isArray(value) || value.length > MAX_RECOVERY_CODES) return null;
+  for (const code of value) {
+    if (typeof code !== "string" || code.length === 0 || code.length > MAX_RECOVERY_CODE_LENGTH) {
+      return null;
+    }
+  }
+  return value as ReadonlyArray<string>;
+}
+
+/**
+ * Project a Hub passkey record onto the bounded {@link HostedHubPasskey} view,
+ * or `null` when it is not one. Only the four known members are copied, so no
+ * unexpected Hub metadata can reach a view model. Callers choose the strictness:
+ * `listPasskeys` rejects a malformed entry, while the add-passkey verify (whose
+ * body shape is not part of the observed contract) tolerates its absence.
+ */
+function passkeyValue(value: unknown): HostedHubPasskey | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== "string" || !CREDENTIAL_ID_PATTERN.test(record.id)) return null;
+  return {
+    id: record.id,
+    label:
+      typeof record.label === "string" && record.label.length <= MAX_PASSKEY_LABEL_LENGTH
+        ? record.label
+        : null,
+    createdAt: nullableNumber(record.createdAt) ? record.createdAt : null,
+    lastUsedAt: nullableNumber(record.lastUsedAt) ? record.lastUsedAt : null,
+  };
 }
 
 async function responseJson(response: {
@@ -237,7 +316,11 @@ export class HostedHubApi {
     const base = this.#isBearer
       ? "/api/auth/native/invitations/registration"
       : "/api/auth/invitations/registration";
-    return this.#registerPasskey(`${base}/options`, `${base}/verify`, input, signal);
+    return this.#registerPasskey(`${base}/options`, `${base}/verify`, input, {
+      authenticated: false,
+      ...(signal ? { signal } : {}),
+      finish: (value) => this.#finishLogin(value),
+    });
   }
 
   async bootstrapOwner(
@@ -251,31 +334,131 @@ export class HostedHubApi {
     const base = this.#isBearer
       ? "/api/auth/native/bootstrap/registration"
       : "/api/auth/bootstrap/registration";
-    return this.#registerPasskey(`${base}/options`, `${base}/verify`, input, signal);
+    return this.#registerPasskey(`${base}/options`, `${base}/verify`, input, {
+      authenticated: false,
+      ...(signal ? { signal } : {}),
+      finish: (value) => this.#finishLogin(value),
+    });
   }
 
-  async #registerPasskey(
+  /**
+   * List the passkeys registered against the signed-in account.
+   *
+   * `GET /api/account/passkeys` is confirmed registered (it answers 401 without
+   * a session). The response member name and record shape are inferred by
+   * symmetry with `/api/nodes` → `{ nodes: [...] }` and are projected through
+   * {@link passkeyValue}, so an unexpected member can never reach a view model.
+   */
+  async listPasskeys(signal?: AbortSignal): Promise<ReadonlyArray<HostedHubPasskey>> {
+    const result = await this.#request("/api/account/passkeys", signal ? { signal } : {});
+    if (!Array.isArray(result.passkeys)) throw new HostedHubApiError("invalid_response", 502);
+    return result.passkeys.map((value) => {
+      const passkey = passkeyValue(value);
+      if (!passkey) throw new HostedHubApiError("invalid_response", 502);
+      return passkey;
+    });
+  }
+
+  /**
+   * Register an additional passkey on the *already signed-in* account — the
+   * "add this device" ceremony. Runs on the existing session (CSRF in cookie
+   * mode, `Authorization: DPoP` + an `ath`-bound proof in bearer mode) rather
+   * than the pre-session mint used by bootstrap and invitation redemption.
+   */
+  async addPasskey(
+    input: { readonly passkeyLabel: string | null },
+    signal?: AbortSignal,
+  ): Promise<HostedHubPasskey | null> {
+    return this.#registerPasskey(
+      "/api/account/passkeys/registration/options",
+      "/api/account/passkeys/registration/verify",
+      input,
+      {
+        authenticated: true,
+        ...(signal ? { signal } : {}),
+        finish: (value) => this.#finishAddPasskey(value),
+      },
+    );
+  }
+
+  /**
+   * Revoke one of the account's passkeys.
+   *
+   * The revoke shape is **not** part of the observed contract; `DELETE` on the
+   * collection member is the least surprising reading of a registered
+   * `/api/account/passkeys` collection, so that is what this issues. The
+   * credential id is validated against {@link CREDENTIAL_ID_PATTERN} before it
+   * is placed in the path, so a malformed id fails closed without reaching the
+   * wire. The response body is deliberately not projected.
+   */
+  async revokePasskey(credentialId: string, signal?: AbortSignal): Promise<void> {
+    if (!CREDENTIAL_ID_PATTERN.test(credentialId)) {
+      throw new HostedHubApiError("invalid_request", 400);
+    }
+    await this.#request(`/api/account/passkeys/${encodeURIComponent(credentialId)}`, {
+      method: "DELETE",
+      csrf: true,
+      ...(signal ? { signal } : {}),
+    });
+  }
+
+  /**
+   * Fetch the account's recovery codes for a single display.
+   *
+   * `/api/account/recovery-codes` is confirmed registered and rejects `GET`
+   * (405), so the client issues `POST`. The `recoveryCodes: string[]` member is
+   * the shape the verify responses already use. The codes are returned to the
+   * caller and never persisted, logged, or placed in an error by this client.
+   */
+  async getRecoveryCodes(signal?: AbortSignal): Promise<ReadonlyArray<string>> {
+    const result = await this.#request("/api/account/recovery-codes", {
+      method: "POST",
+      body: {},
+      csrf: true,
+      ...(signal ? { signal } : {}),
+    });
+    const recoveryCodes = recoveryCodesValue(result.recoveryCodes);
+    if (!recoveryCodes || recoveryCodes.length === 0) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
+    return recoveryCodes;
+  }
+
+  async #registerPasskey<T>(
     optionsPath: string,
     verifyPath: string,
     input: unknown,
-    signal?: AbortSignal,
-  ): Promise<HostedHubSessionResponse> {
-    const options = await this.#request(optionsPath, {
+    options: {
+      /**
+       * `true` when the ceremony runs on an existing session (add-passkey):
+       * cookie mode presents the session CSRF token and bearer mode presents
+       * `Authorization: DPoP` plus an `ath`-bound proof. `false` is the
+       * pre-session mint ceremony used by bootstrap and invitation redemption.
+       */
+      readonly authenticated: boolean;
+      readonly signal?: AbortSignal;
+      readonly finish: (value: Record<string, unknown>) => T;
+    },
+  ): Promise<T> {
+    const transport = {
+      csrf: options.authenticated,
+      ...(options.authenticated ? {} : { dpop: "mint" as const }),
+      ...(options.signal ? { signal: options.signal } : {}),
+    };
+    const challenge = await this.#request(optionsPath, {
       method: "POST",
       body: input,
-      dpop: "mint",
-      ...(signal ? { signal } : {}),
+      ...transport,
     });
     const response = await this.#passkeyCeremony.register(
-      validatePasskeyRegistrationOptions(options.options),
-      signal,
+      validatePasskeyRegistrationOptions(challenge.options),
+      options.signal,
     );
-    return this.#finishLogin(
+    return options.finish(
       await this.#request(verifyPath, {
         method: "POST",
         body: { response },
-        dpop: "mint",
-        ...(signal ? { signal } : {}),
+        ...transport,
       }),
     );
   }
@@ -301,10 +484,38 @@ export class HostedHubApi {
     const response = this.#accountAndSession(value);
     // A native restore may rotate the token; persist a fresh one if present,
     // otherwise the existing enclave-bound token stays in force.
-    if (typeof value.token === "string" && value.token.length > 0) {
-      this.#writeBearerToken(value.token);
-    }
+    const token = bearerTokenValue(value.token);
+    if (token) this.#writeBearerToken(token);
     return response;
+  }
+
+  /**
+   * Complete an add-passkey ceremony on an already-authenticated session.
+   *
+   * Unlike bootstrap and invitation registration this must **not** mint a
+   * session. The caller is already signed in, and the Hub's verify response is
+   * not required to carry session material, so session material is only
+   * *rotated* here — never demanded, never cleared:
+   *
+   * - Demanding it (what `#finishLogin` does, via `#nativeSessionResponse` /
+   *   `#sessionResponse`) would reject a valid Hub response as
+   *   `invalid_response` and report a successful enrolment as a failure.
+   * - Clearing it would sign the user out for adding a credential.
+   * - Ignoring a token the Hub *did* return would leave the client presenting a
+   *   token the Hub has rotated away from, so a well-formed one is persisted —
+   *   the same rotation-tolerant contract as `#restoreNativeSession`.
+   *
+   * Neither the token nor the CSRF token is returned; the caller only ever sees
+   * the bounded passkey view.
+   */
+  #finishAddPasskey(value: Record<string, unknown>): HostedHubPasskey | null {
+    if (this.#isBearer) {
+      const token = bearerTokenValue(value.token);
+      if (token) this.#writeBearerToken(token);
+    } else if (typeof value.csrfToken === "string" && value.csrfToken.length > 0) {
+      this.#sessionCredentials.writeCsrfToken(value.csrfToken);
+    }
+    return passkeyValue(value.passkey);
   }
 
   async signOut(signal?: AbortSignal): Promise<void> {
@@ -477,7 +688,8 @@ export class HostedHubApi {
   #accountAndSession(value: Record<string, unknown>): HostedHubSessionResponse {
     const account = objectValue(value.account);
     const session = objectValue(value.session);
-    const recoveryCodes = value.recoveryCodes;
+    const recoveryCodes =
+      value.recoveryCodes === undefined ? undefined : recoveryCodesValue(value.recoveryCodes);
     if (
       typeof account.id !== "string" ||
       typeof account.displayName !== "string" ||
@@ -491,8 +703,7 @@ export class HostedHubApi {
       !Number.isSafeInteger(session.lastSeenAt) ||
       !nullableNumber(session.revokedAt) ||
       (session.revocationReasonCode !== null && typeof session.revocationReasonCode !== "string") ||
-      (recoveryCodes !== undefined &&
-        (!Array.isArray(recoveryCodes) || recoveryCodes.some((code) => typeof code !== "string")))
+      recoveryCodes === null
     ) {
       throw new HostedHubApiError("invalid_response", 502);
     }
@@ -542,16 +753,15 @@ export class HostedHubApi {
     readonly response: HostedHubSessionResponse;
     readonly token: string;
   } {
-    if (typeof value.token !== "string" || value.token.length === 0 || value.token.length > 4096) {
-      throw new HostedHubApiError("invalid_response", 502);
-    }
-    return { response: this.#accountAndSession(value), token: value.token };
+    const token = bearerTokenValue(value.token);
+    if (!token) throw new HostedHubApiError("invalid_response", 502);
+    return { response: this.#accountAndSession(value), token };
   }
 
   async #request(
     pathname: string,
     options: {
-      readonly method?: "GET" | "POST";
+      readonly method?: "GET" | "POST" | "DELETE";
       readonly body?: unknown;
       readonly csrf?: boolean;
       /** Bearer mode only: `"mint"` = login/public (no token, proof without `ath`). */
@@ -562,6 +772,12 @@ export class HostedHubApi {
     const url = new URL(pathname, this.#endpoint.origin());
     if (url.origin !== this.#endpoint.origin() || url.search || url.hash) {
       throw new HostedHubApiError("invalid_request", 400);
+    }
+    // Fail closed before any I/O — and before any passkey prompt — on routes the
+    // Hub only serves to a browser transport. Reaching the wire here yields an
+    // unexplained 404 the caller cannot act on.
+    if (this.#isBearer && isBrowserOnlyPath(url.pathname)) {
+      throw new HostedHubApiError("browser_only_transport", 400);
     }
     const method = options.method ?? "GET";
     const headers: Record<string, string> = { ...JSON_HEADERS };
@@ -615,6 +831,11 @@ export class HostedHubApi {
         throw error;
       throw new HostedHubApiError("unavailable", 0);
     }
+    // A successful 204 carries no body by definition. Every caller validates the
+    // record it gets back, so an empty record is rejected by exactly the checks
+    // that reject a malformed body today; only callers that project nothing
+    // (`revokePasskey`) accept it.
+    if (response.ok && response.status === 204) return {};
     return responseJson(response);
   }
 }

@@ -9,6 +9,7 @@ import type {
   HostedDirectoryStatus,
   HostedHubAccount,
   HostedHubNode,
+  HostedHubPasskey,
   HostedHubSession,
   HostedHubSessionResponse,
   HostedRelayFailure,
@@ -57,18 +58,51 @@ const initialState: HostedHubState = {
   generation: 0,
 };
 
+export type HostedPasskeyDirectoryStatus = "idle" | "loading" | "ready" | "stale";
+
+export type HostedAccountActionStatus =
+  | "idle"
+  | "adding-passkey"
+  | "revoking-passkey"
+  | "loading-recovery-codes";
+
+/**
+ * Account-management surface state. Kept in its own store rather than widened
+ * into {@link HostedHubState} so the relay/session lifecycle state — republished
+ * on every transport and session transition — is not perturbed by an account
+ * screen, and so an account read never re-renders a relay consumer.
+ *
+ * No secret material lives here. A passkey `id` is a public credential
+ * identifier; recovery codes are deliberately *not* stored here — they go to the
+ * existing single-display `hostedHubStore.recoveryCodes` slot that
+ * `dismissRecoveryCodes` already clears.
+ */
+export interface HostedAccountState {
+  readonly passkeys: ReadonlyArray<HostedHubPasskey>;
+  readonly passkeysStatus: HostedPasskeyDirectoryStatus;
+  readonly actionStatus: HostedAccountActionStatus;
+  readonly errorMessage: string | null;
+}
+
+const initialAccountState: HostedAccountState = {
+  passkeys: [],
+  passkeysStatus: "idle",
+  actionStatus: "idle",
+  errorMessage: null,
+};
+
 type HostedHubStoreListener = () => void;
 
 /** Neutral external store; React binding remains in the web adapter. */
-export const hostedHubStore = (() => {
-  let state = initialState;
+function createHostedStore<T extends object>(initial: T) {
+  let state = initial;
   const listeners = new Set<HostedHubStoreListener>();
   const publish = () => listeners.forEach((listener) => listener());
   return {
     getState: () => state,
-    getInitialState: () => initialState,
-    setState: (patch: Partial<HostedHubState> | HostedHubState, replace = false) => {
-      state = replace ? (patch as HostedHubState) : { ...state, ...patch };
+    getInitialState: () => initial,
+    setState: (patch: Partial<T> | T, replace = false) => {
+      state = replace ? (patch as T) : { ...state, ...patch };
       publish();
     },
     subscribe: (listener: HostedHubStoreListener) => {
@@ -76,10 +110,18 @@ export const hostedHubStore = (() => {
       return () => listeners.delete(listener);
     },
   };
-})();
+}
+
+export const hostedHubStore = createHostedStore(initialState);
+
+export const hostedAccountStore = createHostedStore(initialAccountState);
 
 function patchState(patch: Partial<HostedHubState>): void {
   hostedHubStore.setState(patch);
+}
+
+function patchAccountState(patch: Partial<HostedAccountState>): void {
+  hostedAccountStore.setState(patch);
 }
 
 function errorMessage(error: unknown): string {
@@ -122,6 +164,9 @@ class HostedHubController {
   #browserResumePromise: Promise<void> | null = null;
   #browserSuspendPromise: Promise<void> | null = null;
   #browserLifecycleGeneration = 0;
+  #passkeysOperation: AbortController | null = null;
+  #passkeysPromise: Promise<void> | null = null;
+  #accountOperation: AbortController | null = null;
 
   bootstrap(): Promise<void> {
     if (this.#bootstrapPromise) return this.#bootstrapPromise;
@@ -231,6 +276,137 @@ class HostedHubController {
     patchState({ recoveryCodes: [] });
   }
 
+  /**
+   * Load the account's passkeys. Deduplicated like the node directory: a second
+   * caller joins the in-flight read rather than issuing a second request.
+   */
+  refreshPasskeys(): Promise<void> {
+    if (this.#passkeysPromise) return this.#passkeysPromise;
+    const operation = new AbortController();
+    this.#passkeysOperation = operation;
+    const promise = this.#refreshPasskeys(operation).finally(() => {
+      if (this.#passkeysOperation === operation) this.#passkeysOperation = null;
+      if (this.#passkeysPromise === promise) this.#passkeysPromise = null;
+    });
+    this.#passkeysPromise = promise;
+    return promise;
+  }
+
+  async #refreshPasskeys(operation: AbortController): Promise<void> {
+    const state = hostedHubStore.getState();
+    if (state.accountStatus !== "authenticated") return;
+    const sessionId = state.session?.id ?? null;
+    if (hostedAccountStore.getState().passkeys.length === 0) {
+      patchAccountState({ passkeysStatus: "loading" });
+    }
+    try {
+      const passkeys = await getHostedHubApi().listPasskeys(operation.signal);
+      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) return;
+      patchAccountState({ passkeys, passkeysStatus: "ready", errorMessage: null });
+    } catch (error) {
+      if (operation.signal.aborted) return;
+      if (isSessionFailure(error)) {
+        await this.expireSession();
+        return;
+      }
+      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) return;
+      patchAccountState({ passkeysStatus: "stale", errorMessage: errorMessage(error) || null });
+    }
+  }
+
+  /** Enrol an additional passkey on the signed-in account ("add this device"). */
+  async addPasskey(input: { readonly passkeyLabel: string | null }): Promise<void> {
+    const committed = await this.#accountAction("adding-passkey", async (signal) => {
+      await getHostedHubApi().addPasskey(input, signal);
+      return () => undefined;
+    });
+    if (committed) await this.refreshPasskeys();
+  }
+
+  async revokePasskey(credentialId: string): Promise<void> {
+    const committed = await this.#accountAction("revoking-passkey", async (signal) => {
+      await getHostedHubApi().revokePasskey(credentialId, signal);
+      return () => undefined;
+    });
+    if (committed) await this.refreshPasskeys();
+  }
+
+  /**
+   * Fetch recovery codes for a single display. They land in the existing
+   * `recoveryCodes` slot — in memory only, cleared by `dismissRecoveryCodes` and
+   * by any account teardown — and are never written to the account store, an
+   * error message, or a log.
+   */
+  async loadRecoveryCodes(): Promise<void> {
+    await this.#accountAction("loading-recovery-codes", async (signal) => {
+      const recoveryCodes = await getHostedHubApi().getRecoveryCodes(signal);
+      return () => patchState({ recoveryCodes });
+    });
+  }
+
+  /**
+   * Run one account-surface mutation at a time, publishing its result only
+   * behind the same session fence the directory refresh uses. `run` returns the
+   * commit thunk so nothing reaches a store before that fence passes. Resolves
+   * `true` when the action committed.
+   */
+  async #accountAction(
+    status: Exclude<HostedAccountActionStatus, "idle">,
+    run: (signal: AbortSignal) => Promise<() => void>,
+  ): Promise<boolean> {
+    if (hostedAccountStore.getState().actionStatus !== "idle") return false;
+    const state = hostedHubStore.getState();
+    if (state.accountStatus !== "authenticated") return false;
+    const sessionId = state.session?.id ?? null;
+    const operation = new AbortController();
+    this.#accountOperation = operation;
+    patchAccountState({ actionStatus: status, errorMessage: null });
+    try {
+      const commit = await run(operation.signal);
+      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) return false;
+      commit();
+      return true;
+    } catch (error) {
+      if (operation.signal.aborted) return false;
+      if (isSessionFailure(error)) {
+        await this.expireSession();
+        return false;
+      }
+      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) return false;
+      patchAccountState({ errorMessage: errorMessage(error) || null });
+      return false;
+    } finally {
+      if (this.#accountOperation === operation) {
+        this.#accountOperation = null;
+        if (hostedAccountStore.getState().actionStatus === status) {
+          patchAccountState({ actionStatus: "idle" });
+        }
+      }
+    }
+  }
+
+  /**
+   * Fence an account-surface result: a result may only publish while the same
+   * Hub session that issued the request is still the authenticated one.
+   */
+  #isCurrentAccountSession(signal: AbortSignal, sessionId: string | null): boolean {
+    const active = hostedHubStore.getState();
+    return (
+      !signal.aborted &&
+      active.accountStatus === "authenticated" &&
+      (active.session?.id ?? null) === sessionId
+    );
+  }
+
+  #clearAccountSurface(): void {
+    this.#passkeysOperation?.abort();
+    this.#passkeysOperation = null;
+    this.#passkeysPromise = null;
+    this.#accountOperation?.abort();
+    this.#accountOperation = null;
+    hostedAccountStore.setState(initialAccountState, true);
+  }
+
   resetForTests(): void {
     this.#operation?.abort();
     this.#operation = null;
@@ -249,6 +425,7 @@ class HostedHubController {
     this.#browserResumePromise = null;
     this.#browserSuspendPromise = null;
     this.#browserLifecycleGeneration += 1;
+    this.#clearAccountSurface();
     getHostedHubApi().clearSessionMaterial();
     hostedHubStore.setState(initialState, true);
   }
@@ -373,6 +550,7 @@ class HostedHubController {
     this.#directoryPromise = null;
     this.#operation?.abort();
     this.#operation = null;
+    this.#clearAccountSurface();
     const previousEnvironmentId = hostedHubStore.getState().selectedNode?.environmentId ?? null;
     patchState({
       ...initialState,

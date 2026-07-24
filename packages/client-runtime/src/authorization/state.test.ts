@@ -44,7 +44,12 @@ import {
   type HostedNodeLifecycle,
   type HostedRuntimeConfiguration,
 } from "./runtime";
-import { hostedHubController, hostedHubStore, markHostedSessionReady } from "./state";
+import {
+  hostedAccountStore,
+  hostedHubController,
+  hostedHubStore,
+  markHostedSessionReady,
+} from "./state";
 
 const hasHostedRelayPendingRequests = vi.fn(() => false);
 
@@ -57,6 +62,10 @@ const hostedHubApi = {
   bootstrapOwner: vi.fn(),
   redeemInvitation: vi.fn(),
   listNodes: vi.fn(),
+  listPasskeys: vi.fn(),
+  addPasskey: vi.fn(),
+  revokePasskey: vi.fn(),
+  getRecoveryCodes: vi.fn(),
   clearSessionMaterial: vi.fn(),
 } as unknown as HostedHubApi;
 
@@ -1148,6 +1157,195 @@ describe("hosted registration and directory state", () => {
     expect(hostedHubStore.getState()).toMatchObject({
       sessionStatus: "ready",
       sessionRecoveredAfterUnknown: false,
+    });
+  });
+});
+
+describe("hosted account management state", () => {
+  const passkey = {
+    id: "credential-aaa",
+    label: "Studio laptop",
+    createdAt: 10,
+    lastUsedAt: null,
+  } as const;
+
+  /** Bring the controller to an authenticated, ready-directory state. */
+  async function authenticate(): Promise<void> {
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([]);
+    await hostedHubController.bootstrap();
+  }
+
+  it("loads the account's passkeys and deduplicates concurrent reads", async () => {
+    await authenticate();
+    const listPasskeys = vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
+
+    expect(hostedAccountStore.getState()).toMatchObject({
+      passkeys: [],
+      passkeysStatus: "idle",
+      actionStatus: "idle",
+    });
+    await Promise.all([
+      hostedHubController.refreshPasskeys(),
+      hostedHubController.refreshPasskeys(),
+    ]);
+
+    expect(listPasskeys).toHaveBeenCalledOnce();
+    expect(hostedAccountStore.getState()).toMatchObject({
+      passkeys: [passkey],
+      passkeysStatus: "ready",
+      errorMessage: null,
+    });
+  });
+
+  it("does not read passkeys while signed out", async () => {
+    const listPasskeys = vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
+    await hostedHubController.refreshPasskeys();
+    expect(listPasskeys).not.toHaveBeenCalled();
+    expect(hostedAccountStore.getState().passkeysStatus).toBe("idle");
+  });
+
+  it("reports a bounded passkey read failure without dropping the session", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "listPasskeys").mockRejectedValue(
+      new HostedHubApiError("unavailable", 0),
+    );
+    await hostedHubController.refreshPasskeys();
+    expect(hostedHubStore.getState().accountStatus).toBe("authenticated");
+    expect(hostedAccountStore.getState()).toMatchObject({
+      passkeysStatus: "stale",
+      errorMessage: "Hub is temporarily unavailable.",
+    });
+  });
+
+  it("expires the session when an account read is rejected as unauthenticated", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "listPasskeys").mockRejectedValue(
+      new HostedHubApiError("session_invalid", 401),
+    );
+    await hostedHubController.refreshPasskeys();
+    expect(hostedHubStore.getState().accountStatus).toBe("session-expired");
+    expect(hostedAccountStore.getState()).toEqual(hostedAccountStore.getInitialState());
+  });
+
+  it("adds a passkey and refreshes the list from the Hub", async () => {
+    await authenticate();
+    const addPasskey = vi.spyOn(hostedHubApi, "addPasskey").mockResolvedValue(passkey);
+    const listPasskeys = vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
+
+    await hostedHubController.addPasskey({ passkeyLabel: "Studio laptop" });
+
+    expect(addPasskey).toHaveBeenCalledWith({ passkeyLabel: "Studio laptop" }, expect.anything());
+    expect(listPasskeys).toHaveBeenCalledOnce();
+    expect(hostedAccountStore.getState()).toMatchObject({
+      passkeys: [passkey],
+      passkeysStatus: "ready",
+      actionStatus: "idle",
+    });
+  });
+
+  it("revokes a passkey and refreshes the list from the Hub", async () => {
+    await authenticate();
+    const revokePasskey = vi.spyOn(hostedHubApi, "revokePasskey").mockResolvedValue();
+    const listPasskeys = vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([]);
+
+    await hostedHubController.revokePasskey("credential-aaa");
+
+    expect(revokePasskey).toHaveBeenCalledWith("credential-aaa", expect.anything());
+    expect(listPasskeys).toHaveBeenCalledOnce();
+    expect(hostedAccountStore.getState()).toMatchObject({ passkeys: [], actionStatus: "idle" });
+  });
+
+  it("maps an add-passkey failure to a bounded message and stays authenticated", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "addPasskey").mockRejectedValue(
+      new HostedHubApiError("browser_only_transport", 400),
+    );
+    const listPasskeys = vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([]);
+
+    await hostedHubController.addPasskey({ passkeyLabel: null });
+
+    expect(listPasskeys).not.toHaveBeenCalled();
+    expect(hostedHubStore.getState().accountStatus).toBe("authenticated");
+    expect(hostedAccountStore.getState()).toMatchObject({
+      actionStatus: "idle",
+      errorMessage: "This action is only available in a browser.",
+    });
+  });
+
+  it("runs one account action at a time", async () => {
+    await authenticate();
+    let release: (() => void) | null = null;
+    vi.spyOn(hostedHubApi, "addPasskey").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(null);
+        }),
+    );
+    const revokePasskey = vi.spyOn(hostedHubApi, "revokePasskey").mockResolvedValue();
+    vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([]);
+
+    const pending = hostedHubController.addPasskey({ passkeyLabel: null });
+    expect(hostedAccountStore.getState().actionStatus).toBe("adding-passkey");
+    await hostedHubController.revokePasskey("credential-aaa");
+    expect(revokePasskey).not.toHaveBeenCalled();
+
+    release?.();
+    await pending;
+    expect(hostedAccountStore.getState().actionStatus).toBe("idle");
+  });
+
+  it("shows recovery codes once and keeps them out of the account surface", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "getRecoveryCodes").mockResolvedValue(["recovery-sensitive-canary"]);
+
+    await hostedHubController.loadRecoveryCodes();
+
+    expect(hostedHubStore.getState().recoveryCodes).toEqual(["recovery-sensitive-canary"]);
+    // Recovery codes live only in the single-display slot: never in the account
+    // surface, never in an error message, never in a status.
+    expect(JSON.stringify(hostedAccountStore.getState())).not.toContain(
+      "recovery-sensitive-canary",
+    );
+
+    hostedHubController.dismissRecoveryCodes();
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
+  });
+
+  it("drops the account surface and any displayed codes when the account clears", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
+    vi.spyOn(hostedHubApi, "getRecoveryCodes").mockResolvedValue(["recovery-sensitive-canary"]);
+    await hostedHubController.refreshPasskeys();
+    await hostedHubController.loadRecoveryCodes();
+    vi.spyOn(hostedHubApi, "signOut").mockResolvedValue();
+
+    await hostedHubController.signOut();
+
+    expect(hostedAccountStore.getState()).toEqual(hostedAccountStore.getInitialState());
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
+    const persisted = `${JSON.stringify(hostedHubStore.getState())}${JSON.stringify(
+      hostedAccountStore.getState(),
+    )}`;
+    expect(persisted).not.toContain("recovery-sensitive-canary");
+    expect(persisted).not.toContain("csrf-sensitive-canary");
+  });
+
+  it("discards an account result that outlived its session", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "listPasskeys").mockImplementation(async () => {
+      // The session is replaced while the read is in flight.
+      hostedHubStore.setState({
+        session: { ...sessionResponse.session, id: "sess_bbbbbbbbbbbbbbbbbbbbbb" },
+      });
+      return [passkey];
+    });
+
+    await hostedHubController.refreshPasskeys();
+
+    expect(hostedAccountStore.getState()).toMatchObject({
+      passkeys: [],
+      passkeysStatus: "loading",
     });
   });
 });

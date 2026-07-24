@@ -76,6 +76,19 @@ export interface HostedHubSessionResponse {
   readonly recoveryCodes?: ReadonlyArray<string>;
 }
 
+/**
+ * A passkey credential registered against the signed-in account. `id` is the
+ * WebAuthn credential id — a public identifier, never authenticator secret
+ * material. The remaining members are display metadata and are `null` whenever
+ * the Hub omits them; nothing outside this shape is projected.
+ */
+export interface HostedHubPasskey {
+  readonly id: string;
+  readonly label: string | null;
+  readonly createdAt: number | null;
+  readonly lastUsedAt: number | null;
+}
+
 export interface HostedNodeEnrollment {
   readonly id: string;
   readonly label: string;
