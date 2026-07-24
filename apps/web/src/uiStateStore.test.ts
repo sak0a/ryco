@@ -25,7 +25,9 @@ import {
   setReasoningIndicatorStyle,
   setThreadChangedFilesExpanded,
   setThreadPinned,
+  setThreadTurnFoldExpanded,
   setThreadWorkEntryExpanded,
+  setThreadWorkGroupExpanded,
   setTokenModeControlStyle,
   setWideComposerControlsAutoCollapse,
   syncProjects,
@@ -44,6 +46,8 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     pinnedThreadKeys: {},
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
+    threadTurnFoldExpandedById: {},
+    threadWorkGroupExpandedById: {},
     threadWorkEntryExpandedById: {},
     defaultAdvertisedEndpointKey: null,
     reasoningIndicatorStyle: "icon-dots",
@@ -421,6 +425,14 @@ describe("uiStateStore pure functions", () => {
           "turn-2": false,
         },
       },
+      threadTurnFoldExpandedById: {
+        [thread1]: { "turn-fold:settled:turn-1": true },
+        [thread2]: { "turn-fold:running:turn-2": false },
+      },
+      threadWorkGroupExpandedById: {
+        [thread1]: { "work-group:work-1": true },
+        [thread2]: { "work-group:work-2": true },
+      },
     });
 
     const next = syncThreads(initialState, [{ key: thread1 }]);
@@ -435,6 +447,12 @@ describe("uiStateStore pure functions", () => {
       [thread1]: {
         "turn-1": false,
       },
+    });
+    expect(next.threadTurnFoldExpandedById).toEqual({
+      [thread1]: { "turn-fold:settled:turn-1": true },
+    });
+    expect(next.threadWorkGroupExpandedById).toEqual({
+      [thread1]: { "work-group:work-1": true },
     });
   });
 
@@ -724,6 +742,12 @@ describe("uiStateStore pure functions", () => {
           "turn-1": false,
         },
       },
+      threadTurnFoldExpandedById: {
+        [thread1]: { "turn-fold:settled:turn-1": true },
+      },
+      threadWorkGroupExpandedById: {
+        [thread1]: { "work-group:work-1": true },
+      },
     });
 
     const next = clearThreadUi(initialState, thread1);
@@ -731,6 +755,8 @@ describe("uiStateStore pure functions", () => {
     expect(next.pinnedThreadKeys).toEqual({});
     expect(next.threadLastVisitedAtById).toEqual({});
     expect(next.threadChangedFilesExpandedById).toEqual({});
+    expect(next.threadTurnFoldExpandedById).toEqual({});
+    expect(next.threadWorkGroupExpandedById).toEqual({});
   });
 
   it("setThreadChangedFilesExpanded stores collapsed turns per thread", () => {
@@ -822,6 +848,46 @@ describe("uiStateStore pure functions", () => {
     const next = setThreadWorkEntryExpanded(initialState, thread1, "entry-1", true);
 
     expect(next).toBe(initialState);
+  });
+
+  it("stores turn-fold and work-group expansion independently", () => {
+    const thread1 = ThreadId.make("thread-1");
+    const withRunningFoldCollapsed = setThreadTurnFoldExpanded(
+      makeUiState(),
+      thread1,
+      "turn-fold:running:turn-1",
+      false,
+    );
+    const next = setThreadWorkGroupExpanded(
+      withRunningFoldCollapsed,
+      thread1,
+      "work-group:work-1",
+      true,
+    );
+
+    expect(next.threadTurnFoldExpandedById).toEqual({
+      [thread1]: { "turn-fold:running:turn-1": false },
+    });
+    expect(next.threadWorkGroupExpandedById).toEqual({
+      [thread1]: { "work-group:work-1": true },
+    });
+    expect(next.threadWorkEntryExpandedById).toEqual({});
+  });
+
+  it("keeps running and settled fold overrides under distinct lifecycle keys", () => {
+    const thread1 = ThreadId.make("thread-1");
+    const running = setThreadTurnFoldExpanded(
+      makeUiState(),
+      thread1,
+      "turn-fold:running:turn-1",
+      true,
+    );
+    const settled = setThreadTurnFoldExpanded(running, thread1, "turn-fold:settled:turn-1", false);
+
+    expect(settled.threadTurnFoldExpandedById[thread1]).toEqual({
+      "turn-fold:running:turn-1": true,
+      "turn-fold:settled:turn-1": false,
+    });
   });
 });
 

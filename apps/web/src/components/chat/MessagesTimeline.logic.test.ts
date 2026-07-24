@@ -287,6 +287,7 @@ describe("deriveMessagesTimelineRows", () => {
         },
       ],
       completionDividerBeforeEntryId: "assistant-final-entry",
+      turnFoldExpandedById: { "turn-fold:settled:turn-1": true },
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -302,6 +303,321 @@ describe("deriveMessagesTimelineRows", () => {
     expect(assistantRows[0]?.showAssistantCopyButton).toBe(false);
     expect(assistantRows[1]?.showAssistantCopyButton).toBe(true);
     expect(assistantRows[1]?.showCompletionDivider).toBe(true);
+  });
+
+  it("starts a running turn expanded and replaces the standalone working row", () => {
+    const turnId = TurnId.make("turn-1");
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "user-1" as never,
+            role: "user",
+            text: "Inspect it",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "commentary-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:05Z",
+          message: {
+            id: "assistant-1" as never,
+            role: "assistant",
+            text: "Looking through the timeline.",
+            turnId,
+            createdAt: "2026-01-01T00:00:05Z",
+            streaming: true,
+          },
+        },
+        {
+          id: "work-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:07Z",
+          entry: makeWorkEntry({ id: "work-1", turnId }),
+        },
+      ],
+      latestTurn: {
+        turnId,
+        state: "running",
+        startedAt: "2026-01-01T00:00:01Z",
+        completedAt: null,
+      },
+      runningTurnId: turnId,
+      completionDividerBeforeEntryId: null,
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:00:01Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.kind)).toEqual(["message", "turn-fold", "message", "work"]);
+    expect(rows[1]).toEqual(
+      expect.objectContaining({
+        kind: "turn-fold",
+        foldId: "turn-fold:running:turn-1",
+        status: "running",
+        durationStart: "2026-01-01T00:00:01Z",
+        expanded: true,
+      }),
+    );
+    expect(rows.some((row) => row.kind === "working")).toBe(false);
+  });
+
+  it("keeps a user-collapsed running turn closed as new activity arrives", () => {
+    const turnId = TurnId.make("turn-1");
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "commentary-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:05Z",
+          message: {
+            id: "assistant-1" as never,
+            role: "assistant",
+            text: "Looking.",
+            turnId,
+            createdAt: "2026-01-01T00:00:05Z",
+            streaming: true,
+          },
+        },
+        {
+          id: "new-work-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:08Z",
+          entry: makeWorkEntry({ id: "work-new", turnId }),
+        },
+      ],
+      latestTurn: {
+        turnId,
+        state: "running",
+        startedAt: "2026-01-01T00:00:01Z",
+        completedAt: null,
+      },
+      runningTurnId: turnId,
+      turnFoldExpandedById: { "turn-fold:running:turn-1": false },
+      completionDividerBeforeEntryId: null,
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:00:01Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        kind: "turn-fold",
+        foldId: "turn-fold:running:turn-1",
+        expanded: false,
+      }),
+    ]);
+  });
+
+  it("automatically collapses a settled turn and leaves its final response visible", () => {
+    const turnId = TurnId.make("turn-1");
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "user-1" as never,
+            role: "user",
+            text: "Build it",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "commentary-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:05Z",
+          message: {
+            id: "assistant-commentary" as never,
+            role: "assistant",
+            text: "Checking.",
+            turnId,
+            createdAt: "2026-01-01T00:00:05Z",
+            completedAt: "2026-01-01T00:00:06Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "work-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:10Z",
+          entry: makeWorkEntry({ id: "work-1", turnId }),
+        },
+        {
+          id: "final-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:39Z",
+          message: {
+            id: "assistant-final" as never,
+            role: "assistant",
+            text: "Done",
+            turnId,
+            createdAt: "2026-01-01T00:00:39Z",
+            completedAt: "2026-01-01T00:00:40Z",
+            streaming: false,
+          },
+        },
+      ],
+      latestTurn: {
+        turnId,
+        state: "completed",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:00:40Z",
+      },
+      runningTurnId: null,
+      turnFoldExpandedById: { "turn-fold:running:turn-1": true },
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.id)).toEqual([
+      "user-entry",
+      "turn-fold:settled:turn-1",
+      "final-entry",
+    ]);
+    expect(rows[1]).toEqual(
+      expect.objectContaining({
+        kind: "turn-fold",
+        label: "Worked for 40s",
+        expanded: false,
+      }),
+    );
+  });
+
+  it("shows the latest tool and discloses previous tool calls", () => {
+    const timelineEntries = [
+      {
+        id: "work-entry-1",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:01Z",
+        entry: makeWorkEntry({ id: "work-1", createdAt: "2026-01-01T00:00:01Z" }),
+      },
+      {
+        id: "work-entry-2",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:02Z",
+        entry: makeWorkEntry({ id: "work-2", createdAt: "2026-01-01T00:00:02Z" }),
+      },
+    ];
+    const baseInput = {
+      timelineEntries,
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    };
+
+    const collapsed = deriveMessagesTimelineRows(baseInput);
+    expect(collapsed.map((row) => row.id)).toEqual(["work-2", "work-toggle:work-entry-1"]);
+    expect(collapsed[1]).toEqual(
+      expect.objectContaining({
+        kind: "work-toggle",
+        hiddenCount: 1,
+        onlyToolEntries: true,
+        expanded: false,
+      }),
+    );
+
+    const expanded = deriveMessagesTimelineRows({
+      ...baseInput,
+      workGroupExpandedById: { "work-group:work-entry-1": true },
+    });
+    expect(expanded.map((row) => row.id)).toEqual(["work-1", "work-2", "work-toggle:work-entry-1"]);
+  });
+
+  it("uses authoritative timing and a stopped label for an interrupted turn", () => {
+    const turnId = TurnId.make("turn-interrupted");
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "work-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:05Z",
+          entry: makeWorkEntry({ id: "work-1", turnId }),
+        },
+      ],
+      latestTurn: {
+        turnId,
+        state: "interrupted",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:00:47Z",
+      },
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        kind: "turn-fold",
+        label: "You stopped after 47s",
+        expanded: false,
+      }),
+    ]);
+  });
+
+  it("keeps the previous turn settled while a newly sent message awaits its turn id", () => {
+    const previousTurnId = TurnId.make("turn-previous");
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "previous-work-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:05Z",
+          entry: makeWorkEntry({ id: "work-previous", turnId: previousTurnId }),
+        },
+        {
+          id: "new-user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:01:00Z",
+          message: {
+            id: "user-new" as never,
+            role: "user",
+            text: "Do the next thing",
+            turnId: null,
+            createdAt: "2026-01-01T00:01:00Z",
+            streaming: false,
+          },
+        },
+      ],
+      latestTurn: {
+        turnId: previousTurnId,
+        state: "completed",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:00:10Z",
+      },
+      runningTurnId: null,
+      completionDividerBeforeEntryId: null,
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:01:00Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.kind)).toEqual(["turn-fold", "message", "working"]);
+    expect(rows[0]).toEqual(
+      expect.objectContaining({
+        foldId: "turn-fold:settled:turn-previous",
+        expanded: false,
+      }),
+    );
   });
 
   it("projects assistant diff summaries and user revert counts onto the affected rows", () => {

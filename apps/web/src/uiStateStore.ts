@@ -88,6 +88,10 @@ export interface UiThreadState {
   pinnedThreadKeys: Record<string, boolean>;
   threadLastVisitedAtById: Record<string, string>;
   threadChangedFilesExpandedById: Record<string, Record<string, boolean>>;
+  /** Session-only expansion overrides for running and settled turn folds. */
+  threadTurnFoldExpandedById: Record<string, Record<string, boolean>>;
+  /** Session-only expansion overrides for compact work-log groups. */
+  threadWorkGroupExpandedById: Record<string, Record<string, boolean>>;
   /**
    * Per-thread expand state for individual work-log entries (tool calls,
    * terminal commands). Session-only — not persisted.
@@ -130,6 +134,8 @@ const initialState: UiState = {
   pinnedThreadKeys: {},
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
+  threadTurnFoldExpandedById: {},
+  threadWorkGroupExpandedById: {},
   threadWorkEntryExpandedById: {},
   defaultAdvertisedEndpointKey: null,
   reasoningIndicatorStyle: DEFAULT_REASONING_INDICATOR_STYLE,
@@ -876,6 +882,16 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
       retainedThreadIds.has(threadId),
     ),
   );
+  const nextThreadTurnFoldExpandedById = Object.fromEntries(
+    Object.entries(state.threadTurnFoldExpandedById).filter(([threadId]) =>
+      retainedThreadIds.has(threadId),
+    ),
+  );
+  const nextThreadWorkGroupExpandedById = Object.fromEntries(
+    Object.entries(state.threadWorkGroupExpandedById).filter(([threadId]) =>
+      retainedThreadIds.has(threadId),
+    ),
+  );
   if (
     recordsEqual(state.pinnedThreadKeys, nextPinnedThreadKeys) &&
     recordsEqual(state.threadLastVisitedAtById, nextThreadLastVisitedAtById) &&
@@ -883,6 +899,8 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
       state.threadChangedFilesExpandedById,
       nextThreadChangedFilesExpandedById,
     ) &&
+    nestedBooleanRecordsEqual(state.threadTurnFoldExpandedById, nextThreadTurnFoldExpandedById) &&
+    nestedBooleanRecordsEqual(state.threadWorkGroupExpandedById, nextThreadWorkGroupExpandedById) &&
     nestedBooleanRecordsEqual(state.threadWorkEntryExpandedById, nextThreadWorkEntryExpandedById)
   ) {
     return state;
@@ -892,6 +910,8 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
     pinnedThreadKeys: nextPinnedThreadKeys,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
     threadChangedFilesExpandedById: nextThreadChangedFilesExpandedById,
+    threadTurnFoldExpandedById: nextThreadTurnFoldExpandedById,
+    threadWorkGroupExpandedById: nextThreadWorkGroupExpandedById,
     threadWorkEntryExpandedById: nextThreadWorkEntryExpandedById,
   };
 }
@@ -973,23 +993,38 @@ export function clearThreadUi(state: UiState, threadId: string): UiState {
   const hasPinnedState = threadId in state.pinnedThreadKeys;
   const hasVisitedState = threadId in state.threadLastVisitedAtById;
   const hasChangedFilesState = threadId in state.threadChangedFilesExpandedById;
+  const hasTurnFoldState = threadId in state.threadTurnFoldExpandedById;
+  const hasWorkGroupState = threadId in state.threadWorkGroupExpandedById;
   const hasWorkEntryState = threadId in state.threadWorkEntryExpandedById;
-  if (!hasPinnedState && !hasVisitedState && !hasChangedFilesState && !hasWorkEntryState) {
+  if (
+    !hasPinnedState &&
+    !hasVisitedState &&
+    !hasChangedFilesState &&
+    !hasTurnFoldState &&
+    !hasWorkGroupState &&
+    !hasWorkEntryState
+  ) {
     return state;
   }
   const nextPinnedThreadKeys = { ...state.pinnedThreadKeys };
   const nextThreadLastVisitedAtById = { ...state.threadLastVisitedAtById };
   const nextThreadChangedFilesExpandedById = { ...state.threadChangedFilesExpandedById };
+  const nextThreadTurnFoldExpandedById = { ...state.threadTurnFoldExpandedById };
+  const nextThreadWorkGroupExpandedById = { ...state.threadWorkGroupExpandedById };
   const nextThreadWorkEntryExpandedById = { ...state.threadWorkEntryExpandedById };
   delete nextPinnedThreadKeys[threadId];
   delete nextThreadLastVisitedAtById[threadId];
   delete nextThreadChangedFilesExpandedById[threadId];
+  delete nextThreadTurnFoldExpandedById[threadId];
+  delete nextThreadWorkGroupExpandedById[threadId];
   delete nextThreadWorkEntryExpandedById[threadId];
   return {
     ...state,
     pinnedThreadKeys: nextPinnedThreadKeys,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
     threadChangedFilesExpandedById: nextThreadChangedFilesExpandedById,
+    threadTurnFoldExpandedById: nextThreadTurnFoldExpandedById,
+    threadWorkGroupExpandedById: nextThreadWorkGroupExpandedById,
     threadWorkEntryExpandedById: nextThreadWorkEntryExpandedById,
   };
 }
@@ -1063,6 +1098,55 @@ export function setThreadWorkEntryExpanded(
       },
     },
   };
+}
+
+function setThreadScopedExpanded(
+  byThread: Record<string, Record<string, boolean>>,
+  threadId: string,
+  itemId: string,
+  expanded: boolean,
+): Record<string, Record<string, boolean>> | null {
+  const currentThreadState = byThread[threadId] ?? {};
+  if (currentThreadState[itemId] === expanded) {
+    return null;
+  }
+  return {
+    ...byThread,
+    [threadId]: {
+      ...currentThreadState,
+      [itemId]: expanded,
+    },
+  };
+}
+
+export function setThreadTurnFoldExpanded(
+  state: UiState,
+  threadId: string,
+  foldId: string,
+  expanded: boolean,
+): UiState {
+  const next = setThreadScopedExpanded(
+    state.threadTurnFoldExpandedById,
+    threadId,
+    foldId,
+    expanded,
+  );
+  return next ? { ...state, threadTurnFoldExpandedById: next } : state;
+}
+
+export function setThreadWorkGroupExpanded(
+  state: UiState,
+  threadId: string,
+  groupId: string,
+  expanded: boolean,
+): UiState {
+  const next = setThreadScopedExpanded(
+    state.threadWorkGroupExpandedById,
+    threadId,
+    groupId,
+    expanded,
+  );
+  return next ? { ...state, threadWorkGroupExpandedById: next } : state;
 }
 
 export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | null): UiState {
@@ -1438,6 +1522,8 @@ interface UiStateStore extends UiState {
   toggleThreadPinned: (threadId: string) => void;
   clearThreadUi: (threadId: string) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
+  setThreadTurnFoldExpanded: (threadId: string, foldId: string, expanded: boolean) => void;
+  setThreadWorkGroupExpanded: (threadId: string, groupId: string, expanded: boolean) => void;
   setThreadWorkEntryExpanded: (threadId: string, entryId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
   setReasoningIndicatorStyle: (style: ReasoningIndicatorStyle) => void;
@@ -1484,6 +1570,10 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   clearThreadUi: (threadId) => set((state) => clearThreadUi(state, threadId)),
   setThreadChangedFilesExpanded: (threadId, turnId, expanded) =>
     set((state) => setThreadChangedFilesExpanded(state, threadId, turnId, expanded)),
+  setThreadTurnFoldExpanded: (threadId, foldId, expanded) =>
+    set((state) => setThreadTurnFoldExpanded(state, threadId, foldId, expanded)),
+  setThreadWorkGroupExpanded: (threadId, groupId, expanded) =>
+    set((state) => setThreadWorkGroupExpanded(state, threadId, groupId, expanded)),
   setThreadWorkEntryExpanded: (threadId, entryId, expanded) =>
     set((state) => setThreadWorkEntryExpanded(state, threadId, entryId, expanded)),
   setDefaultAdvertisedEndpointKey: (key) =>

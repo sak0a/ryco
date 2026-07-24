@@ -3,7 +3,7 @@ import "../../index.css";
 import { EnvironmentId, MessageId, TurnId } from "@ryco/contracts";
 import { createRef } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
@@ -48,6 +48,7 @@ vi.mock("@legendapp/list/react", async () => {
 });
 
 import { MessagesTimeline } from "./MessagesTimeline";
+import { useUiStateStore } from "~/uiStateStore";
 
 function buildProps() {
   return {
@@ -79,6 +80,10 @@ describe("MessagesTimeline", () => {
     scrollToEndSpy.mockReset();
     getStateSpy.mockClear();
     vi.restoreAllMocks();
+    useUiStateStore.setState({
+      threadTurnFoldExpandedById: {},
+      threadWorkGroupExpandedById: {},
+    });
     document.body.innerHTML = "";
   });
 
@@ -417,6 +422,150 @@ describe("MessagesTimeline", () => {
       );
 
       await expect.element(page.getByText("Changed files (1)")).toBeVisible();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("uses one collapsible activity design while running and auto-collapses on completion", async () => {
+    const turnId = TurnId.make("turn-activity");
+    const commentaryEntry = {
+      id: "commentary-entry",
+      kind: "message" as const,
+      createdAt: "2026-04-13T12:00:04.000Z",
+      message: {
+        id: MessageId.make("message-commentary"),
+        role: "assistant" as const,
+        text: "I am checking the current implementation.",
+        turnId,
+        createdAt: "2026-04-13T12:00:04.000Z",
+        streaming: true,
+      },
+    };
+    const runningEntries = [
+      commentaryEntry,
+      {
+        id: "work-entry-1",
+        kind: "work" as const,
+        createdAt: "2026-04-13T12:00:06.000Z",
+        entry: {
+          id: "work-1",
+          createdAt: "2026-04-13T12:00:06.000Z",
+          label: "First command",
+          detail: "rg -n Working",
+          tone: "tool" as const,
+          turnId,
+        },
+      },
+      {
+        id: "work-entry-2",
+        kind: "work" as const,
+        createdAt: "2026-04-13T12:00:08.000Z",
+        entry: {
+          id: "work-2",
+          createdAt: "2026-04-13T12:00:08.000Z",
+          label: "Latest command",
+          detail: "bun typecheck",
+          tone: "tool" as const,
+          turnId,
+        },
+      },
+    ];
+    const props = {
+      ...buildProps(),
+      isWorking: true,
+      activeTurnInProgress: true,
+      activeTurnId: turnId,
+      latestTurn: {
+        turnId,
+        state: "running" as const,
+        startedAt: "2026-04-13T12:00:00.000Z",
+        completedAt: null,
+      },
+      activeTurnStartedAt: "2026-04-13T12:00:00.000Z",
+    };
+    const screen = await render(<MessagesTimeline {...props} timelineEntries={runningEntries} />);
+
+    try {
+      const runningFold = page.getByRole("button", { name: /Working for/ });
+      await expect.element(runningFold).toBeVisible();
+      await expect.element(runningFold).toHaveAttribute("aria-expanded", "true");
+      await expect
+        .element(page.getByText("I am checking the current implementation."))
+        .toBeVisible();
+      await expect.element(page.getByText("Latest command - bun typecheck")).toBeVisible();
+      await expect.element(page.getByText("+1 previous tool call")).toBeVisible();
+
+      runningFold.element().focus();
+      await userEvent.keyboard("{Enter}");
+      await expect.element(runningFold).toHaveAttribute("aria-expanded", "false");
+      await expect
+        .element(page.getByText("I am checking the current implementation."))
+        .not.toBeInTheDocument();
+
+      const finalEntry = {
+        id: "final-entry",
+        kind: "message" as const,
+        createdAt: "2026-04-13T12:00:39.000Z",
+        message: {
+          id: MessageId.make("message-final"),
+          role: "assistant" as const,
+          text: "The redesign is complete.",
+          turnId,
+          createdAt: "2026-04-13T12:00:39.000Z",
+          completedAt: "2026-04-13T12:00:40.000Z",
+          streaming: false,
+        },
+      };
+      await screen.rerender(
+        <MessagesTimeline
+          {...props}
+          isWorking={false}
+          activeTurnInProgress={false}
+          latestTurn={{
+            turnId,
+            state: "completed",
+            startedAt: "2026-04-13T12:00:00.000Z",
+            completedAt: "2026-04-13T12:00:40.000Z",
+          }}
+          timelineEntries={[
+            {
+              ...commentaryEntry,
+              message: {
+                ...commentaryEntry.message,
+                completedAt: "2026-04-13T12:00:05.000Z",
+                streaming: false,
+              },
+            },
+            runningEntries[1]!,
+            runningEntries[2]!,
+            finalEntry,
+          ]}
+        />,
+      );
+
+      const settledFold = page.getByRole("button", { name: "Worked for 40s" });
+      await expect.element(settledFold).toBeVisible();
+      await expect.element(settledFold).toHaveAttribute("aria-expanded", "false");
+      await expect.element(page.getByText("The redesign is complete.")).toBeVisible();
+      await expect
+        .element(page.getByText("I am checking the current implementation."))
+        .not.toBeInTheDocument();
+
+      await settledFold.click();
+      await expect.element(settledFold).toHaveAttribute("aria-expanded", "true");
+      await expect
+        .element(page.getByText("I am checking the current implementation."))
+        .toBeVisible();
+      await expect.element(page.getByText("+1 previous tool call")).toBeVisible();
+
+      const previousToolsToggle = page.getByRole("button", {
+        name: "+1 previous tool call",
+      });
+      previousToolsToggle.element().focus();
+      await userEvent.keyboard(" ");
+      await expect.element(page.getByText("First command - rg -n Working")).toBeVisible();
+      await expect.element(page.getByText("Show fewer tool calls")).toBeVisible();
     } finally {
       await screen.unmount();
     }

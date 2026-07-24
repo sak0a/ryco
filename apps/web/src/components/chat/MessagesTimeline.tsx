@@ -23,6 +23,7 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
@@ -46,7 +47,6 @@ import {
   buildTimelineStreamingState,
   computeStableMessagesTimelineRows,
   isErroredWorkEntry,
-  MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
@@ -55,6 +55,7 @@ import {
   type TimelineMessageActionsRequest,
   type TimelineStableState,
   type TimelineStreamingState,
+  type TimelineLatestTurn,
 } from "./MessagesTimeline.logic";
 import { MessageActionsSheet } from "./MessageActionsSheet";
 import { useLongPress } from "~/hooks/useLongPress";
@@ -101,6 +102,7 @@ const EMPTY_THREAD_MESSAGE_SEARCH_OCCURRENCES_BY_MESSAGE_ID: ReadonlyMap<
   MessageId,
   ReadonlyArray<ThreadMessageSearchOccurrence>
 > = new Map();
+const EMPTY_EXPANSION_OVERRIDES: Readonly<Record<string, boolean>> = {};
 const MESSAGE_SEARCH_HIGHLIGHT_DURATION_MS = 1_800;
 const MESSAGE_ACTION_BUTTON_CLASS_NAME =
   "size-6 min-w-6 rounded-md border-0 bg-transparent px-0 text-muted-foreground/45 shadow-none transition-[background-color,color,box-shadow] before:hidden hover:bg-foreground/8 hover:text-foreground/75 hover:shadow-sm/5 focus-visible:ring-1 focus-visible:ring-ring/60 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/35";
@@ -113,6 +115,7 @@ interface MessagesTimelineProps {
   isWorking: boolean;
   activeTurnInProgress: boolean;
   activeTurnId?: TurnId | null;
+  latestTurn?: TimelineLatestTurn | null;
   activeTurnStartedAt: string | null;
   listRef: React.RefObject<LegendListRef | null>;
   targetMessageId?: MessageId | null;
@@ -153,6 +156,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   isWorking,
   activeTurnInProgress,
   activeTurnId,
+  latestTurn = null,
   activeTurnStartedAt,
   listRef,
   targetMessageId = null,
@@ -182,12 +186,22 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onIsAtEndChange,
 }: MessagesTimelineProps) {
   usePerfMark("MessagesTimeline");
+  const turnFoldExpandedById = useUiStateStore(
+    (store) => store.threadTurnFoldExpandedById[routeThreadKey] ?? EMPTY_EXPANSION_OVERRIDES,
+  );
+  const workGroupExpandedById = useUiStateStore(
+    (store) => store.threadWorkGroupExpandedById[routeThreadKey] ?? EMPTY_EXPANSION_OVERRIDES,
+  );
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
   revertTurnCountRef.current = revertTurnCountByUserMessageId;
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
         timelineEntries,
+        latestTurn,
+        runningTurnId: isWorking || activeTurnInProgress ? (activeTurnId ?? null) : null,
+        turnFoldExpandedById,
+        workGroupExpandedById,
         completionDividerBeforeEntryId,
         isWorking,
         activeTurnStartedAt,
@@ -196,6 +210,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       }),
     [
       timelineEntries,
+      latestTurn,
+      activeTurnInProgress,
+      activeTurnId,
+      turnFoldExpandedById,
+      workGroupExpandedById,
       completionDividerBeforeEntryId,
       isWorking,
       activeTurnStartedAt,
@@ -479,7 +498,14 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
       className={cn(
-        "pb-4",
+        row.kind === "work"
+          ? "pb-0.5"
+          : row.kind === "work-toggle" ||
+              (row.kind === "message" &&
+                row.message.role === "assistant" &&
+                !row.showAssistantCopyButton)
+            ? "pb-2"
+            : "pb-4",
         row.kind === "message"
           ? "scroll-mt-12 rounded-xl transition-[background-color,box-shadow] duration-500"
           : null,
@@ -493,6 +519,8 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
       {row.kind === "work" && <WorkGroupSection groupedEntries={row.groupedEntries} />}
+      {row.kind === "work-toggle" && <WorkGroupToggleTimelineRow row={row} />}
+      {row.kind === "turn-fold" && <TurnFoldTimelineRow row={row} />}
 
       {row.kind === "context-compaction" && (
         <ContextCompactionMarkerRow createdAt={row.createdAt} label={row.marker.label} />
@@ -675,26 +703,55 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
         </div>
       )}
 
-      {row.kind === "working" && (
-        <div className="py-0.5 pl-1.5">
-          <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
-            <span className="inline-flex items-center gap-[3px]">
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
-            </span>
-            <span>
-              {row.createdAt ? (
-                <>
-                  Working for <WorkingTimer createdAt={row.createdAt} />
-                </>
-              ) : (
-                "Working..."
-              )}
-            </span>
-          </div>
-        </div>
-      )}
+      {row.kind === "working" && <PendingWorkingTimelineRow row={row} />}
+    </div>
+  );
+}
+
+function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-fold" }> }) {
+  const { routeThreadKey } = use(TimelineStableCtx);
+  const setExpanded = useUiStateStore((store) => store.setThreadTurnFoldExpanded);
+  const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
+
+  return (
+    <div className="border-b border-border/60 pt-1 pb-2" data-turn-fold-status={row.status}>
+      <button
+        type="button"
+        aria-expanded={row.expanded}
+        onClick={() => setExpanded(routeThreadKey, row.foldId, !row.expanded)}
+        className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-xs text-muted-foreground tabular-nums transition-colors duration-150 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      >
+        <span>
+          {row.status === "running" ? (
+            row.durationStart ? (
+              <>
+                Working for <WorkingTimer createdAt={row.durationStart} />
+              </>
+            ) : (
+              "Working…"
+            )
+          ) : (
+            (row.label ?? "Worked")
+          )}
+        </span>
+        <Icon className="size-3.5" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+function PendingWorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
+  return (
+    <div className="border-b border-border/60 pt-1 pb-2">
+      <div className="flex items-center px-1 text-xs text-muted-foreground tabular-nums">
+        {row.createdAt ? (
+          <>
+            Working for <WorkingTimer createdAt={row.createdAt} />
+          </>
+        ) : (
+          "Working…"
+        )}
+      </div>
     </div>
   );
 }
@@ -769,37 +826,20 @@ const WorkGroupSection = memo(function WorkGroupSection({
 }) {
   const { activeTurnId, isWorking } = use(TimelineStreamingCtx);
   const { workspaceRoot } = use(TimelineStableCtx);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
-  const visibleEntries =
-    hasOverflow && !isExpanded
-      ? groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
-      : groupedEntries;
-  const hiddenCount = groupedEntries.length - visibleEntries.length;
   const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
-  const showHeader = hasOverflow || !onlyToolEntries;
   const groupLabel = onlyToolEntries ? "Tool calls" : "Work log";
 
   return (
     <div className="space-y-1">
-      {showHeader && (
-        <div className="flex items-center justify-between gap-2 px-2">
+      {!onlyToolEntries && (
+        <div className="flex items-center gap-2 px-2">
           <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/55">
             {groupLabel} ({groupedEntries.length})
           </p>
-          {hasOverflow && (
-            <button
-              type="button"
-              className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
-              onClick={() => setIsExpanded((v) => !v)}
-            >
-              {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
-            </button>
-          )}
         </div>
       )}
       <div className="space-y-0.5">
-        {visibleEntries.map((workEntry) => {
+        {groupedEntries.map((workEntry) => {
           const isActive =
             isWorking &&
             activeTurnId !== null &&
@@ -829,6 +869,46 @@ const WorkGroupSection = memo(function WorkGroupSection({
     </div>
   );
 });
+
+function WorkGroupToggleTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "work-toggle" }>;
+}) {
+  const { routeThreadKey } = use(TimelineStableCtx);
+  const setExpanded = useUiStateStore((store) => store.setThreadWorkGroupExpanded);
+  const labelNoun = row.onlyToolEntries
+    ? row.hiddenCount === 1
+      ? "tool call"
+      : "tool calls"
+    : row.hiddenCount === 1
+      ? "log entry"
+      : "log entries";
+
+  return (
+    <button
+      type="button"
+      aria-expanded={row.expanded}
+      onClick={() => setExpanded(routeThreadKey, row.groupId, !row.expanded)}
+      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+    >
+      <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground/65">
+        <ChevronDownIcon
+          className={cn(
+            "size-3.5 opacity-70 transition-transform duration-200",
+            row.expanded && "rotate-180",
+          )}
+          aria-hidden
+        />
+      </span>
+      <span className="font-medium text-foreground/82">
+        {row.expanded
+          ? `Show fewer ${row.onlyToolEntries ? "tool calls" : "log entries"}`
+          : `+${row.hiddenCount} previous ${labelNoun}`}
+      </span>
+    </button>
+  );
+}
 
 const ContextCompactionMarkerRow = memo(function ContextCompactionMarkerRow({
   createdAt,
