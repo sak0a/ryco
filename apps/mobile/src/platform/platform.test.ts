@@ -35,6 +35,13 @@ vi.mock("expo-sqlite/kv-store", () => ({
 }));
 vi.mock("expo-linking", () => ({ getInitialURL: async () => null }));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { extra: {} } } }));
+const { passkeyGet, passkeyCreate } = vi.hoisted(() => ({
+  passkeyGet: vi.fn(),
+  passkeyCreate: vi.fn(),
+}));
+vi.mock("react-native-passkey", () => ({
+  Passkey: { get: passkeyGet, create: passkeyCreate, isSupported: () => true },
+}));
 
 import { mobileAppLifecycle } from "./appLifecycle";
 import { mobileAttachmentCodec } from "./attachmentCodec";
@@ -109,11 +116,79 @@ describe("mobile platform adapters", () => {
     expect(await kv.getItem("draft")).toBeNull();
   });
 
-  it("stubs the hosted passkey ceremony as unavailable in B1", async () => {
-    await expect(mobilePasskeyCeremony.authenticate({})).rejects.toThrow(
-      "hosted mode not available",
-    );
-    await expect(mobilePasskeyCeremony.register({})).rejects.toThrow("hosted mode not available");
+  it("round-trips a passkey assertion through the native ceremony seam", async () => {
+    const ceremony: PasskeyCeremonyService = mobilePasskeyCeremony;
+    passkeyGet.mockResolvedValueOnce({
+      id: "Y3JlZC1pZA",
+      rawId: "Y3JlZC1pZA",
+      type: "public-key",
+      authenticatorAttachment: "platform",
+      response: { clientDataJSON: "Y2xpZW50", authenticatorData: "YXV0aA", signature: "c2ln" },
+    });
+
+    const response = await ceremony.authenticate({
+      challenge: new Uint8Array([1, 2, 3]),
+      rpId: "app.ryco.dev",
+      allowCredentials: [{ id: new Uint8Array([4, 5]), type: "public-key" }],
+    });
+
+    // Options reach native base64url-encoded, with the server's RP ID intact.
+    expect(passkeyGet).toHaveBeenCalledWith({
+      challenge: "AQID",
+      rpId: "app.ryco.dev",
+      allowCredentials: [{ type: "public-key", id: "BAU" }],
+    });
+    expect(response).toEqual({
+      id: "Y3JlZC1pZA",
+      rawId: "Y3JlZC1pZA",
+      response: { clientDataJSON: "Y2xpZW50", authenticatorData: "YXV0aA", signature: "c2ln" },
+      type: "public-key",
+      clientExtensionResults: {},
+      authenticatorAttachment: "platform",
+    });
+  });
+
+  it("round-trips a passkey registration through the native ceremony seam", async () => {
+    passkeyCreate.mockResolvedValueOnce({
+      id: "Y3JlZC1pZA",
+      rawId: "Y3JlZC1pZA",
+      type: "public-key",
+      response: { clientDataJSON: "Y2xpZW50", attestationObject: "YXR0" },
+    });
+
+    const response = await mobilePasskeyCeremony.register({
+      challenge: new Uint8Array([1, 2, 3]),
+      rp: { name: "Ryco", id: "app.ryco.dev" },
+      user: { id: new Uint8Array([6, 7]), name: "owner@example.test", displayName: "Owner" },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+    });
+
+    expect(passkeyCreate).toHaveBeenCalledWith({
+      challenge: "AQID",
+      rp: { id: "app.ryco.dev", name: "Ryco" },
+      user: { id: "Bgc", name: "owner@example.test", displayName: "Owner" },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+    });
+    expect(response.type).toBe("public-key");
+    expect(response.response.attestationObject).toBe("YXR0");
+  });
+
+  it("bounds a native ceremony failure instead of surfacing native detail", async () => {
+    passkeyGet.mockRejectedValueOnce({
+      error: "Native error",
+      message: "challenge=LEAKED-CHALLENGE",
+    });
+
+    const failure = await mobilePasskeyCeremony
+      .authenticate({ challenge: new Uint8Array([1]), rpId: "app.ryco.dev" })
+      .then(
+        () => null,
+        (error: unknown) => error as Error,
+      );
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure?.message).toBe("Passkey ceremony failed.");
+    expect(JSON.stringify(failure?.message)).not.toContain("LEAKED-CHALLENGE");
   });
 
   it("resolves relative pathnames against the configured origin", async () => {
