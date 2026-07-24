@@ -26,7 +26,7 @@ export function ConnectionsNewRouteScreen() {
   const [error, setError] = useState<string | null>(null);
   const [pairing, setPairing] = useState(false);
 
-  const placeholderColor = useThemeColor("--color-icon-subtle");
+  const placeholderColor = useThemeColor("--color-placeholder");
   const textColor = useThemeColor("--color-foreground");
 
   const onScan = useCallback((payload: string) => {
@@ -77,7 +77,7 @@ export function ConnectionsNewRouteScreen() {
     <ScrollView
       contentInsetAdjustmentBehavior="automatic"
       className="flex-1 bg-screen"
-      contentContainerStyle={{ padding: 16, gap: 12 }}
+      contentContainerStyle={{ padding: 20, gap: 14 }}
     >
       <Text className="font-sans text-base text-foreground-muted">
         Pair with a local or staging node. Scan its QR code, or enter the pairing URL / host + code.
@@ -164,9 +164,9 @@ export function ConnectionsNewRouteScreen() {
       <Pressable
         disabled={!canPair}
         onPress={() => void pair()}
-        className="items-center rounded-full bg-primary px-4 py-3 active:opacity-70 disabled:opacity-40"
+        className="items-center rounded-full bg-primary px-5 py-3.5 active:opacity-80 disabled:opacity-40"
       >
-        <Text className="text-sm font-ryco-bold text-primary-foreground">
+        <Text className="text-base font-ryco-bold text-primary-foreground">
           {pairing ? "Pairing…" : "Pair and connect"}
         </Text>
       </Pressable>
