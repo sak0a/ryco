@@ -32,7 +32,13 @@ interface ShellEventContext {
  * recovered-batch path in the driver (§4).
  */
 export function createMobileEnvironmentStateSink(
-  input: { readonly supervisor?: () => SinkSupervisor } = {},
+  input: {
+    readonly supervisor?: () => SinkSupervisor;
+    // Wired by the driver to the checkpoint-diff cache invalidation throttle
+    // (§6). Default no-ops keep the sink usable standalone (e.g. in tests).
+    readonly markProviderInvalidationNeeded?: () => void;
+    readonly flushProviderInvalidation?: () => void;
+  } = {},
 ): EnvironmentStateSink {
   return {
     // Snapshot the pre-apply thread so afterShellEventApplied can tell a freshly
@@ -94,8 +100,9 @@ export function createMobileEnvironmentStateSink(
     clearProjectDraftThread: (ref) =>
       useComposerDraftStore.getState().clearProjectDraftThreadId(ref),
     clearTerminalState: (ref) => useTerminalStateStore.getState().removeTerminalState(ref),
-    // Permanent no-ops on mobile — no RPC-atom caches in B1 (§3-28).
-    markProviderInvalidationNeeded: () => undefined,
-    flushProviderInvalidation: () => undefined,
+    // Wired by the driver to the checkpoint-diff cache once it exists (Task 5);
+    // no-op standalone.
+    markProviderInvalidationNeeded: input.markProviderInvalidationNeeded ?? (() => undefined),
+    flushProviderInvalidation: input.flushProviderInvalidation ?? (() => undefined),
   };
 }

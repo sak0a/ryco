@@ -20,6 +20,7 @@ import {
   selectThreadByRef,
   useStore,
 } from "../state/threadsRuntime";
+import { invalidateAllCheckpointDiffs } from "../rpc/checkpointDiffAtoms";
 import { subscribeAppStateResume } from "./appStateResume";
 import { createMobileEnvironmentStateSink } from "./environmentStateSink";
 import type { MobileRemoteEnvironmentApi } from "./remoteApi";
@@ -82,9 +83,26 @@ const noopPushSequenceMonitor: PushSequenceMonitor = {
   recordSnapshot: () => undefined,
 };
 
-// B1 has no provider caches to invalidate, so the throttle is inert.
-function createNoopThrottle() {
-  return { maybeExecute: () => undefined, cancel: () => undefined };
+// A real trailing throttle for the checkpoint-diff cache invalidation (§6). On
+// maybeExecute it schedules `onFire` after `waitMs`, coalescing bursts; cancel
+// clears the pending timer. Bound wrapper, no import-time side effects.
+function createTrailingThrottle(onFire: () => void, waitMs: number) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return {
+    maybeExecute: () => {
+      if (timer !== null) return;
+      timer = setTimeout(() => {
+        timer = null;
+        onFire();
+      }, waitMs);
+    },
+    cancel: () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    },
+  };
 }
 
 function nowIso(): string {
@@ -158,9 +176,27 @@ export function createMobileEnvironmentDriver(
   let supervisor: EnvironmentConnectionSupervisor;
   const getSupervisor = () => supervisor;
 
+  // Coalesced checkpoint-diff cache invalidation (§6): the sink marks it needed
+  // (and pokes the supervisor throttle); the throttle flushes it.
+  let needsProviderInvalidation = false;
+  const flushProviderInvalidation = () => {
+    needsProviderInvalidation = false;
+    invalidateAllCheckpointDiffs();
+  };
+
   // Give the sink the supervisor handle so live thread-upserted/removed events
-  // drive draft promotion + detail-subscription eviction/dispose (§4).
-  const stateSink = deps.stateSink ?? createMobileEnvironmentStateSink({ supervisor: getSupervisor });
+  // drive draft promotion + detail-subscription eviction/dispose (§4), and wire
+  // the checkpoint-diff cache invalidation (§6).
+  const stateSink =
+    deps.stateSink ??
+    createMobileEnvironmentStateSink({
+      supervisor: getSupervisor,
+      markProviderInvalidationNeeded: () => {
+        needsProviderInvalidation = true;
+        getSupervisor().requestProviderInvalidation();
+      },
+      flushProviderInvalidation,
+    });
   // Recovered/pushed thread-detail events flow through the same batch-effects path
   // as the shell stream (§4).
   const applyThreadDetailEvent = createThreadDetailEventApplier({
@@ -289,8 +325,13 @@ export function createMobileEnvironmentDriver(
     now: boundNow,
     setTimeout: boundSetTimeout,
     clearTimeout: boundClearTimeout,
-    createInvalidationThrottle: createNoopThrottle,
-    resetProviderInvalidation: () => undefined,
+    createInvalidationThrottle: () =>
+      createTrailingThrottle(() => {
+        if (needsProviderInvalidation) flushProviderInvalidation();
+      }, 100),
+    resetProviderInvalidation: () => {
+      needsProviderInvalidation = false;
+    },
     // Mobile has no window-origin/primary environment; direct-node uses saved
     // environments only.
     createPrimaryConnection: () => null,

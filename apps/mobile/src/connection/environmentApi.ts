@@ -11,13 +11,21 @@ import { createMobileConnectionRegistry } from "../runtime/bootstrap";
 // the live client per environment, so this stays a thin lookup with no state.
 export { createEnvironmentApi };
 
-const registry = createMobileConnectionRegistry();
+// Resolve the registry lazily (not at module load): the checkpoint-diff cache
+// (§6) imports this module and is itself imported by the driver, so eager
+// construction here would close a module-load cycle (driver -> cache ->
+// environmentApi -> bootstrap -> driver) and trip a TDZ. Deferring to first call
+// keeps the static import edge but runs after all modules initialize.
+let cachedRegistry: ReturnType<typeof createMobileConnectionRegistry> | null = null;
+function registry() {
+  return (cachedRegistry ??= createMobileConnectionRegistry());
+}
 const environmentApiOverridesForTests = new Map<EnvironmentId, EnvironmentApi>();
 
 const lookup = createEnvironmentApiLookup({
   canReadConnections: () => true,
   readClient: (environmentId): WsRpcClient | null =>
-    registry.driver.supervisor.read(environmentId)?.client ?? null,
+    registry().driver.supervisor.read(environmentId)?.client ?? null,
 });
 
 export function readEnvironmentApi(environmentId: EnvironmentId): EnvironmentApi | undefined {
