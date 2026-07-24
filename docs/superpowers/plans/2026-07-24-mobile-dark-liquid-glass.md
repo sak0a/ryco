@@ -15,7 +15,7 @@
 The brief calls for **dark + Liquid Glass to match Cursor closely**. The design reference establishes two facts we must reconcile:
 
 1. **Cursor's shipped mobile chrome is light-first**, not dark. There is no sourced dark-chrome screenshot. So "match Cursor's dark" means: **take Cursor's structure, shape language, restraint, and glass discipline exactly, and render them in a dark palette derived from Cursor's desktop brand.** The dark palette is a reconstruction (reference §8) — treat every dark hex as a first proposal to tune on-device with the owner, not a fixed truth.
-2. **Glass is reserved for floating chrome only.** In Cursor, content surfaces (workspace list, PR cards, deployment rows, settings groups) are **flat opaque**; blur appears only on nav circles, the bottom input capsule, modal sheets, and overlay pills. **This overrides the inventory's touch-list suggestion to wrap Home/Settings/Connections cards in glass.** We will *not* glass-ify content cards. Doing so would read as generic "frosted everything," the opposite of Cursor's editorial calm.
+2. **Glass is reserved for floating chrome only.** In Cursor, content surfaces (workspace list, PR cards, deployment rows, settings groups) are **flat opaque**; blur appears only on nav circles, the bottom input capsule, modal sheets, and overlay pills. **This overrides the inventory's touch-list suggestion to wrap Home/Settings/Connections cards in glass.** We will _not_ glass-ify content cards. Doing so would read as generic "frosted everything," the opposite of Cursor's editorial calm.
 
 Everything below follows from those two points.
 
@@ -29,7 +29,7 @@ Ryco's existing dark tokens are already close to the target (near-black `#0a0a0a
 - **Primary CTA is inverted on dark:** a **white capsule with black label** (Cursor flips primary contrast the same way; Ryco's dark `--color-primary` already does this).
 - **Glass = floating chrome only.** Nav headers, the bottom composer capsule, circular icon buttons, modal sheets, and overlay pills. Content cards stay **opaque** `bg-card`.
 - **Airy, editorial density.** ~20pt gutters, generous vertical rhythm, thin hairlines, quiet small metadata, high contrast between ink and ground. "Notion/Linear-adjacent minimal."
-- **One token system, no forked logic.** Dark is the *resolved default*, not a code fork. Token classes (`bg-card`, `text-foreground`) resolve per theme via Uniwind's `@variant` blocks — **no `dark:` prefixes** on token classes. The only permitted capability branch is `GlassSurface`'s existing iOS-26-vs-fallback split, already encapsulated.
+- **One token system, no forked logic.** Dark is the _resolved default_, not a code fork. Token classes (`bg-card`, `text-foreground`) resolve per theme via Uniwind's `@variant` blocks — **no `dark:` prefixes** on token classes. The only permitted capability branch is `GlassSurface`'s existing iOS-26-vs-fallback split, already encapsulated.
 - **Uniwind CSS-first.** All tokens live in `global.css` `:root` `@variant light/@variant dark` blocks; runtime reads go through `useThemeColor("--color-*")`. New tokens require regenerating `uniwind-types.d.ts`.
 
 ---
@@ -42,79 +42,79 @@ Retune the existing dark values toward Cursor's derivation and **add** a restrai
 
 **Ground and surfaces (keep content opaque)**
 
-| Token | Current | Target | Rationale |
-|---|---|---|---|
-| `--color-screen` | `#0a0a0a` | `#0a0a0a` | keep — Cursor near-black ground |
-| `--color-sheet` | `rgba(14,14,14,.98)` | `rgba(13,13,13,.98)` | keep opaque sheet fallback |
-| `--color-card` | `#171717` | `#141414` | Cursor low-elevation card |
-| `--color-card-alt` | `#1c1c1c` | `#1f1f1f` | second elevation |
-| `--color-card-translucent` | `rgba(17,17,17,.8)` | `rgba(20,20,20,.8)` | align to new card |
-| `--color-border` | `rgba(255,255,255,.06)` | `rgba(255,255,255,.10)` | Cursor hairlines (~`#262626`) read slightly more |
-| `--color-border-subtle` | `rgba(255,255,255,.04)` | `rgba(255,255,255,.06)` | inset row dividers |
-| `--color-separator` | `rgba(255,255,255,.03)` | `rgba(255,255,255,.05)` | |
+| Token                      | Current                 | Target                  | Rationale                                        |
+| -------------------------- | ----------------------- | ----------------------- | ------------------------------------------------ |
+| `--color-screen`           | `#0a0a0a`               | `#0a0a0a`               | keep — Cursor near-black ground                  |
+| `--color-sheet`            | `rgba(14,14,14,.98)`    | `rgba(13,13,13,.98)`    | keep opaque sheet fallback                       |
+| `--color-card`             | `#171717`               | `#141414`               | Cursor low-elevation card                        |
+| `--color-card-alt`         | `#1c1c1c`               | `#1f1f1f`               | second elevation                                 |
+| `--color-card-translucent` | `rgba(17,17,17,.8)`     | `rgba(20,20,20,.8)`     | align to new card                                |
+| `--color-border`           | `rgba(255,255,255,.06)` | `rgba(255,255,255,.10)` | Cursor hairlines (~`#262626`) read slightly more |
+| `--color-border-subtle`    | `rgba(255,255,255,.04)` | `rgba(255,255,255,.06)` | inset row dividers                               |
+| `--color-separator`        | `rgba(255,255,255,.03)` | `rgba(255,255,255,.05)` |                                                  |
 
 **Ink**
 
-| Token | Current | Target | Notes |
-|---|---|---|---|
-| `--color-foreground` | `#f5f5f5` | `#ededed` | Cursor primary ink |
-| `--color-foreground-secondary` | `#a3a3a3` | `#a3a3a3` | keep |
-| `--color-foreground-muted` | `#8e8e93` | `#949494` | bumped for AA on `#141414` (see §8) |
-| `--color-foreground-tertiary` | `#636366` | `#6b6b6b` | timestamps/quiet metadata |
-| `--color-placeholder` | `#8e8e93` | `#5a5a5a` | Cursor placeholder (decorative) |
+| Token                          | Current   | Target    | Notes                               |
+| ------------------------------ | --------- | --------- | ----------------------------------- |
+| `--color-foreground`           | `#f5f5f5` | `#ededed` | Cursor primary ink                  |
+| `--color-foreground-secondary` | `#a3a3a3` | `#a3a3a3` | keep                                |
+| `--color-foreground-muted`     | `#8e8e93` | `#949494` | bumped for AA on `#141414` (see §8) |
+| `--color-foreground-tertiary`  | `#636366` | `#6b6b6b` | timestamps/quiet metadata           |
+| `--color-placeholder`          | `#8e8e93` | `#5a5a5a` | Cursor placeholder (decorative)     |
 
 **Primary / secondary buttons**
 
-| Token | Current | Target | Notes |
-|---|---|---|---|
-| `--color-primary` | `#f5f5f5` | `#ffffff` | white CTA capsule (strongest brand mark) |
-| `--color-primary-foreground` | `#0a0a0a` | `#0a0a0a` | black label |
-| `--color-secondary` | `rgba(255,255,255,.04)` | `rgba(255,255,255,.05)` | ghost/outline fill |
-| `--color-secondary-foreground` | `#f5f5f5` | `#ededed` | |
-| `--color-secondary-border` | `rgba(255,255,255,.06)` | `rgba(255,255,255,.12)` | visible hairline outline |
+| Token                          | Current                 | Target                  | Notes                                    |
+| ------------------------------ | ----------------------- | ----------------------- | ---------------------------------------- |
+| `--color-primary`              | `#f5f5f5`               | `#ffffff`               | white CTA capsule (strongest brand mark) |
+| `--color-primary-foreground`   | `#0a0a0a`               | `#0a0a0a`               | black label                              |
+| `--color-secondary`            | `rgba(255,255,255,.04)` | `rgba(255,255,255,.05)` | ghost/outline fill                       |
+| `--color-secondary-foreground` | `#f5f5f5`               | `#ededed`               |                                          |
+| `--color-secondary-border`     | `rgba(255,255,255,.06)` | `rgba(255,255,255,.12)` | visible hairline outline                 |
 
 **Accents — add these semantic tokens (light + dark values), replacing hardcoded amber/sky/rose/violet/emerald**
 
-| New token | Dark value | Light value | Use |
-|---|---|---|---|
-| `--color-accent` | `#3b82c4` | `#1567a0` | streaming/agent text, links, active status |
-| `--color-accent-strong` | `#4a90cf` | `#12629b` | small accent text/links, status dots on card |
-| `--color-success` | `#2fa37a` | `#00764a` | passed/merged/additions glyph + text |
-| `--color-success-bg` | `rgba(47,163,122,.14)` | `#b7d6cb` | tinted status pill fill ("Open") |
-| `--color-success-border` | `rgba(47,163,122,.22)` | `rgba(0,118,74,.18)` | pill hairline |
-| `--color-warning` | `#c99a3a` | `#9a6b12` | pending/approval only — use sparingly |
-| `--color-warning-bg` | `rgba(201,154,58,.14)` | `rgba(201,154,58,.14)` | |
-| `--color-warning-border` | `rgba(201,154,58,.22)` | `rgba(201,154,58,.22)` | |
-| `--color-diff-add` | `#2fa37a` | `#00764a` | `+80` counters (tabular) |
-| `--color-diff-del` | `#e0455f` | `#c7113f` | `-230` counters (tabular) |
+| New token                | Dark value             | Light value            | Use                                          |
+| ------------------------ | ---------------------- | ---------------------- | -------------------------------------------- |
+| `--color-accent`         | `#3b82c4`              | `#1567a0`              | streaming/agent text, links, active status   |
+| `--color-accent-strong`  | `#4a90cf`              | `#12629b`              | small accent text/links, status dots on card |
+| `--color-success`        | `#2fa37a`              | `#00764a`              | passed/merged/additions glyph + text         |
+| `--color-success-bg`     | `rgba(47,163,122,.14)` | `#b7d6cb`              | tinted status pill fill ("Open")             |
+| `--color-success-border` | `rgba(47,163,122,.22)` | `rgba(0,118,74,.18)`   | pill hairline                                |
+| `--color-warning`        | `#c99a3a`              | `#9a6b12`              | pending/approval only — use sparingly        |
+| `--color-warning-bg`     | `rgba(201,154,58,.14)` | `rgba(201,154,58,.14)` |                                              |
+| `--color-warning-border` | `rgba(201,154,58,.22)` | `rgba(201,154,58,.22)` |                                              |
+| `--color-diff-add`       | `#2fa37a`              | `#00764a`              | `+80` counters (tabular)                     |
+| `--color-diff-del`       | `#e0455f`              | `#c7113f`              | `-230` counters (tabular)                    |
 
 **Retune existing danger to Cursor crimson**
 
-| Token | Current | Target |
-|---|---|---|
-| `--color-danger` | `rgba(239,68,68,.14)` | `rgba(224,69,95,.12)` |
-| `--color-danger-border` | `rgba(248,113,113,.18)` | `rgba(224,69,95,.22)` |
-| `--color-danger-foreground` | `#fca5a5` | `#e0455f` |
+| Token                       | Current                 | Target                |
+| --------------------------- | ----------------------- | --------------------- |
+| `--color-danger`            | `rgba(239,68,68,.14)`   | `rgba(224,69,95,.12)` |
+| `--color-danger-border`     | `rgba(248,113,113,.18)` | `rgba(224,69,95,.22)` |
+| `--color-danger-foreground` | `#fca5a5`               | `#e0455f`             |
 
 **User bubble — deliberate divergence (flag for owner)**
-Cursor's *user prompt* bubble is a neutral gray, right-aligned — **not** blue; blue is reserved for agent/streaming. Ryco currently uses iOS system blue (`#0a84ff`). Recommend switching to a neutral elevated surface; hold behind owner approval in Phase 2 since it changes a familiar element.
+Cursor's _user prompt_ bubble is a neutral gray, right-aligned — **not** blue; blue is reserved for agent/streaming. Ryco currently uses iOS system blue (`#0a84ff`). Recommend switching to a neutral elevated surface; hold behind owner approval in Phase 2 since it changes a familiar element.
 
-| Token | Current | Target (proposed) |
-|---|---|---|
-| `--color-user-bubble` | `#0a84ff` | `#1f1f1f` |
-| `--color-user-bubble-foreground` | `#ffffff` | `#ededed` |
+| Token                            | Current   | Target (proposed) |
+| -------------------------------- | --------- | ----------------- |
+| `--color-user-bubble`            | `#0a84ff` | `#1f1f1f`         |
+| `--color-user-bubble-foreground` | `#ffffff` | `#ededed`         |
 
 **Glass materials**
 
-| Token | Current | Target | Notes |
-|---|---|---|---|
-| `--color-glass-surface` | `rgba(23,23,23,.78)` | `rgba(18,18,18,.64)` | dark ultra-thin material fallback fill (~60–70% opacity) |
-| `--color-glass-tint` | `rgba(23,23,23,.24)` | `rgba(255,255,255,.05)` | faint white specular tint (Cursor dark glass has white edge, not dark) |
-| `--color-glass-specular` *(add)* | `rgba(255,255,255,.12)` | — | top-edge highlight for the non-glass fallback rim |
-| `--color-header` | `rgba(10,10,10,.97)` | `rgba(10,10,10,.80)` | fallback header only; glass path stays transparent |
-| `--color-header-border` | `rgba(255,255,255,.06)` | `rgba(255,255,255,.08)` | |
-| `--color-status-bar` | `#0a0a0a` | `#0a0a0a` | keep; `light-content` bar style |
-| `--color-backdrop` | `rgba(0,0,0,.48)` | `rgba(0,0,0,.55)` | scrim behind glass sheets (Cursor dims + scales page) |
+| Token                            | Current                 | Target                  | Notes                                                                  |
+| -------------------------------- | ----------------------- | ----------------------- | ---------------------------------------------------------------------- |
+| `--color-glass-surface`          | `rgba(23,23,23,.78)`    | `rgba(18,18,18,.64)`    | dark ultra-thin material fallback fill (~60–70% opacity)               |
+| `--color-glass-tint`             | `rgba(23,23,23,.24)`    | `rgba(255,255,255,.05)` | faint white specular tint (Cursor dark glass has white edge, not dark) |
+| `--color-glass-specular` _(add)_ | `rgba(255,255,255,.12)` | —                       | top-edge highlight for the non-glass fallback rim                      |
+| `--color-header`                 | `rgba(10,10,10,.97)`    | `rgba(10,10,10,.80)`    | fallback header only; glass path stays transparent                     |
+| `--color-header-border`          | `rgba(255,255,255,.06)` | `rgba(255,255,255,.08)` |                                                                        |
+| `--color-status-bar`             | `#0a0a0a`               | `#0a0a0a`               | keep; `light-content` bar style                                        |
+| `--color-backdrop`               | `rgba(0,0,0,.48)`       | `rgba(0,0,0,.55)`       | scrim behind glass sheets (Cursor dims + scales page)                  |
 
 Also tokenize the hardcoded plan/skill/markdown accents that currently duplicate palette hues (`--color-inline-skill-*`, `--color-md-*`) toward `--color-accent`/`--color-success`/`--color-danger` where they overlap, so the whole surface coheres. Keep the light `@variant` block intact and fully valid (a future toggle must be able to restore light).
 
@@ -122,20 +122,20 @@ Also tokenize the hardcoded plan/skill/markdown accents that currently duplicate
 
 - **Keep DMSans** (`--font-sans`/`--font-medium`/`--font-bold`). DMSans is a geometric grotesk — a faithful stand-in for Cursor's default "Grotesk" (double-story a/g, even width). No family change; the marketed screens confirm a neutral grotesk, not a serif or rounded face. The appearance screen's Typography options map cleanly onto Ryco's existing font-var mutation path.
 - **Weights:** Bold/Semibold for large titles; Medium for row titles and button labels; Regular for body/secondary.
-- **Large-title pattern:** left-aligned large title *below* the transparent nav bar (~28pt bold), not a centered inline title. Use native `headerLargeTitle` where the stack supports it.
+- **Large-title pattern:** left-aligned large title _below_ the transparent nav bar (~28pt bold), not a centered inline title. Use native `headerLargeTitle` where the stack supports it.
 - **Sizes** (map to existing `--text-*` scale): row title ~17pt medium, subtitle ~15pt regular, section header ~13–15pt regular in `--color-foreground-muted` (**not** uppercased), nav actions ~17pt.
-- **Monospace is reserved strictly for code and file diffs** (Review diff body). Diff *counts* use the proportional UI font, tabular figures.
+- **Monospace is reserved strictly for code and file diffs** (Review diff body). Diff _counts_ use the proportional UI font, tabular figures.
 - Preserve the `AppearancePreferencesProvider` `--text-*` live-mutation path unchanged — Dynamic Type / user font-scale must keep working.
 
 ### 3.3 Shape language (radii)
 
-| Element | Radius | Ryco expression |
-|---|---|---|
-| Circular icon buttons | full circle, 44pt | `rounded-full`, 44×44 |
-| Pills / CTAs / status pills | capsule (½ height) | `rounded-full` |
-| Content cards | ~16pt | `rounded-2xl` (keep existing recipe) |
-| Message bubble | ~20pt | `rounded-[20px]` |
-| Modal / compose sheet top | ~28–32pt | sheet radius 28 (expose as `GlassSurface` prop; today it hardcodes 32) |
+| Element                     | Radius             | Ryco expression                                                        |
+| --------------------------- | ------------------ | ---------------------------------------------------------------------- |
+| Circular icon buttons       | full circle, 44pt  | `rounded-full`, 44×44                                                  |
+| Pills / CTAs / status pills | capsule (½ height) | `rounded-full`                                                         |
+| Content cards               | ~16pt              | `rounded-2xl` (keep existing recipe)                                   |
+| Message bubble              | ~20pt              | `rounded-[20px]`                                                       |
+| Modal / compose sheet top   | ~28–32pt           | sheet radius 28 (expose as `GlassSurface` prop; today it hardcodes 32) |
 
 Parameterize `GlassSurface`'s hardcoded `borderRadius: 32` into a `radius` prop so capsules (composer, icon circles) and sheets can share the component.
 
@@ -154,7 +154,8 @@ Rendering path (reuse existing infra, do not add libraries):
 - **Component:** `GlassSurface` (`expo-glass-effect` `<GlassView>` on iOS 26, plain `<View>` fallback) and `GlassSafeAreaView`. Both are currently **dead code** — this pass gives them their first consumers.
 - **Fallback (Android / pre-iOS-26):** opaque fill from `--color-glass-surface` + a 1px top rim from `--color-glass-specular` to fake depth. Header fallback keeps `SHEET_BACKGROUND_COLOR` (`Stack.tsx`). No blur is faked with heavy shadows.
 
-Glass surfaces (and *only* these):
+Glass surfaces (and _only_ these):
+
 1. **Nav headers** — already glass via `GLASS_HEADER_OPTIONS` (`Stack.tsx`), gated on iOS 26 with `scrollEdgeEffects`. Keep; extend the glass preset to any stack route that should float.
 2. **Bottom composer capsule** (`ThreadComposer`) — the marquee surface; content fades faintly beneath it. Currently deferred by an in-file comment; this pass ships it.
 3. **Circular icon buttons** — nav actions and `ControlPill`'s icon variant become translucent glass circles (dark tint on content, invert on dark-image annotation surfaces if/when present).
@@ -222,31 +223,35 @@ Four phases, each producing a Simulator build the owner reviews before the next 
 Acceptance vocabulary: **typecheck** = `bun typecheck` clean; **vp** (visual-parity self-check) = Simulator screenshot of the touched surface compared side-by-side against the mapped Cursor reference screenshot, structure/rhythm/accents matching; **owner-check** = owner approves the surface live on the Simulator. The **full gate** (`bun install --frozen-lockfile`, `bun fmt`, `bun run fmt:check`, `bun lint`, `bun typecheck`, `bun run test`, `bun run build`, `bun audit`) plus `vendor/ryco` public gates runs before the PR and after any review-driven change.
 
 **Phase 0**
-- **T0.1 Palette tokens.** Apply §3.1 to the dark `@variant` block; add the new accent/diff/glass tokens to **both** light and dark blocks; regenerate `uniwind-types.d.ts`. *Accept:* typecheck; token classes resolve at runtime.
-- **T0.2 Dark-by-default wiring.** §4 (config, splash, resolver, navigation theme, Uniwind). *Accept:* typecheck; app boots dark from splash through first screen; light block still compiles.
-- **T0.3 GlassSurface radius prop.** Parameterize `borderRadius`. *Accept:* typecheck; existing header glass unchanged.
-- **T0.4 Owner review — foundation.** *Accept:* vp (Home/Thread at token level); owner-check on base palette + first-paint.
+
+- **T0.1 Palette tokens.** Apply §3.1 to the dark `@variant` block; add the new accent/diff/glass tokens to **both** light and dark blocks; regenerate `uniwind-types.d.ts`. _Accept:_ typecheck; token classes resolve at runtime.
+- **T0.2 Dark-by-default wiring.** §4 (config, splash, resolver, navigation theme, Uniwind). _Accept:_ typecheck; app boots dark from splash through first screen; light block still compiles.
+- **T0.3 GlassSurface radius prop.** Parameterize `borderRadius`. _Accept:_ typecheck; existing header glass unchanged.
+- **T0.4 Owner review — foundation.** _Accept:_ vp (Home/Thread at token level); owner-check on base palette + first-paint.
 
 **Phase 1**
-- **T1.1 Glass composer capsule** (`ThreadComposer`). *Accept:* typecheck; vp vs "Ship code / Talk to Cursor" bottom bar; owner-check.
-- **T1.2 Glass icon circles** (nav actions + `ControlPill` variant). *Accept:* typecheck; vp; owner-check.
-- **T1.3 Glass sheet + backdrop** (`ReviewSheet`, compose sheets). *Accept:* typecheck; vp vs voice/compose sheet; owner-check.
-- **T1.4 Owner review — chrome.** *Accept:* owner-check across all Phase-1 surfaces on-device.
+
+- **T1.1 Glass composer capsule** (`ThreadComposer`). _Accept:_ typecheck; vp vs "Ship code / Talk to Cursor" bottom bar; owner-check.
+- **T1.2 Glass icon circles** (nav actions + `ControlPill` variant). _Accept:_ typecheck; vp; owner-check.
+- **T1.3 Glass sheet + backdrop** (`ReviewSheet`, compose sheets). _Accept:_ typecheck; vp vs voice/compose sheet; owner-check.
+- **T1.4 Owner review — chrome.** _Accept:_ owner-check across all Phase-1 surfaces on-device.
 
 **Phase 2**
-- **T2.1 Home** — layout + status semantics + glass header buttons. *Accept:* typecheck; vp vs "Kick off new agents"; owner-check.
-- **T2.2 Thread** — bubbles, streaming accent, plan-card tokenize. Includes owner-gated user-bubble change. *Accept:* typecheck; vp; owner-check (explicit yes/no on the bubble color).
-- **T2.3 Review** — diff tokens, CTA taxonomy. *Accept:* typecheck; vp vs "focused diff before merging"; owner-check.
-- **T2.4 Connections** — tokenize `connectionTone.ts`, danger ghost. *Accept:* typecheck; vp; owner-check.
-- **T2.5 Settings** — destructive/switch tokens, grouped-list. *Accept:* typecheck; vp; owner-check.
-- **T2.6 Onboarding + Empty states + shared banners.** *Accept:* typecheck; vp; owner-check.
-- **T2.7 De-hardcode sweep** — remove every `dark:` variant listed in §5; grep proves no stray hardcoded amber/sky/rose/violet/emerald remains. *Accept:* typecheck; `rg` clean.
+
+- **T2.1 Home** — layout + status semantics + glass header buttons. _Accept:_ typecheck; vp vs "Kick off new agents"; owner-check.
+- **T2.2 Thread** — bubbles, streaming accent, plan-card tokenize. Includes owner-gated user-bubble change. _Accept:_ typecheck; vp; owner-check (explicit yes/no on the bubble color).
+- **T2.3 Review** — diff tokens, CTA taxonomy. _Accept:_ typecheck; vp vs "focused diff before merging"; owner-check.
+- **T2.4 Connections** — tokenize `connectionTone.ts`, danger ghost. _Accept:_ typecheck; vp; owner-check.
+- **T2.5 Settings** — destructive/switch tokens, grouped-list. _Accept:_ typecheck; vp; owner-check.
+- **T2.6 Onboarding + Empty states + shared banners.** _Accept:_ typecheck; vp; owner-check.
+- **T2.7 De-hardcode sweep** — remove every `dark:` variant listed in §5; grep proves no stray hardcoded amber/sky/rose/violet/emerald remains. _Accept:_ typecheck; `rg` clean.
 
 **Phase 3**
-- **T3.1 Contrast audit** (§6) — compute ratios for the final palette; fix failures. *Accept:* documented ratio table, all AA; owner-check.
-- **T3.2 Fallback verification** — Android + a pre-iOS-26 iOS Simulator: glass degrades to the opaque `--color-glass-surface` + specular-rim treatment, no broken chrome. *Accept:* screenshots on both; typecheck.
-- **T3.3 Motion/quiet-state polish** — animated blue "Working" cluster, recording waveform/timer, native spring sheet depth; keep motion quiet. *Accept:* vp; owner-check.
-- **T3.4 Full gate + PR** — run the complete Hub-adjacent public gate set and `vendor/ryco` gates; open a public PR on `sak0a/ryco`. *Accept:* all gates green; PR opened; owner sign-off on the assembled build.
+
+- **T3.1 Contrast audit** (§6) — compute ratios for the final palette; fix failures. _Accept:_ documented ratio table, all AA; owner-check.
+- **T3.2 Fallback verification** — Android + a pre-iOS-26 iOS Simulator: glass degrades to the opaque `--color-glass-surface` + specular-rim treatment, no broken chrome. _Accept:_ screenshots on both; typecheck.
+- **T3.3 Motion/quiet-state polish** — animated blue "Working" cluster, recording waveform/timer, native spring sheet depth; keep motion quiet. _Accept:_ vp; owner-check.
+- **T3.4 Full gate + PR** — run the complete Hub-adjacent public gate set and `vendor/ryco` gates; open a public PR on `sak0a/ryco`. _Accept:_ all gates green; PR opened; owner sign-off on the assembled build.
 
 ---
 
