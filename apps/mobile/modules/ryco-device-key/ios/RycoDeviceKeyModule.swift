@@ -1,0 +1,176 @@
+import ExpoModulesCore
+import Foundation
+import Security
+
+/// Secure Enclave P-256 key used to sign DPoP proofs for the hosted plane.
+///
+/// The private key is generated inside the Secure Enclave, marked
+/// non-exportable, and never crosses into JS — this module exposes no export or
+/// extract path by design. If the enclave is unavailable (notably on the
+/// Simulator) key creation fails closed: there is no software fallback, because
+/// a software key would collapse DPoP down to bare bearer assurance.
+public final class RycoDeviceKeyModule: Module {
+  /// Stable per-install tag. Changing it orphans the existing key and forces a
+  /// fresh hosted login, so it must stay constant across releases.
+  private static let applicationTag = "dev.ryco.hostedhub.dpop.p256".data(using: .utf8)!
+
+  public func definition() -> ModuleDefinition {
+    Name("RycoDeviceKey")
+
+    AsyncFunction("ensureKey") { () -> [String: Any] in
+      let key = try Self.loadKey() ?? Self.createKey()
+      return [
+        "publicKey": try Self.exportPublicKey(key).base64EncodedString(),
+        "backing": "secure-enclave",
+      ]
+    }
+
+    AsyncFunction("sign") { (payloadBase64: String) -> String in
+      guard let payload = Data(base64Encoded: payloadBase64) else {
+        throw DeviceKeyError.invalidPayload
+      }
+      guard let key = try Self.loadKey() else {
+        throw DeviceKeyError.keyMissing
+      }
+      return try Self.sign(payload: payload, with: key).base64EncodedString()
+    }
+
+    AsyncFunction("hasKey") { () -> Bool in
+      ((try? Self.loadKey()) ?? nil) != nil
+    }
+
+    AsyncFunction("deleteKey") { () -> Void in
+      Self.deleteKey()
+    }
+  }
+
+  // MARK: - Keychain
+
+  private static func baseQuery() -> [String: Any] {
+    [
+      kSecClass as String: kSecClassKey,
+      kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
+      kSecAttrApplicationTag as String: applicationTag,
+    ]
+  }
+
+  private static func loadKey() throws -> SecKey? {
+    var query = baseQuery()
+    query[kSecReturnRef as String] = true
+
+    var item: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    if status == errSecItemNotFound { return nil }
+    guard status == errSecSuccess, let result = item, CFGetTypeID(result) == SecKeyGetTypeID()
+    else {
+      throw DeviceKeyError.keychain(status)
+    }
+    return (result as! SecKey)
+  }
+
+  private static func createKey() throws -> SecKey {
+    var accessError: Unmanaged<CFError>?
+    // `.privateKeyUsage` alone: a DPoP proof is minted on every authenticated
+    // request, so gating the key on biometry or user presence would prompt the
+    // user continuously. Device-only accessibility keeps the key off backups
+    // and off other devices.
+    guard
+      let access = SecAccessControlCreateWithFlags(
+        kCFAllocatorDefault,
+        kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+        .privateKeyUsage,
+        &accessError
+      )
+    else {
+      throw DeviceKeyError.accessControl(accessError?.takeRetainedValue())
+    }
+
+    let attributes: [String: Any] = [
+      kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
+      kSecAttrKeySizeInBits as String: 256,
+      kSecAttrTokenID as String: kSecAttrTokenIDSecureEnclave,
+      kSecPrivateKeyAttrs as String: [
+        kSecAttrIsPermanent as String: true,
+        kSecAttrApplicationTag as String: applicationTag,
+        kSecAttrAccessControl as String: access,
+      ],
+    ]
+
+    var createError: Unmanaged<CFError>?
+    guard let key = SecKeyCreateRandomKey(attributes as CFDictionary, &createError) else {
+      // The Simulator has no Secure Enclave, so this is the expected failure
+      // path there. Fail closed rather than falling back to a software key.
+      throw DeviceKeyError.enclaveUnavailable(createError?.takeRetainedValue())
+    }
+    return key
+  }
+
+  private static func deleteKey() {
+    SecItemDelete(baseQuery() as CFDictionary)
+  }
+
+  // MARK: - Key material
+
+  /// X9.63 uncompressed point (`0x04 ‖ X(32) ‖ Y(32)`) for the public half only.
+  private static func exportPublicKey(_ key: SecKey) throws -> Data {
+    guard let publicKey = SecKeyCopyPublicKey(key) else {
+      throw DeviceKeyError.publicKeyUnavailable
+    }
+    var error: Unmanaged<CFError>?
+    guard let representation = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
+      throw DeviceKeyError.publicKeyExport(error?.takeRetainedValue())
+    }
+    return representation
+  }
+
+  /// Returns an ASN.1 DER `SEQUENCE { INTEGER r, INTEGER s }`; the JS layer
+  /// converts it to the raw `r ‖ s` form JWS ES256 requires.
+  private static func sign(payload: Data, with key: SecKey) throws -> Data {
+    let algorithm: SecKeyAlgorithm = .ecdsaSignatureMessageX962SHA256
+    guard SecKeyIsAlgorithmSupported(key, .sign, algorithm) else {
+      throw DeviceKeyError.algorithmUnsupported
+    }
+    var error: Unmanaged<CFError>?
+    guard
+      let signature = SecKeyCreateSignature(key, algorithm, payload as CFData, &error) as Data?
+    else {
+      throw DeviceKeyError.signing(error?.takeRetainedValue())
+    }
+    return signature
+  }
+}
+
+/// Bounded errors. Messages are fixed strings so no key material, payload, or
+/// unbounded platform detail reaches JS.
+private enum DeviceKeyError: Error, LocalizedError {
+  case enclaveUnavailable(CFError?)
+  case accessControl(CFError?)
+  case keychain(OSStatus)
+  case keyMissing
+  case publicKeyUnavailable
+  case publicKeyExport(CFError?)
+  case algorithmUnsupported
+  case signing(CFError?)
+  case invalidPayload
+
+  var errorDescription: String? {
+    switch self {
+    case .enclaveUnavailable:
+      return "Secure Enclave is unavailable on this device."
+    case .accessControl:
+      return "Secure Enclave access control could not be created."
+    case .keychain:
+      return "The device key could not be read from the keychain."
+    case .keyMissing:
+      return "No device key exists."
+    case .publicKeyUnavailable, .publicKeyExport:
+      return "The device public key could not be read."
+    case .algorithmUnsupported:
+      return "The device key does not support ES256 signing."
+    case .signing:
+      return "The device key could not sign the request."
+    case .invalidPayload:
+      return "The signing payload was malformed."
+    }
+  }
+}

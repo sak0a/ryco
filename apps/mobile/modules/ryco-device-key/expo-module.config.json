@@ -1,0 +1,10 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["RycoDeviceKeyModule"],
+    "podspecPath": "RycoDeviceKey.podspec"
+  },
+  "android": {
+    "modules": ["expo.modules.rycodevicekey.RycoDeviceKeyModule"]
+  }
+}

@@ -1,0 +1,134 @@
+import { decodeBase64Url } from "@ryco/client-runtime/relay";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+
+const { ensureKey, sign, hasKey, deleteKey } = vi.hoisted(() => ({
+  ensureKey: vi.fn(),
+  sign: vi.fn(),
+  hasKey: vi.fn(),
+  deleteKey: vi.fn(),
+}));
+
+vi.mock("@ryco/mobile-device-key", () => ({
+  default: { ensureKey, sign, hasKey, deleteKey },
+}));
+
+import {
+  getMobileDeviceSigningKey,
+  isMobileDeviceKeyAvailable,
+  resetMobileDeviceKeyForTests,
+} from "./deviceKey";
+
+const UNAVAILABLE = "A hardware-backed device key is unavailable on this device.";
+
+/** Base64 of an X9.63 uncompressed point with recognizable coordinates. */
+function publicKeyBase64(): string {
+  const point = new Uint8Array([
+    0x04,
+    ...Array.from({ length: 32 }, () => 0xa1),
+    ...Array.from({ length: 32 }, () => 0xb2),
+  ]);
+  return btoa(String.fromCharCode(...point));
+}
+
+/** Base64 of a DER `SEQUENCE { INTEGER r, INTEGER s }` with short integers. */
+function derSignatureBase64(): string {
+  const der = new Uint8Array([0x30, 0x06, 0x02, 0x01, 0x07, 0x02, 0x01, 0x09]);
+  return btoa(String.fromCharCode(...der));
+}
+
+beforeEach(() => {
+  resetMobileDeviceKeyForTests();
+  vi.clearAllMocks();
+});
+
+describe("hardware device key", () => {
+  it("builds an ES256 signing key from a Secure Enclave public point", async () => {
+    ensureKey.mockResolvedValue({ publicKey: publicKeyBase64(), backing: "secure-enclave" });
+
+    const key = await getMobileDeviceSigningKey();
+
+    expect(key.algorithm).toBe("ES256");
+    expect(key.publicJwk.kty).toBe("EC");
+    expect(key.publicJwk.crv).toBe("P-256");
+    expect([...decodeBase64Url(key.publicJwk.x!)]).toEqual(Array.from({ length: 32 }, () => 0xa1));
+    expect([...decodeBase64Url(key.publicJwk.y!)]).toEqual(Array.from({ length: 32 }, () => 0xb2));
+  });
+
+  it("accepts a StrongBox-backed key", async () => {
+    ensureKey.mockResolvedValue({ publicKey: publicKeyBase64(), backing: "strongbox" });
+    await expect(getMobileDeviceSigningKey()).resolves.toBeDefined();
+  });
+
+  it("converts the native DER signature to raw r ‖ s", async () => {
+    ensureKey.mockResolvedValue({ publicKey: publicKeyBase64(), backing: "secure-enclave" });
+    sign.mockResolvedValue(derSignatureBase64());
+
+    const key = await getMobileDeviceSigningKey();
+    const signature = await key.sign(new TextEncoder().encode("signing-input"));
+
+    // JWS ES256 requires exactly 64 raw bytes; returning DER here would produce
+    // a proof the Hub rejects as a signature failure.
+    expect(signature).toHaveLength(64);
+    expect(signature[31]).toBe(0x07);
+    expect(signature[63]).toBe(0x09);
+  });
+
+  it("fails closed when the platform reports no hardware backing", async () => {
+    // This is the Simulator path: no enclave, so there must be no hosted
+    // session at all rather than a software-key fallback.
+    ensureKey.mockResolvedValue({ publicKey: publicKeyBase64(), backing: "unavailable" });
+
+    await expect(getMobileDeviceSigningKey()).rejects.toThrow(UNAVAILABLE);
+    await expect(isMobileDeviceKeyAvailable()).resolves.toBe(false);
+  });
+
+  it("fails closed with a bounded message when the enclave rejects", async () => {
+    ensureKey.mockRejectedValue(new Error("SecKeyCreateRandomKey failed: -25293 at 0xdeadbeef"));
+
+    const failure = await getMobileDeviceSigningKey().then(
+      () => null,
+      (error: unknown) => error as Error,
+    );
+
+    expect(failure?.message).toBe(UNAVAILABLE);
+    expect(failure?.message).not.toContain("0xdeadbeef");
+  });
+
+  it("builds the key once and reuses it across calls", async () => {
+    ensureKey.mockResolvedValue({ publicKey: publicKeyBase64(), backing: "secure-enclave" });
+
+    const first = await getMobileDeviceSigningKey();
+    const second = await getMobileDeviceSigningKey();
+
+    expect(first).toBe(second);
+    expect(ensureKey).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not memoize a failure, so a later attempt can still succeed", async () => {
+    ensureKey.mockRejectedValueOnce(new Error("enclave busy"));
+    await expect(getMobileDeviceSigningKey()).rejects.toThrow(UNAVAILABLE);
+
+    ensureKey.mockResolvedValueOnce({ publicKey: publicKeyBase64(), backing: "secure-enclave" });
+    await expect(getMobileDeviceSigningKey()).resolves.toBeDefined();
+  });
+
+  it("rejects a malformed public point rather than emitting a bad JWK", async () => {
+    ensureKey.mockResolvedValue({
+      publicKey: btoa(String.fromCharCode(...new Uint8Array(64).fill(0x04))),
+      backing: "secure-enclave",
+    });
+
+    await expect(getMobileDeviceSigningKey()).rejects.toThrow(UNAVAILABLE);
+  });
+
+  it("exposes no export or extract path on the key", async () => {
+    ensureKey.mockResolvedValue({ publicKey: publicKeyBase64(), backing: "secure-enclave" });
+
+    const key = await getMobileDeviceSigningKey();
+
+    expect(Object.keys(key).toSorted()).toEqual(["algorithm", "publicJwk", "sign"]);
+    for (const member of ["d", "p", "q", "dp", "dq", "qi", "k", "oth"]) {
+      expect(member in key.publicJwk).toBe(false);
+    }
+  });
+});
