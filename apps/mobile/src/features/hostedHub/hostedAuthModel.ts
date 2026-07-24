@@ -1,0 +1,526 @@
+import { ORCHESTRATION_WS_METHODS } from "@ryco/contracts";
+import {
+  deriveHostedConnectionStatusIndicator,
+  deriveHostedConnectionStatusText,
+  resolveHostedRpcCapability,
+  type HostedConnectionStatusIndicator,
+  type HostedConnectionStatusText,
+  type HostedHubState,
+  type HostedRpcCapability,
+} from "@ryco/client-runtime/authorization";
+
+import type { StatusTone } from "../../components/StatusPill";
+import { hostedHubController } from "../../hostedHub/state";
+import { openHostedFallbackSession } from "./HostedFallbackSession";
+
+/**
+ * View models for every hosted-plane surface the native app renders.
+ *
+ * This module is deliberately free of `react-native` (and of React): the
+ * navigation tree's route config is kept import-clean for the same reason, and
+ * react-native ships untranspiled Flow that cannot load in the vp/node test
+ * env. Keeping the derivation here means each surface's state machine, its
+ * bounded copy, and the controller call behind every affordance are asserted by
+ * a real test rather than by inspection of a `.tsx` file.
+ *
+ * Two rules the derivations never break:
+ *
+ * 1. **Nothing is re-derived that the runtime already computes.** Connection
+ *    status comes from `deriveHostedConnectionStatusText` /
+ *    `…Indicator`, and action availability from `resolveHostedRpcCapability`.
+ *    A hand-written status string here would be a second, drifting source of
+ *    truth for the state the relay engine owns.
+ * 2. **A view model carries status, never secret material.** The hosted store
+ *    holds no token, proof, or ticket — those live behind the session
+ *    credentials seam and the enclave — and nothing here reintroduces one, nor
+ *    surfaces an account id, session id, or any other identifier. The bounded
+ *    status vocabulary and the account's own display name are the whole
+ *    vocabulary. `hostedAuthModel.test.ts` asserts this over every surface.
+ */
+
+/** The one node RPC the hosted account surface reports capability for. */
+const HOSTED_CAPABILITY_METHOD: string = ORCHESTRATION_WS_METHODS.dispatchCommand;
+
+export type HostedSignInSurface =
+  /** No hosted plane in this build, or no hardware-backed key on this device. */
+  | "unavailable"
+  /** Hosted mode is configured but the Hub could not be reached. */
+  | "hub-unreachable"
+  /** Signed out with an account already enrolled on the Hub. */
+  | "signed-out"
+  /** The Hub has no owner yet: registration is browser-transport-only. */
+  | "first-run"
+  /** A passkey ceremony is in flight. */
+  | "authenticating"
+  | "session-expired"
+  | "signing-out"
+  /** Codes shown once, after a registration; must be acknowledged. */
+  | "recovery-codes"
+  | "authenticated";
+
+export type HostedAuthActionId =
+  | "sign-in"
+  | "cancel-authentication"
+  | "open-fallback"
+  | "retry-hub"
+  | "pair-device"
+  | "dismiss-recovery-codes"
+  | "acknowledge-delivery-unknown"
+  | "sign-out"
+  | "add-this-device"
+  | "recovery-codes"
+  | "done";
+
+/** A confirmation the surface must present before running an action. */
+export interface HostedAuthConfirmation {
+  readonly title: string;
+  readonly message: string;
+  readonly confirmText: string;
+  readonly destructive: boolean;
+}
+
+export interface HostedAuthAction {
+  readonly id: HostedAuthActionId;
+  readonly label: string;
+  readonly disabled: boolean;
+  readonly confirm?: HostedAuthConfirmation;
+  readonly run: () => void;
+}
+
+/**
+ * The mandatory delivery-unknown acknowledgement.
+ *
+ * A request may or may not have reached the node, and the runtime deliberately
+ * does not resend it. The acknowledgement is the user's, so no surface may
+ * auto-dismiss it: it stays in the view model for as long as the session status
+ * says so, and only `acknowledgeDeliveryUnknown()` clears it. The action is
+ * disabled — never hidden — until replay has settled, so the state is always
+ * visible even while it cannot yet be dismissed.
+ */
+export interface HostedDeliveryUnknownView {
+  readonly message: string;
+  readonly action: HostedAuthAction;
+}
+
+export interface HostedSignInView {
+  readonly surface: HostedSignInSurface;
+  readonly title: string;
+  readonly detail: string;
+  /** True while a ceremony or sign-out is in flight; surfaces show a spinner. */
+  readonly busy: boolean;
+  readonly errorMessage: string | null;
+  readonly statusText: HostedConnectionStatusText | null;
+  readonly statusIndicator: HostedConnectionStatusIndicator | null;
+  readonly recoveryCodes: ReadonlyArray<string>;
+  readonly primaryAction: HostedAuthAction | null;
+  readonly secondaryAction: HostedAuthAction | null;
+  readonly deliveryUnknown: HostedDeliveryUnknownView | null;
+}
+
+export interface HostedAccountRow {
+  readonly id: HostedAuthActionId;
+  readonly label: string;
+  readonly value: string | null;
+  readonly destructive: boolean;
+  readonly confirm?: HostedAuthConfirmation;
+  readonly run: () => void;
+}
+
+export interface HostedAccountView {
+  /** False for a direct-only build: the Settings row must not render at all. */
+  readonly available: boolean;
+  readonly signedIn: boolean;
+  readonly title: string;
+  readonly detail: string;
+  readonly displayName: string | null;
+  readonly roleLabel: string | null;
+  readonly statusText: HostedConnectionStatusText | null;
+  readonly statusIndicator: HostedConnectionStatusIndicator | null;
+  readonly capability: HostedRpcCapability;
+  /** The runtime's own explanation of why node actions are unavailable. */
+  readonly capabilityNotice: string | null;
+  readonly errorMessage: string | null;
+  readonly rows: ReadonlyArray<HostedAccountRow>;
+  readonly recoveryCodes: ReadonlyArray<string>;
+  readonly deliveryUnknown: HostedDeliveryUnknownView | null;
+  /** Present only while signed out, so Settings can route to the sheet. */
+  readonly signInAction: HostedAuthAction | null;
+}
+
+export interface HostedSignInViewInput {
+  readonly state: HostedHubState;
+  /** `isMobileHostedModeAvailable()` — hosted config plus a usable hardware key. */
+  readonly hostedModeAvailable: boolean;
+  /** The direct-plane escape hatch offered whenever hosted mode cannot run. */
+  readonly onPairDevice: () => void;
+  /** Dismiss the sheet once the hosted session is established. */
+  readonly onDone: () => void;
+}
+
+export interface HostedAccountViewInput {
+  readonly state: HostedHubState;
+  readonly hostedModeAvailable: boolean;
+  /** Open the sign-in sheet (the `Onboarding` route). */
+  readonly onSignIn: () => void;
+}
+
+const DELIVERY_UNKNOWN_MESSAGE =
+  "A request may or may not have reached the node. Ryco did not resend it automatically.";
+
+/**
+ * Hand control to the Hub's own web app, then back to a native passkey login.
+ *
+ * Every credential flow the native transport cannot perform — owner bootstrap,
+ * invitation redemption, password, email, TOTP, recovery-code redemption — is
+ * browser-transport-only on the Hub. `openHostedFallbackSession` owns the URL
+ * validation and the transport separation; the only thing decided here is that
+ * the return path is always `signIn()`, because the app never adopts the
+ * browser's session.
+ */
+function openFallbackSession(): void {
+  void openHostedFallbackSession({
+    completeWithNativeSignIn: () => hostedHubController.signIn(),
+  });
+}
+
+function action(
+  id: HostedAuthActionId,
+  label: string,
+  run: () => void,
+  options?: { readonly disabled?: boolean; readonly confirm?: HostedAuthConfirmation },
+): HostedAuthAction {
+  const disabled = options?.disabled ?? false;
+  return {
+    id,
+    label,
+    disabled,
+    ...(options?.confirm ? { confirm: options.confirm } : {}),
+    // The guard lives here rather than only in the surface's `disabled` prop: a
+    // hardware keyboard, an accessibility action, or a future surface that
+    // forgets to pass the flag must not be able to fire a call the state
+    // machine is not ready for.
+    run: disabled ? () => undefined : run,
+  };
+}
+
+const signInAction = (label: string): HostedAuthAction =>
+  action("sign-in", label, () => void hostedHubController.signIn());
+
+const fallbackAction = (label: string): HostedAuthAction =>
+  action("open-fallback", label, openFallbackSession);
+
+function statusOf(state: HostedHubState): {
+  readonly text: HostedConnectionStatusText;
+  readonly indicator: HostedConnectionStatusIndicator;
+} {
+  const input = {
+    browserStatus: state.browserStatus,
+    sessionStatus: state.sessionStatus,
+    selectionStatus: state.selectionStatus,
+    transportStatus: state.transportStatus,
+  };
+  return {
+    text: deriveHostedConnectionStatusText(input),
+    indicator: deriveHostedConnectionStatusIndicator(input),
+  };
+}
+
+/**
+ * The short labels that mean "something is wrong", as opposed to "not there
+ * yet". Everything else — Connecting, Preparing, Syncing, Opening — is a
+ * transient step and gets the neutral tone rather than an alarming one.
+ */
+const HOSTED_ATTENTION_LABELS: ReadonlySet<string> = new Set([
+  "Unconfirmed",
+  "No access",
+  "Revoked",
+  "Incompatible",
+  "Failed",
+]);
+
+/**
+ * Token-class tone for one bounded status, mirroring `connectionTone.ts` for
+ * the direct plane. The label is the runtime's own short label — the tone
+ * chooses colour only, so a pill can never contradict the word inside it.
+ */
+export function hostedStatusTone(indicator: HostedConnectionStatusIndicator): StatusTone {
+  if (indicator.connected) {
+    return {
+      label: indicator.shortLabel,
+      pillClassName: "bg-success-bg border border-success-border",
+      textClassName: "text-success",
+    };
+  }
+  if (HOSTED_ATTENTION_LABELS.has(indicator.shortLabel)) {
+    return {
+      label: indicator.shortLabel,
+      pillClassName: "bg-danger border border-danger-border",
+      textClassName: "text-danger-foreground",
+    };
+  }
+  return {
+    label: indicator.shortLabel,
+    pillClassName: "bg-subtle",
+    textClassName: "text-foreground-muted",
+  };
+}
+
+function deliveryUnknownView(state: HostedHubState): HostedDeliveryUnknownView | null {
+  if (state.sessionStatus !== "delivery-unknown") return null;
+  const recovered = state.sessionRecoveredAfterUnknown;
+  return {
+    message: DELIVERY_UNKNOWN_MESSAGE,
+    action: action(
+      "acknowledge-delivery-unknown",
+      recovered ? "Acknowledge" : "Synchronizing…",
+      () => hostedHubController.acknowledgeDeliveryUnknown(),
+      { disabled: !recovered },
+    ),
+  };
+}
+
+function roleLabel(state: HostedHubState): string | null {
+  const role = state.account?.role ?? null;
+  if (role === null) return null;
+  return `${role.charAt(0).toUpperCase()}${role.slice(1)}`;
+}
+
+/** The surface the sign-in sheet shows, in strict precedence order. */
+function resolveSignInSurface(input: HostedSignInViewInput): HostedSignInSurface {
+  const { state } = input;
+  if (!input.hostedModeAvailable) return "unavailable";
+  if (state.accountStatus === "unavailable") return "hub-unreachable";
+  if (state.accountStatus === "authenticating") return "authenticating";
+  if (state.accountStatus === "signing-out") return "signing-out";
+  if (state.accountStatus === "session-expired") return "session-expired";
+  if (state.accountStatus === "authenticated") {
+    // Codes are shown exactly once and are not recoverable afterwards, so they
+    // outrank the connected summary until they are acknowledged.
+    return state.recoveryCodes.length > 0 ? "recovery-codes" : "authenticated";
+  }
+  return state.bootstrapAvailable ? "first-run" : "signed-out";
+}
+
+/** The hosted sign-in sheet (`Onboarding`), as a bounded view model. */
+export function deriveHostedSignInView(input: HostedSignInViewInput): HostedSignInView {
+  const { state } = input;
+  const surface = resolveSignInSurface(input);
+  const pairDevice = action("pair-device", "Pair a device directly", input.onPairDevice);
+  const base = {
+    surface,
+    busy: false,
+    errorMessage: state.errorMessage,
+    statusText: null,
+    statusIndicator: null,
+    recoveryCodes: [] as ReadonlyArray<string>,
+    primaryAction: null,
+    secondaryAction: null,
+    deliveryUnknown: null,
+  } satisfies Omit<HostedSignInView, "title" | "detail">;
+
+  switch (surface) {
+    case "unavailable":
+      return {
+        ...base,
+        title: "Hub sign-in unavailable",
+        detail:
+          "This build has no Ryco Hub, or this device cannot create the hardware-backed key a Hub session requires. Pair a Ryco node directly instead.",
+        // Deliberately no error text: `errorMessage` describes the hosted
+        // session, and there is no hosted session to describe.
+        errorMessage: null,
+        primaryAction: pairDevice,
+      };
+    case "hub-unreachable":
+      return {
+        ...base,
+        title: "Hub unavailable",
+        detail: "Ryco could not reach your Hub. Check your connection and try again.",
+        primaryAction: action("retry-hub", "Try again", () => void hostedHubController.bootstrap()),
+        secondaryAction: pairDevice,
+      };
+    case "authenticating":
+      return {
+        ...base,
+        title: "Waiting for your passkey",
+        detail: "Approve the passkey request to finish signing in to your Hub.",
+        busy: true,
+        primaryAction: action("cancel-authentication", "Cancel", () =>
+          hostedHubController.cancelAuthentication(),
+        ),
+      };
+    case "signing-out":
+      return {
+        ...base,
+        title: "Signing out",
+        detail: "Ending this device's Hub session.",
+        busy: true,
+      };
+    case "session-expired":
+      return {
+        ...base,
+        title: "Your session expired",
+        detail: "Sign in again with your passkey to reconnect to your Hub.",
+        primaryAction: signInAction("Sign in with passkey"),
+        secondaryAction: fallbackAction("Other ways to sign in"),
+      };
+    case "first-run":
+      return {
+        ...base,
+        title: "Set up your Hub",
+        detail:
+          "This Hub has no account yet. Ryco opens your browser to create the first owner and a passkey, then signs you in here.",
+        primaryAction: fallbackAction("Continue in browser"),
+        secondaryAction: signInAction("I already have a passkey"),
+      };
+    case "recovery-codes":
+      return {
+        ...base,
+        title: "Save your recovery codes",
+        detail: "These codes are shown once. Ryco does not store them on this device.",
+        recoveryCodes: state.recoveryCodes,
+        primaryAction: action("dismiss-recovery-codes", "I saved the codes", () =>
+          hostedHubController.dismissRecoveryCodes(),
+        ),
+      };
+    case "authenticated": {
+      const status = statusOf(state);
+      return {
+        ...base,
+        title: "Connected to your Hub",
+        detail:
+          state.account === null
+            ? "This device has a Hub session."
+            : `Signed in as ${state.account.displayName}.`,
+        statusText: status.text,
+        statusIndicator: status.indicator,
+        deliveryUnknown: deliveryUnknownView(state),
+        primaryAction: action("done", "Done", input.onDone),
+      };
+    }
+    case "signed-out":
+      return {
+        ...base,
+        title: "Connect to your Hub",
+        detail:
+          "Sign in with the passkey registered for this Hub. Every request from this device is signed with a key that never leaves its secure hardware.",
+        primaryAction: signInAction("Sign in with passkey"),
+        secondaryAction: fallbackAction("Other ways to sign in"),
+      };
+  }
+}
+
+/**
+ * The account rows.
+ *
+ * "Add this device" and "Recovery codes" hand off to the Hub's web app rather
+ * than calling an endpoint directly. Both ceremonies exist on the Hub, but the
+ * shared runtime exposes no client method for either, and constructing those
+ * requests here would fork proof construction and URL derivation out of
+ * `@ryco/client-runtime` — the one thing this plane is not allowed to do. The
+ * browser handoff is the sanctioned path and still ends in a native passkey
+ * login, so the app's own session stays DPoP-bound either way.
+ */
+function accountRows(state: HostedHubState): ReadonlyArray<HostedAccountRow> {
+  const row = (
+    id: HostedAuthActionId,
+    label: string,
+    run: () => void,
+    extras?: {
+      readonly value?: string;
+      readonly destructive?: boolean;
+      readonly confirm?: HostedAuthConfirmation;
+    },
+  ): HostedAccountRow => ({
+    id,
+    label,
+    value: extras?.value ?? null,
+    destructive: extras?.destructive ?? false,
+    ...(extras?.confirm ? { confirm: extras.confirm } : {}),
+    run,
+  });
+
+  return [
+    row("add-this-device", "Add a passkey for this device", openFallbackSession),
+    row("recovery-codes", "Recovery codes", openFallbackSession),
+    row("sign-out", "Sign out", () => void hostedHubController.signOut(), {
+      destructive: true,
+      confirm: {
+        title: "Sign out of your Hub?",
+        message:
+          state.selectedNode === null
+            ? "This device's Hub session ends. Directly paired devices are unaffected."
+            : `This device's Hub session ends and ${state.selectedNode.label} disconnects. Directly paired devices are unaffected.`,
+        confirmText: "Sign out",
+        destructive: true,
+      },
+    }),
+  ];
+}
+
+/** The hosted account surface in Settings, as a bounded view model. */
+export function deriveHostedAccountView(input: HostedAccountViewInput): HostedAccountView {
+  const { state } = input;
+  const capability = resolveHostedRpcCapability({
+    hosted: input.hostedModeAvailable,
+    role: state.effectiveRole,
+    fresh: state.directoryStatus === "ready" && state.transportStatus === "online",
+    browserCurrent: state.browserStatus === "current",
+    sessionReady: state.sessionStatus === "ready",
+    method: HOSTED_CAPABILITY_METHOD,
+  });
+  const base = {
+    available: input.hostedModeAvailable,
+    capability,
+    capabilityNotice: capability.allowed ? null : capability.reason,
+    errorMessage: state.errorMessage,
+    displayName: null,
+    roleLabel: null,
+    statusText: null,
+    statusIndicator: null,
+    rows: [] as ReadonlyArray<HostedAccountRow>,
+    recoveryCodes: [] as ReadonlyArray<string>,
+    deliveryUnknown: null,
+    signInAction: null,
+  } satisfies Omit<HostedAccountView, "signedIn" | "title" | "detail">;
+
+  if (!input.hostedModeAvailable) {
+    // Nothing about the hosted plane is reachable, so nothing about it renders
+    // — not even a disabled row that would imply a broken feature.
+    return {
+      ...base,
+      capabilityNotice: null,
+      errorMessage: null,
+      signedIn: false,
+      title: "Hub unavailable",
+      detail: "This build has no Ryco Hub.",
+    };
+  }
+
+  if (state.accountStatus !== "authenticated" || state.account === null) {
+    return {
+      ...base,
+      signedIn: false,
+      title: "Not signed in",
+      detail:
+        state.accountStatus === "session-expired"
+          ? "Your Hub session expired. Sign in again with your passkey."
+          : "Sign in with your passkey to reach the nodes on your Hub.",
+      signInAction: action("sign-in", "Sign in", input.onSignIn),
+    };
+  }
+
+  const status = statusOf(state);
+  return {
+    ...base,
+    signedIn: true,
+    title: state.account.displayName,
+    detail: "Signed in with a passkey on this device.",
+    displayName: state.account.displayName,
+    roleLabel: roleLabel(state),
+    statusText: status.text,
+    statusIndicator: status.indicator,
+    rows: accountRows(state),
+    recoveryCodes: state.recoveryCodes,
+    deliveryUnknown: deliveryUnknownView(state),
+  };
+}

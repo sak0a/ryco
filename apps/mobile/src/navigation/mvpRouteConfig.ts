@@ -67,7 +67,9 @@ export const MVP_ROOT_ROUTES = {
     linking: "connections",
     overlay: true,
     headerPreset: "none",
-    ios: { presentation: "formSheet", sheetAllowedDetents: [0.55, 0.7], sheetGrabberVisible: true },
+    // Widened from [0.55, 0.7]: the sheet now carries two labeled sections —
+    // direct saved devices and hosted Hub nodes — rather than one list.
+    ios: { presentation: "formSheet", sheetAllowedDetents: [0.6, 0.95], sheetGrabberVisible: true },
     android: { presentation: "card", headerShown: false },
   },
   ConnectionsNew: {
@@ -113,6 +115,10 @@ export const MVP_SETTINGS_SHEET_ROUTES = {
   Settings: { linking: "" },
   SettingsEnvironments: { linking: "environments" },
   SettingsEnvironmentNew: { linking: "environment-new" },
+  // Hosted Hub account. Nested rather than a root route so the hosted plane
+  // adds no root-route churn: sign-in lives inside the existing `Onboarding`
+  // sheet, and this is the only route the hosted surfaces add anywhere.
+  SettingsAccount: { linking: "account" },
   SettingsAppearance: { linking: "appearance" },
   SettingsClientStorage: { linking: "client-storage" },
 } as const satisfies Record<string, { readonly linking: string }>;

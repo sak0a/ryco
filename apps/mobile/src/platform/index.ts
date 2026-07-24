@@ -1,6 +1,10 @@
 export { mobileAppLifecycle } from "./appLifecycle";
 export { mobileAttachmentCodec, type MobileAttachmentInput } from "./attachmentCodec";
-export { readMobileClientRuntimeConfig } from "./config";
+export {
+  readMobileClientRuntimeConfig,
+  readMobileHostedConfig,
+  type MobileHostedConfig,
+} from "./config";
 export { createMobileEndpoint } from "./endpoint";
 export { mobileClock, mobileFrameScheduler } from "./frame";
 export { createMobileHttpClient } from "./httpClient";
@@ -12,8 +16,30 @@ export {
   mobilePairingCredentialSource,
   type MobilePairingCredentialSource,
 } from "./pairingCredentialSource";
-export { mobilePasskeyCeremony } from "./passkeyCeremony";
-export { createMobileSessionCredentials, mobileSessionCredentials } from "./sessionCredentials";
+export {
+  isMobilePasskeySupported,
+  mobilePasskeyCeremony,
+  resetPasskeyModuleForTests,
+} from "./passkeyCeremony";
+export { derSignatureToRaw, ecPublicKeyJwk, uncompressedPointToJwk } from "./ecdsa";
+export {
+  getMobileDeviceSigningKey,
+  isMobileDeviceKeyAvailable,
+  resetMobileDeviceKeyForTests,
+  type DeviceKeyBacking,
+} from "./deviceKey";
+export {
+  assertHostedRuntimeGlobals,
+  createMobileDpopSigner,
+  resetMobileDpopSignerForTests,
+} from "./dpopSigner";
+export {
+  createMobileSessionCredentials,
+  hydrateMobileHostedSessionToken,
+  mobileSessionCredentials,
+  HOSTED_SESSION_TOKEN_KEY,
+  type MobileSessionCredentials,
+} from "./sessionCredentials";
 export {
   createMobileSecretKV,
   mobileSecretKV,

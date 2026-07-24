@@ -5,6 +5,7 @@ import { Pressable, ScrollView, View } from "react-native";
 import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
 import { EmptyState } from "../../components/EmptyState";
+import { RycoWordmark } from "../../components/RycoWordmark";
 import { cn } from "../../lib/cn";
 import { useThemeColor } from "../../lib/useThemeColor";
 import type { SidebarThreadSummary } from "@ryco/client-runtime/state/threads";
@@ -67,6 +68,20 @@ export function HomeScreen() {
   // nav bar provides the chrome; the buttons should read as bare icons.
   useLayoutEffect(() => {
     navigation.setOptions({
+      // The brand mark is the environment switcher's entry point: it opens the
+      // Connections sheet, which lists direct saved devices and hosted Hub
+      // nodes as two separate sections.
+      headerLeft: () => (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Switch environment"
+          hitSlop={12}
+          className="active:opacity-50"
+          onPress={() => navigation.navigate("Connections")}
+        >
+          <RycoWordmark compact />
+        </Pressable>
+      ),
       headerRight: () => (
         <View className="flex-row items-center gap-6">
           <Pressable

@@ -18,6 +18,7 @@ import { useThemeColor } from "./lib/useThemeColor";
 import { ConnectionRegistryProvider } from "./providers/ConnectionRegistryProvider";
 import { AppProviders } from "./providers/AppProviders";
 import { ServerStateBootstrap } from "./state/serverStateSync";
+import { useHostedAppLifecycle } from "./hostedHub/useHostedAppLifecycle";
 import { RootStack } from "./Stack";
 
 import "../global.css";
@@ -54,6 +55,18 @@ function SplashScreenCoordinator() {
   return null;
 }
 
+/**
+ * Drives the hosted browser lifecycle from app foreground/background and
+ * connectivity. Mounted once, above every hosted surface: iOS tears down
+ * sockets on background, and without this the runtime never learns, so the
+ * transport keeps reconnecting and issuing fresh relay tickets while
+ * backgrounded instead of suspending. Inert when hosted mode is unconfigured.
+ */
+function HostedAppLifecycle() {
+  useHostedAppLifecycle();
+  return null;
+}
+
 // B2 app root: B1's provider stack (gesture/atom-registry/safe-area/keyboard) +
 // the connection-registry context + appearance preferences, then the full
 // navigation shell. Cloud auth, incoming-share, and the showcase rig are stripped.
@@ -70,6 +83,7 @@ export default function App() {
         <AppearancePreferencesProvider>
           <SplashScreenCoordinator />
           <ServerStateBootstrap />
+          <HostedAppLifecycle />
           <StatusBar
             barStyle={colorScheme === "dark" ? "light-content" : "dark-content"}
             backgroundColor={statusBarBg}

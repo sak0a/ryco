@@ -6,8 +6,9 @@ import { loadMobileEnv, resolveAppVariant, type AppVariant } from "./config/env.
 // managed-cloud plane, its EAS project/owner, upstream bundle IDs/schemes, brand
 // assets, the default telemetry endpoint, widgets, share extension, quick
 // actions, and the camera-showcase rig are all stripped per the design spec's
-// strip list. Direct-node bearer pairing is the B1 auth plane; hosted passkeys
-// (associated domains below) are inert until workstream C.
+// strip list. Direct-node bearer pairing is one auth plane; the hosted plane
+// (associated domains + `extra.hosted` below) activates only when a Hub origin
+// is configured.
 const repoEnv = loadMobileEnv();
 Object.assign(process.env, repoEnv);
 
@@ -77,6 +78,27 @@ const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
 
+// The relying party is the host that serves the association documents, so it is
+// deployment metadata, not a build constant: a staging Hub on its own domain
+// needs its own RP id. It must equal the Hub's configured `RYCO_HUB_WEBAUTHN_RP_ID`,
+// because that is the host the passkey ceremony resolves `webcredentials:`
+// against. Defaults to the canonical hosted origin.
+const HOST_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
+const relyingPartyOverride = repoEnv.EXPO_PUBLIC_RYCO_RELYING_PARTY?.trim();
+
+if (relyingPartyOverride !== undefined && relyingPartyOverride !== "") {
+  if (!HOST_PATTERN.test(relyingPartyOverride)) {
+    throw new Error(
+      `EXPO_PUBLIC_RYCO_RELYING_PARTY must be a bare hostname such as app.ryco.dev — received ${JSON.stringify(relyingPartyOverride)}. It is a WebAuthn RP id, so it carries no scheme, port, or path.`,
+    );
+  }
+}
+
+const relyingParty =
+  relyingPartyOverride !== undefined && relyingPartyOverride !== ""
+    ? relyingPartyOverride
+    : variant.relyingParty;
+
 // Aliases match the fonts' PostScript names on iOS; register the same names on
 // Android so RN and the native composer share one family-name set.
 const dmSansFonts = {
@@ -88,6 +110,51 @@ const dmSansFonts = {
 // Apple Developer Team id is deployment metadata (owner-supplied via env);
 // never hardcode a team id in the public scaffold.
 const appleTeamId = repoEnv.RYCO_IOS_APPLE_TEAM_ID?.trim();
+
+// Hosted Hub plane. `EXPO_PUBLIC_RYCO_HUB_URL` must be the Hub's *public origin*
+// (the host that serves the API and the relay upgrade), because every DPoP proof
+// signs `htu` against that origin. `EXPO_PUBLIC_RYCO_HUB_APP_URL` is the hosted
+// web app the fallback (registration/recovery) browser session opens.
+const hostedHubBaseUrl = repoEnv.EXPO_PUBLIC_RYCO_HUB_URL?.trim() || null;
+const hostedHubAppUrl = repoEnv.EXPO_PUBLIC_RYCO_HUB_APP_URL?.trim() || null;
+
+// Fail closed at config time: a hosted build whose associated domains can never
+// resolve is worse than no hosted build, because the failure only surfaces on a
+// device at passkey time.
+if (hostedHubBaseUrl) {
+  // `webcredentials:` resolves against TEAMID.BUNDLEID; without a team id the
+  // association document can never name this app.
+  if (!appleTeamId) {
+    throw new Error(
+      "RYCO_IOS_APPLE_TEAM_ID is required when EXPO_PUBLIC_RYCO_HUB_URL is set: the webcredentials association resolves against TEAMID.BUNDLEID, so a hosted build without an Apple Developer Team id can never associate with the relying party.",
+    );
+  }
+  // The personal-team escape hatch rewrites the bundle identifier, which breaks
+  // the association document ↔ bundle binding the passkey ceremony depends on.
+  if (isIosPersonalTeamBuild || personalTeamBundleIdentifier) {
+    throw new Error(
+      "RYCO_IOS_PERSONAL_TEAM / RYCO_IOS_PERSONAL_TEAM_BUNDLE_ID cannot be combined with EXPO_PUBLIC_RYCO_HUB_URL: the personal-team override changes the iOS bundle identifier, so it no longer matches the TEAMID.BUNDLEID entry in the relying party's apple-app-site-association document. Build hosted variants with the real team's bundle identifier, or unset EXPO_PUBLIC_RYCO_HUB_URL for a direct-node-only local build.",
+    );
+  }
+  // A Hub on a domain that the relying party does not cover can never serve the
+  // association documents the ceremony reads, and that failure is only visible
+  // on a device at passkey time — so surface it here instead. The RP id must be
+  // the Hub's host or a registrable parent of it.
+  const hubHost = (() => {
+    try {
+      return new URL(hostedHubBaseUrl).hostname;
+    } catch {
+      throw new Error(
+        `EXPO_PUBLIC_RYCO_HUB_URL must be an absolute URL — received ${JSON.stringify(hostedHubBaseUrl)}.`,
+      );
+    }
+  })();
+  if (hubHost !== relyingParty && !hubHost.endsWith(`.${relyingParty}`)) {
+    throw new Error(
+      `EXPO_PUBLIC_RYCO_RELYING_PARTY (${relyingParty}) must equal the Hub host (${hubHost}) or a registrable parent of it, and must match the Hub's RYCO_HUB_WEBAUTHN_RP_ID. Otherwise the passkey ceremony resolves webcredentials: against a host that serves no association document.`,
+    );
+  }
+}
 
 const config: ExpoConfig = {
   name: variant.appName,
@@ -116,11 +183,9 @@ const config: ExpoConfig = {
     supportsTablet: true,
     bundleIdentifier: iosBundleIdentifier,
     ...(appleTeamId ? { appleTeamId } : {}),
-    // Present but inert for B1: hosted passkeys land with workstream C.
-    associatedDomains: [
-      `applinks:${variant.relyingParty}`,
-      `webcredentials:${variant.relyingParty}`,
-    ],
+    // Native passkeys (webcredentials) and universal links (applinks) for the
+    // hosted plane's relying party.
+    associatedDomains: [`applinks:${relyingParty}`, `webcredentials:${relyingParty}`],
     infoPlist: {
       NSAppTransportSecurity: {
         // Allow LAN/tailnet connections to a local or staging node over http.
@@ -140,6 +205,17 @@ const config: ExpoConfig = {
       monochromeImage: "./assets/android-icon-mark.png",
     },
     predictiveBackGestureEnabled: true,
+    // App Links for the relying party host: `autoVerify` makes Android verify
+    // this package against the host's /.well-known/assetlinks.json, which is the
+    // same document Credential Manager checks for passkeys.
+    intentFilters: [
+      {
+        action: "VIEW",
+        autoVerify: true,
+        category: ["BROWSABLE", "DEFAULT"],
+        data: [{ scheme: "https", host: relyingParty }],
+      },
+    ],
   },
   web: {
     favicon: "./assets/icon.png",
@@ -226,6 +302,13 @@ const config: ExpoConfig = {
     node: {
       httpBaseUrl: repoEnv.EXPO_PUBLIC_RYCO_HTTP_URL ?? null,
       wsBaseUrl: repoEnv.EXPO_PUBLIC_RYCO_WS_URL ?? null,
+    },
+    // Hosted plane. Absent/blank `hubBaseUrl` keeps the app in direct-node mode
+    // (src/platform/config.ts fails closed on anything it cannot validate).
+    hosted: {
+      hubBaseUrl: hostedHubBaseUrl,
+      appUrl: hostedHubAppUrl,
+      relyingParty: relyingParty,
     },
   },
 };

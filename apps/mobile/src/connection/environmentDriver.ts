@@ -21,6 +21,7 @@ import {
   useStore,
 } from "../state/threadsRuntime";
 import { invalidateAllCheckpointDiffs } from "../rpc/checkpointDiffAtoms";
+import { createHostedPrimaryConnection } from "../hostedHub/primaryConnection";
 import { subscribeAppStateResume } from "./appStateResume";
 import { createMobileEnvironmentStateSink } from "./environmentStateSink";
 import type { MobileRemoteEnvironmentApi } from "./remoteApi";
@@ -336,9 +337,18 @@ export function createMobileEnvironmentDriver(
     resetProviderInvalidation: () => {
       needsProviderInvalidation = false;
     },
-    // Mobile has no window-origin/primary environment; direct-node uses saved
-    // environments only.
-    createPrimaryConnection: () => null,
+    // The direct plane has no primary environment, so this stays `null` for a
+    // direct-only build — including at supervisor `start()`. It becomes non-null
+    // only once the hosted runtime has written a primary descriptor for a
+    // selected Hub node, and that connection runs through the Hub relay.
+    createPrimaryConnection: () =>
+      createHostedPrimaryConnection({
+        pushSequenceMonitor: noopPushSequenceMonitor,
+        applyShellEvent: (event, environmentId) =>
+          getSupervisor().applyShellEvent(event, environmentId),
+        syncShellSnapshot: (snapshot, environmentId) =>
+          getSupervisor().syncShellSnapshot(snapshot, environmentId),
+      }),
     listSavedEnvironmentRecords: () => catalog.list(),
     hasSavedEnvironmentRegistryHydrated: () => catalog.hasHydrated(),
     waitForSavedEnvironmentRegistryHydration: () => catalog.waitForHydration(),
