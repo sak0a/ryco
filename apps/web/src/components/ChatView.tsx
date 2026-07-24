@@ -45,7 +45,6 @@ import { isRightPanelOpen, parseRightPanelRouteSearch } from "../rightPanelRoute
 import { deriveThreadSubagents } from "../threadWorkspaceViewModel";
 import { parseStandaloneComposerSlashCommand } from "../composer-logic";
 import {
-  deriveCompletionDividerBeforeEntryId,
   derivePhase,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
@@ -54,7 +53,6 @@ import {
   findLatestProposedPlan,
   hasActionableProposedPlan,
   isLatestTurnSettled,
-  formatElapsed,
 } from "../session-logic";
 import { type LegendListRef } from "@legendapp/list/react";
 import {
@@ -1354,7 +1352,6 @@ export default function ChatView(props: ChatViewProps) {
   const {
     workLogEntries,
     contextCompactionEntries,
-    latestTurnHasToolActivity,
     pendingApprovals,
     pendingUserInputs,
     activePlan,
@@ -1572,25 +1569,6 @@ export default function ChatView(props: ChatViewProps) {
     });
   }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
 
-  const completionSummary = useMemo(() => {
-    if (!latestTurnSettled) return null;
-    if (!activeLatestTurn?.startedAt) return null;
-    if (!activeLatestTurn.completedAt) return null;
-    if (!latestTurnHasToolActivity) return null;
-
-    const elapsed = formatElapsed(activeLatestTurn.startedAt, activeLatestTurn.completedAt);
-    return elapsed ? `Worked for ${elapsed}` : null;
-  }, [
-    activeLatestTurn?.completedAt,
-    activeLatestTurn?.startedAt,
-    latestTurnHasToolActivity,
-    latestTurnSettled,
-  ]);
-  const completionDividerBeforeEntryId = useMemo(() => {
-    if (!latestTurnSettled) return null;
-    if (!completionSummary) return null;
-    return deriveCompletionDividerBeforeEntryId(timelineEntries, activeLatestTurn);
-  }, [activeLatestTurn, completionSummary, latestTurnSettled, timelineEntries]);
   const gitCwd = activeProject
     ? projectScriptCwd({
         project: { cwd: activeProject.cwd },
@@ -3237,6 +3215,7 @@ export default function ChatView(props: ChatViewProps) {
                 isWorking={isWorking}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
                 activeTurnId={activeLatestTurn?.turnId ?? null}
+                latestTurn={activeLatestTurn}
                 activeTurnStartedAt={activeWorkStartedAt}
                 listRef={legendListRef}
                 targetMessageId={
@@ -3252,8 +3231,6 @@ export default function ChatView(props: ChatViewProps) {
                   threadMessageSearchOpen ? selectedThreadMessageSearchOccurrence : null
                 }
                 timelineEntries={timelineEntries}
-                completionDividerBeforeEntryId={completionDividerBeforeEntryId}
-                completionSummary={completionSummary}
                 turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
                 activeThreadEnvironmentId={activeThread.environmentId}
                 routeThreadKey={routeThreadKey}

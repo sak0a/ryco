@@ -24,6 +24,7 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
@@ -48,7 +49,6 @@ import {
   computeStableMessagesTimelineRows,
   deriveTimelineMinimapItems,
   isErroredWorkEntry,
-  MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
@@ -64,6 +64,7 @@ import {
   type TimelineMessageActionsRequest,
   type TimelineStableState,
   type TimelineStreamingState,
+  type TimelineLatestTurn,
   TIMELINE_MINIMAP_MIN_ITEMS,
 } from "./MessagesTimeline.logic";
 import { MessageActionsSheet } from "./MessageActionsSheet";
@@ -111,6 +112,7 @@ const EMPTY_THREAD_MESSAGE_SEARCH_OCCURRENCES_BY_MESSAGE_ID: ReadonlyMap<
   MessageId,
   ReadonlyArray<ThreadMessageSearchOccurrence>
 > = new Map();
+const EMPTY_EXPANSION_OVERRIDES: Readonly<Record<string, boolean>> = {};
 const MESSAGE_SEARCH_HIGHLIGHT_DURATION_MS = 1_800;
 const MESSAGE_ACTION_BUTTON_CLASS_NAME =
   "size-6 min-w-6 rounded-md border-0 bg-transparent px-0 text-muted-foreground/45 shadow-none transition-[background-color,color,box-shadow] before:hidden hover:bg-foreground/8 hover:text-foreground/75 hover:shadow-sm/5 focus-visible:ring-1 focus-visible:ring-ring/60 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/35";
@@ -123,6 +125,7 @@ interface MessagesTimelineProps {
   isWorking: boolean;
   activeTurnInProgress: boolean;
   activeTurnId?: TurnId | null;
+  latestTurn?: TimelineLatestTurn | null;
   activeTurnStartedAt: string | null;
   listRef: React.RefObject<LegendListRef | null>;
   targetMessageId?: MessageId | null;
@@ -135,8 +138,6 @@ interface MessagesTimelineProps {
   >;
   activeThreadMessageSearchOccurrence?: ThreadMessageSearchOccurrence | null;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
-  completionDividerBeforeEntryId: string | null;
-  completionSummary: string | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   openDiffTurnId?: TurnId | null;
   routeThreadKey: string;
@@ -163,6 +164,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   isWorking,
   activeTurnInProgress,
   activeTurnId,
+  latestTurn = null,
   activeTurnStartedAt,
   listRef,
   targetMessageId = null,
@@ -172,8 +174,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   threadMessageSearchOccurrencesByMessageId = EMPTY_THREAD_MESSAGE_SEARCH_OCCURRENCES_BY_MESSAGE_ID,
   activeThreadMessageSearchOccurrence = null,
   timelineEntries,
-  completionDividerBeforeEntryId,
-  completionSummary,
   turnDiffSummaryByAssistantMessageId,
   openDiffTurnId = null,
   routeThreadKey,
@@ -192,13 +192,22 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onIsAtEndChange,
 }: MessagesTimelineProps) {
   usePerfMark("MessagesTimeline");
+  const turnFoldExpandedById = useUiStateStore(
+    (store) => store.threadTurnFoldExpandedById[routeThreadKey] ?? EMPTY_EXPANSION_OVERRIDES,
+  );
+  const workGroupExpandedById = useUiStateStore(
+    (store) => store.threadWorkGroupExpandedById[routeThreadKey] ?? EMPTY_EXPANSION_OVERRIDES,
+  );
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
   revertTurnCountRef.current = revertTurnCountByUserMessageId;
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
         timelineEntries,
-        completionDividerBeforeEntryId,
+        latestTurn,
+        runningTurnId: isWorking || activeTurnInProgress ? (activeTurnId ?? null) : null,
+        turnFoldExpandedById,
+        workGroupExpandedById,
         isWorking,
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
@@ -206,7 +215,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       }),
     [
       timelineEntries,
-      completionDividerBeforeEntryId,
+      latestTurn,
+      activeTurnInProgress,
+      activeTurnId,
+      turnFoldExpandedById,
+      workGroupExpandedById,
       isWorking,
       activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
@@ -360,17 +373,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         activeTurnId: activeTurnId ?? null,
         isWorking,
         isRevertingCheckpoint,
-        completionSummary,
         openDiffTurnId,
       }),
-    [
-      activeTurnInProgress,
-      activeTurnId,
-      isWorking,
-      isRevertingCheckpoint,
-      completionSummary,
-      openDiffTurnId,
-    ],
+    [activeTurnInProgress, activeTurnId, isWorking, isRevertingCheckpoint, openDiffTurnId],
   );
 
   // Stable context — identity preserved across streaming transitions so rows
@@ -783,7 +788,14 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
       className={cn(
-        "pb-4",
+        row.kind === "work"
+          ? "pb-0.5"
+          : row.kind === "work-toggle" ||
+              (row.kind === "message" &&
+                row.message.role === "assistant" &&
+                !row.showAssistantCopyButton)
+            ? "pb-2"
+            : "pb-4",
         row.kind === "message"
           ? "scroll-mt-12 rounded-xl transition-[background-color,box-shadow] duration-500"
           : null,
@@ -797,6 +809,8 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
       {row.kind === "work" && <WorkGroupSection groupedEntries={row.groupedEntries} />}
+      {row.kind === "work-toggle" && <WorkGroupToggleTimelineRow row={row} />}
+      {row.kind === "turn-fold" && <TurnFoldTimelineRow row={row} />}
 
       {row.kind === "context-compaction" && (
         <ContextCompactionMarkerRow createdAt={row.createdAt} label={row.marker.label} />
@@ -908,15 +922,6 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const assistantCopyState = resolveAssistantRowCopyState(row, ctx);
           return (
             <>
-              {row.showCompletionDivider && (
-                <div className="my-3 flex items-center gap-3">
-                  <span className="h-px flex-1 bg-border" />
-                  <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
-                    {ctx.completionSummary ? `Response • ${ctx.completionSummary}` : "Response"}
-                  </span>
-                  <span className="h-px flex-1 bg-border" />
-                </div>
-              )}
               <div className="min-w-0 px-1 py-0.5" {...messageLongPress}>
                 <ChatMarkdown
                   text={messageText}
@@ -979,26 +984,55 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
         </div>
       )}
 
-      {row.kind === "working" && (
-        <div className="py-0.5 pl-1.5">
-          <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
-            <span className="inline-flex items-center gap-[3px]">
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
-            </span>
-            <span>
-              {row.createdAt ? (
-                <>
-                  Working for <WorkingTimer createdAt={row.createdAt} />
-                </>
-              ) : (
-                "Working..."
-              )}
-            </span>
-          </div>
-        </div>
-      )}
+      {row.kind === "working" && <PendingWorkingTimelineRow row={row} />}
+    </div>
+  );
+}
+
+function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-fold" }> }) {
+  const { routeThreadKey } = use(TimelineStableCtx);
+  const setExpanded = useUiStateStore((store) => store.setThreadTurnFoldExpanded);
+  const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
+
+  return (
+    <div className="border-b border-border/60 pt-1 pb-2" data-turn-fold-status={row.status}>
+      <button
+        type="button"
+        aria-expanded={row.expanded}
+        onClick={() => setExpanded(routeThreadKey, row.foldId, !row.expanded)}
+        className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-xs text-muted-foreground tabular-nums transition-colors duration-150 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      >
+        <span>
+          {row.status === "running" ? (
+            row.durationStart ? (
+              <>
+                Working for <WorkingTimer createdAt={row.durationStart} />
+              </>
+            ) : (
+              "Working…"
+            )
+          ) : (
+            (row.label ?? "Worked")
+          )}
+        </span>
+        <Icon className="size-3.5" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+function PendingWorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
+  return (
+    <div className="border-b border-border/60 pt-1 pb-2">
+      <div className="flex items-center px-1 text-xs text-muted-foreground tabular-nums">
+        {row.createdAt ? (
+          <>
+            Working for <WorkingTimer createdAt={row.createdAt} />
+          </>
+        ) : (
+          "Working…"
+        )}
+      </div>
     </div>
   );
 }
@@ -1064,8 +1098,10 @@ function LiveMessageMeta({
 // re-render only the affected row, not the entire list.
 // ---------------------------------------------------------------------------
 
-/** Owns its own expand/collapse state so toggling re-renders only this row.
- *  State resets on unmount which is fine — work groups start collapsed. */
+const COMPACT_WORK_ROW_CLASS_NAME =
+  "grid min-h-[30px] w-full grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 text-left";
+
+/** Renders one already-derived group while individual entry state stays row-local. */
 const WorkGroupSection = memo(function WorkGroupSection({
   groupedEntries,
 }: {
@@ -1073,37 +1109,20 @@ const WorkGroupSection = memo(function WorkGroupSection({
 }) {
   const { activeTurnId, isWorking } = use(TimelineStreamingCtx);
   const { workspaceRoot } = use(TimelineStableCtx);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
-  const visibleEntries =
-    hasOverflow && !isExpanded
-      ? groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
-      : groupedEntries;
-  const hiddenCount = groupedEntries.length - visibleEntries.length;
   const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
-  const showHeader = hasOverflow || !onlyToolEntries;
   const groupLabel = onlyToolEntries ? "Tool calls" : "Work log";
 
   return (
     <div className="space-y-1">
-      {showHeader && (
-        <div className="flex items-center justify-between gap-2 px-2">
+      {!onlyToolEntries && (
+        <div className="flex items-center gap-2 px-2">
           <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/55">
             {groupLabel} ({groupedEntries.length})
           </p>
-          {hasOverflow && (
-            <button
-              type="button"
-              className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
-              onClick={() => setIsExpanded((v) => !v)}
-            >
-              {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
-            </button>
-          )}
         </div>
       )}
       <div className="space-y-0.5">
-        {visibleEntries.map((workEntry) => {
+        {groupedEntries.map((workEntry) => {
           const isActive =
             isWorking &&
             activeTurnId !== null &&
@@ -1133,6 +1152,51 @@ const WorkGroupSection = memo(function WorkGroupSection({
     </div>
   );
 });
+
+function WorkGroupToggleTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "work-toggle" }>;
+}) {
+  const { routeThreadKey } = use(TimelineStableCtx);
+  const setExpanded = useUiStateStore((store) => store.setThreadWorkGroupExpanded);
+  const labelNoun = row.onlyToolEntries
+    ? row.hiddenCount === 1
+      ? "tool call"
+      : "tool calls"
+    : row.hiddenCount === 1
+      ? "log entry"
+      : "log entries";
+
+  return (
+    <button
+      type="button"
+      aria-expanded={row.expanded}
+      onClick={() => setExpanded(routeThreadKey, row.groupId, !row.expanded)}
+      data-work-group-toggle="true"
+      className={cn(
+        COMPACT_WORK_ROW_CLASS_NAME,
+        "cursor-pointer text-[11px] leading-5 transition-colors duration-150 hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+      )}
+    >
+      <span className="flex size-5 items-center justify-center text-muted-foreground/65">
+        <ChevronDownIcon
+          className={cn(
+            "size-3.5 opacity-70 transition-transform duration-200",
+            row.expanded && "rotate-180",
+          )}
+          aria-hidden
+        />
+      </span>
+      <span className="font-medium text-foreground/82">
+        {row.expanded
+          ? `Show fewer ${row.onlyToolEntries ? "tool calls" : "log entries"}`
+          : `+${row.hiddenCount} previous ${labelNoun}`}
+      </span>
+      <span className="size-5" aria-hidden />
+    </button>
+  );
+}
 
 const ContextCompactionMarkerRow = memo(function ContextCompactionMarkerRow({
   createdAt,
@@ -1681,107 +1745,81 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       : rawPreview;
   const rawCommand = workEntryRawCommand(workEntry);
   const displayText = preview ? `${heading} - ${preview}` : heading;
-  const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
-  const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
 
   return (
-    <div className="rounded-lg px-1 py-1">
-      <div className="flex items-center gap-2 transition-[opacity,translate] duration-200">
-        <span
-          className={cn("flex size-5 shrink-0 items-center justify-center", iconConfig.className)}
-        >
-          <EntryIcon className="size-3" />
-        </span>
-        <div className="min-w-0 flex-1 overflow-hidden">
-          {rawCommand ? (
-            <div className="max-w-full">
+    <>
+      <span
+        className={cn("flex size-5 items-center justify-center", iconConfig.className)}
+        data-work-entry-icon="true"
+      >
+        <EntryIcon className="size-3" />
+      </span>
+      <div className="min-w-0 overflow-hidden transition-[opacity,translate] duration-200">
+        {rawCommand ? (
+          <div className="max-w-full">
+            <p
+              className={cn(
+                "truncate text-[11px] leading-5",
+                workToneClass(workEntry.tone),
+                preview ? "text-muted-foreground/70" : "",
+              )}
+              title={displayText}
+            >
+              <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
+                {heading}
+              </span>
+              {preview && (
+                <Tooltip>
+                  <TooltipTrigger
+                    closeDelay={0}
+                    delay={75}
+                    render={
+                      <span className="max-w-full cursor-default text-muted-foreground/55 transition-colors hover:text-muted-foreground/75 focus-visible:text-muted-foreground/75">
+                        {" "}
+                        - {preview}
+                      </span>
+                    }
+                  />
+                  <TooltipPopup
+                    align="start"
+                    className="max-w-[min(56rem,calc(100vw-2rem))] px-0 py-0"
+                    side="top"
+                  >
+                    <div className="max-w-[min(56rem,calc(100vw-2rem))] overflow-x-auto px-1.5 py-1 font-mono text-[11px] leading-4 whitespace-nowrap">
+                      {rawCommand}
+                    </div>
+                  </TooltipPopup>
+                </Tooltip>
+              )}
+            </p>
+          </div>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              className="block min-w-0 w-full text-left"
+              title={displayText}
+              aria-label={displayText}
+            >
               <p
                 className={cn(
-                  "truncate text-xs leading-5",
+                  "truncate text-[11px] leading-5",
                   workToneClass(workEntry.tone),
                   preview ? "text-muted-foreground/70" : "",
                 )}
-                title={displayText}
               >
                 <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
                   {heading}
                 </span>
-                {preview && (
-                  <Tooltip>
-                    <TooltipTrigger
-                      closeDelay={0}
-                      delay={75}
-                      render={
-                        <span className="max-w-full cursor-default text-muted-foreground/55 transition-colors hover:text-muted-foreground/75 focus-visible:text-muted-foreground/75">
-                          {" "}
-                          - {preview}
-                        </span>
-                      }
-                    />
-                    <TooltipPopup
-                      align="start"
-                      className="max-w-[min(56rem,calc(100vw-2rem))] px-0 py-0"
-                      side="top"
-                    >
-                      <div className="max-w-[min(56rem,calc(100vw-2rem))] overflow-x-auto px-1.5 py-1 font-mono text-[11px] leading-4 whitespace-nowrap">
-                        {rawCommand}
-                      </div>
-                    </TooltipPopup>
-                  </Tooltip>
-                )}
+                {preview && <span className="text-muted-foreground/55"> - {preview}</span>}
               </p>
-            </div>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger
-                className="block min-w-0 w-full text-left"
-                title={displayText}
-                aria-label={displayText}
-              >
-                <p
-                  className={cn(
-                    "truncate text-[11px] leading-5",
-                    workToneClass(workEntry.tone),
-                    preview ? "text-muted-foreground/70" : "",
-                  )}
-                >
-                  <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
-                    {heading}
-                  </span>
-                  {preview && <span className="text-muted-foreground/55"> - {preview}</span>}
-                </p>
-              </TooltipTrigger>
-              <TooltipPopup className="max-w-[min(720px,calc(100vw-2rem))]">
-                <p className="whitespace-pre-wrap wrap-break-word text-xs leading-5">
-                  {displayText}
-                </p>
-              </TooltipPopup>
-            </Tooltip>
-          )}
-        </div>
+            </TooltipTrigger>
+            <TooltipPopup className="max-w-[min(720px,calc(100vw-2rem))]">
+              <p className="whitespace-pre-wrap wrap-break-word text-xs leading-5">{displayText}</p>
+            </TooltipPopup>
+          </Tooltip>
+        )}
       </div>
-      {hasChangedFiles && !previewIsChangedFiles && (
-        <div className="mt-1 flex flex-wrap gap-1 pl-6">
-          {workEntry.changedFiles?.slice(0, 4).map((filePath) => {
-            const displayPath = formatWorkspaceRelativePath(filePath, workspaceRoot);
-            return (
-              <span
-                key={`${workEntry.id}:${filePath}`}
-                className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
-                title={displayPath}
-              >
-                {displayPath}
-              </span>
-            );
-          })}
-          {(workEntry.changedFiles?.length ?? 0) > 4 && (
-            <span className="px-1 text-[10px] text-muted-foreground/55">
-              +{(workEntry.changedFiles?.length ?? 0) - 4}
-            </span>
-          )}
-        </div>
-      )}
-    </div>
+    </>
   );
 });
 
@@ -1813,78 +1851,82 @@ const FileEditWorkEntryRow = memo(function FileEditWorkEntryRow(props: {
   return (
     <div
       className={cn(
-        "chat-file-edit-row rounded-lg border border-border/50 bg-background/55 px-2 py-1.5 shadow-sm/5 transition-[border-color,box-shadow] duration-200",
-        isEditing && "border-success/25 shadow-md/8",
+        COMPACT_WORK_ROW_CLASS_NAME,
+        "chat-file-edit-row transition-colors duration-150 hover:bg-foreground/5",
+        changedFiles.length > 1 && "items-start py-1.5",
+        isEditing && "bg-success/[0.045]",
       )}
+      data-tool-entry-row="true"
+      data-tool-entry-kind="file-edit"
       data-file-edit-work-row="true"
       data-file-edit-work-state={workEntry.completed ? "completed" : "editing"}
     >
-      <div className="relative flex min-w-0 items-center gap-2">
-        <span
+      <span
+        className={cn(
+          "flex size-5 items-center justify-center text-muted-foreground/75",
+          changedFiles.length > 1 && "mt-0.5",
+          isEditing && "text-success/85",
+        )}
+        data-work-entry-icon="true"
+      >
+        <SquarePenIcon className="size-3" />
+      </span>
+      <div className="min-w-0">
+        <p
           className={cn(
-            "flex size-5 shrink-0 items-center justify-center rounded-md border border-border/45 bg-card/65 text-muted-foreground/75",
-            isEditing && "border-success/20 text-success/85",
+            "chat-file-edit-text truncate text-[11px] leading-5 font-medium text-foreground/80",
+            isEditing && "chat-file-edit-text--active",
           )}
+          title={primaryLabel}
         >
-          <SquarePenIcon className="size-3" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <p
-              className={cn(
-                "chat-file-edit-text truncate text-[11px] leading-5 font-medium text-foreground/80",
-                isEditing && "chat-file-edit-text--active",
-              )}
-              title={primaryLabel}
-            >
-              {primaryLabel}
-            </p>
-            {stat && (
-              <span className="shrink-0 font-mono text-[10px]">
-                <CompactDiffStatLabel additions={stat.additions} deletions={stat.deletions} />
+          {primaryLabel}
+        </p>
+        {changedFiles.length > 1 && (
+          <div className="mt-0.5 flex min-w-0 flex-nowrap gap-1 overflow-hidden">
+            {visibleFiles.map((filePath) => {
+              const displayPath = formatWorkspaceRelativePath(filePath, workspaceRoot);
+              const rawFileStat = statsByPath.get(filePath);
+              const fileStat = summarizeChangedFileStats(rawFileStat ? [rawFileStat] : undefined);
+              return (
+                <span
+                  key={`${workEntry.id}:edit-chip:${filePath}`}
+                  className="inline-flex min-w-0 max-w-[15rem] items-center gap-1 rounded border border-border/45 px-1.5 py-0.5 font-mono text-[9px] leading-3 text-muted-foreground/70"
+                  title={displayPath}
+                >
+                  <span className="truncate">{basenameFromPath(displayPath)}</span>
+                  {fileStat && (
+                    <span className="shrink-0">
+                      <CompactDiffStatLabel
+                        additions={fileStat.additions}
+                        deletions={fileStat.deletions}
+                      />
+                    </span>
+                  )}
+                </span>
+              );
+            })}
+            {hiddenCount > 0 && (
+              <span className="shrink-0 px-1 text-[10px] leading-4 text-muted-foreground/55">
+                +{hiddenCount}
               </span>
             )}
           </div>
-          {changedFiles.length > 1 && (
-            <div className="mt-0.5 flex min-w-0 flex-wrap gap-1">
-              {visibleFiles.map((filePath) => {
-                const displayPath = formatWorkspaceRelativePath(filePath, workspaceRoot);
-                const rawFileStat = statsByPath.get(filePath);
-                const fileStat = summarizeChangedFileStats(rawFileStat ? [rawFileStat] : undefined);
-                return (
-                  <span
-                    key={`${workEntry.id}:edit-chip:${filePath}`}
-                    className="inline-flex max-w-[15rem] items-center gap-1 rounded-md border border-border/45 bg-card/55 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
-                    title={displayPath}
-                  >
-                    <span className="truncate">{basenameFromPath(displayPath)}</span>
-                    {fileStat && (
-                      <span className="shrink-0">
-                        <CompactDiffStatLabel
-                          additions={fileStat.additions}
-                          deletions={fileStat.deletions}
-                        />
-                      </span>
-                    )}
-                  </span>
-                );
-              })}
-              {hiddenCount > 0 && (
-                <span className="px-1 text-[10px] leading-5 text-muted-foreground/55">
-                  +{hiddenCount}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
+        )}
       </div>
+      {stat ? (
+        <span className={cn("shrink-0 font-mono text-[10px]", changedFiles.length > 1 && "mt-1")}>
+          <CompactDiffStatLabel additions={stat.additions} deletions={stat.deletions} />
+        </span>
+      ) : (
+        <span className="size-5" aria-hidden />
+      )}
     </div>
   );
 });
 
 // ---------------------------------------------------------------------------
 // Expandable wrapper — renders a SimpleWorkEntryRow as a click target with
-// a leading chevron, conditionally mounting WorkEntryExpandedPanel below.
+// a trailing chevron, conditionally mounting WorkEntryExpandedPanel below.
 // ---------------------------------------------------------------------------
 
 const ANSI_SGR_RE = new RegExp(String.raw`\u001b\[[0-9;]*m`, "g");
@@ -1924,18 +1966,23 @@ const ExpandableWorkEntryRow = memo(function ExpandableWorkEntryRow(props: {
             toggle();
           }
         }}
-        className="flex cursor-pointer items-start gap-1 rounded-lg pr-1 transition-colors duration-150 hover:bg-foreground/5 focus-visible:bg-foreground/5 focus-visible:outline-none"
+        data-tool-entry-row="true"
+        data-tool-entry-kind="expandable"
+        className={cn(
+          COMPACT_WORK_ROW_CLASS_NAME,
+          "cursor-pointer transition-colors duration-150 hover:bg-foreground/5 focus-visible:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+        )}
       >
-        <ChevronRightIcon
-          aria-hidden
-          className={cn(
-            "mt-1.5 size-3 shrink-0 text-muted-foreground/55 transition-transform duration-150",
-            isOpen ? "rotate-90" : "",
-          )}
-        />
-        <div className="min-w-0 flex-1">
-          <SimpleWorkEntryRow workEntry={workEntry} workspaceRoot={workspaceRoot} />
-        </div>
+        <SimpleWorkEntryRow workEntry={workEntry} workspaceRoot={workspaceRoot} />
+        <span className="flex size-5 items-center justify-center">
+          <ChevronRightIcon
+            aria-hidden
+            className={cn(
+              "size-3 text-muted-foreground/55 transition-transform duration-150",
+              isOpen ? "rotate-90" : "",
+            )}
+          />
+        </span>
       </div>
       {isOpen && (
         <WorkEntryExpandedPanel workEntry={workEntry} panelId={panelId} headingLabel={heading} />
@@ -1964,7 +2011,7 @@ const WorkEntryExpandedPanel = memo(function WorkEntryExpandedPanel(props: {
       id={panelId}
       role="region"
       aria-label={`${headingLabel} details`}
-      className="mt-1 border-t border-border/40 pt-1.5 pl-7"
+      className="mt-1 border-t border-border/40 pt-1.5 pl-9"
     >
       {phoneDetailText && phoneDetailText !== inputLine && (
         <p

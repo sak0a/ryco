@@ -3,7 +3,7 @@ import "../../index.css";
 import { EnvironmentId, MessageId, TurnId } from "@ryco/contracts";
 import { createRef } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
@@ -62,6 +62,7 @@ vi.mock("@legendapp/list/react", async () => {
 });
 
 import { MessagesTimeline } from "./MessagesTimeline";
+import { useUiStateStore } from "~/uiStateStore";
 
 function buildProps() {
   return {
@@ -70,8 +71,6 @@ function buildProps() {
     activeTurnId: null,
     activeTurnStartedAt: null,
     listRef: createRef<LegendListRef | null>(),
-    completionDividerBeforeEntryId: null,
-    completionSummary: null,
     turnDiffSummaryByAssistantMessageId: new Map(),
     routeThreadKey: "environment-local:thread-1",
     onOpenTurnDiff: vi.fn(),
@@ -95,6 +94,10 @@ describe("MessagesTimeline", () => {
     getStateSpy.mockReset();
     getStateSpy.mockReturnValue({ isAtEnd: true });
     vi.restoreAllMocks();
+    useUiStateStore.setState({
+      threadTurnFoldExpandedById: {},
+      threadWorkGroupExpandedById: {},
+    });
     document.body.innerHTML = "";
   });
 
@@ -417,6 +420,117 @@ describe("MessagesTimeline", () => {
     }
   });
 
+  it("aligns standard and file-edit tools to one compact base row", async () => {
+    const props = buildProps();
+    const screen = await render(
+      <MessagesTimeline
+        {...props}
+        timelineEntries={[
+          {
+            id: "command-entry",
+            kind: "work",
+            createdAt: "2026-04-13T12:00:00.000Z",
+            entry: {
+              id: "command",
+              createdAt: "2026-04-13T12:00:00.000Z",
+              label: "Command",
+              command: "bun typecheck",
+              tone: "tool",
+            },
+          },
+        ]}
+      />,
+    );
+
+    try {
+      const standardRow = document.querySelector<HTMLElement>(
+        "[data-tool-entry-kind='expandable']",
+      );
+      const standardIcon = standardRow?.querySelector<HTMLElement>("[data-work-entry-icon='true']");
+      expect(standardRow).not.toBeNull();
+      expect(standardIcon).not.toBeNull();
+      const standardRect = standardRow!.getBoundingClientRect();
+      const standardIconRect = standardIcon!.getBoundingClientRect();
+      expect(standardRect.height).toBe(30);
+
+      await screen.rerender(
+        <MessagesTimeline
+          {...props}
+          timelineEntries={[
+            {
+              id: "single-edit-entry",
+              kind: "work",
+              createdAt: "2026-04-13T12:00:01.000Z",
+              entry: {
+                id: "single-edit",
+                createdAt: "2026-04-13T12:00:01.000Z",
+                label: "File change",
+                tone: "tool",
+                itemType: "file_change",
+                requestKind: "file-change",
+                changedFiles: ["src/app.ts"],
+                changedFileStats: [{ path: "src/app.ts", additions: 2, deletions: 1 }],
+                completed: true,
+              },
+            },
+          ]}
+        />,
+      );
+
+      const singleEditRow = document.querySelector<HTMLElement>(
+        "[data-tool-entry-kind='file-edit']",
+      );
+      const singleEditIcon = singleEditRow?.querySelector<HTMLElement>(
+        "[data-work-entry-icon='true']",
+      );
+      expect(singleEditRow).not.toBeNull();
+      expect(singleEditIcon).not.toBeNull();
+      const singleEditRect = singleEditRow!.getBoundingClientRect();
+      const singleEditIconRect = singleEditIcon!.getBoundingClientRect();
+      expect(singleEditRect.height).toBe(standardRect.height);
+      expect(singleEditIconRect.left).toBe(standardIconRect.left);
+
+      await screen.rerender(
+        <MessagesTimeline
+          {...props}
+          timelineEntries={[
+            {
+              id: "multi-edit-entry",
+              kind: "work",
+              createdAt: "2026-04-13T12:00:02.000Z",
+              entry: {
+                id: "multi-edit",
+                createdAt: "2026-04-13T12:00:02.000Z",
+                label: "File change",
+                tone: "tool",
+                itemType: "file_change",
+                requestKind: "file-change",
+                changedFiles: ["src/app.ts", "src/router.ts", "src/styles.css"],
+                changedFileStats: [
+                  { path: "src/app.ts", additions: 2, deletions: 1 },
+                  { path: "src/router.ts", additions: 4, deletions: 0 },
+                  { path: "src/styles.css", additions: 1, deletions: 2 },
+                ],
+                completed: true,
+              },
+            },
+          ]}
+        />,
+      );
+
+      const multiEditRow = document.querySelector<HTMLElement>(
+        "[data-tool-entry-kind='file-edit']",
+      );
+      expect(multiEditRow).not.toBeNull();
+      expect(multiEditRow!.getBoundingClientRect().height).toBeGreaterThan(standardRect.height);
+      await expect.element(page.getByText("app.ts")).toBeVisible();
+      await expect.element(page.getByText("router.ts")).toBeVisible();
+      await expect.element(page.getByText("styles.css")).toBeVisible();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("defers final changed files until the assistant response is complete", async () => {
     const assistantMessageId = MessageId.make("message-assistant-1");
     const turnId = TurnId.make("turn-1");
@@ -522,6 +636,151 @@ describe("MessagesTimeline", () => {
       );
 
       await expect.element(page.getByText("Changed files (1)")).toBeVisible();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("uses one collapsible activity design while running and auto-collapses on completion", async () => {
+    const turnId = TurnId.make("turn-activity");
+    const commentaryEntry = {
+      id: "commentary-entry",
+      kind: "message" as const,
+      createdAt: "2026-04-13T12:00:04.000Z",
+      message: {
+        id: MessageId.make("message-commentary"),
+        role: "assistant" as const,
+        text: "I am checking the current implementation.",
+        turnId,
+        createdAt: "2026-04-13T12:00:04.000Z",
+        streaming: true,
+      },
+    };
+    const runningEntries = [
+      commentaryEntry,
+      {
+        id: "work-entry-1",
+        kind: "work" as const,
+        createdAt: "2026-04-13T12:00:06.000Z",
+        entry: {
+          id: "work-1",
+          createdAt: "2026-04-13T12:00:06.000Z",
+          label: "First command",
+          detail: "rg -n Working",
+          tone: "tool" as const,
+          turnId,
+        },
+      },
+      {
+        id: "work-entry-2",
+        kind: "work" as const,
+        createdAt: "2026-04-13T12:00:08.000Z",
+        entry: {
+          id: "work-2",
+          createdAt: "2026-04-13T12:00:08.000Z",
+          label: "Latest command",
+          detail: "bun typecheck",
+          tone: "tool" as const,
+          turnId,
+        },
+      },
+    ];
+    const props = {
+      ...buildProps(),
+      isWorking: true,
+      activeTurnInProgress: true,
+      activeTurnId: turnId,
+      latestTurn: {
+        turnId,
+        state: "running" as const,
+        startedAt: "2026-04-13T12:00:00.000Z",
+        completedAt: null,
+      },
+      activeTurnStartedAt: "2026-04-13T12:00:00.000Z",
+    };
+    const screen = await render(<MessagesTimeline {...props} timelineEntries={runningEntries} />);
+
+    try {
+      const runningFold = page.getByRole("button", { name: /Working for/ });
+      await expect.element(runningFold).toBeVisible();
+      await expect.element(runningFold).toHaveAttribute("aria-expanded", "true");
+      await expect
+        .element(page.getByText("I am checking the current implementation."))
+        .toBeVisible();
+      await expect.element(page.getByText("Latest command - bun typecheck")).toBeVisible();
+      await expect.element(page.getByText("+1 previous tool call")).toBeVisible();
+
+      runningFold.element().focus();
+      await userEvent.keyboard("{Enter}");
+      await expect.element(runningFold).toHaveAttribute("aria-expanded", "false");
+      await expect
+        .element(page.getByText("I am checking the current implementation."))
+        .not.toBeInTheDocument();
+
+      const finalEntry = {
+        id: "final-entry",
+        kind: "message" as const,
+        createdAt: "2026-04-13T12:00:39.000Z",
+        message: {
+          id: MessageId.make("message-final"),
+          role: "assistant" as const,
+          text: "The redesign is complete.",
+          turnId,
+          createdAt: "2026-04-13T12:00:39.000Z",
+          completedAt: "2026-04-13T12:00:40.000Z",
+          streaming: false,
+        },
+      };
+      await screen.rerender(
+        <MessagesTimeline
+          {...props}
+          isWorking={false}
+          activeTurnInProgress={false}
+          latestTurn={{
+            turnId,
+            state: "completed",
+            startedAt: "2026-04-13T12:00:00.000Z",
+            completedAt: "2026-04-13T12:00:40.000Z",
+          }}
+          timelineEntries={[
+            {
+              ...commentaryEntry,
+              message: {
+                ...commentaryEntry.message,
+                completedAt: "2026-04-13T12:00:05.000Z",
+                streaming: false,
+              },
+            },
+            runningEntries[1]!,
+            runningEntries[2]!,
+            finalEntry,
+          ]}
+        />,
+      );
+
+      const settledFold = page.getByRole("button", { name: "Worked for 40s" });
+      await expect.element(settledFold).toBeVisible();
+      await expect.element(settledFold).toHaveAttribute("aria-expanded", "false");
+      await expect.element(page.getByText("Response • Worked for 40s")).not.toBeInTheDocument();
+      await expect.element(page.getByText("The redesign is complete.")).toBeVisible();
+      await expect
+        .element(page.getByText("I am checking the current implementation."))
+        .not.toBeInTheDocument();
+
+      await settledFold.click();
+      await expect.element(settledFold).toHaveAttribute("aria-expanded", "true");
+      await expect
+        .element(page.getByText("I am checking the current implementation."))
+        .toBeVisible();
+      await expect.element(page.getByText("+1 previous tool call")).toBeVisible();
+
+      const previousToolsToggle = page.getByRole("button", {
+        name: "+1 previous tool call",
+      });
+      previousToolsToggle.element().focus();
+      await userEvent.keyboard(" ");
+      await expect.element(page.getByText("First command - rg -n Working")).toBeVisible();
+      await expect.element(page.getByText("Show fewer tool calls")).toBeVisible();
     } finally {
       await screen.unmount();
     }
