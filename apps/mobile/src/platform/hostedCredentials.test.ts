@@ -139,6 +139,33 @@ describe("bearer session credentials", () => {
     expect(kv.store.has(HOSTED_SESSION_TOKEN_KEY)).toBe(false);
   });
 
+  it("never lets a delayed write resurrect a token cleared by sign-out", async () => {
+    // Unsequenced writes let a slow `set` land after the `remove` issued by
+    // sign-out, leaving live session material in SecretKV that the next launch
+    // would hydrate back — the holder clear but the session resurrected.
+    const kv = fakeSecretKV();
+    let releaseSet: (() => void) | undefined;
+    const credentials = createMobileSessionCredentials({
+      ...kv.service,
+      set: async (key, value) => {
+        await new Promise<void>((resolve) => {
+          releaseSet = resolve;
+        });
+        kv.store.set(key, value);
+        return true;
+      },
+    });
+
+    credentials.writeBearerToken?.("token-value");
+    credentials.writeBearerToken?.(null);
+    releaseSet?.();
+    // Let both queued persistence operations settle.
+    for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
+
+    expect(credentials.readBearerToken?.()).toBeNull();
+    expect(kv.store.has(HOSTED_SESSION_TOKEN_KEY)).toBe(false);
+  });
+
   it("hydrates at most once", async () => {
     const kv = fakeSecretKV(new Map([[HOSTED_SESSION_TOKEN_KEY, "t"]]));
     const get = vi.fn(kv.service.get);

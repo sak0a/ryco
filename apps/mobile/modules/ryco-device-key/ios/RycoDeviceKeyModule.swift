@@ -18,9 +18,21 @@ public final class RycoDeviceKeyModule: Module {
     Name("RycoDeviceKey")
 
     AsyncFunction("ensureKey") { () -> [String: Any] in
-      let key = try Self.loadKey() ?? Self.createKey()
+      // Never report a backing we have not verified. A key already present
+      // under this tag — left by an earlier build, or by another component
+      // sharing the access group — may be an ordinary software key, and
+      // accepting it would silently reduce DPoP to bare bearer assurance.
+      var key = try Self.loadKey()
+      if let existing = key, !Self.isSecureEnclaveResident(existing) {
+        Self.deleteKey()
+        key = nil
+      }
+      let resolved = try key ?? Self.createKey()
+      guard Self.isSecureEnclaveResident(resolved) else {
+        throw DeviceKeyError.enclaveUnavailable(nil)
+      }
       return [
-        "publicKey": try Self.exportPublicKey(key).base64EncodedString(),
+        "publicKey": try Self.exportPublicKey(resolved).base64EncodedString(),
         "backing": "secure-enclave",
       ]
     }
@@ -52,6 +64,17 @@ public final class RycoDeviceKeyModule: Module {
       kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
       kSecAttrApplicationTag as String: applicationTag,
     ]
+  }
+
+  /// Whether the private key actually lives in the Secure Enclave.
+  ///
+  /// The keychain query matches on the application tag alone, so this is the
+  /// only thing that distinguishes an enclave key from a software key stored
+  /// under the same tag.
+  private static func isSecureEnclaveResident(_ key: SecKey) -> Bool {
+    guard let attributes = SecKeyCopyAttributes(key) as? [String: Any] else { return false }
+    guard let tokenID = attributes[kSecAttrTokenID as String] as? String else { return false }
+    return tokenID == (kSecAttrTokenIDSecureEnclave as String)
   }
 
   private static func loadKey() throws -> SecKey? {

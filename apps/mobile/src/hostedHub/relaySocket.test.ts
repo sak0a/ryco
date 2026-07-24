@@ -203,6 +203,45 @@ describe("DPoP upgrade", () => {
     expect(harness.events.map((event) => event.type)).toEqual(["error", "close"]);
   });
 
+  it("abandons a pending mint when the caller closes first", async () => {
+    // Without this, a close issued while signing is in flight still opens an
+    // authenticated upgrade when the proof resolves — against an engine that is
+    // already closed, so it would never be authenticated or torn down.
+    const createSocket = vi.fn();
+    let releaseMint: (() => void) | undefined;
+    const harness = build({
+      createSocket,
+      dpopSigner: async () => {
+        await new Promise<void>((resolve) => {
+          releaseMint = resolve;
+        });
+        return { sign: async () => PROOF } as unknown as DpopSignerService;
+      },
+    });
+
+    harness.facade.close(1000, "cancelled");
+    releaseMint?.();
+    await settle();
+
+    expect(createSocket).not.toHaveBeenCalled();
+  });
+
+  it("fails the engine on a mint failure, not just the facade", async () => {
+    // Emitting only on the facade looks like an ordinary close to the shared
+    // transport, which would reconnect and issue a fresh ticket — turning a
+    // permanent key failure into an unbounded ticket loop.
+    const onFailure = vi.fn();
+    build({
+      callbacks: { ...callbacks(), onFailure },
+      dpopSigner: async () => {
+        throw new Error("no key");
+      },
+    });
+    await settle();
+
+    expect(onFailure).toHaveBeenCalled();
+  });
+
   it("never puts the token, proof, or ticket into a surfaced event", async () => {
     const harness = build({
       dpopSigner: async () => {

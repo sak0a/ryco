@@ -33,6 +33,8 @@ export function createMobileSessionCredentials(
   let csrfToken: string | null = null;
   let bearerToken: string | null = null;
   let hydration: Promise<void> | undefined;
+  /** Serializes SecretKV writes so they land in call order. */
+  let persistence: Promise<void> = Promise.resolve();
 
   return {
     mode: "bearer",
@@ -45,13 +47,21 @@ export function createMobileSessionCredentials(
     readBearerToken: () => bearerToken,
     writeBearerToken: (token) => {
       bearerToken = token;
-      // Mirror durably. Failures are swallowed: losing persistence costs the
-      // user a re-login, but must not surface the token in an error path.
-      void (
-        token === null
-          ? secretKV.remove(HOSTED_SESSION_TOKEN_KEY)
-          : secretKV.set(HOSTED_SESSION_TOKEN_KEY, token)
-      ).catch(() => undefined);
+      // Mirror durably, strictly in call order. Unsequenced writes let a
+      // delayed `set` land after the `remove` issued by sign-out, leaving a
+      // live token in SecretKV that the next launch would hydrate back — the
+      // in-memory holder would be clear but the session would resurrect.
+      //
+      // Failures are swallowed: losing persistence costs the user a re-login,
+      // but must not surface the token in an error path.
+      persistence = persistence.then(async () => {
+        try {
+          if (token === null) await secretKV.remove(HOSTED_SESSION_TOKEN_KEY);
+          else await secretKV.set(HOSTED_SESSION_TOKEN_KEY, token);
+        } catch {
+          // Persistence is best-effort; never surface the token in an error.
+        }
+      });
     },
     hydrate: () => {
       hydration ??= (async () => {

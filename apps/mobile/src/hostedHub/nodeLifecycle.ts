@@ -27,7 +27,14 @@ function supervisor() {
  * Those belong to the direct plane and survive a hosted node switch.
  */
 function clearNodeScopedState(environmentId: EnvironmentId): void {
-  supervisor().disposeThreadDetailSubscriptionsForEnvironment(environmentId);
+  // A node can be reachable on both planes at once — paired directly and also
+  // enrolled in the Hub — and the Hub's descriptor reuses the same environment
+  // id. Wiping this state on hosted teardown would then destroy the live direct
+  // connection's threads and subscriptions. The direct plane owns anything in
+  // its catalog, so leave that alone.
+  const registry = createMobileConnectionRegistry();
+  if (registry.catalog.get(environmentId)) return;
+  registry.driver.supervisor.disposeThreadDetailSubscriptionsForEnvironment(environmentId);
   useStore.getState().removeEnvironmentState(environmentId);
   clearCheckpointDiffState();
 }

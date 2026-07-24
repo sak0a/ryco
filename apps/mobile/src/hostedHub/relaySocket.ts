@@ -291,9 +291,23 @@ export class MobileHostedRelaySocket {
       // Bounded: never surface the proof, token, or ticket.
       if (this.#abandoned) return;
       this.#abandoned = true;
-      this.#emit({ type: "error" });
-      this.#state = CLOSED;
-      this.#emit({ type: "close", code: 4401, reason: UPGRADE_FAILED, wasClean: false });
+      // Fail the engine first. It owns the ticket buffer and the failure
+      // callback the shared transport reads; closing only the facade would look
+      // like an ordinary close, so the transport would reconnect and issue a
+      // fresh ticket — turning a permanent key failure into an unbounded ticket
+      // loop instead of a terminal state.
+      try {
+        this.#engine.reportUndecodableMessage("protocol_invalid");
+      } catch {
+        // Already closed; the fallback below still settles the facade.
+      }
+      // The engine drives `error` and `close` back through its own events, so
+      // emit here only if it was already closed and did nothing.
+      if (this.#state !== CLOSED) {
+        this.#emit({ type: "error" });
+        this.#state = CLOSED;
+        this.#emit({ type: "close", code: 4401, reason: UPGRADE_FAILED, wasClean: false });
+      }
     }
   }
 
@@ -325,6 +339,11 @@ export class MobileHostedRelaySocket {
   close(code = 1000, reason = ""): void {
     if (this.#state === CLOSED || this.#state === CLOSING) return;
     this.#state = CLOSING;
+    // Abandon any in-flight proof mint. Without this, a close issued while
+    // signing is pending still opens an authenticated upgrade when the proof
+    // resolves — against an engine that is already closed, so it would never
+    // be authenticated or torn down.
+    this.#abandoned = true;
     this.#engine.close(code, reason);
   }
 

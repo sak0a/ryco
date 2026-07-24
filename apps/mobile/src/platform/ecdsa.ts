@@ -63,6 +63,11 @@ function readDerLength(der: Uint8Array, offset: number): { length: number; next:
   for (let index = 0; index < byteCount; index += 1) {
     length = (length << 8) | der[offset + 1 + index]!;
   }
+  // DER requires the shortest possible length encoding, and a leading zero in
+  // the long form is never minimal. BER permits both; accepting them would mean
+  // two encodings of the same signature are both honoured.
+  if (der[offset + 1] === 0) invalidSignature();
+  if (length < 0x80) invalidSignature();
   return { length, next: offset + 1 + byteCount };
 }
 
@@ -71,7 +76,17 @@ function readDerInteger(der: Uint8Array, offset: number): { value: Uint8Array; n
   if (der[offset] !== DER_INTEGER_TAG) invalidSignature();
   const { length, next } = readDerLength(der, offset + 1);
   if (length === 0 || next + length > der.length) invalidSignature();
-  return { value: der.subarray(next, next + length), next: next + length };
+  const value = der.subarray(next, next + length);
+  // An ECDSA scalar is a positive integer, so the high bit of the first byte
+  // must be clear — a set bit encodes a negative value, which is not a valid
+  // signature component.
+  if ((value[0]! & 0x80) !== 0) invalidSignature();
+  // DER integers are minimal: a leading zero byte is only permitted when it is
+  // there to keep the next byte from reading as negative.
+  if (value.length > 1 && value[0] === 0 && (value[1]! & 0x80) === 0) invalidSignature();
+  // A zero scalar is never a valid r or s.
+  if (value.every((byte) => byte === 0)) invalidSignature();
+  return { value, next: next + length };
 }
 
 /**

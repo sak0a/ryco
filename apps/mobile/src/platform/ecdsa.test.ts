@@ -3,9 +3,19 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { derSignatureToRaw, ecPublicKeyJwk, uncompressedPointToJwk } from "./ecdsa";
 
-/** Build a DER `SEQUENCE { INTEGER r, INTEGER s }` from raw integer bytes. */
+/**
+ * Build a DER `SEQUENCE { INTEGER r, INTEGER s }` from raw integer bytes.
+ *
+ * DER integers are signed, so a value whose top bit is set gets a `0x00` sign
+ * byte — emitting one without it would not be valid DER, and the parser now
+ * rejects that (as it must, so two encodings of one value cannot both pass).
+ * Callers that pass an already-padded value are left alone.
+ */
 function derSignature(r: ReadonlyArray<number>, s: ReadonlyArray<number>): Uint8Array {
-  const integer = (value: ReadonlyArray<number>) => [0x02, value.length, ...value];
+  const integer = (raw: ReadonlyArray<number>) => {
+    const value = (raw[0]! & 0x80) === 0 ? raw : [0x00, ...raw];
+    return [0x02, value.length, ...value];
+  };
   const body = [...integer(r), ...integer(s)];
   const header = body.length < 0x80 ? [0x30, body.length] : [0x30, 0x81, body.length];
   return new Uint8Array([...header, ...body]);
