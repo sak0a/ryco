@@ -209,8 +209,12 @@ describe("mobile environment driver", () => {
       .spyOn(useStore.getState(), "applyShellEvent")
       .mockImplementation(() => undefined);
 
-    const snapshot = { threads: [] } as unknown as Parameters<typeof sink.syncServerShellSnapshot>[1];
-    const event = { kind: "thread-upserted" } as unknown as Parameters<typeof sink.applyShellEvent>[1];
+    const snapshot = { threads: [] } as unknown as Parameters<
+      typeof sink.syncServerShellSnapshot
+    >[1];
+    const event = { kind: "thread-upserted" } as unknown as Parameters<
+      typeof sink.applyShellEvent
+    >[1];
 
     sink.syncServerShellSnapshot(ENV_ID, snapshot);
     sink.applyShellEvent(ENV_ID, event);

@@ -104,7 +104,10 @@
   },
   "expo": {
     "autolinking": {
-      "buildFromSource": ["react-native-screens", "@react-native-menu/menu"]
+      "buildFromSource": [
+        "react-native-screens",
+        "@react-native-menu/menu"
+      ]
     }
   }
 }

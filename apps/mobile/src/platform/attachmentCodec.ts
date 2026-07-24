@@ -34,7 +34,12 @@ export const mobileAttachmentCodec: AttachmentCodecService = {
   encode: async (value) => {
     const attachment = asMobileAttachmentInput(value);
     if (attachment.uri !== undefined) {
-      return { id: attachment.id, mime: attachment.mime, size: attachment.size, uri: attachment.uri };
+      return {
+        id: attachment.id,
+        mime: attachment.mime,
+        size: attachment.size,
+        uri: attachment.uri,
+      };
     }
     if (attachment.bytes !== undefined) {
       const bytes = new Uint8Array(attachment.bytes.byteLength);
@@ -45,7 +50,12 @@ export const mobileAttachmentCodec: AttachmentCodecService = {
   },
   decode: async (attachment: ComposerAttachment) => {
     if ("uri" in attachment) {
-      return { id: attachment.id, mime: attachment.mime, size: attachment.size, uri: attachment.uri };
+      return {
+        id: attachment.id,
+        mime: attachment.mime,
+        size: attachment.size,
+        uri: attachment.uri,
+      };
     }
     const bytes = new Uint8Array(attachment.bytes.byteLength);
     bytes.set(attachment.bytes);

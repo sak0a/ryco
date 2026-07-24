@@ -110,7 +110,9 @@ describe("mobile platform adapters", () => {
   });
 
   it("stubs the hosted passkey ceremony as unavailable in B1", async () => {
-    await expect(mobilePasskeyCeremony.authenticate({})).rejects.toThrow("hosted mode not available");
+    await expect(mobilePasskeyCeremony.authenticate({})).rejects.toThrow(
+      "hosted mode not available",
+    );
     await expect(mobilePasskeyCeremony.register({})).rejects.toThrow("hosted mode not available");
   });
 
@@ -203,7 +205,12 @@ describe("mobile platform adapters", () => {
       size: 3,
       uri: "file:///tmp/img.png",
     });
-    expect(encoded).toEqual({ id: "img-1", mime: "image/png", size: 3, uri: "file:///tmp/img.png" });
+    expect(encoded).toEqual({
+      id: "img-1",
+      mime: "image/png",
+      size: 3,
+      uri: "file:///tmp/img.png",
+    });
     await expect(mobileAttachmentCodec.decode(encoded)).resolves.toEqual({
       id: "img-1",
       mime: "image/png",

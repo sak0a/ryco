@@ -17,7 +17,8 @@ export * from "@ryco/client-runtime/state/composer";
 /** On RN the in-memory composer image needs no DOM File — previewUrl is a uri. */
 export type MobileComposerImageAttachment = ComposerDraftImage;
 
-export type ComposerThreadDraftState = RuntimeComposerThreadDraftState<MobileComposerImageAttachment>;
+export type ComposerThreadDraftState =
+  RuntimeComposerThreadDraftState<MobileComposerImageAttachment>;
 export type ComposerDraftStoreState = RuntimeComposerDraftStoreState<MobileComposerImageAttachment>;
 
 const mobileComposerStorage = {

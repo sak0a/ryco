@@ -4,7 +4,11 @@ import type {
   HttpClientService,
 } from "@ryco/client-runtime/platform";
 
-import { createMobileEndpoint, createMobileHttpClient, readMobileClientRuntimeConfig } from "../platform";
+import {
+  createMobileEndpoint,
+  createMobileHttpClient,
+  readMobileClientRuntimeConfig,
+} from "../platform";
 
 // Lazily-memoized runtime singletons. Reading the app config (expo-constants)
 // and constructing the endpoint/httpClient is deferred to first use so importing

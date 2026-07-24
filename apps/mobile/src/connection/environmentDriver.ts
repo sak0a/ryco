@@ -116,7 +116,11 @@ export function createMobileEnvironmentDriver(
   ) => catalog.runtimeStore.getState().patch(environmentId, patch);
 
   const setRuntimeConnecting = (environmentId: EnvironmentId) =>
-    patchRuntime(environmentId, { connectionState: "connecting", lastError: null, lastErrorAt: null });
+    patchRuntime(environmentId, {
+      connectionState: "connecting",
+      lastError: null,
+      lastErrorAt: null,
+    });
   const setRuntimeConnected = (environmentId: EnvironmentId) => {
     const connectedAt = nowIso();
     patchRuntime(environmentId, {
@@ -198,7 +202,8 @@ export function createMobileEnvironmentDriver(
       knownEnvironment: { ...knownEnvironment, environmentId: record.environmentId },
       client,
       pushSequenceMonitor: noopPushSequenceMonitor,
-      applyShellEvent: (event, environmentId) => getSupervisor().applyShellEvent(event, environmentId),
+      applyShellEvent: (event, environmentId) =>
+        getSupervisor().applyShellEvent(event, environmentId),
       syncShellSnapshot: (snapshot, environmentId) =>
         getSupervisor().syncShellSnapshot(snapshot, environmentId),
       // Terminal streaming is deferred to v1.1.
