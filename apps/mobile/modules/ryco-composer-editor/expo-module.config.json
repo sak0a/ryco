@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["RycoComposerEditorModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.rycocomposereditor.RycoComposerEditorModule"]
+  }
+}
