@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, TurnId } from "@ryco/contracts";
+import { EnvironmentId, MessageId, TurnId } from "@ryco/contracts";
 import { type WorkLogEntry } from "../../session-logic";
 import {
   buildTimelineStableState,
@@ -8,9 +8,16 @@ import {
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
   deriveRevertTurnCountByUserMessageId,
+  deriveTimelineMinimapItems,
   isErroredWorkEntry,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveTimelineMinimapHasPersistentGutter,
+  resolveTimelineMinimapHeightStyle,
+  resolveTimelineMinimapHitStripWidth,
+  resolveTimelineMinimapIndexFromPointer,
+  resolveTimelineMinimapInteractiveWidth,
+  resolveTimelineMinimapTopPercent,
   type TimelineStableState,
   type TimelineStreamingState,
 } from "./MessagesTimeline.logic";
@@ -24,6 +31,131 @@ function makeWorkEntry(overrides: Partial<WorkLogEntry> = {}): WorkLogEntry {
     ...overrides,
   };
 }
+
+describe("timeline minimap", () => {
+  it("maps marker geometry and pointer positions deterministically", () => {
+    expect(resolveTimelineMinimapHeightStyle(5)).toBe("min(32px, calc(100vh - 18rem))");
+    expect(resolveTimelineMinimapTopPercent(2, 5)).toBe(50);
+    expect(resolveTimelineMinimapTopPercent(99, 5)).toBe(100);
+    expect(
+      resolveTimelineMinimapIndexFromPointer({
+        itemCount: 101,
+        railTop: 100,
+        railHeight: 500,
+        pointerY: 350,
+      }),
+    ).toBe(50);
+    expect(
+      resolveTimelineMinimapIndexFromPointer({
+        itemCount: 101,
+        railTop: 100,
+        railHeight: 500,
+        pointerY: 999,
+      }),
+    ).toBe(100);
+    expect(
+      resolveTimelineMinimapIndexFromPointer({
+        itemCount: 0,
+        railTop: 100,
+        railHeight: 500,
+        pointerY: 350,
+      }),
+    ).toBeNull();
+  });
+
+  it("caps the collapsed hit strip to the safe content gutter", () => {
+    expect(resolveTimelineMinimapHasPersistentGutter(863)).toBe(false);
+    expect(resolveTimelineMinimapHasPersistentGutter(864)).toBe(true);
+    expect(resolveTimelineMinimapHitStripWidth(768)).toBe(0);
+    expect(resolveTimelineMinimapHitStripWidth(820)).toBe(14);
+    expect(resolveTimelineMinimapHitStripWidth(872)).toBe(40);
+    expect(resolveTimelineMinimapHitStripWidth(Number.NaN)).toBe(0);
+    expect(resolveTimelineMinimapInteractiveWidth(14, false)).toBe(14);
+    expect(resolveTimelineMinimapInteractiveWidth(14, true)).toBe("22rem");
+  });
+
+  it("derives one item per user row with displayed prompt and final assistant response", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "user-row-1",
+          kind: "message",
+          createdAt: "2026-07-24T12:00:00.000Z",
+          message: {
+            id: MessageId.make("user-1"),
+            role: "user",
+            text: [
+              "Investigate   the failure",
+              "",
+              "<terminal_context>",
+              "- Terminal 1 lines 1-1:",
+              "  1 | bun test",
+              "</terminal_context>",
+            ].join("\n"),
+            createdAt: "2026-07-24T12:00:00.000Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "assistant-row-1",
+          kind: "message",
+          createdAt: "2026-07-24T12:00:01.000Z",
+          message: {
+            id: MessageId.make("assistant-1"),
+            role: "assistant",
+            text: "First status",
+            createdAt: "2026-07-24T12:00:01.000Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "assistant-row-2",
+          kind: "message",
+          createdAt: "2026-07-24T12:00:02.000Z",
+          message: {
+            id: MessageId.make("assistant-2"),
+            role: "assistant",
+            text: "  Final   response  ",
+            createdAt: "2026-07-24T12:00:02.000Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "user-row-2",
+          kind: "message",
+          createdAt: "2026-07-24T12:00:03.000Z",
+          message: {
+            id: MessageId.make("user-2"),
+            role: "user",
+            text: "Next request",
+            createdAt: "2026-07-24T12:00:03.000Z",
+            streaming: false,
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(deriveTimelineMinimapItems(rows)).toEqual([
+      {
+        id: "user-row-1",
+        rowIndex: 0,
+        userText: "Investigate the failure",
+        assistantText: "Final response",
+      },
+      {
+        id: "user-row-2",
+        rowIndex: 3,
+        userText: "Next request",
+        assistantText: null,
+      },
+    ]);
+  });
+});
 
 describe("isErroredWorkEntry", () => {
   it("returns true when tone is error", () => {

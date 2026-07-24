@@ -3,6 +3,7 @@ import {
   type TimelineEntry,
   type WorkLogEntry,
 } from "../../session-logic";
+import { deriveDisplayedUserMessageState } from "../../lib/terminalContext";
 import {
   type ChatAttachment,
   type ChatMessage,
@@ -20,6 +21,89 @@ import { type ExpandedImagePreview } from "./ExpandedImagePreview";
 import type { ThreadMessageSearchOccurrence } from "./ThreadMessageSearch.logic";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
+export const TIMELINE_MINIMAP_ITEM_SPACING = 8;
+export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
+export const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
+export const TIMELINE_CONTENT_MAX_WIDTH = 768;
+export const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
+export const TIMELINE_MINIMAP_HIT_STRIP_LEFT = 12;
+export const TIMELINE_MINIMAP_HIT_STRIP_MAX_WIDTH = 40;
+export const TIMELINE_MINIMAP_EXPANDED_HIT_STRIP_WIDTH = "22rem";
+const TIMELINE_MINIMAP_PREVIEW_MAX_LENGTH = 240;
+
+export interface TimelineMinimapItem {
+  readonly id: string;
+  readonly rowIndex: number;
+  readonly userText: string | null;
+  readonly assistantText: string | null;
+}
+
+export function resolveTimelineMinimapHeightStyle(itemCount: number): string {
+  const naturalHeight = Math.max(1, (itemCount - 1) * TIMELINE_MINIMAP_ITEM_SPACING);
+  return `min(${naturalHeight}px, ${TIMELINE_MINIMAP_MAX_HEIGHT_CSS})`;
+}
+
+export function resolveTimelineMinimapTopPercent(index: number, itemCount: number): number {
+  if (itemCount <= 1) {
+    return 0;
+  }
+  return (Math.max(0, Math.min(index, itemCount - 1)) / (itemCount - 1)) * 100;
+}
+
+export function resolveTimelineMinimapIndexFromPointer(input: {
+  readonly itemCount: number;
+  readonly railTop: number;
+  readonly railHeight: number;
+  readonly pointerY: number;
+}): number | null {
+  if (input.itemCount <= 0 || input.railHeight <= 0) {
+    return null;
+  }
+  if (input.itemCount === 1) {
+    return 0;
+  }
+
+  const progress = Math.max(0, Math.min(1, (input.pointerY - input.railTop) / input.railHeight));
+  return Math.max(0, Math.min(input.itemCount - 1, Math.round(progress * (input.itemCount - 1))));
+}
+
+export function resolveTimelineMinimapHasPersistentGutter(viewportWidth: number): boolean {
+  if (!Number.isFinite(viewportWidth) || viewportWidth <= 0) {
+    return false;
+  }
+
+  const contentWidth = Math.min(viewportWidth, TIMELINE_CONTENT_MAX_WIDTH);
+  const sideGutter = Math.max(0, (viewportWidth - contentWidth) / 2);
+  return sideGutter >= TIMELINE_MINIMAP_PERSISTENT_GUTTER;
+}
+
+/**
+ * The minimap overlays the viewport's left edge while the content column is
+ * centered. Cap the collapsed hover strip to the side gutter so it cannot
+ * intercept pointer events over message text under zoom or in a narrow pane.
+ */
+export function resolveTimelineMinimapHitStripWidth(viewportWidth: number): number {
+  if (!Number.isFinite(viewportWidth) || viewportWidth <= 0) {
+    return 0;
+  }
+
+  const contentWidth = Math.min(viewportWidth, TIMELINE_CONTENT_MAX_WIDTH);
+  const sideGutter = Math.max(0, (viewportWidth - contentWidth) / 2);
+  return Math.max(
+    0,
+    Math.min(
+      TIMELINE_MINIMAP_HIT_STRIP_MAX_WIDTH,
+      Math.floor(sideGutter) - TIMELINE_MINIMAP_HIT_STRIP_LEFT,
+    ),
+  );
+}
+
+export function resolveTimelineMinimapInteractiveWidth(
+  collapsedWidth: number,
+  expanded: boolean,
+): number | string {
+  return expanded ? TIMELINE_MINIMAP_EXPANDED_HIT_STRIP_WIDTH : collapsedWidth;
+}
 
 // ---------------------------------------------------------------------------
 // Timeline row context split — streaming-frequent vs stable fields.
@@ -158,6 +242,65 @@ export type MessagesTimelineRow =
       marker: ContextCompactionTimelineEntry;
     }
   | { kind: "working"; id: string; createdAt: string | null };
+
+export function deriveTimelineMinimapItems(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+): TimelineMinimapItem[] {
+  const items: TimelineMinimapItem[] = [];
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row?.kind !== "message" || row.message.role !== "user") {
+      continue;
+    }
+
+    items.push({
+      id: row.id,
+      rowIndex: index,
+      userText: compactTimelineMinimapPreview(
+        deriveDisplayedUserMessageState(row.message.text).visibleText,
+      ),
+      assistantText: compactTimelineMinimapPreview(
+        resolveFinalAssistantTextForTimelineTurn(rows, index),
+      ),
+    });
+  }
+
+  return items;
+}
+
+function resolveFinalAssistantTextForTimelineTurn(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+  userRowIndex: number,
+): string | null {
+  let finalAssistantText: string | null = null;
+
+  for (let index = userRowIndex + 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row?.kind !== "message") {
+      continue;
+    }
+    if (row.message.role === "user") {
+      break;
+    }
+    if (row.message.role === "assistant") {
+      finalAssistantText = row.message.text;
+    }
+  }
+
+  return finalAssistantText;
+}
+
+function compactTimelineMinimapPreview(text: string | null | undefined): string | null {
+  const compact = text?.replace(/\s+/g, " ").trim() ?? "";
+  if (compact.length === 0) {
+    return null;
+  }
+  if (compact.length <= TIMELINE_MINIMAP_PREVIEW_MAX_LENGTH) {
+    return compact;
+  }
+  return `${compact.slice(0, TIMELINE_MINIMAP_PREVIEW_MAX_LENGTH - 1)}…`;
+}
 
 export interface StableMessagesTimelineRowsState {
   byId: Map<string, MessagesTimelineRow>;
