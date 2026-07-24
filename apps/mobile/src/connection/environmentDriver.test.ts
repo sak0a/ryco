@@ -75,7 +75,7 @@ function createFakeCatalog() {
           if (!runtimeById.has(environmentId)) runtimeById.set(environmentId, {});
         },
         patch: (environmentId, patch) => {
-          runtimeById.set(environmentId, { ...(runtimeById.get(environmentId) ?? {}), ...patch });
+          runtimeById.set(environmentId, { ...runtimeById.get(environmentId), ...patch });
         },
       }),
     },
