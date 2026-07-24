@@ -1,4 +1,5 @@
 import type {
+  DpopSignerService,
   EndpointService,
   HttpClientService,
   PasskeyCeremonyService,
@@ -48,6 +49,11 @@ export interface HostedRuntimeConfiguration {
   readonly httpClient: HttpClientService;
   readonly passkeyCeremony: PasskeyCeremonyService;
   readonly sessionCredentials: SessionCredentialsService;
+  /**
+   * Required when `sessionCredentials.mode` is `"bearer"`; supplies the
+   * per-request DPoP proof. Omitted (undefined) in cookie mode, which web uses.
+   */
+  readonly dpopSigner?: DpopSignerService;
   readonly nodeLifecycle: HostedNodeLifecycle;
   readonly timers: HostedRuntimeTimers;
   readonly isForeground: () => boolean;
