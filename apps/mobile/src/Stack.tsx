@@ -42,7 +42,7 @@ const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Pl
 // background stay STATIC config while still adapting to appearance changes.
 const SHEET_BACKGROUND_COLOR =
   Platform.OS === "ios"
-    ? DynamicColorIOS({ light: "rgba(242, 242, 247, 0.98)", dark: "rgba(14, 14, 14, 0.98)" })
+    ? DynamicColorIOS({ light: "rgba(242, 242, 247, 0.98)", dark: "rgba(13, 13, 13, 0.98)" })
     : undefined;
 
 type AppScreenOptions = NativeStackNavigationOptions & {

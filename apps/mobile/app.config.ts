@@ -102,7 +102,10 @@ const config: ExpoConfig = {
   },
   orientation: "portrait",
   icon: "./assets/icon.png",
-  userInterfaceStyle: "automatic",
+  // Dark-by-default (§4). The runtime resolver (src/lib/appScheme.ts) is the seam
+  // a future appearance preference plugs into; this forces the native shell dark so
+  // first paint (splash + system chrome) is dark before JS resolves.
+  userInterfaceStyle: "dark",
   // OTA updates are disabled in the public scaffold: no EAS project id is
   // baked in. B3 wires the Ryco EAS project + update URL.
   updates: {
@@ -191,7 +194,8 @@ const config: ExpoConfig = {
       {
         image: "./assets/splash-icon.png",
         resizeMode: "contain",
-        backgroundColor: "#ffffff",
+        // Dark-by-default: first paint is the dark ground (§4), matching --color-screen.
+        backgroundColor: "#0a0a0a",
         imageWidth: 220,
         dark: {
           image: "./assets/splash-icon.png",

@@ -2,8 +2,10 @@ import { BlurTargetView } from "expo-blur";
 import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
-import { StatusBar, useColorScheme } from "react-native";
+import { StatusBar } from "react-native";
 import { createStaticNavigation, DarkTheme, DefaultTheme } from "@react-navigation/native";
+
+import { applyResolvedAppColorScheme, resolveAppColorScheme } from "./lib/appScheme";
 
 import { ConfirmDialogHost } from "./components/ConfirmDialogHost";
 import { OverlayPortalHost } from "./components/OverlayPortal";
@@ -23,6 +25,11 @@ import "../global.css";
 void SplashScreen.preventAutoHideAsync().catch(() => {
   // The native module can be unavailable in non-native test environments.
 });
+
+// Resolve + apply the app color scheme once, before first render, so Uniwind's
+// active `@variant` and RN's Appearance (useColorScheme → nav theme + status bar)
+// are dark from the very first paint (§4).
+applyResolvedAppColorScheme();
 
 // Per-variant plain schemes shipped by B1's app.config.ts (§7 divergence: these
 // supersede the spec's reverse-DNS wording). Deep links carry only
@@ -51,7 +58,10 @@ function SplashScreenCoordinator() {
 // the connection-registry context + appearance preferences, then the full
 // navigation shell. Cloud auth, incoming-share, and the showcase rig are stripped.
 export default function App() {
-  const colorScheme = useColorScheme();
+  // Resolved via the single scheme seam, not the raw system scheme — dark today,
+  // preference-overridable later (§4). Re-assert on mount so Fast Refresh keeps it.
+  applyResolvedAppColorScheme();
+  const colorScheme = resolveAppColorScheme();
   const statusBarBg = useThemeColor("--color-status-bar");
 
   return (
