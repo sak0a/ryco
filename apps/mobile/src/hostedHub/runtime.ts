@@ -1,0 +1,142 @@
+import { configureHostedRuntime, hostedHubController } from "@ryco/client-runtime/authorization";
+import {
+  hasHostedRelayPendingRequests,
+  resetHostedRelayAttemptFactory,
+} from "@ryco/client-runtime/relay";
+
+import { mobileAppLifecycle } from "../platform/appLifecycle";
+import { createMobileDpopSigner } from "../platform/dpopSigner";
+import { mobilePasskeyCeremony } from "../platform/passkeyCeremony";
+import {
+  hydrateMobileHostedSessionToken,
+  mobileSessionCredentials,
+} from "../platform/sessionCredentials";
+import { mobileHostedNodeLifecycle } from "./nodeLifecycle";
+import { MobileHostedRelaySocket, mobileHostedRelayUrl } from "./relaySocket";
+import {
+  getMobileHostedEndpoint,
+  getMobileHostedHttpClient,
+  isMobileHostedModeConfigured,
+} from "./runtimeConfig";
+
+/**
+ * Hosted runtime wiring.
+ *
+ * Fails closed at every step: with no hosted config, or with no hardware device
+ * key, the runtime is simply never configured and hosted surfaces report
+ * unavailable. Configuring without a DPoP signer would throw inside
+ * `HostedHubApi`'s constructor at bootstrap, so the signer is resolved before
+ * `configureHostedRuntime` is called, never after.
+ */
+
+let configured = false;
+let available = false;
+let session: Promise<void> | undefined;
+
+/** Whether hosted mode is both configured and backed by a usable hardware key. */
+export function isMobileHostedModeAvailable(): boolean {
+  return available;
+}
+
+/**
+ * Bound timer wrappers. Unbound platform methods throw "Illegal invocation"
+ * under React Native, and Hermes builds do not all ship `queueMicrotask`.
+ */
+const timers = {
+  now: (): number => Date.now(),
+  setTimeout: (callback: () => void, delayMs: number) => globalThis.setTimeout(callback, delayMs),
+  clearTimeout: (timer: ReturnType<typeof setTimeout>) => globalThis.clearTimeout(timer),
+  queueMicrotask: (callback: () => void): void => {
+    if (typeof globalThis.queueMicrotask === "function") globalThis.queueMicrotask(callback);
+    else void Promise.resolve().then(callback);
+  },
+};
+
+/**
+ * Subscribe to the next foreground transition, once.
+ *
+ * `mobileAppLifecycle` emits both "foreground" and "resume" per transition, so
+ * this de-duplicates; the runtime's `{once: true}` semantics drive resumption
+ * of the 20s directory poll.
+ */
+function subscribeForeground(listener: () => void): () => void {
+  let fired = false;
+  const unsubscribe = mobileAppLifecycle.subscribe((event) => {
+    if (fired || event !== "foreground") return;
+    fired = true;
+    listener();
+  });
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    unsubscribe();
+  };
+}
+
+/**
+ * Idempotent. Returns false when hosted mode cannot be configured, which is the
+ * normal state for a direct-only build.
+ */
+export async function configureMobileHostedRuntime(): Promise<boolean> {
+  if (configured) return available;
+  if (!isMobileHostedModeConfigured()) return false;
+  const endpoint = getMobileHostedEndpoint();
+  const httpClient = getMobileHostedHttpClient();
+  if (!endpoint || !httpClient) return false;
+
+  let dpopSigner;
+  try {
+    // Hardware-backed key or no hosted session at all. There is deliberately no
+    // software fallback: it would reduce DPoP to bare bearer assurance.
+    dpopSigner = await createMobileDpopSigner();
+  } catch {
+    return false;
+  }
+  if (configured) return available;
+
+  configureHostedRuntime({
+    endpoint,
+    httpClient,
+    passkeyCeremony: mobilePasskeyCeremony,
+    sessionCredentials: mobileSessionCredentials,
+    dpopSigner,
+    nodeLifecycle: mobileHostedNodeLifecycle,
+    timers,
+    isForeground: () => mobileAppLifecycle.isForeground(),
+    subscribeForeground,
+    hasPendingRelayRequests: hasHostedRelayPendingRequests,
+    resetRelayAttemptFactory: resetHostedRelayAttemptFactory,
+    relayUrl: mobileHostedRelayUrl,
+    createRelaySocket: (input) => new MobileHostedRelaySocket(input),
+  });
+  configured = true;
+  available = true;
+  return true;
+}
+
+/**
+ * The single entry point screens use.
+ *
+ * Order matters: the bearer token must be hydrated **before**
+ * `hostedHubController.bootstrap()` runs. `readBearerToken()` is synchronous,
+ * so a null read would make `restoreSession` fail with a 401 and drop the user
+ * to the bootstrap-availability probe even though a valid session exists.
+ */
+export function ensureMobileHostedSession(): Promise<void> {
+  session ??= (async () => {
+    await hydrateMobileHostedSessionToken();
+    if (!(await configureMobileHostedRuntime())) return;
+    await hostedHubController.bootstrap();
+  })().catch(() => {
+    session = undefined;
+  });
+  return session;
+}
+
+/** Test seam: drop the configured/available flags between cases. */
+export function resetMobileHostedRuntimeForTests(): void {
+  configured = false;
+  available = false;
+  session = undefined;
+}
