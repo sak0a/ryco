@@ -23,7 +23,7 @@ import {
 type PairingStatus =
   | { readonly kind: "idle" }
   | { readonly kind: "pairing" }
-  | { readonly kind: "paired"; readonly label: string; readonly wsUrl: string }
+  | { readonly kind: "paired"; readonly label: string }
   | { readonly kind: "error"; readonly message: string };
 
 const PAIRING_BASE_ORIGIN_FALLBACK = "https://app.ryco.dev";
@@ -65,9 +65,12 @@ export function PairingScreen({ registry }: { readonly registry: MobileConnectio
         httpBaseUrl: target.httpBaseUrl,
       });
 
-      // 3. Persist the token in SecretKV and the environment in the catalog.
+      // 3. Persist the bearer token in SecretKV, then upsert the environment
+      //    into the catalog registry. The upsert fires the registry
+      //    subscription the supervisor started, so the environment auto-connects
+      //    (opens the live socket and streams the node into state/threads).
       await registry.catalog.writeBearerToken(descriptor.environmentId, bootstrap.sessionToken);
-      await registry.catalog.persistRecord({
+      registry.catalog.registryStore.getState().upsert({
         environmentId: descriptor.environmentId,
         label: descriptor.label,
         httpBaseUrl: target.httpBaseUrl,
@@ -76,14 +79,7 @@ export function PairingScreen({ registry }: { readonly registry: MobileConnectio
         lastConnectedAt: null,
       });
 
-      // 4. Issue the authenticated WebSocket URL (wsToken in the query).
-      const wsUrl = await registry.remoteApi.resolveRemoteWebSocketConnectionUrl({
-        wsBaseUrl: target.wsBaseUrl,
-        httpBaseUrl: target.httpBaseUrl,
-        bearerToken: bootstrap.sessionToken,
-      });
-
-      setStatus({ kind: "paired", label: descriptor.label, wsUrl });
+      setStatus({ kind: "paired", label: descriptor.label });
     } catch (error) {
       setStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     }

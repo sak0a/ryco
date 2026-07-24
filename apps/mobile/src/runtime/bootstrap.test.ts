@@ -46,6 +46,10 @@ describe("mobile runtime bootstrap", () => {
       },
     });
 
+    // The environment-connection driver (the supervisor over the shared catalog)
+    // is present.
+    expect(registry.driver.supervisor).toBeDefined();
+
     // The saved-environment catalog (the environment registry) initializes with
     // an empty registry.
     expect(registry.catalog).toBeDefined();

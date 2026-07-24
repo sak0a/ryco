@@ -47,14 +47,17 @@ Interactive Simulator QA is the owner's — agents cannot drive the Simulator.
 5. **Pair** in the app: paste the pairing URL and tap **Pair and connect**. The
    app exchanges the credential for a bearer session token
    (`/api/auth/bootstrap/bearer`), stores it in the iOS Keychain (SecureStore),
-   persists the environment in the catalog, and issues the authenticated
-   WebSocket URL (`/api/auth/ws-token`).
+   and upserts the environment into the catalog. That upsert fires the
+   environment-connection driver: the supervisor opens the live WebSocket with a
+   freshly issued ws-token (`/api/auth/ws-token`), subscribes the node's shell
+   stream, and syncs it into `state/threads`.
 6. **Verify the loop** (the B1 runtime acceptance):
    - **Pairing** shows `paired to <node label>`; **Socket** reaches `connected`.
    - The **thread list** populates from the node stream.
-   - Background the app, then foreground it: the socket reconnects (the
-     AppLifecycle adapter drives `foreground` + `resume` aggressively because
-     iOS tears down the socket while backgrounded).
+   - Background the app, then foreground it: the connection reconnects. The
+     supervisor's `subscribeBrowserResume` seam is bound to RN AppState, so every
+     background -> foreground transition re-drives reconnect for any connection
+     whose heartbeat went stale while iOS suspended the socket.
 
 ## Notes / boundaries
 
