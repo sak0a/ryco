@@ -12,8 +12,13 @@ function readExtra(): MobileExtraConfig {
   return (Constants.expoConfig?.extra as MobileExtraConfig | undefined) ?? {};
 }
 
-function trimmed(value: string | null | undefined): string | undefined {
-  const next = value?.trim();
+// `Constants.expoConfig.extra` is untrusted runtime data — its TS type is only a
+// build-time hint, so a value typed `string` can arrive as a non-string (or a
+// null that a bleeding-edge Hermes mishandles under `?.`). Guard on the runtime
+// type instead of trusting the annotation, and never call a method off it.
+function trimmed(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const next = value.trim();
   return next ? next : undefined;
 }
 
