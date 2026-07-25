@@ -13,6 +13,7 @@ import {
   deriveHostedAccountManagementView,
   isHostedPasskeySessionMessage,
   isHostedStepUpMessage,
+  teardownHostedRecoveryCodes,
   type HostedAccountActions,
   type HostedAccountManagementView,
   type HostedAccountPromptDraft,
@@ -573,6 +574,110 @@ describe("recovery codes", () => {
     // The new codes land in the hosted store and are displayed by the account
     // view, so the confirmation gets out of the way rather than repeating them.
     expect(test.draft()).toBeNull();
+  });
+});
+
+/**
+ * Recovery codes are live sign-in credentials in one shared runtime slot, and
+ * the display is what acknowledges them. So the surface that showed them owes
+ * the slot a dismissal on the way out — and a rotation still in flight at that
+ * moment must not push a fresh set into a slot no mounted screen is watching.
+ */
+describe("recovery codes do not outlive the surface that displays them", () => {
+  function stores(initial?: {
+    readonly hub?: Partial<HostedHubState>;
+    readonly account?: Partial<HostedAccountState>;
+  }) {
+    let hub = hubState(initial?.hub);
+    let account = accountState(initial?.account);
+    const hubListeners = new Set<() => void>();
+    const accountListeners = new Set<() => void>();
+
+    const setHub = (patch: Partial<HostedHubState>) => {
+      hub = { ...hub, ...patch };
+      for (const listener of hubListeners) listener();
+    };
+    const setAccount = (patch: Partial<HostedAccountState>) => {
+      account = { ...account, ...patch };
+      for (const listener of accountListeners) listener();
+    };
+
+    const dismissRecoveryCodes = vi.fn(() => setHub({ recoveryCodes: [] }));
+
+    return {
+      setHub,
+      setAccount,
+      dismissRecoveryCodes,
+      codes: () => hub.recoveryCodes,
+      watching: () => hubListeners.size + accountListeners.size,
+      teardown: () =>
+        teardownHostedRecoveryCodes({
+          readHubState: () => hub,
+          readAccountState: () => account,
+          subscribeHubState: (listener) => {
+            hubListeners.add(listener);
+            return () => hubListeners.delete(listener);
+          },
+          subscribeAccountState: (listener) => {
+            accountListeners.add(listener);
+            return () => accountListeners.delete(listener);
+          },
+          dismissRecoveryCodes,
+        }),
+    };
+  }
+
+  it("dismisses the codes the screen was showing when it goes away", () => {
+    const test = stores({ hub: { recoveryCodes: ["aaaa-bbbb", "cccc-dddd"] } });
+    test.teardown();
+    expect(test.dismissRecoveryCodes).toHaveBeenCalledTimes(1);
+    expect(test.codes()).toEqual([]);
+    // Nothing was rotating, so nothing is left watching for a late arrival.
+    expect(test.watching()).toBe(0);
+  });
+
+  /** The finding: navigate back mid-rotation and the codes land unattended. */
+  it("dismisses a rotation that only lands after the screen is gone", () => {
+    const test = stores({ account: { actionStatus: "regenerating-recovery-codes" } });
+    test.teardown();
+    // The controller commits the new set into the shared slot, then settles.
+    test.setHub({ recoveryCodes: ["eeee-ffff", "gggg-hhhh"] });
+    expect(test.codes()).toEqual([]);
+    expect(test.dismissRecoveryCodes).toHaveBeenCalledTimes(1);
+    test.setAccount({ actionStatus: "idle" });
+    expect(test.codes()).toEqual([]);
+    expect(test.watching()).toBe(0);
+  });
+
+  it("stops watching once the abandoned rotation settles without codes", () => {
+    const test = stores({ account: { actionStatus: "regenerating-recovery-codes" } });
+    test.teardown();
+    expect(test.watching()).toBeGreaterThan(0);
+    test.setAccount({ actionStatus: "idle", errorMessage: "Hub is temporarily unavailable." });
+    expect(test.watching()).toBe(0);
+    // A later set belongs to whatever published it — a fresh sign-in shows its
+    // own codes on its own surface — and this teardown no longer touches it.
+    test.setHub({ recoveryCodes: ["iiii-jjjj"] });
+    expect(test.codes()).toEqual(["iiii-jjjj"]);
+    expect(test.dismissRecoveryCodes).not.toHaveBeenCalled();
+  });
+
+  it("leaves a set published by another surface alone", () => {
+    const test = stores();
+    test.teardown();
+    // Registration hands codes to the sign-in screen, which dismisses its own.
+    test.setHub({ recoveryCodes: ["kkkk-llll"] });
+    expect(test.codes()).toEqual(["kkkk-llll"]);
+    expect(test.dismissRecoveryCodes).not.toHaveBeenCalled();
+  });
+
+  it("can be stopped by hand", () => {
+    const test = stores({ account: { actionStatus: "regenerating-recovery-codes" } });
+    const stop = test.teardown();
+    stop();
+    expect(test.watching()).toBe(0);
+    test.setHub({ recoveryCodes: ["mmmm-nnnn"] });
+    expect(test.codes()).toEqual(["mmmm-nnnn"]);
   });
 });
 

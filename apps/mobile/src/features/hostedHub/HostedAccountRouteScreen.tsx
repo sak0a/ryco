@@ -9,6 +9,7 @@ import { ErrorBanner } from "../../components/ErrorBanner";
 import {
   hostedAccountStore,
   hostedHubController,
+  hostedHubStore,
   useHostedAccountStore,
   useHostedHubStore,
 } from "../../hostedHub/state";
@@ -16,6 +17,7 @@ import { SettingsRow } from "../settings/components/SettingsRow";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import {
   deriveHostedAccountManagementView,
+  teardownHostedRecoveryCodes,
   type HostedAccountPromptDraft,
 } from "./hostedAccountModel";
 import { HostedAccountPrompt } from "./HostedAccountPrompt";
@@ -60,12 +62,25 @@ export function HostedAccountRouteScreen() {
     void hostedHubController.refreshPasskeys();
   }, [hostedModeAvailable, signedIn]);
 
-  // Leaving the screen must not leave the account's shared TOTP key in the
-  // runtime's transient slot. The prompt's own close path drops it; this covers
-  // a back-swipe, a sheet dismissal, and a sign-out that unmounts underneath.
+  // Leaving the screen must not leave the account's shared TOTP key — or a set
+  // of live recovery codes — in the runtime's transient slots. The prompt's own
+  // close path drops the enrolment secret; this covers a back-swipe, a sheet
+  // dismissal, and a sign-out that unmounts underneath.
+  //
+  // The recovery-code half also outlives the unmount on purpose: a rotation
+  // still in flight commits its codes after this screen is gone, and
+  // `teardownHostedRecoveryCodes` stays subscribed just long enough to dismiss
+  // that late arrival rather than let the next visit render it.
   useEffect(
     () => () => {
       hostedHubController.dismissTotpEnrollment();
+      teardownHostedRecoveryCodes({
+        readHubState: () => hostedHubStore.getState(),
+        readAccountState: () => hostedAccountStore.getState(),
+        subscribeHubState: (listener) => hostedHubStore.subscribe(listener),
+        subscribeAccountState: (listener) => hostedAccountStore.subscribe(listener),
+        dismissRecoveryCodes: () => hostedHubController.dismissRecoveryCodes(),
+      });
     },
     [],
   );

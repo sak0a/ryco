@@ -114,6 +114,92 @@ export interface HostedAccountActions {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Recovery-code teardown                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The stores and the one controller call the teardown below needs, as seams so
+ * a test can drive it without the runtime.
+ */
+export interface HostedRecoveryCodeTeardownInput {
+  readonly readHubState: () => Pick<HostedHubState, "recoveryCodes">;
+  readonly readAccountState: () => Pick<HostedAccountState, "actionStatus">;
+  /** The hosted lifecycle store, which carries the codes themselves. */
+  readonly subscribeHubState: (listener: () => void) => () => void;
+  /** The account store, which carries the rotation's status. */
+  readonly subscribeAccountState: (listener: () => void) => () => void;
+  readonly dismissRecoveryCodes: () => void;
+}
+
+/**
+ * Drop the account's recovery codes when the surface that displays them goes
+ * away — **including a set that has not landed yet**.
+ *
+ * Recovery codes are live sign-in credentials held in one shared in-memory slot
+ * on the runtime. They are shown once, and the display is what acknowledges
+ * them; the runtime holds them until something dismisses them and cannot
+ * enforce a single display on its own. So a screen that rendered them owes the
+ * slot a dismissal on the way out, exactly as it already owes one for the TOTP
+ * enrolment secret.
+ *
+ * Clearing what is *currently* held is only half of it. A rotation started from
+ * this screen and still in flight at unmount commits its codes into that slot
+ * afterwards, with no mounted surface left to show or dismiss them — and the
+ * next visit to the account screen then renders live recovery credentials
+ * nobody asked for. So a rotation that is still running is watched until it
+ * settles and its result is dismissed as it arrives.
+ *
+ * The watch is deliberately armed *only* for a rotation already in flight: a
+ * set published by any other path — registration hands them to the sign-in
+ * surface, which is a different screen with its own dismissal — is none of this
+ * screen's business and is left alone.
+ *
+ * Returns a stop function; the watch also stops itself once the rotation
+ * settles, so nothing has to be remembered across the unmount.
+ */
+export function teardownHostedRecoveryCodes(input: HostedRecoveryCodeTeardownInput): () => void {
+  const dismissHeldCodes = (): boolean => {
+    if (input.readHubState().recoveryCodes.length === 0) return false;
+    input.dismissRecoveryCodes();
+    return true;
+  };
+
+  dismissHeldCodes();
+
+  // Nothing is rotating, so nothing can arrive after this and there is nothing
+  // to watch for.
+  if (input.readAccountState().actionStatus !== "regenerating-recovery-codes") {
+    return () => undefined;
+  }
+
+  let stopped = false;
+  const unsubscribes: Array<() => void> = [];
+  const stop = () => {
+    stopped = true;
+    while (unsubscribes.length > 0) unsubscribes.pop()?.();
+  };
+  const check = () => {
+    if (stopped) return;
+    // Stop before dismissing: the dismissal republishes the store, and a
+    // listener that re-entered here would otherwise loop through its own write.
+    if (input.readHubState().recoveryCodes.length > 0) {
+      stop();
+      input.dismissRecoveryCodes();
+      return;
+    }
+    // The rotation settled without codes — it was refused, aborted, or the
+    // session went away. Nothing further can arrive for it.
+    if (input.readAccountState().actionStatus !== "regenerating-recovery-codes") stop();
+  };
+
+  unsubscribes.push(input.subscribeHubState(check), input.subscribeAccountState(check));
+  // A store that notified during subscription, or a stop that raced it.
+  if (stopped) stop();
+  else check();
+  return stop;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Buttons                                                                     */
 /* -------------------------------------------------------------------------- */
 
