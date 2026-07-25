@@ -1,5 +1,5 @@
 import { useNavigation } from "@react-navigation/native";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
@@ -49,7 +49,17 @@ export function HostedAccountRouteScreen() {
   const hostedModeAvailable = useHostedModeAvailable();
   const state = useHostedHubStore((value) => value);
   const accountState = useHostedAccountStore((value) => value);
-  const [draft, setDraft] = useState<HostedAccountPromptDraft | null>(null);
+  const [draft, setDraftState] = useState<HostedAccountPromptDraft | null>(null);
+  // The ref is the *live* draft and the state is the rendered one. A submit
+  // settles long after the render that started it, and the fence it checks
+  // itself against — is this still the same prompt, is this still the live
+  // attempt — has to see a close or a newly opened prompt the instant it
+  // happens, not one commit later.
+  const draftRef = useRef<HostedAccountPromptDraft | null>(null);
+  const setDraft = useCallback((next: HostedAccountPromptDraft | null) => {
+    draftRef.current = next;
+    setDraftState(next);
+  }, []);
 
   const signedIn = state.accountStatus === "authenticated";
 
@@ -98,8 +108,11 @@ export function HostedAccountRouteScreen() {
     actions: hostedHubController,
     // Read through the store rather than the subscribed snapshot: a submit
     // needs the state as it is *after* its own action settled, and the value
-    // captured at render time is by definition the one from before.
+    // captured at render time is by definition the one from before. The same
+    // goes for the session it was issued on and for the prompt it belongs to.
     readAccountState: () => hostedAccountStore.getState(),
+    readHubState: () => hostedHubStore.getState(),
+    readDraft: () => draftRef.current,
     onDraftChange: setDraft,
   });
 

@@ -108,8 +108,17 @@ interface Harness {
     [K in keyof HostedAccountActions]: ReturnType<typeof vi.fn>;
   };
   readonly setAccount: (patch: Partial<HostedAccountState>) => void;
+  readonly setHub: (patch: Partial<HostedHubState>) => void;
   /** The store error the *next* controller call publishes. */
   readonly nextOutcome: (message: string | null) => void;
+  /**
+   * Hold the *next* controller call open, the way a platform sheet or a slow
+   * Hub does, and hand back the release. Everything a stale result can collide
+   * with happens in that window.
+   */
+  readonly hold: () => () => void;
+  /** Close the open prompt the way the surface's own dismissal would. */
+  readonly close: () => void;
 }
 
 function harness(initial?: {
@@ -120,9 +129,17 @@ function harness(initial?: {
   let account = accountState(initial?.account);
   let draft: HostedAccountPromptDraft | null = null;
   const outcomes: Array<string | null> = [];
+  let held: Promise<void> | null = null;
 
-  /** Every controller fake settles the store the way the controller would. */
-  const commit = () => {
+  /**
+   * Every controller fake settles the store the way the controller would: it
+   * waits out whatever `hold()` armed, then records the outcome. The controller
+   * resolves for a refusal as readily as for a commit, so the fakes do too.
+   */
+  const commit = async () => {
+    const wait = held;
+    held = null;
+    if (wait !== null) await wait;
     const message = outcomes.length > 0 ? outcomes.shift()! : null;
     account = { ...account, errorMessage: message };
   };
@@ -135,7 +152,7 @@ function harness(initial?: {
     setPassword: vi.fn(async () => commit()),
     removePassword: vi.fn(async () => commit()),
     beginTotpEnrollment: vi.fn(async () => {
-      commit();
+      await commit();
       if (account.errorMessage === null) {
         hub = {
           ...hub,
@@ -148,7 +165,7 @@ function harness(initial?: {
       }
     }),
     confirmTotpEnrollment: vi.fn(async () => {
-      commit();
+      await commit();
       if (account.errorMessage === null) hub = { ...hub, totpEnrollment: null };
     }),
     revokeTotp: vi.fn(async () => commit()),
@@ -156,7 +173,12 @@ function harness(initial?: {
     dismissTotpEnrollment: vi.fn(() => {
       hub = { ...hub, totpEnrollment: null };
     }),
-    cancelAccountAction: vi.fn(),
+    // What the controller really does: it abandons the operation and resets the
+    // surface to idle with no error — indistinguishable, in the store alone,
+    // from the action having succeeded.
+    cancelAccountAction: vi.fn(() => {
+      account = { ...account, actionStatus: "idle", errorMessage: null };
+    }),
   };
 
   const view = () =>
@@ -166,6 +188,8 @@ function harness(initial?: {
       draft,
       actions: actions as unknown as HostedAccountActions,
       readAccountState: () => account,
+      readHubState: () => hub,
+      readDraft: () => draft,
       onDraftChange: (next) => {
         draft = next;
       },
@@ -191,8 +215,21 @@ function harness(initial?: {
     setAccount: (patch) => {
       account = { ...account, ...patch };
     },
+    setHub: (patch) => {
+      hub = { ...hub, ...patch };
+    },
     nextOutcome: (message) => {
       outcomes.push(message);
+    },
+    hold: () => {
+      let release!: () => void;
+      held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return release;
+    },
+    close: () => {
+      draft = null;
     },
   };
 }
@@ -849,6 +886,186 @@ describe("errors", () => {
     expect(
       harness({ account: { passkeys: [], passkeysStatus: "loading" } }).view().passkeysEmptyDetail,
     ).toBe("Loading your passkeys.");
+  });
+});
+
+/**
+ * A submit outlives the prompt that started it, and the account store cannot
+ * say whose result it is holding: a commit, an abandoned operation, and a
+ * session that rotated underneath all leave it idle with no error. So every
+ * result is fenced on the prompt it belongs to, the attempt that is still live,
+ * and the session that issued it — never on the awaited call merely returning.
+ */
+describe("a result only lands on the state it was started from", () => {
+  const PASSWORD = { text: "correct horse battery", secondary: "correct horse battery" };
+
+  /** Start a submit and leave it in flight, with the surface marked busy. */
+  function inFlight(test: Harness, status: HostedAccountState["actionStatus"]) {
+    const release = test.hold();
+    test.prompt().submit?.run();
+    test.setAccount({ actionStatus: status });
+    return release;
+  }
+
+  it("does not close, or complete, a prompt opened after the one it belongs to", async () => {
+    const test = harness();
+    test.open("add-passkey");
+    const release = inFlight(test, "adding-passkey");
+
+    // The user dismisses the prompt and opens something else entirely.
+    test.close();
+    test.open("verify-email");
+    test.setAccount({ actionStatus: "idle" });
+    const opened = test.draft();
+
+    release();
+    await flush();
+    // Byte for byte the prompt the user opened: not closed, not completed, and
+    // not carrying the older action's outcome.
+    expect(test.draft()).toBe(opened);
+    expect(test.view().prompt?.id).toBe("verify-email");
+  });
+
+  /**
+   * The prompt half of the fence on its own: the newer prompt has been
+   * submitted once itself, so it carries the same attempt number as the
+   * abandoned one and only its *identity* tells the two apart.
+   */
+  it("does not close a different prompt that has since been submitted itself", async () => {
+    const test = harness();
+    test.open("add-passkey");
+    const releaseStale = inFlight(test, "adding-passkey");
+
+    test.close();
+    test.open("verify-email");
+    test.type({ text: "ada@example.com" });
+    test.setAccount({ actionStatus: "idle" });
+    test.nextOutcome("Hub is temporarily unavailable.");
+    const releaseCurrent = inFlight(test, "requesting-email-verification");
+    releaseCurrent();
+    await flush();
+    test.setAccount({ actionStatus: "idle" });
+    expect(test.draft()?.attempt).toBe(1);
+    expect(test.prompt().errorMessage).toBe("Hub is temporarily unavailable.");
+
+    // The abandoned passkey request finally returns, and reads as a commit.
+    releaseStale();
+    await flush();
+    // `add-passkey` closes itself on a commit. Closing *this* prompt would take
+    // the user's open, refused email attempt with it.
+    expect(test.view().prompt?.id).toBe("verify-email");
+    expect(test.draft()).not.toBeNull();
+  });
+
+  it("cannot resurrect a prompt the user dismissed", async () => {
+    const test = harness();
+    test.open("set-password");
+    test.type(PASSWORD);
+    const release = inFlight(test, "setting-password");
+
+    test.close();
+    test.setAccount({ actionStatus: "idle" });
+    release();
+    await flush();
+    // `set-password` reports its outcome rather than closing, so an unfenced
+    // result would push a completed prompt back onto an empty surface.
+    expect(test.draft()).toBeNull();
+    expect(test.view().prompt).toBeNull();
+  });
+
+  /**
+   * The reported sequence. "Stop waiting" resets the store to idle with no
+   * error, which is exactly what a success looks like from here.
+   */
+  it("reports no success for an attempt the user stopped waiting on", async () => {
+    const test = harness();
+    test.open("set-password");
+    test.type(PASSWORD);
+    const release = inFlight(test, "setting-password");
+
+    test.prompt().cancel?.run();
+    expect(test.actions.cancelAccountAction).toHaveBeenCalledTimes(1);
+    expect(test.draft()?.completed).toBe(false);
+
+    release();
+    await flush();
+    const prompt = test.prompt();
+    expect(test.draft()?.completed).toBe(false);
+    expect(prompt.message).not.toBe("Your password was saved.");
+    expect(prompt.message).toContain("fallback, not a replacement");
+    // Still submittable: the user can try again, which is the only retry there is.
+    expect(prompt.submit).not.toBeNull();
+  });
+
+  it("reports no success for a result whose session rotated underneath", async () => {
+    const test = harness();
+    test.open("remove-password");
+    const release = inFlight(test, "removing-password");
+
+    // The runtime drops the operation and leaves the store idle and error-free.
+    const session = hubState().session;
+    test.setHub({ session: session === null ? null : { ...session, id: "sess_rotated" } });
+    test.setAccount({ actionStatus: "idle" });
+    release();
+    await flush();
+    expect(test.draft()?.completed).toBe(false);
+    expect(test.prompt().message).not.toBe("Password sign-in is off.");
+  });
+
+  it("reports no success for a result that outlived the session entirely", async () => {
+    const test = harness();
+    test.open("revoke-totp");
+    const release = inFlight(test, "revoking-totp");
+
+    test.setHub({ accountStatus: "signed-out" });
+    test.setAccount({ actionStatus: "idle" });
+    release();
+    await flush();
+    expect(test.draft()?.completed).toBe(false);
+    // And the surface itself is gone, so nothing renders the stale prompt.
+    expect(test.view().available).toBe(false);
+  });
+
+  it("does not turn on a step-up field the newer prompt was never refused", async () => {
+    const test = harness();
+    test.open("remove-password");
+    const release = inFlight(test, "removing-password");
+
+    test.close();
+    test.open("verify-email");
+    test.setAccount({ actionStatus: "idle" });
+    test.nextOutcome(STEP_UP_MESSAGE);
+    release();
+    await flush();
+    expect(test.draft()?.stepUpRequired).toBe(false);
+    expect(test.draft()?.attempted).toBe(false);
+    expect(test.prompt().fields.map((field) => field.key)).toEqual(["text"]);
+    expect(test.prompt().errorMessage).toBeNull();
+  });
+
+  it("still settles the prompt it does belong to", async () => {
+    const test = harness();
+    test.open("set-password");
+    test.type(PASSWORD);
+    const release = inFlight(test, "setting-password");
+    test.setAccount({ actionStatus: "idle" });
+    release();
+    await flush();
+    // The fence refuses stale results, not slow ones.
+    expect(test.prompt().message).toBe("Your password was saved.");
+    expect(test.draft()?.completed).toBe(true);
+  });
+
+  it("gives every prompt its own identity, carried through edits", () => {
+    const test = harness();
+    test.open("set-password");
+    const first = test.draft();
+    test.type({ text: "typing" });
+    expect(test.draft()?.generation).toBe(first?.generation);
+    test.close();
+    test.open("set-password");
+    // Same id, different prompt.
+    expect(test.draft()?.generation).not.toBe(first?.generation);
   });
 });
 

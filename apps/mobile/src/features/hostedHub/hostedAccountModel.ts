@@ -24,7 +24,7 @@ import type { StatusTone } from "../../components/StatusPill";
  * confirmation destroys, and which controller call sits behind every button —
  * lives here and is asserted by a real test. The `.tsx` files are layout.
  *
- * Four rules this module exists to hold:
+ * Five rules this module exists to hold:
  *
  * 1. **Step-up is discovered, never assumed.** Neither the client type nor the
  *    Hub says whether the current session came from a passkey or from a
@@ -40,6 +40,12 @@ import type { StatusTone } from "../../components/StatusPill";
  *    and is dropped through `dismissTotpEnrollment()` on every close path.
  * 4. **A fallback credential is never presented as equivalent to a passkey.**
  *    The password and two-factor copy says so in as many words.
+ * 5. **A result may only land on the state it was started from.** The account
+ *    store cannot distinguish "committed" from "abandoned" or "the session
+ *    rotated" — all three leave it idle with no error — so every submit is
+ *    fenced on the prompt it belongs to, the attempt that is still live, and
+ *    the session that issued it. The runtime's `createFence` is the same
+ *    discipline; this is its surface-side half.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -331,6 +337,20 @@ export type HostedAccountPromptId =
  */
 export interface HostedAccountPromptDraft {
   readonly id: HostedAccountPromptId;
+  /**
+   * Identity of this prompt *instance*, minted once per opened prompt and
+   * carried through every edit. Two prompts with the same `id` are still two
+   * different prompts, so a result may only touch the one it was started from.
+   * See {@link derivePrompt}.
+   */
+  readonly generation: number;
+  /**
+   * Which submit is live. Bumped by every submit and by "Stop waiting", so a
+   * result that lands after the attempt it belongs to was abandoned is
+   * recognisable as stale — the store cannot say so, because a cancellation
+   * resets it to exactly the idle/no-error state a success leaves behind.
+   */
+  readonly attempt: number;
   /** `revoke-passkey` only: which credential, and what to call it in the copy. */
   readonly credentialId: string | null;
   readonly passkeyLabel: string | null;
@@ -348,12 +368,24 @@ export interface HostedAccountPromptDraft {
   readonly completed: boolean;
 }
 
+/**
+ * The generation counter behind {@link HostedAccountPromptDraft.generation}.
+ *
+ * Module-scoped and monotonic, the same shape as the runtime's `createFence`:
+ * the value only ever has to be *comparable*, never meaningful, and a counter
+ * that is never reset cannot hand the same identity to two prompts.
+ */
+let promptGeneration = 0;
+
 export function createHostedAccountPromptDraft(
   id: HostedAccountPromptId,
   extras?: { readonly credentialId?: string; readonly passkeyLabel?: string | null },
 ): HostedAccountPromptDraft {
+  promptGeneration += 1;
   return {
     id,
+    generation: promptGeneration,
+    attempt: 0,
     credentialId: extras?.credentialId ?? null,
     passkeyLabel: extras?.passkeyLabel ?? null,
     text: "",
@@ -462,6 +494,20 @@ export interface HostedAccountManagementInput {
    * way it can spot the step-up gate.
    */
   readonly readAccountState: () => HostedAccountState;
+  /**
+   * Re-reads the hosted lifecycle store, for the same reason: a session that
+   * rotated while an action was in flight makes that action's result somebody
+   * else's, and the render-time snapshot cannot say so.
+   */
+  readonly readHubState: () => HostedHubState;
+  /**
+   * The prompt as it is *now* — not the copy this derivation was handed. A
+   * submit settles into whatever the surface has become, so both halves of the
+   * fence (is this still the same prompt, is this still the live attempt) read
+   * through this. It must reflect an `onDraftChange` immediately, before any
+   * re-render.
+   */
+  readonly readDraft: () => HostedAccountPromptDraft | null;
   /** `null` closes the prompt. */
   readonly onDraftChange: (draft: HostedAccountPromptDraft | null) => void;
   /** Injected so age labels are deterministic under test. */
@@ -680,14 +726,45 @@ function derivePrompt(
   busy: boolean,
 ): HostedAccountPromptView {
   const { actions, accountState } = input;
-  const set = (patch: Partial<HostedAccountPromptDraft>) =>
-    input.onDraftChange({ ...draft, ...patch });
+
+  /**
+   * This prompt as it is *now*, or `null` once it has been closed or replaced.
+   *
+   * Everything that writes goes through it, so a closure held by an in-flight
+   * submit can neither resurrect a prompt the user dismissed nor overwrite a
+   * different one that has since been opened — and a write always merges into
+   * the live draft rather than into the copy this derivation captured.
+   */
+  const live = (): HostedAccountPromptDraft | null => {
+    const current = input.readDraft();
+    return current !== null && current.generation === draft.generation ? current : null;
+  };
+
+  const set = (patch: Partial<HostedAccountPromptDraft>) => {
+    const current = live();
+    if (current === null) return;
+    input.onDraftChange({ ...current, ...patch });
+  };
+
   const close = () => {
+    if (live() === null) return;
     // Every close path drops the enrolment secret, including the ones the
     // runtime would not clear on its own: backing out of the enrolment screen
     // must not leave the account's shared key sitting in a store.
     if (draft.id === "enroll-totp") actions.dismissTotpEnrollment();
     input.onDraftChange(null);
+  };
+
+  /**
+   * Abandon whatever submit is in flight. `cancelAccountAction` resets the
+   * account store to idle with no error — byte for byte what a success leaves
+   * behind — so the abandonment has to be recorded here or the result that
+   * eventually lands reads as that success.
+   */
+  const abandonAttempt = () => {
+    const current = live();
+    if (current === null) return;
+    input.onDraftChange({ ...current, attempt: current.attempt + 1 });
   };
 
   const field: PromptHelpers["field"] = (key, label, placeholder, value, options) => ({
@@ -723,8 +800,25 @@ function derivePrompt(
     : button(
         spec.submitLabel,
         () => {
+          // Claim this submit before it starts. Both halves of the fence are
+          // taken *now*, from the live state, so what the result is compared
+          // against is what was true when the request went out.
+          const attempt = (live() ?? draft).attempt + 1;
+          const session = sessionIdentity(input.readHubState());
+          set({ attempt });
           void (async () => {
             await settle(spec.perform());
+            // The runtime resolves the same way for a commit, a refusal, an
+            // abandoned operation, and a session that rotated underneath, so
+            // "it returned" says nothing about whose result this is. Only a
+            // result that is still the live attempt on the same prompt and the
+            // same session may be read as this action's outcome — the
+            // alternative is a stale closure closing (or falsely completing) a
+            // prompt the user has since opened for something else.
+            const current = live();
+            if (current === null || current.attempt !== attempt || current.completed) return;
+            if (sessionIdentity(input.readHubState()) !== session) return;
+
             const after = input.readAccountState();
             if (after.errorMessage === null) {
               if (spec.onCommitted) spec.onCommitted();
@@ -762,8 +856,26 @@ function derivePrompt(
     busy,
     submit,
     dismiss: button(draft.completed ? "Done" : "Cancel", close, { disabled: busy }),
-    cancel: busy ? button("Stop waiting", () => actions.cancelAccountAction()) : null,
+    cancel: busy
+      ? button("Stop waiting", () => {
+          actions.cancelAccountAction();
+          abandonAttempt();
+        })
+      : null,
   };
+}
+
+/**
+ * Which session a result belongs to.
+ *
+ * A session rotation drops the operation that was in flight and leaves the
+ * account store idle with no error — the same state a success leaves — so the
+ * session is compared rather than the outcome. `accountStatus` rides along
+ * because a sign-out is a change of session too, and it can happen without the
+ * session id changing.
+ */
+function sessionIdentity(state: HostedHubState): string {
+  return `${state.accountStatus}:${state.session?.id ?? ""}`;
 }
 
 function promptSpec(
