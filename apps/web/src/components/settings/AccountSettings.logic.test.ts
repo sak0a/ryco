@@ -1,20 +1,24 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   HostedHubApiError,
+  HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,
   PASSKEY_SESSION_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
   type HostedHubPasskey,
 } from "@ryco/client-runtime/authorization";
 
 import {
+  accountActionOutcome,
   activePasskeys,
   emailIssue,
   formatRecoveryCodesForClipboard,
   inlineErrorMessage,
   isPasskeyRevoked,
   isPasskeySessionRequired,
+  isSettledAccountAction,
   isStepUpRequired,
   isSubmittableTotpCode,
+  mayHaveEnrolledPasskey,
   normalizePasskeyLabel,
   normalizeTotpCode,
   PASSKEY_SESSION_REQUIRED_MESSAGE,
@@ -89,6 +93,65 @@ describe("step-up classification", () => {
     expect(STEP_UP_REQUIRED_MESSAGE).not.toBe(PASSKEY_SESSION_REQUIRED_MESSAGE);
     expect(STEP_UP_REQUIRED_MESSAGE.length).toBeGreaterThan(0);
     expect(PASSKEY_SESSION_REQUIRED_MESSAGE.length).toBeGreaterThan(0);
+  });
+});
+
+describe("account action outcome", () => {
+  const outcome = (
+    action: Parameters<typeof accountActionOutcome>[0]["action"],
+    errorMessage: string | null,
+    passkeysStatus: Parameters<typeof accountActionOutcome>[0]["passkeysStatus"] = "ready",
+  ) => accountActionOutcome({ action, errorMessage, passkeysStatus });
+
+  it("reads a clean store as a commit, and the step-up sentinel as a prompt", () => {
+    expect(outcome("set-password", null)).toBe("committed");
+    expect(outcome("set-password", STEP_UP_REQUIRED_MESSAGE)).toBe("step-up-required");
+    expect(isSettledAccountAction("committed")).toBe(true);
+    expect(isSettledAccountAction("step-up-required")).toBe(false);
+    expect(isSettledAccountAction("failed")).toBe(false);
+  });
+
+  it("treats a passkey add whose confirming re-read failed as settled, not failed", () => {
+    // The credential is already on the account; reporting a failure here is
+    // what invites a second ceremony and a duplicate credential.
+    expect(outcome("add-passkey", "The Hub could not be reached.", "stale")).toBe("unverified");
+    expect(outcome("add-passkey", HOSTED_PASSKEY_UNCONFIRMED_MESSAGE, "ready")).toBe("unverified");
+    expect(isSettledAccountAction("unverified")).toBe(true);
+  });
+
+  it("still reports a passkey add that never committed as a failure", () => {
+    expect(outcome("add-passkey", "That credential is already registered.", "ready")).toBe(
+      "failed",
+    );
+  });
+
+  it("never extends the post-commit reading to an action that does not do it", () => {
+    // Only `addPasskey` writes an error after committing. A stale passkey list
+    // left over from an unrelated read must not turn a failed password change
+    // into a silent success.
+    expect(outcome("set-password", "That password has appeared in a breach.", "stale")).toBe(
+      "failed",
+    );
+    expect(outcome("regenerate-recovery-codes", "Hub unavailable.", "stale")).toBe("failed");
+  });
+
+  it("never reads a step-up refusal as a commit, whatever the passkey list says", () => {
+    expect(outcome("add-passkey", STEP_UP_REQUIRED_MESSAGE, "stale")).toBe("step-up-required");
+  });
+
+  it("is one-sided about an unconfirmed enrolment", () => {
+    expect(
+      mayHaveEnrolledPasskey({
+        errorMessage: HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,
+        passkeysStatus: "ready",
+      }),
+    ).toBe(true);
+    expect(mayHaveEnrolledPasskey({ errorMessage: "Anything.", passkeysStatus: "stale" })).toBe(
+      true,
+    );
+    expect(mayHaveEnrolledPasskey({ errorMessage: "Anything.", passkeysStatus: "ready" })).toBe(
+      false,
+    );
   });
 });
 

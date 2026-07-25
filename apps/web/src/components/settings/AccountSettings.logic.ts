@@ -7,9 +7,11 @@
 
 import {
   HostedHubApiError,
+  HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,
   PASSKEY_SESSION_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
   type HostedHubPasskey,
+  type HostedPasskeyDirectoryStatus,
 } from "@ryco/client-runtime/authorization";
 
 /**
@@ -195,6 +197,56 @@ const STEP_UP_ACTION_TITLES: Record<AccountStepUpAction, string> = {
 
 export function stepUpTitle(action: AccountStepUpAction): string {
   return STEP_UP_ACTION_TITLES[action];
+}
+
+/**
+ * Whether an `add-passkey` attempt that published an error may nonetheless have
+ * enrolled a credential.
+ *
+ * `addPasskey` is the one account action that writes an error **after** it has
+ * committed: the controller confirms the enrolment with a forced re-read, and
+ * both a failed read (`passkeysStatus` moves to `"stale"`) and a read that came
+ * back without the new credential ({@link HOSTED_PASSKEY_UNCONFIRMED_MESSAGE})
+ * leave a message behind. Reading either as "nothing happened" leaves the add
+ * form open with the label intact, and the obvious next move — press the button
+ * again — runs a second ceremony and enrols a second credential.
+ *
+ * The predicate is deliberately one-sided. It errs towards "this may have
+ * committed", because being wrong that way costs a form the user has to reopen,
+ * and being wrong the other way costs a credential they never asked for.
+ */
+export function mayHaveEnrolledPasskey(input: {
+  readonly errorMessage: string | null;
+  readonly passkeysStatus: HostedPasskeyDirectoryStatus;
+}): boolean {
+  if (input.errorMessage === HOSTED_PASSKEY_UNCONFIRMED_MESSAGE) return true;
+  return input.passkeysStatus === "stale";
+}
+
+/**
+ * What an account action did, read off the account store once it has settled.
+ *
+ * `"unverified"` is the outcome that exists only because of
+ * {@link mayHaveEnrolledPasskey}: the change is not confirmed, but it must not
+ * be retried blind. Callers treat it exactly like `"committed"` for the purpose
+ * of tearing their form down — the inline error still says what went wrong.
+ */
+export type AccountActionOutcome = "committed" | "unverified" | "step-up-required" | "failed";
+
+export function accountActionOutcome(input: {
+  readonly action: AccountStepUpAction;
+  readonly errorMessage: string | null;
+  readonly passkeysStatus: HostedPasskeyDirectoryStatus;
+}): AccountActionOutcome {
+  if (input.errorMessage === null) return "committed";
+  if (isStepUpRequired(input.errorMessage)) return "step-up-required";
+  if (input.action === "add-passkey" && mayHaveEnrolledPasskey(input)) return "unverified";
+  return "failed";
+}
+
+/** Whether an outcome forbids repeating the action without the user asking again. */
+export function isSettledAccountAction(outcome: AccountActionOutcome): boolean {
+  return outcome === "committed" || outcome === "unverified";
 }
 
 /**

@@ -36,3 +36,31 @@ export const useRecoveryCodeDisplayStore = create<RecoveryCodeDisplayStore>((set
 export function isRecoveryCodeDisplayClaimed(): boolean {
   return useRecoveryCodeDisplayStore.getState().claims > 0;
 }
+
+/**
+ * A generation fence for recovery-code *deliveries*.
+ *
+ * A rotation writes the new set into the runtime slot when its response lands,
+ * which can be well after the surface that asked for it has gone away. The
+ * teardown path — release the claim, then `dismissRecoveryCodes()` — runs first
+ * and clears an empty slot; the response then lands and fills it again. The
+ * claim is already released by that point, so the codes the user was never
+ * shown, and explicitly dismissed, reappear in the hosted root's full-screen
+ * takeover.
+ *
+ * `issueRecoveryCodeDelivery()` hands out a predicate that stays true until the
+ * next `invalidateRecoveryCodeDelivery()`. A delivery whose predicate has gone
+ * false must drop what it received rather than leave it in the slot.
+ */
+let deliveryGeneration = 0;
+
+/** Abandon every rotation currently in flight. */
+export function invalidateRecoveryCodeDelivery(): void {
+  deliveryGeneration += 1;
+}
+
+/** A predicate that stays true until the next {@link invalidateRecoveryCodeDelivery}. */
+export function issueRecoveryCodeDelivery(): () => boolean {
+  const issued = deliveryGeneration;
+  return () => issued === deliveryGeneration;
+}
