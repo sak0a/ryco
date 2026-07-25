@@ -514,8 +514,15 @@ export interface HostedAccountManagementInput {
   readonly now?: number;
 }
 
+/**
+ * Where a passkey lives is the platform's decision, not Ryco's: a platform
+ * passkey syncs through iCloud Keychain or Google Password Manager by default,
+ * and this same model renders a "Synced" pill saying so. So the copy says what
+ * the list can show and claims no hardware binding for the credential itself —
+ * the only key this app can attest never leaves the device is its own DPoP key.
+ */
 const PASSKEY_FOOTNOTE =
-  "A passkey is the strongest way to sign in, and each device keeps its own in secure hardware. Add one here so this device stops depending on the browser.";
+  "A passkey is the strongest way to sign in. Whether one stays on this device or syncs through your password manager is the platform's decision — each entry below says which. Add one here so this device stops depending on the browser.";
 const RECOVERY_FOOTNOTE =
   "Recovery codes are a last resort for getting back in. Generating a new set replaces the old one.";
 const PASSWORD_FOOTNOTE =
@@ -893,7 +900,7 @@ function promptSpec(
       return {
         title: "Add a passkey for this device",
         message:
-          "Ryco asks this device for a new passkey and registers it with your Hub. The request is signed with a key that never leaves the device's secure hardware.",
+          "Ryco asks this device for a new passkey and registers it with your Hub. Whether that passkey stays here or syncs through your password manager is the platform's decision — the list says which. Ryco's own request is signed with a separate key that never leaves this device's secure hardware.",
         notice: null,
         destructive: false,
         submitLabel: "Add passkey",

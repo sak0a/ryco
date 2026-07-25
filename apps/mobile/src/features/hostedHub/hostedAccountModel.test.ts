@@ -98,6 +98,18 @@ function accountState(overrides: Partial<HostedAccountState> = {}): HostedAccoun
 /** Every button press is fire-and-forget, so a settled press needs a flush. */
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
+/** Every prompt the surface can open. One list, so no sweep can drift from it. */
+const PROMPT_IDS: ReadonlyArray<HostedAccountPromptId> = [
+  "add-passkey",
+  "revoke-passkey",
+  "regenerate-recovery-codes",
+  "set-password",
+  "remove-password",
+  "enroll-totp",
+  "revoke-totp",
+  "verify-email",
+];
+
 interface Harness {
   readonly view: () => HostedAccountManagementView;
   readonly prompt: () => HostedAccountPromptView;
@@ -317,6 +329,81 @@ describe("hosted account management surface", () => {
       }
     }
     expect(test.draft()).toBeNull();
+  });
+});
+
+/**
+ * The copy may not claim a binding the app cannot attest to — the same defect
+ * as the account header claiming a session came from a passkey.
+ *
+ * A platform passkey syncs through iCloud Keychain or Google Password Manager
+ * by default, and `passkeyTone` renders a "Synced" pill for exactly that. So
+ * "never leaves this device" is true of Ryco's own DPoP key and false of the
+ * credential, and any sentence that pairs the two contradicts the pill the user
+ * is looking at three lines above.
+ */
+describe("copy claims no hardware binding for a credential the platform may sync", () => {
+  const HARDWARE_CLAIM = /never leaves|secure hardware|only on this device|keeps its own/i;
+
+  const sentences = (copy: string): ReadonlyArray<string> =>
+    copy.split(/(?<=[.!?])\s+/).filter((part) => part.trim().length > 0);
+
+  /** Every string this surface renders, prompts included. */
+  function allCopy(test: Harness): ReadonlyArray<string> {
+    const copy: string[] = [];
+    const collect = (view: HostedAccountManagementView) => {
+      for (const section of view.sections) {
+        copy.push(section.title, section.footnote, ...section.rows.map((row) => row.label));
+      }
+      for (const row of view.passkeyRows) copy.push(row.label, row.detail, row.tone?.label ?? "");
+      const prompt = view.prompt;
+      if (prompt !== null) {
+        copy.push(prompt.title, prompt.message, prompt.notice ?? "");
+      }
+    };
+    collect(test.view());
+    for (const id of PROMPT_IDS) {
+      test.open(id);
+      collect(test.view());
+    }
+    test.close();
+    return copy;
+  }
+
+  function syncedHarness(): Harness {
+    return harness({
+      account: {
+        passkeys: [
+          passkey({ id: "pkey_01J8ZQ5V2N7X0000000002", label: "iPhone", backupState: true }),
+          passkey({ id: "pkey_01J8ZQ5V2N7X0000000003", label: "iPad", backupState: true }),
+        ],
+      },
+    });
+  }
+
+  it("renders a Synced pill for a credential the platform backed up", () => {
+    const rows = syncedHarness().view().passkeyRows;
+    expect(rows.map((row) => row.tone?.label)).toEqual(["Synced", "Synced"]);
+  });
+
+  it("pairs no hardware claim with a passkey in the same sentence", () => {
+    const test = syncedHarness();
+    const claims = allCopy(test)
+      .flatMap((copy) => sentences(copy))
+      .filter((sentence) => HARDWARE_CLAIM.test(sentence));
+    // The claim is made somewhere — this is not vacuous.
+    expect(claims.length).toBeGreaterThan(0);
+    for (const sentence of claims) {
+      expect(sentence, sentence).not.toMatch(/passkey/i);
+    }
+  });
+
+  it("says where a passkey is kept wherever it introduces one", () => {
+    const test = syncedHarness();
+    const footnote = test.view().sections.find((section) => section.id === "passkeys")?.footnote;
+    expect(footnote).toMatch(/sync/i);
+    test.open("add-passkey");
+    expect(test.prompt().message).toMatch(/sync/i);
   });
 });
 
@@ -1186,17 +1273,7 @@ describe("no unexpected secret material reaches a view model", () => {
   }
 
   it("exposes no credential-shaped key on the surface or any prompt", async () => {
-    const ids: ReadonlyArray<HostedAccountPromptId> = [
-      "add-passkey",
-      "revoke-passkey",
-      "regenerate-recovery-codes",
-      "set-password",
-      "remove-password",
-      "enroll-totp",
-      "revoke-totp",
-      "verify-email",
-    ];
-    for (const id of ids) {
+    for (const id of PROMPT_IDS) {
       const test = harness();
       test.open(id);
       if (id === "enroll-totp") {
