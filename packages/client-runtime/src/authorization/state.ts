@@ -1,6 +1,6 @@
 import type { EnvironmentId, RelayEffectiveRole } from "@ryco/contracts";
 
-import { HostedHubApiError } from "./api.ts";
+import { HostedHubApiError, type HostedAccountStepUp } from "./api.ts";
 import { activateHostedNode, deactivateHostedNode, suspendHostedNode } from "./environment.ts";
 import { getHostedHubApi, getHostedRuntimeConfiguration } from "./runtime.ts";
 import type {
@@ -17,6 +17,7 @@ import type {
   HostedRelayTransportStatus,
   HostedRycoSessionStatus,
   HostedSelectionStatus,
+  HostedTotpEnrollment,
 } from "./types.ts";
 
 export interface HostedHubState {
@@ -35,6 +36,23 @@ export interface HostedHubState {
   readonly sessionRecoveredAfterUnknown: boolean;
   readonly browserStatus: HostedBrowserStatus;
   readonly recoveryCodes: ReadonlyArray<string>;
+  /**
+   * A started TOTP enrolment, held **in memory only** for the enrolment screen
+   * to render its QR code and manual-entry secret.
+   *
+   * It sits beside `recoveryCodes` and carries the same contract: it is the one
+   * other piece of secret material this runtime holds, it is never written to
+   * the account store, an error message, a log, or any persisted store, and it
+   * is cleared by `dismissTotpEnrollment`, by a successful confirm or revoke,
+   * and by every account teardown.
+   *
+   * Declared optional purely so that adding a transient slot to this shared
+   * shape does not force every consumer's state fixture to restate it. The
+   * runtime's own store always carries the slot — `null` when no enrolment is in
+   * progress — so `undefined` only ever appears in a hand-built snapshot, where
+   * it means the same thing.
+   */
+  readonly totpEnrollment?: HostedTotpEnrollment | null;
   readonly errorMessage: string | null;
   readonly generation: number;
 }
@@ -55,13 +73,24 @@ const initialState: HostedHubState = {
   sessionRecoveredAfterUnknown: false,
   browserStatus: "current",
   recoveryCodes: [],
+  totpEnrollment: null,
   errorMessage: null,
   generation: 0,
 };
 
 export type HostedPasskeyDirectoryStatus = "idle" | "loading" | "ready" | "stale";
 
-export type HostedAccountActionStatus = "idle" | "adding-passkey" | "regenerating-recovery-codes";
+export type HostedAccountActionStatus =
+  | "idle"
+  | "adding-passkey"
+  | "revoking-passkey"
+  | "regenerating-recovery-codes"
+  | "setting-password"
+  | "removing-password"
+  | "enrolling-totp"
+  | "confirming-totp"
+  | "revoking-totp"
+  | "requesting-email-verification";
 
 /**
  * Account-management surface state. Kept in its own store rather than widened
@@ -70,11 +99,12 @@ export type HostedAccountActionStatus = "idle" | "adding-passkey" | "regeneratin
  * screen, and so an account read never re-renders a relay consumer.
  *
  * No secret material lives here. A passkey `id` is a public credential
- * identifier; recovery codes are deliberately *not* stored here — they go to
- * the existing `hostedHubStore.recoveryCodes` slot, which is in memory only and
- * is cleared by `dismissRecoveryCodes` and by any account teardown. Showing
- * them exactly once is the consuming UI's contract: the runtime holds them
- * until dismissed and cannot enforce a single display.
+ * identifier; recovery codes and the TOTP enrolment secret are deliberately
+ * *not* stored here — they go to the `hostedHubStore.recoveryCodes` and
+ * `hostedHubStore.totpEnrollment` slots, which are in memory only and are
+ * cleared by `dismissRecoveryCodes` / `dismissTotpEnrollment` and by any account
+ * teardown. Showing them exactly once is the consuming UI's contract: the
+ * runtime holds them until dismissed and cannot enforce a single display.
  */
 export interface HostedAccountState {
   readonly passkeys: ReadonlyArray<HostedHubPasskey>;
@@ -144,6 +174,32 @@ function isSessionFailure(error: unknown): boolean {
   );
 }
 
+/**
+ * A monotonic generation fence.
+ *
+ * `issue()` hands out a predicate that stays true until the next `bump()`. It is
+ * the shared form of a pattern this controller had already grown twice by hand
+ * (`generation` for relay selections, `#browserLifecycleGeneration` for browser
+ * resume): an async result that lands after the state it was fetched for has
+ * moved on must be dropped, not published. Anything that repopulates state a
+ * user has explicitly dismissed needs one.
+ */
+function createFence(): {
+  readonly bump: () => void;
+  readonly issue: () => () => boolean;
+} {
+  let generation = 0;
+  return {
+    bump: () => {
+      generation += 1;
+    },
+    issue: () => {
+      const issued = generation;
+      return () => issued === generation;
+    },
+  };
+}
+
 const DIRECTORY_REFRESH_MS = 20_000;
 const DIRECTORY_RETRY_MAX_MS = 60_000;
 const HOSTED_SESSION_SYNC_DEADLINE_MS = 30_000;
@@ -167,6 +223,7 @@ class HostedHubController {
   #browserResumePromise: Promise<void> | null = null;
   #browserSuspendPromise: Promise<void> | null = null;
   #browserLifecycleGeneration = 0;
+  #totpEnrollmentFence = createFence();
   #passkeysOperation: AbortController | null = null;
   #passkeysPromise: Promise<void> | null = null;
   #accountOperation: AbortController | null = null;
@@ -213,7 +270,12 @@ class HostedHubController {
 
   async signIn(): Promise<void> {
     const operation = this.#replaceOperation();
-    patchState({ accountStatus: "authenticating", errorMessage: null, recoveryCodes: [] });
+    patchState({
+      accountStatus: "authenticating",
+      errorMessage: null,
+      recoveryCodes: [],
+      totpEnrollment: null,
+    });
     try {
       const result = await getHostedHubApi().signIn(operation.signal);
       patchState({
@@ -250,7 +312,12 @@ class HostedHubController {
     register: (signal: AbortSignal) => Promise<HostedHubSessionResponse>,
   ): Promise<void> {
     const operation = this.#replaceOperation();
-    patchState({ accountStatus: "authenticating", errorMessage: null, recoveryCodes: [] });
+    patchState({
+      accountStatus: "authenticating",
+      errorMessage: null,
+      recoveryCodes: [],
+      totpEnrollment: null,
+    });
     try {
       const result = await register(operation.signal);
       patchState({
@@ -272,11 +339,32 @@ class HostedHubController {
   cancelAuthentication(): void {
     this.#operation?.abort();
     this.#operation = null;
-    patchState({ accountStatus: "signed-out", errorMessage: null });
+    // Abandoning sign-in leaves the surface signed out, so nothing may still be
+    // holding recovery codes or an enrolment secret: a signed-out store that
+    // still carries either contradicts the one rule this state has about
+    // secret material.
+    this.#totpEnrollmentFence.bump();
+    patchState({
+      accountStatus: "signed-out",
+      errorMessage: null,
+      recoveryCodes: [],
+      totpEnrollment: null,
+    });
   }
 
   dismissRecoveryCodes(): void {
     patchState({ recoveryCodes: [] });
+  }
+
+  /**
+   * Drop a displayed TOTP enrolment secret. The mirror of
+   * {@link dismissRecoveryCodes}: the secret exists only for the enrolment
+   * screen, and once that screen is gone the runtime must not still be holding
+   * the account's shared key.
+   */
+  dismissTotpEnrollment(): void {
+    this.#totpEnrollmentFence.bump();
+    patchState({ totpEnrollment: null });
   }
 
   /**
@@ -368,8 +456,13 @@ class HostedHubController {
    * (never joined) read is the only authority on whether the credential exists.
    * An unconfirmed enrolment reports a bounded message rather than presenting
    * the ceremony's completion as proof.
+   *
+   * `totpCode` is the optional fallback-session step-up; a passkey session
+   * neither needs nor sees it.
    */
-  async addPasskey(input: { readonly passkeyLabel: string | null }): Promise<void> {
+  async addPasskey(
+    input: { readonly passkeyLabel: string | null } & HostedAccountStepUp,
+  ): Promise<void> {
     const outcome: { result: HostedAddPasskeyResult | null } = { result: null };
     const before = hostedAccountStore.getState().passkeys.length;
     const committed = await this.#accountAction("adding-passkey", async (signal) => {
@@ -401,10 +494,117 @@ class HostedHubController {
    * is the caller's contract; the runtime holds them until they are dismissed
    * and does not enforce a single display.
    */
-  async regenerateRecoveryCodes(): Promise<void> {
+  async regenerateRecoveryCodes(input?: HostedAccountStepUp): Promise<void> {
     await this.#accountAction("regenerating-recovery-codes", async (signal) => {
-      const recoveryCodes = await getHostedHubApi().regenerateRecoveryCodes(signal);
+      const recoveryCodes = await getHostedHubApi().regenerateRecoveryCodes(input, signal);
       return () => patchState({ recoveryCodes });
+    });
+  }
+
+  /**
+   * Revoke one of the account's passkeys and re-read the list.
+   *
+   * The forced refresh is not cosmetic and is the same discipline
+   * {@link addPasskey} follows: a revoke changes the list, and a read already in
+   * flight was issued against the pre-revoke state, so joining it would leave
+   * the surface showing a credential that no longer works.
+   */
+  async revokePasskey(credentialId: string): Promise<void> {
+    const committed = await this.#accountAction("revoking-passkey", async (signal) => {
+      await getHostedHubApi().revokePasskey(credentialId, signal);
+      return () => undefined;
+    });
+    if (!committed) return;
+    await this.refreshPasskeys({ force: true });
+  }
+
+  /**
+   * Set (or replace) the account's fallback password.
+   *
+   * A password is a *fallback* credential and is strictly weaker than a passkey.
+   * No copy built on this may present the two as equivalent. The password is
+   * passed straight through to the request and is never stored, logged, or
+   * placed in an error by the runtime.
+   */
+  async setPassword(input: { readonly password: string } & HostedAccountStepUp): Promise<void> {
+    await this.#accountAction("setting-password", async (signal) => {
+      await getHostedHubApi().setPassword(input, signal);
+      return () => undefined;
+    });
+  }
+
+  /** Remove the account's fallback password. */
+  async removePassword(input?: HostedAccountStepUp): Promise<void> {
+    await this.#accountAction("removing-password", async (signal) => {
+      await getHostedHubApi().removePassword(input, signal);
+      return () => undefined;
+    });
+  }
+
+  /**
+   * Begin TOTP enrolment and hold the secret for the enrolment screen.
+   *
+   * The result is **secret key material**. It lands in the in-memory
+   * `totpEnrollment` slot only — never the account store, never an error
+   * message, never a log — and is dropped by `dismissTotpEnrollment`, by a
+   * successful confirm or revoke, and by any account teardown.
+   *
+   * Enrolment requires a passkey-authenticated session; that is the Hub's rule
+   * to enforce, and this action does not offer a step-up field that would let a
+   * fallback session look like it qualifies.
+   */
+  async beginTotpEnrollment(): Promise<void> {
+    // Fenced against dismissal: a user who backs out of the enrolment screen
+    // while the request is in flight must not have the secret pushed back into
+    // state when it lands. The abort signal alone does not cover this — the
+    // response may already be decoded by then.
+    const current = this.#totpEnrollmentFence.issue();
+    await this.#accountAction("enrolling-totp", async (signal) => {
+      const totpEnrollment = await getHostedHubApi().beginTotpEnrollment(signal);
+      return () => {
+        if (current()) patchState({ totpEnrollment });
+      };
+    });
+  }
+
+  /**
+   * Confirm TOTP enrolment with a code from the authenticator app, and drop the
+   * secret: once the enrolment is confirmed the app holds it and the runtime has
+   * no further reason to.
+   */
+  async confirmTotpEnrollment(input: { readonly code: string }): Promise<void> {
+    await this.#accountAction("confirming-totp", async (signal) => {
+      await getHostedHubApi().confirmTotpEnrollment(input, signal);
+      return () => {
+        this.#totpEnrollmentFence.bump();
+        patchState({ totpEnrollment: null });
+      };
+    });
+  }
+
+  /** Remove TOTP from the account, dropping any half-finished enrolment with it. */
+  async revokeTotp(input?: HostedAccountStepUp): Promise<void> {
+    await this.#accountAction("revoking-totp", async (signal) => {
+      await getHostedHubApi().revokeTotp(input, signal);
+      return () => {
+        this.#totpEnrollmentFence.bump();
+        patchState({ totpEnrollment: null });
+      };
+    });
+  }
+
+  /**
+   * Ask the Hub to send a verification mail for an address.
+   *
+   * The Hub answers 202 uniformly, so a committed action means "the request was
+   * accepted" and never "this address is known" — surfaces must say the former.
+   */
+  async requestEmailVerification(
+    input: { readonly email: string } & HostedAccountStepUp,
+  ): Promise<void> {
+    await this.#accountAction("requesting-email-verification", async (signal) => {
+      await getHostedHubApi().requestEmailVerification(input, signal);
+      return () => undefined;
     });
   }
 
@@ -489,6 +689,7 @@ class HostedHubController {
   }
 
   #clearAccountSurface(): void {
+    this.#totpEnrollmentFence.bump();
     this.#passkeysOperation?.abort();
     this.#passkeysOperation = null;
     this.#passkeysPromise = null;

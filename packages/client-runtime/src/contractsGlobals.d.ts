@@ -79,8 +79,17 @@ declare const console: {
 declare function atob(value: string): string;
 declare function btoa(value: string): string;
 
+/**
+ * The subset of `AbortSignal` this runtime relies on. `addEventListener` /
+ * `removeEventListener` are part of the standard on every target it runs on
+ * (browser and React Native alike) and are what lets one signal be chained onto
+ * another — needed to combine a caller's cancellation with a request deadline
+ * without pulling the whole DOM library into the neutral runtime.
+ */
 interface AbortSignal {
   readonly aborted: boolean;
+  addEventListener(type: "abort", listener: () => void): void;
+  removeEventListener(type: "abort", listener: () => void): void;
 }
 
 declare class AbortController {
