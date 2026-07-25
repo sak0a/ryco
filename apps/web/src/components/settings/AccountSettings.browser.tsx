@@ -99,12 +99,12 @@ async function settle(): Promise<void> {
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    request.onsuccess = () => {
+    request.addEventListener("success", () => {
       resolve(request.result);
-    };
-    request.onerror = () => {
+    });
+    request.addEventListener("error", () => {
       reject(request.error ?? new Error("IndexedDB request failed."));
-    };
+    });
   });
 }
 
@@ -270,19 +270,19 @@ describe("AccountSettingsPanel", () => {
     window.sessionStorage.setItem("session", `${canary}-session`);
     document.cookie = `snapshot-self-check=${canary}-cookie; path=/`;
     const opened = indexedDB.open(database, 1);
-    opened.onupgradeneeded = () => {
+    opened.addEventListener("upgradeneeded", () => {
       opened.result.createObjectStore("records");
-    };
+    });
     const connection = await requestResult(opened);
     await new Promise<void>((resolve, reject) => {
       const transaction = connection.transaction(["records"], "readwrite");
       transaction.objectStore("records").put(`${canary}-indexeddb`, "record");
-      transaction.oncomplete = () => {
+      transaction.addEventListener("complete", () => {
         resolve();
-      };
-      transaction.onerror = () => {
+      });
+      transaction.addEventListener("error", () => {
         reject(transaction.error ?? new Error("IndexedDB write failed."));
-      };
+      });
     });
     connection.close();
 
@@ -560,7 +560,10 @@ describe("AccountSettingsPanel", () => {
     // with no working exit leaves a page reload as the only way out.
     await page.getByRole("button", { name: "Cancel" }).click();
 
-    expect(abort, "the cancel must abort the operation, not just hide the prompt").toHaveBeenCalled();
+    expect(
+      abort,
+      "the cancel must abort the operation, not just hide the prompt",
+    ).toHaveBeenCalled();
     await expect.element(page.getByText("Confirm the email change")).not.toBeInTheDocument();
     await settle();
     // An aborted operation leaves the store idle with no error — byte for byte

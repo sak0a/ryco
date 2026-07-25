@@ -460,17 +460,21 @@ function PasskeysSection({
   const submitAdd = async (event: FormEvent) => {
     event.preventDefault();
     const passkeyLabel = normalizePasskeyLabel(label);
-    await run("add-passkey", (stepUp) => hostedHubController.addPasskey({ passkeyLabel, ...stepUp }), {
-      onCommitted: closeAdd,
-      onAbandoned: closeAdd,
-      // An error after an add is not proof the ceremony failed: the runtime
-      // confirms its own commit with a forced re-read and reports that read's
-      // failure on the same slot. Leaving this dialog open on one would invite
-      // a second "Create passkey" press, a second ceremony, and a duplicate
-      // credential the user never asked for.
-      committedDespiteError: (message) =>
-        isPasskeyEnrolmentUnverified(message, hostedAccountStore.getState().passkeysStatus),
-    });
+    await run(
+      "add-passkey",
+      (stepUp) => hostedHubController.addPasskey({ passkeyLabel, ...stepUp }),
+      {
+        onCommitted: closeAdd,
+        onAbandoned: closeAdd,
+        // An error after an add is not proof the ceremony failed: the runtime
+        // confirms its own commit with a forced re-read and reports that read's
+        // failure on the same slot. Leaving this dialog open on one would invite
+        // a second "Create passkey" press, a second ceremony, and a duplicate
+        // credential the user never asked for.
+        committedDespiteError: (message) =>
+          isPasskeyEnrolmentUnverified(message, hostedAccountStore.getState().passkeysStatus),
+      },
+    );
   };
 
   const confirmRevoke = async () => {
@@ -865,10 +869,14 @@ function PasswordSection({
     event.preventDefault();
     setTouched(true);
     if (issue) return;
-    await run("set-password", (stepUp) => hostedHubController.setPassword({ password, ...stepUp }), {
-      onCommitted: close,
-      onAbandoned: close,
-    });
+    await run(
+      "set-password",
+      (stepUp) => hostedHubController.setPassword({ password, ...stepUp }),
+      {
+        onCommitted: close,
+        onAbandoned: close,
+      },
+    );
   };
 
   const confirmRemove = async () => {
