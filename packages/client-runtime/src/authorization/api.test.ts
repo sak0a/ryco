@@ -374,6 +374,10 @@ describe("HostedHubApi", () => {
                 label: "Studio laptop",
                 createdAt: 10,
                 lastUsedAt: null,
+                backupEligible: true,
+                backupState: false,
+                revokedAt: null,
+                revocationReasonCode: null,
                 unexpectedSensitiveMetadata: "passkey-sensitive-canary",
               },
             ],
@@ -391,7 +395,16 @@ describe("HostedHubApi", () => {
       cache: "no-store",
     });
     expect(passkeys).toEqual([
-      { id: "credential-aaa", label: "Studio laptop", createdAt: 10, lastUsedAt: null },
+      {
+        id: "credential-aaa",
+        label: "Studio laptop",
+        createdAt: 10,
+        lastUsedAt: null,
+        backupEligible: true,
+        backupState: false,
+        revokedAt: null,
+        revocationReasonCode: null,
+      },
     ]);
     expect(JSON.stringify(passkeys)).not.toContain("passkey-sensitive-canary");
   });
@@ -447,7 +460,16 @@ describe("HostedHubApi", () => {
       response: { id: "added-passkey-canary" },
     });
     expect(added).toEqual({
-      passkey: { id: "credential-bbb", label: "Phone", createdAt: null, lastUsedAt: null },
+      passkey: {
+        id: "credential-bbb",
+        label: "Phone",
+        createdAt: null,
+        lastUsedAt: null,
+        backupEligible: null,
+        backupState: null,
+        revokedAt: null,
+        revocationReasonCode: null,
+      },
       confirmed: true,
     });
 
@@ -575,6 +597,332 @@ describe("HostedHubApi", () => {
     await expect(api.approveNodeEnrollment("ABCD-EFGH")).rejects.toMatchObject({
       code: "invalid_response",
     });
+  });
+});
+
+const PASSKEY_ID = "pkey_aaaaaaaaaaaaaaaaaaaaaa";
+
+describe("HostedHubApi account credential management", () => {
+  /** A restored cookie session, and the recorder every case below asserts on. */
+  async function authenticated(): Promise<{
+    readonly api: HostedHubApi;
+    readonly requests: Array<{ input: RequestInfo | URL; init?: RequestInit }>;
+    readonly reply: (value: unknown, status?: number) => void;
+  }> {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    let next: { body: unknown; status: number } = { body: { ok: true }, status: 200 };
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      return requests.length === 1 ? response(session) : response(next.body, next.status);
+    });
+    const api = createApi();
+    await api.restoreSession();
+    return {
+      api,
+      requests,
+      reply: (value, status = 200) => {
+        next = { body: value, status };
+      },
+    };
+  }
+
+  it("posts every credential mutation to its Hub route with session-bound CSRF", async () => {
+    const { api, requests } = await authenticated();
+
+    await expect(
+      api.setPassword({ password: "password-sensitive-canary" }),
+    ).resolves.toBeUndefined();
+    await expect(api.removePassword()).resolves.toBeUndefined();
+    await expect(api.confirmTotpEnrollment({ code: "123456" })).resolves.toBeUndefined();
+    await expect(api.revokeTotp()).resolves.toBeUndefined();
+    await expect(
+      api.requestEmailVerification({ email: "ada@example.test" }),
+    ).resolves.toBeUndefined();
+    await expect(api.revokePasskey(PASSKEY_ID)).resolves.toBeUndefined();
+
+    expect(requests.slice(1).map(({ input }) => input)).toEqual([
+      "/api/account/password",
+      "/api/account/password/remove",
+      "/api/account/totp/enrollment/verify",
+      "/api/account/totp/revoke",
+      "/api/account/email/verification",
+      `/api/account/passkeys/${PASSKEY_ID}/revoke`,
+    ]);
+    for (const request of requests.slice(1)) {
+      expect(request.init).toMatchObject({
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      // Cookie transport: CSRF, never a bearer/DPoP header.
+      expect(headersOf(request.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
+      expect(headersOf(request.init).get("Authorization")).toBeNull();
+      expect(headersOf(request.init).get("DPoP")).toBeNull();
+    }
+    expect(requests.slice(1).map((request) => JSON.parse(String(request.init?.body)))).toEqual([
+      { password: "password-sensitive-canary" },
+      {},
+      { code: "123456" },
+      {},
+      { email: "ada@example.test" },
+      {},
+    ]);
+    // A credential is never placed in a URL, only in a body over TLS.
+    expect(requests.map(({ input }) => String(input)).join(" ")).not.toContain(
+      "password-sensitive-canary",
+    );
+    expect(requests.map(({ input }) => String(input)).join(" ")).not.toContain("ada@example.test");
+  });
+
+  it("threads the fallback-session step-up code and omits it when there is none", async () => {
+    const { api, requests } = await authenticated();
+
+    await api.setPassword({ password: "pw", totpCode: "123456" });
+    await api.removePassword({ totpCode: "234567" });
+    await api.revokeTotp({ totpCode: "345678" });
+    await api.requestEmailVerification({ email: "ada@example.test", totpCode: "456789" });
+
+    expect(requests.slice(1, 5).map((request) => JSON.parse(String(request.init?.body)))).toEqual([
+      { password: "pw", totpCode: "123456" },
+      { totpCode: "234567" },
+      { totpCode: "345678" },
+      { email: "ada@example.test", totpCode: "456789" },
+    ]);
+
+    // Absent and empty are both "no code submitted": the member is omitted
+    // rather than sent as "", so the Hub can answer "a code is required" instead
+    // of "that code is wrong".
+    const bodies: Array<Record<string, unknown>> = [];
+    await api.removePassword();
+    await api.removePassword({});
+    await api.removePassword({ totpCode: "" });
+    for (const request of requests.slice(-3)) bodies.push(JSON.parse(String(request.init?.body)));
+    expect(bodies).toEqual([{}, {}, {}]);
+    for (const body of bodies) expect("totpCode" in body).toBe(false);
+  });
+
+  it("sends the step-up code on a recovery-code rotation and on an add-passkey verify", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      if (requests.length === 1) return response(session);
+      if (requests.length === 2) return response({ recoveryCodes: ["fresh"] });
+      if (requests.length === 3) return response({ options: registrationOptions });
+      return response({ passkey: { id: PASSKEY_ID } }, 201);
+    });
+    const api = createApi({ register: vi.fn(async () => ({ id: "added" }) as never) });
+    await api.restoreSession();
+
+    await api.regenerateRecoveryCodes({ totpCode: "123456" });
+    await api.addPasskey({ passkeyLabel: "Phone", totpCode: "234567" });
+
+    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ totpCode: "123456" });
+    // The step-up rides the verify only. The options body is the Hub's strict
+    // `{ label }` shape and an unexpected member would be rejected outright.
+    expect(JSON.parse(String(requests[2]?.init?.body))).toEqual({ passkeyLabel: "Phone" });
+    expect(JSON.parse(String(requests[3]?.init?.body))).toEqual({
+      response: { id: "added" },
+      totpCode: "234567",
+    });
+  });
+
+  it("never adds a step-up member to the pre-session registration ceremonies", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      return requests.length === 1
+        ? response({ options: registrationOptions })
+        : response(session, 201);
+    });
+    const api = createApi({ register: vi.fn(async () => ({ id: "registered" }) as never) });
+
+    await api.bootstrapOwner({ credential: "c", displayName: "Ada", passkeyLabel: null });
+
+    // The Hub's bootstrap verify body is strict `{ response }`.
+    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ response: { id: "registered" } });
+  });
+
+  it("begins TOTP enrolment and bounds both secret members", async () => {
+    const { api, requests, reply } = await authenticated();
+    reply({
+      secretBase32: "JBSWY3DPEHPK3PXP",
+      provisioningUri: "otpauth://totp/Ryco%20Hub:ada?secret=JBSWY3DPEHPK3PXP&issuer=Ryco%20Hub",
+      unexpectedSensitiveMetadata: "totp-extra-canary",
+    });
+
+    const enrollment = await api.beginTotpEnrollment();
+
+    expect(requests[1]?.input).toBe("/api/account/totp/enrollment/options");
+    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({});
+    expect(enrollment).toEqual({
+      secretBase32: "JBSWY3DPEHPK3PXP",
+      provisioningUri: "otpauth://totp/Ryco%20Hub:ada?secret=JBSWY3DPEHPK3PXP&issuer=Ryco%20Hub",
+    });
+    // Only the two contract members are projected.
+    expect(JSON.stringify(enrollment)).not.toContain("totp-extra-canary");
+  });
+
+  it("rejects a TOTP enrolment whose secret or provisioning URI is not bounded", async () => {
+    const { api, reply } = await authenticated();
+    const uri = "otpauth://totp/Ryco:ada?secret=JBSWY3DPEHPK3PXP";
+
+    reply({ provisioningUri: uri });
+    await expect(api.beginTotpEnrollment()).rejects.toMatchObject({ code: "invalid_response" });
+    reply({ secretBase32: "", provisioningUri: uri });
+    await expect(api.beginTotpEnrollment()).rejects.toMatchObject({ code: "invalid_response" });
+    reply({ secretBase32: "x".repeat(257), provisioningUri: uri });
+    await expect(api.beginTotpEnrollment()).rejects.toMatchObject({ code: "invalid_response" });
+    reply({ secretBase32: "JBSWY3DPEHPK3PXP", provisioningUri: `otpauth://${"x".repeat(2049)}` });
+    await expect(api.beginTotpEnrollment()).rejects.toMatchObject({ code: "invalid_response" });
+
+    // A URI a surface would render as a link or a QR must carry the otpauth
+    // scheme. Anything else is a malformed response, not a provisioning URI.
+    for (const hostile of [
+      "javascript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+      "https://evil.example.test/otpauth://totp/x",
+      "",
+    ]) {
+      reply({ secretBase32: "JBSWY3DPEHPK3PXP", provisioningUri: hostile });
+      await expect(api.beginTotpEnrollment()).rejects.toMatchObject({ code: "invalid_response" });
+    }
+  });
+
+  it("keeps the TOTP secret out of every request, error, and later call", async () => {
+    const { api, requests, reply } = await authenticated();
+    reply({
+      secretBase32: "TOTPSECRETSENSITIVECANARY",
+      provisioningUri: "otpauth://totp/Ryco:ada?secret=TOTPSECRETSENSITIVECANARY",
+    });
+
+    const enrollment = await api.beginTotpEnrollment();
+    expect(enrollment.secretBase32).toBe("TOTPSECRETSENSITIVECANARY");
+
+    // Confirming enrolment sends the user's 6-digit code, never the secret.
+    reply({ ok: true });
+    await api.confirmTotpEnrollment({ code: "123456" });
+    expect(JSON.stringify(requests)).not.toContain("TOTPSECRETSENSITIVECANARY");
+
+    // A malformed enrolment must not reflect the secret it did receive.
+    reply({ secretBase32: "TOTPSECRETSENSITIVECANARY", provisioningUri: "javascript:alert(1)" });
+    const error = await api.beginTotpEnrollment().catch((cause) => cause);
+    expect(error).toBeInstanceOf(HostedHubApiError);
+    expect(JSON.stringify({ message: (error as Error).message, error })).not.toContain(
+      "TOTPSECRETSENSITIVECANARY",
+    );
+  });
+
+  it("fails closed on a passkey id that is not the Hub's credential shape", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      return response(session);
+    });
+    const api = createApi();
+    await api.restoreSession();
+    const before = requests.length;
+
+    for (const hostile of [
+      "",
+      "pkey_short",
+      `pkey_${"a".repeat(23)}`,
+      "sess_aaaaaaaaaaaaaaaaaaaaaa",
+      `${PASSKEY_ID}/../../admin/accounts`,
+      `../../admin/sessions/${PASSKEY_ID}/revoke`,
+      "pkey_aaaaaaaaaaaaaaaaaaaa%2F",
+      `${PASSKEY_ID}?x=1`,
+      `${PASSKEY_ID}#x`,
+      "https://evil.example.test/api/account/passkeys/pkey_aaaaaaaaaaaaaaaaaaaaaa/revoke",
+    ]) {
+      await expect(api.revokePasskey(hostile)).rejects.toMatchObject({ code: "invalid_request" });
+    }
+
+    // Nothing reached the wire: an unvalidated id is never interpolated into a
+    // path, not even one the endpoint guard would have rejected afterwards.
+    expect(requests).toHaveLength(before);
+  });
+
+  it("rejects an acknowledgement that is not exactly { ok: true }", async () => {
+    const { api, reply } = await authenticated();
+
+    for (const body of [
+      { ok: false },
+      { ok: "true" },
+      {},
+      // A route whose whole contract is an acknowledgement has no business
+      // handing over session material, and this client will not take it.
+      { ok: true, token: "native-token-unvalidated-canary" },
+      { ok: true, csrfToken: "csrf-unvalidated-canary" },
+    ]) {
+      reply(body);
+      await expect(api.revokeTotp()).rejects.toMatchObject({ code: "invalid_response" });
+    }
+
+    // The live session is untouched by any of it.
+    reply({ ok: true });
+    await expect(api.removePassword()).resolves.toBeUndefined();
+  });
+
+  it("maps a Hub refusal to a bounded error without reflecting its detail", async () => {
+    const { api, reply } = await authenticated();
+    reply({ error: "invalid_request", detail: "totp-detail-sensitive-canary" }, 400);
+
+    const error = await api.setPassword({ password: "pw" }).catch((cause) => cause);
+
+    expect(error).toBeInstanceOf(HostedHubApiError);
+    expect((error as HostedHubApiError).code).toBe("invalid_request");
+    expect((error as Error).message).not.toContain("totp-detail-sensitive-canary");
+  });
+
+  it("projects the widened passkey record and tolerates members it does not know", async () => {
+    const { api, reply } = await authenticated();
+    reply({
+      passkeys: [
+        {
+          id: PASSKEY_ID,
+          label: "Studio laptop",
+          createdAt: 10,
+          lastUsedAt: 20,
+          backupEligible: true,
+          backupState: true,
+          revokedAt: 30,
+          revocationReasonCode: "owner_revoked",
+        },
+        // A record whose optional members are absent or malformed still lists:
+        // one unfamiliar field must not blank a list the user needs to revoke
+        // from.
+        {
+          id: "pkey_bbbbbbbbbbbbbbbbbbbbbb",
+          backupEligible: "yes",
+          backupState: 1,
+          revokedAt: 1.5,
+          revocationReasonCode: "x".repeat(257),
+        },
+      ],
+    });
+
+    await expect(api.listPasskeys()).resolves.toEqual([
+      {
+        id: PASSKEY_ID,
+        label: "Studio laptop",
+        createdAt: 10,
+        lastUsedAt: 20,
+        backupEligible: true,
+        backupState: true,
+        revokedAt: 30,
+        revocationReasonCode: "owner_revoked",
+      },
+      {
+        id: "pkey_bbbbbbbbbbbbbbbbbbbbbb",
+        label: null,
+        createdAt: null,
+        lastUsedAt: null,
+        backupEligible: null,
+        backupState: null,
+        revokedAt: null,
+        revocationReasonCode: null,
+      },
+    ]);
   });
 });
 
@@ -832,7 +1180,16 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     }
     expect(calls.every((call) => call.token === "native-token-canary")).toBe(true);
     expect(added).toEqual({
-      passkey: { id: "credential-ccc", label: "Phone", createdAt: 5, lastUsedAt: null },
+      passkey: {
+        id: "credential-ccc",
+        label: "Phone",
+        createdAt: 5,
+        lastUsedAt: null,
+        backupEligible: null,
+        backupState: null,
+        revokedAt: null,
+        revocationReasonCode: null,
+      },
       confirmed: true,
     });
     // The enclave-bound token survives an add-passkey that returns none.
@@ -886,7 +1243,16 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     const api = createBearerApi(service, credentials);
 
     await expect(api.listPasskeys()).resolves.toEqual([
-      { id: "credential-aaa", label: null, createdAt: null, lastUsedAt: null },
+      {
+        id: "credential-aaa",
+        label: null,
+        createdAt: null,
+        lastUsedAt: null,
+        backupEligible: null,
+        backupState: null,
+        revokedAt: null,
+        revocationReasonCode: null,
+      },
     ]);
     await expect(api.regenerateRecoveryCodes()).resolves.toEqual(["recovery-sensitive-canary"]);
 
@@ -915,6 +1281,105 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     await expect(api.regenerateRecoveryCodes()).rejects.toMatchObject({
       code: "session_invalid",
     });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("runs every account credential mutation natively over DPoP, never as browser-only", async () => {
+    // The correction that motivates this surface: the Hub takes the DPoP branch
+    // on the presence of an `Authorization` header and applies no same-origin
+    // check there, so `/api/account/*` mutations are fully native. Only the
+    // fallback *login* routes under `/api/auth/*` are browser-transport-only,
+    // and those are what the fail-closed guard covers. If any of these were
+    // added to that list, this case fails with `browser_only_transport`.
+    const { calls, service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      return String(input).endsWith("/totp/enrollment/options")
+        ? response({
+            secretBase32: "TOTPSECRETSENSITIVECANARY",
+            provisioningUri: "otpauth://totp/Ryco:ada?secret=TOTPSECRETSENSITIVECANARY",
+          })
+        : response({ ok: true });
+    });
+    const api = createBearerApi(service, credentials);
+
+    await api.setPassword({ password: "password-sensitive-canary", totpCode: "123456" });
+    await api.removePassword();
+    await expect(api.beginTotpEnrollment()).resolves.toMatchObject({
+      secretBase32: "TOTPSECRETSENSITIVECANARY",
+    });
+    await api.confirmTotpEnrollment({ code: "123456" });
+    await api.revokeTotp();
+    await api.requestEmailVerification({ email: "ada@example.test" });
+    await api.revokePasskey(PASSKEY_ID);
+
+    expect(requests.map((request) => request.input)).toEqual([
+      "https://hub.example.test/api/account/password",
+      "https://hub.example.test/api/account/password/remove",
+      "https://hub.example.test/api/account/totp/enrollment/options",
+      "https://hub.example.test/api/account/totp/enrollment/verify",
+      "https://hub.example.test/api/account/totp/revoke",
+      "https://hub.example.test/api/account/email/verification",
+      `https://hub.example.test/api/account/passkeys/${PASSKEY_ID}/revoke`,
+    ]);
+    for (const request of requests) {
+      const headers = request.init?.headers as Headers;
+      // Bearer: `Authorization: DPoP` + an `ath`-bound single-use proof, no
+      // CSRF header, and never an ambient cookie.
+      expect(headers.get("Authorization")).toBe("DPoP native-token-canary");
+      expect(headers.get("DPoP")).toMatch(/:ath$/);
+      expect(headers.get("X-Ryco-CSRF")).toBeNull();
+      expect(request.init).toMatchObject({ method: "POST", credentials: "omit" });
+    }
+    // Every proof was bound to the presented token, and each to its own URL —
+    // the per-request `ath`/`htu` binding the Hub verifies as single-use.
+    expect(calls.every((call) => call.token === "native-token-canary")).toBe(true);
+    expect(new Set(calls.map((call) => call.url)).size).toBe(requests.length);
+    // The enclave-bound token survives the whole sequence and is never echoed.
+    expect(credentials.current()).toBe("native-token-canary");
+    expect(JSON.stringify(requests)).not.toContain("TOTPSECRETSENSITIVECANARY");
+  });
+
+  it("fails closed on a malformed passkey id before minting a proof", async () => {
+    const { calls, service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const fetchSpy = vi.fn(async () => response({ ok: true }));
+    globalThis.fetch = fetchSpy;
+    const api = createBearerApi(service, credentials);
+
+    await expect(api.revokePasskey("pkey_not-a-valid-id")).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+
+    // No request, and no single-use proof burned on a call that could not go.
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
+    expect(credentials.current()).toBe("native-token-canary");
+  });
+
+  it("fails closed on account credential mutations with no persisted native token", async () => {
+    const { service } = recordingDpopSigner();
+    const api = createBearerApi(service, inMemoryBearerCredentials());
+    const fetchSpy = vi.fn(async () => response({ ok: true }));
+    globalThis.fetch = fetchSpy;
+
+    await expect(api.setPassword({ password: "pw" })).rejects.toMatchObject({
+      code: "session_invalid",
+    });
+    await expect(api.removePassword()).rejects.toMatchObject({ code: "session_invalid" });
+    await expect(api.beginTotpEnrollment()).rejects.toMatchObject({ code: "session_invalid" });
+    await expect(api.confirmTotpEnrollment({ code: "1" })).rejects.toMatchObject({
+      code: "session_invalid",
+    });
+    await expect(api.revokeTotp()).rejects.toMatchObject({ code: "session_invalid" });
+    await expect(api.requestEmailVerification({ email: "a@b.test" })).rejects.toMatchObject({
+      code: "session_invalid",
+    });
+    await expect(api.revokePasskey(PASSKEY_ID)).rejects.toMatchObject({ code: "session_invalid" });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

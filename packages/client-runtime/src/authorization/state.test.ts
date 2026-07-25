@@ -67,7 +67,14 @@ const hostedHubApi = {
   listNodes: vi.fn(),
   listPasskeys: vi.fn(),
   addPasskey: vi.fn(),
+  revokePasskey: vi.fn(),
   regenerateRecoveryCodes: vi.fn(),
+  setPassword: vi.fn(),
+  removePassword: vi.fn(),
+  beginTotpEnrollment: vi.fn(),
+  confirmTotpEnrollment: vi.fn(),
+  revokeTotp: vi.fn(),
+  requestEmailVerification: vi.fn(),
   clearSessionMaterial: vi.fn(),
 } as unknown as HostedHubApi;
 
@@ -1165,10 +1172,14 @@ describe("hosted registration and directory state", () => {
 
 describe("hosted account management state", () => {
   const passkey = {
-    id: "credential-aaa",
+    id: "pkey_aaaaaaaaaaaaaaaaaaaaaa",
     label: "Studio laptop",
     createdAt: 10,
     lastUsedAt: null,
+    backupEligible: true,
+    backupState: false,
+    revokedAt: null,
+    revocationReasonCode: null,
   } as const;
 
   /** Bring the controller to an authenticated, ready-directory state. */
@@ -1541,5 +1552,251 @@ describe("hosted account management state", () => {
       passkeys: [],
       passkeysStatus: "idle",
     });
+  });
+
+  it("routes each credential change to its API method and clears the error on success", async () => {
+    await authenticate();
+    const setPassword = vi.spyOn(hostedHubApi, "setPassword").mockResolvedValue();
+    const removePassword = vi.spyOn(hostedHubApi, "removePassword").mockResolvedValue();
+    const confirmTotpEnrollment = vi
+      .spyOn(hostedHubApi, "confirmTotpEnrollment")
+      .mockResolvedValue();
+    const revokeTotp = vi.spyOn(hostedHubApi, "revokeTotp").mockResolvedValue();
+    const requestEmailVerification = vi
+      .spyOn(hostedHubApi, "requestEmailVerification")
+      .mockResolvedValue();
+    hostedAccountStore.setState({ errorMessage: "a stale failure from an earlier attempt" });
+
+    await hostedHubController.setPassword({ password: "pw", totpCode: "123456" });
+    await hostedHubController.removePassword({ totpCode: "234567" });
+    await hostedHubController.confirmTotpEnrollment({ code: "345678" });
+    await hostedHubController.revokeTotp({ totpCode: "456789" });
+    await hostedHubController.requestEmailVerification({
+      email: "ada@example.test",
+      totpCode: "567890",
+    });
+
+    // The step-up code is threaded through untouched; the runtime never decides
+    // whether it is needed, only whether the caller supplied one.
+    expect(setPassword).toHaveBeenCalledWith(
+      { password: "pw", totpCode: "123456" },
+      expect.anything(),
+    );
+    expect(removePassword).toHaveBeenCalledWith({ totpCode: "234567" }, expect.anything());
+    expect(confirmTotpEnrollment).toHaveBeenCalledWith({ code: "345678" }, expect.anything());
+    expect(revokeTotp).toHaveBeenCalledWith({ totpCode: "456789" }, expect.anything());
+    expect(requestEmailVerification).toHaveBeenCalledWith(
+      { email: "ada@example.test", totpCode: "567890" },
+      expect.anything(),
+    );
+    expect(hostedAccountStore.getState()).toMatchObject({
+      actionStatus: "idle",
+      errorMessage: null,
+    });
+  });
+
+  it("holds the TOTP enrolment secret in memory only and drops it on dismissal", async () => {
+    await authenticate();
+    const enrollment = {
+      secretBase32: "TOTPSECRETSENSITIVECANARY",
+      provisioningUri: "otpauth://totp/Ryco:ada?secret=TOTPSECRETSENSITIVECANARY",
+    };
+    vi.spyOn(hostedHubApi, "beginTotpEnrollment").mockResolvedValue(enrollment);
+
+    await hostedHubController.beginTotpEnrollment();
+
+    expect(hostedHubStore.getState().totpEnrollment).toEqual(enrollment);
+    // The secret lives in exactly ONE slot across both stores. Asserted by
+    // blanking that slot and searching everything that is left — an error
+    // message, a status, a label, the account surface — rather than by checking
+    // the one place a leak was expected.
+    const { totpEnrollment: _held, ...restOfHubState } = hostedHubStore.getState();
+    expect(
+      `${JSON.stringify(restOfHubState)}${JSON.stringify(hostedAccountStore.getState())}`,
+    ).not.toContain("TOTPSECRETSENSITIVECANARY");
+
+    hostedHubController.dismissTotpEnrollment();
+    expect(hostedHubStore.getState().totpEnrollment).toBeNull();
+  });
+
+  it("drops the enrolment secret once the enrolment is confirmed or revoked", async () => {
+    await authenticate();
+    const enrollment = {
+      secretBase32: "TOTPSECRETSENSITIVECANARY",
+      provisioningUri: "otpauth://totp/Ryco:ada?secret=TOTPSECRETSENSITIVECANARY",
+    };
+    vi.spyOn(hostedHubApi, "beginTotpEnrollment").mockResolvedValue(enrollment);
+    vi.spyOn(hostedHubApi, "confirmTotpEnrollment").mockResolvedValue();
+    vi.spyOn(hostedHubApi, "revokeTotp").mockResolvedValue();
+
+    await hostedHubController.beginTotpEnrollment();
+    await hostedHubController.confirmTotpEnrollment({ code: "123456" });
+    expect(hostedHubStore.getState().totpEnrollment).toBeNull();
+
+    await hostedHubController.beginTotpEnrollment();
+    expect(hostedHubStore.getState().totpEnrollment).toEqual(enrollment);
+    await hostedHubController.revokeTotp();
+    expect(hostedHubStore.getState().totpEnrollment).toBeNull();
+  });
+
+  it("drops the enrolment secret when the account clears", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "beginTotpEnrollment").mockResolvedValue({
+      secretBase32: "TOTPSECRETSENSITIVECANARY",
+      provisioningUri: "otpauth://totp/Ryco:ada?secret=TOTPSECRETSENSITIVECANARY",
+    });
+    vi.spyOn(hostedHubApi, "signOut").mockResolvedValue();
+
+    await hostedHubController.beginTotpEnrollment();
+    await hostedHubController.signOut();
+
+    expect(hostedHubStore.getState().totpEnrollment).toBeNull();
+    const persisted = `${JSON.stringify(hostedHubStore.getState())}${JSON.stringify(
+      hostedAccountStore.getState(),
+    )}`;
+    expect(persisted).not.toContain("TOTPSECRETSENSITIVECANARY");
+  });
+
+  it("revokes a passkey and confirms the change against a forced fresh read", async () => {
+    await authenticate();
+    const revoked = { ...passkey, revokedAt: 40, revocationReasonCode: "owner_revoked" } as const;
+    const revokePasskey = vi.spyOn(hostedHubApi, "revokePasskey").mockResolvedValue();
+    const listPasskeys = vi
+      .spyOn(hostedHubApi, "listPasskeys")
+      .mockResolvedValueOnce([passkey])
+      .mockResolvedValue([revoked]);
+
+    await hostedHubController.refreshPasskeys();
+    expect(hostedAccountStore.getState().passkeys).toEqual([passkey]);
+
+    await hostedHubController.revokePasskey(passkey.id);
+
+    expect(revokePasskey).toHaveBeenCalledWith(passkey.id, expect.anything());
+    // A revoke changes the list, so it is re-read rather than assumed — and the
+    // read is forced, so it cannot join one issued before the revoke.
+    expect(listPasskeys).toHaveBeenCalledTimes(2);
+    expect(hostedAccountStore.getState()).toMatchObject({
+      passkeys: [revoked],
+      passkeysStatus: "ready",
+      actionStatus: "idle",
+      errorMessage: null,
+    });
+  });
+
+  it("does not re-read the passkey list when a revoke was refused", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "revokePasskey").mockRejectedValue(
+      new HostedHubApiError("invalid_request", 400),
+    );
+    const listPasskeys = vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
+
+    await hostedHubController.revokePasskey("pkey_not-a-valid-id");
+
+    expect(listPasskeys).not.toHaveBeenCalled();
+    expect(hostedHubStore.getState().accountStatus).toBe("authenticated");
+    expect(hostedAccountStore.getState()).toMatchObject({
+      actionStatus: "idle",
+      errorMessage: "The response was malformed or expired.",
+    });
+  });
+
+  it("expires the session when a credential change is rejected as unauthenticated", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "revokeTotp").mockRejectedValue(
+      new HostedHubApiError("session_invalid", 401),
+    );
+
+    await expect(hostedHubController.revokeTotp()).resolves.toBeUndefined();
+
+    expect(hostedHubStore.getState().accountStatus).toBe("session-expired");
+    expect(hostedAccountStore.getState()).toEqual(hostedAccountStore.getInitialState());
+  });
+
+  it("runs one credential change at a time across the whole account surface", async () => {
+    await authenticate();
+    let release: (() => void) | null = null;
+    vi.spyOn(hostedHubApi, "setPassword").mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const revokePasskey = vi.spyOn(hostedHubApi, "revokePasskey").mockResolvedValue();
+    const beginTotpEnrollment = vi.spyOn(hostedHubApi, "beginTotpEnrollment").mockResolvedValue({
+      secretBase32: "s",
+      provisioningUri: "otpauth://totp/Ryco:ada?secret=s",
+    });
+
+    const pending = hostedHubController.setPassword({ password: "pw" });
+    expect(hostedAccountStore.getState().actionStatus).toBe("setting-password");
+
+    await hostedHubController.revokePasskey(passkey.id);
+    await hostedHubController.beginTotpEnrollment();
+
+    expect(revokePasskey).not.toHaveBeenCalled();
+    expect(beginTotpEnrollment).not.toHaveBeenCalled();
+    expect(hostedHubStore.getState().totpEnrollment).toBeNull();
+    expect(hostedAccountStore.getState().errorMessage).toBe(HOSTED_ACCOUNT_BUSY_MESSAGE);
+
+    release?.();
+    await pending;
+    expect(hostedAccountStore.getState().actionStatus).toBe("idle");
+  });
+
+  it("cancels a credential change that never returns", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "beginTotpEnrollment").mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    const removePassword = vi.spyOn(hostedHubApi, "removePassword").mockResolvedValue();
+
+    void hostedHubController.beginTotpEnrollment();
+    expect(hostedAccountStore.getState().actionStatus).toBe("enrolling-totp");
+
+    hostedHubController.cancelAccountAction();
+    expect(hostedAccountStore.getState()).toMatchObject({
+      actionStatus: "idle",
+      errorMessage: null,
+    });
+    // Nothing was committed by the abandoned action.
+    expect(hostedHubStore.getState().totpEnrollment).toBeNull();
+
+    await hostedHubController.removePassword();
+    expect(removePassword).toHaveBeenCalledOnce();
+  });
+
+  it("refuses every credential change while signed out with a bounded message", async () => {
+    const calls = [
+      vi.spyOn(hostedHubApi, "setPassword"),
+      vi.spyOn(hostedHubApi, "removePassword"),
+      vi.spyOn(hostedHubApi, "beginTotpEnrollment"),
+      vi.spyOn(hostedHubApi, "confirmTotpEnrollment"),
+      vi.spyOn(hostedHubApi, "revokeTotp"),
+      vi.spyOn(hostedHubApi, "requestEmailVerification"),
+      vi.spyOn(hostedHubApi, "revokePasskey"),
+    ];
+
+    await hostedHubController.setPassword({ password: "pw" });
+    await hostedHubController.removePassword();
+    await hostedHubController.beginTotpEnrollment();
+    await hostedHubController.confirmTotpEnrollment({ code: "123456" });
+    await hostedHubController.revokeTotp();
+    await hostedHubController.requestEmailVerification({ email: "ada@example.test" });
+    await hostedHubController.revokePasskey(passkey.id);
+
+    for (const call of calls) expect(call).not.toHaveBeenCalled();
+    expect(hostedAccountStore.getState().errorMessage).toBe(HOSTED_ACCOUNT_SIGNED_OUT_MESSAGE);
+  });
+
+  it("threads the step-up code onto a recovery-code rotation", async () => {
+    await authenticate();
+    const regenerate = vi
+      .spyOn(hostedHubApi, "regenerateRecoveryCodes")
+      .mockResolvedValue(["fresh"]);
+
+    await hostedHubController.regenerateRecoveryCodes({ totpCode: "123456" });
+
+    expect(regenerate).toHaveBeenCalledWith({ totpCode: "123456" }, expect.anything());
+    expect(hostedHubStore.getState().recoveryCodes).toEqual(["fresh"]);
   });
 });

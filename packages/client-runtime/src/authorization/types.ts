@@ -78,15 +78,42 @@ export interface HostedHubSessionResponse {
 
 /**
  * A passkey credential registered against the signed-in account. `id` is the
- * WebAuthn credential id — a public identifier, never authenticator secret
- * material. The remaining members are display metadata and are `null` whenever
- * the Hub omits them; nothing outside this shape is projected.
+ * Hub's credential identifier — a public handle, never authenticator secret
+ * material — and is what `revokePasskey` takes. The remaining members are
+ * display metadata and are `null` whenever the Hub omits them or returns them in
+ * an unrecognised shape; nothing outside this shape is projected.
+ *
+ * `backupEligible` / `backupState` describe whether the credential is
+ * synchronisable and whether it is currently backed up — the difference between
+ * a passkey that survives losing the device and one that does not.
+ * `revokedAt` / `revocationReasonCode` are non-null once the credential has been
+ * revoked; the list reports revoked credentials rather than hiding them, so a
+ * surface can explain why a device stopped working.
  */
 export interface HostedHubPasskey {
   readonly id: string;
   readonly label: string | null;
   readonly createdAt: number | null;
   readonly lastUsedAt: number | null;
+  readonly backupEligible: boolean | null;
+  readonly backupState: boolean | null;
+  readonly revokedAt: number | null;
+  readonly revocationReasonCode: string | null;
+}
+
+/**
+ * A started TOTP enrolment.
+ *
+ * **Both members are secret key material.** `secretBase32` is the shared key and
+ * `provisioningUri` embeds it. They exist to be shown once, on the enrolment
+ * screen, as a QR code and a manual-entry fallback. They must never be
+ * persisted, logged, sent to analytics, or placed in an error, and a surface
+ * holding them must drop them as soon as the screen is dismissed — the same
+ * contract recovery codes carry.
+ */
+export interface HostedTotpEnrollment {
+  readonly secretBase32: string;
+  readonly provisioningUri: string;
 }
 
 /**

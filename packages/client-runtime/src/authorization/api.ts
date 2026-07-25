@@ -15,6 +15,7 @@ import type {
   HostedHubSessionResponse,
   HostedNodeEnrollment,
   HostedRelayTicket,
+  HostedTotpEnrollment,
 } from "./types.ts";
 import {
   validatePasskeyAuthenticationOptions,
@@ -36,11 +37,45 @@ const MAX_RECOVERY_CODES = 256;
 const MAX_RECOVERY_CODE_LENGTH = 512;
 
 /**
- * WebAuthn credential ids are base64url. This bounds what a malformed Hub
- * response can project into a view model; no request path is built from a
- * credential id, so it is a response-projection constraint only.
+ * Bounds the identifier a malformed Hub response may project into a view model.
+ * Deliberately permissive: this is the *projection* constraint, and rejecting a
+ * legitimately-shaped credential here would blank the whole passkey list.
+ *
+ * It is emphatically **not** what makes {@link HostedHubApi.revokePasskey} safe
+ * to build a URL path from — that method re-validates its caller-supplied
+ * argument against the narrower {@link PASSKEY_CREDENTIAL_ID_PATTERN} at the
+ * call boundary, so an id that reached a view model through a looser check can
+ * still never be interpolated into a request path.
  */
 const CREDENTIAL_ID_PATTERN = /^[A-Za-z0-9_-]{1,512}$/;
+
+/**
+ * The Hub's passkey-credential identifier: a `pkey_` prefix and 22 base64url
+ * characters, the same shape the Hub's own route matcher enforces. This is the
+ * gate on the one account path built by interpolation, so it is checked before
+ * a URL is constructed and before any I/O — an id that does not match never
+ * reaches the wire in any form.
+ */
+const PASSKEY_CREDENTIAL_ID_PATTERN = /^pkey_[A-Za-z0-9_-]{22}$/;
+
+/** Bounds on the passkey revocation reason a malformed Hub may project. */
+const MAX_REVOCATION_REASON_LENGTH = 256;
+
+/**
+ * Bounds on the TOTP enrolment response. Both members are **sensitive**: the
+ * base32 secret *is* the shared key, and the provisioning URI embeds it. They
+ * are returned to the caller for a single enrolment display and are never
+ * logged, persisted, or placed in an error by this client.
+ */
+const MAX_TOTP_SECRET_LENGTH = 256;
+const MAX_TOTP_PROVISIONING_URI_LENGTH = 2048;
+
+/**
+ * The provisioning URI is an `otpauth://` key URI (RFC-style, what authenticator
+ * apps consume). Requiring the scheme fails closed on a malformed Hub handing
+ * back something a surface might render as a link or navigate to.
+ */
+const TOTP_PROVISIONING_URI_SCHEME = "otpauth://";
 
 /**
  * Hub routes that only accept a browser transport: they require an `Origin` in
@@ -177,10 +212,15 @@ function boundedRecoveryCodesValue(value: unknown): ReadonlyArray<string> | null
 
 /**
  * Project a Hub passkey record onto the bounded {@link HostedHubPasskey} view,
- * or `null` when it is not one. Only the four known members are copied, so no
- * unexpected Hub metadata can reach a view model. Callers choose the strictness:
- * `listPasskeys` rejects a malformed entry, while the add-passkey verify (whose
- * body shape is not part of the observed contract) tolerates its absence.
+ * or `null` when it is not one. Only the known members are copied, so no
+ * unexpected Hub metadata can reach a view model, and each is bounded or typed
+ * independently: a member the Hub omits — or returns in a shape this client does
+ * not recognise — becomes `null` rather than rejecting the whole record, so one
+ * unfamiliar field cannot blank a list the user needs in order to revoke.
+ *
+ * Callers choose the strictness of the *identity* check: `listPasskeys` rejects
+ * an entry with no usable id, while the add-passkey verify (whose body is not
+ * required to describe the credential at all) tolerates its absence.
  */
 function passkeyValue(value: unknown): HostedHubPasskey | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
@@ -194,7 +234,59 @@ function passkeyValue(value: unknown): HostedHubPasskey | null {
         : null,
     createdAt: nullableNumber(record.createdAt) ? record.createdAt : null,
     lastUsedAt: nullableNumber(record.lastUsedAt) ? record.lastUsedAt : null,
+    backupEligible: typeof record.backupEligible === "boolean" ? record.backupEligible : null,
+    backupState: typeof record.backupState === "boolean" ? record.backupState : null,
+    revokedAt: nullableNumber(record.revokedAt) ? record.revokedAt : null,
+    revocationReasonCode:
+      typeof record.revocationReasonCode === "string" &&
+      record.revocationReasonCode.length > 0 &&
+      record.revocationReasonCode.length <= MAX_REVOCATION_REASON_LENGTH
+        ? record.revocationReasonCode
+        : null,
   };
+}
+
+/**
+ * The optional fallback-session step-up code.
+ *
+ * A session minted from a password, a recovery code, or an email recovery link
+ * must present a current TOTP code to change credentials wherever TOTP is
+ * enrolled. A **passkey session ignores it entirely**, and the Hub — not this
+ * client — is what decides which of those applies. The client's only job is to
+ * pass a code through when the caller has one, and to never present a fallback
+ * session as though it were equivalent to a passkey one.
+ */
+export interface HostedAccountStepUp {
+  readonly totpCode?: string;
+}
+
+/**
+ * The step-up member of a request body, or nothing.
+ *
+ * An absent or empty code omits the member rather than sending `""`: the Hub's
+ * bodies are strict, an untouched input field is not a submitted code, and the
+ * distinction is what lets the Hub answer "a code is required" instead of "that
+ * code is wrong".
+ */
+function stepUpBody(input: HostedAccountStepUp | undefined): { readonly totpCode?: string } {
+  const totpCode = input?.totpCode;
+  return typeof totpCode === "string" && totpCode.length > 0 ? { totpCode } : {};
+}
+
+/** The bounded TOTP enrolment secret, or `null` when the value is not one. */
+function totpSecretValue(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_TOTP_SECRET_LENGTH
+    ? value
+    : null;
+}
+
+/** The bounded `otpauth://` provisioning URI, or `null` when the value is not one. */
+function totpProvisioningUriValue(value: unknown): string | null {
+  return typeof value === "string" &&
+    value.length <= MAX_TOTP_PROVISIONING_URI_LENGTH &&
+    value.toLowerCase().startsWith(TOTP_PROVISIONING_URI_SCHEME)
+    ? value
+    : null;
 }
 
 async function responseJson(response: {
@@ -367,16 +459,15 @@ export class HostedHubApi {
   /**
    * List the passkeys registered against the signed-in account.
    *
-   * `/api/account/passkeys` is confirmed registered and confirmed **GET-only**
-   * as a collection (401 without a session; 405 to `POST` and `DELETE`), and it
-   * exposes **no per-credential member route** — `/api/account/passkeys/{id}`
-   * is 404 on every method — so there is no client-reachable passkey revocation
-   * to implement until the Hub serves one. Its `registration/*` sub-routes
-   * *do* exist; see {@link addPasskey}.
+   * `GET /api/account/passkeys` → `{ passkeys: [...] }`. Each record
+   * is projected through {@link passkeyValue}, so an unexpected member can never
+   * reach a view model, and the list itself is bounded.
    *
-   * The response member name and record shape are inferred by symmetry with
-   * `/api/nodes` → `{ nodes: [...] }` and are projected through
-   * {@link passkeyValue}, so an unexpected member can never reach a view model.
+   * A revoked credential is **not** filtered out here: the Hub reports
+   * `revokedAt` / `revocationReasonCode` and the surface needs them to explain
+   * why a device the user remembers enrolling no longer works. Deciding what to
+   * show is the caller's; hiding evidence of a revocation is not this client's
+   * to do.
    */
   async listPasskeys(signal?: AbortSignal): Promise<ReadonlyArray<HostedHubPasskey>> {
     const result = await this.#request("/api/account/passkeys", signal ? { signal } : {});
@@ -402,17 +493,22 @@ export class HostedHubApi {
    * evidence of what it enrolled, and the caller must confirm against a fresh
    * {@link listPasskeys} read rather than report success on the strength of the
    * ceremony alone.
+   *
+   * `totpCode` is the optional fallback-session step-up (see
+   * {@link HostedAccountStepUp}); it rides the *verify* call only, never the
+   * options call, and is omitted entirely when absent.
    */
   async addPasskey(
-    input: { readonly passkeyLabel: string | null },
+    input: { readonly passkeyLabel: string | null } & HostedAccountStepUp,
     signal?: AbortSignal,
   ): Promise<HostedAddPasskeyResult> {
     return this.#registerPasskey(
       "/api/account/passkeys/registration/options",
       "/api/account/passkeys/registration/verify",
-      input,
+      { passkeyLabel: input.passkeyLabel },
       {
         authenticated: true,
+        verifyExtra: stepUpBody(input),
         ...(signal ? { signal } : {}),
         finish: (value) => this.#finishAddPasskey(value),
       },
@@ -443,16 +539,163 @@ export class HostedHubApi {
    * in an error by this client. Showing them once is the caller's contract; the
    * runtime does not and cannot enforce it.
    */
-  async regenerateRecoveryCodes(signal?: AbortSignal): Promise<ReadonlyArray<string>> {
+  async regenerateRecoveryCodes(
+    input?: HostedAccountStepUp,
+    signal?: AbortSignal,
+  ): Promise<ReadonlyArray<string>> {
     const result = await this.#request("/api/account/recovery-codes", {
       method: "POST",
-      body: {},
+      body: stepUpBody(input),
       csrf: true,
       ...(signal ? { signal } : {}),
     });
     const recoveryCodes = boundedRecoveryCodesValue(result.recoveryCodes);
     if (!recoveryCodes) throw new HostedHubApiError("invalid_response", 502);
     return recoveryCodes;
+  }
+
+  /**
+   * Set (or replace) the account's fallback password.
+   *
+   * `POST /api/account/password` → `{ ok: true }`. A password is a **fallback**
+   * credential: it is strictly weaker than a passkey, and no surface built on
+   * this may present the two as equivalent.
+   *
+   * The password is sent once, in the request body, and is never persisted,
+   * logged, echoed into an error, or placed in a URL by this client.
+   */
+  async setPassword(
+    input: { readonly password: string } & HostedAccountStepUp,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.#acknowledgedMutation(
+      "/api/account/password",
+      { password: input.password, ...stepUpBody(input) },
+      signal,
+    );
+  }
+
+  /**
+   * Remove the account's fallback password, leaving the stronger credentials in
+   * place. `POST /api/account/password/remove` → `{ ok: true }`.
+   */
+  async removePassword(input?: HostedAccountStepUp, signal?: AbortSignal): Promise<void> {
+    await this.#acknowledgedMutation("/api/account/password/remove", stepUpBody(input), signal);
+  }
+
+  /**
+   * Begin TOTP enrolment and return the secret to display once.
+   *
+   * `POST /api/account/totp/enrollment/options` → `{ secretBase32,
+   * provisioningUri }`. **Both members are secret key material** — the base32
+   * secret *is* the shared key and the provisioning URI embeds it. They are
+   * returned to the caller for the enrolment screen and nothing else: this
+   * client never logs, persists, or places either in an error, and a caller must
+   * hold them in memory only and drop them the moment the screen is dismissed.
+   *
+   * Enrolment itself requires a passkey-authenticated session; the Hub enforces
+   * that, and this method carries no step-up code because there is no fallback
+   * path to step up from.
+   */
+  async beginTotpEnrollment(signal?: AbortSignal): Promise<HostedTotpEnrollment> {
+    const result = await this.#request("/api/account/totp/enrollment/options", {
+      method: "POST",
+      body: {},
+      csrf: true,
+      ...(signal ? { signal } : {}),
+    });
+    const secretBase32 = totpSecretValue(result.secretBase32);
+    const provisioningUri = totpProvisioningUriValue(result.provisioningUri);
+    if (!secretBase32 || !provisioningUri) throw new HostedHubApiError("invalid_response", 502);
+    return { secretBase32, provisioningUri };
+  }
+
+  /**
+   * Confirm TOTP enrolment with a code from the authenticator app.
+   * `POST /api/account/totp/enrollment/verify` → `{ ok: true }`.
+   *
+   * `code` is the enrolment proof, not a step-up: it is required, and it is a
+   * distinct member from the optional `totpCode` the fallback-session step-up
+   * uses elsewhere.
+   */
+  async confirmTotpEnrollment(
+    input: { readonly code: string },
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.#acknowledgedMutation(
+      "/api/account/totp/enrollment/verify",
+      { code: input.code },
+      signal,
+    );
+  }
+
+  /** Remove TOTP from the account. `POST /api/account/totp/revoke` → `{ ok: true }`. */
+  async revokeTotp(input?: HostedAccountStepUp, signal?: AbortSignal): Promise<void> {
+    await this.#acknowledgedMutation("/api/account/totp/revoke", stepUpBody(input), signal);
+  }
+
+  /**
+   * Ask the Hub to send a verification mail for an address.
+   * `POST /api/account/email/verification` → `{ ok: true }` (202).
+   *
+   * The 202 is deliberate and uniform: a caller learns that the request was
+   * accepted, never whether an address is known. Confirming the mailed token is
+   * a browser-transport login route and is not part of this surface.
+   */
+  async requestEmailVerification(
+    input: { readonly email: string } & HostedAccountStepUp,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.#acknowledgedMutation(
+      "/api/account/email/verification",
+      { email: input.email, ...stepUpBody(input) },
+      signal,
+    );
+  }
+
+  /**
+   * Revoke one of the account's passkeys.
+   * `POST /api/account/passkeys/{id}/revoke` → `{ ok: true }`.
+   *
+   * This is the only account path this client builds by interpolation, so the
+   * id is validated against {@link PASSKEY_CREDENTIAL_ID_PATTERN} **before a URL
+   * exists** and the call fails closed — no request, no proof minted, no session
+   * material touched — on anything that does not match. Validating here rather
+   * than trusting the looser list projection means an id that reached a view
+   * model through a malformed response still cannot be interpolated into a path.
+   *
+   * Revoking the credential the current session was minted from is a decision
+   * for the caller and the Hub, not something this client second-guesses; the
+   * caller should re-read {@link listPasskeys} afterwards, since a revoke
+   * changes the list.
+   */
+  async revokePasskey(credentialId: string, signal?: AbortSignal): Promise<void> {
+    if (!PASSKEY_CREDENTIAL_ID_PATTERN.test(credentialId)) {
+      throw new HostedHubApiError("invalid_request", 400);
+    }
+    await this.#acknowledgedMutation(`/api/account/passkeys/${credentialId}/revoke`, {}, signal);
+  }
+
+  /**
+   * A session-authenticated account mutation whose entire success contract is
+   * `{ ok: true }`. Validated exactly, so a body carrying anything else — an
+   * error the Hub returned with a 2xx, or session material this route has no
+   * business handing over — is a malformed response rather than a success.
+   */
+  async #acknowledgedMutation(
+    pathname: string,
+    body: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const result = await this.#request(pathname, {
+      method: "POST",
+      body,
+      csrf: true,
+      ...(signal ? { signal } : {}),
+    });
+    if (Object.keys(result).length !== 1 || result.ok !== true) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
   }
 
   async #registerPasskey<T>(
@@ -467,6 +710,12 @@ export class HostedHubApi {
        * pre-session mint ceremony used by bootstrap and invitation redemption.
        */
       readonly authenticated: boolean;
+      /**
+       * Extra members merged into the *verify* body only. The pre-session mint
+       * ceremonies pass nothing: their Hub bodies are strict `{ response }`, so
+       * an unexpected member would be rejected outright.
+       */
+      readonly verifyExtra?: Record<string, unknown>;
       readonly signal?: AbortSignal;
       readonly finish: (value: Record<string, unknown>) => T;
     },
@@ -488,7 +737,7 @@ export class HostedHubApi {
     return options.finish(
       await this.#request(verifyPath, {
         method: "POST",
-        body: { response },
+        body: { response, ...options.verifyExtra },
         ...transport,
       }),
     );
