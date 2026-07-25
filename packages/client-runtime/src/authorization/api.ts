@@ -132,13 +132,16 @@ export type HostedAccountIntent =
   | "regenerate-recovery-codes";
 
 /**
- * The operations where a `403` can only be the fallback-session step-up gate.
+ * The operations where a `403` is *most likely* the fallback-session step-up
+ * gate — and where nothing else on the route is known to raise one.
  *
- * On these routes the Hub raises `forbidden` from exactly one place: a session
- * minted from a password, recovery code, or email link that did not present a
- * valid current TOTP code where TOTP is enrolled. The owner-role check that
- * also raises `forbidden` is not reachable here — it guards the admin routes.
- * So the remap below is exact rather than a heuristic.
+ * On these routes the step-up gate is the only `forbidden` this client can
+ * account for: a session minted from a password, recovery code, or email link
+ * that did not present a valid current TOTP code where TOTP is enrolled. The
+ * owner-role check that also raises `forbidden` guards the admin routes, not
+ * these.
+ *
+ * **This remains an inference.** See {@link narrowCode}.
  */
 const STEP_UP_INTENTS: ReadonlySet<HostedAccountIntent> = new Set([
   "set-password",
@@ -149,7 +152,7 @@ const STEP_UP_INTENTS: ReadonlySet<HostedAccountIntent> = new Set([
   "regenerate-recovery-codes",
 ]);
 
-/** The operations where a `403` can only be "this needs a passkey session". */
+/** The operations where a `403` is most likely "this needs a passkey session". */
 const PASSKEY_SESSION_INTENTS: ReadonlySet<HostedAccountIntent> = new Set([
   "begin-totp-enrollment",
   "confirm-totp-enrollment",
@@ -162,14 +165,67 @@ export const STEP_UP_REQUIRED_CODE = "step_up_required";
 export const PASSKEY_SESSION_REQUIRED_CODE = "passkey_session_required";
 
 /**
- * Narrow a wire code to what it can actually mean on the route that produced it.
+ * The narrowed code, and whether narrowing actually happened.
+ *
+ * `wire` is always what the Hub sent, verbatim (bounded by
+ * {@link ERROR_CODE_PATTERN}). `code` is what a surface should act on. They
+ * differ only when `inferred` is `true`.
+ */
+interface NarrowedCode {
+  readonly code: string;
+  readonly wire: string;
+  readonly inferred: boolean;
+}
+
+/**
+ * Narrow a wire code to what it most likely means on the route that produced it.
+ *
+ * **This is an inference, not a contract, and a caller must not treat the
+ * narrowed code as authoritative.**
+ *
+ * The Hub's error body is only `{ error: <code> }`. It does have a precise
+ * reason for each refusal, but that reason is recorded in its audit log and is
+ * deliberately never put on the wire, so `step_up_required` and
+ * `passkey_session_required` are codes this client *synthesises* — the Hub
+ * never sends either. Without the narrowing a user who simply needs to type a
+ * TOTP code is told "You are not authorized to perform this action.", which is
+ * useless, so the narrowing earns its place. But it is a guess about which of
+ * several possible `forbidden` producers applied, and today it is only correct
+ * because these routes happen to have exactly one:
+ *
+ * - a role or lockout check added to any of these routes later,
+ * - an operator disabling an account mid-session,
+ * - a reverse proxy, WAF, or gateway answering `403 {"error":"forbidden"}`,
+ *
+ * would each render a TOTP prompt that can never succeed while the real cause
+ * is never surfaced. So the narrowing is deliberately *reported* rather than
+ * hidden: {@link HostedHubApiError.wireCode} keeps the code the Hub actually
+ * sent and {@link HostedHubApiError.inferred} marks the substitution, and both
+ * ride the account-action outcome. A surface that renders a step-up prompt off
+ * an inferred code must leave the user a way out (dismiss, retry, sign out) and
+ * must not loop on a repeated refusal.
+ *
+ * It is also applied no more widely than the gate it models: narrowing is
+ * suppressed on request legs where the Hub has no step-up gate at all — the
+ * add-passkey *options* leg, where a `forbidden` cannot be a step-up and
+ * calling it one would be pure fabrication.
+ *
  * Returns the code unchanged when there is nothing to narrow.
  */
-function narrowCode(code: string, intent: HostedAccountIntent | undefined): string {
-  if (code !== "forbidden" || intent === undefined) return code;
-  if (STEP_UP_INTENTS.has(intent)) return STEP_UP_REQUIRED_CODE;
-  if (PASSKEY_SESSION_INTENTS.has(intent)) return PASSKEY_SESSION_REQUIRED_CODE;
-  return code;
+function narrowCode(
+  code: string,
+  intent: HostedAccountIntent | undefined,
+  narrowing: boolean,
+): NarrowedCode {
+  const unchanged: NarrowedCode = { code, wire: code, inferred: false };
+  if (!narrowing || code !== "forbidden" || intent === undefined) return unchanged;
+  if (STEP_UP_INTENTS.has(intent)) {
+    return { code: STEP_UP_REQUIRED_CODE, wire: code, inferred: true };
+  }
+  if (PASSKEY_SESSION_INTENTS.has(intent)) {
+    return { code: PASSKEY_SESSION_REQUIRED_CODE, wire: code, inferred: true };
+  }
+  return unchanged;
 }
 
 export class HostedHubApiError extends Error {
@@ -178,14 +234,34 @@ export class HostedHubApiError extends Error {
   readonly retryAfterMs: number | undefined;
   /** The account operation this error came from, when it had one. */
   readonly intent: HostedAccountIntent | undefined;
+  /**
+   * The code exactly as the Hub sent it, before any route narrowing. Equal to
+   * {@link code} unless {@link inferred} is `true`.
+   */
+  readonly wireCode: string;
+  /**
+   * `true` when {@link code} was synthesised client-side by {@link narrowCode}
+   * rather than received. A security branch may act on an inferred code, but it
+   * must not present it as the Hub's own answer, and it must stay escapable —
+   * see {@link narrowCode}.
+   */
+  readonly inferred: boolean;
 
-  constructor(code: string, status: number, retryAfterMs?: number, intent?: HostedAccountIntent) {
+  constructor(
+    code: string,
+    status: number,
+    retryAfterMs?: number,
+    intent?: HostedAccountIntent,
+    wireCode?: string,
+  ) {
     super(messageForCode(code, intent));
     this.name = "HostedHubApiError";
     this.code = code;
     this.status = status;
     this.retryAfterMs = retryAfterMs;
     this.intent = intent;
+    this.wireCode = wireCode ?? code;
+    this.inferred = wireCode !== undefined && wireCode !== code;
   }
 }
 
@@ -425,7 +501,8 @@ async function responseJson(
     readonly status: number;
     readonly json: () => Promise<unknown>;
   },
-  intent?: HostedAccountIntent,
+  intent: HostedAccountIntent | undefined,
+  narrowing: boolean,
 ): Promise<Record<string, unknown>> {
   let parsed: unknown;
   try {
@@ -442,11 +519,13 @@ async function responseJson(
       body.retryAfterMs <= 300_000
         ? body.retryAfterMs
         : undefined;
+    const narrowed = narrowCode(errorCodeValue(body.error), intent, narrowing);
     throw new HostedHubApiError(
-      narrowCode(errorCodeValue(body.error), intent),
+      narrowed.code,
       response.status,
       retryAfterMs,
       intent,
+      narrowed.wire,
     );
   }
   return body;
@@ -892,6 +971,11 @@ export class HostedHubApi {
       method: "POST",
       body: input,
       ...transport,
+      // The step-up gate lives on the *verify* leg only — this leg mints a
+      // challenge and has no such gate, so a `forbidden` here cannot be a
+      // step-up and must not be relabelled as one. The intent still rides along
+      // so the error reports which operation it belongs to.
+      narrowForbidden: false,
     });
     const response = await this.#passkeyCeremony.register(
       validatePasskeyRegistrationOptions(challenge.options),
@@ -1240,6 +1324,13 @@ export class HostedHubApi {
       readonly dpop?: "mint" | "session";
       /** Narrows generic Hub error codes to what they mean on this route. */
       readonly intent?: HostedAccountIntent;
+      /**
+       * Whether a bare `forbidden` on this leg may be narrowed to a step-up /
+       * passkey-session code. Defaults to `true` when an intent is present; set
+       * it to `false` on a leg that carries the intent for message scoping but
+       * has no step-up gate behind it. See {@link narrowCode}.
+       */
+      readonly narrowForbidden?: boolean;
       readonly signal?: AbortSignal;
     },
   ): Promise<Record<string, unknown>> {
@@ -1347,6 +1438,6 @@ export class HostedHubApi {
       clearTimeout(timer);
       callerSignal?.removeEventListener("abort", forwardAbort);
     }
-    return responseJson(response, options.intent);
+    return responseJson(response, options.intent, options.narrowForbidden !== false);
   }
 }

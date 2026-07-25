@@ -4,7 +4,11 @@ import { HostedHubApiError, type HostedAccountStepUp } from "./api.ts";
 import { activateHostedNode, deactivateHostedNode, suspendHostedNode } from "./environment.ts";
 import { getHostedHubApi, getHostedRuntimeConfiguration } from "./runtime.ts";
 import type {
+  HostedAccountOutcome,
+  HostedAccountRefusalReason,
+  HostedAccountRefused,
   HostedAccountStatus,
+  HostedAddPasskeyOutcome,
   HostedAddPasskeyResult,
   HostedBrowserStatus,
   HostedDirectoryStatus,
@@ -13,11 +17,13 @@ import type {
   HostedHubPasskey,
   HostedHubSession,
   HostedHubSessionResponse,
+  HostedRecoveryCodesOutcome,
   HostedRelayFailure,
   HostedRelayTransportStatus,
   HostedRycoSessionStatus,
   HostedSelectionStatus,
   HostedTotpEnrollment,
+  HostedTotpEnrollmentOutcome,
 } from "./types.ts";
 
 export interface HostedHubState {
@@ -111,6 +117,27 @@ export interface HostedAccountState {
   readonly passkeysStatus: HostedPasskeyDirectoryStatus;
   readonly actionStatus: HostedAccountActionStatus;
   readonly errorMessage: string | null;
+  /**
+   * The machine-readable reason the last account operation failed, in step with
+   * {@link errorMessage} — `null` whenever there is no error.
+   *
+   * This is what a branch on a security outcome must read.
+   * {@link errorMessage} is display copy: it is produced by this runtime's own
+   * error constructor and may be reworded at any time, so string-comparing it
+   * to detect `step_up_required` couples a security decision to a UI string.
+   *
+   * Declared optional for the same reason `totpEnrollment` is — see
+   * {@link HostedHubState.totpEnrollment}. The runtime's own store always
+   * carries the slot.
+   */
+  readonly errorCode?: string | null;
+  /**
+   * `true` when {@link errorCode} was synthesised client-side from the route
+   * rather than received from the Hub — see `narrowCode` in `api.ts`. A surface
+   * may act on an inferred code but must not present it as authoritative, and a
+   * prompt built on one must stay escapable.
+   */
+  readonly errorCodeInferred?: boolean;
 }
 
 const initialAccountState: HostedAccountState = {
@@ -118,6 +145,8 @@ const initialAccountState: HostedAccountState = {
   passkeysStatus: "idle",
   actionStatus: "idle",
   errorMessage: null,
+  errorCode: null,
+  errorCodeInferred: false,
 };
 
 type HostedHubStoreListener = () => void;
@@ -168,6 +197,72 @@ function errorMessage(error: unknown): string {
   return "Hub is temporarily unavailable.";
 }
 
+/**
+ * The three account-error slots as one patch, so a message can never be
+ * published without the code that explains it (or left behind when the code is
+ * cleared). Every account-store error write goes through this or
+ * {@link NO_ACCOUNT_ERROR}.
+ */
+function accountErrorPatch(error: unknown): Partial<HostedAccountState> {
+  const message = errorMessage(error) || null;
+  if (error instanceof HostedHubApiError) {
+    return {
+      errorMessage: message,
+      errorCode: error.code,
+      errorCodeInferred: error.inferred,
+    };
+  }
+  return { errorMessage: message, errorCode: null, errorCodeInferred: false };
+}
+
+/** A bounded, runtime-authored refusal that never came from the Hub. */
+function localErrorPatch(message: string | null): Partial<HostedAccountState> {
+  return { errorMessage: message, errorCode: null, errorCodeInferred: false };
+}
+
+const NO_ACCOUNT_ERROR: Partial<HostedAccountState> = {
+  errorMessage: null,
+  errorCode: null,
+  errorCodeInferred: false,
+};
+
+/** Build the refusal outcome that matches what was just published to the store. */
+function refused(reason: HostedAccountRefusalReason, error?: unknown): HostedAccountRefused {
+  if (error instanceof HostedHubApiError) {
+    return {
+      status: "refused",
+      reason,
+      errorCode: error.code,
+      wireErrorCode: error.wireCode,
+      inferredErrorCode: error.inferred,
+      errorMessage: error.message || null,
+    };
+  }
+  return {
+    status: "refused",
+    reason,
+    errorCode: null,
+    wireErrorCode: null,
+    inferredErrorCode: false,
+    errorMessage: error === undefined ? null : errorMessage(error) || null,
+  };
+}
+
+/** A refusal the runtime raised itself, carrying its own bounded message. */
+function refusedLocally(
+  reason: HostedAccountRefusalReason,
+  message: string | null,
+): HostedAccountRefused {
+  return {
+    status: "refused",
+    reason,
+    errorCode: null,
+    wireErrorCode: null,
+    inferredErrorCode: false,
+    errorMessage: message,
+  };
+}
+
 function isSessionFailure(error: unknown): boolean {
   return (
     error instanceof HostedHubApiError && (error.status === 401 || error.code === "session_invalid")
@@ -208,6 +303,16 @@ export const HOSTED_ACCOUNT_BUSY_MESSAGE = "Another account change is still in p
 export const HOSTED_ACCOUNT_SIGNED_OUT_MESSAGE = "Sign in to change your account settings.";
 export const HOSTED_PASSKEY_UNCONFIRMED_MESSAGE =
   "The passkey could not be confirmed. Check your passkeys before relying on it.";
+/**
+ * A rotation committed with no live claimant, so the codes were dropped rather
+ * than left in the store with nothing on screen to show them.
+ *
+ * The user must be told: the rotation *did* happen server-side, so any codes
+ * they had saved are already dead. Silence here would leave them believing they
+ * still have working recovery credentials.
+ */
+export const HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE =
+  "Your recovery codes were replaced but could not be shown. Your previous codes no longer work — generate a new set and save them.";
 
 class HostedHubController {
   #operation: AbortController | null = null;
@@ -224,6 +329,16 @@ class HostedHubController {
   #browserSuspendPromise: Promise<void> | null = null;
   #browserLifecycleGeneration = 0;
   #totpEnrollmentFence = createFence();
+  #recoveryCodesFence = createFence();
+  /** How many surfaces have declared they are live and will display rotated codes. */
+  #recoveryCodesClaims = 0;
+  /**
+   * Whether the codes currently in the store were published by a *rotation*
+   * under a claim. Codes published by the bootstrap/invitation flow are not
+   * claim-owned and are never cleared by a claim release — that flow has no
+   * claim and its root surface is the display.
+   */
+  #recoveryCodesClaimed = false;
   #passkeysOperation: AbortController | null = null;
   #passkeysPromise: Promise<void> | null = null;
   #accountOperation: AbortController | null = null;
@@ -344,6 +459,8 @@ class HostedHubController {
     // still carries either contradicts the one rule this state has about
     // secret material.
     this.#totpEnrollmentFence.bump();
+    this.#recoveryCodesFence.bump();
+    this.#recoveryCodesClaimed = false;
     patchState({
       accountStatus: "signed-out",
       errorMessage: null,
@@ -352,7 +469,57 @@ class HostedHubController {
     });
   }
 
+  /**
+   * Declare that a surface is live and will display rotated recovery codes,
+   * and take ownership of clearing them. Returns the release; call it when the
+   * surface goes away (a `useEffect` cleanup, an unmount, a dismissed sheet).
+   *
+   * This exists because "clear the secret on every async path" is a contract no
+   * client has managed to keep — this codebase is on its sixth async result
+   * landing after the state it targets moved on, and both the web and the
+   * mobile account surfaces stranded live recovery credentials in the store
+   * identically. So the runtime owns the lifetime instead of asking:
+   *
+   * - **A rotation whose result lands with no live claim publishes nothing.**
+   *   Omitting the claim entirely cannot strand a secret; it fails closed, and
+   *   {@link regenerateRecoveryCodes} says so on its outcome and in a bounded
+   *   message rather than failing silently.
+   * - **Releasing the last claim clears any claim-owned codes.** A client that
+   *   forgets `dismissRecoveryCodes` on one of its teardown paths is still
+   *   covered, because release is the teardown path.
+   * - **A claim released while a rotation is in flight fences that rotation.**
+   *   The result arrives to a surface that is gone, so it is dropped — the same
+   *   discipline `dismissTotpEnrollment` uses, which is what this generalises.
+   *
+   * Claims are counted, so two live surfaces do not clear each other's display,
+   * and the release is idempotent — calling it twice releases one claim.
+   *
+   * The bootstrap/invitation flow is untouched: it publishes codes with no
+   * claim, its root surface displays them, and a release never clears them.
+   */
+  claimRecoveryCodes(): () => void {
+    this.#recoveryCodesClaims += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.#recoveryCodesClaims -= 1;
+      if (this.#recoveryCodesClaims > 0) return;
+      // Last claimant gone: fence anything in flight, and drop codes this
+      // claim was holding. Codes published without a claim (bootstrap) are not
+      // ours to clear.
+      this.#recoveryCodesFence.bump();
+      if (!this.#recoveryCodesClaimed) return;
+      this.#recoveryCodesClaimed = false;
+      patchState({ recoveryCodes: [] });
+    };
+  }
+
   dismissRecoveryCodes(): void {
+    // Fenced like the TOTP secret: a rotation still in flight when the user
+    // dismisses must not push codes back into a surface they just closed.
+    this.#recoveryCodesFence.bump();
+    this.#recoveryCodesClaimed = false;
     patchState({ recoveryCodes: [] });
   }
 
@@ -409,7 +576,7 @@ class HostedHubController {
         this.#discardStalePasskeys();
         return;
       }
-      patchAccountState({ passkeys, passkeysStatus: "ready", errorMessage: null });
+      patchAccountState({ passkeys, passkeysStatus: "ready", ...NO_ACCOUNT_ERROR });
     } catch (error) {
       if (operation.signal.aborted) return;
       if (isSessionFailure(error)) {
@@ -420,7 +587,7 @@ class HostedHubController {
         this.#discardStalePasskeys();
         return;
       }
-      patchAccountState({ passkeysStatus: "stale", errorMessage: errorMessage(error) || null });
+      patchAccountState({ passkeysStatus: "stale", ...accountErrorPatch(error) });
     }
   }
 
@@ -462,43 +629,74 @@ class HostedHubController {
    */
   async addPasskey(
     input: { readonly passkeyLabel: string | null } & HostedAccountStepUp,
-  ): Promise<void> {
-    const outcome: { result: HostedAddPasskeyResult | null } = { result: null };
+  ): Promise<HostedAddPasskeyOutcome> {
+    const captured: { result: HostedAddPasskeyResult | null } = { result: null };
     const before = hostedAccountStore.getState().passkeys.length;
-    const committed = await this.#accountAction("adding-passkey", async (signal) => {
+    const outcome = await this.#accountAction("adding-passkey", async (signal) => {
       const added = await getHostedHubApi().addPasskey(input, signal);
       return () => {
-        outcome.result = added;
+        captured.result = added;
       };
     });
-    if (!committed) return;
+    if (outcome.status !== "committed") return outcome;
+    // Past this point the Hub verified the ceremony: a credential *was*
+    // enrolled. Everything below only decides how well that can be confirmed —
+    // never whether it happened. Reporting any of it as "not committed" is what
+    // makes a surface re-run the ceremony and enrol a second credential.
+    const enrolledPasskey = captured.result?.passkey ?? null;
     await this.refreshPasskeys({ force: true });
     const state = hostedAccountStore.getState();
     // A failed confirming read publishes its own bounded message; do not
     // overwrite it with a weaker one.
-    if (state.passkeysStatus !== "ready") return;
-    const enrolled = outcome.result?.passkey
-      ? state.passkeys.some((candidate) => candidate.id === outcome.result?.passkey?.id)
+    if (state.passkeysStatus !== "ready") {
+      return { status: "committed", confirmation: "unverified", passkey: enrolledPasskey };
+    }
+    const enrolled = enrolledPasskey
+      ? state.passkeys.some((candidate) => candidate.id === enrolledPasskey.id)
       : state.passkeys.length > before;
-    if (!enrolled) patchAccountState({ errorMessage: HOSTED_PASSKEY_UNCONFIRMED_MESSAGE });
+    if (!enrolled) {
+      patchAccountState(localErrorPatch(HOSTED_PASSKEY_UNCONFIRMED_MESSAGE));
+      return { status: "committed", confirmation: "missing", passkey: enrolledPasskey };
+    }
+    return { status: "committed", confirmation: "confirmed", passkey: enrolledPasskey };
   }
 
   /**
    * **Rotate** the account's recovery codes, invalidating any the user has
    * already saved, and place the new set in the existing `recoveryCodes` slot —
-   * in memory only, cleared by `dismissRecoveryCodes` and by any account
-   * teardown, never written to the account store, an error message, or a log.
+   * in memory only, never written to the account store, an error message, or a
+   * log.
    *
    * This is a mutation. Call it only from an explicit, confirmed user action —
-   * never on mount, focus, retry, or reconnect. Showing the returned codes once
-   * is the caller's contract; the runtime holds them until they are dismissed
-   * and does not enforce a single display.
+   * never on mount, focus, retry, or reconnect.
+   *
+   * **The codes only reach the store while a {@link claimRecoveryCodes} claim is
+   * live.** With no live claim the rotation still happens — it is a server-side
+   * mutation and there is no taking it back — but its result is dropped rather
+   * than left sitting in a shared slot with nothing on screen to show it, and
+   * the outcome reports `displayed: false` alongside a bounded message saying
+   * the previous codes are dead. Clearing is the claim's job, not the caller's.
    */
-  async regenerateRecoveryCodes(input?: HostedAccountStepUp): Promise<void> {
-    await this.#accountAction("regenerating-recovery-codes", async (signal) => {
+  async regenerateRecoveryCodes(input?: HostedAccountStepUp): Promise<HostedRecoveryCodesOutcome> {
+    const live = this.#recoveryCodesFence.issue();
+    let displayed = false;
+    const outcome = await this.#accountAction("regenerating-recovery-codes", async (signal) => {
       const recoveryCodes = await getHostedHubApi().regenerateRecoveryCodes(input, signal);
-      return () => patchState({ recoveryCodes });
+      return () => {
+        // Fence *and* claim: the fence catches a surface that tore down or
+        // dismissed while this was in flight, the claim count catches a caller
+        // that never had a live surface at all.
+        if (!live() || this.#recoveryCodesClaims === 0) return;
+        this.#recoveryCodesClaimed = true;
+        displayed = true;
+        patchState({ recoveryCodes });
+      };
     });
+    if (outcome.status !== "committed") return outcome;
+    if (!displayed) {
+      patchAccountState(localErrorPatch(HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE));
+    }
+    return { status: "committed", displayed };
   }
 
   /**
@@ -509,13 +707,14 @@ class HostedHubController {
    * flight was issued against the pre-revoke state, so joining it would leave
    * the surface showing a credential that no longer works.
    */
-  async revokePasskey(credentialId: string): Promise<void> {
-    const committed = await this.#accountAction("revoking-passkey", async (signal) => {
+  async revokePasskey(credentialId: string): Promise<HostedAccountOutcome> {
+    const outcome = await this.#accountAction("revoking-passkey", async (signal) => {
       await getHostedHubApi().revokePasskey(credentialId, signal);
       return () => undefined;
     });
-    if (!committed) return;
+    if (outcome.status !== "committed") return outcome;
     await this.refreshPasskeys({ force: true });
+    return outcome;
   }
 
   /**
@@ -526,16 +725,18 @@ class HostedHubController {
    * passed straight through to the request and is never stored, logged, or
    * placed in an error by the runtime.
    */
-  async setPassword(input: { readonly password: string } & HostedAccountStepUp): Promise<void> {
-    await this.#accountAction("setting-password", async (signal) => {
+  async setPassword(
+    input: { readonly password: string } & HostedAccountStepUp,
+  ): Promise<HostedAccountOutcome> {
+    return this.#accountAction("setting-password", async (signal) => {
       await getHostedHubApi().setPassword(input, signal);
       return () => undefined;
     });
   }
 
   /** Remove the account's fallback password. */
-  async removePassword(input?: HostedAccountStepUp): Promise<void> {
-    await this.#accountAction("removing-password", async (signal) => {
+  async removePassword(input?: HostedAccountStepUp): Promise<HostedAccountOutcome> {
+    return this.#accountAction("removing-password", async (signal) => {
       await getHostedHubApi().removePassword(input, signal);
       return () => undefined;
     });
@@ -553,18 +754,23 @@ class HostedHubController {
    * to enforce, and this action does not offer a step-up field that would let a
    * fallback session look like it qualifies.
    */
-  async beginTotpEnrollment(): Promise<void> {
+  async beginTotpEnrollment(): Promise<HostedTotpEnrollmentOutcome> {
     // Fenced against dismissal: a user who backs out of the enrolment screen
     // while the request is in flight must not have the secret pushed back into
     // state when it lands. The abort signal alone does not cover this — the
     // response may already be decoded by then.
     const current = this.#totpEnrollmentFence.issue();
-    await this.#accountAction("enrolling-totp", async (signal) => {
+    let displayed = false;
+    const outcome = await this.#accountAction("enrolling-totp", async (signal) => {
       const totpEnrollment = await getHostedHubApi().beginTotpEnrollment(signal);
       return () => {
-        if (current()) patchState({ totpEnrollment });
+        if (!current()) return;
+        displayed = true;
+        patchState({ totpEnrollment });
       };
     });
+    if (outcome.status !== "committed") return outcome;
+    return { status: "committed", displayed };
   }
 
   /**
@@ -572,8 +778,8 @@ class HostedHubController {
    * secret: once the enrolment is confirmed the app holds it and the runtime has
    * no further reason to.
    */
-  async confirmTotpEnrollment(input: { readonly code: string }): Promise<void> {
-    await this.#accountAction("confirming-totp", async (signal) => {
+  async confirmTotpEnrollment(input: { readonly code: string }): Promise<HostedAccountOutcome> {
+    return this.#accountAction("confirming-totp", async (signal) => {
       await getHostedHubApi().confirmTotpEnrollment(input, signal);
       return () => {
         this.#totpEnrollmentFence.bump();
@@ -583,8 +789,8 @@ class HostedHubController {
   }
 
   /** Remove TOTP from the account, dropping any half-finished enrolment with it. */
-  async revokeTotp(input?: HostedAccountStepUp): Promise<void> {
-    await this.#accountAction("revoking-totp", async (signal) => {
+  async revokeTotp(input?: HostedAccountStepUp): Promise<HostedAccountOutcome> {
+    return this.#accountAction("revoking-totp", async (signal) => {
       await getHostedHubApi().revokeTotp(input, signal);
       return () => {
         this.#totpEnrollmentFence.bump();
@@ -601,8 +807,8 @@ class HostedHubController {
    */
   async requestEmailVerification(
     input: { readonly email: string } & HostedAccountStepUp,
-  ): Promise<void> {
-    await this.#accountAction("requesting-email-verification", async (signal) => {
+  ): Promise<HostedAccountOutcome> {
+    return this.#accountAction("requesting-email-verification", async (signal) => {
       await getHostedHubApi().requestEmailVerification(input, signal);
       return () => undefined;
     });
@@ -619,52 +825,61 @@ class HostedHubController {
     if (!this.#accountOperation) return;
     this.#accountOperation.abort();
     this.#accountOperation = null;
-    patchAccountState({ actionStatus: "idle", errorMessage: null });
+    patchAccountState({ actionStatus: "idle", ...NO_ACCOUNT_ERROR });
   }
 
   /**
    * Run one account-surface mutation at a time, publishing its result only
    * behind the same session fence the directory refresh uses. `run` returns the
-   * commit thunk so nothing reaches a store before that fence passes. Resolves
-   * `true` when the action committed.
+   * commit thunk so nothing reaches a store before that fence passes.
+   *
+   * Resolves a discriminated {@link HostedAccountOutcome} rather than writing a
+   * result a caller has to go and re-read. Re-reading `errorMessage` after the
+   * await is both racy — a concurrent action or a post-commit confirming
+   * refresh writes the same slot — and ambiguous: a cancelled action
+   * deliberately leaves no message, so "no message" is not success.
    */
   async #accountAction(
     status: Exclude<HostedAccountActionStatus, "idle">,
     run: (signal: AbortSignal) => Promise<() => void>,
-  ): Promise<boolean> {
+  ): Promise<HostedAccountOutcome> {
     // A refusal must always say why. Silently resolving leaves a surface whose
     // taps do nothing and whose state never explains it.
     if (hostedAccountStore.getState().actionStatus !== "idle") {
-      patchAccountState({ errorMessage: HOSTED_ACCOUNT_BUSY_MESSAGE });
-      return false;
+      patchAccountState(localErrorPatch(HOSTED_ACCOUNT_BUSY_MESSAGE));
+      return refusedLocally("busy", HOSTED_ACCOUNT_BUSY_MESSAGE);
     }
     const state = hostedHubStore.getState();
     if (state.accountStatus !== "authenticated") {
-      patchAccountState({ errorMessage: HOSTED_ACCOUNT_SIGNED_OUT_MESSAGE });
-      return false;
+      patchAccountState(localErrorPatch(HOSTED_ACCOUNT_SIGNED_OUT_MESSAGE));
+      return refusedLocally("signed-out", HOSTED_ACCOUNT_SIGNED_OUT_MESSAGE);
     }
     const sessionId = state.session?.id ?? null;
     const operation = new AbortController();
     this.#accountOperation = operation;
-    patchAccountState({ actionStatus: status, errorMessage: null });
+    patchAccountState({ actionStatus: status, ...NO_ACCOUNT_ERROR });
     try {
       const commit = await run(operation.signal);
-      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) return false;
+      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) {
+        return refusedLocally(operation.signal.aborted ? "cancelled" : "superseded", null);
+      }
       commit();
       // A concurrent caller refused by the busy guard above recorded its
       // message against an action that has now succeeded. Leaving it would show
       // a failure on an idle surface that did exactly what was asked.
-      patchAccountState({ errorMessage: null });
-      return true;
+      patchAccountState(NO_ACCOUNT_ERROR);
+      return { status: "committed" };
     } catch (error) {
-      if (operation.signal.aborted) return false;
+      if (operation.signal.aborted) return refusedLocally("cancelled", null);
       if (isSessionFailure(error)) {
         await this.#expireSessionHandled();
-        return false;
+        return refused("session-expired", error);
       }
-      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) return false;
-      patchAccountState({ errorMessage: errorMessage(error) || null });
-      return false;
+      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) {
+        return refused("superseded", error);
+      }
+      patchAccountState(accountErrorPatch(error));
+      return refused("request-failed", error);
     } finally {
       if (this.#accountOperation === operation) {
         this.#accountOperation = null;
@@ -690,6 +905,12 @@ class HostedHubController {
 
   #clearAccountSurface(): void {
     this.#totpEnrollmentFence.bump();
+    // The account is going away and `initialState` takes the codes with it, so
+    // a rotation still in flight must not repopulate the slot behind the
+    // teardown, and any surviving claim must not later "release" codes that
+    // are already gone into a fresh account's display.
+    this.#recoveryCodesFence.bump();
+    this.#recoveryCodesClaimed = false;
     this.#passkeysOperation?.abort();
     this.#passkeysOperation = null;
     this.#passkeysPromise = null;
@@ -717,6 +938,10 @@ class HostedHubController {
     this.#browserSuspendPromise = null;
     this.#browserLifecycleGeneration += 1;
     this.#clearAccountSurface();
+    // Claims are held by surfaces, not by the session, so only a full reset
+    // drops them — otherwise a test's leftover claim would keep the next test's
+    // rotation "displayed".
+    this.#recoveryCodesClaims = 0;
     getHostedHubApi().clearSessionMaterial();
     hostedHubStore.setState(initialState, true);
   }

@@ -38,7 +38,7 @@ const { activateHostedNode, deactivateHostedNode, suspendHostedNode, resetRelayA
   });
 vi.mock("./environment", () => ({ activateHostedNode, deactivateHostedNode, suspendHostedNode }));
 
-import { HostedHubApiError, type HostedHubApi } from "./api";
+import { HostedHubApiError, STEP_UP_REQUIRED_CODE, type HostedHubApi } from "./api";
 import {
   configureHostedRuntime,
   type HostedNodeLifecycle,
@@ -48,6 +48,7 @@ import {
   HOSTED_ACCOUNT_BUSY_MESSAGE,
   HOSTED_ACCOUNT_SIGNED_OUT_MESSAGE,
   HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,
+  HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE,
   hostedAccountStore,
   hostedHubController,
   hostedHubStore,
@@ -1189,6 +1190,22 @@ describe("hosted account management state", () => {
     await hostedHubController.bootstrap();
   }
 
+  let claims: Array<() => void> = [];
+  afterEach(() => {
+    for (const release of claims) release();
+    claims = [];
+  });
+
+  /**
+   * Stand in for a live recovery-code surface, and release it at the end of the
+   * test. A rotation only publishes while one of these is live.
+   */
+  function claimRecoveryCodes(): () => void {
+    const release = hostedHubController.claimRecoveryCodes();
+    claims.push(release);
+    return release;
+  }
+
   it("loads the account's passkeys and deduplicates concurrent reads", async () => {
     await authenticate();
     const listPasskeys = vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
@@ -1388,6 +1405,7 @@ describe("hosted account management state", () => {
 
   it("clears a concurrent refusal once the action it refused has succeeded", async () => {
     await authenticate();
+    claimRecoveryCodes();
     let release: ((value: ReadonlyArray<string>) => void) | null = null;
     vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockImplementation(
       () =>
@@ -1442,7 +1460,10 @@ describe("hosted account management state", () => {
       new HostedHubApiError("session_invalid", 401),
     );
 
-    await expect(hostedHubController.addPasskey({ passkeyLabel: null })).resolves.toBeUndefined();
+    await expect(hostedHubController.addPasskey({ passkeyLabel: null })).resolves.toMatchObject({
+      status: "refused",
+      reason: "session-expired",
+    });
     expect(hostedHubStore.getState().accountStatus).toBe("session-expired");
   });
 
@@ -1479,6 +1500,7 @@ describe("hosted account management state", () => {
 
   it("surfaces regenerated recovery codes and keeps them out of the account store", async () => {
     await authenticate();
+    claimRecoveryCodes();
     vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockResolvedValue([
       "recovery-sensitive-canary",
     ]);
@@ -1498,6 +1520,7 @@ describe("hosted account management state", () => {
 
   it("drops the account surface and any displayed codes when the account clears", async () => {
     await authenticate();
+    claimRecoveryCodes();
     vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
     vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockResolvedValue([
       "recovery-sensitive-canary",
@@ -1761,6 +1784,7 @@ describe("hosted account management state", () => {
 
   it("clears held secrets when sign-in is abandoned", async () => {
     await authenticate();
+    claimRecoveryCodes();
     vi.spyOn(hostedHubApi, "beginTotpEnrollment").mockResolvedValue({
       secretBase32: "TOTPSECRETSENSITIVECANARY",
       provisioningUri: "otpauth://totp/Ryco:ada?secret=TOTPSECRETSENSITIVECANARY",
@@ -1807,7 +1831,11 @@ describe("hosted account management state", () => {
       new HostedHubApiError("session_invalid", 401),
     );
 
-    await expect(hostedHubController.revokeTotp()).resolves.toBeUndefined();
+    await expect(hostedHubController.revokeTotp()).resolves.toMatchObject({
+      status: "refused",
+      reason: "session-expired",
+      errorCode: "session_invalid",
+    });
 
     expect(hostedHubStore.getState().accountStatus).toBe("session-expired");
     expect(hostedAccountStore.getState()).toEqual(hostedAccountStore.getInitialState());
@@ -1891,6 +1919,7 @@ describe("hosted account management state", () => {
 
   it("threads the step-up code onto a recovery-code rotation", async () => {
     await authenticate();
+    claimRecoveryCodes();
     const regenerate = vi
       .spyOn(hostedHubApi, "regenerateRecoveryCodes")
       .mockResolvedValue(["fresh"]);
@@ -1899,5 +1928,309 @@ describe("hosted account management state", () => {
 
     expect(regenerate).toHaveBeenCalledWith({ totpCode: "123456" }, expect.anything());
     expect(hostedHubStore.getState().recoveryCodes).toEqual(["fresh"]);
+  });
+
+  // --- G1: the action's own outcome, not a re-read of shared state ------------
+
+  it("reports a committed action on its own outcome", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "setPassword").mockResolvedValue();
+
+    await expect(hostedHubController.setPassword({ password: "pw" })).resolves.toEqual({
+      status: "committed",
+    });
+  });
+
+  it("reports a cancelled action as refused, not as an absent error", async () => {
+    await authenticate();
+    // The bug this exists to stop: a surface that infers success from
+    // `errorMessage === null` after the await reports an *abandoned* password
+    // change as a completed one. The message is deliberately absent — a user
+    // who cancelled did not fail at anything — so only the outcome can say.
+    vi.spyOn(hostedHubApi, "setPassword").mockImplementation(
+      (_input, signal) =>
+        new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => {
+            const error = new Error("aborted");
+            error.name = "AbortError";
+            reject(error);
+          });
+        }),
+    );
+
+    const pending = hostedHubController.setPassword({ password: "pw" });
+    hostedHubController.cancelAccountAction();
+    const outcome = await pending;
+
+    expect(hostedAccountStore.getState().errorMessage).toBeNull();
+    expect(outcome).toEqual({
+      status: "refused",
+      reason: "cancelled",
+      errorCode: null,
+      wireErrorCode: null,
+      inferredErrorCode: false,
+      errorMessage: null,
+    });
+  });
+
+  it("names the refusal when an action never reached the Hub", async () => {
+    const signedOut = await hostedHubController.removePassword();
+    expect(signedOut).toMatchObject({ status: "refused", reason: "signed-out", errorCode: null });
+
+    await authenticate();
+    let release: (() => void) | null = null;
+    vi.spyOn(hostedHubApi, "setPassword").mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    vi.spyOn(hostedHubApi, "removePassword").mockResolvedValue();
+
+    const pending = hostedHubController.setPassword({ password: "pw" });
+    const busy = await hostedHubController.removePassword();
+    expect(busy).toMatchObject({ status: "refused", reason: "busy", errorCode: null });
+
+    release?.();
+    await pending;
+  });
+
+  it("reports an enrolment whose confirming read failed as committed", async () => {
+    await authenticate();
+    // The duplicate-credential bug: the credential *is* enrolled — the Hub
+    // verified the ceremony — and only the confirming re-read failed. A surface
+    // told "failed" leaves its dialog open and the user enrols a second one.
+    vi.spyOn(hostedHubApi, "addPasskey").mockResolvedValue({ passkey, confirmed: true });
+    vi.spyOn(hostedHubApi, "listPasskeys").mockRejectedValue(
+      new HostedHubApiError("unavailable", 0),
+    );
+
+    const outcome = await hostedHubController.addPasskey({ passkeyLabel: null });
+
+    expect(outcome).toEqual({ status: "committed", confirmation: "unverified", passkey });
+    // Still distinguishable from a real failure, which never commits.
+    expect(hostedAccountStore.getState().passkeysStatus).toBe("stale");
+  });
+
+  it("separates a confirmed enrolment, an unvouched one, and a refused one", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "addPasskey").mockResolvedValue({ passkey, confirmed: true });
+    vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
+    await expect(hostedHubController.addPasskey({ passkeyLabel: null })).resolves.toEqual({
+      status: "committed",
+      confirmation: "confirmed",
+      passkey,
+    });
+
+    vi.spyOn(hostedHubApi, "addPasskey").mockResolvedValue({ passkey: null, confirmed: false });
+    vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([]);
+    await expect(hostedHubController.addPasskey({ passkeyLabel: null })).resolves.toEqual({
+      status: "committed",
+      confirmation: "missing",
+      passkey: null,
+    });
+    expect(hostedAccountStore.getState().errorMessage).toBe(HOSTED_PASSKEY_UNCONFIRMED_MESSAGE);
+
+    vi.spyOn(hostedHubApi, "addPasskey").mockRejectedValue(
+      new HostedHubApiError("browser_only_transport", 400),
+    );
+    await expect(hostedHubController.addPasskey({ passkeyLabel: null })).resolves.toMatchObject({
+      status: "refused",
+      reason: "request-failed",
+      errorCode: "browser_only_transport",
+    });
+  });
+
+  // --- G2: the code, not the copy --------------------------------------------
+
+  it("publishes the error code beside the message and marks an inferred one", async () => {
+    await authenticate();
+    // What the api layer produces for a bare 403 on a step-up route: a
+    // synthesised code, with the wire code kept alongside it.
+    vi.spyOn(hostedHubApi, "setPassword").mockRejectedValue(
+      new HostedHubApiError(STEP_UP_REQUIRED_CODE, 403, undefined, "set-password", "forbidden"),
+    );
+
+    const outcome = await hostedHubController.setPassword({ password: "pw" });
+
+    expect(outcome).toEqual({
+      status: "refused",
+      reason: "request-failed",
+      errorCode: STEP_UP_REQUIRED_CODE,
+      wireErrorCode: "forbidden",
+      inferredErrorCode: true,
+      errorMessage: "Enter a current code from your authenticator app to confirm this change.",
+    });
+    expect(hostedAccountStore.getState()).toMatchObject({
+      errorCode: STEP_UP_REQUIRED_CODE,
+      errorCodeInferred: true,
+    });
+  });
+
+  it("keeps the code in step with the message, and never leaves one behind", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "removePassword").mockRejectedValue(
+      new HostedHubApiError("rate_limited", 429),
+    );
+    await hostedHubController.removePassword();
+    expect(hostedAccountStore.getState()).toMatchObject({
+      errorMessage: "Too many attempts. Wait briefly and try again.",
+      errorCode: "rate_limited",
+      errorCodeInferred: false,
+    });
+
+    // A message the runtime authored itself has no Hub code behind it. Leaving
+    // the previous code standing would point a branch at an error that is not
+    // the one being shown — a stale `step_up_required` under a "still in
+    // progress" message renders a TOTP prompt for nothing.
+    //
+    // The code has to be written by something *other* than the account action
+    // that is holding the mutex, or starting that action would have cleared it
+    // and the assertion would prove nothing. A concurrent passkey read is
+    // exactly that.
+    let release: (() => void) | null = null;
+    vi.spyOn(hostedHubApi, "setPassword").mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const pending = hostedHubController.setPassword({ password: "pw" });
+    vi.spyOn(hostedHubApi, "listPasskeys").mockRejectedValue(
+      new HostedHubApiError("rate_limited", 429),
+    );
+    await hostedHubController.refreshPasskeys({ force: true });
+    expect(hostedAccountStore.getState()).toMatchObject({
+      passkeysStatus: "stale",
+      errorCode: "rate_limited",
+    });
+
+    await hostedHubController.removePassword();
+    expect(hostedAccountStore.getState()).toMatchObject({
+      errorMessage: HOSTED_ACCOUNT_BUSY_MESSAGE,
+      errorCode: null,
+      errorCodeInferred: false,
+    });
+
+    release?.();
+    await pending;
+    expect(hostedAccountStore.getState()).toMatchObject({
+      errorMessage: null,
+      errorCode: null,
+      errorCodeInferred: false,
+    });
+  });
+
+  // --- G3: the runtime owns the one-shot secret's lifetime -------------------
+
+  it("drops a rotation that lands with no live claimant", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockResolvedValue([
+      "recovery-sensitive-canary",
+    ]);
+
+    // No claim: a client that simply forgot cannot strand live credentials.
+    const outcome = await hostedHubController.regenerateRecoveryCodes();
+
+    expect(outcome).toEqual({ status: "committed", displayed: false });
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("recovery-sensitive-canary");
+    // The rotation still happened, so the user must be told their saved codes
+    // are dead rather than left believing they still work.
+    expect(hostedAccountStore.getState().errorMessage).toBe(
+      HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE,
+    );
+  });
+
+  it("drops a rotation whose claimant went away while it was in flight", async () => {
+    await authenticate();
+    const release = claimRecoveryCodes();
+    let settle: ((value: ReadonlyArray<string>) => void) | null = null;
+    vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        }),
+    );
+
+    const pending = hostedHubController.regenerateRecoveryCodes();
+    // The surface tears down before the Hub answers — the exact shape both
+    // clients shipped, where the late result landed in a slot nothing was
+    // watching and stayed there.
+    release();
+    settle?.(["recovery-sensitive-canary"]);
+    const outcome = await pending;
+
+    expect(outcome).toEqual({ status: "committed", displayed: false });
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("recovery-sensitive-canary");
+  });
+
+  it("clears claim-owned codes when the last claim is released", async () => {
+    await authenticate();
+    const first = claimRecoveryCodes();
+    const second = claimRecoveryCodes();
+    vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockResolvedValue([
+      "recovery-sensitive-canary",
+    ]);
+
+    await expect(hostedHubController.regenerateRecoveryCodes()).resolves.toEqual({
+      status: "committed",
+      displayed: true,
+    });
+    expect(hostedHubStore.getState().recoveryCodes).toEqual(["recovery-sensitive-canary"]);
+
+    // Two live surfaces must not clear each other's display.
+    first();
+    first();
+    expect(hostedHubStore.getState().recoveryCodes).toEqual(["recovery-sensitive-canary"]);
+
+    // The last one to leave clears — so a client that forgets
+    // `dismissRecoveryCodes` on one of its teardown paths is still covered.
+    second();
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("recovery-sensitive-canary");
+  });
+
+  it("leaves post-bootstrap codes alone when a claim is released", async () => {
+    // The legitimate publish-and-display flow: codes arrive with the new
+    // account and the root surface shows them. They are not claim-owned, so an
+    // unrelated claim's release must not wipe them out from under it.
+    vi.spyOn(hostedHubApi, "bootstrapOwner").mockResolvedValue({
+      ...sessionResponse,
+      recoveryCodes: ["bootstrap-code"],
+    });
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([]);
+    await hostedHubController.bootstrapOwner({
+      credential: "c",
+      displayName: "Ada",
+      passkeyLabel: null,
+    });
+    expect(hostedHubStore.getState().recoveryCodes).toEqual(["bootstrap-code"]);
+
+    claimRecoveryCodes()();
+
+    expect(hostedHubStore.getState().recoveryCodes).toEqual(["bootstrap-code"]);
+  });
+
+  it("fences an in-flight rotation against an explicit dismissal", async () => {
+    await authenticate();
+    claimRecoveryCodes();
+    let settle: ((value: ReadonlyArray<string>) => void) | null = null;
+    vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        }),
+    );
+
+    const pending = hostedHubController.regenerateRecoveryCodes();
+    hostedHubController.dismissRecoveryCodes();
+    settle?.(["recovery-sensitive-canary"]);
+    await pending;
+
+    // A user who dismissed the display must not have it reopened behind them.
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("recovery-sensitive-canary");
   });
 });
