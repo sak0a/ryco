@@ -17,7 +17,7 @@ import { SettingsRow } from "../settings/components/SettingsRow";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import {
   deriveHostedAccountManagementView,
-  teardownHostedRecoveryCodes,
+  leaseHostedRecoveryCodeDisplay,
   type HostedAccountPromptDraft,
 } from "./hostedAccountModel";
 import { HostedAccountPrompt } from "./HostedAccountPrompt";
@@ -72,28 +72,15 @@ export function HostedAccountRouteScreen() {
     void hostedHubController.refreshPasskeys();
   }, [hostedModeAvailable, signedIn]);
 
-  // Leaving the screen must not leave the account's shared TOTP key — or a set
-  // of live recovery codes — in the runtime's transient slots. The prompt's own
-  // close path drops the enrolment secret; this covers a back-swipe, a sheet
-  // dismissal, and a sign-out that unmounts underneath.
-  //
-  // The recovery-code half also outlives the unmount on purpose: a rotation
-  // still in flight commits its codes after this screen is gone, and
-  // `teardownHostedRecoveryCodes` stays subscribed just long enough to dismiss
-  // that late arrival rather than let the next visit render it.
-  useEffect(
-    () => () => {
-      hostedHubController.dismissTotpEnrollment();
-      teardownHostedRecoveryCodes({
-        readHubState: () => hostedHubStore.getState(),
-        readAccountState: () => hostedAccountStore.getState(),
-        subscribeHubState: (listener) => hostedHubStore.subscribe(listener),
-        subscribeAccountState: (listener) => hostedAccountStore.subscribe(listener),
-        dismissRecoveryCodes: () => hostedHubController.dismissRecoveryCodes(),
-      });
-    },
-    [],
-  );
+  // This screen displays the account's one-time recovery codes, and saying so
+  // is the whole of its involvement in their lifetime. The runtime publishes a
+  // rotation's result only if a lease was live when the user asked for it, so
+  // without this the "Generate new codes" row would rotate the codes and then
+  // be unable to show them. Releasing the lease destroys nothing — leaving the
+  // screen is not the user saying they have written the codes down, and the
+  // rotation has by then already killed the set they had. Both secrets go away
+  // on their own acknowledgements, or with the account.
+  useEffect(() => leaseHostedRecoveryCodeDisplay(hostedHubController), []);
 
   const view = deriveHostedAccountView({
     state,
