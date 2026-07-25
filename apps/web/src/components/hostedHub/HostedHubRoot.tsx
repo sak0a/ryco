@@ -23,6 +23,7 @@ import {
   useHostedNodeRouteOrchestrator,
   useRoutedHostedNode,
 } from "../../hostedHub/nodeRouteOrchestrator";
+import { useRecoveryCodeDisplayStore } from "../../hostedHub/recoveryCodeDisplay";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { useHostedBrowserLifecycle } from "../../hostedHub/useHostedBrowserLifecycle";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
@@ -42,6 +43,7 @@ export function HostedHubRoot() {
   const transportStatus = useHostedHubStore((state) => state.transportStatus);
   const sessionEstablished = useHostedHubStore((state) => state.sessionEstablished);
   const errorMessage = useHostedHubStore((state) => state.errorMessage);
+  const recoveryCodeDisplayClaims = useRecoveryCodeDisplayStore((state) => state.claims);
   const routedNode = useRoutedHostedNode();
   useHostedNodeRouteOrchestrator();
   // The single browser lifecycle owner, above the presentation-tier seam: the
@@ -49,7 +51,11 @@ export function HostedHubRoot() {
   useHostedBrowserLifecycle();
 
   if (accountStatus !== "authenticated") return <HostedAuthenticationSurface />;
-  if (recoveryCodes.length > 0) return <RecoveryCodesSurface />;
+  // The post-bootstrap "save your codes" step owns the viewport because at that
+  // point there is no shell to show it inside. Once a surface within the running
+  // app has claimed the display — account settings regenerating them — taking
+  // the viewport would tear that surface down mid-flow, so the claim wins.
+  if (recoveryCodes.length > 0 && recoveryCodeDisplayClaims === 0) return <RecoveryCodesSurface />;
   if (!selectedNode) {
     // A routed node segment is pending fail-closed validation: keep the UI on
     // a read-only restoring surface instead of flashing the directory. The

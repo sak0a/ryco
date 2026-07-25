@@ -13,6 +13,7 @@ import {
   RotateCcwIcon,
   ServerIcon,
   Settings2Icon,
+  UserRoundIcon,
 } from "lucide-react";
 
 import { type SettingsSectionId, useSettingsDialogStore } from "../../settingsDialogStore";
@@ -31,6 +32,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: ReadonlyArray<NavItem> = [
+  { id: "account", label: "Account", icon: UserRoundIcon },
   { id: "general", label: "General", icon: Settings2Icon },
   { id: "providers", label: "Providers", icon: BlocksIcon },
   { id: "opinionated-plugins", label: "Plugins", icon: PlugZapIcon },
@@ -55,12 +57,27 @@ const HOSTED_OWNER_SECTIONS = new Set<SettingsSectionId>([
   "statistics",
 ]);
 
+/**
+ * Sections that exist only in the hosted client. Account management is one:
+ * there is no Hub account to manage in the standard (local-server) mode, so the
+ * section is filtered out entirely rather than rendered empty.
+ */
+const HOSTED_ONLY_SECTIONS: ReadonlySet<SettingsSectionId> = new Set(["account"]);
+
+export function settingsSectionAvailable(section: SettingsSectionId, hosted: boolean): boolean {
+  return hosted || !HOSTED_ONLY_SECTIONS.has(section);
+}
+
 export function hostedSettingsSectionAllowed(
   section: SettingsSectionId,
   role: "viewer" | "operator" | "owner" | null,
 ): boolean {
   if (section === "connections") return false;
   if (section === "appearance") return true;
+  // Every signed-in account owns its own credentials, whatever role it holds on
+  // the nodes it can reach — and, unlike the node-scoped sections, the answer
+  // does not depend on a role snapshot being fresh.
+  if (section === "account") return true;
   if (section === "archived") return role !== null;
   return role === "owner" && HOSTED_OWNER_SECTIONS.has(section);
 }
@@ -71,6 +88,9 @@ const SECTIONS_WITH_RESTORE: ReadonlySet<SettingsSectionId> = new Set([
   "appearance",
 ]);
 
+const LazyAccountSettingsPanel = lazy(() =>
+  import("./AccountSettings").then((module) => ({ default: module.AccountSettingsPanel })),
+);
 const LazyProvidersSettingsPanel = lazy(() =>
   import("./ProvidersSettingsPanel").then((module) => ({
     default: module.ProvidersSettingsPanel,
@@ -131,6 +151,7 @@ function SectionPanel({ section }: { section: SettingsSectionId }) {
         </div>
       }
     >
+      {section === "account" ? <LazyAccountSettingsPanel /> : null}
       {section === "general" ? <GeneralSettingsPanel /> : null}
       {section === "providers" ? <LazyProvidersSettingsPanel /> : null}
       {section === "opinionated-plugins" ? <LazyOpinionatedPluginsSettingsPanel /> : null}
@@ -156,11 +177,11 @@ export function SettingsDialog() {
   const hostedTransportStatus = useHostedHubStore((state) => state.transportStatus);
   const hosted = isHostedHubMode();
   const roleFresh = hostedDirectoryStatus === "ready" && hostedTransportStatus === "online";
-  const visibleNavItems = hosted
-    ? NAV_ITEMS.filter((item) =>
-        hostedSettingsSectionAllowed(item.id, roleFresh ? hostedRole : null),
-      )
-    : NAV_ITEMS;
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) =>
+      settingsSectionAvailable(item.id, hosted) &&
+      (!hosted || hostedSettingsSectionAllowed(item.id, roleFresh ? hostedRole : null)),
+  );
   const effectiveSection = visibleNavItems.some((item) => item.id === section)
     ? section
     : (visibleNavItems[0]?.id ?? "appearance");

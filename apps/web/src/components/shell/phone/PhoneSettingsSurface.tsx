@@ -23,13 +23,17 @@ import {
   RotateCcwIcon,
   ServerIcon,
   Settings2Icon,
+  UserRoundIcon,
   XIcon,
 } from "lucide-react";
 
 import { type SettingsSectionId, useSettingsDialogStore } from "../../../settingsDialogStore";
 import { isHostedHubMode } from "../../../env";
 import { useHostedHubStore } from "../../../hostedHub/state";
-import { hostedSettingsSectionAllowed } from "../../settings/SettingsDialog";
+import {
+  hostedSettingsSectionAllowed,
+  settingsSectionAvailable,
+} from "../../settings/SettingsDialog";
 import {
   ArchivedThreadsPanel,
   GeneralSettingsPanel,
@@ -57,6 +61,7 @@ interface PhoneSettingsItem {
  * in this delivery step.
  */
 const GENERAL_ITEMS: ReadonlyArray<PhoneSettingsItem> = [
+  { id: "account", label: "Account", icon: UserRoundIcon },
   { id: "general", label: "General", icon: Settings2Icon },
   { id: "providers", label: "Providers", icon: BlocksIcon },
   { id: "opinionated-plugins", label: "Plugins", icon: PlugZapIcon },
@@ -84,6 +89,11 @@ const SECTIONS_WITH_RESTORE: ReadonlySet<SettingsSectionId> = new Set([
 /** The closed-store default; used to detect open-to-section deep links. */
 const DEFAULT_SECTION: SettingsSectionId = "general";
 
+const LazyAccountSettingsPanel = lazy(() =>
+  import("../../settings/AccountSettings").then((module) => ({
+    default: module.AccountSettingsPanel,
+  })),
+);
 const LazyProvidersSettingsPanel = lazy(() =>
   import("../../settings/ProvidersSettingsPanel").then((module) => ({
     default: module.ProvidersSettingsPanel,
@@ -139,6 +149,7 @@ function SectionPanel({ section }: { section: SettingsSectionId }) {
         </div>
       }
     >
+      {section === "account" ? <LazyAccountSettingsPanel /> : null}
       {section === "general" ? <GeneralSettingsPanel /> : null}
       {section === "providers" ? <LazyProvidersSettingsPanel /> : null}
       {section === "opinionated-plugins" ? <LazyOpinionatedPluginsSettingsPanel /> : null}
@@ -204,7 +215,8 @@ export function PhoneSettingsSurface() {
   const roleFresh = hostedDirectoryStatus === "ready" && hostedTransportStatus === "online";
   const sectionAllowed = useCallback(
     (id: SettingsSectionId) =>
-      !hosted || hostedSettingsSectionAllowed(id, roleFresh ? hostedRole : null),
+      settingsSectionAvailable(id, hosted) &&
+      (!hosted || hostedSettingsSectionAllowed(id, roleFresh ? hostedRole : null)),
     [hosted, hostedRole, roleFresh],
   );
   const generalItems = GENERAL_ITEMS.filter((item) => sectionAllowed(item.id));
