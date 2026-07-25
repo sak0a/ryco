@@ -1661,19 +1661,30 @@ describe("hosted account management state", () => {
     await authenticate();
     const revoked = { ...passkey, revokedAt: 40, revocationReasonCode: "owner_revoked" } as const;
     const revokePasskey = vi.spyOn(hostedHubApi, "revokePasskey").mockResolvedValue();
+
+    // A read is ALREADY IN FLIGHT when the revoke lands. It was issued against
+    // the pre-revoke state and resolves with the stale list. If the confirming
+    // read joined it instead of forcing its own, the surface would settle on a
+    // list that still shows the credential as active — evidence the revoke had
+    // failed, for a revoke that succeeded. Asserting only the call count does
+    // not catch that: the count is 2 either way.
+    let releaseStaleRead: ((value: ReadonlyArray<typeof passkey>) => void) | null = null;
     const listPasskeys = vi
       .spyOn(hostedHubApi, "listPasskeys")
-      .mockResolvedValueOnce([passkey])
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseStaleRead = resolve;
+          }),
+      )
       .mockResolvedValue([revoked]);
 
-    await hostedHubController.refreshPasskeys();
-    expect(hostedAccountStore.getState().passkeys).toEqual([passkey]);
-
+    const stale = hostedHubController.refreshPasskeys();
     await hostedHubController.revokePasskey(passkey.id);
+    releaseStaleRead?.([passkey]);
+    await stale;
 
     expect(revokePasskey).toHaveBeenCalledWith(passkey.id, expect.anything());
-    // A revoke changes the list, so it is re-read rather than assumed — and the
-    // read is forced, so it cannot join one issued before the revoke.
     expect(listPasskeys).toHaveBeenCalledTimes(2);
     expect(hostedAccountStore.getState()).toMatchObject({
       passkeys: [revoked],
@@ -1681,6 +1692,96 @@ describe("hosted account management state", () => {
       actionStatus: "idle",
       errorMessage: null,
     });
+  });
+
+  it("does not publish a credential change whose session rotated under it", async () => {
+    // The fence on the SUCCESS path. `#accountAction` may only commit while the
+    // session that issued the request is still the authenticated one; a result
+    // that outlived its session must be dropped, not written. Without it a
+    // secret minted for one session lands in the state of another.
+    await authenticate();
+    vi.spyOn(hostedHubApi, "beginTotpEnrollment").mockImplementation(async () => {
+      hostedHubStore.setState({
+        session: { ...sessionResponse.session, id: "sess_bbbbbbbbbbbbbbbbbbbbbb" },
+      });
+      return {
+        secretBase32: "TOTPSECRETSENSITIVECANARY",
+        provisioningUri: "otpauth://totp/Ryco:ada?secret=TOTPSECRETSENSITIVECANARY",
+      };
+    });
+
+    await hostedHubController.beginTotpEnrollment();
+
+    expect(hostedHubStore.getState().totpEnrollment).toBeNull();
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("TOTPSECRETSENSITIVECANARY");
+  });
+
+  it("does not publish a credential failure whose session rotated under it", async () => {
+    // The same fence on the FAILURE path. An error belonging to a session that
+    // is no longer current must not be pinned onto the one that replaced it.
+    await authenticate();
+    vi.spyOn(hostedHubApi, "setPassword").mockImplementation(async () => {
+      hostedHubStore.setState({
+        session: { ...sessionResponse.session, id: "sess_bbbbbbbbbbbbbbbbbbbbbb" },
+      });
+      throw new HostedHubApiError("unavailable", 0);
+    });
+
+    await hostedHubController.setPassword({ password: "pw" });
+
+    expect(hostedAccountStore.getState()).toMatchObject({
+      actionStatus: "idle",
+      errorMessage: null,
+    });
+  });
+
+  it("drops an enrolment secret that arrives after the screen was dismissed", async () => {
+    // A user who backs out while the request is in flight must not have the
+    // account's shared key pushed back into state when it lands.
+    await authenticate();
+    let release: ((value: { secretBase32: string; provisioningUri: string }) => void) | null = null;
+    vi.spyOn(hostedHubApi, "beginTotpEnrollment").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const pending = hostedHubController.beginTotpEnrollment();
+    hostedHubController.dismissTotpEnrollment();
+    release?.({
+      secretBase32: "TOTPSECRETSENSITIVECANARY",
+      provisioningUri: "otpauth://totp/Ryco:ada?secret=TOTPSECRETSENSITIVECANARY",
+    });
+    await pending;
+
+    expect(hostedHubStore.getState().totpEnrollment).toBeNull();
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("TOTPSECRETSENSITIVECANARY");
+  });
+
+  it("clears held secrets when sign-in is abandoned", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "beginTotpEnrollment").mockResolvedValue({
+      secretBase32: "TOTPSECRETSENSITIVECANARY",
+      provisioningUri: "otpauth://totp/Ryco:ada?secret=TOTPSECRETSENSITIVECANARY",
+    });
+    vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockResolvedValue([
+      "recovery-sensitive-canary",
+    ]);
+    await hostedHubController.beginTotpEnrollment();
+    await hostedHubController.regenerateRecoveryCodes();
+
+    hostedHubController.cancelAuthentication();
+
+    // A signed-out store still holding either would contradict the single rule
+    // this state has about secret material.
+    expect(hostedHubStore.getState()).toMatchObject({
+      accountStatus: "signed-out",
+      recoveryCodes: [],
+      totpEnrollment: null,
+    });
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("TOTPSECRETSENSITIVECANARY");
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("recovery-sensitive-canary");
   });
 
   it("does not re-read the passkey list when a revoke was refused", async () => {

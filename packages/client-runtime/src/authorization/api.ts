@@ -78,6 +78,13 @@ const MAX_TOTP_PROVISIONING_URI_LENGTH = 2048;
 const TOTP_PROVISIONING_URI_SCHEME = "otpauth://";
 
 /**
+ * How long any single Hub request may take before this client gives up. Covers
+ * the network round trip only — a passkey ceremony runs outside `#request` and
+ * is bounded by the platform sheet plus `cancelAccountAction`.
+ */
+const REQUEST_DEADLINE_MS = 30_000;
+
+/**
  * Hub routes that only accept a browser transport: they require an `Origin` in
  * the Hub's configured WebAuthn origin list, which a native socket cannot
  * present. The bearer branch below still derives these paths for owner
@@ -103,22 +110,129 @@ function isBrowserOnlyPath(pathname: string): boolean {
   return BROWSER_ONLY_BEARER_PATH_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
+/**
+ * Which account operation a request belongs to.
+ *
+ * The Hub's error body is **only** `{ error: <code> }` — the precise reason is
+ * recorded in its audit log and never put on the wire. So a bare `forbidden` or
+ * `conflict` is not self-describing, and the only thing that makes it
+ * actionable is knowing which route produced it. Each of these intents narrows a
+ * generic code to exactly one meaning on that route; the narrowing is read off
+ * the Hub's error paths, not guessed.
+ */
+export type HostedAccountIntent =
+  | "set-password"
+  | "remove-password"
+  | "begin-totp-enrollment"
+  | "confirm-totp-enrollment"
+  | "revoke-totp"
+  | "request-email-verification"
+  | "revoke-passkey"
+  | "add-passkey"
+  | "regenerate-recovery-codes";
+
+/**
+ * The operations where a `403` can only be the fallback-session step-up gate.
+ *
+ * On these routes the Hub raises `forbidden` from exactly one place: a session
+ * minted from a password, recovery code, or email link that did not present a
+ * valid current TOTP code where TOTP is enrolled. The owner-role check that
+ * also raises `forbidden` is not reachable here — it guards the admin routes.
+ * So the remap below is exact rather than a heuristic.
+ */
+const STEP_UP_INTENTS: ReadonlySet<HostedAccountIntent> = new Set([
+  "set-password",
+  "remove-password",
+  "revoke-totp",
+  "request-email-verification",
+  "add-passkey",
+  "regenerate-recovery-codes",
+]);
+
+/** The operations where a `403` can only be "this needs a passkey session". */
+const PASSKEY_SESSION_INTENTS: ReadonlySet<HostedAccountIntent> = new Set([
+  "begin-totp-enrollment",
+  "confirm-totp-enrollment",
+]);
+
+/** A step-up is required but was not satisfied. Distinguishable, and actionable. */
+export const STEP_UP_REQUIRED_CODE = "step_up_required";
+
+/** The action requires a passkey-authenticated session, not a fallback one. */
+export const PASSKEY_SESSION_REQUIRED_CODE = "passkey_session_required";
+
+/**
+ * Narrow a wire code to what it can actually mean on the route that produced it.
+ * Returns the code unchanged when there is nothing to narrow.
+ */
+function narrowCode(code: string, intent: HostedAccountIntent | undefined): string {
+  if (code !== "forbidden" || intent === undefined) return code;
+  if (STEP_UP_INTENTS.has(intent)) return STEP_UP_REQUIRED_CODE;
+  if (PASSKEY_SESSION_INTENTS.has(intent)) return PASSKEY_SESSION_REQUIRED_CODE;
+  return code;
+}
+
 export class HostedHubApiError extends Error {
   readonly code: string;
   readonly status: number;
   readonly retryAfterMs: number | undefined;
+  /** The account operation this error came from, when it had one. */
+  readonly intent: HostedAccountIntent | undefined;
 
-  constructor(code: string, status: number, retryAfterMs?: number) {
-    super(messageForCode(code));
+  constructor(code: string, status: number, retryAfterMs?: number, intent?: HostedAccountIntent) {
+    super(messageForCode(code, intent));
     this.name = "HostedHubApiError";
     this.code = code;
     this.status = status;
     this.retryAfterMs = retryAfterMs;
+    this.intent = intent;
   }
 }
 
-function messageForCode(code: string): string {
+/**
+ * Route-scoped messages for the codes whose generic text would be actively
+ * misleading. Each mapping corresponds to exactly one Hub error path on that
+ * route, so none of these is a guess about which of several causes applied.
+ */
+function intentMessage(code: string, intent: HostedAccountIntent): string | null {
+  if (code === "conflict") {
+    switch (intent) {
+      case "set-password":
+        return "That password has appeared in a known breach. Choose a different one.";
+      case "revoke-passkey":
+        return "That is the only passkey left on this account. Add another before removing it.";
+      case "begin-totp-enrollment":
+        return "Two-factor authentication is already set up on this account.";
+      case "confirm-totp-enrollment":
+        return "This setup is no longer in progress. Start again.";
+      case "request-email-verification":
+        return "That email address is already in use.";
+      default:
+        return null;
+    }
+  }
+  if (code === "authentication_failed" && intent === "confirm-totp-enrollment") {
+    // The generic text names a passkey; this route only ever rejects a code.
+    return "That code is not correct. Check your authenticator app and try again.";
+  }
+  if (code === "not_found" && intent === "revoke-passkey") {
+    return "That passkey is no longer on this account.";
+  }
+  return null;
+}
+
+function messageForCode(code: string, intent?: HostedAccountIntent): string {
+  const scoped = intent === undefined ? null : intentMessage(code, intent);
+  if (scoped !== null) return scoped;
   switch (code) {
+    case STEP_UP_REQUIRED_CODE:
+      return "Enter a current code from your authenticator app to confirm this change.";
+    case PASSKEY_SESSION_REQUIRED_CODE:
+      return "Sign in with a passkey on this device to change two-factor settings.";
+    case "invalid_credential_id":
+      return "That passkey could not be identified.";
+    case "timeout":
+      return "The request took too long. Check your connection and try again.";
     case "authentication_failed":
       return "The passkey could not be verified.";
     case "registration_unavailable":
@@ -263,14 +377,18 @@ export interface HostedAccountStepUp {
 /**
  * The step-up member of a request body, or nothing.
  *
- * An absent or empty code omits the member rather than sending `""`: the Hub's
- * bodies are strict, an untouched input field is not a submitted code, and the
- * distinction is what lets the Hub answer "a code is required" instead of "that
- * code is wrong".
+ * A code that is absent, empty, or only whitespace omits the member entirely.
+ * This is **not** because the two outcomes differ at the Hub — they do not: the
+ * step-up gate answers "denied" identically for a missing code and a wrong one,
+ * so omitting buys no better error. It is because an untouched input field is
+ * not a submitted code, and sending `" "` as though it were one turns a user who
+ * has not typed anything yet into a failed attempt.
  */
 function stepUpBody(input: HostedAccountStepUp | undefined): { readonly totpCode?: string } {
   const totpCode = input?.totpCode;
-  return typeof totpCode === "string" && totpCode.length > 0 ? { totpCode } : {};
+  if (typeof totpCode !== "string") return {};
+  const trimmed = totpCode.trim();
+  return trimmed.length > 0 ? { totpCode } : {};
 }
 
 /** The bounded TOTP enrolment secret, or `null` when the value is not one. */
@@ -289,16 +407,31 @@ function totpProvisioningUriValue(value: unknown): string | null {
     : null;
 }
 
-async function responseJson(response: {
-  readonly ok: boolean;
-  readonly status: number;
-  readonly json: () => Promise<unknown>;
-}): Promise<Record<string, unknown>> {
+/**
+ * The Hub's error codes are short snake_case tokens. Anything else is not a code
+ * this client knows how to act on, and an unbounded string from a malformed or
+ * hostile response has no business becoming an error `code` that a surface may
+ * switch on or render.
+ */
+const ERROR_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
+function errorCodeValue(value: unknown): string {
+  return typeof value === "string" && ERROR_CODE_PATTERN.test(value) ? value : "unavailable";
+}
+
+async function responseJson(
+  response: {
+    readonly ok: boolean;
+    readonly status: number;
+    readonly json: () => Promise<unknown>;
+  },
+  intent?: HostedAccountIntent,
+): Promise<Record<string, unknown>> {
   let parsed: unknown;
   try {
     parsed = await response.json();
   } catch {
-    throw new HostedHubApiError("invalid_response", response.status);
+    throw new HostedHubApiError("invalid_response", response.status, undefined, intent);
   }
   const body = objectValue(parsed);
   if (!response.ok) {
@@ -310,9 +443,10 @@ async function responseJson(response: {
         ? body.retryAfterMs
         : undefined;
     throw new HostedHubApiError(
-      typeof body.error === "string" ? body.error : "unavailable",
+      narrowCode(errorCodeValue(body.error), intent),
       response.status,
       retryAfterMs,
+      intent,
     );
   }
   return body;
@@ -494,6 +628,13 @@ export class HostedHubApi {
    * {@link listPasskeys} read rather than report success on the strength of the
    * ceremony alone.
    *
+   * The options body member is `label`, not `passkeyLabel`: the two pre-session
+   * ceremonies take `passkeyLabel`, this one does not, and the Hub parses it
+   * strictly — an unrecognised member is a `400` before the ceremony starts. A
+   * blank label is omitted rather than sent as `""`, which the Hub also rejects.
+   *
+   * **This route rotates the session** — see {@link #finishRotatedSession}.
+   *
    * `totpCode` is the optional fallback-session step-up (see
    * {@link HostedAccountStepUp}); it rides the *verify* call only, never the
    * options call, and is omitted entirely when absent.
@@ -502,12 +643,14 @@ export class HostedHubApi {
     input: { readonly passkeyLabel: string | null } & HostedAccountStepUp,
     signal?: AbortSignal,
   ): Promise<HostedAddPasskeyResult> {
+    const label = typeof input.passkeyLabel === "string" ? input.passkeyLabel.trim() : null;
     return this.#registerPasskey(
       "/api/account/passkeys/registration/options",
       "/api/account/passkeys/registration/verify",
-      { passkeyLabel: input.passkeyLabel },
+      { label: label === null || label.length === 0 ? null : label },
       {
         authenticated: true,
+        intent: "add-passkey",
         verifyExtra: stepUpBody(input),
         ...(signal ? { signal } : {}),
         finish: (value) => this.#finishAddPasskey(value),
@@ -518,22 +661,11 @@ export class HostedHubApi {
   /**
    * **Rotate** the account's recovery codes and return the new set.
    *
-   * This is a mutation, not a read. `/api/account/recovery-codes` is confirmed
-   * registered and confirmed to reject `GET` (405), so the client issues
-   * `POST`; the approved spec calls the capability "fetch/regenerate"; and the
-   * `recoveryCodes` member matches the one the *registration verify* responses
-   * carry, which are freshly minted codes. Every one of those points to a
-   * regenerate, and the Hub's true semantics cannot be settled from outside an
-   * authenticated session — so the client takes the mutating reading, which is
-   * the only safe one on a recovery surface.
+   * This is a mutation, not a read: it mints a fresh set and invalidates any
+   * codes the user previously saved. Run it only from an explicit, confirmed
+   * user action — never on mount, focus, retry, or reconnect.
    *
-   * Callers must treat this as **invalidating any codes the user previously
-   * saved**: run it only from an explicit, confirmed user action, never on
-   * mount, focus, retry, or reconnect.
-   *
-   * It is confirmed reachable over the bearer transport: a bare `POST` is
-   * refused by the browser-origin gate (403), while the same `POST` carrying an
-   * `Authorization: DPoP` header reaches authentication instead (401).
+   * **It also rotates the session** — see {@link #finishRotatedSession}.
    *
    * The codes are returned to the caller and never persisted, logged, or placed
    * in an error by this client. Showing them once is the caller's contract; the
@@ -547,10 +679,14 @@ export class HostedHubApi {
       method: "POST",
       body: stepUpBody(input),
       csrf: true,
+      intent: "regenerate-recovery-codes",
       ...(signal ? { signal } : {}),
     });
     const recoveryCodes = boundedRecoveryCodesValue(result.recoveryCodes);
     if (!recoveryCodes) throw new HostedHubApiError("invalid_response", 502);
+    // Adopt the replacement session *after* the payload validates, so a response
+    // this client cannot read never displaces working session material.
+    this.#finishRotatedSession(result);
     return recoveryCodes;
   }
 
@@ -572,6 +708,7 @@ export class HostedHubApi {
       "/api/account/password",
       { password: input.password, ...stepUpBody(input) },
       signal,
+      "set-password",
     );
   }
 
@@ -580,7 +717,12 @@ export class HostedHubApi {
    * place. `POST /api/account/password/remove` → `{ ok: true }`.
    */
   async removePassword(input?: HostedAccountStepUp, signal?: AbortSignal): Promise<void> {
-    await this.#acknowledgedMutation("/api/account/password/remove", stepUpBody(input), signal);
+    await this.#acknowledgedMutation(
+      "/api/account/password/remove",
+      stepUpBody(input),
+      signal,
+      "remove-password",
+    );
   }
 
   /**
@@ -602,6 +744,7 @@ export class HostedHubApi {
       method: "POST",
       body: {},
       csrf: true,
+      intent: "begin-totp-enrollment",
       ...(signal ? { signal } : {}),
     });
     const secretBase32 = totpSecretValue(result.secretBase32);
@@ -626,12 +769,18 @@ export class HostedHubApi {
       "/api/account/totp/enrollment/verify",
       { code: input.code },
       signal,
+      "confirm-totp-enrollment",
     );
   }
 
   /** Remove TOTP from the account. `POST /api/account/totp/revoke` → `{ ok: true }`. */
   async revokeTotp(input?: HostedAccountStepUp, signal?: AbortSignal): Promise<void> {
-    await this.#acknowledgedMutation("/api/account/totp/revoke", stepUpBody(input), signal);
+    await this.#acknowledgedMutation(
+      "/api/account/totp/revoke",
+      stepUpBody(input),
+      signal,
+      "revoke-totp",
+    );
   }
 
   /**
@@ -650,6 +799,7 @@ export class HostedHubApi {
       "/api/account/email/verification",
       { email: input.email, ...stepUpBody(input) },
       signal,
+      "request-email-verification",
     );
   }
 
@@ -671,9 +821,17 @@ export class HostedHubApi {
    */
   async revokePasskey(credentialId: string, signal?: AbortSignal): Promise<void> {
     if (!PASSKEY_CREDENTIAL_ID_PATTERN.test(credentialId)) {
-      throw new HostedHubApiError("invalid_request", 400);
+      // A distinct code: this client refused its own input, so blaming the Hub
+      // for a malformed *response* would send a caller looking in the wrong
+      // place entirely.
+      throw new HostedHubApiError("invalid_credential_id", 400);
     }
-    await this.#acknowledgedMutation(`/api/account/passkeys/${credentialId}/revoke`, {}, signal);
+    await this.#acknowledgedMutation(
+      `/api/account/passkeys/${credentialId}/revoke`,
+      {},
+      signal,
+      "revoke-passkey",
+    );
   }
 
   /**
@@ -685,16 +843,18 @@ export class HostedHubApi {
   async #acknowledgedMutation(
     pathname: string,
     body: Record<string, unknown>,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    intent: HostedAccountIntent,
   ): Promise<void> {
     const result = await this.#request(pathname, {
       method: "POST",
       body,
       csrf: true,
+      intent,
       ...(signal ? { signal } : {}),
     });
     if (Object.keys(result).length !== 1 || result.ok !== true) {
-      throw new HostedHubApiError("invalid_response", 502);
+      throw new HostedHubApiError("invalid_response", 502, undefined, intent);
     }
   }
 
@@ -710,6 +870,8 @@ export class HostedHubApi {
        * pre-session mint ceremony used by bootstrap and invitation redemption.
        */
       readonly authenticated: boolean;
+      /** Narrows generic Hub error codes for the account ceremony. */
+      readonly intent?: HostedAccountIntent;
       /**
        * Extra members merged into the *verify* body only. The pre-session mint
        * ceremonies pass nothing: their Hub bodies are strict `{ response }`, so
@@ -723,6 +885,7 @@ export class HostedHubApi {
     const transport = {
       csrf: options.authenticated,
       ...(options.authenticated ? {} : { dpop: "mint" as const }),
+      ...(options.intent ? { intent: options.intent } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
     };
     const challenge = await this.#request(optionsPath, {
@@ -770,38 +933,59 @@ export class HostedHubApi {
   }
 
   /**
+   * Adopt the session material a **rotating** account route returns.
+   *
+   * Adding a passkey and rotating recovery codes both mint a replacement session
+   * server-side and **revoke the one that made the request**. The response
+   * carries the replacement: a fresh `token` for a native session, a fresh
+   * `csrfToken` (plus `Set-Cookie`) for a browser one.
+   *
+   * Discarding it does not fail safe, it fails *certainly*:
+   *
+   * - **Bearer** — the enclave keeps a revoked token, so the very next
+   *   authenticated call is a `401`. For add-passkey that next call is the
+   *   controller's own confirming read, so the user is signed out for adding a
+   *   device, every time.
+   * - **Cookie** — `Set-Cookie` installs the new session but the stored CSRF
+   *   token belongs to the revoked one, so every later mutation is a `403`,
+   *   which `isSessionFailure` does not match. The session wedges until a
+   *   reload.
+   *
+   * The rule that matters is not "never adopt" but **"never adopt
+   * unvalidated"**. So the whole account/session payload is validated first, by
+   * the same {@link #accountAndSession} path `restoreSession` and every
+   * login/register verify already use, and the transport-specific material is
+   * demanded rather than sniffed: bearer requires a bounded `token`, cookie
+   * requires a non-empty `csrfToken`. A response this client cannot read is an
+   * `invalid_response` and displaces nothing.
+   */
+  #finishRotatedSession(value: Record<string, unknown>): void {
+    if (this.#isBearer) {
+      const { token } = this.#nativeSessionResponse(value);
+      this.#writeBearerToken(token);
+      return;
+    }
+    this.#sessionCredentials.writeCsrfToken(this.#sessionResponse(value).csrfToken);
+  }
+
+  /**
    * Complete an add-passkey ceremony on an already-authenticated session.
    *
-   * Unlike bootstrap and invitation registration this must **not** mint a
-   * session, and — on either transport — it **adopts no session material at
-   * all**. It is never demanded, never cleared, and never rotated:
+   * The replacement session is adopted first — see
+   * {@link #finishRotatedSession} — and only then is the enrolled credential
+   * projected. Ordering matters: if the payload does not validate, this throws
+   * before reporting an enrolment whose session the caller could not use.
    *
-   * - Demanding it (what `#finishLogin` does, via `#nativeSessionResponse` /
-   *   `#sessionResponse`) would reject a valid Hub response as
-   *   `invalid_response` and report a successful enrolment as a failure.
-   * - Clearing it would sign the user out for adding a credential.
-   * - **Rotating it would be worse than either.** The only verified way this
-   *   client learns session material is a complete, *validated* account/session
-   *   response — which is exactly what `restoreSession` and the login/register
-   *   verifies deliver, and what this route's body is not required to contain.
-   *   A bare `token` or `csrfToken` member here is part of no contract observed
-   *   on this route, and a length bound does not make an unverified value
-   *   correct: adopting a well-formed but wrong one replaces working session
-   *   material and every later authenticated call fails — 401 in bearer mode,
-   *   which `isSessionFailure` matches and which would expire a session that
-   *   was perfectly valid a moment ago; 403 in cookie mode, which it does not
-   *   match, wedging the session until a reload. Both are self-inflicted, and
-   *   neither is diagnosable from the surface.
+   * `confirmed` stays a tolerant read of the `passkey` member. The Hub does
+   * describe the credential it enrolled, but the controller's confirming list
+   * read is a second, independent check and there is no reason to turn a
+   * cosmetic omission into a failed enrolment.
    *
-   * Not adopting costs nothing in the case the Hub genuinely does rotate: the
-   * next `restoreSession` re-establishes the correct material through the
-   * validated path, and until then the failure is the Hub's own bounded error
-   * rather than one this client manufactured.
-   *
-   * No token and no CSRF value is read or returned; the caller only ever sees
-   * the bounded passkey view.
+   * No token and no CSRF value is returned; the caller only ever sees the
+   * bounded passkey view.
    */
   #finishAddPasskey(value: Record<string, unknown>): HostedAddPasskeyResult {
+    this.#finishRotatedSession(value);
     const passkey = passkeyValue(value.passkey);
     return { passkey, confirmed: passkey !== null };
   }
@@ -1054,6 +1238,8 @@ export class HostedHubApi {
       readonly csrf?: boolean;
       /** Bearer mode only: `"mint"` = login/public (no token, proof without `ath`). */
       readonly dpop?: "mint" | "session";
+      /** Narrows generic Hub error codes to what they mean on this route. */
+      readonly intent?: HostedAccountIntent;
       readonly signal?: AbortSignal;
     },
   ): Promise<Record<string, unknown>> {
@@ -1061,19 +1247,26 @@ export class HostedHubApi {
     // Every path this runtime issues is a literal with no percent-encoding, so
     // an encoded pathname is never legitimate — and an encoded separator would
     // otherwise let a path slip past the browser-only guard below.
+    //
+    // The percent clause is deliberately a *second* layer: the only path built
+    // from a caller-supplied value is `revokePasskey`'s, and its credential-id
+    // guard already refuses encoding before a URL is constructed. It is kept so
+    // that a future dynamic path cannot reintroduce the hole silently. The
+    // origin/search/hash clauses are reachable — the endpoint is an injected
+    // seam — and are covered by test.
     if (
       url.origin !== this.#endpoint.origin() ||
       url.search ||
       url.hash ||
       url.pathname.includes("%")
     ) {
-      throw new HostedHubApiError("invalid_request", 400);
+      throw new HostedHubApiError("invalid_request", 400, undefined, options.intent);
     }
     // Fail closed before any I/O — and before any passkey prompt — on routes the
     // Hub only serves to a browser transport. Reaching the wire here yields an
     // unexplained 404 the caller cannot act on.
     if (this.#isBearer && isBrowserOnlyPath(url.pathname)) {
-      throw new HostedHubApiError("browser_only_transport", 400);
+      throw new HostedHubApiError("browser_only_transport", 400, undefined, options.intent);
     }
     const method = options.method ?? "GET";
     const headers: Record<string, string> = { ...JSON_HEADERS };
@@ -1086,12 +1279,14 @@ export class HostedHubApi {
       // the mint/login ceremony (and the public status probe) carries a proof
       // without `ath` and no token.
       const signer = this.#dpopSigner;
-      if (!signer) throw new HostedHubApiError("session_invalid", 401);
+      if (!signer) throw new HostedHubApiError("session_invalid", 401, undefined, options.intent);
       const requestUrl = url.toString();
       let token: string | undefined;
       if (options.dpop !== "mint") {
         token = this.#readBearerToken() ?? undefined;
-        if (!token) throw new HostedHubApiError("session_invalid", 401);
+        if (!token) {
+          throw new HostedHubApiError("session_invalid", 401, undefined, options.intent);
+        }
       }
       headers["DPoP"] = await signer.sign({ method, url: requestUrl, ...(token ? { token } : {}) });
       if (token) headers["Authorization"] = `DPoP ${token}`;
@@ -1100,12 +1295,30 @@ export class HostedHubApi {
     } else {
       if (options.csrf) {
         const csrfToken = this.#sessionCredentials.readCsrfToken();
-        if (!csrfToken) throw new HostedHubApiError("session_invalid", 401);
+        if (!csrfToken) {
+          throw new HostedHubApiError("session_invalid", 401, undefined, options.intent);
+        }
         headers["X-Ryco-CSRF"] = csrfToken;
       }
       target = url.pathname;
       credentials = "same-origin";
     }
+
+    // Bound the wait. Without this a stalled request never settles, and on the
+    // account surface that is not merely a spinner: the controller runs one
+    // mutation at a time, so a hung `setPassword` holds the mutex for the life
+    // of the session and a user who wants to revoke a passkey they believe
+    // compromised cannot. The deadline releases it.
+    const deadline = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      deadline.abort();
+    }, REQUEST_DEADLINE_MS);
+    const callerSignal = options.signal;
+    const forwardAbort = () => deadline.abort();
+    if (callerSignal?.aborted) deadline.abort();
+    else callerSignal?.addEventListener("abort", forwardAbort);
 
     let response: Awaited<ReturnType<HttpClientService["fetch"]>>;
     try {
@@ -1115,9 +1328,13 @@ export class HostedHubApi {
         cache: "no-store",
         headers,
         ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-        ...(options.signal ? { signal: options.signal } : {}),
+        signal: deadline.signal,
       });
     } catch (error) {
+      // Our own deadline is not the caller's cancellation: surfacing it as an
+      // `AbortError` would let it be mistaken for a user-cancelled action and
+      // reported as no error at all.
+      if (timedOut) throw new HostedHubApiError("timeout", 0, undefined, options.intent);
       if (
         typeof error === "object" &&
         error !== null &&
@@ -1125,8 +1342,11 @@ export class HostedHubApi {
         error.name === "AbortError"
       )
         throw error;
-      throw new HostedHubApiError("unavailable", 0);
+      throw new HostedHubApiError("unavailable", 0, undefined, options.intent);
+    } finally {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener("abort", forwardAbort);
     }
-    return responseJson(response);
+    return responseJson(response, options.intent);
   }
 }

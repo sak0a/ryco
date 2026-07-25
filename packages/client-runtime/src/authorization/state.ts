@@ -174,6 +174,32 @@ function isSessionFailure(error: unknown): boolean {
   );
 }
 
+/**
+ * A monotonic generation fence.
+ *
+ * `issue()` hands out a predicate that stays true until the next `bump()`. It is
+ * the shared form of a pattern this controller had already grown twice by hand
+ * (`generation` for relay selections, `#browserLifecycleGeneration` for browser
+ * resume): an async result that lands after the state it was fetched for has
+ * moved on must be dropped, not published. Anything that repopulates state a
+ * user has explicitly dismissed needs one.
+ */
+function createFence(): {
+  readonly bump: () => void;
+  readonly issue: () => () => boolean;
+} {
+  let generation = 0;
+  return {
+    bump: () => {
+      generation += 1;
+    },
+    issue: () => {
+      const issued = generation;
+      return () => issued === generation;
+    },
+  };
+}
+
 const DIRECTORY_REFRESH_MS = 20_000;
 const DIRECTORY_RETRY_MAX_MS = 60_000;
 const HOSTED_SESSION_SYNC_DEADLINE_MS = 30_000;
@@ -197,6 +223,7 @@ class HostedHubController {
   #browserResumePromise: Promise<void> | null = null;
   #browserSuspendPromise: Promise<void> | null = null;
   #browserLifecycleGeneration = 0;
+  #totpEnrollmentFence = createFence();
   #passkeysOperation: AbortController | null = null;
   #passkeysPromise: Promise<void> | null = null;
   #accountOperation: AbortController | null = null;
@@ -312,7 +339,17 @@ class HostedHubController {
   cancelAuthentication(): void {
     this.#operation?.abort();
     this.#operation = null;
-    patchState({ accountStatus: "signed-out", errorMessage: null });
+    // Abandoning sign-in leaves the surface signed out, so nothing may still be
+    // holding recovery codes or an enrolment secret: a signed-out store that
+    // still carries either contradicts the one rule this state has about
+    // secret material.
+    this.#totpEnrollmentFence.bump();
+    patchState({
+      accountStatus: "signed-out",
+      errorMessage: null,
+      recoveryCodes: [],
+      totpEnrollment: null,
+    });
   }
 
   dismissRecoveryCodes(): void {
@@ -326,6 +363,7 @@ class HostedHubController {
    * the account's shared key.
    */
   dismissTotpEnrollment(): void {
+    this.#totpEnrollmentFence.bump();
     patchState({ totpEnrollment: null });
   }
 
@@ -516,9 +554,16 @@ class HostedHubController {
    * fallback session look like it qualifies.
    */
   async beginTotpEnrollment(): Promise<void> {
+    // Fenced against dismissal: a user who backs out of the enrolment screen
+    // while the request is in flight must not have the secret pushed back into
+    // state when it lands. The abort signal alone does not cover this — the
+    // response may already be decoded by then.
+    const current = this.#totpEnrollmentFence.issue();
     await this.#accountAction("enrolling-totp", async (signal) => {
       const totpEnrollment = await getHostedHubApi().beginTotpEnrollment(signal);
-      return () => patchState({ totpEnrollment });
+      return () => {
+        if (current()) patchState({ totpEnrollment });
+      };
     });
   }
 
@@ -530,7 +575,10 @@ class HostedHubController {
   async confirmTotpEnrollment(input: { readonly code: string }): Promise<void> {
     await this.#accountAction("confirming-totp", async (signal) => {
       await getHostedHubApi().confirmTotpEnrollment(input, signal);
-      return () => patchState({ totpEnrollment: null });
+      return () => {
+        this.#totpEnrollmentFence.bump();
+        patchState({ totpEnrollment: null });
+      };
     });
   }
 
@@ -538,7 +586,10 @@ class HostedHubController {
   async revokeTotp(input?: HostedAccountStepUp): Promise<void> {
     await this.#accountAction("revoking-totp", async (signal) => {
       await getHostedHubApi().revokeTotp(input, signal);
-      return () => patchState({ totpEnrollment: null });
+      return () => {
+        this.#totpEnrollmentFence.bump();
+        patchState({ totpEnrollment: null });
+      };
     });
   }
 
@@ -638,6 +689,7 @@ class HostedHubController {
   }
 
   #clearAccountSurface(): void {
+    this.#totpEnrollmentFence.bump();
     this.#passkeysOperation?.abort();
     this.#passkeysOperation = null;
     this.#passkeysPromise = null;

@@ -12,6 +12,8 @@ import type {
 import { HostedHubApi, HostedHubApiError } from "./api";
 import { encodeBase64Url } from "../relay/base64url";
 
+const PASSKEY_ID = "pkey_aaaaaaaaaaaaaaaaaaaaaa";
+
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
 
@@ -438,8 +440,16 @@ describe("HostedHubApi", () => {
       requests.push({ input, ...(init ? { init } : {}) });
       if (requests.length === 1) return response(session);
       if (requests.length === 2) return response({ options: registrationOptions });
-      // The Hub carries no session material on an add-passkey verify.
-      return response({ passkey: { id: "credential-bbb", label: "Phone" } }, 201);
+      // The add-passkey verify ROTATES the session: it returns the replacement
+      // account/session plus a fresh CSRF token, and revokes the old session.
+      return response(
+        {
+          ...session,
+          csrfToken: "csrf-rotated-canary",
+          passkey: { id: PASSKEY_ID, label: "Phone" },
+        },
+        201,
+      );
     });
     const api = createApi({ register });
     await api.restoreSession();
@@ -455,13 +465,16 @@ describe("HostedHubApi", () => {
       expect(headersOf(request.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
       expect(request.init).toMatchObject({ method: "POST", credentials: "same-origin" });
     }
-    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ passkeyLabel: "Phone" });
+    // The Hub parses this body strictly and its member is `label`. Sending
+    // `passkeyLabel` — which is what the two PRE-SESSION ceremonies take — is a
+    // 400 before the ceremony starts.
+    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ label: "Phone" });
     expect(JSON.parse(String(requests[2]?.init?.body))).toEqual({
       response: { id: "added-passkey-canary" },
     });
     expect(added).toEqual({
       passkey: {
-        id: "credential-bbb",
+        id: PASSKEY_ID,
         label: "Phone",
         createdAt: null,
         lastUsedAt: null,
@@ -473,14 +486,16 @@ describe("HostedHubApi", () => {
       confirmed: true,
     });
 
-    // The live session is untouched: a subsequent CSRF-bound call still
-    // presents the token minted by restoreSession.
+    // The ROTATED session is adopted: the next CSRF-bound call presents the new
+    // token, not the revoked one. Keeping the old token would 403 every later
+    // mutation, and `isSessionFailure` does not match 403 — the session would
+    // wedge until a reload.
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({ input, ...(init ? { init } : {}) });
       return response({ ok: true });
     });
     await api.denyNodeEnrollment("ABCD-EFGH");
-    expect(headersOf(requests[3]?.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
+    expect(headersOf(requests[3]?.init).get("X-Ryco-CSRF")).toBe("csrf-rotated-canary");
   });
 
   it("never adopts an unvalidated CSRF token from an add-passkey verify", async () => {
@@ -489,21 +504,22 @@ describe("HostedHubApi", () => {
       requests.push({ input, ...(init ? { init } : {}) });
       if (requests.length === 1) return response(session);
       if (requests.length === 2) return response({ options: registrationOptions });
-      // A bare csrfToken member is not a validated session response. Adopting it
-      // would wedge every later CSRF-bound call in a 403 that isSessionFailure
-      // does not match, with no way back but a reload.
+      // A bare csrfToken with no account/session is not a validated session
+      // response. The route DOES rotate, so the value must be adopted — but only
+      // after the whole payload validates. An unreadable body is rejected and
+      // displaces nothing.
       if (requests.length === 3) return response({ csrfToken: "csrf-unvalidated-canary" }, 201);
       return response({ ok: true });
     });
     const api = createApi({ register: vi.fn(async () => ({ id: "added" }) as never) });
     await api.restoreSession();
 
-    await expect(api.addPasskey({ passkeyLabel: null })).resolves.toEqual({
-      passkey: null,
-      confirmed: false,
+    await expect(api.addPasskey({ passkeyLabel: null })).rejects.toMatchObject({
+      code: "invalid_response",
     });
     await api.denyNodeEnrollment("ABCD-EFGH");
 
+    // The pre-existing token still works; the unvalidated one never landed.
     expect(headersOf(requests[3]?.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
   });
 
@@ -513,7 +529,12 @@ describe("HostedHubApi", () => {
       requests.push({ input, ...(init ? { init } : {}) });
       return requests.length === 1
         ? response(session)
-        : response({ recoveryCodes: ["recovery-sensitive-canary"] });
+        : // This route rotates the session too: fresh CSRF token, old one revoked.
+          response({
+            ...session,
+            csrfToken: "csrf-rotated-canary",
+            recoveryCodes: ["recovery-sensitive-canary"],
+          });
     });
     const api = createApi();
     await api.restoreSession();
@@ -526,13 +547,25 @@ describe("HostedHubApi", () => {
     // No code is ever echoed back to the Hub or placed in a URL.
     expect(JSON.stringify(requests)).not.toContain("recovery-sensitive-canary");
 
-    globalThis.fetch = vi.fn(async () => response({ recoveryCodes: [] }));
+    // The replacement CSRF token is adopted, so the next mutation is not a 403.
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      return response({ ok: true });
+    });
+    await api.denyNodeEnrollment("ABCD-EFGH");
+    expect(headersOf(requests[2]?.init).get("X-Ryco-CSRF")).toBe("csrf-rotated-canary");
+
+    globalThis.fetch = vi.fn(async () => response({ ...session, recoveryCodes: [] }));
     await expect(api.regenerateRecoveryCodes()).rejects.toMatchObject({ code: "invalid_response" });
-    globalThis.fetch = vi.fn(async () => response({ recoveryCodes: [1, 2] }));
+    globalThis.fetch = vi.fn(async () => response({ ...session, recoveryCodes: [1, 2] }));
     await expect(api.regenerateRecoveryCodes()).rejects.toMatchObject({ code: "invalid_response" });
     globalThis.fetch = vi.fn(async () =>
-      response({ recoveryCodes: Array.from({ length: 257 }, () => "code") }),
+      response({ ...session, recoveryCodes: Array.from({ length: 257 }, () => "code") }),
     );
+    await expect(api.regenerateRecoveryCodes()).rejects.toMatchObject({ code: "invalid_response" });
+    // A valid code list with NO replacement session is still a rejection: this
+    // route always rotates, so a body without one cannot be read as success.
+    globalThis.fetch = vi.fn(async () => response({ recoveryCodes: ["orphan"] }));
     await expect(api.regenerateRecoveryCodes()).rejects.toMatchObject({ code: "invalid_response" });
   });
 
@@ -599,8 +632,6 @@ describe("HostedHubApi", () => {
     });
   });
 });
-
-const PASSKEY_ID = "pkey_aaaaaaaaaaaaaaaaaaaaaa";
 
 describe("HostedHubApi account credential management", () => {
   /** A restored cookie session, and the recorder every case below asserts on. */
@@ -706,9 +737,11 @@ describe("HostedHubApi account credential management", () => {
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({ input, ...(init ? { init } : {}) });
       if (requests.length === 1) return response(session);
-      if (requests.length === 2) return response({ recoveryCodes: ["fresh"] });
+      if (requests.length === 2) {
+        return response({ ...session, csrfToken: "csrf-r1", recoveryCodes: ["fresh"] });
+      }
       if (requests.length === 3) return response({ options: registrationOptions });
-      return response({ passkey: { id: PASSKEY_ID } }, 201);
+      return response({ ...session, csrfToken: "csrf-r2", passkey: { id: PASSKEY_ID } }, 201);
     });
     const api = createApi({ register: vi.fn(async () => ({ id: "added" }) as never) });
     await api.restoreSession();
@@ -719,7 +752,7 @@ describe("HostedHubApi account credential management", () => {
     expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ totpCode: "123456" });
     // The step-up rides the verify only. The options body is the Hub's strict
     // `{ label }` shape and an unexpected member would be rejected outright.
-    expect(JSON.parse(String(requests[2]?.init?.body))).toEqual({ passkeyLabel: "Phone" });
+    expect(JSON.parse(String(requests[2]?.init?.body))).toEqual({ label: "Phone" });
     expect(JSON.parse(String(requests[3]?.init?.body))).toEqual({
       response: { id: "added" },
       totpCode: "234567",
@@ -834,7 +867,11 @@ describe("HostedHubApi account credential management", () => {
       `${PASSKEY_ID}#x`,
       "https://evil.example.test/api/account/passkeys/pkey_aaaaaaaaaaaaaaaaaaaaaa/revoke",
     ]) {
-      await expect(api.revokePasskey(hostile)).rejects.toMatchObject({ code: "invalid_request" });
+      // A distinct code: this client refused its own input, so the error must
+      // not blame the Hub for a malformed response.
+      await expect(api.revokePasskey(hostile)).rejects.toMatchObject({
+        code: "invalid_credential_id",
+      });
     }
 
     // Nothing reached the wire: an unvalidated id is never interpolated into a
@@ -872,6 +909,119 @@ describe("HostedHubApi account credential management", () => {
     expect(error).toBeInstanceOf(HostedHubApiError);
     expect((error as HostedHubApiError).code).toBe("invalid_request");
     expect((error as Error).message).not.toContain("totp-detail-sensitive-canary");
+  });
+
+  it("omits a step-up code that is only whitespace", async () => {
+    const { api, requests } = await authenticated();
+
+    // A controlled input the user has focused but not filled yields " " or "\n",
+    // not a code. Sending it turns "hasn't typed anything" into a failed attempt.
+    for (const blank of ["", " ", "   ", "\n", "\t", " \n\t "]) {
+      await api.removePassword({ totpCode: blank });
+    }
+    for (const request of requests.slice(1)) {
+      expect(JSON.parse(String(request.init?.body))).toEqual({});
+    }
+
+    // A real code surrounded by whitespace is still a real code, and is sent
+    // exactly as given — normalising it is the Hub's business, not this client's.
+    await api.removePassword({ totpCode: " 123456 " });
+    expect(JSON.parse(String(requests.at(-1)?.init?.body))).toEqual({ totpCode: " 123456 " });
+  });
+
+  it("narrows a bare 403 to the one thing it can mean on each route", async () => {
+    // The Hub's error body is only `{ error: <code> }` — the reason code is
+    // audited server-side and never sent. A raw `forbidden` would surface as
+    // "You are not authorized to perform this action.", which tells a user who
+    // simply needs to type a TOTP code precisely nothing.
+    const { api, reply } = await authenticated();
+    reply({ error: "forbidden" }, 403);
+
+    for (const call of [
+      () => api.setPassword({ password: "pw" }),
+      () => api.removePassword(),
+      () => api.revokeTotp(),
+      () => api.requestEmailVerification({ email: "ada@example.test" }),
+      () => api.regenerateRecoveryCodes(),
+    ]) {
+      const error = await call().catch((cause) => cause);
+      expect(error).toMatchObject({ code: "step_up_required", status: 403 });
+      expect((error as Error).message).toBe(
+        "Enter a current code from your authenticator app to confirm this change.",
+      );
+    }
+
+    // TOTP enrolment's 403 is a different thing entirely: it requires a passkey
+    // session, and no code the user could type would satisfy it.
+    for (const call of [
+      () => api.beginTotpEnrollment(),
+      () => api.confirmTotpEnrollment({ code: "123456" }),
+    ]) {
+      const error = await call().catch((cause) => cause);
+      expect(error).toMatchObject({ code: "passkey_session_required", status: 403 });
+      expect((error as Error).message).toBe(
+        "Sign in with a passkey on this device to change two-factor settings.",
+      );
+    }
+
+    // A 403 with no account intent is left exactly as the Hub sent it.
+    reply({ error: "forbidden" }, 403);
+    await expect(api.listPasskeys()).rejects.toMatchObject({ code: "forbidden" });
+  });
+
+  it("gives each route-specific 409 an accurate message", async () => {
+    const { api, reply } = await authenticated();
+    reply({ error: "conflict" }, 409);
+
+    const cases: ReadonlyArray<readonly [() => Promise<unknown>, string]> = [
+      [() => api.setPassword({ password: "pw" }), "That password has appeared in a known breach."],
+      [() => api.revokePasskey(PASSKEY_ID), "That is the only passkey left on this account."],
+      [() => api.beginTotpEnrollment(), "Two-factor authentication is already set up"],
+      [() => api.confirmTotpEnrollment({ code: "1" }), "This setup is no longer in progress."],
+      [
+        () => api.requestEmailVerification({ email: "ada@example.test" }),
+        "That email address is already in use.",
+      ],
+    ];
+    for (const [call, fragment] of cases) {
+      const error = await call().catch((cause) => cause);
+      expect(error).toMatchObject({ code: "conflict", status: 409 });
+      // The generic "The request has already been used." is wrong for every one
+      // of these and leaves the user with no idea what to do next.
+      expect((error as Error).message).toContain(fragment);
+      expect((error as Error).message).not.toBe("The request has already been used.");
+    }
+
+    // A wrong TOTP code is not a failed passkey.
+    reply({ error: "authentication_failed" }, 401);
+    const totp = await api.confirmTotpEnrollment({ code: "000000" }).catch((cause) => cause);
+    expect((totp as Error).message).toBe(
+      "That code is not correct. Check your authenticator app and try again.",
+    );
+  });
+
+  it("bounds the error code it will adopt from a response body", async () => {
+    const { api, reply } = await authenticated();
+
+    for (const hostile of [
+      "x".repeat(65),
+      "Forbidden",
+      "step up required",
+      "<script>alert(1)</script>",
+      "../../etc/passwd",
+      42,
+      { nested: true },
+    ]) {
+      reply({ error: hostile }, 400);
+      const error = await api.removePassword().catch((cause) => cause);
+      // Unrecognisable codes collapse to the neutral one rather than becoming an
+      // unbounded string a surface might switch on or render.
+      expect((error as HostedHubApiError).code).toBe("unavailable");
+      expect((error as Error).message).toBe("Hub is temporarily unavailable.");
+    }
+
+    reply({ error: "rate_limited" }, 429);
+    await expect(api.removePassword()).rejects.toMatchObject({ code: "rate_limited" });
   });
 
   it("projects the widened passkey record and tolerates members it does not know", async () => {
@@ -1158,8 +1308,16 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
       requests.push({ input: String(input), ...(init ? { init } : {}) });
       return requests.length === 1
         ? response({ options: registrationOptions })
-        : // No session material on an add-passkey verify.
-          response({ passkey: { id: "credential-ccc", label: "Phone", createdAt: 5 } }, 201);
+        : // The verify ROTATES the native session: a replacement token, and the
+          // presented one revoked.
+          response(
+            {
+              ...accountAndSession,
+              token: "native-token-rotated-canary",
+              passkey: { id: PASSKEY_ID, label: "Phone", createdAt: 5 },
+            },
+            201,
+          );
     });
     const register = vi.fn(async () => ({ id: "added-passkey-canary" }) as never);
     const api = createBearerApi(service, credentials, { register });
@@ -1181,7 +1339,7 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     expect(calls.every((call) => call.token === "native-token-canary")).toBe(true);
     expect(added).toEqual({
       passkey: {
-        id: "credential-ccc",
+        id: PASSKEY_ID,
         label: "Phone",
         createdAt: 5,
         lastUsedAt: null,
@@ -1192,10 +1350,15 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
       },
       confirmed: true,
     });
-    // The enclave-bound token survives an add-passkey that returns none.
-    expect(credentials.current()).toBe("native-token-canary");
+    // The REPLACEMENT token is now the enclave-bound one. Keeping the presented
+    // token would leave the enclave holding a revoked credential, and the very
+    // next call — the controller's own confirming read — would 401 and sign the
+    // user out for adding a device.
+    expect(credentials.current()).toBe("native-token-rotated-canary");
     expect(api.hasSessionMaterial).toBe(true);
+    // Neither token is ever surfaced in the returned view.
     expect(JSON.stringify(added)).not.toContain("native-token-canary");
+    expect(JSON.stringify(added)).not.toContain("native-token-rotated-canary");
   });
 
   it("never adopts an unvalidated native token from an add-passkey verify", async () => {
@@ -1207,19 +1370,18 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
       call += 1;
       return call === 1
         ? response({ options: registrationOptions })
-        : // A 2xx body carrying a bare token and no account/session. Adopting it
-          // would replace a valid enclave-bound token with an unverified one,
-          // and the very next authenticated call would 401 — which
-          // isSessionFailure matches, expiring a session that was valid.
+        : // A 2xx body carrying a bare token and no account/session. The route
+          // does rotate, so a *validated* replacement would be adopted — but a
+          // length bound is not validation, and adopting an unverified value
+          // would replace working material with a wrong one.
           response({ token: "native-token-unvalidated-canary" }, 201);
     });
     const api = createBearerApi(service, credentials, {
       register: vi.fn(async () => ({ id: "added" }) as never),
     });
 
-    await expect(api.addPasskey({ passkeyLabel: null })).resolves.toEqual({
-      passkey: null,
-      confirmed: false,
+    await expect(api.addPasskey({ passkeyLabel: null })).rejects.toMatchObject({
+      code: "invalid_response",
     });
     expect(credentials.current()).toBe("native-token-canary");
 
@@ -1238,7 +1400,11 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
       requests.push({ input: String(input), ...(init ? { init } : {}) });
       return requests.length === 1
         ? response({ passkeys: [{ id: "credential-aaa" }] })
-        : response({ recoveryCodes: ["recovery-sensitive-canary"] });
+        : response({
+            ...accountAndSession,
+            token: "native-token-rotated-canary",
+            recoveryCodes: ["recovery-sensitive-canary"],
+          });
     });
     const api = createBearerApi(service, credentials);
 
@@ -1270,6 +1436,8 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     }
     // No recovery code and no session token is ever echoed onto the wire.
     expect(JSON.stringify(requests)).not.toContain("recovery-sensitive-canary");
+    // The rotation replaced the enclave-bound token.
+    expect(credentials.current()).toBe("native-token-rotated-canary");
   });
 
   it("fails closed on account requests with no persisted native token", async () => {
@@ -1352,13 +1520,69 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     const api = createBearerApi(service, credentials);
 
     await expect(api.revokePasskey("pkey_not-a-valid-id")).rejects.toMatchObject({
-      code: "invalid_request",
+      code: "invalid_credential_id",
     });
 
     // No request, and no single-use proof burned on a call that could not go.
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(calls).toEqual([]);
     expect(credentials.current()).toBe("native-token-canary");
+  });
+
+  it("rejects an encoded credential id at the only path it could enter through", async () => {
+    // `#request` also refuses any percent-encoded pathname, but that check is
+    // now a SECOND layer with no reachable caller: every other path this client
+    // issues is a literal, and the one path built from an argument is guarded
+    // here first. So the encoding defence is asserted where it actually runs.
+    const { calls, service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const fetchSpy = vi.fn(async () => response({ ok: true }));
+    globalThis.fetch = fetchSpy;
+    const api = createBearerApi(service, credentials);
+
+    for (const encoded of [
+      "pkey_aaaaaaaaaaaaaaaaaaa%2F",
+      `${PASSKEY_ID}%2f..`,
+      "pkey_%2e%2e%2f%2e%2e%2fadmin",
+      `${PASSKEY_ID}%00`,
+    ]) {
+      await expect(api.revokePasskey(encoded)).rejects.toMatchObject({
+        code: "invalid_credential_id",
+      });
+    }
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
+  });
+
+  it("fails closed when the endpoint seam does not agree with itself", async () => {
+    // The origin is read from an injected adapter, so it is not a constant this
+    // client controls. A URL that does not resolve back to the same origin is
+    // refused before any I/O rather than dispatched somewhere unintended.
+    const { calls, service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const fetchSpy = vi.fn(async () => response({ passkeys: [] }));
+    globalThis.fetch = fetchSpy;
+    let call = 0;
+    const api = new HostedHubApi({
+      endpoint: {
+        ...fakeEndpoint,
+        origin: () => {
+          call += 1;
+          return call === 1 ? "https://hub.example.test" : "https://evil.example.test";
+        },
+      },
+      httpClient: fakeHttpClient,
+      sessionCredentials: credentials,
+      dpopSigner: service,
+      passkeyCeremony: { authenticate: vi.fn(), register: vi.fn() },
+    });
+
+    await expect(api.listPasskeys()).rejects.toMatchObject({ code: "invalid_request" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
   });
 
   it("fails closed on account credential mutations with no persisted native token", async () => {
