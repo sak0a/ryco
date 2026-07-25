@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 export type SettingsSectionId =
+  | "account"
   | "general"
   | "providers"
   | "opinionated-plugins"
