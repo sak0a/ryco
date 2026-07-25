@@ -3,6 +3,7 @@ import {
   deriveHostedConnectionStatusIndicator,
   deriveHostedConnectionStatusText,
   resolveHostedRpcCapability,
+  type HostedAccountActionStatus,
   type HostedConnectionStatusIndicator,
   type HostedConnectionStatusText,
   type HostedHubState,
@@ -146,6 +147,13 @@ export interface HostedAccountView {
    * displayed with no way to dismiss them would either persist across
    * navigation or be cleared by something other than the user, and the display
    * contract is that the user says when they are done reading.
+   *
+   * **Disabled — never hidden — while a rotation is in flight.** The codes on
+   * screen are the ones that rotation is about to invalidate, so an
+   * acknowledgement tapped now says "I saved these" about a set that is
+   * seconds from being dead, and clears the display the replacement is due to
+   * arrive in. It stays visible so the state is never a mystery, and comes back
+   * the moment the new set lands.
    */
   readonly dismissRecoveryCodes: HostedAuthAction | null;
   readonly deliveryUnknown: HostedDeliveryUnknownView | null;
@@ -168,6 +176,14 @@ export interface HostedAccountViewInput {
   readonly hostedModeAvailable: boolean;
   /** Open the sign-in sheet (the `Onboarding` route). */
   readonly onSignIn: () => void;
+  /**
+   * What the account surface is currently doing, from `hostedAccountStore`.
+   *
+   * Read for one reason: while a recovery-code rotation is in flight, the
+   * acknowledgement on screen belongs to the set that rotation is about to
+   * invalidate. See {@link HostedAccountView.dismissRecoveryCodes}.
+   */
+  readonly actionStatus: HostedAccountActionStatus;
 }
 
 const DELIVERY_UNKNOWN_MESSAGE =
@@ -538,8 +554,11 @@ export function deriveHostedAccountView(input: HostedAccountViewInput): HostedAc
     recoveryCodes: state.recoveryCodes,
     dismissRecoveryCodes:
       state.recoveryCodes.length > 0
-        ? action("dismiss-recovery-codes", "I saved the codes", () =>
-            hostedHubController.dismissRecoveryCodes(),
+        ? action(
+            "dismiss-recovery-codes",
+            "I saved the codes",
+            () => hostedHubController.dismissRecoveryCodes(),
+            { disabled: input.actionStatus === "regenerating-recovery-codes" },
           )
         : null,
     deliveryUnknown: deliveryUnknownView(state),

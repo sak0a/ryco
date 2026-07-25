@@ -49,6 +49,7 @@ import {
   HOSTED_ACCOUNT_SIGNED_OUT_MESSAGE,
   HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,
   HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE,
+  HOSTED_TOTP_ENROLLMENT_UNDISPLAYED_MESSAGE,
   hostedAccountStore,
   hostedHubController,
   hostedHubStore,
@@ -1719,14 +1720,46 @@ describe("hosted account management state", () => {
     });
   });
 
-  it("does not publish a credential change whose session rotated under it", async () => {
-    // The fence on the SUCCESS path. `#accountAction` may only commit while the
-    // session that issued the request is still the authenticated one; a result
-    // that outlived its session must be dropped, not written. Without it a
-    // secret minted for one session lands in the state of another.
+  it("publishes an enrolment secret whose session rotated under it, to the same account", async () => {
+    // A session rotation is not an account change. `restoreSession` re-mints
+    // the id on every foreground and reconnect, so the ordinary session fence
+    // would discard a secret the Hub has already issued — and this Hub refuses
+    // to issue a second one, leaving the user with a half-enrolled
+    // authenticator they can neither see nor replace. Backgrounding the app
+    // mid-enrolment must not do that.
     await authenticate();
     vi.spyOn(hostedHubApi, "beginTotpEnrollment").mockImplementation(async () => {
       hostedHubStore.setState({
+        session: { ...sessionResponse.session, id: "sess_bbbbbbbbbbbbbbbbbbbbbb" },
+      });
+      return {
+        secretBase32: "TOTPSECRETSENSITIVECANARY",
+        provisioningUri: "otpauth://totp/Ryco:ada?secret=TOTPSECRETSENSITIVECANARY",
+      };
+    });
+
+    await expect(hostedHubController.beginTotpEnrollment()).resolves.toEqual({
+      status: "committed",
+      displayed: true,
+    });
+
+    expect(hostedHubStore.getState().totpEnrollment).toEqual({
+      secretBase32: "TOTPSECRETSENSITIVECANARY",
+      provisioningUri: "otpauth://totp/Ryco:ada?secret=TOTPSECRETSENSITIVECANARY",
+    });
+    // Still only ever in its own slot.
+    expect(JSON.stringify(hostedAccountStore.getState())).not.toContain(
+      "TOTPSECRETSENSITIVECANARY",
+    );
+  });
+
+  it("does not publish an enrolment secret once a different account holds the session", async () => {
+    // The fence that does still apply: an account change is not a rotation, and
+    // a secret minted for one account may never land in another's state.
+    await authenticate();
+    vi.spyOn(hostedHubApi, "beginTotpEnrollment").mockImplementation(async () => {
+      hostedHubStore.setState({
+        account: { ...sessionResponse.account, id: "acct_bbbbbbbbbbbbbbbbbbbbbb" },
         session: { ...sessionResponse.session, id: "sess_bbbbbbbbbbbbbbbbbbbbbb" },
       });
       return {
@@ -1739,6 +1772,10 @@ describe("hosted account management state", () => {
 
     expect(hostedHubStore.getState().totpEnrollment).toBeNull();
     expect(JSON.stringify(hostedHubStore.getState())).not.toContain("TOTPSECRETSENSITIVECANARY");
+    // …and it is not silent: the Hub issued an enrolment nobody can see.
+    expect(hostedAccountStore.getState().errorMessage).toBe(
+      HOSTED_TOTP_ENROLLMENT_UNDISPLAYED_MESSAGE,
+    );
   });
 
   it("does not publish a credential failure whose session rotated under it", async () => {
@@ -2252,9 +2289,15 @@ describe("hosted account management state", () => {
     expect(hostedHubStore.getState().recoveryCodes).toEqual(["bootstrap-code"]);
   });
 
-  it("fences an in-flight rotation against an explicit dismissal", async () => {
+  it("publishes a rotation that lands after the user acknowledged the previous set", async () => {
+    // The acknowledgement on screen while a rotation is in flight is about the
+    // set being replaced — the new one does not exist yet, so nothing the user
+    // taps can be an acknowledgement of it. Letting that tap fence the rotation
+    // means one press invalidates the codes they just saved *and* discards the
+    // replacement.
     await authenticate();
     leaseRecoveryCodeDisplay();
+    hostedHubStore.setState({ recoveryCodes: ["stale-set"] });
     let settle: ((value: ReadonlyArray<string>) => void) | null = null;
     vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockImplementation(
       () =>
@@ -2265,11 +2308,80 @@ describe("hosted account management state", () => {
 
     const pending = hostedHubController.regenerateRecoveryCodes();
     hostedHubController.dismissRecoveryCodes();
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
     settle?.(["recovery-sensitive-canary"]);
     await pending;
 
-    // A user who dismissed the display must not have it reopened behind them.
+    expect(hostedHubStore.getState().recoveryCodes).toEqual(["recovery-sensitive-canary"]);
+  });
+
+  it("publishes a rotation whose session rotated under it, to the same account", async () => {
+    // The ordinary session fence discards a result whose session was replaced.
+    // `restoreSession` replaces it on every foreground and reconnect without
+    // ending the account, so backgrounding a phone mid-rotation used to throw
+    // away codes the Hub had already committed — with the user's previous set
+    // already dead. A committed one-shot secret is not stale, it is
+    // irreplaceable.
+    await authenticate();
+    leaseRecoveryCodeDisplay();
+    vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockImplementation(async () => {
+      hostedHubStore.setState({
+        session: { ...sessionResponse.session, id: "sess_bbbbbbbbbbbbbbbbbbbbbb" },
+      });
+      return ["recovery-sensitive-canary"];
+    });
+
+    await expect(hostedHubController.regenerateRecoveryCodes()).resolves.toEqual({
+      status: "committed",
+      displayed: true,
+    });
+
+    expect(hostedHubStore.getState().recoveryCodes).toEqual(["recovery-sensitive-canary"]);
+    expect(hostedAccountStore.getState().errorMessage).toBeNull();
+  });
+
+  it("never lets a committed rotation pass in silence", async () => {
+    // The one outcome that must be impossible. Whatever withholds the codes —
+    // here the account itself changing under the request — the user has to be
+    // told that the set they saved no longer works.
+    await authenticate();
+    leaseRecoveryCodeDisplay();
+    vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockImplementation(async () => {
+      hostedHubStore.setState({
+        account: { ...sessionResponse.account, id: "acct_bbbbbbbbbbbbbbbbbbbbbb" },
+      });
+      return ["recovery-sensitive-canary"];
+    });
+
+    const outcome = await hostedHubController.regenerateRecoveryCodes();
+
+    expect(outcome.status).toBe("refused");
     expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
     expect(JSON.stringify(hostedHubStore.getState())).not.toContain("recovery-sensitive-canary");
+    expect(hostedAccountStore.getState().errorMessage).toBe(
+      HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE,
+    );
+  });
+
+  it("keeps a release from a dropped lease from unleasing a live display", async () => {
+    // `resetForTests` drops every lease. A counter would then be driven
+    // negative by the stale release that follows, and the next surface's lease
+    // would only count back to zero — leaving a live display unleased and its
+    // rotations undisplayable.
+    const stale = leaseRecoveryCodeDisplay();
+    hostedHubController.resetForTests();
+
+    leaseRecoveryCodeDisplay();
+    stale();
+    await Promise.resolve();
+
+    expect(hostedRecoveryCodeDisplayStore.getState().leased).toBe(true);
+
+    await authenticate();
+    vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockResolvedValue(["fresh"]);
+    await expect(hostedHubController.regenerateRecoveryCodes()).resolves.toEqual({
+      status: "committed",
+      displayed: true,
+    });
   });
 });

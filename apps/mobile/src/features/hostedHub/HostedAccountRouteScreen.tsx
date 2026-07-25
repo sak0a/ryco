@@ -86,6 +86,7 @@ export function HostedAccountRouteScreen() {
     state,
     hostedModeAvailable,
     onSignIn: () => navigation.navigate("Onboarding"),
+    actionStatus: accountState.actionStatus,
   });
 
   const management = deriveHostedAccountManagementView({

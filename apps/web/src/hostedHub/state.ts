@@ -72,7 +72,7 @@ type HostedRecoveryCodeDisplaySelector<T> = (state: HostedRecoveryCodeDisplaySta
  * React binding for "is some surface already displaying the one-time recovery
  * codes".
  *
- * The runtime owns this rather than the web owning a second claim of its own:
+ * The runtime owns this rather than the web keeping a second lease of its own:
  * one lease decides both whether a rotation may publish and which surface
  * shows the result, so there is no way to hold one and forget the other. It
  * answers a *presentation* question only — nothing that clears a secret may

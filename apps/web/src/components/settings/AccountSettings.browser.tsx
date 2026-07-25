@@ -871,14 +871,26 @@ describe("AccountSettingsPanel", () => {
 
     await expect.element(page.getByText(RECOVERY_CODES[0])).toBeVisible();
 
-    const persisted = await persistedStorageSnapshot();
+    const displayed = await persistedStorageSnapshot();
     for (const code of RECOVERY_CODES) {
-      expect(persisted, `recovery code ${code} reached a persisted store`).not.toContain(code);
+      expect(displayed, `recovery code ${code} reached a persisted store`).not.toContain(code);
       expect(window.location.href).not.toContain(code);
     }
 
+    // Copy is the one affordance that hands the codes to another API, and the
+    // snapshot has to be taken *after* it: a copy helper that cached, logged, or
+    // queued what it copied would leave the pre-click snapshot clean and the
+    // proof vacuous.
     await page.getByRole("button", { name: "Copy codes" }).click();
+    await expect.element(page.getByRole("button", { name: "Copied" })).toBeVisible();
+    await settle();
+
     expect(clipboard).toEqual([RECOVERY_CODES.join("\n")]);
+    const copied = await persistedStorageSnapshot();
+    for (const code of RECOVERY_CODES) {
+      expect(copied, `copying recovery code ${code} persisted it`).not.toContain(code);
+      expect(window.location.href).not.toContain(code);
+    }
   });
 
   it("gives freshly minted recovery codes exactly one exit", async () => {

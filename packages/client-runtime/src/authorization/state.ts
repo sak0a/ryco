@@ -149,6 +149,25 @@ const initialAccountState: HostedAccountState = {
   errorCodeInferred: false,
 };
 
+/**
+ * What must still hold when an account action's result comes back, for that
+ * result to be published.
+ *
+ * `"session"` is the default and the right answer for anything the surface can
+ * simply ask for again: a result fetched under a session the app has since
+ * replaced may describe state that no longer applies, and re-reading is free.
+ *
+ * `"account"` is for a result that **cannot be re-fetched** — a one-shot secret
+ * the Hub has already committed. The session fence is wrong for those, and
+ * dangerously so: `restoreSession` re-mints the session id on every
+ * foreground and reconnect *without ending the account*, so backgrounding a
+ * phone mid-rotation used to discard a set of recovery codes the Hub had
+ * already made authoritative, with the user's previous set already dead. A
+ * committed one-shot secret is not stale, it is irreplaceable; the account
+ * still being the same account is the whole of what has to be true.
+ */
+type HostedAccountCommitFence = "session" | "account";
+
 type HostedHubStoreListener = () => void;
 
 /** Neutral external store; React binding remains in the web adapter. */
@@ -325,15 +344,27 @@ export const HOSTED_ACCOUNT_SIGNED_OUT_MESSAGE = "Sign in to change your account
 export const HOSTED_PASSKEY_UNCONFIRMED_MESSAGE =
   "The passkey could not be confirmed. Check your passkeys before relying on it.";
 /**
- * A rotation committed with no live claimant, so the codes were dropped rather
- * than left in the store with nothing on screen to show them.
+ * A rotation the Hub committed whose codes never reached a display.
  *
  * The user must be told: the rotation *did* happen server-side, so any codes
  * they had saved are already dead. Silence here would leave them believing they
- * still have working recovery credentials.
+ * still have working recovery credentials. Every path that can swallow a
+ * committed rotation publishes this — there is no route from "the Hub minted
+ * codes" to "nothing said so".
  */
 export const HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE =
   "Your recovery codes were replaced but could not be shown. Your previous codes no longer work — generate a new set and save them.";
+/**
+ * An enrolment the Hub issued whose secret never reached the enrolment screen.
+ *
+ * The same rule as the rotation above, for the other one-shot secret: the Hub
+ * treats an enrolment as live from the moment it is issued and refuses to issue
+ * a second one, so a user who is not told is left with a half-enrolled
+ * authenticator they cannot see and cannot re-request. Removing two-factor
+ * authentication is what clears it.
+ */
+export const HOSTED_TOTP_ENROLLMENT_UNDISPLAYED_MESSAGE =
+  "Two-factor setup started but its key could not be shown. Remove two-factor authentication and set it up again.";
 
 class HostedHubController {
   #operation: AbortController | null = null;
@@ -351,8 +382,17 @@ class HostedHubController {
   #browserLifecycleGeneration = 0;
   #totpEnrollmentFence = createFence();
   #recoveryCodesFence = createFence();
-  /** How many surfaces are currently displaying the one-time recovery codes. */
-  #recoveryCodesLeases = 0;
+  /**
+   * The surfaces currently displaying the one-time recovery codes, one token
+   * each.
+   *
+   * Tokens rather than a counter so a release is inert once the lease it
+   * belongs to is gone: `resetForTests` drops every lease, and a counter would
+   * then be driven negative by the stale cleanup that follows — after which the
+   * next lease would count to zero and a live surface's rotation would find no
+   * display.
+   */
+  #recoveryCodesLeases = new Set<symbol>();
   /** Whether the settle for an already-released lease is queued. */
   #recoveryCodesLeaseSettleQueued = false;
   #passkeysOperation: AbortController | null = null;
@@ -399,6 +439,17 @@ class HostedHubController {
     return promise;
   }
 
+  /**
+   * Sign in with a passkey.
+   *
+   * The reset below clears both one-shot secret slots, which everywhere else in
+   * this controller would be a lockout. It is safe *only* because sign-in,
+   * registration, `cancelAuthentication` and the bootstrap failure path are
+   * reachable from unauthenticated surfaces alone, where nothing can be holding
+   * a secret that belongs to the account being signed in to. Nothing enforces
+   * that precondition — recording it here so a future caller that wires one of
+   * these to an authenticated surface has to reckon with it first.
+   */
   async signIn(): Promise<void> {
     const operation = this.#replaceOperation();
     patchState({
@@ -488,13 +539,14 @@ class HostedHubController {
    * Declare that a surface is displaying the one-time recovery codes, for as
    * long as it is. Returns the release; call it when the surface goes away (a
    * `useEffect` cleanup, an unmount, a dismissed sheet). The release is
-   * idempotent, and leases are counted, so two live surfaces coexist.
+   * idempotent, and leases are held one per surface, so two live surfaces
+   * coexist.
    *
    * **A lease says "I am showing this". It does not own the codes' destruction,
-   * and releasing one destroys nothing.** That is the point of it: the claim
-   * this replaces *did* clear the slot when the last claimant left, so every
-   * reason a surface stops being mounted became a reason to destroy a set of
-   * codes the Hub had already made authoritative — a hosted node deactivating
+   * and releasing one destroys nothing.** That is the point of it: a lifetime
+   * tied to the last surface leaving made every reason a surface stops being
+   * mounted a reason to destroy a set of codes the Hub had already made
+   * authoritative — a hosted node deactivating
    * and closing the settings dialog underneath the user, a React reparent
    * across the phone breakpoint, a lazily-loaded presentation swapping in.
    * None of those is the user's decision, and each one left the account holding
@@ -522,19 +574,19 @@ class HostedHubController {
    * indistinguishable from a teardown.
    */
   leaseRecoveryCodeDisplay(): () => void {
-    this.#recoveryCodesLeases += 1;
+    const lease = Symbol("hosted-recovery-code-display-lease");
+    this.#recoveryCodesLeases.add(lease);
     this.#publishRecoveryCodeDisplayLease();
-    let released = false;
     return () => {
-      if (released) return;
-      released = true;
-      this.#recoveryCodesLeases -= 1;
+      // Idempotent, and inert for a lease that has already been dropped
+      // wholesale — a release can only ever end its own lease.
+      if (!this.#recoveryCodesLeases.delete(lease)) return;
       this.#queueRecoveryCodeDisplayLeaseSettle();
     };
   }
 
   #publishRecoveryCodeDisplayLease(): void {
-    const leased = this.#recoveryCodesLeases > 0;
+    const leased = this.#recoveryCodesLeases.size > 0;
     if (hostedRecoveryCodeDisplayStore.getState().leased === leased) return;
     hostedRecoveryCodeDisplayStore.setState({ leased });
   }
@@ -571,11 +623,16 @@ class HostedHubController {
    * the user's decision leaves the account with recovery codes its owner never
    * saw. Ending a display is what {@link leaseRecoveryCodeDisplay}'s release is
    * for, and it deliberately destroys nothing.
+   *
+   * It clears the set that is **on screen now**, and deliberately does not
+   * fence a rotation that is still in flight. Those codes do not exist yet, so
+   * this cannot be an acknowledgement of them — and a surface that leaves the
+   * acknowledgement live while a rotation runs (mobile's account screen did)
+   * would otherwise let one tap invalidate the saved set *and* discard its
+   * replacement. The user is acknowledging the old codes; the new ones still
+   * have to arrive somewhere.
    */
   dismissRecoveryCodes(): void {
-    // Fenced like the TOTP secret: a rotation still in flight when the user
-    // acknowledges must not push codes back into a surface they just closed.
-    this.#recoveryCodesFence.bump();
     patchState({ recoveryCodes: [] });
   }
 
@@ -744,27 +801,54 @@ class HostedHubController {
    * closed is the lockout rather than the safe default. An orphaned set stays
    * in the slot for the hosted root's takeover to show, until it is
    * acknowledged or the account goes away.
+   *
+   * The result publishes across a **session rotation** for the same reason —
+   * see the `"account"` fence on {@link #accountAction}. Backgrounding an app
+   * mid-rotation re-mints the session without ending the account, and the
+   * ordinary session fence would have discarded a set of codes the Hub had
+   * already committed.
+   *
+   * And if it still cannot be published, the user is told. There is no route
+   * from "the Hub minted codes" to silence.
    */
   async regenerateRecoveryCodes(input?: HostedAccountStepUp): Promise<HostedRecoveryCodesOutcome> {
     const live = this.#recoveryCodesFence.issue();
-    const leased = this.#recoveryCodesLeases > 0;
+    const leased = this.#recoveryCodesLeases.size > 0;
+    let rotated = false;
     let displayed = false;
-    const outcome = await this.#accountAction("regenerating-recovery-codes", async (signal) => {
-      const recoveryCodes = await getHostedHubApi().regenerateRecoveryCodes(input, signal);
-      return () => {
-        // The lease catches a caller that never had a display at all; the fence
-        // catches the two things that may legitimately withhold a late result —
-        // an explicit acknowledgement, and the account going away.
-        if (!leased || !live()) return;
-        displayed = true;
-        patchState({ recoveryCodes });
-      };
-    });
+    const outcome = await this.#accountAction(
+      "regenerating-recovery-codes",
+      async (signal) => {
+        const recoveryCodes = await getHostedHubApi().regenerateRecoveryCodes(input, signal);
+        // Past this point the previous codes are dead whatever happens next.
+        rotated = true;
+        return () => {
+          // The lease catches a caller that never had a display at all; the
+          // fence catches the account itself going away underneath.
+          if (!leased || !live()) return;
+          displayed = true;
+          patchState({ recoveryCodes });
+        };
+      },
+      "account",
+    );
+    if (rotated && !displayed) this.#warnUndisplayed(HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE);
     if (outcome.status !== "committed") return outcome;
-    if (!displayed) {
-      patchAccountState(localErrorPatch(HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE));
-    }
     return { status: "committed", displayed };
+  }
+
+  /**
+   * Report a one-shot secret the Hub committed that no surface received.
+   *
+   * Written after the action has settled, not inside its commit thunk: the
+   * thunk's caller clears the account error slots on success, so a message
+   * published there would be wiped by the very action it describes. Suppressed
+   * once the account is gone — the account surface is reset with it, and a
+   * warning about a signed-out account's credentials explains nothing.
+   */
+  #warnUndisplayed(message: string): void {
+    if (hostedHubStore.getState().accountStatus !== "authenticated") return;
+    patchAccountState(localErrorPatch(message));
   }
 
   /**
@@ -827,16 +911,32 @@ class HostedHubController {
     // while the request is in flight must not have the secret pushed back into
     // state when it lands. The abort signal alone does not cover this — the
     // response may already be decoded by then.
+    //
+    // Unlike a recovery-code rotation, that dismissal is unambiguous: there is
+    // exactly one enrolment in play and backing out is about *this* one. What
+    // it is not is silent — an enrolment the Hub issued and nobody saw is
+    // reported below, because the Hub will not issue a second.
     const current = this.#totpEnrollmentFence.issue();
+    let issued = false;
     let displayed = false;
-    const outcome = await this.#accountAction("enrolling-totp", async (signal) => {
-      const totpEnrollment = await getHostedHubApi().beginTotpEnrollment(signal);
-      return () => {
-        if (!current()) return;
-        displayed = true;
-        patchState({ totpEnrollment });
-      };
-    });
+    const outcome = await this.#accountAction(
+      "enrolling-totp",
+      async (signal) => {
+        const totpEnrollment = await getHostedHubApi().beginTotpEnrollment(signal);
+        // Past this point the Hub holds a live enrolment for this account.
+        issued = true;
+        return () => {
+          if (!current()) return;
+          displayed = true;
+          patchState({ totpEnrollment });
+        };
+      },
+      // Same rule as the rotation: a foreground/reconnect re-mints the session
+      // without ending the account, and the secret it would discard cannot be
+      // re-requested.
+      "account",
+    );
+    if (issued && !displayed) this.#warnUndisplayed(HOSTED_TOTP_ENROLLMENT_UNDISPLAYED_MESSAGE);
     if (outcome.status !== "committed") return outcome;
     return { status: "committed", displayed };
   }
@@ -898,8 +998,9 @@ class HostedHubController {
 
   /**
    * Run one account-surface mutation at a time, publishing its result only
-   * behind the same session fence the directory refresh uses. `run` returns the
-   * commit thunk so nothing reaches a store before that fence passes.
+   * behind the {@link HostedAccountCommitFence} the caller asks for. `run`
+   * returns the commit thunk so nothing reaches a store before that fence
+   * passes.
    *
    * Resolves a discriminated {@link HostedAccountOutcome} rather than writing a
    * result a caller has to go and re-read. Re-reading `errorMessage` after the
@@ -910,6 +1011,7 @@ class HostedHubController {
   async #accountAction(
     status: Exclude<HostedAccountActionStatus, "idle">,
     run: (signal: AbortSignal) => Promise<() => void>,
+    fence: HostedAccountCommitFence = "session",
   ): Promise<HostedAccountOutcome> {
     // A refusal must always say why. Silently resolving leaves a surface whose
     // taps do nothing and whose state never explains it.
@@ -923,12 +1025,17 @@ class HostedHubController {
       return refusedLocally("signed-out", HOSTED_ACCOUNT_SIGNED_OUT_MESSAGE);
     }
     const sessionId = state.session?.id ?? null;
+    const accountId = state.account?.id ?? null;
     const operation = new AbortController();
     this.#accountOperation = operation;
     patchAccountState({ actionStatus: status, ...NO_ACCOUNT_ERROR });
     try {
       const commit = await run(operation.signal);
-      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) {
+      const mayCommit =
+        fence === "account"
+          ? this.#isCurrentAccount(operation.signal, accountId)
+          : this.#isCurrentAccountSession(operation.signal, sessionId);
+      if (!mayCommit) {
         return refusedLocally(operation.signal.aborted ? "cancelled" : "superseded", null);
       }
       commit();
@@ -971,6 +1078,19 @@ class HostedHubController {
     );
   }
 
+  /**
+   * The weaker fence: the same *account* is still signed in, whatever session
+   * is now carrying it. See {@link HostedAccountCommitFence}.
+   */
+  #isCurrentAccount(signal: AbortSignal, accountId: string | null): boolean {
+    const active = hostedHubStore.getState();
+    return (
+      !signal.aborted &&
+      active.accountStatus === "authenticated" &&
+      (active.account?.id ?? null) === accountId
+    );
+  }
+
   #clearAccountSurface(): void {
     this.#totpEnrollmentFence.bump();
     // The account is going away and `initialState` takes the codes with it, so
@@ -1007,8 +1127,9 @@ class HostedHubController {
     this.#clearAccountSurface();
     // Leases are held by surfaces, not by the session, so only a full reset
     // drops them — otherwise a test's leftover lease would keep the next test's
-    // rotation "displayed".
-    this.#recoveryCodesLeases = 0;
+    // rotation "displayed". Releases issued for the dropped leases stay safe:
+    // each one can only remove its own token, which is already gone.
+    this.#recoveryCodesLeases.clear();
     this.#publishRecoveryCodeDisplayLease();
     getHostedHubApi().clearSessionMaterial();
     hostedHubStore.setState(initialState, true);
