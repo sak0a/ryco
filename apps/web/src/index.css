@@ -136,6 +136,12 @@
   --animate-boot-logo-pulse: boot-logo-pulse 1.4s ease-in-out infinite;
   --font-sans: var(--font-family-sans);
   --font-mono: var(--font-family-mono);
+  /* `font-heading` is applied by DialogTitle, AlertDialogTitle, SheetTitle,
+     EmptyTitle and MobileSheetTitle, but had no `@theme` key — so Tailwind
+     emitted nothing for it and every heading silently fell back to the sans
+     stack. Defining it here changes nothing visually today and makes a future
+     heading face a one-token edit instead of a rename across a dozen files. */
+  --font-heading: var(--font-family-sans);
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
   --color-success-foreground: var(--success-foreground);

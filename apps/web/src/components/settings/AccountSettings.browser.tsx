@@ -457,6 +457,40 @@ describe("AccountSettingsPanel", () => {
     expect(revoke).toHaveBeenCalledWith("pkey_aaaaaaaaaaaaaaaaaaaaaa");
   });
 
+  it("warns about the last usable passkey without refusing to revoke it", async () => {
+    // The Hub owns this rule and answers `conflict` on the last credential. A
+    // client-side disable would be a guess whenever the list is stale — and a
+    // client must not enforce a server rule it only inferred. So the blast
+    // radius is stated, and the control still works.
+    const revoke = vi
+      .spyOn(hostedHubController, "revokePasskey")
+      .mockImplementation(async () => committed());
+
+    await mount();
+    const trigger = page.getByRole("button", { name: "Revoke Work laptop" });
+    await expect.element(trigger).toBeEnabled();
+    await trigger.click();
+
+    await expect
+      .element(page.getByText(/This is the only usable passkey on this account/i))
+      .toBeVisible();
+    await page.getByRole("button", { name: "Revoke passkey" }).click();
+    expect(revoke).toHaveBeenCalledWith("pkey_aaaaaaaaaaaaaaaaaaaaaa");
+  });
+
+  it("does not warn about the last passkey when another usable one exists", async () => {
+    hostedAccountStore.setState({
+      passkeys: [passkey(), passkey({ id: "pkey_bbbbbbbbbbbbbbbbbbbbbb", label: "Phone" })],
+      passkeysStatus: "ready",
+    });
+
+    await mount();
+    await page.getByRole("button", { name: "Revoke Work laptop" }).click();
+    await expect
+      .element(page.getByText(/This is the only usable passkey on this account/i))
+      .not.toBeInTheDocument();
+  });
+
   it("reports the revoke while it is running, on the row being revoked", async () => {
     const pending = deferred();
     vi.spyOn(hostedHubController, "revokePasskey").mockImplementation(async () => {
@@ -533,8 +567,11 @@ describe("AccountSettingsPanel", () => {
     await page.getByRole("textbox", { name: "Authenticator code" }).fill("111111");
     await page.getByRole("button", { name: "Confirm code" }).click();
 
-    // Still open, and the copy no longer claims to know why it failed.
-    await expect.element(page.getByText(/That code was not accepted/i)).toBeVisible();
+    // Still open, and the copy no longer claims to know why it failed. This
+    // refusal is the runtime's *inferred* `step_up_required` — synthesised from
+    // a bare `forbidden` — so the retry copy must also concede that the code may
+    // not be the obstacle at all.
+    await expect.element(page.getByText(/may not be about the code at all/i)).toBeVisible();
     await expect.element(page.getByText(/Request accepted by the Hub/i)).not.toBeInTheDocument();
 
     await page.getByRole("textbox", { name: "Authenticator code" }).fill("654321");

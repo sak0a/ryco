@@ -5,6 +5,19 @@ import type * as React from "react";
 
 import { cn } from "~/lib/utils";
 
+/**
+ * The 44px touch floor for a phone-reachable text field.
+ *
+ * `className` lands on the wrapper `span` (`data-slot="input-control"`), while
+ * the height that a hit test actually measures lives on the inner control
+ * (`data-slot="input"`) — `h-8.5`/`sm:h-7.5` by default, `h-9.5`/`sm:h-8.5` at
+ * `size="lg"`, none of which reach 44px. A bare `phone:h-11` therefore raises
+ * the wrapper and silently leaves the control at 34px, which is why this exists
+ * as one exported string rather than as a note in a comment somewhere.
+ */
+const TOUCH_INPUT_CLASS_NAME =
+  "phone:h-11 phone:[&_[data-slot=input]]:h-11 phone:[&_[data-slot=input]]:leading-11";
+
 type InputProps = Omit<InputPrimitive.Props & React.RefAttributes<HTMLInputElement>, "size"> & {
   size?: "sm" | "default" | "lg" | number;
   unstyled?: boolean;
@@ -59,4 +72,4 @@ function Input({
   );
 }
 
-export { Input, type InputProps };
+export { Input, TOUCH_INPUT_CLASS_NAME, type InputProps };

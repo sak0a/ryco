@@ -4,11 +4,13 @@ import {
   LayoutGridIcon,
   LogOutIcon,
   RefreshCwIcon,
+  UserRoundIcon,
   WifiIcon,
   WifiOffIcon,
 } from "lucide-react";
 import { useState } from "react";
 
+import { useSettingsDialogStore } from "../../settingsDialogStore";
 import { Button } from "../ui/button";
 import { MobileListRow } from "../mobile/MobileListRow";
 import {
@@ -46,7 +48,7 @@ export function NodePresence({ node }: { readonly node: HostedHubNode }) {
   );
 }
 
-function useHostedConnectionActions() {
+export function useHostedConnectionActions() {
   const navigate = useNavigate();
 
   const switchNode = async (next: HostedHubNode) => {
@@ -113,6 +115,7 @@ export function HostedNodeMenu() {
   const role = useHostedHubStore((state) => state.effectiveRole);
   const error = useHostedHubStore((state) => state.errorMessage);
   const browserStatus = useHostedHubStore((state) => state.browserStatus);
+  const openSettings = useSettingsDialogStore((state) => state.openSettings);
   const { switchNode, returnToAllNodes } = useHostedConnectionActions();
   if (!node) return null;
 
@@ -180,7 +183,7 @@ export function HostedNodeMenu() {
                 </button>
               ))}
           </div>
-          <div className="mt-3 flex gap-2 border-t border-border pt-3">
+          <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
             <Button
               size="sm"
               variant="outline"
@@ -190,6 +193,9 @@ export function HostedNodeMenu() {
             </Button>
             <Button size="sm" variant="ghost" onClick={() => void hostedHubController.signOut()}>
               <LogOutIcon aria-hidden /> Sign out
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => openSettings("account")}>
+              <UserRoundIcon aria-hidden /> Account
             </Button>
           </div>
           <div className="mt-3 space-y-3 border-t border-border pt-3">
@@ -226,6 +232,7 @@ export function HostedConnectionSheet({
   const role = useHostedHubStore((state) => state.effectiveRole);
   const error = useHostedHubStore((state) => state.errorMessage);
   const browserStatus = useHostedHubStore((state) => state.browserStatus);
+  const openSettings = useSettingsDialogStore((state) => state.openSettings);
   const { switchNode, returnToAllNodes } = useHostedConnectionActions();
   if (!node) return null;
 
@@ -267,6 +274,16 @@ export function HostedConnectionSheet({
         ) : null}
         <DeliveryUnknownAcknowledgement />
         <div className="mt-3 space-y-1 border-t border-border pt-3">
+          <MobileListRow
+            label="Account"
+            icon={<UserRoundIcon aria-hidden className="size-4 shrink-0" />}
+            onClick={() => {
+              // Close first: the settings surface is its own full-screen sheet
+              // and must not open behind this one.
+              onOpenChange(false);
+              openSettings("account");
+            }}
+          />
           <MobileListRow
             label="All nodes"
             icon={<LayoutGridIcon aria-hidden className="size-4 shrink-0" />}

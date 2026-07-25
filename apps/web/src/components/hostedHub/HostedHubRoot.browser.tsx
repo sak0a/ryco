@@ -6,9 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { render } from "vitest-browser-react";
 
 const navigate = vi.fn(async () => undefined);
+// These suites render the hosted root outside a `RouterProvider`. The toast
+// host the entry surfaces now mount reads route params to scope thread-scoped
+// toasts, which is neither what these suites exercise nor reachable here, so
+// the read is stubbed alongside the navigation that was already stubbed.
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useNavigate: () => navigate,
+  useParams: () => undefined,
 }));
 
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
@@ -337,20 +342,51 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
       .toBeVisible();
   });
 
-  it("keeps one-time recovery material out of browser storage", async () => {
+  it("keeps one-time recovery material out of browser storage, copy included", async () => {
+    const clipboard: Array<string> = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (value: string) => {
+          clipboard.push(value);
+          return Promise.resolve();
+        },
+      },
+    });
     useHostedHubStore.setState({
       accountStatus: "authenticated",
       account,
       session,
-      recoveryCodes: ["recovery-sensitive-browser-canary"],
+      recoveryCodes: ["recovery-sensitive-browser-canary", "second-sensitive-browser-canary"],
     });
     mounted = await render(<HostedHubRoot />);
     await expect
       .element(page.getByRole("heading", { name: "Save your recovery codes" }))
       .toBeVisible();
+    // The count comes from the set rather than from a hardcoded eight or ten.
+    await expect.element(page.getByText(/Save all 2 codes/)).toBeVisible();
     expect(JSON.stringify(localStorage)).not.toContain("recovery-sensitive-browser-canary");
     expect(JSON.stringify(sessionStorage)).not.toContain("recovery-sensitive-browser-canary");
     expect(location.href).not.toContain("recovery-sensitive-browser-canary");
+
+    // The copy control this surface gained is a second path the same secret can
+    // travel, and it must reach the clipboard and nowhere else.
+    await page.getByRole("button", { name: "Copy codes" }).click();
+    expect(clipboard).toEqual([
+      "recovery-sensitive-browser-canary\nsecond-sensitive-browser-canary",
+    ]);
+    expect(JSON.stringify(localStorage)).not.toContain("recovery-sensitive-browser-canary");
+    expect(JSON.stringify(sessionStorage)).not.toContain("recovery-sensitive-browser-canary");
+    expect(document.cookie).not.toContain("recovery-sensitive-browser-canary");
+    expect(location.href).not.toContain("recovery-sensitive-browser-canary");
+
+    // And the acknowledgement is still the group's last child, so it stays the
+    // primary action the fold assertions measure.
+    const acknowledge = [...document.querySelectorAll<HTMLElement>("button")].find(
+      (button) => button.textContent?.trim() === "I saved the codes",
+    );
+    expect(acknowledge).not.toBeUndefined();
+    expect(acknowledge!.parentElement!.lastElementChild).toBe(acknowledge);
   });
 
   it("keeps the node session UI unmounted until the initial snapshot is ready", async () => {

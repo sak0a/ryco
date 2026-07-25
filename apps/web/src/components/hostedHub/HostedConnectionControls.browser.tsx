@@ -8,9 +8,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { render } from "vitest-browser-react";
 
 const navigate = vi.fn(async () => undefined);
+// These suites render the hosted root outside a `RouterProvider`. The toast
+// host the entry surfaces now mount reads route params to scope thread-scoped
+// toasts, which is neither what these suites exercise nor reachable here, so
+// the read is stubbed alongside the navigation that was already stubbed.
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useNavigate: () => navigate,
+  useParams: () => undefined,
 }));
 
 import {

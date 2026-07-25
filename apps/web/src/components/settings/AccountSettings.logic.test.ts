@@ -9,6 +9,7 @@ import {
 } from "@ryco/client-runtime/authorization";
 
 import {
+  accountPosture,
   activePasskeys,
   emailIssue,
   formatRecoveryCodesForClipboard,
@@ -19,11 +20,13 @@ import {
   isSubmittableTotpCode,
   normalizePasskeyLabel,
   normalizeTotpCode,
+  orderPasskeys,
   passkeyBackupSummary,
   passkeyDisplayLabel,
   passwordIssue,
   shouldRetryStepUp,
   stepUpDescription,
+  syncedPasskeyCount,
   stepUpTitle,
   STEP_UP_INFERRED_ATTEMPT_LIMIT,
   TOTP_CODE_MAX_LENGTH,
@@ -253,10 +256,115 @@ describe("step-up prompt copy", () => {
   });
 
   it("does not claim to know whether the first code was wrong or missing", () => {
-    const first = stepUpDescription(0);
-    const retry = stepUpDescription(1);
+    const first = stepUpDescription(0, false);
+    const retry = stepUpDescription(1, false);
     expect(first).not.toBe(retry);
-    expect(first).toMatch(/not started with a passkey/i);
+    expect(first).toMatch(/asked for a code/i);
     expect(retry).toMatch(/not accepted/i);
+  });
+
+  it("never asserts how the session was created when the step-up code was inferred", () => {
+    // `step_up_required` is synthesised client-side from a bare 403; the Hub
+    // never sends it. Saying "this session was not started with a passkey" is
+    // therefore a guess rendered as a finding, and it is false whenever the 403
+    // came from a role check, a disabled account, or a gateway. This is the one
+    // assertion that pins the whole fix.
+    for (const attempts of [0, 1, 5]) {
+      const copy = stepUpDescription(attempts, true);
+      expect(copy).not.toMatch(/not started with a passkey/i);
+      expect(copy).not.toMatch(/this session was/i);
+    }
+  });
+
+  it("distinguishes a refusal the Hub explained from one this client inferred", () => {
+    expect(stepUpDescription(0, true)).not.toBe(stepUpDescription(0, false));
+    expect(stepUpDescription(1, true)).not.toBe(stepUpDescription(1, false));
+    // The inferred cells name the inference as an inference and still say what
+    // to try, rather than going silent or repeating a claim they cannot back.
+    expect(stepUpDescription(0, true)).toMatch(/without saying why/i);
+    expect(stepUpDescription(1, true)).toMatch(/may not be about the code/i);
+    expect(stepUpDescription(1, true)).toMatch(/code showing now/i);
+  });
+});
+
+describe("passkey ordering", () => {
+  it("keeps revoked credentials in the list, below the usable ones", () => {
+    // Revoked keys are never filtered — the list is the only place a user
+    // learns why a device stopped working — but a dead credential between two
+    // live ones makes the usable set impossible to count at a glance.
+    const ordered = orderPasskeys([
+      passkey({ id: "pkey_a", label: "Dead", revokedAt: 2 }),
+      passkey({ id: "pkey_b", label: "Live" }),
+      passkey({ id: "pkey_c", label: "Also dead", revokedAt: 3 }),
+      passkey({ id: "pkey_d", label: "Also live" }),
+    ]);
+    expect(ordered.map((entry) => entry.label)).toEqual(["Live", "Also live", "Dead", "Also dead"]);
+    expect(ordered).toHaveLength(4);
+  });
+
+  it("does not mutate the store's array", () => {
+    const input = [passkey({ id: "pkey_a", revokedAt: 2 }), passkey({ id: "pkey_b" })];
+    orderPasskeys(input);
+    expect(input.map((entry) => entry.id)).toEqual(["pkey_a", "pkey_b"]);
+  });
+});
+
+describe("synced passkey count", () => {
+  it("counts only credentials the Hub positively reported as synced", () => {
+    expect(
+      syncedPasskeyCount([
+        passkey({ id: "pkey_a", backupState: true }),
+        passkey({ id: "pkey_b", backupState: false }),
+        passkey({ id: "pkey_c", backupState: null }),
+        // Revoked credentials cannot protect anything, synced or not.
+        passkey({ id: "pkey_d", backupState: true, revokedAt: 2 }),
+      ]),
+    ).toBe(1);
+  });
+
+  it("returns zero for a set the Hub said nothing about, which the caller must not render", () => {
+    expect(syncedPasskeyCount([passkey({ backupState: null, backupEligible: null })])).toBe(0);
+  });
+});
+
+describe("account posture", () => {
+  it("never scores a list that is loading or could not be refreshed", () => {
+    // Warning about a credential set the surface cannot see is worse than
+    // silence: the user has no way to tell the warning from a real finding.
+    for (const status of ["loading", "stale", "idle"]) {
+      expect(accountPosture([], status)).toBeNull();
+      expect(accountPosture([passkey()], status)).toBeNull();
+    }
+  });
+
+  it("escalates only on the one input the client can actually read", () => {
+    expect(accountPosture([], "ready")?.variant).toBe("error");
+    expect(accountPosture([passkey()], "ready")?.variant).toBe("warning");
+    expect(
+      accountPosture([passkey({ id: "pkey_a" }), passkey({ id: "pkey_b" })], "ready"),
+    ).toBeNull();
+  });
+
+  it("treats revoked credentials as absent", () => {
+    expect(accountPosture([passkey({ revokedAt: 2 })], "ready")?.variant).toBe("error");
+  });
+
+  it("has no positive state, because a green claim would need facts the client cannot see", () => {
+    // Two-factor enrolment, whether a password is set, and whether an address
+    // is on file are all unreadable. Silence is the only honest rendering of
+    // "nothing is wrong that I can detect".
+    const many = [0, 1, 2, 3, 4].map((index) => passkey({ id: `pkey_${String(index)}` }));
+    expect(accountPosture(many, "ready")).toBeNull();
+  });
+
+  it("labels its action distinctly from the Passkeys section's own control", () => {
+    // Two buttons on one page with the same accessible name and the same
+    // destination are an ambiguity for voice control and for anyone listing
+    // the page's controls.
+    expect(accountPosture([], "ready")?.actionLabel).not.toBe("Add passkey");
+    expect(accountPosture([passkey()], "ready")?.actionLabel).not.toBe("Add passkey");
+    expect(accountPosture([], "ready")?.actionLabel).not.toBe(
+      accountPosture([passkey()], "ready")?.actionLabel,
+    );
   });
 });

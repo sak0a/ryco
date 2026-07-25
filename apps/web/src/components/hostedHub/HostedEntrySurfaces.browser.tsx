@@ -27,9 +27,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { render } from "vitest-browser-react";
 
 const navigate = vi.fn(async () => undefined);
+// These suites render the hosted root outside a `RouterProvider`. The toast
+// host the entry surfaces now mount reads route params to scope thread-scoped
+// toasts, which is neither what these suites exercise nor reachable here, so
+// the read is stubbed alongside the navigation that was already stubbed.
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useNavigate: () => navigate,
+  useParams: () => undefined,
 }));
 
 import { resetPointerEmulation, setCoarsePointerEmulation } from "../../../test/browserPointer";
@@ -548,22 +553,35 @@ describe("hosted entry surfaces", () => {
     }
   });
 
-  it.fails("PRE-EXISTING: entry action labels outgrow their content box at 200% text scaling at 320px", async () => {
-    // Pinned, not fixed, and explicitly not caused by this step.
+  it.fails("PRE-EXISTING: entry content outgrows its box at 200% text scaling at 320px", async () => {
+    // Pinned, not fixed. The defect predates the node-detail work; the numbers
+    // below were re-measured after it and are recorded honestly.
     //
-    // At 320px with a 32px root the track's `px-4` resolves to 32px per side
-    // and the content box is 256px, while the action labels' min-content is
-    // 301px (sign-in) and the node rows' 259px (directory), so the surface's
-    // clipping box overflows: node-directory scrollWidth=339 against
-    // clientWidth=320, sign-in 333 against 320. recovery-codes is contained
-    // at 320/320.
+    // At 320px with a 32px root every `rem`-derived length doubles, so the
+    // track's `px-4` resolves to 32px per side and the content box is 256px.
+    // Measured on this fixture, at a 32px root:
     //
-    // This step IMPROVED the residual rather than introducing it: before the
-    // phone card chrome receded, the same content sat inside `section p-5`,
-    // which at a 32px root is 40px per side and left a 176px content box —
-    // strictly worse. The one control this step adds, the phone sign-out,
-    // fits. Fixing it means wrapping or truncating the labels, which is a
-    // separate change with its own review.
+    //   node-directory  scrollWidth=483  clientWidth=320
+    //   sign-in         scrollWidth=351  clientWidth=320
+    //   recovery-codes  scrollWidth=320  clientWidth=320   (contained)
+    //
+    // Previously recorded, before the node rows gained a details column:
+    // node-directory 339, sign-in 333.
+    //
+    // So this step made the residual WORSE, and it is worth naming what did
+    // it rather than leaving the number to be discovered. Everything on the
+    // node row that cannot shrink scales with the root font: the leading
+    // `size-9` tile (72px at a 32px root), the `w-11` details column (88px),
+    // the two `gap-3` gutters (48px), the row's `px-4` (64px) and the
+    // presence indicator's own min-content. The node label is the only column
+    // with `min-w-0`, so it is the only one that yields. sign-in grew by the
+    // "New to this Hub?" disclosure's label.
+    //
+    // Fixing this means letting more of the row yield — a wrapping row, or a
+    // presence indicator that truncates — and the presence indicator is a
+    // shared component with its own tested contract that online and offline
+    // stay visually distinguished. That is a separate change with its own
+    // review, so this stays pinned and visible.
     //
     // Exactly one assertion lives in this test so `it.fails` cannot pass for
     // some unrelated reason; fixing the product makes this test fail until

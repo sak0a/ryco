@@ -32,9 +32,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { render } from "vitest-browser-react";
 
 const navigate = vi.fn(async () => undefined);
+// This suite renders the hosted root outside a `RouterProvider`. The toast host
+// the entry surfaces now mount reads route params to scope thread-scoped
+// toasts, which is neither what this suite exercises nor reachable here, so the
+// read is stubbed alongside the navigation that was already stubbed.
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useNavigate: () => navigate,
+  useParams: () => undefined,
 }));
 
 import { hostedHubController, useHostedHubStore } from "../hostedHub/state";
@@ -170,7 +175,7 @@ const ENTRY_SURFACES: readonly EntrySurface[] = [
         nodes: [selectedNode, otherNode],
       });
     },
-    marker: () => waitForVisibleByText("Choose a Ryco node"),
+    marker: () => waitForVisibleByText("Your nodes"),
     primaryAction: () =>
       [...document.querySelectorAll<HTMLElement>("button")].find((button) =>
         button.textContent?.includes("Studio node"),

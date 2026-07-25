@@ -6,9 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { render } from "vitest-browser-react";
 
 const navigate = vi.fn(async () => undefined);
+// These suites render the hosted root outside a `RouterProvider`. The toast
+// host the entry surfaces now mount reads route params to scope thread-scoped
+// toasts, which is neither what these suites exercise nor reachable here, so
+// the read is stubbed alongside the navigation that was already stubbed.
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useNavigate: () => navigate,
+  useParams: () => undefined,
 }));
 
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
@@ -112,7 +117,7 @@ describe("hosted node route surfaces", () => {
 
     await expect.element(page.getByRole("heading", { name: "Restoring your node" })).toBeVisible();
     await expect.element(page.getByRole("status")).toHaveTextContent(/Checking your access/);
-    expect(document.body.textContent).not.toContain("Choose a Ryco node");
+    expect(document.body.textContent).not.toContain("Your nodes");
     expect(selectNode).not.toHaveBeenCalled();
 
     useHostedHubStore.setState({ directoryStatus: "ready", nodes: [target] });
@@ -138,7 +143,7 @@ describe("hosted node route surfaces", () => {
     });
     mounted = await render(<HostedHubRoot />);
 
-    await expect.element(page.getByRole("heading", { name: "Choose a Ryco node" })).toBeVisible();
+    await expect.element(page.getByRole("heading", { name: /^Your nodes?$/ })).toBeVisible();
     await expect
       .element(page.getByRole("alert"))
       .toHaveTextContent(/not in your authorized node directory/);
@@ -157,7 +162,7 @@ describe("hosted node route surfaces", () => {
     });
     mounted = await render(<HostedHubRoot />);
 
-    await expect.element(page.getByRole("heading", { name: "Choose a Ryco node" })).toBeVisible();
+    await expect.element(page.getByRole("heading", { name: /^Your nodes?$/ })).toBeVisible();
     await expect.element(page.getByRole("alert")).toHaveTextContent(/link is not valid/);
     expect(fakeWindow!.location.pathname).toBe("/");
   });
@@ -223,7 +228,7 @@ describe("hosted node route surfaces", () => {
       .toBeVisible();
 
     fakeWindow!.history.back();
-    await expect.element(page.getByRole("heading", { name: "Choose a Ryco node" })).toBeVisible();
+    await expect.element(page.getByRole("heading", { name: /^Your nodes?$/ })).toBeVisible();
     await vi.waitFor(() => expect(useHostedHubStore.getState().selectedNode).toBeNull());
     expect(useHostedHubStore.getState().selectionStatus).toBe("none");
     expect(fakeWindow!.location.pathname).toBe("/");
