@@ -2,6 +2,7 @@ import {
   HostedHubApiError,
   PASSKEY_SESSION_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
+  type HostedAccountIntent,
   type HostedAccountState,
   type HostedHubPasskey,
   type HostedHubState,
@@ -53,17 +54,61 @@ import type { StatusTone } from "../../components/StatusPill";
 /* -------------------------------------------------------------------------- */
 
 /**
- * The controller reports a refusal as a **message**, not a code: it catches
- * `HostedHubApiError` and publishes `error.message` into
- * `hostedAccountStore.errorMessage`. The code never reaches a consumer.
+ * Every account operation the runtime can attribute an error to.
  *
- * So the two messages this surface must act on are rebuilt from the runtime's
- * own error type rather than copied as string literals. If the runtime rewords
- * either one, these move with it, and the detection cannot silently rot into a
- * comparison against text that no longer exists.
+ * The runtime exports the union as a *type* only, so the values are listed
+ * here — and the `satisfies` is the coupling, not a formality: an intent added
+ * over there stops this file compiling until it is added here too, which is the
+ * whole point of listing them rather than sampling the ones that matter today.
  */
-const STEP_UP_MESSAGE = new HostedHubApiError(STEP_UP_REQUIRED_CODE, 403).message;
-const PASSKEY_SESSION_MESSAGE = new HostedHubApiError(PASSKEY_SESSION_REQUIRED_CODE, 403).message;
+const ACCOUNT_INTENTS = {
+  "set-password": true,
+  "remove-password": true,
+  "begin-totp-enrollment": true,
+  "confirm-totp-enrollment": true,
+  "revoke-totp": true,
+  "request-email-verification": true,
+  "revoke-passkey": true,
+  "add-passkey": true,
+  "regenerate-recovery-codes": true,
+} satisfies Record<HostedAccountIntent, true>;
+
+export const HOSTED_ACCOUNT_INTENTS = Object.keys(
+  ACCOUNT_INTENTS,
+) as ReadonlyArray<HostedAccountIntent>;
+
+/**
+ * Recognise one of the runtime's refusals from the text the controller
+ * published.
+ *
+ * A refusal reaches this surface as a **message**, never a code: the controller
+ * catches `HostedHubApiError` and publishes `error.message`, and the code never
+ * reaches a consumer. So the text is rebuilt from the runtime's own error type
+ * rather than copied as a string literal — a reword over there moves this with
+ * it instead of leaving a comparison against text that no longer exists.
+ *
+ * One message is not enough, though. `messageForCode(code, intent)` consults a
+ * **route-scoped** table before the generic one, and every account error the
+ * controller publishes carries an intent — the runtime already scopes
+ * `conflict`, `authentication_failed`, and `not_found` this way. Matching only
+ * the intent-less text would hold exactly until someone scopes this code too,
+ * and then fail silently and badly: on that one route the authenticator field
+ * would never appear and the action would be permanently uncompletable for a
+ * fallback session. So the matcher accepts every message the runtime can
+ * produce for the code, across every intent it knows about.
+ *
+ * `build` exists so a test can stand in a runtime that *does* scope one; the
+ * default is the real thing.
+ */
+export function createHostedRefusalMatcher(
+  code: string,
+  build: (intent: HostedAccountIntent | undefined) => string = (intent) =>
+    new HostedHubApiError(code, 403, undefined, intent).message,
+): (message: string | null) => boolean {
+  const messages = new Set<string>([build(undefined)]);
+  for (const intent of HOSTED_ACCOUNT_INTENTS) messages.add(build(intent));
+  return (message) => message !== null && messages.has(message);
+}
 
 /**
  * Whether a published error is the fallback-session step-up gate: a session
@@ -71,9 +116,7 @@ const PASSKEY_SESSION_MESSAGE = new HostedHubApiError(PASSKEY_SESSION_REQUIRED_C
  * account that has TOTP enrolled. The answer is "ask the user for a current
  * authenticator code and let them submit again" — never "retry silently".
  */
-export function isHostedStepUpMessage(message: string | null): boolean {
-  return message !== null && message === STEP_UP_MESSAGE;
-}
+export const isHostedStepUpMessage = createHostedRefusalMatcher(STEP_UP_REQUIRED_CODE);
 
 /**
  * Whether a published error is "this needs a passkey session". It is *not* a
@@ -81,9 +124,9 @@ export function isHostedStepUpMessage(message: string | null): boolean {
  * a code field here would imply the two session kinds are interchangeable. The
  * runtime's own message already says what to do instead.
  */
-export function isHostedPasskeySessionMessage(message: string | null): boolean {
-  return message !== null && message === PASSKEY_SESSION_MESSAGE;
-}
+export const isHostedPasskeySessionMessage = createHostedRefusalMatcher(
+  PASSKEY_SESSION_REQUIRED_CODE,
+);
 
 /* -------------------------------------------------------------------------- */
 /* Seams                                                                       */

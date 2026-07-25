@@ -10,7 +10,9 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   createHostedAccountPromptDraft,
+  createHostedRefusalMatcher,
   deriveHostedAccountManagementView,
+  HOSTED_ACCOUNT_INTENTS,
   isHostedPasskeySessionMessage,
   isHostedStepUpMessage,
   teardownHostedRecoveryCodes,
@@ -611,6 +613,51 @@ describe("adding a passkey", () => {
  * the field on.
  */
 describe("TOTP step-up", () => {
+  /**
+   * The runtime builds a refusal message from the code **and the route**, and
+   * every account error the controller publishes carries one. So detection has
+   * to hold for every intent, not only for the intent-less text.
+   */
+  it("recognises each refusal on every route it can arrive from", () => {
+    expect(HOSTED_ACCOUNT_INTENTS.length).toBeGreaterThan(0);
+    for (const intent of HOSTED_ACCOUNT_INTENTS) {
+      const stepUp = new HostedHubApiError(STEP_UP_REQUIRED_CODE, 403, undefined, intent).message;
+      expect(isHostedStepUpMessage(stepUp), intent).toBe(true);
+      expect(isHostedPasskeySessionMessage(stepUp), intent).toBe(false);
+
+      const passkeySession = new HostedHubApiError(
+        PASSKEY_SESSION_REQUIRED_CODE,
+        403,
+        undefined,
+        intent,
+      ).message;
+      expect(isHostedPasskeySessionMessage(passkeySession), intent).toBe(true);
+      expect(isHostedStepUpMessage(passkeySession), intent).toBe(false);
+    }
+  });
+
+  /**
+   * The failure this guards against cannot be reproduced against the runtime as
+   * it stands — it route-scopes `conflict`, `authentication_failed`, and
+   * `not_found`, but not this code. So the scoping is stood in, because the
+   * cost of getting it wrong is silent: on that one route the authenticator
+   * field would never appear and the action would be uncompletable for every
+   * fallback session.
+   */
+  it("keeps recognising a refusal the runtime starts route-scoping", () => {
+    const SCOPED = "Enter a current code from your authenticator app to remove your password.";
+    const match = createHostedRefusalMatcher(STEP_UP_REQUIRED_CODE, (intent) =>
+      intent === "remove-password"
+        ? SCOPED
+        : new HostedHubApiError(STEP_UP_REQUIRED_CODE, 403, undefined, intent).message,
+    );
+    expect(match(SCOPED)).toBe(true);
+    // And the generic text still matches: scoping one route narrows nothing else.
+    expect(match(STEP_UP_MESSAGE)).toBe(true);
+    expect(match("You are not authorized to perform this action.")).toBe(false);
+    expect(match(null)).toBe(false);
+  });
+
   it("acts on the runtime's step-up refusal and on nothing else", () => {
     // Pinned deliberately: this is a string comparison against another
     // package's copy, so a reword there must fail here rather than silently
