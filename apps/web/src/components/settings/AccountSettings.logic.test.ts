@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   HostedHubApiError,
+  HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,
   PASSKEY_SESSION_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
   type HostedHubPasskey,
@@ -11,6 +12,7 @@ import {
   emailIssue,
   formatRecoveryCodesForClipboard,
   inlineErrorMessage,
+  isPasskeyEnrolmentUnverified,
   isPasskeyRevoked,
   isPasskeySessionRequired,
   isStepUpRequired,
@@ -134,6 +136,39 @@ describe("passkey presentation", () => {
     expect(normalizePasskeyLabel("   ")).toBeNull();
     expect(normalizePasskeyLabel("")).toBeNull();
     expect(normalizePasskeyLabel("  Phone  ")).toBe("Phone");
+  });
+});
+
+describe("add-passkey commit classification", () => {
+  it("treats a failed confirming re-read as committed, because the credential may already exist", () => {
+    // The runtime only reaches the confirming read after the Hub has accepted
+    // the ceremony, so a stale list at the end of an add means the credential's
+    // fate is unknown — never "the ceremony failed".
+    expect(isPasskeyEnrolmentUnverified("The Hub could not be reached.", "stale")).toBe(true);
+  });
+
+  it("treats the runtime's unconfirmed-enrolment message as committed", () => {
+    expect(isPasskeyEnrolmentUnverified(HOSTED_PASSKEY_UNCONFIRMED_MESSAGE, "ready")).toBe(true);
+  });
+
+  it("still treats an ordinary refusal on a healthy list as a failed ceremony", () => {
+    for (const status of ["ready", "loading", "idle"]) {
+      expect(isPasskeyEnrolmentUnverified("That password has appeared in a breach.", status)).toBe(
+        false,
+      );
+      expect(isPasskeyEnrolmentUnverified("The passkey ceremony was cancelled.", status)).toBe(
+        false,
+      );
+    }
+  });
+
+  it("never reads a step-up refusal as a commit, whatever the list is doing", () => {
+    // A step-up refusal is pre-commit by construction: the Hub declined the
+    // request. Reading it as committed would close the dialog on the one path
+    // that still needs the user.
+    for (const status of ["ready", "stale", "loading", "idle"]) {
+      expect(isPasskeyEnrolmentUnverified(STEP_UP_REQUIRED_MESSAGE, status)).toBe(false);
+    }
   });
 });
 
