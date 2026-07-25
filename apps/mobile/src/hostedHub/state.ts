@@ -1,4 +1,5 @@
 import {
+  hostedAccountStore,
   hostedHubController,
   hostedHubStore,
   markHostedSessionReady,
@@ -6,6 +7,7 @@ import {
   reportHostedShellSnapshotFailure,
   setHostedRuntimeConfigurator,
   HOSTED_SESSION_SYNC_FAILURE_MESSAGE,
+  type HostedAccountState,
   type HostedHubState,
 } from "@ryco/client-runtime/authorization";
 import { useStore } from "zustand";
@@ -31,6 +33,7 @@ export { ensureMobileHostedSession };
 export { isMobileHostedModeAvailable } from "./runtime";
 
 export {
+  hostedAccountStore,
   hostedHubController,
   hostedHubStore,
   markHostedSessionReady,
@@ -38,7 +41,7 @@ export {
   reportHostedShellSnapshotFailure,
   HOSTED_SESSION_SYNC_FAILURE_MESSAGE,
 };
-export type { HostedHubState };
+export type { HostedAccountState, HostedHubState };
 
 type HostedHubSelector<T> = (state: HostedHubState) => T;
 
@@ -47,4 +50,21 @@ export const useHostedHubStore = Object.assign(
   <T>(selector: HostedHubSelector<T>): T =>
     useStore(hostedHubStore as never, selector as never) as T,
   hostedHubStore,
+);
+
+type HostedAccountSelector<T> = (state: HostedAccountState) => T;
+
+/**
+ * React binding for the package-owned account-management state.
+ *
+ * A second store on purpose, not a widening of {@link useHostedHubStore}: the
+ * relay/session store republishes on every transport transition, and an account
+ * screen subscribing to that would re-render on traffic it does not read — while
+ * a passkey list read would re-render every relay consumer. The runtime keeps
+ * them apart for exactly that reason; the binding preserves it.
+ */
+export const useHostedAccountStore = Object.assign(
+  <T>(selector: HostedAccountSelector<T>): T =>
+    useStore(hostedAccountStore as never, selector as never) as T,
+  hostedAccountStore,
 );

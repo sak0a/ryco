@@ -302,13 +302,53 @@ describe("hosted account surface", () => {
     expect(controller.signOut).toHaveBeenCalledTimes(1);
   });
 
-  it("hands passkey enrollment and recovery codes to the browser", () => {
+  /**
+   * The regression this change exists to prevent.
+   *
+   * "Add this device" and "Recovery codes" used to open the Hub's web app from
+   * here, because the runtime had no client method for either ceremony. Both
+   * are now DPoP-native and live on the account-management surface, so an
+   * authenticated account view must have no route into the browser at all —
+   * sign-out is the only row it offers, and nothing on it can start a fallback
+   * session.
+   */
+  it("reaches no browser from an authenticated account", () => {
     const view = accountView({ ...AUTHENTICATED, ...ONLINE_NODE });
-    view.rows.find((row) => row.id === "add-this-device")?.run();
-    view.rows.find((row) => row.id === "recovery-codes")?.run();
-    expect(fallback.openHostedFallbackSession).toHaveBeenCalledTimes(2);
-    // Neither one mints a session from the browser.
-    expect(controller.signIn).not.toHaveBeenCalled();
+    expect(view.rows.map((row) => row.id)).toEqual(["sign-out"]);
+    for (const row of view.rows) row.run();
+    view.dismissRecoveryCodes?.run();
+    view.deliveryUnknown?.action.run();
+    expect(fallback.openHostedFallbackSession).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The session kind is not knowable from here. A session minted from a
+   * password, a recovery code, or an email link looks identical to a passkey
+   * one at both the client type and the Hub, so the account header must not
+   * claim the stronger of the two.
+   */
+  it("claims only what the client can attest to about the session", () => {
+    const view = accountView({ ...AUTHENTICATED, ...ONLINE_NODE });
+    expect(view.detail).toBe(
+      "Every request from this device is signed with a key held in its secure hardware.",
+    );
+    expect(view.detail).not.toMatch(/passkey/i);
+  });
+
+  it("acknowledges rotated recovery codes only from the explicit action", () => {
+    const none = accountView({ ...AUTHENTICATED, ...ONLINE_NODE });
+    expect(none.recoveryCodes).toEqual([]);
+    expect(none.dismissRecoveryCodes).toBeNull();
+
+    const shown = accountView({
+      ...AUTHENTICATED,
+      ...ONLINE_NODE,
+      recoveryCodes: ["aaaa-bbbb", "cccc-dddd"],
+    });
+    expect(shown.recoveryCodes).toEqual(["aaaa-bbbb", "cccc-dddd"]);
+    expect(controller.dismissRecoveryCodes).not.toHaveBeenCalled();
+    shown.dismissRecoveryCodes?.run();
+    expect(controller.dismissRecoveryCodes).toHaveBeenCalledTimes(1);
   });
 
   it("gates node affordances with the runtime's capability resolution", () => {
@@ -459,6 +499,32 @@ describe("no secret or identifying material reaches a hosted view model", () => 
       expect(rendered).not.toMatch(/\bDPoP\b|\bBearer\b/);
       expect(rendered).not.toMatch(/eyJ[\w-]{6,}/);
       expect(rendered).not.toMatch(/[A-Za-z0-9_-]{40,}/);
+    }
+  });
+
+  /**
+   * The TOTP enrolment secret is the other piece of key material the hosted
+   * store can hold. It exists for exactly one screen — the enrolment prompt in
+   * `hostedAccountModel.ts` — and neither of these two surfaces has any reason
+   * to see it, so both are asserted blind to it even while it is in the store.
+   */
+  it("never projects the TOTP enrolment secret", () => {
+    const enrolling: Partial<HostedHubState> = {
+      ...AUTHENTICATED,
+      ...ONLINE_NODE,
+      totpEnrollment: {
+        secretBase32: "JBSWY3DPEHPK3PXP",
+        provisioningUri: "otpauth://totp/Ryco:ada?secret=JBSWY3DPEHPK3PXP&issuer=Ryco",
+      },
+    };
+    for (const view of [signInView(enrolling), accountView(enrolling)]) {
+      const keys: string[] = [];
+      const strings: string[] = [];
+      walk(view, keys, strings);
+      expect(keys).not.toContain("secretBase32");
+      expect(keys).not.toContain("provisioningUri");
+      expect(strings.join(" ")).not.toContain("JBSWY3DPEHPK3PXP");
+      expect(strings.join(" ")).not.toContain("otpauth");
     }
   });
 

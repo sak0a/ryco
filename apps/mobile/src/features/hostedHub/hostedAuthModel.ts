@@ -67,8 +67,6 @@ export type HostedAuthActionId =
   | "dismiss-recovery-codes"
   | "acknowledge-delivery-unknown"
   | "sign-out"
-  | "add-this-device"
-  | "recovery-codes"
   | "done";
 
 /** A confirmation the surface must present before running an action. */
@@ -142,6 +140,14 @@ export interface HostedAccountView {
   readonly errorMessage: string | null;
   readonly rows: ReadonlyArray<HostedAccountRow>;
   readonly recoveryCodes: ReadonlyArray<string>;
+  /**
+   * Present exactly while codes are on screen. Rotating them is now an action
+   * this surface offers, so the acknowledgement has to live here too: codes
+   * displayed with no way to dismiss them would either persist across
+   * navigation or be cleared by something other than the user, and the display
+   * contract is that the user says when they are done reading.
+   */
+  readonly dismissRecoveryCodes: HostedAuthAction | null;
   readonly deliveryUnknown: HostedDeliveryUnknownView | null;
   /** Present only while signed out, so Settings can route to the sheet. */
   readonly signInAction: HostedAuthAction | null;
@@ -170,12 +176,18 @@ const DELIVERY_UNKNOWN_MESSAGE =
 /**
  * Hand control to the Hub's own web app, then back to a native passkey login.
  *
- * Every credential flow the native transport cannot perform — owner bootstrap,
- * invitation redemption, password, email, TOTP, recovery-code redemption — is
- * browser-transport-only on the Hub. `openHostedFallbackSession` owns the URL
- * validation and the transport separation; the only thing decided here is that
- * the return path is always `signIn()`, because the app never adopts the
- * browser's session.
+ * This is a **login** fallback and nothing else. The routes it exists for are
+ * the ones the Hub guards with `enforceSameOrigin` — owner bootstrap,
+ * invitation registration, password sign-in, recovery-code redemption, and the
+ * email recovery pair — which a native socket cannot satisfy. Credential
+ * *management* is not among them: `/api/account/*` authorizes an
+ * `Authorization: DPoP` request with no same-origin check, so the account
+ * surface calls it natively (see `hostedAccountModel.ts`) and never appears
+ * here.
+ *
+ * `openHostedFallbackSession` owns the URL validation and the transport
+ * separation; the only thing decided here is that the return path is always
+ * `signIn()`, because the app never adopts the browser's session.
  */
 function openFallbackSession(): void {
   void openHostedFallbackSession({
@@ -410,15 +422,13 @@ export function deriveHostedSignInView(input: HostedSignInViewInput): HostedSign
 }
 
 /**
- * The account rows.
+ * The session rows.
  *
- * "Add this device" and "Recovery codes" hand off to the Hub's web app rather
- * than calling an endpoint directly. Both ceremonies exist on the Hub, but the
- * shared runtime exposes no client method for either, and constructing those
- * requests here would fork proof construction and URL derivation out of
- * `@ryco/client-runtime` — the one thing this plane is not allowed to do. The
- * browser handoff is the sanctioned path and still ends in a native passkey
- * login, so the app's own session stays DPoP-bound either way.
+ * Sign-out only. "Add this device" and "Recovery codes" used to hand off to the
+ * Hub's web app from here, because the shared runtime exposed no client method
+ * for either ceremony. It does now, and both are DPoP-native — so they live in
+ * `hostedAccountModel.ts` alongside password, two-factor, and email, and this
+ * model no longer reaches the browser at all from an authenticated session.
  */
 function accountRows(state: HostedHubState): ReadonlyArray<HostedAccountRow> {
   const row = (
@@ -440,8 +450,6 @@ function accountRows(state: HostedHubState): ReadonlyArray<HostedAccountRow> {
   });
 
   return [
-    row("add-this-device", "Add a passkey for this device", openFallbackSession),
-    row("recovery-codes", "Recovery codes", openFallbackSession),
     row("sign-out", "Sign out", () => void hostedHubController.signOut(), {
       destructive: true,
       confirm: {
@@ -479,6 +487,7 @@ export function deriveHostedAccountView(input: HostedAccountViewInput): HostedAc
     statusIndicator: null,
     rows: [] as ReadonlyArray<HostedAccountRow>,
     recoveryCodes: [] as ReadonlyArray<string>,
+    dismissRecoveryCodes: null,
     deliveryUnknown: null,
     signInAction: null,
   } satisfies Omit<HostedAccountView, "signedIn" | "title" | "detail">;
@@ -514,13 +523,25 @@ export function deriveHostedAccountView(input: HostedAccountViewInput): HostedAc
     ...base,
     signedIn: true,
     title: state.account.displayName,
-    detail: "Signed in with a passkey on this device.",
+    // What this device can actually attest to. Nothing the client or the Hub
+    // exposes says which credential minted the session, so claiming "signed in
+    // with a passkey" would state as fact something that could as easily be a
+    // password or a recovery code — the one thing the account copy must never
+    // do. The DPoP binding, by contrast, is true of every session this app
+    // holds.
+    detail: "Every request from this device is signed with a key held in its secure hardware.",
     displayName: state.account.displayName,
     roleLabel: roleLabel(state),
     statusText: status.text,
     statusIndicator: status.indicator,
     rows: accountRows(state),
     recoveryCodes: state.recoveryCodes,
+    dismissRecoveryCodes:
+      state.recoveryCodes.length > 0
+        ? action("dismiss-recovery-codes", "I saved the codes", () =>
+            hostedHubController.dismissRecoveryCodes(),
+          )
+        : null,
     deliveryUnknown: deliveryUnknownView(state),
   };
 }
