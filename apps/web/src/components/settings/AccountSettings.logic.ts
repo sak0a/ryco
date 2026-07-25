@@ -7,6 +7,7 @@
 
 import {
   HostedHubApiError,
+  HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,
   PASSKEY_SESSION_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
   type HostedHubPasskey,
@@ -65,6 +66,37 @@ export function inlineErrorMessage(
   if (!errorMessage) return null;
   if (stepUpPending && isStepUpRequired(errorMessage)) return null;
   return errorMessage;
+}
+
+/**
+ * Whether an error published by an add-passkey attempt arrived *after* the
+ * credential was committed, and so is not evidence the ceremony failed.
+ *
+ * `addPasskey` does not trust the ceremony: once the Hub has accepted it, the
+ * runtime issues a forced re-read and confirms the credential is on the list.
+ * That read publishes its own failure on the same `errorMessage` slot the
+ * ceremony's failure uses, so "there is an error" cannot mean "nothing was
+ * enrolled". Two shapes are post-commit:
+ *
+ *   * the confirming read failed, leaving the list `stale`; or
+ *   * the read succeeded and did not contain the credential, which the runtime
+ *     reports with its own bounded message.
+ *
+ * A pre-commit failure never reaches that read and so cannot leave the list
+ * stale — with one exception: a list already stale from an earlier read is
+ * still stale afterwards. That case is answered the same way, because the two
+ * mistakes do not cost the same. Closing the dialog on a ceremony that really
+ * did fail costs one extra click; re-offering "Create passkey" on one that
+ * succeeded runs a second ceremony and leaves a duplicate credential on the
+ * account, which is the failure this exists to prevent.
+ */
+export function isPasskeyEnrolmentUnverified(
+  errorMessage: string,
+  passkeysStatus: string,
+): boolean {
+  if (isStepUpRequired(errorMessage)) return false;
+  if (errorMessage === HOSTED_PASSKEY_UNCONFIRMED_MESSAGE) return true;
+  return passkeysStatus === "stale";
 }
 
 /** A passkey is revoked once the Hub reports a revocation timestamp for it. */

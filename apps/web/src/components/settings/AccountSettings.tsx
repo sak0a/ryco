@@ -27,7 +27,7 @@ import {
   TriangleAlertIcon,
   UserRoundIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import type { HostedHubPasskey } from "@ryco/client-runtime/authorization";
 
@@ -53,7 +53,6 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
   Dialog,
-  DialogClose,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -70,6 +69,7 @@ import {
   emailIssue,
   EMAIL_MAX_LENGTH,
   inlineErrorMessage,
+  isPasskeyEnrolmentUnverified,
   isPasskeyRevoked,
   isPasskeySessionRequired,
   isStepUpRequired,
@@ -99,16 +99,46 @@ function formatEpoch(value: number | null): string | null {
 }
 
 /**
- * A step-up the Hub asked for: the action's identity (for the prompt copy) and
- * the caller's own thunk, re-run verbatim with the code the user supplies.
+ * What a caller wants done with the outcome of one account action.
+ *
+ * `onCommitted` fires on exactly one of the paths that can succeed — the first
+ * attempt, or the retry that carried a code — so a caller's cleanup cannot be
+ * skipped just because the session turned out to need a step-up.
+ */
+interface AccountActionOptions {
+  /** Cleanup for the one path where the action committed. */
+  readonly onCommitted?: () => void;
+  /**
+   * Cleanup for an attempt the user walked away from: a cancelled step-up, a
+   * dismissed form, a request aborted because it was never going to answer. A
+   * caller holding secret material must drop it here — abandoning an attempt is
+   * not a reason to keep the user's typed password in a React state.
+   */
+  readonly onAbandoned?: () => void;
+  /**
+   * Whether an outcome that carries an error nonetheless committed. Defaults to
+   * "an error means it did not", which is right for every action whose only
+   * error is its own refusal.
+   */
+  readonly committedDespiteError?: (errorMessage: string) => boolean;
+}
+
+/**
+ * A step-up the Hub asked for: the action's identity (for the prompt copy), the
+ * caller's own thunk re-run verbatim with the code the user supplies, and the
+ * caller's cleanups.
+ *
  * Re-running the caller's thunk rather than reconstructing the request keeps the
- * retry identical to the attempt — including the password or email address the
- * user already typed, which never has to be round-tripped through this state.
+ * retry identical to the attempt. It does **not** keep the user's secret out of
+ * this state, and nothing here should claim otherwise: the thunk is a closure
+ * over whatever the caller captured, the typed password included. So the
+ * closure is released the moment the step-up ends, and `onAbandoned` gives the
+ * caller the same chance to release its own copy.
  */
 interface PendingStepUp {
   readonly action: AccountStepUpAction;
   readonly run: (stepUp: { readonly totpCode?: string }) => Promise<void>;
-  readonly onCommitted: (() => void) | undefined;
+  readonly options: AccountActionOptions | undefined;
 }
 
 /**
@@ -118,66 +148,152 @@ interface PendingStepUp {
  * The runtime publishes an action's outcome on `hostedAccountStore` rather than
  * by rejecting, so the store is the authority on what happened; it is read
  * after the await, when exactly one action has run.
- *
- * `onCommitted` fires on exactly one of the two paths that can succeed — the
- * first attempt, or the retry that carried a code — so a caller's cleanup (a
- * typed password cleared, a form closed) cannot be skipped just because the
- * session turned out to need a step-up.
  */
 function useAccountAction() {
   const [stepUp, setStepUp] = useState<PendingStepUp | null>(null);
   const [stepUpAttempts, setStepUpAttempts] = useState(0);
   const [stepUpCode, setStepUpCode] = useState("");
+  /**
+   * Which attempt this surface is waiting on.
+   *
+   * `cancelAccountAction()` leaves the account store idle with no error — byte
+   * for byte what a commit looks like — so an abandoned attempt whose response
+   * lands afterwards would otherwise be read back as a success and fire the
+   * caller's commit cleanup. Bumping this on every start and every abandonment
+   * makes a stale continuation identifiable, and inert.
+   */
+  const attemptRef = useRef(0);
 
-  const closeStepUp = useCallback(() => {
+  const clearStepUp = useCallback(() => {
     setStepUp(null);
     setStepUpAttempts(0);
     setStepUpCode("");
+  }, []);
+
+  /**
+   * Abandon whatever is in flight.
+   *
+   * A platform passkey sheet the user walks away from never returns and never
+   * rejects, and a request can hang for as long as the network lets it. Without
+   * an abort the surface stays busy for the life of the session behind a modal
+   * whose every exit is disabled — only a reload gets out. This aborts the
+   * runtime's operation, drops the pending step-up along with the closure it
+   * holds over the caller's secret, and tells the caller to drop its own.
+   */
+  const cancel = useCallback(() => {
+    attemptRef.current += 1;
+    hostedHubController.cancelAccountAction();
+    stepUp?.options?.onAbandoned?.();
+    clearStepUp();
+  }, [clearStepUp, stepUp]);
+
+  const settle = useCallback((error: string | null, options: AccountActionOptions | undefined) => {
+    if (error === null || (options?.committedDespiteError?.(error) ?? false)) {
+      options?.onCommitted?.();
+    }
   }, []);
 
   const run = useCallback(
     async (
       action: AccountStepUpAction,
       thunk: (input: { readonly totpCode?: string }) => Promise<void>,
-      onCommitted?: () => void,
+      options?: AccountActionOptions,
     ): Promise<void> => {
+      const attempt = (attemptRef.current += 1);
       await thunk({});
+      if (attemptRef.current !== attempt) return;
       const error = hostedAccountStore.getState().errorMessage;
       if (isStepUpRequired(error)) {
         setStepUpCode("");
         setStepUpAttempts(0);
-        setStepUp({ action, run: thunk, onCommitted });
+        setStepUp({ action, run: thunk, options });
         return;
       }
-      if (error === null) onCommitted?.();
+      settle(error, options);
     },
-    [],
+    [settle],
   );
 
   const submitStepUp = useCallback(async () => {
     if (!stepUp) return;
     const totpCode = normalizeTotpCode(stepUpCode);
     if (totpCode.length === 0) return;
+    const attempt = (attemptRef.current += 1);
     await stepUp.run({ totpCode });
+    if (attemptRef.current !== attempt) return;
     const error = hostedAccountStore.getState().errorMessage;
     if (isStepUpRequired(error)) {
       setStepUpAttempts((attempts) => attempts + 1);
       setStepUpCode("");
       return;
     }
-    if (error === null) stepUp.onCommitted?.();
-    closeStepUp();
-  }, [closeStepUp, stepUp, stepUpCode]);
+    settle(error, stepUp.options);
+    clearStepUp();
+  }, [clearStepUp, settle, stepUp, stepUpCode]);
 
   return {
     run,
+    cancel,
     stepUp,
     stepUpAttempts,
     stepUpCode,
     setStepUpCode,
     submitStepUp,
-    closeStepUp,
   };
+}
+
+/**
+ * Own the one-time recovery-code display while this surface is mounted, and
+ * fence a rotation against this surface's own teardown.
+ *
+ * A rotation still in flight at unmount is not cancelled by the cleanup that
+ * dismisses the slot: the response lands afterwards and the runtime writes the
+ * new codes straight back into a slot this surface is no longer rendering. The
+ * display claim has already been released by then, so the hosted root takes the
+ * whole viewport to show a secret the user was just told was gone.
+ *
+ * So the teardown is recorded, a late response is dismissed the moment it
+ * lands, and the claim is held until it has been — without holding the claim,
+ * the root would win the race in the frame between the runtime's write and the
+ * fence. A runtime-side fence is the real fix; this one does not depend on it.
+ */
+function useRecoveryCodeDisplayFence(): (rotate: () => Promise<void>) => Promise<void> {
+  const claim = useRecoveryCodeDisplayStore((state) => state.claim);
+  const release = useRecoveryCodeDisplayStore((state) => state.release);
+  const fence = useRef<{ mounted: boolean; inFlight: number }>({ mounted: false, inFlight: 0 });
+
+  useEffect(() => {
+    const state = fence.current;
+    state.mounted = true;
+    claim();
+    return () => {
+      state.mounted = false;
+      // On teardown this drops **both** secrets the runtime can be holding on
+      // this surface's behalf. Closing the settings surface with codes or an
+      // enrolment secret still in a slot would leave the account's key material
+      // resident for the life of the session.
+      hostedHubController.dismissRecoveryCodes();
+      hostedHubController.dismissTotpEnrollment();
+      if (state.inFlight === 0) release();
+    };
+  }, [claim, release]);
+
+  return useCallback(
+    async (rotate: () => Promise<void>) => {
+      const state = fence.current;
+      state.inFlight += 1;
+      try {
+        await rotate();
+      } finally {
+        state.inFlight -= 1;
+        if (!state.mounted) {
+          hostedHubController.dismissRecoveryCodes();
+          if (state.inFlight === 0) release();
+        }
+      }
+    },
+    [release],
+  );
 }
 
 /** A busy control: the label with a spinner while this action is the live one. */
@@ -201,32 +317,14 @@ export function AccountSettingsPanel() {
   const errorMessage = useHostedAccountStore((state) => state.errorMessage);
   const recoveryCodes = useHostedHubStore((state) => state.recoveryCodes);
   const totpEnrollment = useHostedHubStore((state) => state.totpEnrollment ?? null);
-  const claimRecoveryCodeDisplay = useRecoveryCodeDisplayStore((state) => state.claim);
-  const releaseRecoveryCodeDisplay = useRecoveryCodeDisplayStore((state) => state.release);
 
   const action = useAccountAction();
+  const fenceRecoveryCodes = useRecoveryCodeDisplayFence();
   const busy = actionStatus !== "idle";
 
   useEffect(() => {
     void hostedHubController.refreshPasskeys();
   }, []);
-
-  /**
-   * While this surface is mounted it owns the one-time recovery-code display,
-   * and on teardown it drops **both** secrets the runtime can be holding on its
-   * behalf. Closing the settings surface with codes or an enrolment secret still
-   * in the slot would leave the account's key material resident for the life of
-   * the session — and, for recovery codes, would hand the display back to the
-   * hosted root, which would take over the whole viewport.
-   */
-  useEffect(() => {
-    claimRecoveryCodeDisplay();
-    return () => {
-      releaseRecoveryCodeDisplay();
-      hostedHubController.dismissRecoveryCodes();
-      hostedHubController.dismissTotpEnrollment();
-    };
-  }, [claimRecoveryCodeDisplay, releaseRecoveryCodeDisplay]);
 
   if (accountStatus !== "authenticated") {
     return (
@@ -278,6 +376,7 @@ export function AccountSettingsPanel() {
         busy={busy}
         actionStatus={actionStatus}
         run={action.run}
+        cancel={action.cancel}
       />
 
       <TwoFactorSection
@@ -287,7 +386,12 @@ export function AccountSettingsPanel() {
         run={action.run}
       />
 
-      <PasswordSection busy={busy} actionStatus={actionStatus} run={action.run} />
+      <PasswordSection
+        busy={busy}
+        actionStatus={actionStatus}
+        run={action.run}
+        cancel={action.cancel}
+      />
 
       <EmailSection busy={busy} actionStatus={actionStatus} run={action.run} />
 
@@ -296,6 +400,7 @@ export function AccountSettingsPanel() {
         actionStatus={actionStatus}
         recoveryCodes={recoveryCodes}
         run={action.run}
+        fence={fenceRecoveryCodes}
       />
 
       <StepUpDialog
@@ -304,7 +409,7 @@ export function AccountSettingsPanel() {
         code={action.stepUpCode}
         onCodeChange={action.setStepUpCode}
         onSubmit={action.submitStepUp}
-        onCancel={action.closeStepUp}
+        onCancel={action.cancel}
         busy={busy}
       />
     </SettingsPageContainer>
@@ -314,8 +419,11 @@ export function AccountSettingsPanel() {
 type RunAccountAction = (
   action: AccountStepUpAction,
   thunk: (input: { readonly totpCode?: string }) => Promise<void>,
-  onCommitted?: () => void,
+  options?: AccountActionOptions,
 ) => Promise<void>;
+
+/** Abandon the action in flight, aborting it in the runtime. */
+type CancelAccountAction = () => void;
 
 /* ------------------------------------------------------------------ passkeys */
 
@@ -326,6 +434,7 @@ function PasskeysSection({
   busy,
   actionStatus,
   run,
+  cancel,
 }: {
   readonly passkeys: ReadonlyArray<HostedHubPasskey>;
   readonly loading: boolean;
@@ -333,32 +442,51 @@ function PasskeysSection({
   readonly busy: boolean;
   readonly actionStatus: string;
   readonly run: RunAccountAction;
+  readonly cancel: CancelAccountAction;
 }) {
   const [addOpen, setAddOpen] = useState(false);
   const [label, setLabel] = useState("");
   const [pendingRevoke, setPendingRevoke] = useState<HostedHubPasskey | null>(null);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
   const adding = actionStatus === "adding-passkey";
   const revoking = actionStatus === "revoking-passkey";
   const active = activePasskeys(passkeys);
 
+  const closeAdd = useCallback(() => {
+    setLabel("");
+    setAddOpen(false);
+  }, []);
+
   const submitAdd = async (event: FormEvent) => {
     event.preventDefault();
     const passkeyLabel = normalizePasskeyLabel(label);
-    await run(
-      "add-passkey",
-      (stepUp) => hostedHubController.addPasskey({ passkeyLabel, ...stepUp }),
-      () => {
-        setLabel("");
-        setAddOpen(false);
-      },
-    );
+    await run("add-passkey", (stepUp) => hostedHubController.addPasskey({ passkeyLabel, ...stepUp }), {
+      onCommitted: closeAdd,
+      onAbandoned: closeAdd,
+      // An error after an add is not proof the ceremony failed: the runtime
+      // confirms its own commit with a forced re-read and reports that read's
+      // failure on the same slot. Leaving this dialog open on one would invite
+      // a second "Create passkey" press, a second ceremony, and a duplicate
+      // credential the user never asked for.
+      committedDespiteError: (message) =>
+        isPasskeyEnrolmentUnverified(message, hostedAccountStore.getState().passkeysStatus),
+    });
   };
 
   const confirmRevoke = async () => {
     const target = pendingRevoke;
     if (!target) return;
     setPendingRevoke(null);
-    await hostedHubController.revokePasskey(target.id);
+    // Held past the confirmation so the row's spinner has something to key on:
+    // revoking is destructive and slow enough to be worth reporting, and
+    // clearing the pending target alone left `busy` false for its whole
+    // duration and the spinner permanently unreachable.
+    setRevokingId(target.id);
+    try {
+      await hostedHubController.revokePasskey(target.id);
+    } finally {
+      setRevokingId(null);
+    }
   };
 
   return (
@@ -427,7 +555,7 @@ function PasskeysSection({
                   disabled={busy}
                   onClick={() => setPendingRevoke(passkey)}
                 >
-                  <ActionLabel busy={revoking && pendingRevoke?.id === passkey.id}>
+                  <ActionLabel busy={revoking && revokingId === passkey.id}>
                     <Trash2Icon aria-hidden />
                     Revoke
                   </ActionLabel>
@@ -441,8 +569,15 @@ function PasskeysSection({
       <Dialog
         open={addOpen}
         onOpenChange={(open) => {
+          if (open) {
+            setAddOpen(true);
+            return;
+          }
+          // A ceremony in flight is abandoned only through the explicit Cancel:
+          // a stray Escape must not silently abort a platform passkey sheet the
+          // user is still working through.
           if (busy) return;
-          setAddOpen(open);
+          closeAdd();
         }}
       >
         <DialogPopup className="max-w-md">
@@ -466,13 +601,19 @@ function PasskeysSection({
               />
             </DialogPanel>
             <DialogFooter>
-              {adding ? (
-                <Button variant="outline" onClick={() => hostedHubController.cancelAccountAction()}>
-                  Cancel
-                </Button>
-              ) : (
-                <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
-              )}
+              <Button
+                variant="outline"
+                onClick={() => {
+                  // Routed through the action hook rather than straight to the
+                  // controller: an aborted operation leaves the store idle with
+                  // no error, which is indistinguishable from a commit, and the
+                  // hook is what fences the abandoned attempt out.
+                  cancel();
+                  closeAdd();
+                }}
+              >
+                Cancel
+              </Button>
               <Button type="submit" disabled={busy}>
                 <ActionLabel busy={adding}>Create passkey</ActionLabel>
               </Button>
@@ -682,10 +823,12 @@ function PasswordSection({
   busy,
   actionStatus,
   run,
+  cancel,
 }: {
   readonly busy: boolean;
   readonly actionStatus: string;
   readonly run: RunAccountAction;
+  readonly cancel: CancelAccountAction;
 }) {
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState("");
@@ -702,18 +845,30 @@ function PasswordSection({
     setTouched(false);
   }, []);
 
+  /**
+   * Close and forget. The typed password is plaintext in this component's state
+   * and, once a step-up is pending, in the closure the step-up re-runs; both
+   * have to go the moment the attempt ends, however it ends.
+   */
+  const close = useCallback(() => {
+    clear();
+    setOpen(false);
+  }, [clear]);
+
+  /** Abandon an attempt: abort anything in flight, then close and forget. */
+  const abandon = useCallback(() => {
+    cancel();
+    close();
+  }, [cancel, close]);
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setTouched(true);
     if (issue) return;
-    await run(
-      "set-password",
-      (stepUp) => hostedHubController.setPassword({ password, ...stepUp }),
-      () => {
-        clear();
-        setOpen(false);
-      },
-    );
+    await run("set-password", (stepUp) => hostedHubController.setPassword({ password, ...stepUp }), {
+      onCommitted: close,
+      onAbandoned: close,
+    });
   };
 
   const confirmRemove = async () => {
@@ -751,10 +906,15 @@ function PasswordSection({
       <Dialog
         open={open}
         onOpenChange={(next) => {
-          if (busy) return;
-          setOpen(next);
-          // The typed password is never carried across a dismissal.
-          if (!next) clear();
+          if (next) {
+            setOpen(true);
+            return;
+          }
+          // Every dismissal is an abandonment, including one made while a
+          // request is in flight: without the abort a set-password that never
+          // answers leaves this dialog with no working exit at all. The typed
+          // password is never carried across.
+          abandon();
         }}
       >
         <DialogPopup className="max-w-md">
@@ -798,7 +958,9 @@ function PasswordSection({
               ) : null}
             </DialogPanel>
             <DialogFooter>
-              <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+              <Button variant="outline" onClick={abandon}>
+                Cancel
+              </Button>
               <Button type="submit" disabled={busy}>
                 <ActionLabel busy={setting}>Save password</ActionLabel>
               </Button>
@@ -859,7 +1021,16 @@ function EmailSection({
     await run(
       "request-email-verification",
       (stepUp) => hostedHubController.requestEmailVerification({ email: email.trim(), ...stepUp }),
-      () => setAccepted(true),
+      {
+        onCommitted: () => {
+          setAccepted(true);
+          // The address has been handed to the Hub; leaving it in the field
+          // keeps a piece of the user's identity on screen, and one stray
+          // second press away from being sent again.
+          setEmail("");
+          setTouched(false);
+        },
+      },
     );
   };
 
@@ -923,11 +1094,13 @@ function RecoveryCodesSection({
   actionStatus,
   recoveryCodes,
   run,
+  fence,
 }: {
   readonly busy: boolean;
   readonly actionStatus: string;
   readonly recoveryCodes: ReadonlyArray<string>;
   readonly run: RunAccountAction;
+  readonly fence: (rotate: () => Promise<void>) => Promise<void>;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const regenerating = actionStatus === "regenerating-recovery-codes";
@@ -937,11 +1110,15 @@ function RecoveryCodesSection({
    * Regeneration is a rotation: it mints a new set and invalidates every code
    * the user has already written down. It runs from this confirmed handler and
    * from nowhere else — never on mount, focus, retry, or reconnect.
+   *
+   * The call goes through the display fence, which covers both the first
+   * attempt and the step-up retry, so a response that lands after this surface
+   * is gone cannot put the new codes back into a slot nobody is showing.
    */
   const confirmRegenerate = async () => {
     setConfirmOpen(false);
     await run("regenerate-recovery-codes", (stepUp) =>
-      hostedHubController.regenerateRecoveryCodes(stepUp),
+      fence(() => hostedHubController.regenerateRecoveryCodes(stepUp)),
     );
   };
 
@@ -993,13 +1170,20 @@ function RecoveryCodesSection({
 
       <Dialog
         open={recoveryCodes.length > 0}
-        onOpenChange={(open) => {
-          // Dismissal is the only exit, and it drops the codes from the runtime
-          // slot rather than merely hiding them.
-          if (!open) hostedHubController.dismissRecoveryCodes();
+        disablePointerDismissal
+        onOpenChange={(open, eventDetails) => {
+          // The acknowledgement below is the only exit, exactly as it is on the
+          // hosted root's bootstrap surface. By the time this renders, the
+          // rotation has already invalidated every code the user had written
+          // down, so an Escape, a backdrop press, or a stray close would destroy
+          // the only copy of the set that now protects the account — and the
+          // account would be left holding recovery codes its owner does not
+          // have. Refusing the close is the whole point; there is no
+          // "dismissed" state to fall back to.
+          if (!open) eventDetails.cancel();
         }}
       >
-        <DialogPopup className="max-w-md">
+        <DialogPopup className="max-w-md" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>Save your recovery codes</DialogTitle>
             <DialogDescription>
@@ -1060,7 +1244,10 @@ function StepUpDialog({
     <Dialog
       open={pending !== null}
       onOpenChange={(open) => {
-        if (busy) return;
+        // Every exit abandons the attempt, in flight or not. A retry that hangs
+        // must not be able to wedge this prompt shut: `onCancel` aborts the
+        // runtime operation, so Escape, the backdrop, and the button below all
+        // work while the request is still outstanding.
         if (!open) onCancel();
       }}
     >
@@ -1088,7 +1275,7 @@ function StepUpDialog({
             />
           </DialogPanel>
           <DialogFooter>
-            <Button variant="outline" disabled={busy} onClick={onCancel}>
+            <Button variant="outline" onClick={onCancel}>
               Cancel
             </Button>
             <Button type="submit" disabled={busy || !isSubmittableTotpCode(code)}>
