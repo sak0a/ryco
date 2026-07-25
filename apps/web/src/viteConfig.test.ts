@@ -7,6 +7,9 @@ type ViteConfigWithOptimizeDeps = {
     readonly include?: readonly string[];
   };
   readonly define?: Record<string, string>;
+  readonly resolve?: {
+    readonly dedupe?: readonly string[];
+  };
 };
 
 function collectPluginNames(value: unknown): ReadonlyArray<string> {
@@ -22,6 +25,16 @@ describe("web Vite config", () => {
     const config = createWebViteConfig() as ViteConfigWithOptimizeDeps;
 
     expect(config.optimizeDeps?.include).toContain("react-dom/client");
+  });
+
+  it("deduplicates react and react-dom so workspace deps cannot embed a second runtime", () => {
+    for (const clientMode of ["standard", "hosted-hub"] as const) {
+      const dedupe = (createWebViteConfig(clientMode) as ViteConfigWithOptimizeDeps).resolve
+        ?.dedupe;
+
+      expect(dedupe).toContain("react");
+      expect(dedupe).toContain("react-dom");
+    }
   });
 
   it("enables PWA artifacts only for production hosted builds", () => {

@@ -30,6 +30,13 @@ const buildSourcemap = parseOptInSourcemapEnv(readEnv("RYCO_WEB_SOURCEMAP"), {
   allowHidden: true,
 });
 
+/**
+ * Packages that must resolve to exactly one copy in every web bundle. React keeps its
+ * hook dispatcher in module-level state, so a second runtime pulled in through a
+ * workspace dependency renders every hook call it owns unusable.
+ */
+export const REACT_DEDUPE_PACKAGES = ["react", "react-dom"] as const;
+
 export function shouldEnableHostedPwaBuild(input: {
   readonly clientMode: "hosted-hub" | "standard";
   readonly command: string;
@@ -109,6 +116,13 @@ export function createWebViteConfig(
       "import.meta.env.APP_VERSION": JSON.stringify(pkg.version),
     },
     resolve: {
+      // Workspace packages (e.g. `@ryco/client-runtime`) resolve their own peer
+      // dependencies, so Zustand can pick up a second React copy from the isolated
+      // install tree while `apps/web` renders with its own. Two runtimes means the
+      // second copy's hook dispatcher is always null — `useCallback` of null at
+      // startup. Force every `react`/`react-dom` specifier onto this package's
+      // single runtime for both dev and build.
+      dedupe: [...REACT_DEDUPE_PACKAGES],
       tsconfigPaths: true,
     },
     server: {
