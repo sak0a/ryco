@@ -6,40 +6,28 @@
 // modes are security-relevant rather than cosmetic.
 
 import {
-  HostedHubApiError,
-  HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,
   PASSKEY_SESSION_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
+  type HostedAccountOutcome,
+  type HostedAccountRefused,
   type HostedHubPasskey,
 } from "@ryco/client-runtime/authorization";
 
 /**
- * The runtime's account actions report failures as a *message* on
- * `hostedAccountStore.errorMessage` — the `HostedHubApiError.code` that produced
- * it is not carried onto the store. The two codes this surface has to branch on
- * are therefore recognised by round-tripping them through the runtime's own
- * error constructor rather than by restating its copy here: if the runtime
- * rewords either message, these constants follow it, and a reworded message can
- * never silently stop matching.
- */
-export const STEP_UP_REQUIRED_MESSAGE = new HostedHubApiError(STEP_UP_REQUIRED_CODE, 403).message;
-
-/** The mirror of {@link STEP_UP_REQUIRED_MESSAGE} for the passkey-session gate. */
-export const PASSKEY_SESSION_REQUIRED_MESSAGE = new HostedHubApiError(
-  PASSKEY_SESSION_REQUIRED_CODE,
-  403,
-).message;
-
-/**
- * Whether the last account action failed on the fallback-session step-up gate.
+ * Whether an account action was refused on the fallback-session step-up gate.
  *
- * This is the only signal a client has. Neither the client session nor the Hub
- * exposes which credential minted the session, so a surface cannot know in
- * advance whether an action needs a TOTP code — it attempts the action and asks
- * only once the Hub has said it must.
+ * Read off `errorCode`, which is the Hub-or-runtime *reason*, never the message:
+ * the message is display copy produced by the runtime's own error constructor
+ * and may be reworded at any time, so string-comparing it would couple a
+ * security branch to a UI string.
+ *
+ * This is still the only signal a client has about *when* to ask. Neither the
+ * client session nor the Hub exposes which credential minted the session, so a
+ * surface cannot know in advance whether an action needs a TOTP code — it
+ * attempts the action and asks only once the refusal says it must.
  */
-export function isStepUpRequired(errorMessage: string | null | undefined): boolean {
-  return errorMessage === STEP_UP_REQUIRED_MESSAGE;
+export function isStepUpRefusal(outcome: HostedAccountOutcome): outcome is HostedAccountRefused {
+  return outcome.status === "refused" && outcome.errorCode === STEP_UP_REQUIRED_CODE;
 }
 
 /**
@@ -48,9 +36,51 @@ export function isStepUpRequired(errorMessage: string | null | undefined): boole
  * fallback session cannot enrol TOTP at all, and offering a code field here
  * would imply otherwise.
  */
-export function isPasskeySessionRequired(errorMessage: string | null | undefined): boolean {
-  return errorMessage === PASSKEY_SESSION_REQUIRED_MESSAGE;
+export function isPasskeySessionRequired(errorCode: string | null | undefined): boolean {
+  return errorCode === PASSKEY_SESSION_REQUIRED_CODE;
 }
+
+/**
+ * How many refused code submissions a step-up prompt built on an *inferred*
+ * code may absorb before it stops asking.
+ *
+ * Three, not one: authenticator codes rotate every 30 seconds and a mistyped or
+ * just-expired code is the ordinary case, so a prompt that gives up on the first
+ * refusal would fail the users it exists for.
+ */
+export const STEP_UP_INFERRED_ATTEMPT_LIMIT = 3;
+
+/**
+ * Whether a refused code submission should re-open the prompt.
+ *
+ * `step_up_required` is a code the runtime *synthesises* from a bare `forbidden`
+ * — the Hub never sends it (see `narrowCode` in the runtime's `api.ts`). The
+ * narrowing is right whenever the step-up gate is the only `forbidden` producer
+ * on that route, and wrong the moment anything else answers 403: a role check
+ * added later, an operator disabling the account mid-session, a WAF or gateway
+ * in front of the Hub. In every one of those cases the TOTP prompt can never
+ * succeed, and a surface that re-prompts on each refusal asks forever for a code
+ * that was never the problem.
+ *
+ * So an inferred refusal buys a bounded number of attempts and no more. A code
+ * the Hub actually sent is authoritative and carries no such bound — it means
+ * what it says, and only the user's code is in question.
+ */
+export function shouldRetryStepUp(refusal: HostedAccountRefused, refusals: number): boolean {
+  if (!refusal.inferredErrorCode) return true;
+  return refusals < STEP_UP_INFERRED_ATTEMPT_LIMIT;
+}
+
+/**
+ * What to say once an inferred step-up prompt has been refused to its limit.
+ *
+ * It must not repeat "enter a current code": the whole reason the prompt is
+ * being abandoned is that the code may never have been the obstacle, and the
+ * Hub does not say. Claiming otherwise sends the user back to an authenticator
+ * app that cannot help them.
+ */
+export const STEP_UP_UNRESOLVED_MESSAGE =
+  "The Hub refused this change every time. It answers a missing authenticator code and other refusals identically, so if the codes you entered were current then something else is blocking this — sign in again with a passkey, or try again later.";
 
 /**
  * The error worth rendering in the section body.
@@ -61,42 +91,12 @@ export function isPasskeySessionRequired(errorMessage: string | null | undefined
  */
 export function inlineErrorMessage(
   errorMessage: string | null,
+  errorCode: string | null | undefined,
   stepUpPending: boolean,
 ): string | null {
   if (!errorMessage) return null;
-  if (stepUpPending && isStepUpRequired(errorMessage)) return null;
+  if (stepUpPending && errorCode === STEP_UP_REQUIRED_CODE) return null;
   return errorMessage;
-}
-
-/**
- * Whether an error published by an add-passkey attempt arrived *after* the
- * credential was committed, and so is not evidence the ceremony failed.
- *
- * `addPasskey` does not trust the ceremony: once the Hub has accepted it, the
- * runtime issues a forced re-read and confirms the credential is on the list.
- * That read publishes its own failure on the same `errorMessage` slot the
- * ceremony's failure uses, so "there is an error" cannot mean "nothing was
- * enrolled". Two shapes are post-commit:
- *
- *   * the confirming read failed, leaving the list `stale`; or
- *   * the read succeeded and did not contain the credential, which the runtime
- *     reports with its own bounded message.
- *
- * A pre-commit failure never reaches that read and so cannot leave the list
- * stale — with one exception: a list already stale from an earlier read is
- * still stale afterwards. That case is answered the same way, because the two
- * mistakes do not cost the same. Closing the dialog on a ceremony that really
- * did fail costs one extra click; re-offering "Create passkey" on one that
- * succeeded runs a second ceremony and leaves a duplicate credential on the
- * account, which is the failure this exists to prevent.
- */
-export function isPasskeyEnrolmentUnverified(
-  errorMessage: string,
-  passkeysStatus: string,
-): boolean {
-  if (isStepUpRequired(errorMessage)) return false;
-  if (errorMessage === HOSTED_PASSKEY_UNCONFIRMED_MESSAGE) return true;
-  return passkeysStatus === "stale";
 }
 
 /** A passkey is revoked once the Hub reports a revocation timestamp for it. */

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   HostedHubApiError,
-  HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,
   PASSKEY_SESSION_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
+  type HostedAccountOutcome,
+  type HostedAccountRefused,
   type HostedHubPasskey,
 } from "@ryco/client-runtime/authorization";
 
@@ -12,20 +13,19 @@ import {
   emailIssue,
   formatRecoveryCodesForClipboard,
   inlineErrorMessage,
-  isPasskeyEnrolmentUnverified,
   isPasskeyRevoked,
   isPasskeySessionRequired,
-  isStepUpRequired,
+  isStepUpRefusal,
   isSubmittableTotpCode,
   normalizePasskeyLabel,
   normalizeTotpCode,
-  PASSKEY_SESSION_REQUIRED_MESSAGE,
   passkeyBackupSummary,
   passkeyDisplayLabel,
   passwordIssue,
+  shouldRetryStepUp,
   stepUpDescription,
   stepUpTitle,
-  STEP_UP_REQUIRED_MESSAGE,
+  STEP_UP_INFERRED_ATTEMPT_LIMIT,
   TOTP_CODE_MAX_LENGTH,
 } from "./AccountSettings.logic";
 
@@ -43,33 +43,52 @@ function passkey(overrides: Partial<HostedHubPasskey> = {}): HostedHubPasskey {
   };
 }
 
+function refused(overrides: Partial<HostedAccountRefused> = {}): HostedAccountRefused {
+  return {
+    status: "refused",
+    reason: "request-failed",
+    errorCode: null,
+    wireErrorCode: null,
+    inferredErrorCode: false,
+    errorMessage: null,
+    ...overrides,
+  };
+}
+
+/** What the runtime hands back when it narrowed a bare `forbidden` on a step-up route. */
+function inferredStepUpRefusal(): HostedAccountRefused {
+  return refused({
+    errorCode: STEP_UP_REQUIRED_CODE,
+    wireErrorCode: "forbidden",
+    inferredErrorCode: true,
+    errorMessage: new HostedHubApiError(STEP_UP_REQUIRED_CODE, 403).message,
+  });
+}
+
 describe("step-up classification", () => {
-  it("recognises the runtime's own step-up refusal, whatever the intent", () => {
-    // Every step-up intent narrows a 403 to the same code, and the code carries
-    // one message; the surface must recognise all of them.
-    for (const intent of [
-      "set-password",
-      "remove-password",
-      "revoke-totp",
-      "request-email-verification",
-      "add-passkey",
-      "regenerate-recovery-codes",
-    ] as const) {
-      const error = new HostedHubApiError(STEP_UP_REQUIRED_CODE, 403, undefined, intent);
-      expect(isStepUpRequired(error.message)).toBe(true);
-      expect(isPasskeySessionRequired(error.message)).toBe(false);
-    }
+  it("branches on the code, not on the message the runtime happens to word", () => {
+    // The message is display copy from the runtime's own error constructor and
+    // may be reworded at any time; a surface that string-matched it would lose a
+    // security branch to a copy edit.
+    const reworded = refused({
+      errorCode: STEP_UP_REQUIRED_CODE,
+      wireErrorCode: "forbidden",
+      inferredErrorCode: true,
+      errorMessage: "Some entirely different wording.",
+    });
+    expect(isStepUpRefusal(reworded)).toBe(true);
+
+    const impostor = refused({
+      errorCode: "forbidden",
+      wireErrorCode: "forbidden",
+      errorMessage: new HostedHubApiError(STEP_UP_REQUIRED_CODE, 403).message,
+    });
+    expect(isStepUpRefusal(impostor), "the step-up message alone must not open a prompt").toBe(
+      false,
+    );
   });
 
-  it("recognises the passkey-session gate, which has no step-up out of it", () => {
-    for (const intent of ["begin-totp-enrollment", "confirm-totp-enrollment"] as const) {
-      const error = new HostedHubApiError(PASSKEY_SESSION_REQUIRED_CODE, 403, undefined, intent);
-      expect(isPasskeySessionRequired(error.message)).toBe(true);
-      expect(isStepUpRequired(error.message)).toBe(false);
-    }
-  });
-
-  it("never mistakes another failure for a step-up", () => {
+  it("never mistakes another refusal for a step-up", () => {
     for (const code of [
       "conflict",
       "forbidden",
@@ -77,37 +96,79 @@ describe("step-up classification", () => {
       "rate_limited",
       "authentication_failed",
       "invalid_response",
+      PASSKEY_SESSION_REQUIRED_CODE,
     ]) {
-      const message = new HostedHubApiError(code, 400).message;
-      expect(isStepUpRequired(message)).toBe(false);
-      expect(isPasskeySessionRequired(message)).toBe(false);
+      expect(isStepUpRefusal(refused({ errorCode: code }))).toBe(false);
     }
-    expect(isStepUpRequired(null)).toBe(false);
-    expect(isStepUpRequired("")).toBe(false);
-    expect(isPasskeySessionRequired(null)).toBe(false);
+    expect(isStepUpRefusal(refused())).toBe(false);
   });
 
-  it("keeps the two sentinels distinct", () => {
-    expect(STEP_UP_REQUIRED_MESSAGE).not.toBe(PASSKEY_SESSION_REQUIRED_MESSAGE);
-    expect(STEP_UP_REQUIRED_MESSAGE.length).toBeGreaterThan(0);
-    expect(PASSKEY_SESSION_REQUIRED_MESSAGE.length).toBeGreaterThan(0);
+  it("never reads a committed outcome as a refusal", () => {
+    const committed: HostedAccountOutcome = { status: "committed" };
+    expect(isStepUpRefusal(committed)).toBe(false);
+  });
+
+  it("recognises the passkey-session gate, which has no step-up out of it", () => {
+    expect(isPasskeySessionRequired(PASSKEY_SESSION_REQUIRED_CODE)).toBe(true);
+    expect(isPasskeySessionRequired(STEP_UP_REQUIRED_CODE)).toBe(false);
+    expect(isPasskeySessionRequired("forbidden")).toBe(false);
+    expect(isPasskeySessionRequired(null)).toBe(false);
+    expect(isPasskeySessionRequired(undefined)).toBe(false);
+  });
+});
+
+describe("inferred step-up refusals", () => {
+  it("bounds a prompt built on a code the Hub never sent", () => {
+    // `step_up_required` is synthesised from a bare `forbidden`. When the 403 was
+    // really a role check, a lockout, or a gateway, no code can ever satisfy the
+    // prompt — so it must stop asking rather than loop.
+    const refusal = inferredStepUpRefusal();
+    expect(refusal.inferredErrorCode).toBe(true);
+    expect(shouldRetryStepUp(refusal, 1)).toBe(true);
+    expect(shouldRetryStepUp(refusal, STEP_UP_INFERRED_ATTEMPT_LIMIT - 1)).toBe(true);
+    expect(shouldRetryStepUp(refusal, STEP_UP_INFERRED_ATTEMPT_LIMIT)).toBe(false);
+    expect(shouldRetryStepUp(refusal, STEP_UP_INFERRED_ATTEMPT_LIMIT + 1)).toBe(false);
+  });
+
+  it("still allows enough attempts for a mistyped or just-expired code", () => {
+    // Codes rotate every 30 seconds. Giving up on the first refusal would fail
+    // the users the prompt exists for.
+    expect(STEP_UP_INFERRED_ATTEMPT_LIMIT).toBeGreaterThan(1);
+  });
+
+  it("does not bound a code the Hub actually sent", () => {
+    // A wire code is authoritative: it means what it says, and only the user's
+    // code is in question, so the prompt can keep asking.
+    const authoritative = refused({
+      errorCode: STEP_UP_REQUIRED_CODE,
+      wireErrorCode: STEP_UP_REQUIRED_CODE,
+      inferredErrorCode: false,
+    });
+    expect(shouldRetryStepUp(authoritative, STEP_UP_INFERRED_ATTEMPT_LIMIT * 10)).toBe(true);
   });
 });
 
 describe("inline error suppression", () => {
+  const message = new HostedHubApiError(STEP_UP_REQUIRED_CODE, 403).message;
+
   it("withholds the step-up refusal while the prompt is carrying it", () => {
-    expect(inlineErrorMessage(STEP_UP_REQUIRED_MESSAGE, true)).toBeNull();
+    expect(inlineErrorMessage(message, STEP_UP_REQUIRED_CODE, true)).toBeNull();
   });
 
   it("shows the step-up refusal once the prompt is gone, since nothing else would", () => {
-    expect(inlineErrorMessage(STEP_UP_REQUIRED_MESSAGE, false)).toBe(STEP_UP_REQUIRED_MESSAGE);
+    expect(inlineErrorMessage(message, STEP_UP_REQUIRED_CODE, false)).toBe(message);
   });
 
-  it("never hides an unrelated failure", () => {
-    expect(inlineErrorMessage("Hub is temporarily unavailable.", true)).toBe(
+  it("never hides an unrelated failure, whatever its message says", () => {
+    expect(inlineErrorMessage("Hub is temporarily unavailable.", "internal_error", true)).toBe(
       "Hub is temporarily unavailable.",
     );
-    expect(inlineErrorMessage(null, true)).toBeNull();
+    // A refusal that never reached the Hub carries no code at all.
+    expect(inlineErrorMessage("Another account change is still in progress.", null, true)).toBe(
+      "Another account change is still in progress.",
+    );
+    expect(inlineErrorMessage(message, "forbidden", true)).toBe(message);
+    expect(inlineErrorMessage(null, STEP_UP_REQUIRED_CODE, true)).toBeNull();
   });
 });
 
@@ -136,39 +197,6 @@ describe("passkey presentation", () => {
     expect(normalizePasskeyLabel("   ")).toBeNull();
     expect(normalizePasskeyLabel("")).toBeNull();
     expect(normalizePasskeyLabel("  Phone  ")).toBe("Phone");
-  });
-});
-
-describe("add-passkey commit classification", () => {
-  it("treats a failed confirming re-read as committed, because the credential may already exist", () => {
-    // The runtime only reaches the confirming read after the Hub has accepted
-    // the ceremony, so a stale list at the end of an add means the credential's
-    // fate is unknown — never "the ceremony failed".
-    expect(isPasskeyEnrolmentUnverified("The Hub could not be reached.", "stale")).toBe(true);
-  });
-
-  it("treats the runtime's unconfirmed-enrolment message as committed", () => {
-    expect(isPasskeyEnrolmentUnverified(HOSTED_PASSKEY_UNCONFIRMED_MESSAGE, "ready")).toBe(true);
-  });
-
-  it("still treats an ordinary refusal on a healthy list as a failed ceremony", () => {
-    for (const status of ["ready", "loading", "idle"]) {
-      expect(isPasskeyEnrolmentUnverified("That password has appeared in a breach.", status)).toBe(
-        false,
-      );
-      expect(isPasskeyEnrolmentUnverified("The passkey ceremony was cancelled.", status)).toBe(
-        false,
-      );
-    }
-  });
-
-  it("never reads a step-up refusal as a commit, whatever the list is doing", () => {
-    // A step-up refusal is pre-commit by construction: the Hub declined the
-    // request. Reading it as committed would close the dialog on the one path
-    // that still needs the user.
-    for (const status of ["ready", "stale", "loading", "idle"]) {
-      expect(isPasskeyEnrolmentUnverified(STEP_UP_REQUIRED_MESSAGE, status)).toBe(false);
-    }
   });
 });
 

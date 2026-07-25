@@ -29,16 +29,22 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
-import type { HostedHubPasskey } from "@ryco/client-runtime/authorization";
+import type {
+  HostedAccountOutcome,
+  HostedAccountStepUp,
+  HostedHubPasskey,
+} from "@ryco/client-runtime/authorization";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import {
-  hostedAccountStore,
   hostedHubController,
   useHostedAccountStore,
   useHostedHubStore,
 } from "../../hostedHub/state";
-import { useRecoveryCodeDisplayStore } from "../../hostedHub/recoveryCodeDisplay";
+import {
+  isRecoveryCodeDisplayClaimed,
+  useRecoveryCodeDisplayStore,
+} from "../../hostedHub/recoveryCodeDisplay";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import {
   AlertDialog,
@@ -69,10 +75,9 @@ import {
   emailIssue,
   EMAIL_MAX_LENGTH,
   inlineErrorMessage,
-  isPasskeyEnrolmentUnverified,
   isPasskeyRevoked,
   isPasskeySessionRequired,
-  isStepUpRequired,
+  isStepUpRefusal,
   formatRecoveryCodesForClipboard,
   normalizePasskeyLabel,
   normalizeTotpCode,
@@ -81,8 +86,10 @@ import {
   passwordIssue,
   PASSWORD_MAX_LENGTH,
   isSubmittableTotpCode,
+  shouldRetryStepUp,
   stepUpDescription,
   stepUpTitle,
+  STEP_UP_UNRESOLVED_MESSAGE,
   TOTP_CODE_MAX_LENGTH,
   type AccountStepUpAction,
 } from "./AccountSettings.logic";
@@ -109,19 +116,18 @@ interface AccountActionOptions {
   /** Cleanup for the one path where the action committed. */
   readonly onCommitted?: () => void;
   /**
-   * Cleanup for an attempt the user walked away from: a cancelled step-up, a
-   * dismissed form, a request aborted because it was never going to answer. A
-   * caller holding secret material must drop it here — abandoning an attempt is
-   * not a reason to keep the user's typed password in a React state.
+   * Cleanup for an attempt the user walked away from, or that this surface gave
+   * up on: a cancelled step-up, a dismissed form, a request aborted because it
+   * was never going to answer, a step-up prompt abandoned because it could not
+   * succeed. A caller holding secret material must drop it here — an attempt
+   * that ended is not a reason to keep the user's typed password in a React
+   * state.
    */
   readonly onAbandoned?: () => void;
-  /**
-   * Whether an outcome that carries an error nonetheless committed. Defaults to
-   * "an error means it did not", which is right for every action whose only
-   * error is its own refusal.
-   */
-  readonly committedDespiteError?: (errorMessage: string) => boolean;
 }
+
+/** An account action as this surface calls it: step-up in, outcome out. */
+type AccountActionThunk = (input: HostedAccountStepUp) => Promise<HostedAccountOutcome>;
 
 /**
  * A step-up the Hub asked for: the action's identity (for the prompt copy), the
@@ -137,36 +143,45 @@ interface AccountActionOptions {
  */
 interface PendingStepUp {
   readonly action: AccountStepUpAction;
-  readonly run: (stepUp: { readonly totpCode?: string }) => Promise<void>;
+  readonly run: AccountActionThunk;
   readonly options: AccountActionOptions | undefined;
 }
 
 /**
- * Run an account action, and escalate to a step-up prompt if the Hub says the
- * session needs one.
+ * Run an account action, and escalate to a step-up prompt if the refusal says
+ * the session needs one.
  *
- * The runtime publishes an action's outcome on `hostedAccountStore` rather than
- * by rejecting, so the store is the authority on what happened; it is read
- * after the await, when exactly one action has run.
+ * The runtime resolves a discriminated outcome, so what happened is read off the
+ * value this surface is already holding. It is deliberately not re-read from
+ * `hostedAccountStore` after the await: that read is racy (a concurrent action
+ * or the post-commit confirming refresh writes the same slot) and ambiguous (a
+ * cancelled action leaves no error behind, so "no error" is not success).
  */
 function useAccountAction() {
   const [stepUp, setStepUp] = useState<PendingStepUp | null>(null);
-  const [stepUpAttempts, setStepUpAttempts] = useState(0);
+  const [stepUpRefusals, setStepUpRefusals] = useState(0);
   const [stepUpCode, setStepUpCode] = useState("");
+  /**
+   * Set when a step-up prompt was abandoned because it could not succeed — an
+   * inferred `step_up_required` refused to its limit. The refusal message on the
+   * store still says "enter a code", which by then is the one thing known not to
+   * be the whole story, so the surface says something honest instead.
+   */
+  const [stepUpUnresolved, setStepUpUnresolved] = useState(false);
   /**
    * Which attempt this surface is waiting on.
    *
-   * `cancelAccountAction()` leaves the account store idle with no error — byte
-   * for byte what a commit looks like — so an abandoned attempt whose response
-   * lands afterwards would otherwise be read back as a success and fire the
-   * caller's commit cleanup. Bumping this on every start and every abandonment
-   * makes a stale continuation identifiable, and inert.
+   * The outcome now tells this hook whether an attempt committed, so a stale
+   * continuation can no longer be mistaken for a success. What it can still do
+   * is re-open a prompt, or clear a form, for an attempt the user already walked
+   * away from. Bumping this on every start and every abandonment makes such a
+   * continuation identifiable, and inert.
    */
   const attemptRef = useRef(0);
 
   const clearStepUp = useCallback(() => {
     setStepUp(null);
-    setStepUpAttempts(0);
+    setStepUpRefusals(0);
     setStepUpCode("");
   }, []);
 
@@ -184,34 +199,29 @@ function useAccountAction() {
     attemptRef.current += 1;
     hostedHubController.cancelAccountAction();
     stepUp?.options?.onAbandoned?.();
+    setStepUpUnresolved(false);
     clearStepUp();
   }, [clearStepUp, stepUp]);
-
-  const settle = useCallback((error: string | null, options: AccountActionOptions | undefined) => {
-    if (error === null || (options?.committedDespiteError?.(error) ?? false)) {
-      options?.onCommitted?.();
-    }
-  }, []);
 
   const run = useCallback(
     async (
       action: AccountStepUpAction,
-      thunk: (input: { readonly totpCode?: string }) => Promise<void>,
+      thunk: AccountActionThunk,
       options?: AccountActionOptions,
     ): Promise<void> => {
       const attempt = (attemptRef.current += 1);
-      await thunk({});
+      setStepUpUnresolved(false);
+      const outcome = await thunk({});
       if (attemptRef.current !== attempt) return;
-      const error = hostedAccountStore.getState().errorMessage;
-      if (isStepUpRequired(error)) {
+      if (isStepUpRefusal(outcome)) {
         setStepUpCode("");
-        setStepUpAttempts(0);
+        setStepUpRefusals(0);
         setStepUp({ action, run: thunk, options });
         return;
       }
-      settle(error, options);
+      if (outcome.status === "committed") options?.onCommitted?.();
     },
-    [settle],
+    [],
   );
 
   const submitStepUp = useCallback(async () => {
@@ -219,24 +229,35 @@ function useAccountAction() {
     const totpCode = normalizeTotpCode(stepUpCode);
     if (totpCode.length === 0) return;
     const attempt = (attemptRef.current += 1);
-    await stepUp.run({ totpCode });
+    const outcome = await stepUp.run({ totpCode });
     if (attemptRef.current !== attempt) return;
-    const error = hostedAccountStore.getState().errorMessage;
-    if (isStepUpRequired(error)) {
-      setStepUpAttempts((attempts) => attempts + 1);
-      setStepUpCode("");
+    if (isStepUpRefusal(outcome)) {
+      const refusals = stepUpRefusals + 1;
+      if (shouldRetryStepUp(outcome, refusals)) {
+        setStepUpRefusals(refusals);
+        setStepUpCode("");
+        return;
+      }
+      // The code was synthesised from a bare `forbidden` and has been refused to
+      // the limit, so this prompt is as likely to be answering the wrong
+      // question as the right one. Stop asking, release the caller's secret, and
+      // let the surface say what is actually known.
+      setStepUpUnresolved(true);
+      stepUp.options?.onAbandoned?.();
+      clearStepUp();
       return;
     }
-    settle(error, stepUp.options);
+    if (outcome.status === "committed") stepUp.options?.onCommitted?.();
     clearStepUp();
-  }, [clearStepUp, settle, stepUp, stepUpCode]);
+  }, [clearStepUp, stepUp, stepUpCode, stepUpRefusals]);
 
   return {
     run,
     cancel,
     stepUp,
-    stepUpAttempts,
+    stepUpAttempts: stepUpRefusals,
     stepUpCode,
+    stepUpUnresolved,
     setStepUpCode,
     submitStepUp,
   };
@@ -246,18 +267,25 @@ function useAccountAction() {
  * Own the one-time recovery-code display while this surface is mounted, and
  * fence a rotation against this surface's own teardown.
  *
- * A rotation still in flight at unmount is not cancelled by the cleanup that
- * dismisses the slot: the response lands afterwards and the runtime writes the
- * new codes straight back into a slot this surface is no longer rendering. The
- * display claim has already been released by then, so the hosted root takes the
- * whole viewport to show a secret the user was just told was gone.
+ * Two claims are taken, and they are not the same claim:
  *
- * So the teardown is recorded, a late response is dismissed the moment it
- * lands, and the claim is held until it has been — without holding the claim,
- * the root would win the race in the frame between the runtime's write and the
- * fence. A runtime-side fence is the real fix; this one does not depend on it.
+ *   * `hostedHubController.claimRecoveryCodes()` is the **runtime's**, and it is
+ *     load-bearing rather than defensive. The runtime only writes rotated codes
+ *     into its in-memory slot while a claim is live; a rotation started with no
+ *     claim still happens server-side but publishes nothing and comes back
+ *     `displayed: false`. So without this line every rotation from this surface
+ *     would rotate the user's codes and then refuse to show them. Releasing it
+ *     at unmount is what makes a rotation still in flight land on the floor.
+ *   * The web display claim tells `HostedHubRoot` to keep its full-screen
+ *     "save your codes" takeover out of the way, which is a web-only concern the
+ *     runtime knows nothing about.
+ *
+ * The local mounted/in-flight fence below is kept as defence in depth, but it
+ * now *defers* to the claim counts rather than racing them: it only dismisses
+ * once no claimant is left, so a surface that is still live never has its
+ * display torn down by another instance's teardown.
  */
-function useRecoveryCodeDisplayFence(): (rotate: () => Promise<void>) => Promise<void> {
+function useRecoveryCodeDisplayFence(): <T>(rotate: () => Promise<T>) => Promise<T> {
   const claim = useRecoveryCodeDisplayStore((state) => state.claim);
   const release = useRecoveryCodeDisplayStore((state) => state.release);
   const fence = useRef<{ mounted: boolean; inFlight: number }>({ mounted: false, inFlight: 0 });
@@ -266,29 +294,37 @@ function useRecoveryCodeDisplayFence(): (rotate: () => Promise<void>) => Promise
     const state = fence.current;
     state.mounted = true;
     claim();
+    const releaseRuntimeClaim = hostedHubController.claimRecoveryCodes();
     return () => {
       state.mounted = false;
+      // Release the runtime claim first: that is what fences a rotation still in
+      // flight and drops any codes the claim was holding, so everything below is
+      // cleaning up after an owner that has already let go.
+      releaseRuntimeClaim();
       // On teardown this drops **both** secrets the runtime can be holding on
       // this surface's behalf. Closing the settings surface with codes or an
       // enrolment secret still in a slot would leave the account's key material
       // resident for the life of the session.
-      hostedHubController.dismissRecoveryCodes();
       hostedHubController.dismissTotpEnrollment();
       if (state.inFlight === 0) release();
+      if (!isRecoveryCodeDisplayClaimed()) hostedHubController.dismissRecoveryCodes();
     };
   }, [claim, release]);
 
   return useCallback(
-    async (rotate: () => Promise<void>) => {
+    async <T,>(rotate: () => Promise<T>): Promise<T> => {
       const state = fence.current;
       state.inFlight += 1;
       try {
-        await rotate();
+        return await rotate();
       } finally {
         state.inFlight -= 1;
         if (!state.mounted) {
-          hostedHubController.dismissRecoveryCodes();
           if (state.inFlight === 0) release();
+          // Only once nothing is claiming the display: while another instance is
+          // live the runtime kept the codes for it deliberately, and dismissing
+          // here would destroy a display that surface owns.
+          if (!isRecoveryCodeDisplayClaimed()) hostedHubController.dismissRecoveryCodes();
         }
       }
     },
@@ -315,6 +351,7 @@ export function AccountSettingsPanel() {
   const passkeysStatus = useHostedAccountStore((state) => state.passkeysStatus);
   const actionStatus = useHostedAccountStore((state) => state.actionStatus);
   const errorMessage = useHostedAccountStore((state) => state.errorMessage);
+  const errorCode = useHostedAccountStore((state) => state.errorCode ?? null);
   const recoveryCodes = useHostedHubStore((state) => state.recoveryCodes);
   const totpEnrollment = useHostedHubStore((state) => state.totpEnrollment ?? null);
 
@@ -340,19 +377,20 @@ export function AccountSettingsPanel() {
     );
   }
 
-  const inlineError = inlineErrorMessage(errorMessage, action.stepUp !== null);
+  // An abandoned step-up outranks the store's own message: the store still says
+  // "enter a code", and by then that is the claim this surface has stopped
+  // believing.
+  const inlineError = action.stepUpUnresolved
+    ? STEP_UP_UNRESOLVED_MESSAGE
+    : inlineErrorMessage(errorMessage, errorCode, action.stepUp !== null);
+  const passkeySessionGate = !action.stepUpUnresolved && isPasskeySessionRequired(errorCode);
 
   return (
     <SettingsPageContainer>
       {inlineError ? (
-        <Alert
-          variant={isPasskeySessionRequired(inlineError) ? "info" : "error"}
-          aria-live="polite"
-        >
+        <Alert variant={passkeySessionGate ? "info" : "error"} aria-live="polite">
           <TriangleAlertIcon aria-hidden />
-          <AlertTitle>
-            {isPasskeySessionRequired(inlineError) ? "Passkey needed" : "That did not work"}
-          </AlertTitle>
+          <AlertTitle>{passkeySessionGate ? "Passkey needed" : "That did not work"}</AlertTitle>
           <AlertDescription>{inlineError}</AlertDescription>
         </Alert>
       ) : null}
@@ -418,7 +456,7 @@ export function AccountSettingsPanel() {
 
 type RunAccountAction = (
   action: AccountStepUpAction,
-  thunk: (input: { readonly totpCode?: string }) => Promise<void>,
+  thunk: AccountActionThunk,
   options?: AccountActionOptions,
 ) => Promise<void>;
 
@@ -460,20 +498,18 @@ function PasskeysSection({
   const submitAdd = async (event: FormEvent) => {
     event.preventDefault();
     const passkeyLabel = normalizePasskeyLabel(label);
+    // Whether the credential was enrolled is data, not an inference. The runtime
+    // reaches its confirming re-read only after the Hub has accepted the
+    // ceremony, so a `committed` outcome means a credential exists whatever the
+    // read then managed to see — `confirmation` says how well that could be
+    // checked, and the runtime publishes its own message for the cases it could
+    // not. Closing on it is what stops a second "Create passkey" press turning
+    // an unverifiable enrolment into a duplicate credential; keeping it open on
+    // a refusal is what lets a ceremony that really did fail be retried.
     await run(
       "add-passkey",
       (stepUp) => hostedHubController.addPasskey({ passkeyLabel, ...stepUp }),
-      {
-        onCommitted: closeAdd,
-        onAbandoned: closeAdd,
-        // An error after an add is not proof the ceremony failed: the runtime
-        // confirms its own commit with a forced re-read and reports that read's
-        // failure on the same slot. Leaving this dialog open on one would invite
-        // a second "Create passkey" press, a second ceremony, and a duplicate
-        // credential the user never asked for.
-        committedDespiteError: (message) =>
-          isPasskeyEnrolmentUnverified(message, hostedAccountStore.getState().passkeysStatus),
-      },
+      { onCommitted: closeAdd, onAbandoned: closeAdd },
     );
   };
 
@@ -1108,7 +1144,7 @@ function RecoveryCodesSection({
   readonly actionStatus: string;
   readonly recoveryCodes: ReadonlyArray<string>;
   readonly run: RunAccountAction;
-  readonly fence: (rotate: () => Promise<void>) => Promise<void>;
+  readonly fence: <T>(rotate: () => Promise<T>) => Promise<T>;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const regenerating = actionStatus === "regenerating-recovery-codes";
@@ -1120,8 +1156,10 @@ function RecoveryCodesSection({
    * from nowhere else — never on mount, focus, retry, or reconnect.
    *
    * The call goes through the display fence, which covers both the first
-   * attempt and the step-up retry, so a response that lands after this surface
-   * is gone cannot put the new codes back into a slot nobody is showing.
+   * attempt and the step-up retry. The runtime is the primary guard — it drops
+   * a rotation whose claim has been released — and the fence is what keeps this
+   * surface's own claim alive across the await so a rotation started while
+   * mounted is still allowed to publish.
    */
   const confirmRegenerate = async () => {
     setConfirmOpen(false);

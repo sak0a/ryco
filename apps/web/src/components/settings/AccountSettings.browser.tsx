@@ -23,14 +23,24 @@ import { render } from "vitest-browser-react";
 import {
   HostedHubApiError,
   HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,
+  HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE,
   PASSKEY_SESSION_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
+  type HostedAccountCommitted,
+  type HostedAccountRefused,
+  type HostedAddPasskeyCommitted,
   type HostedHubPasskey,
+  type HostedPasskeyConfirmation,
+  type HostedRecoveryCodesCommitted,
 } from "@ryco/client-runtime/authorization";
 
 import { hostedAccountStore, hostedHubController, hostedHubStore } from "../../hostedHub/state";
 import { useRecoveryCodeDisplayStore } from "../../hostedHub/recoveryCodeDisplay";
 import { AccountSettingsPanel } from "./AccountSettings";
+import {
+  STEP_UP_INFERRED_ATTEMPT_LIMIT,
+  STEP_UP_UNRESOLVED_MESSAGE,
+} from "./AccountSettings.logic";
 
 const STEP_UP_MESSAGE = new HostedHubApiError(STEP_UP_REQUIRED_CODE, 403).message;
 const PASSKEY_SESSION_MESSAGE = new HostedHubApiError(PASSKEY_SESSION_REQUIRED_CODE, 403).message;
@@ -84,6 +94,64 @@ function deferred(): { readonly promise: Promise<void>; readonly land: () => voi
     land = resolve;
   });
   return { promise, land };
+}
+
+/**
+ * Publish an account-action outcome the way the runtime does — the discriminated
+ * value to the caller **and** the matching error slots to the store — and return
+ * it.
+ *
+ * The pair is what a stub has to reproduce faithfully: a double that returned a
+ * refusal without writing the store, or wrote the store without returning the
+ * refusal, would let a surface that reads the wrong one of the two pass.
+ */
+function publishCommitted<T extends HostedAccountCommitted>(outcome: T): T {
+  hostedAccountStore.setState({ errorMessage: null, errorCode: null, errorCodeInferred: false });
+  return outcome;
+}
+
+function publishRefusal(overrides: Partial<HostedAccountRefused> = {}): HostedAccountRefused {
+  const outcome: HostedAccountRefused = {
+    status: "refused",
+    reason: "request-failed",
+    errorCode: null,
+    wireErrorCode: null,
+    inferredErrorCode: false,
+    errorMessage: null,
+    ...overrides,
+  };
+  hostedAccountStore.setState({
+    errorMessage: outcome.errorMessage,
+    errorCode: outcome.errorCode,
+    errorCodeInferred: outcome.inferredErrorCode,
+  });
+  return outcome;
+}
+
+/**
+ * The step-up refusal exactly as the runtime builds it: the code is
+ * *synthesised* from a bare `forbidden` — the Hub never sends `step_up_required`
+ * — so `inferredErrorCode` is true and `wireErrorCode` is what actually arrived.
+ */
+function stepUpRefusal(): HostedAccountRefused {
+  return publishRefusal({
+    errorCode: STEP_UP_REQUIRED_CODE,
+    wireErrorCode: "forbidden",
+    inferredErrorCode: true,
+    errorMessage: STEP_UP_MESSAGE,
+  });
+}
+
+function committed(): HostedAccountCommitted {
+  return publishCommitted({ status: "committed" });
+}
+
+function addPasskeyCommitted(confirmation: HostedPasskeyConfirmation): HostedAddPasskeyCommitted {
+  return publishCommitted({ status: "committed", confirmation, passkey: null });
+}
+
+function recoveryCodesCommitted(displayed: boolean): HostedRecoveryCodesCommitted {
+  return publishCommitted({ status: "committed", displayed });
 }
 
 /**
@@ -322,7 +390,7 @@ describe("AccountSettingsPanel", () => {
       .spyOn(hostedHubController, "regenerateRecoveryCodes")
       .mockImplementation(async () => {
         hostedHubStore.setState({ recoveryCodes: [...RECOVERY_CODES] });
-        hostedAccountStore.setState({ errorMessage: null });
+        return recoveryCodesCommitted(true);
       });
 
     await mount();
@@ -341,7 +409,9 @@ describe("AccountSettingsPanel", () => {
   });
 
   it("leaves the saved codes alone when the confirmation is declined", async () => {
-    const regenerate = vi.spyOn(hostedHubController, "regenerateRecoveryCodes").mockResolvedValue();
+    const regenerate = vi
+      .spyOn(hostedHubController, "regenerateRecoveryCodes")
+      .mockImplementation(async () => recoveryCodesCommitted(true));
 
     await mount();
     await page.getByRole("button", { name: "Generate new codes" }).click();
@@ -354,7 +424,9 @@ describe("AccountSettingsPanel", () => {
   });
 
   it("never rotates recovery codes as a side effect of mounting the surface", async () => {
-    const regenerate = vi.spyOn(hostedHubController, "regenerateRecoveryCodes").mockResolvedValue();
+    const regenerate = vi
+      .spyOn(hostedHubController, "regenerateRecoveryCodes")
+      .mockImplementation(async () => recoveryCodesCommitted(true));
 
     await mount();
     await expect.element(page.getByText("One-time recovery codes")).toBeVisible();
@@ -363,7 +435,9 @@ describe("AccountSettingsPanel", () => {
   });
 
   it("revokes a passkey only after an explicit confirmation", async () => {
-    const revoke = vi.spyOn(hostedHubController, "revokePasskey").mockResolvedValue();
+    const revoke = vi
+      .spyOn(hostedHubController, "revokePasskey")
+      .mockImplementation(async () => committed());
 
     await mount();
     await page.getByRole("button", { name: "Revoke Work laptop" }).click();
@@ -380,6 +454,7 @@ describe("AccountSettingsPanel", () => {
     vi.spyOn(hostedHubController, "revokePasskey").mockImplementation(async () => {
       hostedAccountStore.setState({ actionStatus: "revoking-passkey" });
       await pending.promise;
+      return committed();
     });
 
     await mount();
@@ -404,9 +479,7 @@ describe("AccountSettingsPanel", () => {
     const attempts: Array<{ readonly email: string; readonly totpCode?: string }> = [];
     vi.spyOn(hostedHubController, "requestEmailVerification").mockImplementation(async (input) => {
       attempts.push(input);
-      hostedAccountStore.setState({
-        errorMessage: input.totpCode === undefined ? STEP_UP_MESSAGE : null,
-      });
+      return input.totpCode === undefined ? stepUpRefusal() : committed();
     });
 
     await mount();
@@ -441,9 +514,7 @@ describe("AccountSettingsPanel", () => {
     const codes: Array<string | undefined> = [];
     vi.spyOn(hostedHubController, "requestEmailVerification").mockImplementation(async (input) => {
       codes.push(input.totpCode);
-      hostedAccountStore.setState({
-        errorMessage: input.totpCode === "654321" ? null : STEP_UP_MESSAGE,
-      });
+      return input.totpCode === "654321" ? committed() : stepUpRefusal();
     });
 
     await mount();
@@ -466,9 +537,9 @@ describe("AccountSettingsPanel", () => {
   });
 
   it("never opens a step-up prompt for a session the Hub accepts", async () => {
-    vi.spyOn(hostedHubController, "requestEmailVerification").mockImplementation(async () => {
-      hostedAccountStore.setState({ errorMessage: null });
-    });
+    vi.spyOn(hostedHubController, "requestEmailVerification").mockImplementation(async () =>
+      committed(),
+    );
 
     await mount();
     await page.getByRole("textbox", { name: "Email address" }).fill("ada@example.com");
@@ -484,9 +555,13 @@ describe("AccountSettingsPanel", () => {
     // The step-up gate is one specific refusal. A classifier that fired on any
     // failure would demand an authenticator code for a rejected address — and
     // would then re-send the same doomed request with a code attached.
-    vi.spyOn(hostedHubController, "requestEmailVerification").mockImplementation(async () => {
-      hostedAccountStore.setState({ errorMessage: "That address was not accepted." });
-    });
+    vi.spyOn(hostedHubController, "requestEmailVerification").mockImplementation(async () =>
+      publishRefusal({
+        errorCode: "conflict",
+        wireErrorCode: "conflict",
+        errorMessage: "That address was not accepted.",
+      }),
+    );
 
     await mount();
     await page.getByRole("textbox", { name: "Email address" }).fill("ada@example.com");
@@ -505,9 +580,14 @@ describe("AccountSettingsPanel", () => {
     // become a step-up prompt, so it is the only place the two gates can be
     // confused. An action that never routes through the step-up path could not
     // show a code field whatever the classifier said, and proves nothing.
-    vi.spyOn(hostedHubController, "revokeTotp").mockImplementation(async () => {
-      hostedAccountStore.setState({ errorMessage: PASSKEY_SESSION_MESSAGE });
-    });
+    vi.spyOn(hostedHubController, "revokeTotp").mockImplementation(async () =>
+      publishRefusal({
+        errorCode: PASSKEY_SESSION_REQUIRED_CODE,
+        wireErrorCode: "forbidden",
+        inferredErrorCode: true,
+        errorMessage: PASSKEY_SESSION_MESSAGE,
+      }),
+    );
 
     await mount();
     await page.getByRole("button", { name: "Turn off two-factor authentication" }).click();
@@ -521,9 +601,14 @@ describe("AccountSettingsPanel", () => {
   });
 
   it("presents the passkey-session gate as a passkey prompt rather than a failure", async () => {
-    vi.spyOn(hostedHubController, "beginTotpEnrollment").mockImplementation(async () => {
-      hostedAccountStore.setState({ errorMessage: PASSKEY_SESSION_MESSAGE });
-    });
+    vi.spyOn(hostedHubController, "beginTotpEnrollment").mockImplementation(async () =>
+      publishRefusal({
+        errorCode: PASSKEY_SESSION_REQUIRED_CODE,
+        wireErrorCode: "forbidden",
+        inferredErrorCode: true,
+        errorMessage: PASSKEY_SESSION_MESSAGE,
+      }),
+    );
 
     await mount();
     await page.getByRole("button", { name: "Set up" }).click();
@@ -535,12 +620,12 @@ describe("AccountSettingsPanel", () => {
   it("lets the user out of a step-up retry the Hub never answers", async () => {
     const pending = deferred();
     vi.spyOn(hostedHubController, "requestEmailVerification").mockImplementation(async (input) => {
-      if (input.totpCode === undefined) {
-        hostedAccountStore.setState({ errorMessage: STEP_UP_MESSAGE });
-        return;
-      }
+      if (input.totpCode === undefined) return stepUpRefusal();
       hostedAccountStore.setState({ actionStatus: "requesting-email-verification" });
       await pending.promise;
+      // What an aborted operation resolves to: a refusal that deliberately
+      // carries no message, because the user did not fail at anything.
+      return publishRefusal({ reason: "cancelled" });
     });
     const abort = vi.spyOn(hostedHubController, "cancelAccountAction").mockImplementation(() => {
       hostedAccountStore.setState({ actionStatus: "idle", errorMessage: null });
@@ -571,11 +656,67 @@ describe("AccountSettingsPanel", () => {
     await expect.element(page.getByText(/Request accepted by the Hub/i)).not.toBeInTheDocument();
   });
 
+  it("stops asking for a code once an inferred step-up refusal has been refused to its limit", async () => {
+    // `step_up_required` is *synthesised* from a bare `forbidden` — the Hub never
+    // sends it. When the 403 was really a role check, an operator disabling the
+    // account, or a gateway in front of the Hub, no code the user types can ever
+    // satisfy this prompt, and a surface that re-prompts on every refusal asks
+    // forever for something that was never the obstacle.
+    const codes: Array<string | undefined> = [];
+    vi.spyOn(hostedHubController, "requestEmailVerification").mockImplementation(async (input) => {
+      codes.push(input.totpCode);
+      return stepUpRefusal();
+    });
+
+    await mount();
+    await page.getByRole("textbox", { name: "Email address" }).fill("ada@example.com");
+    await page.getByRole("button", { name: "Send verification" }).click();
+    await expect.element(page.getByText("Confirm the email change")).toBeVisible();
+
+    for (let attempt = 0; attempt < STEP_UP_INFERRED_ATTEMPT_LIMIT; attempt += 1) {
+      await page.getByRole("textbox", { name: "Authenticator code" }).fill("123456");
+      await page.getByRole("button", { name: "Confirm code" }).click();
+    }
+
+    await expect.element(page.getByText("Confirm the email change")).not.toBeInTheDocument();
+    // And it does not repeat the one claim it now knows may be false.
+    await expect.element(page.getByText(STEP_UP_UNRESOLVED_MESSAGE)).toBeVisible();
+    await expect.element(page.getByText(STEP_UP_MESSAGE)).not.toBeInTheDocument();
+
+    await settle();
+    expect(codes, "the surface kept re-sending after it stopped prompting").toHaveLength(
+      STEP_UP_INFERRED_ATTEMPT_LIMIT + 1,
+    );
+  });
+
+  it("keeps a step-up prompt built on an inferred code escapable", async () => {
+    vi.spyOn(hostedHubController, "requestEmailVerification").mockImplementation(async () =>
+      stepUpRefusal(),
+    );
+    const abort = vi.spyOn(hostedHubController, "cancelAccountAction").mockImplementation(() => {
+      hostedAccountStore.setState({ actionStatus: "idle" });
+    });
+
+    await mount();
+    await page.getByRole("textbox", { name: "Email address" }).fill("ada@example.com");
+    await page.getByRole("button", { name: "Send verification" }).click();
+    await expect.element(page.getByText("Confirm the email change")).toBeVisible();
+
+    // The demand for a code is this client's guess, not the Hub's answer, so the
+    // user must always be able to walk away from it rather than be held by a
+    // prompt that may be about something else entirely.
+    await userEvent.keyboard("{Escape}");
+
+    await expect.element(page.getByText("Confirm the email change")).not.toBeInTheDocument();
+    expect(abort, "escaping the prompt must abort the operation too").toHaveBeenCalled();
+  });
+
   it("lets the user out of a set-password the Hub never answers, and keeps nothing", async () => {
     const pending = deferred();
     vi.spyOn(hostedHubController, "setPassword").mockImplementation(async () => {
       hostedAccountStore.setState({ actionStatus: "setting-password" });
       await pending.promise;
+      return publishRefusal({ reason: "cancelled" });
     });
     const abort = vi.spyOn(hostedHubController, "cancelAccountAction").mockImplementation(() => {
       hostedAccountStore.setState({ actionStatus: "idle", errorMessage: null });
@@ -601,14 +742,16 @@ describe("AccountSettingsPanel", () => {
   /* ------------------------------------------------------- passkey commits */
 
   it("does not invite a second ceremony when the confirming re-read of a committed passkey fails", async () => {
-    // What the runtime leaves behind when the Hub accepted the ceremony and the
-    // forced read that confirms it could not reach the Hub: the credential is
-    // enrolled, and there is an error on the same slot a refusal would use.
+    // What the runtime reports when the Hub accepted the ceremony and the forced
+    // read that confirms it could not reach the Hub: the credential *is*
+    // enrolled — `committed` — and the failed read has published its own message
+    // on the same slot a refusal would use. The outcome, not the message, is
+    // what says so.
     const add = vi.spyOn(hostedHubController, "addPasskey").mockImplementation(async () => {
-      hostedAccountStore.setState({
-        passkeysStatus: "stale",
-        errorMessage: "The Hub could not be reached.",
-      });
+      hostedAccountStore.setState({ passkeysStatus: "stale" });
+      const outcome = addPasskeyCommitted("unverified");
+      hostedAccountStore.setState({ errorMessage: "The Hub could not be reached." });
+      return outcome;
     });
 
     await mount();
@@ -625,10 +768,10 @@ describe("AccountSettingsPanel", () => {
 
   it("does not invite a second ceremony when the Hub does not list the passkey it accepted", async () => {
     const add = vi.spyOn(hostedHubController, "addPasskey").mockImplementation(async () => {
-      hostedAccountStore.setState({
-        passkeysStatus: "ready",
-        errorMessage: HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,
-      });
+      hostedAccountStore.setState({ passkeysStatus: "ready" });
+      const outcome = addPasskeyCommitted("missing");
+      hostedAccountStore.setState({ errorMessage: HOSTED_PASSKEY_UNCONFIRMED_MESSAGE });
+      return outcome;
     });
 
     await mount();
@@ -642,8 +785,10 @@ describe("AccountSettingsPanel", () => {
 
   it("keeps the add dialog open when the ceremony itself was refused", async () => {
     vi.spyOn(hostedHubController, "addPasskey").mockImplementation(async () => {
-      hostedAccountStore.setState({
-        passkeysStatus: "ready",
+      hostedAccountStore.setState({ passkeysStatus: "ready" });
+      return publishRefusal({
+        errorCode: "conflict",
+        wireErrorCode: "conflict",
         errorMessage: "That credential is already registered.",
       });
     });
@@ -657,12 +802,59 @@ describe("AccountSettingsPanel", () => {
     await expect.element(page.getByText("Add a passkey")).toBeVisible();
   });
 
+  it("keeps the add dialog open for a refusal that arrives on an already-stale list", async () => {
+    // The case a message-and-list-status heuristic cannot get right, and the
+    // reason the runtime reports the outcome as data instead. A pre-commit
+    // refusal leaves the list exactly as stale as a failed post-commit read
+    // does, so classifying by "is the list stale?" closes the dialog on a
+    // ceremony that enrolled nothing — and silently drops the one retry the user
+    // needed. The outcome says `refused`; nothing else has to be inferred.
+    const add = vi.spyOn(hostedHubController, "addPasskey").mockImplementation(async () =>
+      publishRefusal({
+        errorCode: "internal_error",
+        wireErrorCode: "internal_error",
+        errorMessage: "Hub is temporarily unavailable.",
+      }),
+    );
+
+    hostedAccountStore.setState({ passkeys: [], passkeysStatus: "stale" });
+
+    await mount();
+    await page.getByRole("button", { name: "Add passkey" }).click();
+    await page.getByRole("textbox", { name: "Name (optional)" }).fill("Work laptop");
+    await page.getByRole("button", { name: "Create passkey" }).click();
+
+    await expect.element(page.getByText("Hub is temporarily unavailable.")).toBeVisible();
+    await expect.element(page.getByText("Add a passkey")).toBeVisible();
+    // The label survives too: the user has to be able to press the one control
+    // that retries what actually failed.
+    await expect
+      .element(page.getByRole("textbox", { name: "Name (optional)" }))
+      .toHaveValue("Work laptop");
+    expect(add).toHaveBeenCalledOnce();
+  });
+
+  it("closes the add dialog on a confirmed enrolment", async () => {
+    const add = vi
+      .spyOn(hostedHubController, "addPasskey")
+      .mockImplementation(async () => addPasskeyCommitted("confirmed"));
+
+    await mount();
+    await page.getByRole("button", { name: "Add passkey" }).click();
+    await page.getByRole("textbox", { name: "Name (optional)" }).fill("Work laptop");
+    await page.getByRole("button", { name: "Create passkey" }).click();
+
+    await expect.element(page.getByText("Add a passkey")).not.toBeInTheDocument();
+    await expect.element(page.getByText("That did not work")).not.toBeInTheDocument();
+    expect(add).toHaveBeenCalledOnce();
+  });
+
   /* ------------------------------------------------------ secret handling */
 
   it("shows recovery codes once, with copy, and never writes them to a persisted store", async () => {
     vi.spyOn(hostedHubController, "regenerateRecoveryCodes").mockImplementation(async () => {
       hostedHubStore.setState({ recoveryCodes: [...RECOVERY_CODES] });
-      hostedAccountStore.setState({ errorMessage: null });
+      return recoveryCodesCommitted(true);
     });
 
     await mount();
@@ -684,7 +876,7 @@ describe("AccountSettingsPanel", () => {
   it("gives freshly minted recovery codes exactly one exit", async () => {
     vi.spyOn(hostedHubController, "regenerateRecoveryCodes").mockImplementation(async () => {
       hostedHubStore.setState({ recoveryCodes: [...RECOVERY_CODES] });
-      hostedAccountStore.setState({ errorMessage: null });
+      return recoveryCodesCommitted(true);
     });
 
     await mount();
@@ -723,8 +915,10 @@ describe("AccountSettingsPanel", () => {
     const pending = deferred();
     vi.spyOn(hostedHubController, "regenerateRecoveryCodes").mockImplementation(async () => {
       await pending.promise;
+      // A runtime that had not been told the claim was released: the codes reach
+      // the slot after the surface is gone. The web fence is what catches that.
       hostedHubStore.setState({ recoveryCodes: [...RECOVERY_CODES] });
-      hostedAccountStore.setState({ errorMessage: null });
+      return recoveryCodesCommitted(true);
     });
 
     await mount();
@@ -805,6 +999,45 @@ describe("AccountSettingsPanel", () => {
     const dom = document.body.innerHTML;
     expect(dom).not.toContain(TOTP_SECRET);
     expect(dom).not.toContain("otpauth:");
+  });
+
+  it("holds the runtime's recovery-code claim for exactly as long as it is mounted", async () => {
+    // Not defensive: the runtime only writes rotated codes into its slot while a
+    // claim is live. Without this claim every rotation started here would rotate
+    // the user's codes server-side and then come back `displayed: false` with
+    // nothing to show, and releasing it is what fences a rotation still in
+    // flight when the surface goes away.
+    let released = 0;
+    const claim = vi.spyOn(hostedHubController, "claimRecoveryCodes").mockImplementation(() => {
+      return () => {
+        released += 1;
+      };
+    });
+
+    await mount();
+    expect(claim).toHaveBeenCalledOnce();
+    expect(released, "the claim was released while the surface was still live").toBe(0);
+
+    await teardown();
+    expect(released).toBe(1);
+  });
+
+  it("reports a rotation that committed without reaching a display", async () => {
+    // The rotation happened, so every code the user had saved is already dead.
+    // Silence here would leave them believing they still hold working recovery
+    // credentials.
+    vi.spyOn(hostedHubController, "regenerateRecoveryCodes").mockImplementation(async () => {
+      const outcome = recoveryCodesCommitted(false);
+      hostedAccountStore.setState({ errorMessage: HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE });
+      return outcome;
+    });
+
+    await mount();
+    await page.getByRole("button", { name: "Generate new codes" }).click();
+    await page.getByRole("button", { name: "Replace codes" }).click();
+
+    await expect.element(page.getByText(HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE)).toBeVisible();
+    await expect.element(page.getByText("Save your recovery codes")).not.toBeInTheDocument();
   });
 
   it("keeps the hosted root's full-screen code takeover out of the way while it is mounted", async () => {
