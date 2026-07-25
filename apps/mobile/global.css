@@ -107,6 +107,12 @@
       --color-drawer: rgba(255, 255, 255, 0.99);
       --color-drawer-shadow: rgba(0, 0, 0, 0.12);
 
+      /* QR symbols (TOTP enrolment). Deliberately identical in both schemes:
+         a QR code is read by a camera, not by a person, and inverting it is a
+         scanning failure rather than a theming choice. */
+      --color-qr-surface: #ffffff;
+      --color-qr-module: #000000;
+
       /* Misc */
       --color-dot-separator: rgba(0, 0, 0, 0.2);
       --color-wordmark: #262626;
@@ -215,6 +221,12 @@
       --color-backdrop: rgba(0, 0, 0, 0.55);
       --color-drawer: rgba(14, 14, 14, 0.99);
       --color-drawer-shadow: rgba(0, 0, 0, 0.32);
+
+      /* QR symbols (TOTP enrolment). Deliberately identical in both schemes:
+         a QR code is read by a camera, not by a person, and inverting it is a
+         scanning failure rather than a theming choice. */
+      --color-qr-surface: #ffffff;
+      --color-qr-module: #000000;
 
       /* Misc */
       --color-dot-separator: rgba(255, 255, 255, 0.2);

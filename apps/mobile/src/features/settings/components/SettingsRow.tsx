@@ -10,11 +10,13 @@ export function SettingsRow(props: {
   readonly onPress?: () => void;
   readonly first?: boolean;
   readonly destructive?: boolean;
+  /** Renders the row inert and dimmed. Pass `onPress` anyway; it is ignored. */
+  readonly disabled?: boolean;
 }) {
   const chevronColor = useThemeColor("--color-icon-subtle");
   const content = (
     <View
-      className={`flex-row items-center gap-3 px-5 py-3.5 ${props.first ? "" : "border-t border-border-subtle"}`}
+      className={`flex-row items-center gap-3 px-5 py-3.5 ${props.first ? "" : "border-t border-border-subtle"} ${props.disabled ? "opacity-40" : ""}`}
     >
       <Text
         className={`flex-1 font-sans text-[17px] ${props.destructive ? "text-danger-foreground" : "text-foreground"}`}
@@ -26,7 +28,7 @@ export function SettingsRow(props: {
           {props.value}
         </Text>
       ) : null}
-      {props.onPress ? (
+      {props.onPress && !props.disabled ? (
         <SymbolView
           name={{ ios: "chevron.right", android: "chevron_right" }}
           size={16}
@@ -36,7 +38,7 @@ export function SettingsRow(props: {
       ) : null}
     </View>
   );
-  if (!props.onPress) return content;
+  if (!props.onPress || props.disabled) return content;
   return (
     <Pressable onPress={props.onPress} className="active:bg-subtle">
       {content}
