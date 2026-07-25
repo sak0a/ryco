@@ -2340,15 +2340,16 @@ describe("hosted account management state", () => {
     expect(hostedAccountStore.getState().errorMessage).toBeNull();
   });
 
-  it("never lets a committed rotation pass in silence", async () => {
-    // The one outcome that must be impossible. Whatever withholds the codes —
-    // here the account itself changing under the request — the user has to be
-    // told that the set they saved no longer works.
+  it("does not publish a rotation once a different account holds the session", async () => {
+    // The fence that does still apply. A rotation is not stale because the
+    // session was re-minted, but codes minted for one account may never land in
+    // another's state — and the user is still told the rotation happened.
     await authenticate();
     leaseRecoveryCodeDisplay();
     vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockImplementation(async () => {
       hostedHubStore.setState({
         account: { ...sessionResponse.account, id: "acct_bbbbbbbbbbbbbbbbbbbbbb" },
+        session: { ...sessionResponse.session, id: "sess_bbbbbbbbbbbbbbbbbbbbbb" },
       });
       return ["recovery-sensitive-canary"];
     });
@@ -2356,6 +2357,29 @@ describe("hosted account management state", () => {
     const outcome = await hostedHubController.regenerateRecoveryCodes();
 
     expect(outcome.status).toBe("refused");
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("recovery-sensitive-canary");
+    expect(hostedAccountStore.getState().errorMessage).toBe(
+      HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE,
+    );
+  });
+
+  it("never lets a committed rotation pass in silence", async () => {
+    // The one outcome that must be impossible. Here the user abandons the
+    // action — a hung passkey sheet, a closed prompt — after the Hub has
+    // already minted the new set. The abandonment is honoured, and the codes it
+    // costs are not passed over without a word: what the user saved is dead
+    // either way, and only this message says so.
+    await authenticate();
+    leaseRecoveryCodeDisplay();
+    vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockImplementation(async () => {
+      hostedHubController.cancelAccountAction();
+      return ["recovery-sensitive-canary"];
+    });
+
+    const outcome = await hostedHubController.regenerateRecoveryCodes();
+
+    expect(outcome).toMatchObject({ status: "refused", reason: "cancelled" });
     expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
     expect(JSON.stringify(hostedHubStore.getState())).not.toContain("recovery-sensitive-canary");
     expect(hostedAccountStore.getState().errorMessage).toBe(
