@@ -841,7 +841,7 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     expect(JSON.stringify(added)).not.toContain("native-token-canary");
   });
 
-  it("rotates the native token when an add-passkey verify returns a fresh one", async () => {
+  it("never adopts an unvalidated native token from an add-passkey verify", async () => {
     const { service } = recordingDpopSigner();
     const credentials = inMemoryBearerCredentials();
     credentials.writeBearerToken?.("native-token-canary");
@@ -850,7 +850,11 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
       call += 1;
       return call === 1
         ? response({ options: registrationOptions })
-        : response({ token: "native-token-rotated-canary" }, 201);
+        : // A 2xx body carrying a bare token and no account/session. Adopting it
+          // would replace a valid enclave-bound token with an unverified one,
+          // and the very next authenticated call would 401 — which
+          // isSessionFailure matches, expiring a session that was valid.
+          response({ token: "native-token-unvalidated-canary" }, 201);
     });
     const api = createBearerApi(service, credentials, {
       register: vi.fn(async () => ({ id: "added" }) as never),
@@ -860,7 +864,12 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
       passkey: null,
       confirmed: false,
     });
-    expect(credentials.current()).toBe("native-token-rotated-canary");
+    expect(credentials.current()).toBe("native-token-canary");
+
+    // The live session still works: the next authenticated call presents the
+    // original token, not the one the verify tried to hand over.
+    globalThis.fetch = vi.fn(async () => response({ passkeys: [] }));
+    await expect(api.listPasskeys()).resolves.toEqual([]);
   });
 
   it("lists passkeys and fetches recovery codes over DPoP with no CSRF", async () => {

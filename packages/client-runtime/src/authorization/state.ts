@@ -325,7 +325,7 @@ class HostedHubController {
     } catch (error) {
       if (operation.signal.aborted) return;
       if (isSessionFailure(error)) {
-        await this.expireSession();
+        await this.#expireSessionHandled();
         return;
       }
       if (!this.#isCurrentAccountSession(operation.signal, sessionId)) {
@@ -334,6 +334,20 @@ class HostedHubController {
       }
       patchAccountState({ passkeysStatus: "stale", errorMessage: errorMessage(error) || null });
     }
+  }
+
+  /**
+   * Expire the session as a *handled* outcome.
+   *
+   * `expireSession` reaches `clearAccount`, which awaits `deactivateHostedNode`
+   * — a lifecycle teardown whose rejection is not an authorization failure.
+   * State is already cleared before that await, so authorization still fails
+   * closed either way; letting the rejection escape would turn a handled
+   * session failure into a rejected account read, and hand a fire-and-forget
+   * caller an unhandled rejection.
+   */
+  async #expireSessionHandled(): Promise<void> {
+    await this.expireSession().catch(() => undefined);
   }
 
   /**
@@ -437,11 +451,15 @@ class HostedHubController {
       const commit = await run(operation.signal);
       if (!this.#isCurrentAccountSession(operation.signal, sessionId)) return false;
       commit();
+      // A concurrent caller refused by the busy guard above recorded its
+      // message against an action that has now succeeded. Leaving it would show
+      // a failure on an idle surface that did exactly what was asked.
+      patchAccountState({ errorMessage: null });
       return true;
     } catch (error) {
       if (operation.signal.aborted) return false;
       if (isSessionFailure(error)) {
-        await this.expireSession();
+        await this.#expireSessionHandled();
         return false;
       }
       if (!this.#isCurrentAccountSession(operation.signal, sessionId)) return false;

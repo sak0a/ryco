@@ -524,38 +524,35 @@ export class HostedHubApi {
    * Complete an add-passkey ceremony on an already-authenticated session.
    *
    * Unlike bootstrap and invitation registration this must **not** mint a
-   * session. The caller is already signed in, and the Hub's verify response is
-   * not required to carry session material, so it is never demanded and never
-   * cleared:
+   * session, and — on either transport — it **adopts no session material at
+   * all**. It is never demanded, never cleared, and never rotated:
    *
    * - Demanding it (what `#finishLogin` does, via `#nativeSessionResponse` /
    *   `#sessionResponse`) would reject a valid Hub response as
    *   `invalid_response` and report a successful enrolment as a failure.
    * - Clearing it would sign the user out for adding a credential.
+   * - **Rotating it would be worse than either.** The only verified way this
+   *   client learns session material is a complete, *validated* account/session
+   *   response — which is exactly what `restoreSession` and the login/register
+   *   verifies deliver, and what this route's body is not required to contain.
+   *   A bare `token` or `csrfToken` member here is part of no contract observed
+   *   on this route, and a length bound does not make an unverified value
+   *   correct: adopting a well-formed but wrong one replaces working session
+   *   material and every later authenticated call fails — 401 in bearer mode,
+   *   which `isSessionFailure` matches and which would expire a session that
+   *   was perfectly valid a moment ago; 403 in cookie mode, which it does not
+   *   match, wedging the session until a reload. Both are self-inflicted, and
+   *   neither is diagnosable from the surface.
    *
-   * **Bearer** additionally tolerates rotation: ignoring a token the Hub did
-   * return would leave the client presenting one the Hub has rotated away from,
-   * and a bounded well-formed replacement is exactly the contract
-   * `#restoreNativeSession` already implements for this transport.
+   * Not adopting costs nothing in the case the Hub genuinely does rotate: the
+   * next `restoreSession` re-establishes the correct material through the
+   * validated path, and until then the failure is the Hub's own bounded error
+   * rather than one this client manufactured.
    *
-   * **Cookie does not rotate.** The only verified way this client learns a CSRF
-   * token is a complete, validated session response; a bare `csrfToken` member
-   * on an add-passkey verify is not part of any contract observed here.
-   * Adopting an unvalidated one would replace working session material with a
-   * value that wedges every later CSRF-bound call in a 403 that
-   * `isSessionFailure` does not match — undiagnosable, and unrecoverable
-   * without a reload. Ignoring it is strictly safer: a genuine Hub-side
-   * rotation surfaces as the same bounded 403, and the next `restoreSession`
-   * re-establishes the correct token.
-   *
-   * No token and no CSRF value is returned; the caller only ever sees the
-   * bounded passkey view.
+   * No token and no CSRF value is read or returned; the caller only ever sees
+   * the bounded passkey view.
    */
   #finishAddPasskey(value: Record<string, unknown>): HostedAddPasskeyResult {
-    if (this.#isBearer) {
-      const token = bearerTokenValue(value.token);
-      if (token) this.#writeBearerToken(token);
-    }
     const passkey = passkeyValue(value.passkey);
     return { passkey, confirmed: passkey !== null };
   }

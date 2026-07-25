@@ -1375,6 +1375,66 @@ describe("hosted account management state", () => {
     expect(hostedAccountStore.getState().actionStatus).toBe("idle");
   });
 
+  it("clears a concurrent refusal once the action it refused has succeeded", async () => {
+    await authenticate();
+    let release: ((value: ReadonlyArray<string>) => void) | null = null;
+    vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    vi.spyOn(hostedHubApi, "addPasskey").mockResolvedValue({ passkey: null, confirmed: false });
+    vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([]);
+
+    const pending = hostedHubController.regenerateRecoveryCodes();
+    await hostedHubController.addPasskey({ passkeyLabel: null });
+    expect(hostedAccountStore.getState().errorMessage).toBe(HOSTED_ACCOUNT_BUSY_MESSAGE);
+
+    release?.(["fresh-code"]);
+    await pending;
+
+    // An idle surface must not still be showing a failure for an action that
+    // then succeeded.
+    expect(hostedAccountStore.getState()).toMatchObject({
+      actionStatus: "idle",
+      errorMessage: null,
+    });
+    expect(hostedHubStore.getState().recoveryCodes).toEqual(["fresh-code"]);
+  });
+
+  it("completes rather than rejects when lifecycle teardown fails on expiry", async () => {
+    // Session expiry reaches deactivateHostedNode, which only runs when a node
+    // is selected. A teardown failure there is not an authorization failure and
+    // must not surface as a rejected account read (or an unhandled rejection
+    // for a fire-and-forget caller).
+    const selected = node();
+    await authenticate();
+    hostedHubStore.setState({ selectedNode: selected });
+    deactivateHostedNode.mockRejectedValueOnce(new Error("lifecycle-teardown-canary"));
+    vi.spyOn(hostedHubApi, "listPasskeys").mockRejectedValue(
+      new HostedHubApiError("session_invalid", 401),
+    );
+
+    await expect(hostedHubController.refreshPasskeys()).resolves.toBeUndefined();
+    expect(deactivateHostedNode).toHaveBeenCalledWith(selected.environmentId);
+    expect(hostedHubStore.getState().accountStatus).toBe("session-expired");
+
+    hostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      selectedNode: selected,
+    });
+    deactivateHostedNode.mockRejectedValueOnce(new Error("lifecycle-teardown-canary"));
+    vi.spyOn(hostedHubApi, "addPasskey").mockRejectedValue(
+      new HostedHubApiError("session_invalid", 401),
+    );
+
+    await expect(hostedHubController.addPasskey({ passkeyLabel: null })).resolves.toBeUndefined();
+    expect(hostedHubStore.getState().accountStatus).toBe("session-expired");
+  });
+
   it("cancels an account ceremony that never returns", async () => {
     await authenticate();
     // A platform passkey sheet the user leaves open never resolves and never
