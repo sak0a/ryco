@@ -117,6 +117,13 @@ interface Harness {
    * with happens in that window.
    */
   readonly hold: () => () => void;
+  /**
+   * Let a TOTP confirm commit *without* the runtime clearing the enrolment
+   * slot — what happens whenever the runtime's own commit thunk does not run,
+   * and the case the surface's "no secret once it is reporting the outcome"
+   * guard exists for.
+   */
+  readonly keepEnrollmentSlot: () => void;
   /** Close the open prompt the way the surface's own dismissal would. */
   readonly close: () => void;
 }
@@ -130,6 +137,7 @@ function harness(initial?: {
   let draft: HostedAccountPromptDraft | null = null;
   const outcomes: Array<string | null> = [];
   let held: Promise<void> | null = null;
+  let clearsEnrollmentOnConfirm = true;
 
   /**
    * Every controller fake settles the store the way the controller would: it
@@ -166,7 +174,9 @@ function harness(initial?: {
     }),
     confirmTotpEnrollment: vi.fn(async () => {
       await commit();
-      if (account.errorMessage === null) hub = { ...hub, totpEnrollment: null };
+      if (account.errorMessage === null && clearsEnrollmentOnConfirm) {
+        hub = { ...hub, totpEnrollment: null };
+      }
     }),
     revokeTotp: vi.fn(async () => commit()),
     requestEmailVerification: vi.fn(async () => commit()),
@@ -227,6 +237,9 @@ function harness(initial?: {
         release = resolve;
       });
       return release;
+    },
+    keepEnrollmentSlot: () => {
+      clearsEnrollmentOnConfirm = false;
     },
     close: () => {
       draft = null;
@@ -395,6 +408,51 @@ describe("passkey rows", () => {
       view.prompt?.message ?? "",
     ].join(" ");
     expect(rendered).not.toContain("pkey_");
+  });
+
+  /**
+   * The list's trash affordance is a mutation like any other row, and the busy
+   * interlock has to hold for it too: two revokes in flight is the one thing
+   * the runtime's single-action guard would answer with "another account change
+   * is still in progress" — after the user had already destroyed a credential.
+   */
+  it("withholds the revoke while another account change is in flight", () => {
+    const passkeys = [
+      passkey({ id: "pkey_01J8ZQ5V2N7X0000000002", label: "iPhone" }),
+      passkey({ id: "pkey_01J8ZQ5V2N7X0000000003", label: "iPad" }),
+    ];
+    const idle = harness({ account: { passkeys } }).view();
+    expect(idle.passkeyRows.every((row) => row.revoke !== undefined)).toBe(true);
+
+    const test = harness({ account: { passkeys, actionStatus: "setting-password" } });
+    const view = test.view();
+    expect(view.busy).toBe(true);
+    // Not merely greyed out by the list: there is no handler to press at all.
+    expect(view.passkeyRows.map((row) => row.revoke)).toEqual([undefined, undefined]);
+    for (const row of view.passkeyRows) row.revoke?.();
+    expect(test.draft()).toBeNull();
+  });
+
+  /**
+   * `revoke-passkey` is the one prompt that cannot be opened from a section row
+   * — it needs a credential the list names. A draft without one has nothing to
+   * revoke, and must not be submittable: the action would otherwise settle with
+   * no error and read as a successful revocation that never happened.
+   */
+  it("cannot submit a revoke that names no credential", async () => {
+    const test = harness();
+    test.open("revoke-passkey");
+    expect(test.draft()?.credentialId).toBeNull();
+
+    const prompt = test.prompt();
+    expect(prompt.submit?.disabled).toBe(true);
+    prompt.submit?.run();
+    await flush();
+    expect(test.actions.revokePasskey).not.toHaveBeenCalled();
+    // And nothing reported an outcome: the prompt is still open and unattempted.
+    expect(test.draft()).not.toBeNull();
+    expect(test.draft()?.attempted).toBe(false);
+    expect(test.draft()?.completed).toBe(false);
   });
 
   it("revokes through the controller with the credential the row named", async () => {
@@ -819,6 +877,39 @@ describe("TOTP enrolment", () => {
     expect(prompt.message).toContain("Two-factor authentication is on");
     expect(prompt.enrollment).toBeNull();
     expect(prompt.submit).toBeNull();
+  });
+
+  /**
+   * The completion stage shows no secret *whatever the runtime still holds*.
+   *
+   * Clearing the slot is the runtime's job on a confirm, but it does that from
+   * a commit thunk it does not always run — its own session fence can skip the
+   * commit while leaving the account store idle and error-free, which this
+   * surface reads as a success and turns into `completed`. The QR and the
+   * base32 key would then re-render under "Two-factor authentication is on".
+   * So the prompt drops the projection itself rather than trusting the slot.
+   */
+  it("shows no secret once the prompt is reporting the outcome", async () => {
+    const test = harness();
+    test.open("enroll-totp");
+    test.prompt().submit?.run();
+    await flush();
+    expect(test.prompt().enrollment).not.toBeNull();
+
+    // The runtime commits the confirm but leaves the enrolment slot populated.
+    test.keepEnrollmentSlot();
+    test.type({ text: "123456" });
+    test.prompt().submit?.run();
+    await flush();
+
+    const prompt = test.prompt();
+    expect(test.draft()?.completed).toBe(true);
+    expect(prompt.message).toContain("Two-factor authentication is on");
+    expect(prompt.enrollment).toBeNull();
+    expect(prompt.fields).toEqual([]);
+    // Nothing anywhere on the surface still carries the shared key.
+    expect(JSON.stringify(test.view())).not.toContain("JBSWY3DPEHPK3PXP");
+    expect(JSON.stringify(test.view())).not.toContain("otpauth://");
   });
 
   it("says a passkey session is required, without offering a shortcut", () => {
