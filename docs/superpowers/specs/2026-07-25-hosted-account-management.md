@@ -91,3 +91,67 @@ this spec → approval → plan → runtime methods (+ security review)
 ```
 
 Mobile screens already exist in shape from L3 Task 6; they currently hand off to the webview and would switch to native calls.
+
+---
+
+# Appendix A — Verified Hub contract (read from the Hub source)
+
+The Hub route table and zod request schemas were read directly from `src/http/authRoutes.ts` and `src/auth/httpSecurity.ts`. This supersedes every probe-inferred guess above.
+
+## A.1 The transport correction — account management is DPoP-native
+
+`authorizePresentedSession` (`src/auth/httpSecurity.ts:91`) branches on the `Authorization` header:
+
+- **`Authorization: DPoP <token>` present** → native path. Verifies the proof (`singleUse: mutation`), binds against the session's `dpopJkt`, and applies **no same-origin check**.
+- **No Authorization header** → cookie path, and `enforceSameOrigin` runs **only for mutations**.
+
+Consequently **every `/api/account/*` route, including all mutations, is fully reachable over the native DPoP transport.** The L3 plan §0.3 and this spec's earlier text were wrong to call password/TOTP/email "browser-transport-only": that is true only of the fallback **login** routes under `/api/auth/*`, which is a different thing from credential **management**.
+
+The mobile app therefore does credential management **natively**. The C2 webview is needed only for the initial fallback *login* when the user has no passkey on the device.
+
+## A.2 Account-management routes (session-authenticated; DPoP or cookie)
+
+All are `POST`. Cookie mode requires CSRF + same-origin; DPoP mode requires a single-use-jti proof. Every one already routes through the runtime's existing `#request` bearer/cookie machinery.
+
+| Method call | Path | Request body | Response |
+| --- | --- | --- | --- |
+| `setPassword` | `/api/account/password` | `{ password: string(≤256), totpCode?: string(≤16) }` | `{ ok: true }` |
+| `removePassword` | `/api/account/password/remove` | `{ totpCode?: string(≤16) }` | `{ ok: true }` |
+| `beginTotpEnrollment` | `/api/account/totp/enrollment/options` | `{}` | `{ secretBase32: string, provisioningUri: string }` |
+| `confirmTotpEnrollment` | `/api/account/totp/enrollment/verify` | `{ code: string(≤16) }` | `{ ok: true }` |
+| `revokeTotp` | `/api/account/totp/revoke` | `{ totpCode?: string(≤16) }` | `{ ok: true }` |
+| `requestEmailVerification` | `/api/account/email/verification` | `{ email: string(≤254), totpCode?: string(≤16) }` | `{ ok: true }` (202) |
+| `revokePasskey` | `/api/account/passkeys/{id}/revoke` | `{}` | `{ ok: true }` |
+| `regenerateRecoveryCodes` | `/api/account/recovery-codes` | `{ totpCode?: string(≤16) }` | session + `{ recoveryCodes: string[] }` |
+| `listPasskeys` | `/api/account/passkeys` (GET) | — | `{ passkeys: PublicPasskey[] }` |
+| `addPasskey` | `/api/account/passkeys/registration/{options,verify}` | options `{ label? }`; verify `{ response, totpCode? }` | verify → 201 + `{ passkey }` |
+
+**`revokePasskey` DOES exist** — the earlier removal was correct only because the probe used the wrong shape. The real route is `POST /api/account/passkeys/{id}/revoke`, where `id` matches `pkey_[A-Za-z0-9_-]{22}` (regex enforced server-side, `authRoutes.ts`). It should be re-added with that exact method and path.
+
+`PublicPasskey` (`publicPasskey`, `authRoutes.ts:195`): `{ id, label, createdAt, lastUsedAt, backupEligible, backupState, revokedAt, revocationReasonCode }`. The current client projects only the first four; extend it.
+
+## A.3 The TOTP step-up rule (decision #4), from the code
+
+The optional `totpCode` on set-password, remove-password, revoke-totp, email-verification, recovery-codes, and passkey-verify is the **fallback-session step-up**: a session minted from password / recovery / email-recovery must present a current TOTP code to perform these actions **where TOTP is enrolled**; a passkey session ignores it (the service enforces this, not the client). TOTP *enrolment* itself requires a passkey-authenticated session. The client must (a) surface a TOTP-code field on these actions only when the session is a fallback session with TOTP enrolled, and (b) never present a fallback session as equivalent to a passkey session.
+
+## A.4 Browser-only fallback LOGIN routes (kept behind the webview + guard)
+
+These call `enforceSameOrigin` and are login flows, not management — they stay behind the C2 webview, and the runtime's fail-closed bearer guard correctly blocks them natively:
+
+- `POST /api/auth/password` — `{ email, password, totpCode? }` → session
+- `POST /api/auth/recovery` — `{ code }` → session (recovery-code login)
+- `POST /api/auth/email/verify` — `{ token }` → `{ ok: true }`
+- `POST /api/auth/recovery/email/request` — `{ email }` → `{ ok: true }` (202, uniform)
+- `POST /api/auth/recovery/email/confirm` — `{ token, totpCode? }` → session
+
+## A.5 Revised sequencing
+
+```
+runtime methods (A.2, incl. re-added revokePasskey) + security review
+                                │
+                   ┌────────────┴────────────┐
+              web UI settings          mobile account screens
+              (parallel)               (parallel — now NATIVE, not webview)
+```
+
+The mobile screens from L3 Task 6 that currently hand off to the webview for "add this device" and "get recovery codes" can call the runtime natively once A.2 lands. The webview remains only the no-passkey fallback *login* entry point.
