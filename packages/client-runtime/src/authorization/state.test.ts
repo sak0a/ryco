@@ -52,6 +52,7 @@ import {
   hostedAccountStore,
   hostedHubController,
   hostedHubStore,
+  hostedRecoveryCodeDisplayStore,
   markHostedSessionReady,
 } from "./state";
 
@@ -1190,19 +1191,20 @@ describe("hosted account management state", () => {
     await hostedHubController.bootstrap();
   }
 
-  let claims: Array<() => void> = [];
+  let leases: Array<() => void> = [];
   afterEach(() => {
-    for (const release of claims) release();
-    claims = [];
+    for (const release of leases) release();
+    leases = [];
   });
 
   /**
-   * Stand in for a live recovery-code surface, and release it at the end of the
-   * test. A rotation only publishes while one of these is live.
+   * Stand in for a surface displaying the codes, and release it at the end of
+   * the test. A rotation only publishes if one of these was live when it was
+   * asked for.
    */
-  function claimRecoveryCodes(): () => void {
-    const release = hostedHubController.claimRecoveryCodes();
-    claims.push(release);
+  function leaseRecoveryCodeDisplay(): () => void {
+    const release = hostedHubController.leaseRecoveryCodeDisplay();
+    leases.push(release);
     return release;
   }
 
@@ -1405,7 +1407,7 @@ describe("hosted account management state", () => {
 
   it("clears a concurrent refusal once the action it refused has succeeded", async () => {
     await authenticate();
-    claimRecoveryCodes();
+    leaseRecoveryCodeDisplay();
     let release: ((value: ReadonlyArray<string>) => void) | null = null;
     vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockImplementation(
       () =>
@@ -1500,7 +1502,7 @@ describe("hosted account management state", () => {
 
   it("surfaces regenerated recovery codes and keeps them out of the account store", async () => {
     await authenticate();
-    claimRecoveryCodes();
+    leaseRecoveryCodeDisplay();
     vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockResolvedValue([
       "recovery-sensitive-canary",
     ]);
@@ -1520,7 +1522,7 @@ describe("hosted account management state", () => {
 
   it("drops the account surface and any displayed codes when the account clears", async () => {
     await authenticate();
-    claimRecoveryCodes();
+    leaseRecoveryCodeDisplay();
     vi.spyOn(hostedHubApi, "listPasskeys").mockResolvedValue([passkey]);
     vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockResolvedValue([
       "recovery-sensitive-canary",
@@ -1784,7 +1786,7 @@ describe("hosted account management state", () => {
 
   it("clears held secrets when sign-in is abandoned", async () => {
     await authenticate();
-    claimRecoveryCodes();
+    leaseRecoveryCodeDisplay();
     vi.spyOn(hostedHubApi, "beginTotpEnrollment").mockResolvedValue({
       secretBase32: "TOTPSECRETSENSITIVECANARY",
       provisioningUri: "otpauth://totp/Ryco:ada?secret=TOTPSECRETSENSITIVECANARY",
@@ -1919,7 +1921,7 @@ describe("hosted account management state", () => {
 
   it("threads the step-up code onto a recovery-code rotation", async () => {
     await authenticate();
-    claimRecoveryCodes();
+    leaseRecoveryCodeDisplay();
     const regenerate = vi
       .spyOn(hostedHubApi, "regenerateRecoveryCodes")
       .mockResolvedValue(["fresh"]);
@@ -2123,13 +2125,13 @@ describe("hosted account management state", () => {
 
   // --- G3: the runtime owns the one-shot secret's lifetime -------------------
 
-  it("drops a rotation that lands with no live claimant", async () => {
+  it("drops a rotation asked for with no display at all", async () => {
     await authenticate();
     vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockResolvedValue([
       "recovery-sensitive-canary",
     ]);
 
-    // No claim: a client that simply forgot cannot strand live credentials.
+    // No lease: a client that simply forgot cannot strand live credentials.
     const outcome = await hostedHubController.regenerateRecoveryCodes();
 
     expect(outcome).toEqual({ status: "committed", displayed: false });
@@ -2142,9 +2144,9 @@ describe("hosted account management state", () => {
     );
   });
 
-  it("drops a rotation whose claimant went away while it was in flight", async () => {
+  it("publishes a rotation whose display went away while it was in flight", async () => {
     await authenticate();
-    const release = claimRecoveryCodes();
+    const release = leaseRecoveryCodeDisplay();
     let settle: ((value: ReadonlyArray<string>) => void) | null = null;
     vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockImplementation(
       () =>
@@ -2154,22 +2156,26 @@ describe("hosted account management state", () => {
     );
 
     const pending = hostedHubController.regenerateRecoveryCodes();
-    // The surface tears down before the Hub answers — the exact shape both
-    // clients shipped, where the late result landed in a slot nothing was
-    // watching and stayed there.
+    // The surface goes away before the Hub answers — a node switch closing the
+    // settings dialog, a reparent, a back-swipe. None of that reaches the Hub:
+    // the rotation commits, so the codes the user had saved are already dead.
     release();
     settle?.(["recovery-sensitive-canary"]);
     const outcome = await pending;
 
-    expect(outcome).toEqual({ status: "committed", displayed: false });
-    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
-    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("recovery-sensitive-canary");
+    // Dropping them here would leave the account with recovery codes nobody
+    // has. They are published instead, and left unleased so the hosted root's
+    // takeover puts them in front of the user.
+    expect(outcome).toEqual({ status: "committed", displayed: true });
+    expect(hostedHubStore.getState().recoveryCodes).toEqual(["recovery-sensitive-canary"]);
+    await Promise.resolve();
+    expect(hostedRecoveryCodeDisplayStore.getState().leased).toBe(false);
   });
 
-  it("clears claim-owned codes when the last claim is released", async () => {
+  it("keeps displayed codes when the last display lease is released", async () => {
     await authenticate();
-    const first = claimRecoveryCodes();
-    const second = claimRecoveryCodes();
+    const first = leaseRecoveryCodeDisplay();
+    const second = leaseRecoveryCodeDisplay();
     vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockResolvedValue([
       "recovery-sensitive-canary",
     ]);
@@ -2185,17 +2191,50 @@ describe("hosted account management state", () => {
     first();
     expect(hostedHubStore.getState().recoveryCodes).toEqual(["recovery-sensitive-canary"]);
 
-    // The last one to leave clears — so a client that forgets
-    // `dismissRecoveryCodes` on one of its teardown paths is still covered.
+    // Nor may the last one out. A surface stops being mounted for reasons that
+    // were never the user's decision — a hosted node deactivating and closing
+    // the settings dialog, a reparent across the phone breakpoint — and by now
+    // the rotation has already invalidated every code the user had saved.
     second();
+    await Promise.resolve();
+    expect(hostedHubStore.getState().recoveryCodes).toEqual(["recovery-sensitive-canary"]);
+    expect(hostedRecoveryCodeDisplayStore.getState().leased).toBe(false);
+
+    // The acknowledgement is what clears them, and it still does.
+    hostedHubController.dismissRecoveryCodes();
     expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
     expect(JSON.stringify(hostedHubStore.getState())).not.toContain("recovery-sensitive-canary");
   });
 
-  it("leaves post-bootstrap codes alone when a claim is released", async () => {
+  it("never reports the display gone across a release and retake in one tick", async () => {
+    // React runs a deleted subtree's cleanups before the replacement's mount
+    // effects, so a remount looks exactly like a teardown at the moment the
+    // release runs. Publishing `false` there hands the viewport to the hosted
+    // root's takeover for a frame, mid-flow, on nothing but a reparent.
+    const published: Array<boolean> = [];
+    const unsubscribe = hostedRecoveryCodeDisplayStore.subscribe(() => {
+      published.push(hostedRecoveryCodeDisplayStore.getState().leased);
+    });
+    try {
+      const release = leaseRecoveryCodeDisplay();
+      expect(published).toEqual([true]);
+
+      release();
+      leaseRecoveryCodeDisplay();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(published, "a remount published an unleased display").toEqual([true]);
+      expect(hostedRecoveryCodeDisplayStore.getState().leased).toBe(true);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("leaves post-bootstrap codes alone when a lease is released", async () => {
     // The legitimate publish-and-display flow: codes arrive with the new
-    // account and the root surface shows them. They are not claim-owned, so an
-    // unrelated claim's release must not wipe them out from under it.
+    // account and the root surface shows them. A release from an unrelated
+    // surface must not wipe them out from under it.
     vi.spyOn(hostedHubApi, "bootstrapOwner").mockResolvedValue({
       ...sessionResponse,
       recoveryCodes: ["bootstrap-code"],
@@ -2208,14 +2247,14 @@ describe("hosted account management state", () => {
     });
     expect(hostedHubStore.getState().recoveryCodes).toEqual(["bootstrap-code"]);
 
-    claimRecoveryCodes()();
+    leaseRecoveryCodeDisplay()();
 
     expect(hostedHubStore.getState().recoveryCodes).toEqual(["bootstrap-code"]);
   });
 
   it("fences an in-flight rotation against an explicit dismissal", async () => {
     await authenticate();
-    claimRecoveryCodes();
+    leaseRecoveryCodeDisplay();
     let settle: ((value: ReadonlyArray<string>) => void) | null = null;
     vi.spyOn(hostedHubApi, "regenerateRecoveryCodes").mockImplementation(
       () =>

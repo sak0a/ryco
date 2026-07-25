@@ -9,10 +9,14 @@
 //      attempted, and a TOTP field appears only after the Hub has refused it
 //      with the step-up gate. A field rendered up front would be a guess, and a
 //      wrong one for every passkey session.
-//   2. **Secret material is transient.** Recovery codes and the TOTP enrolment
-//      secret live in one in-memory runtime slot each. This surface renders them,
-//      never copies them into its own state, never puts them in a URL or a log,
-//      and drops them on dismissal and on teardown.
+//   2. **Secret material is transient, but it is the user who ends it.** Recovery
+//      codes and the TOTP enrolment secret live in one in-memory runtime slot
+//      each. This surface renders them, never copies them into its own state,
+//      never puts them in a URL or a log, and drops them when the user says so.
+//      It does **not** drop them on teardown: this panel is unmounted by a node
+//      switch, a dialog close, and a tier flip, none of which is the user
+//      deciding they have saved a secret that by then is the only one that
+//      works.
 //   3. **A fallback is never dressed up as a passkey.** Password, recovery code,
 //      and emailed link are the weaker ways in, and the copy says so.
 
@@ -41,10 +45,6 @@ import {
   useHostedAccountStore,
   useHostedHubStore,
 } from "../../hostedHub/state";
-import {
-  isRecoveryCodeDisplayClaimed,
-  useRecoveryCodeDisplayStore,
-} from "../../hostedHub/recoveryCodeDisplay";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import {
   AlertDialog,
@@ -264,72 +264,30 @@ function useAccountAction() {
 }
 
 /**
- * Own the one-time recovery-code display while this surface is mounted, and
- * fence a rotation against this surface's own teardown.
+ * Declare that this surface is displaying the one-time recovery codes, for as
+ * long as it is mounted. That is the whole of this surface's involvement in the
+ * lifetime of the two secrets it renders.
  *
- * Two claims are taken, and they are not the same claim:
+ * The lease is load-bearing rather than defensive: the runtime publishes rotated
+ * codes only if a lease was live when the rotation was asked for, so without
+ * this line every rotation from here would rotate the user's codes server-side
+ * and then come back `displayed: false` with nothing to show. It also keeps
+ * `HostedHubRoot`'s full-screen takeover out of the way while this surface is
+ * the one showing them.
  *
- *   * `hostedHubController.claimRecoveryCodes()` is the **runtime's**, and it is
- *     load-bearing rather than defensive. The runtime only writes rotated codes
- *     into its in-memory slot while a claim is live; a rotation started with no
- *     claim still happens server-side but publishes nothing and comes back
- *     `displayed: false`. So without this line every rotation from this surface
- *     would rotate the user's codes and then refuse to show them. Releasing it
- *     at unmount is what makes a rotation still in flight land on the floor.
- *   * The web display claim tells `HostedHubRoot` to keep its full-screen
- *     "save your codes" takeover out of the way, which is a web-only concern the
- *     runtime knows nothing about.
- *
- * The local mounted/in-flight fence below is kept as defence in depth, but it
- * now *defers* to the claim counts rather than racing them: it only dismisses
- * once no claimant is left, so a surface that is still live never has its
- * display torn down by another instance's teardown.
+ * **The release destroys nothing, and nothing else here does either.** This
+ * cleanup used to end in `dismissRecoveryCodes()` and `dismissTotpEnrollment()`,
+ * which made every involuntary teardown destroy a secret the Hub had already
+ * made authoritative — and this panel is torn down for reasons that are not the
+ * user's: `clearWebHostedNodeScopedState` calls `closeSettings()` on every
+ * hosted node deactivate, suspend, and switch, and `LazySettingsDialogMount`
+ * remounts it at a new position whenever the presentation tier flips. Both left
+ * the account holding recovery codes nobody had ever seen. The codes and the
+ * enrolment secret now go away on an explicit acknowledgement (the buttons
+ * below) or with the account, and on nothing else.
  */
-function useRecoveryCodeDisplayFence(): <T>(rotate: () => Promise<T>) => Promise<T> {
-  const claim = useRecoveryCodeDisplayStore((state) => state.claim);
-  const release = useRecoveryCodeDisplayStore((state) => state.release);
-  const fence = useRef<{ mounted: boolean; inFlight: number }>({ mounted: false, inFlight: 0 });
-
-  useEffect(() => {
-    const state = fence.current;
-    state.mounted = true;
-    claim();
-    const releaseRuntimeClaim = hostedHubController.claimRecoveryCodes();
-    return () => {
-      state.mounted = false;
-      // Release the runtime claim first: that is what fences a rotation still in
-      // flight and drops any codes the claim was holding, so everything below is
-      // cleaning up after an owner that has already let go.
-      releaseRuntimeClaim();
-      // On teardown this drops **both** secrets the runtime can be holding on
-      // this surface's behalf. Closing the settings surface with codes or an
-      // enrolment secret still in a slot would leave the account's key material
-      // resident for the life of the session.
-      hostedHubController.dismissTotpEnrollment();
-      if (state.inFlight === 0) release();
-      if (!isRecoveryCodeDisplayClaimed()) hostedHubController.dismissRecoveryCodes();
-    };
-  }, [claim, release]);
-
-  return useCallback(
-    async <T,>(rotate: () => Promise<T>): Promise<T> => {
-      const state = fence.current;
-      state.inFlight += 1;
-      try {
-        return await rotate();
-      } finally {
-        state.inFlight -= 1;
-        if (!state.mounted) {
-          if (state.inFlight === 0) release();
-          // Only once nothing is claiming the display: while another instance is
-          // live the runtime kept the codes for it deliberately, and dismissing
-          // here would destroy a display that surface owns.
-          if (!isRecoveryCodeDisplayClaimed()) hostedHubController.dismissRecoveryCodes();
-        }
-      }
-    },
-    [release],
-  );
+function useRecoveryCodeDisplayLease(): void {
+  useEffect(() => hostedHubController.leaseRecoveryCodeDisplay(), []);
 }
 
 /** A busy control: the label with a spinner while this action is the live one. */
@@ -356,7 +314,7 @@ export function AccountSettingsPanel() {
   const totpEnrollment = useHostedHubStore((state) => state.totpEnrollment ?? null);
 
   const action = useAccountAction();
-  const fenceRecoveryCodes = useRecoveryCodeDisplayFence();
+  useRecoveryCodeDisplayLease();
   const busy = actionStatus !== "idle";
 
   useEffect(() => {
@@ -438,7 +396,6 @@ export function AccountSettingsPanel() {
         actionStatus={actionStatus}
         recoveryCodes={recoveryCodes}
         run={action.run}
-        fence={fenceRecoveryCodes}
       />
 
       <StepUpDialog
@@ -1138,13 +1095,11 @@ function RecoveryCodesSection({
   actionStatus,
   recoveryCodes,
   run,
-  fence,
 }: {
   readonly busy: boolean;
   readonly actionStatus: string;
   readonly recoveryCodes: ReadonlyArray<string>;
   readonly run: RunAccountAction;
-  readonly fence: <T>(rotate: () => Promise<T>) => Promise<T>;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const regenerating = actionStatus === "regenerating-recovery-codes";
@@ -1155,16 +1110,16 @@ function RecoveryCodesSection({
    * the user has already written down. It runs from this confirmed handler and
    * from nowhere else — never on mount, focus, retry, or reconnect.
    *
-   * The call goes through the display fence, which covers both the first
-   * attempt and the step-up retry. The runtime is the primary guard — it drops
-   * a rotation whose claim has been released — and the fence is what keeps this
-   * surface's own claim alive across the await so a rotation started while
-   * mounted is still allowed to publish.
+   * Nothing wraps the call. The runtime reads this surface's display lease when
+   * the rotation is asked for — the user is looking at the panel, so it is
+   * live — and publishes the result whether or not the panel is still here when
+   * the Hub answers. Anything else drops a set of codes that is by then the only
+   * thing still opening the account.
    */
   const confirmRegenerate = async () => {
     setConfirmOpen(false);
     await run("regenerate-recovery-codes", (stepUp) =>
-      fence(() => hostedHubController.regenerateRecoveryCodes(stepUp)),
+      hostedHubController.regenerateRecoveryCodes(stepUp),
     );
   };
 

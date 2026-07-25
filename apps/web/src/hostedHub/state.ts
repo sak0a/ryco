@@ -2,6 +2,7 @@ import {
   hostedAccountStore,
   hostedHubController,
   hostedHubStore,
+  hostedRecoveryCodeDisplayStore,
   markHostedSessionReady,
   markHostedSessionReplaying,
   reportHostedShellSnapshotFailure,
@@ -9,6 +10,7 @@ import {
   HOSTED_SESSION_SYNC_FAILURE_MESSAGE,
   type HostedAccountState,
   type HostedHubState,
+  type HostedRecoveryCodeDisplayState,
 } from "@ryco/client-runtime/authorization";
 import { useStore } from "zustand";
 
@@ -31,12 +33,13 @@ export {
   hostedAccountStore,
   hostedHubController,
   hostedHubStore,
+  hostedRecoveryCodeDisplayStore,
   markHostedSessionReady,
   markHostedSessionReplaying,
   reportHostedShellSnapshotFailure,
   HOSTED_SESSION_SYNC_FAILURE_MESSAGE,
 };
-export type { HostedAccountState, HostedHubState };
+export type { HostedAccountState, HostedHubState, HostedRecoveryCodeDisplayState };
 
 type HostedHubSelector<T> = (state: HostedHubState) => T;
 
@@ -61,4 +64,22 @@ export const useHostedAccountStore = Object.assign(
   <T>(selector: HostedAccountSelector<T>): T =>
     useStore(hostedAccountStore as never, selector as never) as T,
   hostedAccountStore,
+);
+
+type HostedRecoveryCodeDisplaySelector<T> = (state: HostedRecoveryCodeDisplayState) => T;
+
+/**
+ * React binding for "is some surface already displaying the one-time recovery
+ * codes".
+ *
+ * The runtime owns this rather than the web owning a second claim of its own:
+ * one lease decides both whether a rotation may publish and which surface
+ * shows the result, so there is no way to hold one and forget the other. It
+ * answers a *presentation* question only — nothing that clears a secret may
+ * read it.
+ */
+export const useHostedRecoveryCodeDisplayStore = Object.assign(
+  <T>(selector: HostedRecoveryCodeDisplaySelector<T>): T =>
+    useStore(hostedRecoveryCodeDisplayStore as never, selector as never) as T,
+  hostedRecoveryCodeDisplayStore,
 );

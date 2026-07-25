@@ -174,6 +174,27 @@ export const hostedHubStore = createHostedStore(initialState);
 
 export const hostedAccountStore = createHostedStore(initialAccountState);
 
+/**
+ * Whether any surface is currently displaying the one-time recovery codes.
+ *
+ * Deliberately its own store rather than a field of {@link HostedHubState}: a
+ * lease belongs to the mounted *surfaces*, not to the account session, and the
+ * session state is replaced wholesale on teardown — a lease field living there
+ * would be reset out from under a surface that still holds one.
+ *
+ * Its one legitimate consumer is a surface deciding whether to display the
+ * codes *itself*: the hosted root's full-screen "save your codes" takeover
+ * steps in only when nothing else is showing them. **Nothing destructive may
+ * key on this** — see {@link HostedHubController.leaseRecoveryCodeDisplay}.
+ */
+export interface HostedRecoveryCodeDisplayState {
+  readonly leased: boolean;
+}
+
+export const hostedRecoveryCodeDisplayStore = createHostedStore<HostedRecoveryCodeDisplayState>({
+  leased: false,
+});
+
 function patchState(patch: Partial<HostedHubState>): void {
   hostedHubStore.setState(patch);
 }
@@ -330,15 +351,10 @@ class HostedHubController {
   #browserLifecycleGeneration = 0;
   #totpEnrollmentFence = createFence();
   #recoveryCodesFence = createFence();
-  /** How many surfaces have declared they are live and will display rotated codes. */
-  #recoveryCodesClaims = 0;
-  /**
-   * Whether the codes currently in the store were published by a *rotation*
-   * under a claim. Codes published by the bootstrap/invitation flow are not
-   * claim-owned and are never cleared by a claim release — that flow has no
-   * claim and its root surface is the display.
-   */
-  #recoveryCodesClaimed = false;
+  /** How many surfaces are currently displaying the one-time recovery codes. */
+  #recoveryCodesLeases = 0;
+  /** Whether the settle for an already-released lease is queued. */
+  #recoveryCodesLeaseSettleQueued = false;
   #passkeysOperation: AbortController | null = null;
   #passkeysPromise: Promise<void> | null = null;
   #accountOperation: AbortController | null = null;
@@ -460,7 +476,6 @@ class HostedHubController {
     // secret material.
     this.#totpEnrollmentFence.bump();
     this.#recoveryCodesFence.bump();
-    this.#recoveryCodesClaimed = false;
     patchState({
       accountStatus: "signed-out",
       errorMessage: null,
@@ -470,64 +485,108 @@ class HostedHubController {
   }
 
   /**
-   * Declare that a surface is live and will display rotated recovery codes,
-   * and take ownership of clearing them. Returns the release; call it when the
-   * surface goes away (a `useEffect` cleanup, an unmount, a dismissed sheet).
+   * Declare that a surface is displaying the one-time recovery codes, for as
+   * long as it is. Returns the release; call it when the surface goes away (a
+   * `useEffect` cleanup, an unmount, a dismissed sheet). The release is
+   * idempotent, and leases are counted, so two live surfaces coexist.
    *
-   * This exists because "clear the secret on every async path" is a contract no
-   * client has managed to keep — this codebase is on its sixth async result
-   * landing after the state it targets moved on, and both the web and the
-   * mobile account surfaces stranded live recovery credentials in the store
-   * identically. So the runtime owns the lifetime instead of asking:
+   * **A lease says "I am showing this". It does not own the codes' destruction,
+   * and releasing one destroys nothing.** That is the point of it: the claim
+   * this replaces *did* clear the slot when the last claimant left, so every
+   * reason a surface stops being mounted became a reason to destroy a set of
+   * codes the Hub had already made authoritative — a hosted node deactivating
+   * and closing the settings dialog underneath the user, a React reparent
+   * across the phone breakpoint, a lazily-loaded presentation swapping in.
+   * None of those is the user's decision, and each one left the account holding
+   * recovery codes nobody has, which with a lost passkey is a lockout.
    *
-   * - **A rotation whose result lands with no live claim publishes nothing.**
-   *   Omitting the claim entirely cannot strand a secret; it fails closed, and
-   *   {@link regenerateRecoveryCodes} says so on its outcome and in a bounded
-   *   message rather than failing silently.
-   * - **Releasing the last claim clears any claim-owned codes.** A client that
-   *   forgets `dismissRecoveryCodes` on one of its teardown paths is still
-   *   covered, because release is the teardown path.
-   * - **A claim released while a rotation is in flight fences that rotation.**
-   *   The result arrives to a surface that is gone, so it is dropped — the same
-   *   discipline `dismissTotpEnrollment` uses, which is what this generalises.
+   * So the codes outlive the lease. They are destroyed by
+   * {@link dismissRecoveryCodes} — an explicit acknowledgement — or by the
+   * account going away, and by nothing else.
    *
-   * Claims are counted, so two live surfaces do not clear each other's display,
-   * and the release is idempotent — calling it twice releases one claim.
+   * What a lease does still decide:
    *
-   * The bootstrap/invitation flow is untouched: it publishes codes with no
-   * claim, its root surface displays them, and a release never clears them.
+   * - **A rotation publishes only if a lease was live when it was asked for.**
+   *   A caller with no display at all cannot rotate codes into a slot nothing
+   *   will ever render: it fails closed, reports `displayed: false`, and says
+   *   so in a bounded message. Omitting the lease is therefore safe — which is
+   *   the only kind of omission this API can afford.
+   * - **Which surface displays them.** While a lease is live the hosted root
+   *   leaves its full-screen takeover alone; once none is, that takeover is
+   *   what puts an orphaned set in front of the user instead of leaving it
+   *   unseen in memory.
+   *
+   * "No lease left" is settled a microtask after the release rather than at the
+   * moment of it: React runs the deleted subtree's cleanups *before* the
+   * replacement's mount effects, so at the instant a cleanup runs a remount is
+   * indistinguishable from a teardown.
    */
-  claimRecoveryCodes(): () => void {
-    this.#recoveryCodesClaims += 1;
+  leaseRecoveryCodeDisplay(): () => void {
+    this.#recoveryCodesLeases += 1;
+    this.#publishRecoveryCodeDisplayLease();
     let released = false;
     return () => {
       if (released) return;
       released = true;
-      this.#recoveryCodesClaims -= 1;
-      if (this.#recoveryCodesClaims > 0) return;
-      // Last claimant gone: fence anything in flight, and drop codes this
-      // claim was holding. Codes published without a claim (bootstrap) are not
-      // ours to clear.
-      this.#recoveryCodesFence.bump();
-      if (!this.#recoveryCodesClaimed) return;
-      this.#recoveryCodesClaimed = false;
-      patchState({ recoveryCodes: [] });
+      this.#recoveryCodesLeases -= 1;
+      this.#queueRecoveryCodeDisplayLeaseSettle();
     };
   }
 
+  #publishRecoveryCodeDisplayLease(): void {
+    const leased = this.#recoveryCodesLeases > 0;
+    if (hostedRecoveryCodeDisplayStore.getState().leased === leased) return;
+    hostedRecoveryCodeDisplayStore.setState({ leased });
+  }
+
+  /**
+   * Settle "nothing is displaying the codes" one microtask after the release
+   * that suggested it, so a remount — old cleanup then new mount, in the same
+   * commit — never publishes an unleased display and the hosted root's takeover
+   * never gets a frame in which to steal the viewport.
+   *
+   * A resolved promise rather than the runtime's injected timers, on purpose: a
+   * surface can mount before the app has configured the runtime, and reading
+   * that configuration here would make mounting a component force it. All this
+   * schedules is a store publish, and nothing destructive is behind it — a
+   * settle that concludes wrongly costs a takeover, never a secret.
+   */
+  #queueRecoveryCodeDisplayLeaseSettle(): void {
+    if (this.#recoveryCodesLeaseSettleQueued) return;
+    this.#recoveryCodesLeaseSettleQueued = true;
+    void Promise.resolve().then(() => {
+      this.#recoveryCodesLeaseSettleQueued = false;
+      this.#publishRecoveryCodeDisplayLease();
+    });
+  }
+
+  /**
+   * The user's acknowledgement that they have saved the displayed codes, and
+   * the only thing short of the account going away that drops them.
+   *
+   * **Never call this from a teardown path** — an unmount, a cleanup, a dialog
+   * close driven by anything other than the user pressing the acknowledgement.
+   * By the time codes are in this slot the rotation has already invalidated
+   * every code the user had saved, so clearing them for any reason that was not
+   * the user's decision leaves the account with recovery codes its owner never
+   * saw. Ending a display is what {@link leaseRecoveryCodeDisplay}'s release is
+   * for, and it deliberately destroys nothing.
+   */
   dismissRecoveryCodes(): void {
     // Fenced like the TOTP secret: a rotation still in flight when the user
-    // dismisses must not push codes back into a surface they just closed.
+    // acknowledges must not push codes back into a surface they just closed.
     this.#recoveryCodesFence.bump();
-    this.#recoveryCodesClaimed = false;
     patchState({ recoveryCodes: [] });
   }
 
   /**
    * Drop a displayed TOTP enrolment secret. The mirror of
-   * {@link dismissRecoveryCodes}: the secret exists only for the enrolment
-   * screen, and once that screen is gone the runtime must not still be holding
-   * the account's shared key.
+   * {@link dismissRecoveryCodes}, and it carries the same rule: this is the
+   * user abandoning the enrolment (or the flow finishing), never a teardown.
+   * The enrolment is live on the Hub the moment the secret is issued and this
+   * Hub refuses a second one, so a cleanup that clears the slot destroys the
+   * only copy of a key the account is already expecting — the surface's own
+   * copy says "this is the only time the key is displayed", and it is right.
    */
   dismissTotpEnrollment(): void {
     this.#totpEnrollmentFence.bump();
@@ -670,24 +729,33 @@ class HostedHubController {
    * This is a mutation. Call it only from an explicit, confirmed user action —
    * never on mount, focus, retry, or reconnect.
    *
-   * **The codes only reach the store while a {@link claimRecoveryCodes} claim is
-   * live.** With no live claim the rotation still happens — it is a server-side
-   * mutation and there is no taking it back — but its result is dropped rather
-   * than left sitting in a shared slot with nothing on screen to show it, and
-   * the outcome reports `displayed: false` alongside a bounded message saying
-   * the previous codes are dead. Clearing is the claim's job, not the caller's.
+   * **The codes only reach the store if a {@link leaseRecoveryCodeDisplay}
+   * lease was live when the rotation was asked for.** With no lease at all the
+   * rotation still happens — it is a server-side mutation and there is no
+   * taking it back — but its result is dropped rather than left sitting in a
+   * shared slot with nothing on screen to show it, and the outcome reports
+   * `displayed: false` alongside a bounded message saying the previous codes
+   * are dead.
+   *
+   * The lease is read when the user asks, not when the Hub answers. A display
+   * that went away in between does **not** withhold the codes: the rotation has
+   * already invalidated everything the user had saved, so the new set is the
+   * only thing that still opens this account, and dropping it because a dialog
+   * closed is the lockout rather than the safe default. An orphaned set stays
+   * in the slot for the hosted root's takeover to show, until it is
+   * acknowledged or the account goes away.
    */
   async regenerateRecoveryCodes(input?: HostedAccountStepUp): Promise<HostedRecoveryCodesOutcome> {
     const live = this.#recoveryCodesFence.issue();
+    const leased = this.#recoveryCodesLeases > 0;
     let displayed = false;
     const outcome = await this.#accountAction("regenerating-recovery-codes", async (signal) => {
       const recoveryCodes = await getHostedHubApi().regenerateRecoveryCodes(input, signal);
       return () => {
-        // Fence *and* claim: the fence catches a surface that tore down or
-        // dismissed while this was in flight, the claim count catches a caller
-        // that never had a live surface at all.
-        if (!live() || this.#recoveryCodesClaims === 0) return;
-        this.#recoveryCodesClaimed = true;
+        // The lease catches a caller that never had a display at all; the fence
+        // catches the two things that may legitimately withhold a late result —
+        // an explicit acknowledgement, and the account going away.
+        if (!leased || !live()) return;
         displayed = true;
         patchState({ recoveryCodes });
       };
@@ -907,10 +975,9 @@ class HostedHubController {
     this.#totpEnrollmentFence.bump();
     // The account is going away and `initialState` takes the codes with it, so
     // a rotation still in flight must not repopulate the slot behind the
-    // teardown, and any surviving claim must not later "release" codes that
-    // are already gone into a fresh account's display.
+    // teardown. Leases are left alone: they belong to whatever is mounted, and
+    // a surface that is still on screen still holds one.
     this.#recoveryCodesFence.bump();
-    this.#recoveryCodesClaimed = false;
     this.#passkeysOperation?.abort();
     this.#passkeysOperation = null;
     this.#passkeysPromise = null;
@@ -938,10 +1005,11 @@ class HostedHubController {
     this.#browserSuspendPromise = null;
     this.#browserLifecycleGeneration += 1;
     this.#clearAccountSurface();
-    // Claims are held by surfaces, not by the session, so only a full reset
-    // drops them — otherwise a test's leftover claim would keep the next test's
+    // Leases are held by surfaces, not by the session, so only a full reset
+    // drops them — otherwise a test's leftover lease would keep the next test's
     // rotation "displayed".
-    this.#recoveryCodesClaims = 0;
+    this.#recoveryCodesLeases = 0;
+    this.#publishRecoveryCodeDisplayLease();
     getHostedHubApi().clearSessionMaterial();
     hostedHubStore.setState(initialState, true);
   }
