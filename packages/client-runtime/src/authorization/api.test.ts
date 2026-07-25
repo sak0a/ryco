@@ -969,6 +969,92 @@ describe("HostedHubApi account credential management", () => {
     await expect(api.listPasskeys()).rejects.toMatchObject({ code: "forbidden" });
   });
 
+  it("keeps the wire code and marks a narrowed one as inferred", async () => {
+    // The narrowing is a client-side guess: the Hub sends `forbidden` and keeps
+    // its reason in its audit log. A consumer that renders a TOTP prompt off
+    // `step_up_required` needs to know it is acting on an inference — an
+    // unrelated 403 (a role check added later, a proxy, a WAF, an operator
+    // lockout) reaches this same branch and no code the user types can satisfy
+    // it, so the real cause must stay recoverable.
+    const { api, reply } = await authenticated();
+    reply({ error: "forbidden" }, 403);
+
+    const inferred = await api.revokeTotp().catch((cause) => cause);
+    expect(inferred).toBeInstanceOf(HostedHubApiError);
+    expect(inferred).toMatchObject({
+      code: "step_up_required",
+      wireCode: "forbidden",
+      inferred: true,
+      intent: "revoke-totp",
+    });
+
+    // A code that was not narrowed reports itself as received, not inferred.
+    reply({ error: "rate_limited" }, 429);
+    const untouched = await api.revokeTotp().catch((cause) => cause);
+    expect(untouched).toMatchObject({
+      code: "rate_limited",
+      wireCode: "rate_limited",
+      inferred: false,
+    });
+
+    // And so does a 403 on a route with nothing to narrow it to.
+    reply({ error: "forbidden" }, 403);
+    const unnarrowed = await api.listPasskeys().catch((cause) => cause);
+    expect(unnarrowed).toMatchObject({
+      code: "forbidden",
+      wireCode: "forbidden",
+      inferred: false,
+    });
+  });
+
+  it("does not narrow a 403 on a ceremony leg that has no step-up gate", async () => {
+    // The add-passkey step-up rides the *verify* call. The options call mints a
+    // challenge and has no such gate, so a `forbidden` there cannot be a
+    // step-up — calling it one would prompt for a code that route never checks.
+    const requests: Array<RequestInfo | URL> = [];
+    const register = vi.fn(async () => ({ id: "added" }) as never);
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      requests.push(input);
+      if (requests.length === 1) return response(session);
+      return response({ error: "forbidden" }, 403);
+    });
+    const api = createApi({ register });
+    await api.restoreSession();
+
+    const optionsLeg = await api.addPasskey({ passkeyLabel: null }).catch((cause) => cause);
+
+    expect(requests.at(-1)).toBe("/api/account/passkeys/registration/options");
+    expect(optionsLeg).toMatchObject({
+      code: "forbidden",
+      wireCode: "forbidden",
+      inferred: false,
+      // The intent still rides along, so the error still says which operation
+      // it belongs to — only the narrowing is suppressed.
+      intent: "add-passkey",
+    });
+    expect(register).not.toHaveBeenCalled();
+
+    // The verify leg, which does have the gate, still narrows.
+    const verifyRequests: Array<RequestInfo | URL> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      verifyRequests.push(input);
+      if (verifyRequests.length === 1) return response(session);
+      if (verifyRequests.length === 2) return response({ options: registrationOptions });
+      return response({ error: "forbidden" }, 403);
+    });
+    const verifyApi = createApi({ register });
+    await verifyApi.restoreSession();
+
+    const verifyLeg = await verifyApi.addPasskey({ passkeyLabel: null }).catch((cause) => cause);
+
+    expect(verifyRequests.at(-1)).toBe("/api/account/passkeys/registration/verify");
+    expect(verifyLeg).toMatchObject({
+      code: "step_up_required",
+      wireCode: "forbidden",
+      inferred: true,
+    });
+  });
+
   it("gives each route-specific 409 an accurate message", async () => {
     const { api, reply } = await authenticated();
     reply({ error: "conflict" }, 409);
