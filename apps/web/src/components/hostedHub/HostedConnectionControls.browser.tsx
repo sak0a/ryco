@@ -29,6 +29,7 @@ import {
   hostedConnectionStatusRepresentatives,
 } from "../../../test/hostedConnectionVocabulary";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import { useSettingsDialogStore } from "../../settingsDialogStore";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
 import {
@@ -143,6 +144,7 @@ describe("hosted connection controls", () => {
   beforeEach(() => {
     localStorage.clear();
     hostedHubController.resetForTests();
+    useSettingsDialogStore.setState({ open: false, section: "general" });
     navigate.mockClear();
   });
 
@@ -150,6 +152,7 @@ describe("hosted connection controls", () => {
     await mounted?.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    useSettingsDialogStore.setState({ open: false, section: "general" });
     resetPrimaryEnvironmentDescriptorForTests();
     vi.restoreAllMocks();
     document.body.innerHTML = "";
@@ -259,6 +262,26 @@ describe("hosted connection controls", () => {
     // to the router navigation plus the controller primitive.
     await vi.waitFor(() => expect(returnToDirectory).toHaveBeenCalledOnce());
     expect(navigate).toHaveBeenCalledWith({ to: "/", replace: true });
+  });
+
+  it("closes the desktop menu before opening account settings over it", async () => {
+    // The phone twin closes its sheet before `openSettings("account")` and says
+    // why. The desktop menu did not, so the modal settings dialog opened on top
+    // of a still-open disclosure: two owners of one dismissal, and an Escape
+    // that returns focus into a popover the user believes they already left.
+    seedConnectedState();
+    useHostedHubStore.setState({ transportStatus: "reconnecting", sessionStatus: "stale" });
+    mounted = await render(<HostedNodeMenu />);
+
+    await page.getByText("Reconnecting", { exact: true }).click();
+    const disclosure = document.querySelector<HTMLDetailsElement>("details");
+    expect(disclosure, "no desktop menu rendered").not.toBeNull();
+    expect(disclosure!.open, "the menu did not open, so this proves nothing").toBe(true);
+
+    await page.getByRole("button", { name: "Account" }).click();
+    expect(useSettingsDialogStore.getState().open).toBe(true);
+    expect(useSettingsDialogStore.getState().section).toBe("account");
+    expect(disclosure!.open, "the menu stayed open under the settings dialog").toBe(false);
   });
 
   it("opens the phone connection sheet from the pill with the full bounded control set", async () => {

@@ -8,7 +8,7 @@ import {
   WifiIcon,
   WifiOffIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { useSettingsDialogStore } from "../../settingsDialogStore";
 import { Button } from "../ui/button";
@@ -117,6 +117,7 @@ export function HostedNodeMenu() {
   const browserStatus = useHostedHubStore((state) => state.browserStatus);
   const openSettings = useSettingsDialogStore((state) => state.openSettings);
   const { switchNode, returnToAllNodes } = useHostedConnectionActions();
+  const disclosureRef = useRef<HTMLDetailsElement>(null);
   if (!node) return null;
 
   const statusText = deriveHostedConnectionStatusText({
@@ -128,7 +129,7 @@ export function HostedNodeMenu() {
 
   return (
     <div className="relative max-w-full">
-      <details className="group relative">
+      <details ref={disclosureRef} className="group relative">
         <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-border bg-card/95 px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
           {transport === "online" ? (
             <WifiIcon aria-hidden className="size-4 text-emerald-500" />
@@ -194,7 +195,19 @@ export function HostedNodeMenu() {
             <Button size="sm" variant="ghost" onClick={() => void hostedHubController.signOut()}>
               <LogOutIcon aria-hidden /> Sign out
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => openSettings("account")}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                // Close first, exactly as the phone sheet twin does: the
+                // settings surface is modal and takes focus, and a disclosure
+                // left open underneath it makes two owners of one dismissal —
+                // Escape closes the dialog and returns focus into a popover the
+                // user believes they already left.
+                if (disclosureRef.current) disclosureRef.current.open = false;
+                openSettings("account");
+              }}
+            >
               <UserRoundIcon aria-hidden /> Account
             </Button>
           </div>
