@@ -12,8 +12,9 @@ which also prevents developers from exercising the Hub's browser sign-in and cro
 QR flow.
 
 Development builds will add a clearly labeled browser-only preview action when a Hub profile is
-compatible but the native hardware key is unavailable. The action opens the validated Hub web app
-in an ephemeral system-browser authentication session. A developer can use the Hub's normal
+compatible but the native hardware key is unavailable. The action opens the validated Hub profile
+origin, which serves the Hub web app, in an ephemeral system-browser authentication session. A
+developer can use the Hub's normal
 "Sign in with passkey" action and scan the cross-device QR code with a physical iPhone.
 
 The preview never configures the hosted runtime, creates a DPoP signer, redeems a native handoff,
@@ -73,7 +74,7 @@ When all of these conditions hold:
 1. the app is a development build;
 2. a validated Hub profile is configured and compatible;
 3. the hosted runtime is unavailable because no hardware-backed key could be created; and
-4. the configured Hub web app URL is valid;
+4. the compatible Hub profile has a valid HTTPS origin;
 
 the Hub settings screen shows a secondary action labeled **Preview Hub sign-in** beneath the existing
 hardware-key explanation. Supporting copy states that the browser flow can be tested, including a
@@ -89,14 +90,13 @@ app keeps the current unavailable explanation and offers no preview action.
 
 ## URL and browser boundary
 
-The preview URL is derived only from the app's validated `hostedAppUrl` configuration. It is never
-accepted from a deep link, QR code, text field, Hub response, query parameter, or fragment. The URL
-must:
+The preview URL is derived only from the compatible Hub profile's normalized origin. It is never
+accepted directly from a deep link, QR code, arbitrary browser field, Hub response, query
+parameter, or fragment. The URL must:
 
 - use HTTPS;
-- have the same origin as the configured Hub;
-- contain no username, password, query, or fragment; and
-- retain only the configured application path.
+- be the configured Hub origin exactly;
+- contain no username, password, path beyond `/`, query, or fragment.
 
 The preview uses `expo-web-browser` with `preferEphemeralSession: true`. It does not provide a
 native callback URL, parse a returned URL, or move cookies, CSRF material, authorization codes,
