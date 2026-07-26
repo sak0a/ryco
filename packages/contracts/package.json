@@ -20,6 +20,11 @@
       "import": "./src/relay.ts",
       "require": "./src/relay.ts"
     },
+    "./native-handoff": {
+      "types": "./src/nativeHandoff.ts",
+      "import": "./src/nativeHandoff.ts",
+      "require": "./src/nativeHandoff.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",
