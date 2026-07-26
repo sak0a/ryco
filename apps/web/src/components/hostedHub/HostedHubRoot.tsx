@@ -695,12 +695,19 @@ function NodeRow({
   return (
     // Two sibling controls with a full-height divider — never a button inside a
     // button, never an `absolute inset-0` overlay.
+    //
+    // `overflow-hidden` is what keeps the divider and the hover fill inside the
+    // radius, and it is also a clip on both children: an OUTSET ring is drawn
+    // outside the border box, so on a control that fills its parent's padding
+    // box three of its four sides land in the clipped region. Every focus
+    // indicator inside this row is therefore inset — the same rule the phone
+    // home's identical two-control rows follow.
     <li className="flex items-stretch overflow-hidden rounded-xl border border-border bg-background">
       <button
         type="button"
         disabled={disabled}
         onClick={onConnect}
-        className="flex min-h-16 min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:hover:bg-transparent phone:min-h-18"
+        className="flex min-h-16 min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-60 disabled:hover:bg-transparent phone:min-h-18"
       >
         {/* `ServerIcon` for every platform: lucide has no legitimate macOS or
             Windows mark, and shipping a vendor glyph would be brand

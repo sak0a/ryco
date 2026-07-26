@@ -16,7 +16,7 @@
 import "../../index.css";
 
 import { EnvironmentId } from "@ryco/contracts";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
@@ -326,6 +326,39 @@ describe("hosted node directory", () => {
       expect(document.querySelectorAll("li button[aria-describedby]")).toHaveLength(3);
     });
     expect(labels(), "presence must not be a sort key").toEqual(["Bravo", "Charlie", "Alpha"]);
+  });
+
+  it("keeps both of a row's focus indicators inside the row's clipping box", async () => {
+    // The row is `overflow-hidden` — that is what keeps the divider and the
+    // hover fill inside the radius — and both controls fill its padding box. An
+    // OUTSET ring is a box-shadow drawn outside the border box, so it is clipped
+    // on three sides and leaves a 2px sliver; with `outline-none` there is no
+    // fallback behind it. WCAG 2.4.7.
+    seedDirectory([node()]);
+    mounted = await render(<HostedHubRoot />);
+
+    const row = document.querySelector<HTMLElement>("li");
+    expect(row, "no row to clip").not.toBeNull();
+    // The clip is real, so the assertions below are about something.
+    expect(getComputedStyle(row!).overflow).toBe("hidden");
+
+    // Keyboard modality first: Chromium only matches `:focus-visible` when the
+    // last interaction was a keyboard one, so a bare `focus()` asserts nothing.
+    await userEvent.keyboard("{Tab}");
+    for (const control of row!.querySelectorAll<HTMLElement>("button")) {
+      control.focus();
+      expect(document.activeElement).toBe(control);
+      expect(control.matches(":focus-visible")).toBe(true);
+      const shadow = getComputedStyle(control).boxShadow;
+      expect(
+        shadow,
+        `${control.textContent ?? control.ariaLabel ?? "control"} has no indicator`,
+      ).not.toBe("none");
+      expect(
+        shadow,
+        `${control.textContent ?? control.ariaLabel ?? "control"} draws its indicator outside the clip`,
+      ).toContain("inset");
+    }
   });
 
   it("states the presence poll interval rather than animating a live indicator", async () => {
