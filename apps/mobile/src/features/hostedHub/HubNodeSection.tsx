@@ -12,8 +12,8 @@ import {
 import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusPill, type StatusTone } from "../../components/StatusPill";
-import { cn } from "../../lib/cn";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import { NodeRow } from "../nodes/NodeRow";
 import { hostedStatusTone } from "./hostedAuthModel";
 import { useHostedModeAvailable } from "./useHostedMode";
 
@@ -67,6 +67,7 @@ export interface HubNodeRowModel {
   readonly label: string;
   /** Bounded presence/role summary. Never an id, token, ticket, or raw error. */
   readonly detail: string;
+  readonly transportLabel: "Hub relay";
   readonly tone: StatusTone;
   readonly selected: boolean;
   readonly disabled: boolean;
@@ -195,6 +196,7 @@ export function deriveHubNodeSectionModel(input: {
         nodeId: node.id,
         label: node.label,
         detail: rowDetail(node),
+        transportLabel: "Hub relay",
         // The selected node's row shows the live connection status; every other
         // row shows directory presence, which is all the directory knows.
         tone:
@@ -238,7 +240,7 @@ function ActionPill(props: { readonly label: string; readonly onPress: () => voi
       accessibilityRole="button"
       accessibilityLabel={props.label}
       onPress={props.onPress}
-      className="rounded-full border border-border px-3 py-1.5 active:opacity-70"
+      className="h-11 items-center justify-center rounded-full border border-border px-3 active:opacity-70"
     >
       <Text className="text-xs font-ryco-bold text-foreground">{props.label}</Text>
     </Pressable>
@@ -265,32 +267,18 @@ export function HubNodeSectionView(props: { readonly model: HubNodeSectionModel 
       {model.rows.length > 0 ? (
         <View className="mx-5 overflow-hidden rounded-2xl border border-border bg-card">
           {model.rows.map((row, index) => (
-            <Pressable
+            <NodeRow
               key={row.nodeId}
-              accessibilityRole="button"
-              accessibilityLabel={`${row.label}, ${row.detail}`}
-              accessibilityState={{ disabled: row.disabled, selected: row.selected }}
+              label={row.label}
+              detail={row.detail}
+              transportLabel={row.transportLabel}
+              statusTone={row.tone}
+              selected={row.selected}
+              selectable
               disabled={row.disabled}
+              showDivider={index > 0}
               onPress={row.onPress}
-              className={cn(
-                "flex-row items-center gap-3 px-5 py-4 active:bg-subtle",
-                index > 0 && "border-t border-border-subtle",
-                row.disabled && "opacity-40",
-              )}
-            >
-              <View className="flex-1 gap-1">
-                <Text className="font-sans text-base text-foreground" numberOfLines={1}>
-                  {row.label}
-                </Text>
-                <Text className="text-xs font-ryco-medium text-foreground-muted">{row.detail}</Text>
-              </View>
-              <StatusPill
-                size="compact"
-                label={row.tone.label}
-                pillClassName={row.tone.pillClassName}
-                textClassName={row.tone.textClassName}
-              />
-            </Pressable>
+            />
           ))}
         </View>
       ) : null}

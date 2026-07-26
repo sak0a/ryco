@@ -20,6 +20,46 @@ export interface NodeSectionModel {
   readonly rows: ReadonlyArray<NodeModelInput>;
 }
 
+function isPrivateIpv4(hostname: string): boolean {
+  const octets = hostname.split(".").map(Number);
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet))) return false;
+  const [first, second] = octets;
+  if (first === 10 || first === 127) return true;
+  if (first === 192 && second === 168) return true;
+  return first === 172 && second !== undefined && second >= 16 && second <= 31;
+}
+
+function isTailscaleIpv4(hostname: string): boolean {
+  const octets = hostname.split(".").map(Number);
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet))) return false;
+  const [first, second] = octets;
+  return first === 100 && second !== undefined && second >= 64 && second <= 127;
+}
+
+export function directTransportLabel(
+  httpBaseUrl: string,
+): "LAN · Direct" | "Tailscale · Direct" | "Direct" {
+  let hostname: string;
+  try {
+    hostname = new URL(httpBaseUrl).hostname.toLocaleLowerCase();
+  } catch {
+    return "Direct";
+  }
+  if (hostname.endsWith(".ts.net") || isTailscaleIpv4(hostname)) return "Tailscale · Direct";
+  if (hostname === "localhost" || hostname.endsWith(".local") || isPrivateIpv4(hostname)) {
+    return "LAN · Direct";
+  }
+  return "Direct";
+}
+
+export function directRoleLabel(
+  role: "owner" | "client" | null,
+): "Owner" | "Client" | "Role pending" {
+  if (role === "owner") return "Owner";
+  if (role === "client") return "Client";
+  return "Role pending";
+}
+
 export function buildNodeSections(input: {
   readonly rows: ReadonlyArray<NodeModelInput>;
   readonly query?: string;
@@ -47,12 +87,10 @@ export function canSelectHubNode(input: {
   readonly directoryStatus: "idle" | "loading" | "ready" | "error";
   readonly browserStatus: "idle" | "refreshing" | "current" | "error";
   readonly revokedAt: string | null;
-  readonly presence: "online" | "offline" | "unknown";
 }): boolean {
   return (
     input.directoryStatus === "ready" &&
     input.browserStatus === "current" &&
-    input.revokedAt === null &&
-    input.presence === "online"
+    input.revokedAt === null
   );
 }

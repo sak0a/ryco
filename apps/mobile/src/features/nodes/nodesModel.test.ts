@@ -2,7 +2,12 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentId } from "@ryco/contracts";
 
-import { buildNodeSections, canSelectHubNode } from "./nodesModel";
+import {
+  buildNodeSections,
+  canSelectHubNode,
+  directRoleLabel,
+  directTransportLabel,
+} from "./nodesModel";
 
 describe("Nodes model", () => {
   it("keeps Hub and direct rows in separate ordered sections", () => {
@@ -67,7 +72,6 @@ describe("Nodes model", () => {
         directoryStatus: "ready",
         browserStatus: "current",
         revokedAt: null,
-        presence: "online",
       }),
     ).toBe(true);
     expect(
@@ -75,7 +79,6 @@ describe("Nodes model", () => {
         directoryStatus: "loading",
         browserStatus: "current",
         revokedAt: null,
-        presence: "online",
       }),
     ).toBe(false);
     expect(
@@ -83,8 +86,21 @@ describe("Nodes model", () => {
         directoryStatus: "ready",
         browserStatus: "current",
         revokedAt: "2026-07-26T10:00:00.000Z",
-        presence: "online",
       }),
     ).toBe(false);
+  });
+
+  it("labels LAN and Tailscale as direct transports", () => {
+    expect(directTransportLabel("https://macbook.local:44342")).toBe("LAN · Direct");
+    expect(directTransportLabel("https://192.168.1.12:44342")).toBe("LAN · Direct");
+    expect(directTransportLabel("https://100.96.12.4:44342")).toBe("Tailscale · Direct");
+    expect(directTransportLabel("https://studio.tail123.ts.net")).toBe("Tailscale · Direct");
+    expect(directTransportLabel("https://node.example.com")).toBe("Direct");
+  });
+
+  it("keeps direct role copy bounded", () => {
+    expect(directRoleLabel("owner")).toBe("Owner");
+    expect(directRoleLabel("client")).toBe("Client");
+    expect(directRoleLabel(null)).toBe("Role pending");
   });
 });
