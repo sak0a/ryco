@@ -1,12 +1,22 @@
 import {
+  configureHostedRuntime,
+  HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE,
   HostedHubApiError,
+  hostedAccountStore,
+  hostedHubController,
+  hostedHubStore,
+  hostedRecoveryCodeDisplayStore,
   PASSKEY_SESSION_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
   type HostedAccountState,
+  type HostedHubApi,
   type HostedHubPasskey,
+  type HostedHubSessionResponse,
   type HostedHubState,
+  type HostedNodeLifecycle,
+  type HostedRuntimeConfiguration,
 } from "@ryco/client-runtime/authorization";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   createHostedAccountPromptDraft,
@@ -15,7 +25,7 @@ import {
   HOSTED_ACCOUNT_INTENTS,
   isHostedPasskeySessionMessage,
   isHostedStepUpMessage,
-  teardownHostedRecoveryCodes,
+  leaseHostedRecoveryCodeDisplay,
   type HostedAccountActions,
   type HostedAccountManagementView,
   type HostedAccountPromptDraft,
@@ -807,106 +817,261 @@ describe("recovery codes", () => {
 });
 
 /**
- * Recovery codes are live sign-in credentials in one shared runtime slot, and
- * the display is what acknowledges them. So the surface that showed them owes
- * the slot a dismissal on the way out — and a rotation still in flight at that
- * moment must not push a fresh set into a slot no mounted screen is watching.
+ * The account surface's ownership of the two one-shot secrets it renders,
+ * asserted against the **real** `hostedHubController` over a fake transport.
+ *
+ * Every other test on this surface injects a fake `regenerateRecoveryCodes`,
+ * and that is exactly how the defect this replaces shipped: the runtime only
+ * publishes a rotation's codes if a display lease was live when the user asked
+ * for it, this screen never took one, and no fake could say so. A fake cannot
+ * refuse the way the runtime refuses — so this block does not use one for the
+ * controller. The Hub is the only thing faked, and the controller in front of
+ * it is the one the app runs.
+ *
+ * One seam stays uncovered, and it is the `.tsx`'s single line binding
+ * {@link leaseHostedRecoveryCodeDisplay} to the screen's `useEffect`. There is
+ * no React renderer here — `react-native` ships untranspiled Flow the runner
+ * cannot parse — so nothing below can mount the screen and observe that it
+ * mounts the lease. Everything the effect *does* is asserted; that it is called
+ * is not. Closing it needs a renderer able to load the RN packages.
  */
-describe("recovery codes do not outlive the surface that displays them", () => {
-  function stores(initial?: {
-    readonly hub?: Partial<HostedHubState>;
-    readonly account?: Partial<HostedAccountState>;
-  }) {
-    let hub = hubState(initial?.hub);
-    let account = accountState(initial?.account);
-    const hubListeners = new Set<() => void>();
-    const accountListeners = new Set<() => void>();
+describe("the account surface owns the display, not the secrets", () => {
+  const CODES = ["recovery-sensitive-canary-1", "recovery-sensitive-canary-2"] as const;
+  const ENROLLMENT = {
+    secretBase32: "TOTPSECRETSENSITIVECANARY",
+    provisioningUri: "otpauth://totp/Ryco:ada?secret=TOTPSECRETSENSITIVECANARY",
+  } as const;
 
-    const setHub = (patch: Partial<HostedHubState>) => {
-      hub = { ...hub, ...patch };
-      for (const listener of hubListeners) listener();
-    };
-    const setAccount = (patch: Partial<HostedAccountState>) => {
-      account = { ...account, ...patch };
-      for (const listener of accountListeners) listener();
-    };
+  const session: HostedHubSessionResponse = {
+    account: {
+      id: "acct_01J8ZQ5V2N7X0000000000",
+      displayName: "Ada Lovelace",
+      role: "owner",
+      createdAt: 1,
+      disabledAt: null,
+    },
+    session: {
+      id: "sess_01J8ZQ5V2N7X1111111111",
+      accountId: "acct_01J8ZQ5V2N7X0000000000",
+      createdAt: 1,
+      expiresAt: 2,
+      lastSeenAt: 1,
+      revokedAt: null,
+      revocationReasonCode: null,
+    },
+    csrfToken: "csrf-sensitive-canary",
+  };
 
-    const dismissRecoveryCodes = vi.fn(() => setHub({ recoveryCodes: [] }));
+  /** Every platform service the recovery-code path must not reach. */
+  const unusedService = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error("the hosted account surface must not reach a platform service");
+      },
+    },
+  ) as never;
 
+  const nodeLifecycle: HostedNodeLifecycle = {
+    activate: vi.fn(async () => undefined),
+    suspend: vi.fn(async () => undefined),
+    deactivate: vi.fn(async () => undefined),
+    clearNodeScopedState: vi.fn(),
+    writePrimaryEnvironmentDescriptor: vi.fn(),
+    connectPrimaryEnvironment: vi.fn(),
+    disconnectPrimaryEnvironment: vi.fn(async () => undefined),
+    setActiveEnvironmentId: vi.fn(),
+  };
+
+  /** The Hub, and nothing else about the runtime, replaced by fakes. */
+  function hubApi(overrides?: Partial<Record<keyof HostedHubApi, unknown>>): HostedHubApi {
     return {
-      setHub,
-      setAccount,
-      dismissRecoveryCodes,
-      codes: () => hub.recoveryCodes,
-      watching: () => hubListeners.size + accountListeners.size,
-      teardown: () =>
-        teardownHostedRecoveryCodes({
-          readHubState: () => hub,
-          readAccountState: () => account,
-          subscribeHubState: (listener) => {
-            hubListeners.add(listener);
-            return () => hubListeners.delete(listener);
-          },
-          subscribeAccountState: (listener) => {
-            accountListeners.add(listener);
-            return () => accountListeners.delete(listener);
-          },
-          dismissRecoveryCodes,
-        }),
+      restoreSession: vi.fn(async () => session),
+      listNodes: vi.fn(async () => []),
+      listPasskeys: vi.fn(async () => []),
+      regenerateRecoveryCodes: vi.fn(async () => [...CODES]),
+      beginTotpEnrollment: vi.fn(async () => ENROLLMENT),
+      clearSessionMaterial: vi.fn(),
+      ...overrides,
+    } as unknown as HostedHubApi;
+  }
+
+  function runtime(): HostedRuntimeConfiguration {
+    return {
+      endpoint: unusedService,
+      httpClient: unusedService,
+      passkeyCeremony: unusedService,
+      sessionCredentials: unusedService,
+      nodeLifecycle,
+      timers: {
+        now: () => Date.now(),
+        setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+        clearTimeout: (timer) => globalThis.clearTimeout(timer),
+        queueMicrotask: (callback) => globalThis.queueMicrotask(callback),
+      },
+      isForeground: () => true,
+      subscribeForeground: () => () => undefined,
+      hasPendingRelayRequests: () => false,
+      resetRelayAttemptFactory: () => undefined,
+      relayUrl: () => "wss://hub.example.test/v1/relay/client",
+      createRelaySocket: () => ({}),
     };
   }
 
-  it("dismisses the codes the screen was showing when it goes away", () => {
-    const test = stores({ hub: { recoveryCodes: ["aaaa-bbbb", "cccc-dddd"] } });
-    test.teardown();
-    expect(test.dismissRecoveryCodes).toHaveBeenCalledTimes(1);
-    expect(test.codes()).toEqual([]);
-    // Nothing was rotating, so nothing is left watching for a late arrival.
-    expect(test.watching()).toBe(0);
+  /** Sign in for real, the way `bootstrap()` does on a restored session. */
+  async function signIn(api: HostedHubApi = hubApi()): Promise<HostedHubApi> {
+    configureHostedRuntime(runtime(), api);
+    await hostedHubController.bootstrap();
+    expect(hostedHubStore.getState().accountStatus).toBe("authenticated");
+    return api;
+  }
+
+  /** Mount the account screen's one lifetime effect; the return is its cleanup. */
+  const mount = (): (() => void) => leaseHostedRecoveryCodeDisplay(hostedHubController);
+
+  /** The microtask on which a released lease settles as "nothing is showing". */
+  const settleLease = async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+
+  afterEach(() => {
+    hostedHubController.resetForTests();
   });
 
-  /** The finding: navigate back mid-rotation and the codes land unattended. */
-  it("dismisses a rotation that only lands after the screen is gone", () => {
-    const test = stores({ account: { actionStatus: "regenerating-recovery-codes" } });
-    test.teardown();
-    // The controller commits the new set into the shared slot, then settles.
-    test.setHub({ recoveryCodes: ["eeee-ffff", "gggg-hhhh"] });
-    expect(test.codes()).toEqual([]);
-    expect(test.dismissRecoveryCodes).toHaveBeenCalledTimes(1);
-    test.setAccount({ actionStatus: "idle" });
-    expect(test.codes()).toEqual([]);
-    expect(test.watching()).toBe(0);
+  it("declares the display while the screen is mounted", async () => {
+    await signIn();
+    expect(hostedRecoveryCodeDisplayStore.getState().leased).toBe(false);
+    const unmount = mount();
+    expect(hostedRecoveryCodeDisplayStore.getState().leased).toBe(true);
+    unmount();
+    await settleLease();
+    expect(hostedRecoveryCodeDisplayStore.getState().leased).toBe(false);
   });
 
-  it("stops watching once the abandoned rotation settles without codes", () => {
-    const test = stores({ account: { actionStatus: "regenerating-recovery-codes" } });
-    test.teardown();
-    expect(test.watching()).toBeGreaterThan(0);
-    test.setAccount({ actionStatus: "idle", errorMessage: "Hub is temporarily unavailable." });
-    expect(test.watching()).toBe(0);
-    // A later set belongs to whatever published it — a fresh sign-in shows its
-    // own codes on its own surface — and this teardown no longer touches it.
-    test.setHub({ recoveryCodes: ["iiii-jjjj"] });
-    expect(test.codes()).toEqual(["iiii-jjjj"]);
-    expect(test.dismissRecoveryCodes).not.toHaveBeenCalled();
+  /**
+   * The bug, from the button inwards: rotation is destructive server-side and
+   * the runtime withholds the result from a caller with no display, so a screen
+   * that never leased one killed the user's saved codes and then told them the
+   * new ones could not be shown.
+   */
+  it("shows the codes a rotation from the mounted screen produces", async () => {
+    await signIn();
+    const unmount = mount();
+
+    const outcome = await hostedHubController.regenerateRecoveryCodes();
+
+    expect(outcome).toEqual({ status: "committed", displayed: true });
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([...CODES]);
+    // Nothing to apologise for: the codes are on screen.
+    expect(hostedAccountStore.getState().errorMessage).toBeNull();
+    unmount();
   });
 
-  it("leaves a set published by another surface alone", () => {
-    const test = stores();
-    test.teardown();
-    // Registration hands codes to the sign-in screen, which dismisses its own.
-    test.setHub({ recoveryCodes: ["kkkk-llll"] });
-    expect(test.codes()).toEqual(["kkkk-llll"]);
-    expect(test.dismissRecoveryCodes).not.toHaveBeenCalled();
+  it("cannot show the codes at all without the mount that declares the display", async () => {
+    await signIn();
+
+    // No mount: the shape this screen shipped, and what it cost.
+    const outcome = await hostedHubController.regenerateRecoveryCodes();
+
+    expect(outcome).toEqual({ status: "committed", displayed: false });
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
+    expect(hostedAccountStore.getState().errorMessage).toBe(
+      HOSTED_RECOVERY_CODES_UNDISPLAYED_MESSAGE,
+    );
   });
 
-  it("can be stopped by hand", () => {
-    const test = stores({ account: { actionStatus: "regenerating-recovery-codes" } });
-    const stop = test.teardown();
-    stop();
-    expect(test.watching()).toBe(0);
-    test.setHub({ recoveryCodes: ["mmmm-nnnn"] });
-    expect(test.codes()).toEqual(["mmmm-nnnn"]);
+  /**
+   * The F1/F5 defect on this screen. A back-swipe, the settings sheet closing,
+   * a sign-out underneath, a re-render at a new position — none of them is the
+   * user saying they have saved anything, and by now the rotation has already
+   * invalidated the set they had.
+   */
+  it("destroys neither secret when the screen goes away", async () => {
+    await signIn();
+    const unmount = mount();
+    await hostedHubController.regenerateRecoveryCodes();
+    await hostedHubController.beginTotpEnrollment();
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([...CODES]);
+    expect(hostedHubStore.getState().totpEnrollment).toEqual(ENROLLMENT);
+
+    unmount();
+    await settleLease();
+
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([...CODES]);
+    expect(hostedHubStore.getState().totpEnrollment).toEqual(ENROLLMENT);
+    // Left unleased, so the next visit to this screen renders them with their
+    // acknowledgement rather than the account silently holding codes nobody has.
+    expect(hostedRecoveryCodeDisplayStore.getState().leased).toBe(false);
+  });
+
+  it("keeps a rotation that only lands after the screen is gone", async () => {
+    // Assigned by the executor, which `new Promise` runs synchronously — so it
+    // is set before the controller's call to the Hub returns to us.
+    let settle!: (codes: ReadonlyArray<string>) => void;
+    await signIn(
+      hubApi({
+        regenerateRecoveryCodes: vi.fn(
+          () =>
+            new Promise<ReadonlyArray<string>>((resolve) => {
+              settle = resolve;
+            }),
+        ),
+      }),
+    );
+    const unmount = mount();
+
+    const pending = hostedHubController.regenerateRecoveryCodes();
+    // Nothing about leaving reaches the Hub: the rotation commits either way,
+    // so the codes the user had saved are already dead by the time this lands.
+    unmount();
+    settle([...CODES]);
+
+    expect(await pending).toEqual({ status: "committed", displayed: true });
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([...CODES]);
+  });
+
+  it("drops both secrets on the acknowledgements the surface offers", async () => {
+    await signIn();
+    const unmount = mount();
+    await hostedHubController.regenerateRecoveryCodes();
+    await hostedHubController.beginTotpEnrollment();
+
+    // "I saved the codes", and the enrolment prompt's own close.
+    hostedHubController.dismissRecoveryCodes();
+    hostedHubController.dismissTotpEnrollment();
+
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
+    expect(hostedHubStore.getState().totpEnrollment).toBeNull();
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("sensitive-canary");
+    unmount();
+  });
+
+  /**
+   * React Navigation re-renders this screen at a new position — a header
+   * change, a tier flip — by unmounting the old subtree before mounting the
+   * replacement. Publishing "nothing is showing" in that gap would be wrong
+   * about the only thing this store is read for.
+   */
+  it("never reports the display gone across a remount", async () => {
+    await signIn();
+    const published: Array<boolean> = [];
+    const unsubscribe = hostedRecoveryCodeDisplayStore.subscribe(() => {
+      published.push(hostedRecoveryCodeDisplayStore.getState().leased);
+    });
+    try {
+      const unmount = mount();
+      expect(published).toEqual([true]);
+
+      unmount();
+      const remounted = mount();
+      await settleLease();
+
+      expect(published, "a remount published an unleased display").toEqual([true]);
+      remounted();
+    } finally {
+      unsubscribe();
+    }
   });
 });
 

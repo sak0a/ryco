@@ -1,6 +1,7 @@
 import type { EnvironmentId } from "@ryco/contracts";
 import {
   HOSTED_CONNECTION_STATUS_TEXTS,
+  type HostedAccountActionStatus,
   type HostedHubState,
 } from "@ryco/client-runtime/authorization";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -127,12 +128,16 @@ function signInView(
 
 function accountView(
   overrides: Partial<HostedHubState> = {},
-  options: { readonly hostedModeAvailable?: boolean } = {},
+  options: {
+    readonly hostedModeAvailable?: boolean;
+    readonly actionStatus?: HostedAccountActionStatus;
+  } = {},
 ): HostedAccountView {
   return deriveHostedAccountView({
     state: hostedState(overrides),
     hostedModeAvailable: options.hostedModeAvailable ?? true,
     onSignIn: vi.fn(),
+    actionStatus: options.actionStatus ?? "idle",
   });
 }
 
@@ -285,6 +290,7 @@ describe("hosted account surface", () => {
       state: hostedState(),
       hostedModeAvailable: true,
       onSignIn,
+      actionStatus: "idle",
     });
     expect(view.signedIn).toBe(false);
     expect(view.rows).toEqual([]);
@@ -348,6 +354,32 @@ describe("hosted account surface", () => {
     expect(shown.recoveryCodes).toEqual(["aaaa-bbbb", "cccc-dddd"]);
     expect(controller.dismissRecoveryCodes).not.toHaveBeenCalled();
     shown.dismissRecoveryCodes?.run();
+    expect(controller.dismissRecoveryCodes).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to acknowledge the displayed codes while their replacement is in flight", () => {
+    // The codes on screen are the ones the rotation is about to invalidate, so
+    // this tap cannot mean "I saved the new ones" — it would clear the display
+    // the replacement is due to arrive in, having already agreed to kill the
+    // set the user just wrote down.
+    const rotating = accountView(
+      { ...AUTHENTICATED, ...ONLINE_NODE, recoveryCodes: ["aaaa-bbbb", "cccc-dddd"] },
+      { actionStatus: "regenerating-recovery-codes" },
+    );
+
+    // Visible, so the state is never a mystery — and inert, including for a
+    // hardware keyboard or an accessibility action that never sees `disabled`.
+    expect(rotating.dismissRecoveryCodes?.disabled).toBe(true);
+    rotating.dismissRecoveryCodes?.run();
+    expect(controller.dismissRecoveryCodes).not.toHaveBeenCalled();
+
+    // Any other action in flight is unrelated to what is on screen.
+    const adding = accountView(
+      { ...AUTHENTICATED, ...ONLINE_NODE, recoveryCodes: ["aaaa-bbbb", "cccc-dddd"] },
+      { actionStatus: "adding-passkey" },
+    );
+    expect(adding.dismissRecoveryCodes?.disabled).toBe(false);
+    adding.dismissRecoveryCodes?.run();
     expect(controller.dismissRecoveryCodes).toHaveBeenCalledTimes(1);
   });
 

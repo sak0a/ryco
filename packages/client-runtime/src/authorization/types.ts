@@ -215,9 +215,10 @@ export type HostedAddPasskeyOutcome = HostedAddPasskeyCommitted | HostedAccountR
 export interface HostedRecoveryCodesCommitted extends HostedAccountCommitted {
   /**
    * `true` when the new codes reached the display slot. `false` means the
-   * rotation happened — the previous codes are dead — but no surface was live
-   * to receive them, so the runtime dropped them rather than strand live
-   * recovery credentials in the store. See `claimRecoveryCodes`.
+   * rotation happened — the previous codes are dead — but no surface had a
+   * display lease when it was asked for, so the runtime dropped them rather
+   * than strand live recovery credentials in a slot nothing renders. See
+   * `leaseRecoveryCodeDisplay`.
    */
   readonly displayed: boolean;
 }

@@ -13,8 +13,10 @@
 //     invites a second ceremony and a duplicate credential;
 //   * a request that never answers can always be abandoned;
 //   * secret material never reaches a persisted store, the URL, or a DOM
-//     attribute, and a dismissed or torn-down secret is cleared from the
-//     runtime rather than merely hidden.
+//     attribute, and an *acknowledged* secret is cleared from the runtime rather
+//     than merely hidden — while a secret whose display merely went away (an
+//     unmount, a remount at a new position) is kept, because neither of those
+//     was the user saying they had saved it.
 import "../../index.css";
 
 import { page, userEvent } from "vite-plus/test/browser";
@@ -34,8 +36,12 @@ import {
   type HostedRecoveryCodesCommitted,
 } from "@ryco/client-runtime/authorization";
 
-import { hostedAccountStore, hostedHubController, hostedHubStore } from "../../hostedHub/state";
-import { useRecoveryCodeDisplayStore } from "../../hostedHub/recoveryCodeDisplay";
+import {
+  hostedAccountStore,
+  hostedHubController,
+  hostedHubStore,
+  hostedRecoveryCodeDisplayStore,
+} from "../../hostedHub/state";
 import { AccountSettingsPanel } from "./AccountSettings";
 import {
   STEP_UP_INFERRED_ATTEMPT_LIMIT,
@@ -295,6 +301,9 @@ describe("AccountSettingsPanel", () => {
     window.localStorage.clear();
     window.sessionStorage.clear();
     clipboard = [];
+    // Drops any display lease a previous test left behind, which is the only
+    // thing the runtime keeps outside its two stores.
+    hostedHubController.resetForTests();
     hostedHubStore.setState(
       {
         ...hostedHubStore.getInitialState(),
@@ -308,7 +317,6 @@ describe("AccountSettingsPanel", () => {
       { ...hostedAccountStore.getInitialState(), passkeys: [passkey()], passkeysStatus: "ready" },
       true,
     );
-    useRecoveryCodeDisplayStore.setState({ claims: 0 });
     // The mount read is a read; it must never be the thing that reaches the Hub
     // in a test about mutations.
     vi.spyOn(hostedHubController, "refreshPasskeys").mockResolvedValue();
@@ -863,14 +871,26 @@ describe("AccountSettingsPanel", () => {
 
     await expect.element(page.getByText(RECOVERY_CODES[0])).toBeVisible();
 
-    const persisted = await persistedStorageSnapshot();
+    const displayed = await persistedStorageSnapshot();
     for (const code of RECOVERY_CODES) {
-      expect(persisted, `recovery code ${code} reached a persisted store`).not.toContain(code);
+      expect(displayed, `recovery code ${code} reached a persisted store`).not.toContain(code);
       expect(window.location.href).not.toContain(code);
     }
 
+    // Copy is the one affordance that hands the codes to another API, and the
+    // snapshot has to be taken *after* it: a copy helper that cached, logged, or
+    // queued what it copied would leave the pre-click snapshot clean and the
+    // proof vacuous.
     await page.getByRole("button", { name: "Copy codes" }).click();
+    await expect.element(page.getByRole("button", { name: "Copied" })).toBeVisible();
+    await settle();
+
     expect(clipboard).toEqual([RECOVERY_CODES.join("\n")]);
+    const copied = await persistedStorageSnapshot();
+    for (const code of RECOVERY_CODES) {
+      expect(copied, `copying recovery code ${code} persisted it`).not.toContain(code);
+      expect(window.location.href).not.toContain(code);
+    }
   });
 
   it("gives freshly minted recovery codes exactly one exit", async () => {
@@ -911,12 +931,14 @@ describe("AccountSettingsPanel", () => {
     expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
   });
 
-  it("does not let a rotation still in flight put codes back after the surface is gone", async () => {
+  it("keeps a rotation that lands after the surface is gone, for the root to show", async () => {
     const pending = deferred();
     vi.spyOn(hostedHubController, "regenerateRecoveryCodes").mockImplementation(async () => {
       await pending.promise;
-      // A runtime that had not been told the claim was released: the codes reach
-      // the slot after the surface is gone. The web fence is what catches that.
+      // The runtime publishes a rotation it accepted under a live lease even if
+      // the display went away in between: the Hub has already invalidated every
+      // code the user had saved, so this set is the only one that still opens
+      // the account.
       hostedHubStore.setState({ recoveryCodes: [...RECOVERY_CODES] });
       return recoveryCodesCommitted(true);
     });
@@ -926,20 +948,23 @@ describe("AccountSettingsPanel", () => {
     await page.getByRole("button", { name: "Replace codes" }).click();
 
     await teardown();
-    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
 
     pending.land();
     await settle();
 
-    // The response landed into a slot nobody is rendering. Left there, the
-    // hosted root's full-screen takeover would show a secret this surface has
-    // already reported as dropped — and the claim that would have kept the root
-    // away has been released.
-    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
-    expect(useRecoveryCodeDisplayStore.getState().claims).toBe(0);
+    // Nothing here may destroy them. Unleased, they are exactly what the hosted
+    // root's full-screen takeover exists to put in front of the user.
+    expect(hostedHubStore.getState().recoveryCodes).toEqual([...RECOVERY_CODES]);
+    expect(hostedRecoveryCodeDisplayStore.getState().leased).toBe(false);
   });
 
-  it("drops both held secrets when the surface goes away", async () => {
+  it("keeps both held secrets when the surface is torn down without an acknowledgement", async () => {
+    // This panel is unmounted by things that were never the user's decision:
+    // `clearWebHostedNodeScopedState` closes the settings dialog on every
+    // hosted node deactivate, suspend, and switch. By then the rotation has
+    // already invalidated the codes the user had saved, and this Hub refuses a
+    // second TOTP enrolment — so clearing either slot here leaves the account
+    // holding credentials its owner never saw.
     await mount();
     hostedHubStore.setState({
       recoveryCodes: [...RECOVERY_CODES],
@@ -948,15 +973,76 @@ describe("AccountSettingsPanel", () => {
     await expect.element(page.getByText(RECOVERY_CODES[0])).toBeVisible();
 
     await teardown();
+    await settle();
 
-    expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
-    expect(hostedHubStore.getState().totpEnrollment).toBeNull();
-    // `innerHTML`, not `textContent`: the enrolment secret is rendered as text
-    // *and* encoded into a provisioning URI, and a URI stranded in an attribute
-    // is invisible to a textContent assertion.
+    expect(hostedHubStore.getState().recoveryCodes, "an unmount destroyed the codes").toEqual([
+      ...RECOVERY_CODES,
+    ]);
+    expect(
+      hostedHubStore.getState().totpEnrollment,
+      "an unmount destroyed the enrolment secret",
+    ).toEqual({ secretBase32: TOTP_SECRET, provisioningUri: TOTP_URI });
+    // Held is not the same as rendered: nothing that is gone from the screen may
+    // still be in the document. `innerHTML`, not `textContent` — the enrolment
+    // secret is rendered as text *and* encoded into a provisioning URI, and a
+    // URI stranded in an attribute is invisible to a textContent assertion.
     const dom = document.body.innerHTML;
     expect(dom).not.toContain(TOTP_SECRET);
     expect(dom).not.toContain("otpauth:");
+    for (const code of RECOVERY_CODES) expect(dom).not.toContain(code);
+    // …and neither of them reached anything that survives a reload.
+    const persisted = await persistedStorageSnapshot();
+    expect(persisted).not.toContain(TOTP_SECRET);
+    for (const code of RECOVERY_CODES) expect(persisted).not.toContain(code);
+  });
+
+  it("keeps both held secrets across a remount at a new position", async () => {
+    // `LazySettingsDialogMount` forks on the presentation tier, so crossing the
+    // phone breakpoint replaces this panel with a fresh instance in a different
+    // position. React runs the deleted tree's cleanups *before* the new tree's
+    // mount effects, so at the moment of teardown a remount is indistinguishable
+    // from a disappearance — and the old instance's cleanup used to be what
+    // destroyed the secrets the new instance was about to render.
+    const leases: Array<boolean> = [];
+    const unsubscribe = hostedRecoveryCodeDisplayStore.subscribe(() => {
+      leases.push(hostedRecoveryCodeDisplayStore.getState().leased);
+    });
+    try {
+      mounted = await render(
+        <div data-tier="desktop">
+          <AccountSettingsPanel />
+        </div>,
+      );
+      hostedHubStore.setState({
+        recoveryCodes: [...RECOVERY_CODES],
+        totpEnrollment: { secretBase32: TOTP_SECRET, provisioningUri: TOTP_URI },
+      });
+      await expect.element(page.getByText(RECOVERY_CODES[0])).toBeVisible();
+
+      // A different element type at the same position: React unmounts the old
+      // subtree and mounts a new one, exactly as the tier fork does.
+      await mounted.rerender(
+        <section data-tier="phone">
+          <AccountSettingsPanel />
+        </section>,
+      );
+      await settle();
+
+      expect(hostedHubStore.getState().recoveryCodes, "a remount destroyed the codes").toEqual([
+        ...RECOVERY_CODES,
+      ]);
+      expect(
+        hostedHubStore.getState().totpEnrollment,
+        "a remount destroyed the enrolment secret",
+      ).toEqual({ secretBase32: TOTP_SECRET, provisioningUri: TOTP_URI });
+      await expect.element(page.getByText(RECOVERY_CODES[0])).toBeVisible();
+
+      // And the display was never reported as gone, so the hosted root's
+      // takeover had no frame in which to seize the viewport mid-flow.
+      expect(leases, "a remount published an unleased display").toEqual([true]);
+    } finally {
+      unsubscribe();
+    }
   });
 
   it("draws the enrolment QR rather than stranding the provisioning URI in an attribute", async () => {
@@ -1001,22 +1087,23 @@ describe("AccountSettingsPanel", () => {
     expect(dom).not.toContain("otpauth:");
   });
 
-  it("holds the runtime's recovery-code claim for exactly as long as it is mounted", async () => {
-    // Not defensive: the runtime only writes rotated codes into its slot while a
-    // claim is live. Without this claim every rotation started here would rotate
-    // the user's codes server-side and then come back `displayed: false` with
-    // nothing to show, and releasing it is what fences a rotation still in
-    // flight when the surface goes away.
+  it("holds the runtime's recovery-code display lease for exactly as long as it is mounted", async () => {
+    // Not defensive: the runtime publishes rotated codes only if a lease was
+    // live when the rotation was asked for. Without this lease every rotation
+    // started here would rotate the user's codes server-side and then come back
+    // `displayed: false` with nothing to show.
     let released = 0;
-    const claim = vi.spyOn(hostedHubController, "claimRecoveryCodes").mockImplementation(() => {
-      return () => {
-        released += 1;
-      };
-    });
+    const lease = vi
+      .spyOn(hostedHubController, "leaseRecoveryCodeDisplay")
+      .mockImplementation(() => {
+        return () => {
+          released += 1;
+        };
+      });
 
     await mount();
-    expect(claim).toHaveBeenCalledOnce();
-    expect(released, "the claim was released while the surface was still live").toBe(0);
+    expect(lease).toHaveBeenCalledOnce();
+    expect(released, "the lease was released while the surface was still live").toBe(0);
 
     await teardown();
     expect(released).toBe(1);
@@ -1042,9 +1129,12 @@ describe("AccountSettingsPanel", () => {
 
   it("keeps the hosted root's full-screen code takeover out of the way while it is mounted", async () => {
     await mount();
-    expect(useRecoveryCodeDisplayStore.getState().claims).toBe(1);
+    expect(hostedRecoveryCodeDisplayStore.getState().leased).toBe(true);
     await teardown();
-    expect(useRecoveryCodeDisplayStore.getState().claims).toBe(0);
+    await settle();
+    // Released, not acknowledged: the takeover is now free to show whatever is
+    // still in the slot, which is the point — an orphaned set gets seen.
+    expect(hostedRecoveryCodeDisplayStore.getState().leased).toBe(false);
   });
 
   /* ------------------------------------------------------------------ copy */

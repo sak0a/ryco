@@ -312,6 +312,31 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     await expect.element(page.getByText(HOSTED_RELAY_TRUST_DISCLOSURE)).toBeVisible();
   });
 
+  it("takes the viewport over for codes nothing is displaying, and yields to a display that is", async () => {
+    // The safety net for a set of codes whose display went away without an
+    // acknowledgement — a node switch closing the settings dialog, a lost
+    // grant. The codes stay in the runtime's slot, so this is what puts them in
+    // front of the user rather than leaving the account holding codes its owner
+    // never saw. While a surface *is* showing them, taking the viewport would
+    // tear that surface down mid-flow instead.
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account,
+      session,
+      recoveryCodes: ["recovery-sensitive-browser-canary"],
+    });
+    const release = hostedHubController.leaseRecoveryCodeDisplay();
+    mounted = await render(<HostedHubRoot />);
+    await expect
+      .element(page.getByRole("heading", { name: "Save your recovery codes" }))
+      .not.toBeInTheDocument();
+
+    release();
+    await expect
+      .element(page.getByRole("heading", { name: "Save your recovery codes" }))
+      .toBeVisible();
+  });
+
   it("keeps one-time recovery material out of browser storage", async () => {
     useHostedHubStore.setState({
       accountStatus: "authenticated",
