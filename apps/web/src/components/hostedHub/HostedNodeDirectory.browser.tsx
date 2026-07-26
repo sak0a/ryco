@@ -84,6 +84,22 @@ function seedDirectory(nodes: ReadonlyArray<HostedHubNode>, overrides: object = 
   });
 }
 
+/**
+ * Every row's details control, by accessible name and in DOM order. The name is
+ * where node identity lives, so this is also what proves the ordering.
+ */
+function detailsNames(): ReadonlyArray<string> {
+  return [
+    ...document.querySelectorAll<HTMLElement>(
+      'ul[role="list"] button[aria-label^="Node details: "]',
+    ),
+  ].map((button) => button.getAttribute("aria-label")!);
+}
+
+function detailsNodeLabels(): ReadonlyArray<string> {
+  return detailsNames().map((name) => name.replace("Node details: ", ""));
+}
+
 syncDocumentPresentationTier();
 
 let mounted: Awaited<ReturnType<typeof render>> | null = null;
@@ -123,8 +139,8 @@ describe("hosted node directory", () => {
     });
     mounted = await render(<HostedHubRoot />);
 
-    await expect.element(page.getByRole("button", { name: /Studio/ })).toBeDisabled();
-    const details = page.getByRole("button", { name: "Node details" });
+    await expect.element(page.getByRole("button", { name: /^Studio/ })).toBeDisabled();
+    const details = page.getByRole("button", { name: "Node details: Studio" });
     await expect.element(details).toBeEnabled();
 
     await details.click();
@@ -137,21 +153,29 @@ describe("hosted node directory", () => {
     await expect.element(page.getByRole("button", { name: "Connect" })).toBeDisabled();
   });
 
-  it("names the details control after the action and the node after the description", async () => {
-    // A per-node name like "Details for Studio" would make every label query in
-    // the directory ambiguous — the fixture labels contain the presence words —
-    // and it reads worse: the name is the action, the object is the description.
-    seedDirectory([node()]);
+  it("gives every row's details control an accessible name of its own", async () => {
+    // Identity used to arrive as an `aria-describedby` description, which is
+    // supplementary and is not what a name-based interface addresses: voice
+    // control targets accessible NAMES, so N rows all named "Node details" left
+    // "click Node details" ambiguous on every directory with more than one node.
+    seedDirectory([
+      node({ id: "node_aaaaaaaaaaaaaaaaaaaaaa", label: "Studio" }),
+      node({ id: "node_bbbbbbbbbbbbbbbbbbbbbb", label: "Travel" }),
+    ]);
     mounted = await render(<HostedHubRoot />);
 
-    const details = document.querySelector<HTMLElement>('button[aria-label="Node details"]');
-    expect(details).not.toBeNull();
-    const describedBy = details!.getAttribute("aria-describedby");
-    expect(describedBy, "node identity must reach the reader as a description").not.toBeNull();
-    expect(document.getElementById(describedBy!)?.textContent).toBe("Studio");
+    const names = detailsNames();
+    expect(names).toEqual(["Node details: Studio", "Node details: Travel"]);
+    expect(new Set(names).size, "two rows share one accessible name").toBe(names.length);
+    // The action still leads, so a reader hears what the control does before
+    // which machine it belongs to.
+    for (const name of names) expect(name).toMatch(/^Node details: /);
 
-    // The connect control remains the unique match for the node's own label.
+    // And the identity goes AFTER the action for a reason: the connect control
+    // stays the only accessible name that starts with the node's own label, so
+    // a query for the row is not ambiguous with a query for its details.
     await expect.element(page.getByRole("button", { name: /^Studio/ })).toBeVisible();
+    await expect.element(page.getByRole("button", { name: /^Travel/ })).toBeVisible();
   });
 
   it("renders each nullable timestamp with its own meaning", async () => {
@@ -167,7 +191,7 @@ describe("hosted node directory", () => {
       }),
     ]);
     mounted = await render(<HostedHubRoot />);
-    await page.getByRole("button", { name: "Node details" }).click();
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
 
     await expect.element(page.getByText("Not reported")).toBeVisible();
     await expect.element(page.getByText("Never", { exact: true })).toBeVisible();
@@ -181,7 +205,7 @@ describe("hosted node directory", () => {
       }),
     ]);
     mounted = await render(<HostedHubRoot />);
-    await page.getByRole("button", { name: "Node details" }).click();
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
 
     await expect.element(page.getByText("Not reported")).toBeVisible();
     await expect.element(page.getByText("Never", { exact: true })).not.toBeInTheDocument();
@@ -194,7 +218,7 @@ describe("hosted node directory", () => {
     // The client version renders nowhere in the directory today, and it is the
     // only diagnostic for an `incompatible` selection.
     await expect.element(page.getByText("0.9.7")).not.toBeInTheDocument();
-    await page.getByRole("button", { name: "Node details" }).click();
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
     await expect.element(page.getByText("0.9.7")).toBeVisible();
     await expect.element(page.getByText("node_aaaaaaaaaaaaaaaaaaaaaa")).toBeVisible();
   });
@@ -207,7 +231,7 @@ describe("hosted node directory", () => {
     // client version and heartbeat age keep reporting open-time values.
     seedDirectory([node()]);
     mounted = await render(<HostedHubRoot />);
-    await page.getByRole("button", { name: "Node details" }).click();
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
 
     const sheetText = () =>
       document.querySelector<HTMLElement>('[data-slot="sheet-popup"]')?.textContent ?? "";
@@ -244,7 +268,7 @@ describe("hosted node directory", () => {
   it("reports a grant role only when it differs from the role in effect", async () => {
     seedDirectory([node({ grant: { id: "grant_a", role: "owner" }, effectiveRole: "operator" })]);
     mounted = await render(<HostedHubRoot />);
-    await page.getByRole("button", { name: "Node details" }).click();
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
     await expect.element(page.getByText("Granted role")).toBeVisible();
 
     await mounted.unmount();
@@ -254,7 +278,7 @@ describe("hosted node directory", () => {
       node({ grant: { id: "grant_a", role: "operator" }, effectiveRole: "operator" }),
     ]);
     mounted = await render(<HostedHubRoot />);
-    await page.getByRole("button", { name: "Node details" }).click();
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
     await expect.element(page.getByText("Your role")).toBeVisible();
     await expect.element(page.getByText("Granted role")).not.toBeInTheDocument();
   });
@@ -303,10 +327,7 @@ describe("hosted node directory", () => {
     ]);
     mounted = await render(<HostedHubRoot />);
 
-    const labels = () =>
-      [...document.querySelectorAll<HTMLElement>("li button[aria-describedby]")].map(
-        (button) => document.getElementById(button.getAttribute("aria-describedby")!)?.textContent,
-      );
+    const labels = detailsNodeLabels;
     await vi.waitFor(() => {
       expect(labels()).toEqual(["Bravo", "Charlie", "Alpha"]);
     });
@@ -323,7 +344,7 @@ describe("hosted node directory", () => {
       ],
     });
     await vi.waitFor(() => {
-      expect(document.querySelectorAll("li button[aria-describedby]")).toHaveLength(3);
+      expect(detailsNames()).toHaveLength(3);
     });
     expect(labels(), "presence must not be a sort key").toEqual(["Bravo", "Charlie", "Alpha"]);
   });

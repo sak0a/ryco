@@ -190,7 +190,7 @@ describe("hosted node route surfaces", () => {
     });
     mounted = await render(<HostedHubRoot />);
 
-    await page.getByRole("button", { name: /Studio online/ }).click();
+    await page.getByRole("button", { name: /^Studio online/ }).click();
     expect(selectNode).toHaveBeenCalledWith(target.id);
     await expect
       .element(page.getByRole("heading", { name: `Connecting to ${target.label}` }))
@@ -222,7 +222,7 @@ describe("hosted node route surfaces", () => {
       nodes: [target],
     });
     mounted = await render(<HostedHubRoot />);
-    await page.getByRole("button", { name: /Studio online/ }).click();
+    await page.getByRole("button", { name: /^Studio online/ }).click();
     await expect
       .element(page.getByRole("heading", { name: `Connecting to ${target.label}` }))
       .toBeVisible();
@@ -254,7 +254,7 @@ describe("hosted node route surfaces", () => {
       nodes: [target],
     });
     mounted = await render(<HostedHubRoot />);
-    await page.getByRole("button", { name: /Studio online/ }).click();
+    await page.getByRole("button", { name: /^Studio online/ }).click();
     await expect
       .element(page.getByRole("heading", { name: `Connecting to ${target.label}` }))
       .toBeVisible();

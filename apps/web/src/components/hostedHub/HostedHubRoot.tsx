@@ -693,7 +693,6 @@ function NodeRow({
   readonly onConnect: () => void;
   readonly onOpenDetail: () => void;
 }) {
-  const labelId = useId();
   const lastSeen = lastSeenLabel(node, nowMs);
 
   return (
@@ -720,9 +719,7 @@ function NodeRow({
           <ServerIcon aria-hidden className="size-4" />
         </span>
         <span className="min-w-0 flex-1">
-          <span id={labelId} className="block truncate font-medium">
-            {node.label}
-          </span>
+          <span className="block truncate font-medium">{node.label}</span>
           <span className="block truncate text-xs text-muted-foreground">{nodeMetaLine(node)}</span>
         </span>
         <span className="flex shrink-0 flex-col items-end gap-0.5">
@@ -740,13 +737,19 @@ function NodeRow({
       {/* Never disabled — not for a revoked node, not while the directory is
           stale. Being unable to connect is exactly when the metadata is needed;
           disabling this would hide the explanation behind the symptom.
-          The accessible NAME is generic and node identity arrives as a
-          description, so a reader hears "Node details, button, Studio online"
-          and the directory's label queries stay unambiguous. */}
+
+          Node identity is in the NAME, not in an `aria-describedby`
+          description. A description is supplementary and is not what a
+          name-based interface addresses: with every row named "Node details",
+          "click Node details" was ambiguous on every directory with more than
+          one node, and voice control had no way to say which. The action leads
+          so a reader still hears what the control does first, and putting the
+          label after a prefix — rather than "Studio details" — keeps the row's
+          connect control the only accessible name that *starts* with the node's
+          own label. */}
       <button
         type="button"
-        aria-label="Node details"
-        aria-describedby={labelId}
+        aria-label={`Node details: ${node.label}`}
         onClick={onOpenDetail}
         className="flex w-[44px] shrink-0 items-center justify-center text-muted-foreground outline-none hover:bg-accent/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >

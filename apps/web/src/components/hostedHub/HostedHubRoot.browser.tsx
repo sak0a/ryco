@@ -107,7 +107,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
       });
       mounted = await render(<HostedHubRoot />);
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
-      const selectButton = page.getByRole("button", { name: /Studio online/ });
+      const selectButton = page.getByRole("button", { name: /^Studio online/ });
       await expect.element(selectButton).toBeVisible();
       const box = selectButton.element().getBoundingClientRect();
       expect(box.left).toBeGreaterThanOrEqual(0);
@@ -211,11 +211,11 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
         ],
       });
       mounted = await render(<HostedHubRoot />);
-      const onlineRow = page.getByRole("button", { name: /Studio online/ });
+      const onlineRow = page.getByRole("button", { name: /^Studio online/ });
       await expect.element(onlineRow).toBeVisible();
       expect(unnamedVisibleControls()).toEqual([]);
       expect(onlineRow.element().textContent).toContain("Online");
-      const offlineRow = page.getByRole("button", { name: /Travel offline/ });
+      const offlineRow = page.getByRole("button", { name: /^Travel offline/ });
       expect(offlineRow.element().textContent).toContain("Offline");
 
       useHostedHubStore.setState({ directoryStatus: "stale" });
@@ -310,8 +310,8 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     });
     mounted = await render(<HostedHubRoot />);
     await expect.element(page.getByRole("status")).toHaveTextContent(/Directory data is stale/);
-    await expect.element(page.getByRole("button", { name: /Studio online/ })).toBeDisabled();
-    await expect.element(page.getByRole("button", { name: /Travel offline/ })).toBeDisabled();
+    await expect.element(page.getByRole("button", { name: /^Studio online/ })).toBeDisabled();
+    await expect.element(page.getByRole("button", { name: /^Travel offline/ })).toBeDisabled();
     await expect.element(page.getByText("Online", { exact: true })).toBeVisible();
     await expect.element(page.getByText("Offline", { exact: true })).toBeVisible();
     await expect.element(page.getByText(HOSTED_RELAY_TRUST_DISCLOSURE)).toBeVisible();
@@ -468,7 +468,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     });
     const selectNode = vi.spyOn(hostedHubController, "selectNode").mockResolvedValue();
     mounted = await render(<HostedHubRoot />);
-    await page.getByRole("button", { name: /Studio online/ }).click();
+    await page.getByRole("button", { name: /^Studio online/ }).click();
     expect(selectNode).toHaveBeenCalledWith(selectable.id);
   });
 
@@ -486,7 +486,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
 
     mounted = await render(<HostedHubRoot />);
 
-    const nodeButton = page.getByRole("button", { name: /Studio online/ });
+    const nodeButton = page.getByRole("button", { name: /^Studio online/ });
     await expect.element(nodeButton).toBeDisabled();
     expect(selectNode).not.toHaveBeenCalled();
   });
@@ -612,7 +612,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     });
     mounted = await render(<HostedHubRoot />);
     await expect.element(page.getByRole("alert")).toHaveTextContent(/Authorization.*removed/);
-    await expect.element(page.getByRole("button", { name: /Studio online/ })).toBeDisabled();
+    await expect.element(page.getByRole("button", { name: /^Studio online/ })).toBeDisabled();
     await expect.element(page.getByText("Revoked", { exact: true })).toBeVisible();
   });
 

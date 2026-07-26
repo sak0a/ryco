@@ -643,8 +643,10 @@ describe("hosted entry surfaces", () => {
     ).toBeLessThanOrEqual(row!.clientWidth);
 
     // The one thing a directory of machines cannot afford to lose.
-    const label = row!.querySelector<HTMLElement>("span[id]");
-    expect(label?.textContent).toBe("Studio node 1");
+    const label = [...row!.querySelectorAll<HTMLElement>("span")].find(
+      (span) => span.textContent === "Studio node 1",
+    );
+    expect(label, "the node's own name is not rendered at all").not.toBeUndefined();
     expect(
       label!.getBoundingClientRect().width,
       "the node's own name was squeezed to nothing",
