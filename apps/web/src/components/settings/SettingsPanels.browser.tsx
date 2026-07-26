@@ -1471,3 +1471,258 @@ describe("SourceControlSettingsPanel discovery states", () => {
     expect(calls).toBe(1);
   });
 });
+
+describe("ConnectionsSettings Hub section", () => {
+  let mounted:
+    | (Awaited<ReturnType<typeof render>> & {
+        cleanup?: () => Promise<void>;
+        unmount?: () => Promise<void>;
+      })
+    | undefined;
+
+  beforeEach(() => {
+    resetAppAtomRegistryForTests();
+    resetServerStateForTests();
+    __resetLocalApiForTests();
+    authAccessHarness.reset();
+    localStorage.clear();
+    useUiStateStore.setState({ defaultAdvertisedEndpointKey: null });
+  });
+
+  afterEach(async () => {
+    await mounted?.cleanup?.();
+    await mounted?.unmount?.();
+    mounted = undefined;
+    vi.unstubAllGlobals();
+    delete window.desktopBridge;
+    delete window.nativeApi;
+  });
+
+  /**
+   * Serve the hub control plane from a fetch stub.
+   *
+   * The panel reads these three routes on every poll, so a test that omits one
+   * would exercise the error path rather than the state it means to.
+   */
+  const stubHubFetch = (hub: {
+    readonly status: unknown;
+    readonly identity: unknown;
+    readonly enrollment?: unknown;
+  }) => {
+    const json = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/auth/session")) {
+        return json({
+          authenticated: true,
+          auth: createBaseServerConfig().auth,
+          role: "owner",
+          sessionMethod: "browser-session-cookie",
+          expiresAt: "2036-05-07T00:00:00.000Z",
+        });
+      }
+      if (url.endsWith("/api/hub/status")) return json(hub.status);
+      if (url.endsWith("/api/hub/identity")) return json(hub.identity);
+      if (url.endsWith("/api/hub/enrollment")) {
+        return hub.enrollment === undefined
+          ? json({ message: "No Hub enrollment is pending." }, 404)
+          : json(hub.enrollment);
+      }
+      throw new Error(`Unhandled fetch ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  };
+
+  const renderHub = async (hubConfig?: { enabled: boolean; origin: string | null }) => {
+    window.desktopBridge = createDesktopBridgeStub({
+      serverExposureState: {
+        mode: "local-only",
+        endpointUrl: "http://127.0.0.1:3773",
+        advertisedHost: null,
+        tailscaleServeEnabled: false,
+        tailscaleServePort: 443,
+      },
+    });
+    if (hubConfig) {
+      window.desktopBridge.getHubLaunchConfig = async () => hubConfig;
+    }
+    setServerConfigSnapshot(createBaseServerConfig());
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <ConnectionsSettings />
+      </AppAtomRegistryProvider>,
+    );
+  };
+
+  const baseStatus = {
+    transitionedAt: "2036-04-07T00:00:00.000Z",
+    activeChannels: 0,
+    queuedBytes: 0,
+  };
+
+  it("offers enabling when nothing is enrolled", async () => {
+    stubHubFetch({
+      status: { ...baseStatus, state: "disabled" },
+      identity: { enrolled: "none" },
+    });
+    await renderHub();
+
+    await expect
+      .element(page.getByRole("heading", { name: "Hub", exact: true }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("heading", { name: "Connection", exact: true }))
+      .toBeInTheDocument();
+    await expect.element(page.getByText("Not connected")).toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Enable" })).toBeInTheDocument();
+    // Nothing enrolled, so the address is editable.
+    await expect.element(page.getByPlaceholder("https://…")).toBeEnabled();
+  });
+
+  it("locks the address once an identity exists, and offers leaving", async () => {
+    stubHubFetch({
+      status: { ...baseStatus, state: "disabled" },
+      identity: { enrolled: "active" },
+    });
+    await renderHub({ enabled: false, origin: "https://hub.example.com" });
+
+    // Status is identical to the previous test; only the identity summary differs.
+    await expect.element(page.getByText("Turned off")).toBeInTheDocument();
+    await expect.element(page.getByPlaceholder("https://…")).toBeDisabled();
+    await expect
+      .element(
+        page.getByText("Locked while this machine is enrolled. Leave this Hub to change it."),
+      )
+      .toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Leave this Hub" })).toBeInTheDocument();
+  });
+
+  it("renders the enrollment comparison with every field the approval screen shows", async () => {
+    stubHubFetch({
+      status: { ...baseStatus, state: "awaiting_approval" },
+      identity: { enrolled: "pending" },
+      enrollment: {
+        deviceCode: "K7P2-N4QX",
+        fingerprint: `SHA256:${"A".repeat(43)}`,
+        label: "Laurin's MacBook Pro",
+        platformOs: "darwin",
+        platformArch: "arm64",
+        clientVersion: "0.0.17",
+        algorithm: "ed25519",
+        expiresAt: "2036-04-07T00:10:00.000Z",
+        pollIntervalMs: 5_000,
+      },
+    });
+    await renderHub({ enabled: true, origin: "https://hub.example.com" });
+
+    await expect.element(page.getByText("Waiting for approval on the Hub")).toBeInTheDocument();
+    for (const field of [
+      "Label",
+      "Platform",
+      "Version",
+      "Algorithm",
+      "Fingerprint",
+      "Expires",
+      "Device code",
+    ]) {
+      await expect.element(page.getByText(field, { exact: true })).toBeInTheDocument();
+    }
+    await expect.element(page.getByText(`SHA256:${"A".repeat(43)}`)).toBeInTheDocument();
+    await expect.element(page.getByText("K7P2-N4QX")).toBeInTheDocument();
+    // The compare instruction has to be present, or the fields are decoration.
+    await expect
+      .element(
+        page.getByText(
+          "If the fingerprint on the Hub differs by even one character, deny it there and cancel here.",
+        ),
+      )
+      .toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+  });
+
+  it("reports a retrying connector without asking the operator to act", async () => {
+    stubHubFetch({
+      status: {
+        ...baseStatus,
+        state: "degraded",
+        degradedMode: "backing_off",
+        failure: "network_unavailable",
+        reconnectAttempt: 3,
+        nextRetryAt: "2099-01-01T00:00:00.000Z",
+      },
+      identity: { enrolled: "active" },
+    });
+    await renderHub({ enabled: true, origin: "https://hub.example.com" });
+
+    await expect.element(page.getByText("Reconnecting")).toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Retry now" })).not.toBeInTheDocument();
+  });
+
+  it("offers a retry for a duplicate process, which schedules none of its own", async () => {
+    stubHubFetch({
+      status: {
+        ...baseStatus,
+        state: "degraded",
+        degradedMode: "operator_action_required",
+        failure: "connection_replaced",
+      },
+      identity: { enrolled: "active" },
+    });
+    await renderHub({ enabled: true, origin: "https://hub.example.com" });
+
+    await expect
+      .element(page.getByText("Another process connected as this machine"))
+      .toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Retry now" })).toBeInTheDocument();
+  });
+
+  it("says a revoked node will not retry, rather than looking stuck", async () => {
+    stubHubFetch({
+      status: { ...baseStatus, state: "revoked", failure: "authentication_failed" },
+      identity: { enrolled: "active" },
+    });
+    await renderHub({ enabled: true, origin: "https://hub.example.com" });
+
+    await expect.element(page.getByText("Revoked at the Hub")).toBeInTheDocument();
+    await expect.element(page.getByText(/will not retry/)).toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Leave this Hub" })).toBeInTheDocument();
+  });
+
+  it("warns before erasing the key, and names what leaving does not do", async () => {
+    stubHubFetch({
+      status: { ...baseStatus, state: "revoked", failure: "authentication_failed" },
+      identity: { enrolled: "active" },
+    });
+    await renderHub({ enabled: true, origin: "https://hub.example.com" });
+
+    await page.getByRole("button", { name: "Leave this Hub" }).click();
+
+    await expect.element(page.getByText("Leave this Hub?")).toBeInTheDocument();
+    await expect.element(page.getByText(/join as a new machine/)).toBeInTheDocument();
+    // The orphan record is the thing an operator will otherwise be surprised by.
+    await expect.element(page.getByText(/until an owner removes it/)).toBeInTheDocument();
+  });
+
+  it("shows the session count and the role explainer while online", async () => {
+    stubHubFetch({
+      status: {
+        ...baseStatus,
+        state: "online",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        activeChannels: 2,
+      },
+      identity: { enrolled: "active" },
+    });
+    await renderHub({ enabled: true, origin: "https://hub.example.com" });
+
+    await expect.element(page.getByText("Connected")).toBeInTheDocument();
+    await expect.element(page.getByText("2 active sessions")).toBeInTheDocument();
+    await expect.element(page.getByText(/Managed on the Hub, not here/)).toBeInTheDocument();
+  });
+});

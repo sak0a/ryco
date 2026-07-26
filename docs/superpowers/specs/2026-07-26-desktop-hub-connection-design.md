@@ -638,7 +638,7 @@ file uses none. No badges, no pills, no cards inside cards, no icon that carries
 
 ```
 HUB ─────────────────────────────────────────────────────────────
-  Hub                                                  [ Enable ]
+  Connection                                           [ Enable ]
   Reach this Mac from anywhere — including behind NAT or CGNAT —
   without opening a port. Requires a Hub account.
   ● Not connected
@@ -656,7 +656,7 @@ Enable is disabled until the origin validates. Toggling it opens the existing re
 ### Enrolling — the comparison, expanded in place
 
 ```
-  Hub                                       [ Open Hub ] [ Cancel ]
+  Connection                                [ Open Hub ] [ Cancel ]
   ● Waiting for approval on the Hub · expires in 8m 12s
 
   ┌────────────────────────────────────────────────────────────┐
@@ -685,7 +685,7 @@ instruction twice rather than two instructions once.
 ### Online
 
 ```
-  Hub                                              [ Turn off ]
+  Connection                                       [ Turn off ]
   ● Connected · 2 active sessions
 
   Who can connect          Managed on the Hub, not here.
@@ -697,7 +697,7 @@ instruction twice rather than two instructions once.
 ### Stopped permanently
 
 ```
-  Hub                                       [ Leave this Hub ]
+  Connection                                [ Leave this Hub ]
   ● Revoked at the Hub. This will not retry.
   This machine's access was revoked. Leaving erases its Hub key
   so you can enrol again; it does not remove the node record on
@@ -707,7 +707,7 @@ instruction twice rather than two instructions once.
 ### Retrying
 
 ```
-  Hub                                            [ Retry now ]
+  Connection                                     [ Retry now ]
   ● Reconnecting — next attempt in 24s (attempt 5)
 ```
 

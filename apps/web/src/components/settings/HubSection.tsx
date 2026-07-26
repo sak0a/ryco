@@ -240,7 +240,7 @@ export function HubSection({
   return (
     <SettingsSection title="Hub">
       <SettingsRow
-        title="Hub"
+        title="Connection"
         description={
           presentation === null
             ? "Loading…"
