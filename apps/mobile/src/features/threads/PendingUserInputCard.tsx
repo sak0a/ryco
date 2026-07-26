@@ -72,7 +72,7 @@ export function PendingUserInputCard(props: {
               <Pressable
                 key={option.label}
                 onPress={() => toggle(question.id, option.label)}
-                className={`rounded-xl border px-3 py-2.5 active:opacity-70 ${
+                className={`min-h-11 justify-center rounded-xl border px-3 py-2.5 active:opacity-70 ${
                   isSelected(question.id, option.label)
                     ? "border-primary bg-primary/10"
                     : "border-border bg-card"
@@ -87,7 +87,7 @@ export function PendingUserInputCard(props: {
       <Pressable
         disabled={!canSubmit}
         onPress={() => void submit()}
-        className="mt-4 items-center rounded-full bg-primary px-4 py-2.5 active:opacity-70 disabled:opacity-40"
+        className="mt-4 h-11 items-center justify-center rounded-full bg-primary px-4 active:opacity-70 disabled:opacity-40"
       >
         <Text className="text-sm font-ryco-bold text-primary-foreground">Submit</Text>
       </Pressable>

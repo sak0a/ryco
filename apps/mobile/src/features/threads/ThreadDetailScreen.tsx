@@ -1,35 +1,130 @@
-import { useEffect, useState } from "react";
-import { ScrollView, View } from "react-native";
+import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react-native";
+import { useNavigation } from "@react-navigation/native";
+import { useHeaderHeight } from "@react-navigation/elements";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, View } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 import { getWsConnectionStatus, getWsConnectionUiState } from "@ryco/client-runtime/rpc";
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
+import type { TimelineEntry } from "@ryco/client-runtime/state/session";
 import { EnvironmentId, ThreadId } from "@ryco/contracts";
 
 import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
+import { SymbolView } from "../../components/AppSymbol";
 import { ensureEnvironmentApi } from "../../connection/environmentApi";
 import { retainThreadDetailSubscription } from "../../connection/threadDetail";
+import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import { newCommandId, newMessageId } from "../../lib/ids";
+import { useThemeColor } from "../../lib/useThemeColor";
+import { useHomeWorkspaceData } from "../../state/homeData";
 import { enqueueThreadOutboxMessage } from "../../state/threadOutbox";
 import { useThreadTimeline } from "../../state/threadTimeline";
 import { selectProjectByRef, selectThreadByRef, useStore } from "../../state/threadsRuntime";
+import { useHomeEnvironments } from "../home/useHomeEnvironments";
 import { executeSendTurn } from "./executeSendTurn";
-import { sendThreadTurn } from "./sendThreadTurn";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { PendingUserInputCard } from "./PendingUserInputCard";
+import { sendThreadTurn } from "./sendThreadTurn";
+import { interruptThreadTurn, renameThread, setThreadArchived } from "./sessionActions";
+import { ThreadActionsSheet } from "./ThreadActionsSheet";
 import { ThreadComposer } from "./ThreadComposer";
-import { proposedPlanPresentation, threadMessagePresentation } from "./threadPresentation";
+import { ThreadContextBar } from "./ThreadContextBar";
+import {
+  buildThreadHeaderModel,
+  findThreadWorktree,
+  type ThreadHeaderModel,
+} from "./threadHeaderModel";
+import { ThreadMessage } from "./ThreadMessage";
+import { proposedPlanPresentation } from "./threadPresentation";
+
+function TimelineRow(props: { readonly entry: TimelineEntry }) {
+  const { entry } = props;
+  if (entry.kind === "message") {
+    return <ThreadMessage message={entry.message} />;
+  }
+  if (entry.kind === "proposed-plan") {
+    const presentation = proposedPlanPresentation();
+    return (
+      <View className={`mx-4 my-2 rounded-2xl p-4 ${presentation.containerClassName}`}>
+        <Text
+          className={`text-xs font-ryco-bold uppercase tracking-wide ${presentation.labelClassName}`}
+        >
+          Proposed plan
+        </Text>
+        <Text className="mt-1 font-sans text-sm text-foreground" selectable>
+          {entry.proposedPlan.planMarkdown}
+        </Text>
+      </View>
+    );
+  }
+  if (entry.kind === "context-compaction") {
+    return (
+      <View className="my-3 flex-row items-center gap-2 px-6">
+        <View className="h-px flex-1 bg-border" />
+        <Text className="text-2xs uppercase tracking-wide text-foreground-muted">
+          Context compacted
+        </Text>
+        <View className="h-px flex-1 bg-border" />
+      </View>
+    );
+  }
+  return (
+    <View className="px-6 py-1.5">
+      <Text className="font-mono text-xs text-foreground-muted" numberOfLines={3} selectable>
+        {entry.entry.label ?? "Working…"}
+      </Text>
+    </View>
+  );
+}
+
+function HeaderActions(props: {
+  readonly model: ThreadHeaderModel;
+  readonly iconColor: string;
+  readonly onReview: () => void;
+  readonly onMore: () => void;
+}) {
+  return (
+    <View className="flex-row items-center gap-1">
+      {props.model.reviewVisible ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Review changes"
+          onPress={props.onReview}
+          className="h-11 items-center justify-center rounded-full px-3 active:bg-subtle-strong"
+        >
+          <Text className="text-sm font-ryco-bold text-foreground">Review</Text>
+        </Pressable>
+      ) : null}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="More task actions"
+        onPress={props.onMore}
+        className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
+      >
+        <SymbolView name="ellipsis" size={21} tintColor={props.iconColor} type="monochrome" />
+      </Pressable>
+    </View>
+  );
+}
 
 export function ThreadDetailScreen(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
 }) {
   const { environmentId, threadId } = props;
+  const navigation = useNavigation();
+  const headerHeight = useHeaderHeight();
+  const iconColor = String(useThemeColor("--color-icon"));
   const [sendError, setSendError] = useState<string | null>(null);
+  const [actionsVisible, setActionsVisible] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Retain the supervisor's thread-detail subscription while mounted, and make
-  // this the active environment (spec Thread-row requirement + the B1 gap).
+  // this node authoritative for the active task.
   useEffect(() => {
     useStore.getState().setActiveEnvironmentId(environmentId);
     return retainThreadDetailSubscription(environmentId, threadId);
@@ -39,8 +134,68 @@ export function ThreadDetailScreen(props: {
   const thread = useStore((state) =>
     selectThreadByRef(state, scopeThreadRef(environmentId, threadId)),
   );
+  const project = useStore((state) =>
+    thread
+      ? (selectProjectByRef(state, scopeProjectRef(environmentId, thread.projectId)) ?? null)
+      : null,
+  );
+  const { worktrees } = useHomeWorkspaceData();
+  const environments = useHomeEnvironments();
+  const pendingApprovals = built?.viewModel.pendingApprovals ?? [];
+  const pendingUserInputs = built?.viewModel.pendingUserInputs ?? [];
+  const worktree = useMemo(
+    () => (thread ? findThreadWorktree(thread, worktrees) : null),
+    [thread, worktrees],
+  );
+  const nodeLabel =
+    environments.find((environment) => environment.environmentId === environmentId)?.label ?? null;
+  const headerModel = useMemo(
+    () =>
+      thread
+        ? buildThreadHeaderModel({
+            thread,
+            project,
+            worktree,
+            nodeLabel,
+            hasPendingApproval: pendingApprovals.length > 0,
+            hasPendingUserInput: pendingUserInputs.length > 0,
+          })
+        : null,
+    [nodeLabel, pendingApprovals.length, pendingUserInputs.length, project, thread, worktree],
+  );
 
-  const onSend = async (text: string): Promise<boolean> => {
+  const openReview = useCallback(
+    () =>
+      navigation.navigate("ThreadReview", {
+        environmentId,
+        threadId,
+      }),
+    [environmentId, navigation, threadId],
+  );
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: headerModel?.title ?? "Task",
+      headerRight: headerModel
+        ? () => (
+            <HeaderActions
+              model={headerModel}
+              iconColor={iconColor}
+              onReview={openReview}
+              onMore={() => {
+                setActionError(null);
+                setActionsVisible(true);
+              }}
+            />
+          )
+        : undefined,
+    });
+  }, [headerModel, iconColor, navigation, openReview]);
+
+  const onSend = async (
+    text: string,
+    attachments: ReadonlyArray<DraftComposerImageAttachment>,
+  ): Promise<boolean> => {
     setSendError(null);
     const state = useStore.getState();
     const currentThread = selectThreadByRef(state, scopeThreadRef(environmentId, threadId));
@@ -48,19 +203,17 @@ export function ThreadDetailScreen(props: {
       setSendError("Thread is not loaded yet.");
       return false;
     }
-    const project = selectProjectByRef(
+    const currentProject = selectProjectByRef(
       state,
       scopeProjectRef(environmentId, currentThread.projectId),
     );
-    const modelSelection = project?.defaultModelSelection ?? null;
+    const modelSelection = currentThread.modelSelection ?? currentProject?.defaultModelSelection;
     if (!modelSelection) {
       setSendError("No model is configured for this project.");
       return false;
     }
 
     const tokenMode = currentThread.tokenMode ?? "balanced";
-    // A turn already running (or a disconnected socket) routes the send into the
-    // offline outbox instead of dispatching immediately (§3-14).
     const threadBusy = currentThread.latestTurn?.state === "running";
     const connected = getWsConnectionUiState(getWsConnectionStatus()) === "connected";
 
@@ -69,7 +222,7 @@ export function ThreadDetailScreen(props: {
         environmentId,
         threadId,
         text,
-        attachments: [],
+        attachments,
         modelSelection,
         runtimeMode: currentThread.runtimeMode,
         interactionMode: currentThread.interactionMode,
@@ -96,15 +249,24 @@ export function ThreadDetailScreen(props: {
             },
             composer: {
               prompt: text,
-              images: [],
+              // The runtime attachment pipeline expects the outgoing data URL,
+              // not the image-picker preview file URI.
+              images: attachments.map((attachment) => ({
+                type: "image",
+                id: attachment.id,
+                name: attachment.name,
+                mimeType: attachment.mimeType,
+                sizeBytes: attachment.sizeBytes,
+                previewUrl: attachment.dataUrl,
+              })),
               selectedModelSelection: modelSelection,
               selectedModel: modelSelection.model,
               hasSelectedModel: true,
             },
             project: {
               projectId: currentThread.projectId,
-              projectCwd: project?.cwd ?? "",
-              defaultModel: modelSelection.model,
+              projectCwd: currentProject?.cwd ?? "",
+              defaultModel: currentProject?.defaultModelSelection?.model ?? modelSelection.model,
             },
             settings: {
               runtimeMode: currentThread.runtimeMode,
@@ -120,107 +282,124 @@ export function ThreadDetailScreen(props: {
     );
   };
 
-  const pendingApprovals = built?.viewModel.pendingApprovals ?? [];
-  const pendingUserInputs = built?.viewModel.pendingUserInputs ?? [];
+  const runAction = async (action: () => Promise<void>, closeAfter = true) => {
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await action();
+      if (closeAfter) setActionsVisible(false);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "The task action failed.");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const renderItem = ({ item }: LegendListRenderItemProps<TimelineEntry>) => (
+    <TimelineRow entry={item} />
+  );
+  const visibleError = sendError ?? thread?.error ?? null;
+  const hasPrompts = pendingApprovals.length > 0 || pendingUserInputs.length > 0;
 
   return (
-    <View className="flex-1 bg-screen">
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        className="flex-1"
-        contentContainerStyle={{ paddingVertical: 12 }}
-      >
-        {sendError ? <ErrorBanner message={sendError} /> : null}
-        {!built ? (
-          <View className="px-4 py-16">
-            <EmptyState variant="plain" title="Loading thread" detail="Syncing the conversation." />
-          </View>
-        ) : built.timeline.length === 0 ? (
+    <KeyboardAvoidingView
+      behavior="padding"
+      automaticOffset
+      style={{ flex: 1, paddingTop: headerHeight }}
+      className="bg-screen"
+    >
+      {headerModel ? (
+        <ThreadContextBar
+          model={headerModel}
+          onPress={() => {
+            setActionError(null);
+            setActionsVisible(true);
+          }}
+        />
+      ) : null}
+      {visibleError ? <ErrorBanner message={visibleError} /> : null}
+
+      <LegendList
+        data={built?.timeline ?? []}
+        renderItem={renderItem}
+        keyExtractor={(entry) => entry.id}
+        alignItemsAtEnd
+        initialScrollAtEnd
+        maintainScrollAtEnd={{ animated: true, on: { dataChange: true, itemLayout: true } }}
+        maintainVisibleContentPosition
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+        contentInsetAdjustmentBehavior="never"
+        contentContainerStyle={{ paddingVertical: 10 }}
+        ListEmptyComponent={
           <View className="px-4 py-16">
             <EmptyState
               variant="plain"
-              title={thread?.title ?? "Thread"}
-              detail="No messages yet. Send one to get started."
+              title={built ? (thread?.title ?? "Task") : "Loading task"}
+              detail={
+                built
+                  ? "No messages yet. Send one to get started."
+                  : "Syncing the conversation from the node."
+              }
             />
           </View>
-        ) : (
-          built.timeline.map((entry) => {
-            if (entry.kind === "message") {
-              const isUser = entry.message.role === "user";
-              const presentation = threadMessagePresentation(isUser ? "user" : "assistant");
-              return (
-                <View
-                  key={entry.id}
-                  className={`px-4 py-2 ${isUser ? "items-end" : "items-start"}`}
-                >
-                  <View
-                    className={`max-w-[85%] rounded-2xl px-4 py-2.5 ${presentation.bubbleClassName}`}
-                  >
-                    <Text className={`font-sans text-base ${presentation.textClassName}`}>
-                      {entry.message.text || (entry.message.streaming ? "…" : "")}
-                    </Text>
-                  </View>
-                </View>
-              );
-            }
-            if (entry.kind === "proposed-plan") {
-              const presentation = proposedPlanPresentation();
-              return (
-                <View
-                  key={entry.id}
-                  className={`mx-4 my-2 rounded-2xl p-4 ${presentation.containerClassName}`}
-                >
-                  <Text
-                    className={`text-xs font-ryco-bold uppercase tracking-wide ${presentation.labelClassName}`}
-                  >
-                    Proposed plan
-                  </Text>
-                  <Text className="mt-1 font-sans text-sm text-foreground" numberOfLines={12}>
-                    {entry.proposedPlan.planMarkdown}
-                  </Text>
-                </View>
-              );
-            }
-            if (entry.kind === "context-compaction") {
-              return (
-                <View key={entry.id} className="my-3 flex-row items-center gap-2 px-6">
-                  <View className="h-px flex-1 bg-border" />
-                  <Text className="text-2xs uppercase tracking-wide text-foreground-muted">
-                    Context compacted
-                  </Text>
-                  <View className="h-px flex-1 bg-border" />
-                </View>
-              );
-            }
-            return (
-              <View key={entry.id} className="px-6 py-1">
-                <Text className="font-mono text-xs text-foreground-muted" numberOfLines={2}>
-                  {entry.entry.label ?? "Working…"}
-                </Text>
-              </View>
-            );
-          })
-        )}
+        }
+      />
 
-        {pendingApprovals.map((approval) => (
-          <PendingApprovalCard
-            key={approval.requestId}
-            environmentId={environmentId}
-            threadId={threadId}
-            approval={approval}
-          />
-        ))}
-        {pendingUserInputs.map((userInput) => (
-          <PendingUserInputCard
-            key={userInput.requestId}
-            environmentId={environmentId}
-            threadId={threadId}
-            userInput={userInput}
-          />
-        ))}
-      </ScrollView>
+      {hasPrompts ? (
+        <ScrollView
+          className="grow-0 border-t border-border"
+          style={{ maxHeight: "42%" }}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingVertical: 4 }}
+        >
+          {pendingApprovals.map((approval) => (
+            <PendingApprovalCard
+              key={approval.requestId}
+              environmentId={environmentId}
+              threadId={threadId}
+              approval={approval}
+            />
+          ))}
+          {pendingUserInputs.map((userInput) => (
+            <PendingUserInputCard
+              key={userInput.requestId}
+              environmentId={environmentId}
+              threadId={threadId}
+              userInput={userInput}
+            />
+          ))}
+        </ScrollView>
+      ) : null}
 
       <ThreadComposer onSend={onSend} />
-    </View>
+
+      {headerModel ? (
+        <ThreadActionsSheet
+          visible={actionsVisible}
+          model={headerModel}
+          busy={actionBusy}
+          error={actionError}
+          onClose={() => setActionsVisible(false)}
+          onRename={(title) =>
+            void runAction(() => renameThread(ensureEnvironmentApi(environmentId), threadId, title))
+          }
+          onStop={() =>
+            void runAction(() => interruptThreadTurn(ensureEnvironmentApi(environmentId), threadId))
+          }
+          onToggleArchive={() =>
+            void runAction(async () => {
+              const shouldArchive = thread?.archivedAt === null;
+              await setThreadArchived(ensureEnvironmentApi(environmentId), threadId, shouldArchive);
+              if (shouldArchive && navigation.canGoBack()) navigation.goBack();
+            })
+          }
+          onReview={() => {
+            setActionsVisible(false);
+            openReview();
+          }}
+        />
+      ) : null}
+    </KeyboardAvoidingView>
   );
 }
