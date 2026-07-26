@@ -379,7 +379,9 @@ export class HubConnector {
         degradedMode: "operator_action_required",
         failure: identityFailure(error),
       });
-      throw new Error("Hub identity could not be erased.");
+      // The cause aids local diagnosis; it never reaches a caller, because the
+      // route replaces this error with a bounded message.
+      throw new Error("Hub identity could not be erased.", { cause: error });
     }
     // `disabled` is legal from every state and is literally true here: no
     // socket, timer, or channel survives the teardown above. `enrolling` is only

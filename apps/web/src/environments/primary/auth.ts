@@ -47,6 +47,13 @@ export const revokeServerPairingLink = auth.revokeServerPairingLink;
 export const listServerClientSessions = auth.listServerClientSessions;
 export const revokeServerClientSession = auth.revokeServerClientSession;
 export const revokeOtherServerClientSessions = auth.revokeOtherServerClientSessions;
+export const fetchHubStatus = auth.fetchHubStatus;
+export const fetchHubIdentity = auth.fetchHubIdentity;
+export const fetchHubEnrollment = auth.fetchHubEnrollment;
+export const startHubEnrollment = auth.startHubEnrollment;
+export const cancelHubEnrollment = auth.cancelHubEnrollment;
+export const resumeHubConnector = auth.resumeHubConnector;
+export const leaveHub = auth.leaveHub;
 export const resolveInitialServerAuthGateState = auth.resolveInitialServerAuthGateState;
 export const __resetServerAuthBootstrapForTests = auth.resetForTests;
 

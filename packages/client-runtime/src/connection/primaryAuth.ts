@@ -1,4 +1,8 @@
 import type {
+  HubConnectorStatus,
+  HubEnrollmentCeremonyDetail,
+  HubEnrollmentStartResult,
+  HubIdentitySummary,
   AuthBootstrapInput,
   AuthBootstrapResult,
   AuthClientMetadata,
@@ -207,9 +211,40 @@ export function createPrimaryAuth(deps: PrimaryAuthDependencies) {
     if (!response.ok) throw new Error(await readErrorMessage(response, fallback));
     return (await response.json()) as T;
   };
+  /**
+   * Hub connector control, over the node's own owner-gated HTTP routes.
+   *
+   * Reached through this factory rather than a panel-local fetch so it inherits
+   * the cookie-versus-bearer credential choice, the transient-bootstrap retry,
+   * and the bounded error extraction that already live here. These routes are
+   * unreachable over the relay by construction: the relay carries only
+   * `ryco.rpc` channels, and there is no HTTP tunnel.
+   */
+  const getHubOrNull = async <T>(pathname: string, fallback: string): Promise<T | null> => {
+    const response = await deps.httpClient.fetch(
+      deps.endpoint.resolveHttpUrl(pathname),
+      credentials,
+    );
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(await readErrorMessage(response, fallback));
+    return (await response.json()) as T;
+  };
+
   return {
     fetchSessionState,
     issuePrimaryWebSocketToken,
+    fetchHubStatus: () => get<HubConnectorStatus>("/api/hub/status", "Unable to read Hub status."),
+    fetchHubIdentity: () =>
+      get<HubIdentitySummary>("/api/hub/identity", "Unable to read Hub identity state."),
+    fetchHubEnrollment: () =>
+      getHubOrNull<HubEnrollmentCeremonyDetail>(
+        "/api/hub/enrollment",
+        "Unable to read the pending Hub enrollment.",
+      ),
+    startHubEnrollment: () => post<HubEnrollmentStartResult>("/api/hub/enrollment"),
+    cancelHubEnrollment: () => post<HubConnectorStatus>("/api/hub/enrollment/cancel"),
+    resumeHubConnector: () => post<HubConnectorStatus>("/api/hub/resume"),
+    leaveHub: () => post<HubConnectorStatus>("/api/hub/leave"),
     retryTransientBootstrap,
     takePairingCredential: () => deps.pairingCredentialSource.take(),
     submitServerAuthCredential: async (credential: string) => {

@@ -60,6 +60,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Button } from "../ui/button";
 import { Group, GroupSeparator } from "../ui/group";
 import { AnimatedHeight } from "../AnimatedHeight";
+import { HubSection } from "./HubSection";
 import {
   Menu,
   MenuGroup,
@@ -2712,6 +2713,8 @@ export function ConnectionsSettings() {
           />
         </SettingsSection>
       )}
+
+      {desktopBridge ? <HubSection desktopBridge={desktopBridge} /> : null}
 
       <SettingsSection
         title="Remote environments"
