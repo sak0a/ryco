@@ -185,11 +185,14 @@ const withHubRoutes = <A, E, R>(
     );
   });
 
-const post = (origin: string, path: string, token?: string) =>
+const post = (origin: string, path: string, token?: string, requestOrigin?: string) =>
   Effect.promise(() =>
     fetch(`${origin}${path}`, {
       method: "POST",
-      headers: token === undefined ? {} : { Authorization: `Bearer ${token}` },
+      headers: {
+        ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }),
+        ...(requestOrigin === undefined ? {} : { Origin: requestOrigin }),
+      },
     }),
   );
 
@@ -388,6 +391,43 @@ it.layer(NodeServices.layer)("hub connector http routes", (it) => {
         assert.equal(response.status, 200);
         const body = (yield* Effect.promise(() => response.json())) as HubConnectorStatus;
         assert.equal(body.state, "revoked");
+      }),
+    ),
+  );
+
+  // SameSite=Lax does not separate loopback ports: "site" ignores the port, so a
+  // page served from any other port on 127.0.0.1 is same-site with this backend
+  // and its POSTs carry the session cookie. A bodyless POST is also a CORS simple
+  // request, so it is never preflighted — the attacker cannot read the reply, but
+  // the operation still runs. That is enough to erase this node's Hub key.
+  it.effect("refuses a state-changing request from another local origin", () =>
+    withHubRoutes({ statuses: [ONLINE_STATUS] }, ({ origin, ownerToken, resumeCalls }) =>
+      Effect.gen(function* () {
+        const attacker = "http://127.0.0.1:59999";
+        for (const path of [
+          "/api/hub/leave",
+          "/api/hub/resume",
+          "/api/hub/enrollment",
+          "/api/hub/enrollment/cancel",
+        ]) {
+          const response = yield* post(origin, path, ownerToken, attacker);
+          assert.equal(response.status, 403, `${path} accepted a cross-origin mutation`);
+        }
+        assert.equal(resumeCalls(), 0, "a cross-origin request reached the connector");
+      }),
+    ),
+  );
+
+  it.effect("still accepts a same-origin request, and a CLI request with no Origin", () =>
+    withHubRoutes({ statuses: [ONLINE_STATUS] }, ({ origin, ownerToken, resumeCalls }) =>
+      Effect.gen(function* () {
+        // The desktop renderer is same-origin with the backend and sends Origin
+        // on POST; the CLI authenticates with a bearer token and sends none.
+        const sameOrigin = yield* post(origin, "/api/hub/resume", ownerToken, origin);
+        const noOrigin = yield* post(origin, "/api/hub/resume", ownerToken);
+        assert.equal(sameOrigin.status, 200);
+        assert.equal(noOrigin.status, 200);
+        assert.equal(resumeCalls(), 2);
       }),
     ),
   );

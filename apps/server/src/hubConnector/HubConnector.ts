@@ -250,6 +250,11 @@ export class HubConnector {
   async identitySummary(): Promise<HubIdentitySummary> {
     try {
       const state = await this.#identity.readState();
+      // A committed teardown means the erase is under way: the keys it names may
+      // already be gone. Reporting the surviving activeNode as "active" would
+      // present an enrollment with nothing behind it, lock the Hub address, and
+      // leave no in-panel way to correct it.
+      if (state.pendingTeardown !== null) return { enrolled: "none" };
       if (state.activeNode !== null) return { enrolled: "active" };
       if (state.pendingEnrollment !== null) return { enrolled: "pending" };
       return { enrolled: "none" };

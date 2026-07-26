@@ -1135,4 +1135,39 @@ describe("HubConnector", () => {
     const status = await connector.leave();
     expect(status.state).toBe("disabled");
   });
+
+  it("does not report a half-erased identity as enrolled", async () => {
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        readState: async () => ({
+          version: 1,
+          revision: 9,
+          environmentId: `env_${"E".repeat(22)}`,
+          pendingEnrollment: null,
+          // A leave that committed its marker and deleted the secrets, then
+          // crashed before clearing state. The keys are gone.
+          activeNode: {
+            hubOrigin: "https://relay.example",
+            nodeId: `node_${"N".repeat(22)}`,
+            activeKeyId: `nkey_${"K".repeat(22)}`,
+            activeKeySecretName: "node-key.gone",
+            cleanupPollingSecretName: null,
+            enrolledAt: 1,
+          },
+          stagedRotation: null,
+          pendingTeardown: { secretNames: ["node-key.gone"], requestedAt: 1 },
+        }),
+      }),
+      transport: { open: () => new FakeSocket() },
+      channels: {
+        open: async () => {
+          throw new Error("unused");
+        },
+      },
+      enrollmentMetadata,
+    });
+
+    expect(await connector.identitySummary()).toEqual({ enrolled: "none" });
+  });
 });

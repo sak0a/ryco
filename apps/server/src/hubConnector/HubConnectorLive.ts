@@ -71,17 +71,37 @@ const unavailableIdentity = (): HubIdentityRuntimeShape => {
  * as "possibly enrolled". On a fresh install that locks the Hub address field
  * and offers a Leave button, making the feature impossible to configure.
  */
-const readOnlyIdentity = (statePath: string): HubIdentityRuntimeShape => {
+const readOnlyIdentity = (options: {
+  readonly statePath: string;
+  readonly fileSecretRoot: string;
+  readonly allowFileFallback: boolean;
+}): HubIdentityRuntimeShape => {
   const unavailable = async (): Promise<never> => {
     throw new HubIdentityRuntimeError("identity_unavailable");
   };
   return {
     backend: "permissioned-file",
     readState: async () => {
-      const store = await makeLocalHubIdentityStateStore(statePath);
+      const store = await makeLocalHubIdentityStateStore(options.statePath);
       return store.readOrCreate();
     },
-    leave: unavailable,
+    /**
+     * Erasing an identity is the one operation that must still work here.
+     *
+     * The panel offers "Leave this Hub" precisely in this configuration —
+     * enrolled, connector switched off — so a stub that throws would report a
+     * fabricated "keychain is locked" and leave the key on disk with no way to
+     * remove it. Opening key custody is what the operator just asked for, so the
+     * full runtime is built on demand rather than on every launch.
+     */
+    leave: async () => {
+      const runtime = await makeHubIdentityRuntime({
+        statePath: options.statePath,
+        fileSecretRoot: options.fileSecretRoot,
+        allowFileFallback: options.allowFileFallback,
+      });
+      await runtime.leave();
+    },
     readPendingEnrollment: unavailable,
     startEnrollment: unavailable,
     pollEnrollment: unavailable,
@@ -112,7 +132,11 @@ export const HubConnectorLive = Layer.effect(
             }),
           catch: () => new HubIdentityRuntimeError("identity_unavailable"),
         }).pipe(Effect.orElseSucceed(unavailableIdentity))
-      : readOnlyIdentity(config.hubIdentityStatePath);
+      : readOnlyIdentity({
+          statePath: config.hubIdentityStatePath,
+          fileSecretRoot: `${config.secretsDir}/hub-node`,
+          allowFileFallback: config.hubConnector?.allowFileSecretStore ?? false,
+        });
 
     const channelFactory: RelayChannelSessionFactory = {
       open: async ({ channelId, effectiveRole, send }) => {
