@@ -68,6 +68,10 @@ Long term maintainability is a core priority. If you add new functionality, firs
 - Mobile presentation may adapt substantially, but authentication, relay, synchronization,
   application state, and mutation-readiness policy remain shared. Do not fork those security or
   lifecycle decisions into a second mobile implementation.
+- There are now two phone surfaces and they are not equals. `apps/mobile` is the intended phone
+  experience; `apps/web`'s `phone:` presentation tier is frozen behind a flag with a get-the-app
+  interstitial and stays until native reaches parity. Do not extend the web phone tier, and do not
+  delete it either — its removal is a separate approved change.
 - Keep this public repository free of private Hub issue links, deployment identifiers,
   infrastructure details, credentials, private operational policies, and qualification evidence.
 
@@ -76,9 +80,10 @@ Long term maintainability is a core priority. If you add new functionality, firs
 - `apps/server`: HTTP/WebSocket backend and `ryco-cli` package. Serves the React app, owns provider sessions, orchestration, persistence, terminals, git/source-control operations, auth, and remote/pairing endpoints.
 - `apps/web`: React/Vite UI. Owns session UX, conversation/event rendering, settings, project/source-control views, and client-side state. Connects to one or more Ryco servers over WebSocket.
 - `apps/desktop`: Electron shell. Starts a desktop-scoped backend process, wires desktop APIs such as file dialogs/updates/SSH prompts, and loads the shared web app.
+- `apps/mobile`: Expo / React Native native app (iOS first). Consumes `packages/client-runtime` and owns only its platform adapters, native modules, and screens. It is a separate client, not a second runtime.
 - `packages/contracts`: Shared Effect Schema schemas and TypeScript contracts for RPC, provider events, orchestration, settings, model/session types, keybindings, source control, and work items. Keep this package schema-only — no runtime logic.
 - `packages/shared`: Shared runtime utilities consumed by both server and web. Uses explicit subpath exports (e.g. `@ryco/shared/git`) — no barrel index.
-- `packages/client-runtime`: Client-side environment/endpoint helpers shared by web and desktop clients.
+- `packages/client-runtime`: The shared client runtime for web, desktop, and mobile. Owns the `platform` service contracts each app provides, the rpc transport, connection catalog/supervision, authorization (cookie and DPoP bearer modes, `HostedHubApi`), the relay client, and the `state/*` domains. No DOM or React Native imports may enter this package.
 - `packages/effect-codex-app-server`: Effect-based Codex app-server JSON-RPC protocol/client wrapper.
 - `packages/effect-acp`: Effect-based Agent Client Protocol schema/client/agent helpers used by ACP providers.
 - `packages/ssh`: SSH config/auth/command/tunnel utilities for desktop-managed remote access.
