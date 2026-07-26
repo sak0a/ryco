@@ -312,7 +312,7 @@ describe("Hub enrollment client", () => {
         expiresAt: now + 600_000,
         pollIntervalMs: 5_000,
       }),
-      poll: async () => ({ status: "unavailable" }),
+      poll: async () => ({ status: "unavailable", reason: "rejected" }),
     };
     const test = await harness(transport, { now: () => now });
     let error: unknown;

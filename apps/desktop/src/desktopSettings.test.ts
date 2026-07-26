@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
   DEFAULT_DESKTOP_SETTINGS,
+  DesktopSettingsReadError,
   readDesktopSettings,
   resolveDefaultDesktopSettings,
   setDesktopServerExposurePreference,
@@ -40,6 +41,8 @@ describe("desktopSettings", () => {
       tailscaleServePort: 443,
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
+      hubConnectorEnabled: false,
+      hubOrigin: null,
     });
   });
 
@@ -52,6 +55,8 @@ describe("desktopSettings", () => {
       tailscaleServePort: 8443,
       updateChannel: "latest",
       updateChannelConfiguredByUser: true,
+      hubConnectorEnabled: false,
+      hubOrigin: null,
     });
 
     expect(readDesktopSettings(settingsPath, "0.0.17")).toEqual({
@@ -60,6 +65,8 @@ describe("desktopSettings", () => {
       tailscaleServePort: 8443,
       updateChannel: "latest",
       updateChannelConfiguredByUser: true,
+      hubConnectorEnabled: false,
+      hubOrigin: null,
     });
   });
 
@@ -72,6 +79,8 @@ describe("desktopSettings", () => {
           tailscaleServePort: 443,
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
+          hubConnectorEnabled: false,
+          hubOrigin: null,
         },
         "network-accessible",
       ),
@@ -81,6 +90,8 @@ describe("desktopSettings", () => {
       tailscaleServePort: 443,
       updateChannel: "latest",
       updateChannelConfiguredByUser: false,
+      hubConnectorEnabled: false,
+      hubOrigin: null,
     });
   });
 
@@ -93,6 +104,8 @@ describe("desktopSettings", () => {
           tailscaleServePort: 443,
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
+          hubConnectorEnabled: false,
+          hubOrigin: null,
         },
         { enabled: true, port: 8443 },
       ),
@@ -102,6 +115,8 @@ describe("desktopSettings", () => {
       tailscaleServePort: 8443,
       updateChannel: "latest",
       updateChannelConfiguredByUser: false,
+      hubConnectorEnabled: false,
+      hubOrigin: null,
     });
   });
 
@@ -114,6 +129,8 @@ describe("desktopSettings", () => {
           tailscaleServePort: 8443,
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
+          hubConnectorEnabled: false,
+          hubOrigin: null,
         },
         { enabled: true },
       ),
@@ -123,6 +140,8 @@ describe("desktopSettings", () => {
       tailscaleServePort: 8443,
       updateChannel: "latest",
       updateChannelConfiguredByUser: false,
+      hubConnectorEnabled: false,
+      hubOrigin: null,
     });
   });
 
@@ -135,6 +154,8 @@ describe("desktopSettings", () => {
           tailscaleServePort: 443,
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
+          hubConnectorEnabled: false,
+          hubOrigin: null,
         },
         "nightly",
       ),
@@ -144,14 +165,46 @@ describe("desktopSettings", () => {
       tailscaleServePort: 443,
       updateChannel: "nightly",
       updateChannelConfiguredByUser: true,
+      hubConnectorEnabled: false,
+      hubOrigin: null,
     });
   });
 
-  it("falls back to defaults when the settings file is malformed", () => {
+  // Deliberate change of behaviour: this used to return defaults. Doing so meant
+  // the next write persisted them, silently discarding a configured Hub
+  // connection with no signal to the operator.
+  it("surfaces a malformed settings file instead of silently resetting it", () => {
     const settingsPath = makeSettingsPath();
     fs.writeFileSync(settingsPath, "{not-json", "utf8");
 
-    expect(readDesktopSettings(settingsPath, "0.0.17")).toEqual(DEFAULT_DESKTOP_SETTINGS);
+    expect(() => readDesktopSettings(settingsPath, "0.0.17")).toThrow(DesktopSettingsReadError);
+    // The bad file must survive, so it can be inspected rather than overwritten.
+    expect(fs.readFileSync(settingsPath, "utf8")).toBe("{not-json");
+  });
+
+  it("still returns defaults when no settings file exists yet", () => {
+    expect(readDesktopSettings(makeSettingsPath(), "0.0.17")).toEqual(DEFAULT_DESKTOP_SETTINGS);
+  });
+
+  it("writes the settings file owner-only", () => {
+    const settingsPath = makeSettingsPath();
+    writeDesktopSettings(settingsPath, DEFAULT_DESKTOP_SETTINGS);
+    // The Hub address says where this machine is reachable; other local users
+    // have no business reading it.
+    expect(fs.statSync(settingsPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("round-trips the hub launch configuration", () => {
+    const settingsPath = makeSettingsPath();
+    writeDesktopSettings(settingsPath, {
+      ...DEFAULT_DESKTOP_SETTINGS,
+      hubConnectorEnabled: true,
+      hubOrigin: "https://hub.example.com",
+    });
+    expect(readDesktopSettings(settingsPath, "0.0.17")).toMatchObject({
+      hubConnectorEnabled: true,
+      hubOrigin: "https://hub.example.com",
+    });
   });
 
   it("falls back to the nightly channel for legacy nightly settings without an update track", () => {
@@ -164,6 +217,8 @@ describe("desktopSettings", () => {
       tailscaleServePort: 443,
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
+      hubConnectorEnabled: false,
+      hubOrigin: null,
     });
   });
 
@@ -184,6 +239,8 @@ describe("desktopSettings", () => {
       tailscaleServePort: 443,
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
+      hubConnectorEnabled: false,
+      hubOrigin: null,
     });
   });
 
@@ -195,6 +252,8 @@ describe("desktopSettings", () => {
         serverExposureMode: "local-only",
         updateChannel: "latest",
         updateChannelConfiguredByUser: true,
+        hubConnectorEnabled: false,
+        hubOrigin: null,
       }),
       "utf8",
     );
@@ -205,6 +264,8 @@ describe("desktopSettings", () => {
       tailscaleServePort: 443,
       updateChannel: "latest",
       updateChannelConfiguredByUser: true,
+      hubConnectorEnabled: false,
+      hubOrigin: null,
     });
   });
 
@@ -225,6 +286,8 @@ describe("desktopSettings", () => {
       tailscaleServePort: 443,
       updateChannel: "latest",
       updateChannelConfiguredByUser: false,
+      hubConnectorEnabled: false,
+      hubOrigin: null,
     });
   });
 });

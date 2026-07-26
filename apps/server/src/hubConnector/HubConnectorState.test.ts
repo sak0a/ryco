@@ -73,4 +73,26 @@ describe("classifyConnectorFailure", () => {
     expect(classifyConnectorFailure("protocol_invalid", 0).action).toBe("retry");
     expect(classifyConnectorFailure("protocol_invalid", 1).action).toBe("operator");
   });
+  it("keeps expiry distinguishable from denial, and a dead store from a locked one", () => {
+    // Each pair needs opposite operator instructions, so collapsing either into
+    // one code would make the panel give the wrong advice half the time.
+    expect(classifyConnectorFailure("enrollment_expired", 0)).toEqual({
+      action: "operator",
+      failure: "enrollment_expired",
+    });
+    expect(classifyConnectorFailure("enrollment_unavailable", 0)).toEqual({
+      action: "operator",
+      failure: "enrollment_unavailable",
+    });
+    // A construction failure is latched for the process lifetime: resume cannot
+    // repair it, so it must not read as the retryable locked-keychain case.
+    expect(classifyConnectorFailure("identity_store_unavailable", 0)).toEqual({
+      action: "operator",
+      failure: "identity_store_unavailable",
+    });
+    expect(classifyConnectorFailure("identity_unavailable", 0)).toEqual({
+      action: "operator",
+      failure: "identity_unavailable",
+    });
+  });
 });

@@ -960,7 +960,7 @@ describe("HubConnector", () => {
           stagedRotation: null,
           pendingTeardown: null,
         }),
-        pollEnrollment: async () => ({ status: "unavailable" }),
+        pollEnrollment: async () => ({ status: "unavailable", reason: "rejected" }),
       }),
       transport: { open: () => new FakeSocket() },
       channels: {

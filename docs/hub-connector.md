@@ -184,10 +184,15 @@ and the normal server listener follow their existing shutdown path.
 ## Troubleshooting
 
 - `configuration_invalid`: check the exact boolean spellings, HTTPS origin, and reconnect ranges.
-- `identity_unavailable`: unlock or restore the platform credential store; do not copy a node ID or
-  generate a replacement key manually.
+- `identity_unavailable`: unlock or restore the platform credential store, then `ryco hub resume`;
+  do not copy a node ID or generate a replacement key manually.
+- `identity_store_unavailable`: the credential store could not be opened at all when this process
+  started, and no retry can repair it. Fix the store, then restart Ryco.
+- `enrollment_expired`: the ceremony's own expiry passed. Start a new one.
 - `identity_origin_mismatch`: use the origin to which the identity was enrolled or perform an
   approved re-enrollment.
+- `enrollment_unavailable`: the ceremony was denied or cancelled at the Hub. Find out why before
+  starting another; a denial is a human saying no.
 - `authentication_failed` or `revoked`: verify approval, key rotation, and node status with the Hub
   operator; retries are intentionally stopped. `ryco hub resume` will not restart a revoked identity.
 - `connection_replaced`: another process authenticated as this node. Stop it, then run

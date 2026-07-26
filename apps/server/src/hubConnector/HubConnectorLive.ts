@@ -31,9 +31,17 @@ export class HubConnectorService extends Context.Service<
   HubConnectorServiceShape
 >()("ryco/hubConnector/HubConnectorService") {}
 
+/**
+ * The runtime a node gets when key custody could not be constructed at all.
+ *
+ * Every method throws for the lifetime of the process, so `resume()` provably
+ * cannot repair it. It reports `identity_store_unavailable` rather than
+ * `identity_unavailable` so the panel can say "restart Ryco" and withhold a
+ * Retry button that would do nothing.
+ */
 const unavailableIdentity = (): HubIdentityRuntimeShape => {
   const unavailable = async (): Promise<never> => {
-    throw new HubIdentityRuntimeError("identity_unavailable");
+    throw new HubIdentityRuntimeError("identity_store_unavailable");
   };
   return {
     backend: "permissioned-file",

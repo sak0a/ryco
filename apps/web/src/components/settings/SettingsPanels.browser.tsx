@@ -372,6 +372,9 @@ const createDesktopBridgeStub = (overrides?: {
   };
 
   return {
+    getHubLaunchConfig: async () => ({ enabled: false, origin: null }),
+    setHubLaunchConfig: async () => undefined,
+    validateHubOrigin: async () => ({ ok: false as const, reason: "empty" as const }),
     getAppBranding: vi.fn().mockReturnValue(null),
     getLocalEnvironmentBootstrap: () => ({
       label: "Local environment",

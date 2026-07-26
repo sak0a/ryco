@@ -48,6 +48,7 @@ import {
   setDesktopServerExposurePreference,
   setDesktopTailscaleServePreference,
   setDesktopUpdateChannelPreference,
+  setDesktopHubPreference,
   writeDesktopSettings,
 } from "./desktopSettings.ts";
 import {
@@ -95,6 +96,7 @@ import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runti
 import { resolveDesktopAppBranding } from "./appBranding.ts";
 import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
+import { validateHubOrigin } from "./hubOrigin.ts";
 import {
   parseTurnCompleteNotification,
   shouldShowTurnCompleteNotification,
@@ -138,6 +140,9 @@ const REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:remove-saved-environmen
 const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
+const GET_HUB_LAUNCH_CONFIG_CHANNEL = "desktop:get-hub-launch-config";
+const SET_HUB_LAUNCH_CONFIG_CHANNEL = "desktop:set-hub-launch-config";
+const VALIDATE_HUB_ORIGIN_CHANNEL = "desktop:validate-hub-origin";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
 const NOTIFY_TURN_COMPLETE_CHANNEL = "desktop:notify-turn-complete";
 const TURN_COMPLETE_NOTIFICATION_ACTIVATED_CHANNEL = "desktop:turn-complete-notification-activated";
@@ -411,6 +416,13 @@ function backendChildEnv(): NodeJS.ProcessEnv {
   deleteEnv(env, "RYCO_DESKTOP_HTTPS_ENDPOINTS");
   deleteEnv(env, "RYCO_TAILSCALE_SERVE");
   deleteEnv(env, "RYCO_TAILSCALE_SERVE_PORT");
+  // The desktop is the single owner of these two: it persists them and passes
+  // them on the bootstrap channel. Leaving the environment able to override
+  // would give the settings panel a toggle that silently does nothing, guarded
+  // by a lock icon any same-user process could forge with `launchctl setenv`.
+  // `ryco serve` is unaffected and stays fully env-configurable.
+  deleteEnv(env, "RYCO_HUB_CONNECTOR_ENABLED");
+  deleteEnv(env, "RYCO_HUB_ORIGIN");
   // VITE_DEV_SERVER_URL must never reach the packaged backend: if a developer's
   // shell exports it, the server's Config.url parser throws and the backend
   // exits before HTTP listen, causing the desktop to spin in a restart loop.
@@ -1988,6 +2000,8 @@ function startBackend(): void {
         desktopBootstrapToken: backendBootstrapToken,
         tailscaleServeEnabled: desktopSettings.tailscaleServeEnabled,
         tailscaleServePort: desktopSettings.tailscaleServePort,
+        hubConnectorEnabled: desktopSettings.hubConnectorEnabled,
+        ...(desktopSettings.hubOrigin === null ? {} : { hubOrigin: desktopSettings.hubOrigin }),
         ...(backendObservabilitySettings.otlpTracesUrl
           ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
           : {}),
@@ -2255,6 +2269,51 @@ function registerIpcHandlers(): void {
     });
     relaunchDesktopApp(`serverExposureMode=${nextMode}`);
     return nextState;
+  });
+
+  ipcMain.removeHandler(GET_HUB_LAUNCH_CONFIG_CHANNEL);
+  ipcMain.handle(GET_HUB_LAUNCH_CONFIG_CHANNEL, () => ({
+    enabled: desktopSettings.hubConnectorEnabled,
+    origin: desktopSettings.hubOrigin,
+  }));
+
+  ipcMain.removeHandler(VALIDATE_HUB_ORIGIN_CHANNEL);
+  ipcMain.handle(VALIDATE_HUB_ORIGIN_CHANNEL, (_event, raw: unknown) =>
+    validateHubOrigin(typeof raw === "string" ? raw : ""),
+  );
+
+  ipcMain.removeHandler(SET_HUB_LAUNCH_CONFIG_CHANNEL);
+  ipcMain.handle(SET_HUB_LAUNCH_CONFIG_CHANNEL, async (_event, rawInput: unknown) => {
+    if (typeof rawInput !== "object" || rawInput === null) {
+      throw new Error("Invalid Hub launch configuration input.");
+    }
+    const input = rawInput as { readonly enabled?: unknown; readonly origin?: unknown };
+    if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
+      throw new Error("Invalid Hub launch configuration input.");
+    }
+
+    let origin: string | null | undefined;
+    if (input.origin === null) {
+      origin = null;
+    } else if (typeof input.origin === "string") {
+      // Validate in main, not in the renderer: the renderer cannot import
+      // `@ryco/shared/nodeIdentity` because it pulls in `node:crypto`, and a
+      // value that reaches the connector unvalidated fails closed at startup
+      // with an opaque `configuration_invalid`.
+      const validation = validateHubOrigin(input.origin);
+      if (!validation.ok) throw new Error("Invalid Hub address.");
+      origin = validation.origin;
+    } else if (input.origin !== undefined) {
+      throw new Error("Invalid Hub launch configuration input.");
+    }
+
+    desktopSettings = setDesktopHubPreference(desktopSettings, {
+      ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+      ...(origin === undefined ? {} : { origin }),
+    });
+    writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
+    // Never log the origin: it says where this machine is reachable.
+    relaunchDesktopApp("hub-launch-config-changed");
   });
 
   ipcMain.removeHandler(SET_TAILSCALE_SERVE_ENABLED_CHANNEL);
@@ -2744,6 +2803,30 @@ function createWindow(): BrowserWindow {
 app.setPath("userData", resolveUserDataPath());
 
 configureAppIdentity();
+
+/**
+ * Refuse to run a second copy of this app against the same state directory.
+ *
+ * Two backends sharing one `RYCO_HOME` contend over a single node identity, and
+ * the loser can land in `connection_replaced` — an operator-action failure with
+ * no retry timer, so it never clears on its own.
+ *
+ * This is a UX guard, not the correctness fix. It coordinates only instances of
+ * this Electron application: a headless `ryco serve`, a dev build, or any other
+ * process sharing the state directory is unaffected, and the identity writer
+ * lock remains the actual arbiter.
+ */
+if (!isDevelopment && !app.requestSingleInstanceLock()) {
+  writeDesktopLogHeader("second instance refused; focusing the existing window");
+  app.exit(0);
+}
+
+app.on("second-instance", () => {
+  const [existing] = BrowserWindow.getAllWindows();
+  if (existing === undefined) return;
+  if (existing.isMinimized()) existing.restore();
+  existing.focus();
+});
 
 async function bootstrap(): Promise<void> {
   markDesktopStartupPhase("desktop.bootstrap.start");

@@ -14,7 +14,7 @@ import {
   type ConnectorFailureKind,
   HubConnectorStateMachine,
 } from "./HubConnectorState.ts";
-import type { HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
+import { HubIdentityRuntimeError, type HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
 import type { HubRelayTransport } from "./HubRelayTransport.ts";
 import {
   relayErrorKind,
@@ -34,6 +34,19 @@ export interface HubConnectorScheduler extends RelaySessionScheduler {
   readonly now: () => number;
   readonly random: () => number;
 }
+
+/**
+ * Distinguish a custody read that may succeed later from one that cannot.
+ *
+ * A construction failure is latched into a stub whose every method throws for
+ * the process lifetime, so `resume()` provably cannot repair it. Reporting both
+ * as `identity_unavailable` would have the panel offer a Retry that does
+ * nothing.
+ */
+const identityFailure = (error: unknown): "identity_unavailable" | "identity_store_unavailable" =>
+  error instanceof HubIdentityRuntimeError && error.code === "identity_store_unavailable"
+    ? "identity_store_unavailable"
+    : "identity_unavailable";
 
 const defaultScheduler: HubConnectorScheduler = {
   now: Date.now,
@@ -101,11 +114,11 @@ export class HubConnector {
     let identity;
     try {
       identity = await this.#identity.readState();
-    } catch {
+    } catch (error: unknown) {
       if (!this.#state.isCurrent(generation) || this.#stopping) return;
       this.#state.transition("degraded", {
         degradedMode: "operator_action_required",
-        failure: "identity_unavailable",
+        failure: identityFailure(error),
       });
       return;
     }
@@ -139,15 +152,18 @@ export class HubConnector {
       return;
     }
     const generation = this.#state.generation;
-    const identity = await this.#identity.readState().catch(() => undefined);
-    if (!this.#state.isCurrent(generation) || this.#stopping) return;
-    if (identity === undefined) {
+    let identity;
+    try {
+      identity = await this.#identity.readState();
+    } catch (error: unknown) {
+      if (!this.#state.isCurrent(generation) || this.#stopping) return;
       this.#state.transition("degraded", {
         degradedMode: "operator_action_required",
-        failure: "identity_unavailable",
+        failure: identityFailure(error),
       });
       return;
     }
+    if (!this.#state.isCurrent(generation) || this.#stopping) return;
     if (identity.activeNode === null) {
       if (identity.pendingEnrollment === null) {
         this.#state.transition("enrolling");
@@ -358,10 +374,10 @@ export class HubConnector {
     this.#started = false;
     try {
       await this.#identity.leave();
-    } catch {
+    } catch (error: unknown) {
       this.#state.transition("degraded", {
         degradedMode: "operator_action_required",
-        failure: "identity_unavailable",
+        failure: identityFailure(error),
       });
       throw new Error("Hub identity could not be erased.");
     }
@@ -515,9 +531,12 @@ export class HubConnector {
       return;
     }
     if (result.status === "unavailable") {
+      // Expiry and denial need opposite operator instructions, so they must not
+      // collapse into one code: an expired ceremony is simply restarted, a
+      // denied one means a human said no and wants finding out why first.
       this.#state.transition("degraded", {
         degradedMode: "operator_action_required",
-        failure: "enrollment_unavailable",
+        failure: result.reason === "expired" ? "enrollment_expired" : "enrollment_unavailable",
       });
       return;
     }

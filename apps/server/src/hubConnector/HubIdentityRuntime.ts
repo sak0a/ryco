@@ -35,6 +35,7 @@ import {
 
 export type HubIdentityRuntimeErrorCode =
   | "identity_unavailable"
+  | "identity_store_unavailable"
   | "enrollment_failed"
   | "node_proof_failed"
   | "rotation_failed";

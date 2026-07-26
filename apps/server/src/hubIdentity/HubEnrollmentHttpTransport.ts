@@ -84,7 +84,7 @@ function parsePollResponse(value: unknown): HubEnrollmentPollResponse {
       enrolledAt: candidate.enrolledAt,
     };
   }
-  if (candidate.status === "unavailable") return { status: "unavailable" };
+  if (candidate.status === "unavailable") return { status: "unavailable", reason: "rejected" };
   return transportError();
 }
 
@@ -117,7 +117,8 @@ export function makeHubEnrollmentHttpTransport(
       });
       if (response.status === 404 || response.status === 410) {
         const candidate = response.value as { readonly error?: unknown };
-        if (candidate?.error === "enrollment_unavailable") return { status: "unavailable" };
+        if (candidate?.error === "enrollment_unavailable")
+          return { status: "unavailable", reason: "rejected" };
         return transportError();
       }
       if (!response.ok) return transportError();

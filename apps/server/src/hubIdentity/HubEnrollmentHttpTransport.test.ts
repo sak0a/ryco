@@ -54,7 +54,7 @@ describe("Hub enrollment HTTP transport", () => {
         hubOrigin: "https://hub.example.com",
         pollingSecret: new Uint8Array(32).fill(0x44),
       }),
-    ).toEqual({ status: "unavailable" });
+    ).toEqual({ status: "unavailable", reason: "rejected" });
     expect(body.pollingSecret).toBe(
       Buffer.from(new Uint8Array(32).fill(0x44)).toString("base64url"),
     );

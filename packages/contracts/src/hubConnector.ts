@@ -31,8 +31,10 @@ export type HubConnectorDegradedMode = typeof HubConnectorDegradedMode.Type;
 export const HUB_CONNECTOR_FAILURE_CODES = [
   "configuration_invalid",
   "identity_unavailable",
+  "identity_store_unavailable",
   "identity_origin_mismatch",
   "enrollment_unavailable",
+  "enrollment_expired",
   "network_unavailable",
   "tls_unavailable",
   "authentication_timeout",

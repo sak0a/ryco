@@ -85,6 +85,8 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   logWebSocketEvents: Schema.optional(Schema.Boolean),
   tailscaleServeEnabled: Schema.optional(Schema.Boolean),
   tailscaleServePort: Schema.optional(PortSchema),
+  hubConnectorEnabled: Schema.optional(Schema.Boolean),
+  hubOrigin: Schema.optional(Schema.String),
   otlpTracesUrl: Schema.optional(Schema.String),
   otlpMetricsUrl: Schema.optional(Schema.String),
 });
@@ -424,9 +426,17 @@ export const resolveServerConfig = (
       () => (mode === "desktop" ? "127.0.0.1" : undefined),
     );
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
+    // Env wins over the bootstrap envelope, matching every other option here.
+    // In the desktop that contest never happens: `backendChildEnv()` strips both
+    // hub variables, so the envelope is the only source. A headless `ryco serve`
+    // sends no envelope, so env stays the only source there.
     const hubConnector = resolveHubConnectorConfig({
-      enabled: env.hubConnectorEnabled,
-      origin: env.hubOrigin,
+      enabled:
+        env.hubConnectorEnabled ??
+        (bootstrap?.hubConnectorEnabled === undefined
+          ? undefined
+          : String(bootstrap.hubConnectorEnabled)),
+      origin: env.hubOrigin ?? bootstrap?.hubOrigin,
       reconnectBaseMs: env.hubReconnectBaseMs,
       reconnectMaxMs: env.hubReconnectMaxMs,
       reconnectStableMs: env.hubReconnectStableMs,
