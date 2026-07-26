@@ -6,16 +6,19 @@ import {
 
 import { mobileAppLifecycle } from "../platform/appLifecycle";
 import { createMobileDpopSigner } from "../platform/dpopSigner";
+import { mobileKV } from "../platform/kv";
 import { mobilePasskeyCeremony } from "../platform/passkeyCeremony";
 import {
   hydrateMobileHostedSessionToken,
   mobileSessionCredentials,
 } from "../platform/sessionCredentials";
+import { hydrateMobileHubProfile } from "./hubProfile";
 import { mobileHostedNodeLifecycle } from "./nodeLifecycle";
 import { MobileHostedRelaySocket, mobileHostedRelayUrl } from "./relaySocket";
 import {
   getMobileHostedEndpoint,
   getMobileHostedHttpClient,
+  invalidateMobileHostedRuntimeConfig,
   isMobileHostedModeConfigured,
 } from "./runtimeConfig";
 
@@ -32,10 +35,22 @@ import {
 let configured = false;
 let available = false;
 let session: Promise<void> | undefined;
+const availabilityListeners = new Set<() => void>();
+
+function setAvailable(next: boolean): void {
+  if (available === next) return;
+  available = next;
+  for (const listener of availabilityListeners) listener();
+}
 
 /** Whether hosted mode is both configured and backed by a usable hardware key. */
 export function isMobileHostedModeAvailable(): boolean {
   return available;
+}
+
+export function subscribeMobileHostedModeAvailability(listener: () => void): () => void {
+  availabilityListeners.add(listener);
+  return () => availabilityListeners.delete(listener);
 }
 
 /**
@@ -111,7 +126,7 @@ export async function configureMobileHostedRuntime(): Promise<boolean> {
     createRelaySocket: (input) => new MobileHostedRelaySocket(input),
   });
   configured = true;
-  available = true;
+  setAvailable(true);
   return true;
 }
 
@@ -125,6 +140,12 @@ export async function configureMobileHostedRuntime(): Promise<boolean> {
  */
 export function ensureMobileHostedSession(): Promise<void> {
   session ??= (async () => {
+    await hydrateMobileHubProfile(mobileKV);
+    // A settings render may have memoized the build default before async
+    // profile hydration completed. Re-resolve now so a custom domain disables
+    // that old native-passkey runtime before any secret is read or request sent.
+    invalidateMobileHostedRuntimeConfig();
+    if (!isMobileHostedModeConfigured()) return;
     await hydrateMobileHostedSessionToken();
     if (!(await configureMobileHostedRuntime())) return;
     await hostedHubController.bootstrap();
@@ -134,9 +155,15 @@ export function ensureMobileHostedSession(): Promise<void> {
   return session;
 }
 
+/** Invalidate hosted availability after a deliberate Hub profile change. */
+export function invalidateMobileHostedRuntime(): void {
+  configured = false;
+  setAvailable(false);
+  session = undefined;
+  invalidateMobileHostedRuntimeConfig();
+}
+
 /** Test seam: drop the configured/available flags between cases. */
 export function resetMobileHostedRuntimeForTests(): void {
-  configured = false;
-  available = false;
-  session = undefined;
+  invalidateMobileHostedRuntime();
 }

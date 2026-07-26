@@ -1,6 +1,8 @@
 import type { ClientRuntimeConfigService } from "@ryco/client-runtime/platform";
 import Constants from "expo-constants";
 
+import { normalizeHubOrigin } from "../hostedHub/hubProfile";
+
 interface MobileExtraConfig {
   readonly appVariant?: string | null;
   readonly node?: {
@@ -50,16 +52,16 @@ function allowsInsecureHostedOrigin(extra: MobileExtraConfig): boolean {
   return trimmed(extra.appVariant) === "development";
 }
 
+export function isMobileDevelopmentBuild(): boolean {
+  return allowsInsecureHostedOrigin(readExtra());
+}
+
 function parseUrl(value: string): URL | null {
   try {
     return new URL(value);
   } catch {
     return null;
   }
-}
-
-function hasCredentials(url: URL): boolean {
-  return url.username !== "" || url.password !== "";
 }
 
 function hasAllowedProtocol(url: URL, allowInsecure: boolean): boolean {
@@ -73,15 +75,8 @@ function hasAllowedProtocol(url: URL, allowInsecure: boolean): boolean {
  * client's `htu` from the server-derived one.
  */
 function parseHostedOrigin(value: unknown, allowInsecure: boolean): string | null {
-  const raw = trimmed(value);
-  if (raw === undefined) return null;
-  const url = parseUrl(raw);
-  if (!url) return null;
-  if (!hasAllowedProtocol(url, allowInsecure)) return null;
-  if (hasCredentials(url)) return null;
-  if (url.search !== "" || url.hash !== "") return null;
-  if (url.pathname !== "" && url.pathname !== "/") return null;
-  return url.origin;
+  const normalized = normalizeHubOrigin(value, { allowInsecure });
+  return normalized.ok ? normalized.origin : null;
 }
 
 /**
@@ -95,7 +90,7 @@ function parseHostedAppUrl(value: unknown, allowInsecure: boolean): string | nul
   const url = parseUrl(raw);
   if (!url) return null;
   if (!hasAllowedProtocol(url, allowInsecure)) return null;
-  if (hasCredentials(url)) return null;
+  if (url.username !== "" || url.password !== "") return null;
   if (url.search !== "" || url.hash !== "") return null;
   return url.toString();
 }

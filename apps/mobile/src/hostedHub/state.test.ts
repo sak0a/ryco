@@ -75,6 +75,7 @@ describe("hosted state module import purity", () => {
       "useHostedHubStore",
       "ensureMobileHostedSession",
       "isMobileHostedModeAvailable",
+      "subscribeMobileHostedModeAvailability",
       "markHostedSessionReady",
       "markHostedSessionReplaying",
       "reportHostedShellSnapshotFailure",

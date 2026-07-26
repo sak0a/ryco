@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 
-import { ensureMobileHostedSession, isMobileHostedModeAvailable } from "../../hostedHub/state";
+import {
+  ensureMobileHostedSession,
+  isMobileHostedModeAvailable,
+  subscribeMobileHostedModeAvailability,
+} from "../../hostedHub/state";
 
 /**
  * Whether this build can run the hosted plane at all.
@@ -25,11 +29,11 @@ export function useHostedModeAvailable(): boolean {
     const settle = () => {
       if (active) setAvailable(isMobileHostedModeAvailable());
     };
-    // Both paths settle the same way: the availability answer comes from the
-    // runtime's own flag, never from whether the promise rejected.
+    const unsubscribe = subscribeMobileHostedModeAvailability(settle);
     void ensureMobileHostedSession().then(settle, settle);
     return () => {
       active = false;
+      unsubscribe();
     };
   }, []);
 

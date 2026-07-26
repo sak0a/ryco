@@ -6,6 +6,7 @@ const hoisted = vi.hoisted(() => ({
   hydrate: vi.fn(async () => {}),
   bootstrap: vi.fn(async () => {}),
   calls: [] as string[],
+  profileRaw: null as string | null,
 }));
 
 vi.mock("react-native", () => ({
@@ -19,6 +20,13 @@ vi.mock("expo-secure-store", () => ({
   getItemAsync: async () => null,
   setItemAsync: async () => {},
   deleteItemAsync: async () => {},
+}));
+vi.mock("expo-sqlite/kv-store", () => ({
+  default: {
+    getItem: async () => hoisted.profileRaw,
+    setItem: async () => {},
+    removeItem: async () => {},
+  },
 }));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { extra: {} } } }));
 vi.mock("../platform/config", () => ({
@@ -66,6 +74,11 @@ import {
   isMobileHostedModeAvailable,
   resetMobileHostedRuntimeForTests,
 } from "./runtime";
+import {
+  createHubProfile,
+  resetMobileHubProfileCacheForTests,
+  serializeHubProfile,
+} from "./hubProfile";
 import { resetMobileHostedRuntimeConfigForTests } from "./runtimeConfig";
 
 const HOSTED_CONFIG = {
@@ -77,9 +90,11 @@ const HOSTED_CONFIG = {
 const signer = { sign: async () => "proof" };
 
 beforeEach(() => {
+  resetMobileHubProfileCacheForTests();
   resetMobileHostedRuntimeForTests();
   resetMobileHostedRuntimeConfigForTests();
   hoisted.calls.length = 0;
+  hoisted.profileRaw = null;
   vi.clearAllMocks();
   hoisted.hydrate.mockResolvedValue(undefined);
   hoisted.readMobileHostedConfig.mockReturnValue(HOSTED_CONFIG);
@@ -163,6 +178,28 @@ describe("fail-closed configuration", () => {
     hoisted.readMobileHostedConfig.mockReturnValue(null);
 
     await expect(ensureMobileHostedSession()).resolves.toBeUndefined();
+    expect(hoisted.calls).not.toContain("bootstrap");
+  });
+
+  it("never reconnects the build-configured Hub when a custom profile is stored", async () => {
+    hoisted.profileRaw = serializeHubProfile(
+      createHubProfile({
+        origin: "https://self-hosted.ryco.dev",
+        compatibility: {
+          status: "compatible",
+          checkedAt: 1234,
+          protocolVersion: 1,
+          handoffVersion: 1,
+          relyingPartyId: "self-hosted.ryco.dev",
+        },
+      })!,
+    );
+
+    await ensureMobileHostedSession();
+
+    expect(isMobileHostedModeAvailable()).toBe(false);
+    expect(hoisted.createMobileDpopSigner).not.toHaveBeenCalled();
+    expect(hoisted.calls).not.toContain("hydrate");
     expect(hoisted.calls).not.toContain("bootstrap");
   });
 });
