@@ -71,6 +71,21 @@ describe("Home header brand mark (environment switcher entry point)", () => {
     expect(element.props.children.props.compact).toBe(true);
   });
 
+  it("gives each trailing header action its own 44-point target", () => {
+    const element = renderHeaderOptions().headerRight?.() as ReactElement<{
+      className: string;
+      children: ReadonlyArray<ReactElement<{ className: string; accessibilityLabel: string }>>;
+    }>;
+
+    expect(element.props.className).toContain("gap-2");
+    expect(element.props.children).toHaveLength(2);
+    for (const action of element.props.children) {
+      expect(action.props.className).toContain("h-11");
+      expect(action.props.className).toContain("w-11");
+      expect(action.props.accessibilityLabel.length).toBeGreaterThan(0);
+    }
+  });
+
   it("opens the Connections switcher sheet when pressed", () => {
     const element = renderHeaderOptions().headerLeft?.() as ReactElement<{
       onPress: () => void;

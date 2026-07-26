@@ -83,12 +83,11 @@ export function HomeScreen() {
         </Pressable>
       ),
       headerRight: () => (
-        <View className="flex-row items-center gap-6">
+        <View className="flex-row items-center gap-2">
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Pair a device"
-            hitSlop={12}
-            className="active:opacity-50"
+            className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
             onPress={() => navigation.navigate("ConnectionsNew")}
           >
             <SymbolView name="link" size={20} tintColor={iconColor} type="monochrome" />
@@ -96,8 +95,7 @@ export function HomeScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Settings"
-            hitSlop={12}
-            className="active:opacity-50"
+            className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
             onPress={() => navigation.navigate("SettingsSheet")}
           >
             <SymbolView name="gearshape" size={22} tintColor={iconColor} type="monochrome" />

@@ -36,8 +36,8 @@ export function PendingApprovalCard(props: {
   };
 
   return (
-    <View className="mx-4 my-2 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4">
-      <Text className="text-xs font-ryco-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+    <View className="mx-4 my-2 rounded-2xl border border-warning-border bg-warning-bg p-4">
+      <Text className="text-xs font-ryco-bold uppercase tracking-wide text-warning">
         Approval needed
       </Text>
       <Text className="mt-1 font-sans text-base text-foreground">

@@ -19,6 +19,7 @@ import { sendThreadTurn } from "./sendThreadTurn";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { PendingUserInputCard } from "./PendingUserInputCard";
 import { ThreadComposer } from "./ThreadComposer";
+import { proposedPlanPresentation, threadMessagePresentation } from "./threadPresentation";
 
 export function ThreadDetailScreen(props: {
   readonly environmentId: EnvironmentId;
@@ -146,19 +147,16 @@ export function ThreadDetailScreen(props: {
           built.timeline.map((entry) => {
             if (entry.kind === "message") {
               const isUser = entry.message.role === "user";
+              const presentation = threadMessagePresentation(isUser ? "user" : "assistant");
               return (
                 <View
                   key={entry.id}
                   className={`px-4 py-2 ${isUser ? "items-end" : "items-start"}`}
                 >
                   <View
-                    className={`max-w-[85%] rounded-2xl px-4 py-2.5 ${
-                      isUser ? "bg-primary" : "border border-border bg-card"
-                    }`}
+                    className={`max-w-[85%] rounded-2xl px-4 py-2.5 ${presentation.bubbleClassName}`}
                   >
-                    <Text
-                      className={`font-sans text-base ${isUser ? "text-primary-foreground" : "text-foreground"}`}
-                    >
+                    <Text className={`font-sans text-base ${presentation.textClassName}`}>
                       {entry.message.text || (entry.message.streaming ? "…" : "")}
                     </Text>
                   </View>
@@ -166,12 +164,15 @@ export function ThreadDetailScreen(props: {
               );
             }
             if (entry.kind === "proposed-plan") {
+              const presentation = proposedPlanPresentation();
               return (
                 <View
                   key={entry.id}
-                  className="mx-4 my-2 rounded-2xl border border-violet-500/40 bg-violet-500/10 p-4"
+                  className={`mx-4 my-2 rounded-2xl p-4 ${presentation.containerClassName}`}
                 >
-                  <Text className="text-xs font-ryco-bold uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                  <Text
+                    className={`text-xs font-ryco-bold uppercase tracking-wide ${presentation.labelClassName}`}
+                  >
                     Proposed plan
                   </Text>
                   <Text className="mt-1 font-sans text-sm text-foreground" numberOfLines={12}>

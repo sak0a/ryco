@@ -59,6 +59,9 @@
       --color-warning: #9a6b12;
       --color-warning-bg: rgba(201, 154, 58, 0.14);
       --color-warning-border: rgba(201, 154, 58, 0.22);
+      --color-plan: #7651a6;
+      --color-plan-bg: rgba(118, 81, 166, 0.1);
+      --color-plan-border: rgba(118, 81, 166, 0.2);
       --color-diff-add: #00764a;
       --color-diff-del: #c7113f;
 
@@ -97,10 +100,10 @@
       --color-md-user-fence-text: #ffffff;
       --color-md-hr: rgba(0, 0, 0, 0.08);
 
-      /* iMessage-style user bubble */
-      --color-user-bubble: #007aff;
-      --color-user-bubble-foreground: #ffffff;
-      --color-user-bubble-foreground-muted: rgba(255, 255, 255, 0.78);
+      /* Quiet user-message surface */
+      --color-user-bubble: #e4e4e7;
+      --color-user-bubble-foreground: #27272a;
+      --color-user-bubble-foreground-muted: #52525b;
 
       /* Drawer / modal backdrop */
       --color-backdrop: rgba(0, 0, 0, 0.22);
@@ -174,6 +177,9 @@
       --color-warning: #c99a3a;
       --color-warning-bg: rgba(201, 154, 58, 0.14);
       --color-warning-border: rgba(201, 154, 58, 0.22);
+      --color-plan: #b79ad8;
+      --color-plan-bg: rgba(151, 111, 194, 0.14);
+      --color-plan-border: rgba(183, 154, 216, 0.22);
       --color-diff-add: #2fa37a;
       --color-diff-del: #e0455f;
 
@@ -212,10 +218,10 @@
       --color-md-user-fence-text: #ffffff;
       --color-md-hr: rgba(255, 255, 255, 0.08);
 
-      /* iMessage-style user bubble */
-      --color-user-bubble: #0a84ff;
-      --color-user-bubble-foreground: #ffffff;
-      --color-user-bubble-foreground-muted: rgba(255, 255, 255, 0.78);
+      /* Quiet user-message surface */
+      --color-user-bubble: #27272a;
+      --color-user-bubble-foreground: #f4f4f5;
+      --color-user-bubble-foreground-muted: #a1a1aa;
 
       /* Drawer / modal backdrop */
       --color-backdrop: rgba(0, 0, 0, 0.55);

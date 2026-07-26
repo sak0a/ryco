@@ -60,8 +60,8 @@ export function PendingUserInputCard(props: {
   };
 
   return (
-    <View className="mx-4 my-2 rounded-2xl border border-sky-500/40 bg-sky-500/10 p-4">
-      <Text className="text-xs font-ryco-bold uppercase tracking-wide text-sky-700 dark:text-sky-300">
+    <View className="mx-4 my-2 rounded-2xl border border-accent-border bg-accent-bg p-4">
+      <Text className="text-xs font-ryco-bold uppercase tracking-wide text-accent-strong">
         Input needed
       </Text>
       {props.userInput.questions.map((question) => (

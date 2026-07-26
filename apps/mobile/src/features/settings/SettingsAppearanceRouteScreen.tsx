@@ -22,7 +22,9 @@ function Stepper(props: {
       <Text className="flex-1 font-sans text-base text-foreground">{props.label}</Text>
       <Pressable
         onPress={() => props.onStep(-1)}
-        className="h-8 w-8 items-center justify-center rounded-full border border-border active:opacity-70"
+        accessibilityRole="button"
+        accessibilityLabel={`Decrease ${props.label.toLowerCase()}`}
+        className="h-11 w-11 items-center justify-center rounded-full border border-border active:bg-subtle-strong"
       >
         <Text className="text-lg font-ryco-bold text-foreground">−</Text>
       </Pressable>
@@ -31,7 +33,9 @@ function Stepper(props: {
       </Text>
       <Pressable
         onPress={() => props.onStep(1)}
-        className="h-8 w-8 items-center justify-center rounded-full border border-border active:opacity-70"
+        accessibilityRole="button"
+        accessibilityLabel={`Increase ${props.label.toLowerCase()}`}
+        className="h-11 w-11 items-center justify-center rounded-full border border-border active:bg-subtle-strong"
       >
         <Text className="text-lg font-ryco-bold text-foreground">+</Text>
       </Pressable>
