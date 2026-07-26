@@ -553,42 +553,134 @@ describe("hosted entry surfaces", () => {
     }
   });
 
-  it.fails("PRE-EXISTING: entry content outgrows its box at 200% text scaling at 320px", async () => {
-    // Pinned, not fixed. The defect predates the node-detail work; the numbers
-    // below were re-measured after it and are recorded honestly.
-    //
+  it("contains the surfaces this branch reshaped at 200% text scaling at 320px", async () => {
     // At 320px with a 32px root every `rem`-derived length doubles, so the
     // track's `px-4` resolves to 32px per side and the content box is 256px.
-    // Measured on this fixture, at a 32px root:
+    // Measured on this fixture, at a 32px root, before and after this fix:
     //
-    //   node-directory  scrollWidth=483  clientWidth=320
-    //   sign-in         scrollWidth=351  clientWidth=320
-    //   recovery-codes  scrollWidth=320  clientWidth=320   (contained)
+    //   node-directory  483 -> 320   (contained)
+    //   recovery-codes  320 -> 320   (contained throughout)
+    //   sign-in         351 -> 333   (residual pinned below)
     //
-    // Previously recorded, before the node rows gained a details column:
-    // node-directory 339, sign-in 333.
-    //
-    // So this step made the residual WORSE, and it is worth naming what did
-    // it rather than leaving the number to be discovered. Everything on the
-    // node row that cannot shrink scales with the root font: the leading
-    // `size-9` tile (72px at a 32px root), the `w-11` details column (88px),
-    // the two `gap-3` gutters (48px), the row's `px-4` (64px) and the
-    // presence indicator's own min-content. The node label is the only column
-    // with `min-w-0`, so it is the only one that yields. sign-in grew by the
-    // "New to this Hub?" disclosure's label.
-    //
-    // Fixing this means letting more of the row yield — a wrapping row, or a
-    // presence indicator that truncates — and the presence indicator is a
-    // shared component with its own tested contract that online and offline
-    // stay visually distinguished. That is a separate change with its own
-    // review, so this stays pinned and visible.
-    //
-    // Exactly one assertion lives in this test so `it.fails` cannot pass for
-    // some unrelated reason; fixing the product makes this test fail until
-    // the annotation is removed.
+    // The 483 was ONE box, and it was not the node rows: reverting the row
+    // changes alone still measures 320 here, because each row is
+    // `overflow-hidden` and clips its own contents instead of widening the
+    // page (that failure is asserted separately below, since this measurement
+    // cannot see it). It was the two-up Account | Sign out row — `flex gap-2`
+    // with two `flex-1` children and no wrap — whose min-content is both
+    // labels side by side and which therefore could not fit a 320px phone at
+    // any font scale above ~150%. It wraps now.
+    await usePhoneViewport(320, 568);
+    document.documentElement.style.fontSize = "32px";
+    for (const surface of ["recovery-codes", "node-directory"] as const) {
+      await renderSurface(surface);
+
+      const scroller = surfaceScroller();
+      // `overflow-x: hidden` still answers programmatic scrolling, so this must
+      // be measured unpanned or it reports a clipped surface as compliant.
+      expect(scroller.scrollLeft, "measured unpanned").toBe(0);
+      expect(
+        scroller.scrollWidth,
+        `${surface}: content wider than the surface's clipping box, and clipped rather than reachable`,
+      ).toBeLessThanOrEqual(scroller.clientWidth);
+
+      await mounted?.unmount();
+      mounted = null;
+      hostedHubController.resetForTests();
+    }
+  });
+
+  it("keeps the directory's phone account row whole at 200% text scaling", async () => {
+    // The two-up `flex gap-2` / `flex-1` row this surface introduced put
+    // Account and Sign out on one line with no way to wrap. At a 32px root the
+    // line cannot hold both, and `main` is `overflow-x: hidden`, so Sign out
+    // was cut off with half its icon missing. Before it was paired it was
+    // full-width and fit.
     await usePhoneViewport(320, 568);
     document.documentElement.style.fontSize = "32px";
     await renderSurface("node-directory");
+
+    const account = control("Account");
+    const signOut = control("Sign out");
+    const rect = signOut.getBoundingClientRect();
+    expect(rect.left, "Sign out starts off-screen left").toBeGreaterThanOrEqual(0);
+    expect(rect.right, "Sign out is cut off on the right").toBeLessThanOrEqual(window.innerWidth);
+    // Its own label is not clipped inside its own box either.
+    expect(signOut.scrollWidth, "the Sign out label overflows its button").toBeLessThanOrEqual(
+      signOut.clientWidth,
+    );
+    // The row wrapped rather than squeezing both onto one line.
+    expect(
+      rect.top,
+      "the row refused to wrap and squeezed both controls onto one line",
+    ).toBeGreaterThanOrEqual(account.getBoundingClientRect().bottom - 0.5);
+  });
+
+  it("keeps a node row's own contents inside the row at 200% text scaling", async () => {
+    // The row is `overflow-hidden`, so what it cannot fit it destroys silently
+    // — the page-level containment assertion above is blind to it. Everything
+    // on the row that could not shrink scaled with the root font: the leading
+    // tile (72px at a 32px root), the details column (88px), the two `gap-3`
+    // gutters (48px) and the row's `px-4` (64px). The label was the only column
+    // with `min-w-0`, so it was the only one that yielded — and at 320px it had
+    // yielded all of it: measured labelW=0 and 5px of the presence indicator
+    // clipped away, i.e. a list of machines with no names on it.
+    //
+    // The tile and the details column are pixel boxes now — a touch target and
+    // an icon frame, neither of which is text — and the row's contents wrap, so
+    // the presence indicator drops to a second line instead of squeezing the
+    // name out. `NodePresence` itself is untouched: its tested contract that
+    // online and offline stay visually distinguished does not have to bend.
+    await usePhoneViewport(320, 568);
+    document.documentElement.style.fontSize = "32px";
+    await renderSurface("node-directory");
+
+    const row = document.querySelector<HTMLElement>('ul[role="list"] > li');
+    expect(row, "no node row rendered").not.toBeNull();
+    expect(
+      row!.scrollWidth,
+      "the row clips content it cannot fit, and nothing can scroll to it",
+    ).toBeLessThanOrEqual(row!.clientWidth);
+
+    // The one thing a directory of machines cannot afford to lose.
+    const label = row!.querySelector<HTMLElement>("span[id]");
+    expect(label?.textContent).toBe("Studio node 1");
+    expect(
+      label!.getBoundingClientRect().width,
+      "the node's own name was squeezed to nothing",
+    ).toBeGreaterThan(0);
+
+    // …and the presence indicator is inside the row rather than past its edge.
+    const presence = [...row!.querySelectorAll<HTMLElement>("span")].find(
+      (span) => span.textContent?.trim() === "Online",
+    );
+    expect(presence, "no presence indicator on the row").not.toBeUndefined();
+    expect(
+      presence!.getBoundingClientRect().right,
+      "the presence indicator is clipped by the row",
+    ).toBeLessThanOrEqual(row!.getBoundingClientRect().right + 0.5);
+  });
+
+  it.fails("PRE-EXISTING: sign-in's button labels outgrow their boxes at 200% text scaling", async () => {
+    // Pinned, not fixed, and narrower than what it replaces: the two surfaces
+    // this branch reshaped are contained now (asserted above), and sign-in is
+    // back to the 333 it measured before this branch — the "New to this Hub?"
+    // disclosure label that had pushed it to 351 wraps now.
+    //
+    // What is left is not this surface's to fix. `buttonVariants` bakes
+    // `whitespace-nowrap` and a fixed `h-*` into every button in the design
+    // system, so at a 32px root "Sign in with passkey" needs a 300px inline
+    // run inside a 254px box and paints past it. Letting button labels wrap
+    // is a design-system change with its own review and its own regression
+    // surface on every screen; making it from here would be editing a shared
+    // primitive under cover of an entry-surface fix.
+    //
+    // Exactly one assertion lives in this test so `it.fails` cannot pass for
+    // some unrelated reason; fixing the primitive makes this test fail until
+    // the annotation is removed.
+    await usePhoneViewport(320, 568);
+    document.documentElement.style.fontSize = "32px";
+    await renderSurface("sign-in");
 
     const scroller = surfaceScroller();
     expect(scroller.scrollWidth).toBeLessThanOrEqual(scroller.clientWidth);

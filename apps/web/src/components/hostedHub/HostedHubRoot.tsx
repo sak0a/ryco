@@ -328,7 +328,11 @@ function NewToThisHubDisclosure({ bootstrapAvailable }: { readonly bootstrapAvai
         size="sm"
         aria-expanded={open}
         aria-controls={panelId}
-        className="-mx-2 phone:min-h-11"
+        // `whitespace-nowrap` is baked into every button variant, and a
+        // one-line label whose font has doubled is a label wider than a 320px
+        // phone. It wraps instead, and the box grows with it rather than
+        // clipping the second line against `h-8`.
+        className="-mx-2 h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-left phone:min-h-11"
         onClick={() => setOpen((current) => !current)}
       >
         New to this Hub?
@@ -707,12 +711,12 @@ function NodeRow({
         type="button"
         disabled={disabled}
         onClick={onConnect}
-        className="flex min-h-16 min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-60 disabled:hover:bg-transparent phone:min-h-18"
+        className="flex min-h-16 min-w-0 flex-1 flex-wrap items-center gap-3 px-4 py-3 text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-60 disabled:hover:bg-transparent phone:min-h-18"
       >
         {/* `ServerIcon` for every platform: lucide has no legitimate macOS or
             Windows mark, and shipping a vendor glyph would be brand
             fabrication as well as colour-adjacent information. */}
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+        <span className="flex size-[36px] shrink-0 items-center justify-center rounded-lg bg-muted">
           <ServerIcon aria-hidden className="size-4" />
         </span>
         <span className="min-w-0 flex-1">
@@ -744,7 +748,7 @@ function NodeRow({
         aria-label="Node details"
         aria-describedby={labelId}
         onClick={onOpenDetail}
-        className="flex w-11 shrink-0 items-center justify-center text-muted-foreground outline-none hover:bg-accent/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        className="flex w-[44px] shrink-0 items-center justify-center text-muted-foreground outline-none hover:bg-accent/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
         <ChevronRightIcon aria-hidden className="size-4" />
       </button>
@@ -869,7 +873,7 @@ function HostedNodeDirectory() {
         // the children — which is what keeps the desktop group static.
         <div className={`phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
           {isPhoneTier ? (
-            <div className="mt-5 flex gap-2">
+            <div className="mt-5 flex flex-wrap gap-2">
               {accountButton}
               {signOutButton}
             </div>
