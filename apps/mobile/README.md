@@ -1,9 +1,8 @@
 # @ryco/mobile
 
 The Ryco iOS-first native app (Expo / React Native), consuming
-`@ryco/client-runtime`. B1 ships the scaffold, the platform adapters, the
-runtime wiring, and the direct-node bearer pairing loop. MVP screens are B2;
-EAS / TestFlight is B3; hosted passkey login arrives with workstream C.
+`@ryco/client-runtime`. It ships the scaffold, platform adapters, direct-node
+bearer pairing loop, and hosted Hub system-browser authorization handoff.
 
 ## Prerequisites
 
@@ -31,15 +30,19 @@ headless CI container.
 
 ## Launch the dev client + connect to a local/staging node (owner, on a Mac)
 
-Interactive Simulator QA is the owner's — agents cannot drive the Simulator.
+Simulator QA uses the development client. Hosted sign-in itself uses the system
+browser and the app's custom callback scheme.
 
 1. **Install deps** (repo root): `bun install --frozen-lockfile`.
 2. **Prebuild the native iOS project** (first run, or after native-dep/plugin
    changes): `cd apps/mobile && APP_VARIANT=development bun run ios:dev`.
    This runs `expo prebuild --clean --platform ios` and `expo run:ios`, building
-   the dev client into the Simulator. (A physical device needs a free Apple
+   the dev client into the Simulator. A physical device can use a free Apple
    Personal Team — set `RYCO_IOS_PERSONAL_TEAM=1` and
-   `RYCO_IOS_PERSONAL_TEAM_BUNDLE_ID`.)
+   `RYCO_IOS_PERSONAL_TEAM_BUNDLE_ID`. This omits associated-domain
+   entitlements but still supports Hub sign-in through
+   `ryco-dev://hosted/complete`; no paid Apple Developer membership is required
+   for development.
 3. **Start Metro** (if not already running): `bun run --cwd apps/mobile dev:client`.
 4. **Start a Ryco node** on the LAN/tailnet and open its **Pair a device**
    screen to produce a pairing URL (`ryco://pair?host=…#token=…`, or an
@@ -61,9 +64,12 @@ Interactive Simulator QA is the owner's — agents cannot drive the Simulator.
 
 ## Notes / boundaries
 
-- Native passkeys and associated-domains (hosted login) are **inert in B1** and
-  cannot be validated on the Simulator; validate on a real device once
-  workstream C lands. Never fabricate device evidence.
+- Expo Go is not supported because hosted sessions use Ryco's custom
+  hardware-backed device-key module. Use the generated development client.
+- Paid/team builds may enable associated domains for native passkey account
+  actions. Core Hub sign-in does not depend on that entitlement: it uses
+  `ASWebAuthenticationSession` / a Custom Tab, explicit browser consent, and a
+  one-time PKCE code returned through the variant's custom scheme.
 - Bundle IDs/schemes are Ryco placeholders (`dev.ryco.app*`, `ryco*`); the EAS
   project, Apple Team id, and App Store Connect record are wired in B3.
 

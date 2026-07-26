@@ -28,19 +28,8 @@ function clientResponse(body: unknown, status = 200) {
 }
 
 describe("Hub capability decoder", () => {
-  it("projects only the bounded public compatibility fields", () => {
-    const decoded = decodeHubCapability(
-      document({
-        token: "must-not-project",
-        pollingSecret: "must-not-project",
-        nativeHandoff: {
-          mode: "system-browser",
-          version: 1,
-          ticket: "must-not-project",
-        },
-      }),
-      ORIGIN,
-    );
+  it("accepts only the canonical bounded public compatibility document", () => {
+    const decoded = decodeHubCapability(document(), ORIGIN);
     expect(decoded).toEqual({
       ok: true,
       capability: {
@@ -49,7 +38,10 @@ describe("Hub capability decoder", () => {
         relyingParty: { id: "hub.ryco.dev", displayName: "Studio Hub" },
       },
     });
-    expect(JSON.stringify(decoded)).not.toContain("must-not-project");
+    expect(decodeHubCapability(document({ token: "must-not-project" }), ORIGIN)).toEqual({
+      ok: false,
+      reason: "invalid-document",
+    });
   });
 
   it("rejects a relying party outside the Hub domain", () => {
@@ -71,14 +63,7 @@ describe("Hub capability decoder", () => {
         document({ relyingParty: { id: "hub.ryco.dev", displayName: "x".repeat(65) } }),
         ORIGIN,
       ),
-    ).toEqual({
-      ok: true,
-      capability: {
-        protocolVersion: 1,
-        nativeHandoff: { mode: "system-browser", version: 1 },
-        relyingParty: { id: "hub.ryco.dev", displayName: null },
-      },
-    });
+    ).toEqual({ ok: false, reason: "invalid-document" });
   });
 });
 

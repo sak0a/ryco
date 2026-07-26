@@ -7,6 +7,7 @@ import {
 import { mobileAppLifecycle } from "../platform/appLifecycle";
 import { createMobileDpopSigner } from "../platform/dpopSigner";
 import { mobileKV } from "../platform/kv";
+import { mobileNativeAuthorization } from "../platform/nativeAuthorization";
 import { mobilePasskeyCeremony } from "../platform/passkeyCeremony";
 import {
   hydrateMobileHostedSessionToken,
@@ -116,6 +117,7 @@ export async function configureMobileHostedRuntime(): Promise<boolean> {
     passkeyCeremony: mobilePasskeyCeremony,
     sessionCredentials: mobileSessionCredentials,
     dpopSigner,
+    nativeAuthorization: mobileNativeAuthorization,
     nodeLifecycle: mobileHostedNodeLifecycle,
     timers,
     isForeground: () => mobileAppLifecycle.isForeground(),
@@ -142,8 +144,8 @@ export function ensureMobileHostedSession(): Promise<void> {
   session ??= (async () => {
     await hydrateMobileHubProfile(mobileKV);
     // A settings render may have memoized the build default before async
-    // profile hydration completed. Re-resolve now so a custom domain disables
-    // that old native-passkey runtime before any secret is read or request sent.
+    // profile hydration completed. Re-resolve now so a compatible saved domain
+    // becomes authoritative before any secret is read or request is sent.
     invalidateMobileHostedRuntimeConfig();
     if (!isMobileHostedModeConfigured()) return;
     await hydrateMobileHostedSessionToken();

@@ -24,6 +24,7 @@ import {
 import { invalidateMobileHostedRuntime } from "../../hostedHub/runtime";
 import { isMobileDevelopmentBuild, readMobileHostedConfig } from "../../platform/config";
 import { mobileKV } from "../../platform/kv";
+import { clearMobileHostedSessionToken } from "../../platform/sessionCredentials";
 import { useHostedModeAvailable } from "../hostedHub/useHostedMode";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
@@ -35,13 +36,8 @@ function compatibilityLabel(profile: HubProfile | null, usesBuildDefault: boolea
   return usesBuildDefault ? "Build configured" : "Not checked";
 }
 
-function accountLabel(
-  profile: HubProfile | null,
-  usesBuildRuntime: boolean,
-  hostedAvailable: boolean,
-): string | undefined {
+function accountLabel(profile: HubProfile | null, hostedAvailable: boolean): string | undefined {
   if (profile === null) return "Not configured";
-  if (!usesBuildRuntime) return "Browser handoff pending";
   return hostedAvailable ? undefined : "Unavailable";
 }
 
@@ -70,10 +66,6 @@ export function SettingsHubRouteScreen() {
     [buildConfig, development],
   );
   const profile = storedProfile ?? buildProfile;
-  const usesBuildRuntime =
-    buildConfig !== null &&
-    (storedProfile === null || storedProfile.origin === buildConfig.hubOrigin);
-
   useEffect(() => {
     let active = true;
     void hydrateMobileHubProfile(mobileKV).then((next) => {
@@ -89,12 +81,7 @@ export function SettingsHubRouteScreen() {
     else await clearMobileHubProfile(mobileKV);
     setStoredProfile(nextProfile);
     invalidateMobileHostedRuntime();
-    if (
-      nextProfile === null ||
-      (buildConfig !== null && nextProfile.origin === buildConfig.hubOrigin)
-    ) {
-      void ensureMobileHostedSession();
-    }
+    void ensureMobileHostedSession();
   };
 
   const replaceProfile = (nextProfile: HubProfile | null) => {
@@ -126,6 +113,9 @@ export function SettingsHubRouteScreen() {
               ) {
                 await hostedHubController.expireSession();
               }
+              // The origin is about to change. Clear the native token even when
+              // the old Hub was unreachable and its controller could not run.
+              await clearMobileHostedSessionToken();
             },
             replaceProfile: () => persistReplacement(nextProfile),
           });
@@ -170,7 +160,7 @@ export function SettingsHubRouteScreen() {
             label="Domain"
             value={profile?.origin ?? "Not configured"}
             disabled={busy}
-            onPress={development ? () => setEditorVisible(true) : undefined}
+            onPress={() => setEditorVisible(true)}
           />
           <SettingsRow
             label="Compatibility"
@@ -183,27 +173,20 @@ export function SettingsHubRouteScreen() {
           />
         </SettingsSection>
 
-        {!development ? (
-          <Text className="mt-2 px-5 font-sans text-xs leading-relaxed text-foreground-muted">
-            Custom Hub editing is development-gated until the public system-browser handoff is
-            available on a compatible Hub.
-          </Text>
-        ) : null}
-
         <SettingsSection title="Account and security">
           <SettingsRow
             first
             label="Account"
-            value={accountLabel(profile, usesBuildRuntime, hostedAvailable)}
-            disabled={!usesBuildRuntime || !hostedAvailable || busy}
+            value={accountLabel(profile, hostedAvailable)}
+            disabled={!hostedAvailable || busy}
             onPress={() => navigation.navigate("SettingsAccount" as never)}
           />
         </SettingsSection>
 
-        {!usesBuildRuntime && profile?.compatibility.status === "compatible" ? (
+        {profile?.compatibility.status === "compatible" && !hostedAvailable ? (
           <Text className="mt-2 px-5 font-sans text-xs leading-relaxed text-foreground-muted">
-            This self-hosted profile is compatible, but native browser handoff remains unavailable
-            until the separately reviewed Hub endpoint is deployed. Direct nodes keep working.
+            This Hub is compatible, but this device could not create the hardware-backed key its
+            session requires. Direct nodes keep working.
           </Text>
         ) : null}
       </ScrollView>

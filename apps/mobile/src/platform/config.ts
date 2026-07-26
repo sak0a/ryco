@@ -16,13 +16,15 @@ interface MobileExtraConfig {
   };
 }
 
+export type MobileAppVariant = "development" | "preview" | "production";
+
 /** The validated hosted-plane configuration, or nothing at all. */
 export interface MobileHostedConfig {
   /** The Hub public origin every bearer request URL and DPoP `htu` is built from. */
   readonly hubOrigin: string;
-  /** The hosted web app the fallback browser session opens, when configured. */
+  /** Optional hosted web surface retained for shared runtime compatibility. */
   readonly appUrl: string | null;
-  /** The passkey relying party (associated-domains host). */
+  /** The Hub's advertised passkey relying party. */
   readonly relyingParty: string;
 }
 
@@ -50,6 +52,20 @@ function readHostedExtra(extra: MobileExtraConfig): MobileExtraConfig["hosted"] 
 // every other variant (and an unrecognized/absent variant) requires `https:`.
 function allowsInsecureHostedOrigin(extra: MobileExtraConfig): boolean {
   return trimmed(extra.appVariant) === "development";
+}
+
+/** The app variant determines the exact custom-scheme authorization callback. */
+export function readMobileAppVariant(): MobileAppVariant {
+  const variant = trimmed(readExtra().appVariant);
+  return variant === "development" || variant === "preview" ? variant : "production";
+}
+
+/** A bounded public label shown in the Hub's explicit device-consent screen. */
+export function readMobileDeviceLabel(): string {
+  const name = trimmed(Constants.deviceName);
+  return Array.from(name ?? "Ryco mobile")
+    .slice(0, 64)
+    .join("");
 }
 
 export function isMobileDevelopmentBuild(): boolean {
@@ -80,9 +96,8 @@ function parseHostedOrigin(value: unknown, allowInsecure: boolean): string | nul
 }
 
 /**
- * The hosted web app URL may carry a path (the app need not sit at the root) but
- * never a query, fragment, or credential — a fallback browser session must be
- * opened at a URL derived from config alone.
+ * The optional hosted web app URL may carry a path (the app need not sit at the
+ * root) but never a query, fragment, or credential.
  */
 function parseHostedAppUrl(value: unknown, allowInsecure: boolean): string | null {
   const raw = trimmed(value);

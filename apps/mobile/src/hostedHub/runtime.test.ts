@@ -3,6 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 const hoisted = vi.hoisted(() => ({
   readMobileHostedConfig: vi.fn(),
   createMobileDpopSigner: vi.fn(),
+  nativeAuthorization: {
+    callbackUri: () => "ryco-dev://hosted/complete",
+    deviceLabel: () => "Ryco mobile",
+    randomBytes: async (length: number) => new Uint8Array(length),
+    sha256: async () => new Uint8Array(32),
+    openSystemBrowser: async () => ({ type: "cancel" as const }),
+  },
   hydrate: vi.fn(async () => {}),
   bootstrap: vi.fn(async () => {}),
   calls: [] as string[],
@@ -34,6 +41,9 @@ vi.mock("../platform/config", () => ({
 }));
 vi.mock("../platform/dpopSigner", () => ({
   createMobileDpopSigner: hoisted.createMobileDpopSigner,
+}));
+vi.mock("../platform/nativeAuthorization", () => ({
+  mobileNativeAuthorization: hoisted.nativeAuthorization,
 }));
 vi.mock("../platform/sessionCredentials", () => ({
   hydrateMobileHostedSessionToken: async () => {
@@ -115,6 +125,7 @@ describe("hosted runtime configuration", () => {
     expect(typeof configuration.passkeyCeremony.register).toBe("function");
     expect(configuration.sessionCredentials.mode).toBe("bearer");
     expect(configuration.dpopSigner).toBe(signer);
+    expect(configuration.nativeAuthorization).toBe(hoisted.nativeAuthorization);
     expect(typeof configuration.nodeLifecycle.connectPrimaryEnvironment).toBe("function");
     expect(typeof configuration.isForeground).toBe("function");
     expect(typeof configuration.subscribeForeground).toBe("function");
@@ -181,7 +192,7 @@ describe("fail-closed configuration", () => {
     expect(hoisted.calls).not.toContain("bootstrap");
   });
 
-  it("never reconnects the build-configured Hub when a custom profile is stored", async () => {
+  it("makes a compatible saved Hub profile authoritative", async () => {
     hoisted.profileRaw = serializeHubProfile(
       createHubProfile({
         origin: "https://self-hosted.ryco.dev",
@@ -193,6 +204,19 @@ describe("fail-closed configuration", () => {
           relyingPartyId: "self-hosted.ryco.dev",
         },
       })!,
+    );
+
+    await ensureMobileHostedSession();
+
+    expect(isMobileHostedModeAvailable()).toBe(true);
+    expect(hoisted.createMobileDpopSigner).toHaveBeenCalledTimes(1);
+    expect(hoisted.calls).toEqual(["hydrate", "bootstrap"]);
+    expect(getHostedRuntimeConfiguration().endpoint.origin()).toBe("https://self-hosted.ryco.dev");
+  });
+
+  it("does not send a credential to an unchecked saved Hub", async () => {
+    hoisted.profileRaw = serializeHubProfile(
+      createHubProfile({ origin: "https://unchecked.ryco.dev" })!,
     );
 
     await ensureMobileHostedSession();

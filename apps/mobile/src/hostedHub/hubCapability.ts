@@ -1,15 +1,19 @@
 import type { HttpClientService } from "@ryco/client-runtime/platform";
+import {
+  NATIVE_HANDOFF_CAPABILITY_PATH,
+  NATIVE_HANDOFF_MAX_CAPABILITY_BYTES,
+  NATIVE_HANDOFF_MODE,
+  NATIVE_HANDOFF_PROTOCOL_VERSION,
+  NATIVE_HANDOFF_VERSION,
+  NativeHandoffCapability,
+} from "@ryco/contracts/native-handoff";
+import { Schema } from "effect";
 
-export const HUB_CAPABILITY_PATH = "/.well-known/ryco-hub";
-export const SUPPORTED_HUB_PROTOCOL_VERSION = 1;
-export const SUPPORTED_HUB_HANDOFF_VERSION = 1;
+export const HUB_CAPABILITY_PATH = NATIVE_HANDOFF_CAPABILITY_PATH;
+export const SUPPORTED_HUB_PROTOCOL_VERSION = NATIVE_HANDOFF_PROTOCOL_VERSION;
+export const SUPPORTED_HUB_HANDOFF_VERSION = NATIVE_HANDOFF_VERSION;
 
-const MAX_CAPABILITY_BODY_LENGTH = 16_384;
-const MAX_RELYING_PARTY_LENGTH = 253;
-const MAX_DISPLAY_NAME_LENGTH = 64;
-const MAX_MODE_LENGTH = 32;
-const RELYING_PARTY_PATTERN =
-  /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$/i;
+const MAX_CAPABILITY_BODY_LENGTH = NATIVE_HANDOFF_MAX_CAPABILITY_BYTES;
 
 export type HubCapabilityFailureReason =
   | "capability-not-found"
@@ -27,7 +31,7 @@ export interface HubCapability {
   };
   readonly relyingParty: {
     readonly id: string;
-    readonly displayName: string | null;
+    readonly displayName: string;
   };
 }
 
@@ -45,34 +49,19 @@ export type HubCapabilityCheck =
 
 type CapabilityDecodeResult =
   | { readonly ok: true; readonly capability: HubCapability }
-  | { readonly ok: false; readonly reason: "invalid-document" | "invalid-relying-party" };
+  | {
+      readonly ok: false;
+      readonly reason:
+        | "invalid-document"
+        | "invalid-relying-party"
+        | "unsupported-handoff"
+        | "unsupported-protocol";
+    };
 
 function objectValue(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
-}
-
-function boundedInteger(value: unknown): value is number {
-  return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 65_535;
-}
-
-function boundedMode(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= MAX_MODE_LENGTH &&
-    /^[a-z][a-z0-9-]*$/.test(value)
-  );
-}
-
-function validRelyingPartyId(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= MAX_RELYING_PARTY_LENGTH &&
-    RELYING_PARTY_PATTERN.test(value)
-  );
 }
 
 function relyingPartyMatchesOrigin(relyingPartyId: string, origin: string): boolean {
@@ -84,38 +73,45 @@ function relyingPartyMatchesOrigin(relyingPartyId: string, origin: string): bool
 export function decodeHubCapability(value: unknown, origin: string): CapabilityDecodeResult {
   const document = objectValue(value);
   const nativeHandoff = objectValue(document?.nativeHandoff);
-  const relyingParty = objectValue(document?.relyingParty);
+  if (document?.service !== "ryco-hub" || !Number.isInteger(document.protocolVersion)) {
+    return { ok: false, reason: "invalid-document" };
+  }
+  if (document.protocolVersion !== SUPPORTED_HUB_PROTOCOL_VERSION) {
+    return { ok: false, reason: "unsupported-protocol" };
+  }
   if (
-    document?.service !== "ryco-hub" ||
-    !boundedInteger(document.protocolVersion) ||
     !nativeHandoff ||
-    !boundedMode(nativeHandoff.mode) ||
-    !boundedInteger(nativeHandoff.version) ||
-    !relyingParty ||
-    !validRelyingPartyId(relyingParty.id)
+    typeof nativeHandoff.mode !== "string" ||
+    !Number.isInteger(nativeHandoff.version)
   ) {
     return { ok: false, reason: "invalid-document" };
   }
-  if (!relyingPartyMatchesOrigin(relyingParty.id, origin)) {
+  if (
+    nativeHandoff.mode !== NATIVE_HANDOFF_MODE ||
+    nativeHandoff.version !== SUPPORTED_HUB_HANDOFF_VERSION
+  ) {
+    return { ok: false, reason: "unsupported-handoff" };
+  }
+
+  let capability: typeof NativeHandoffCapability.Type;
+  try {
+    capability = Schema.decodeUnknownSync(NativeHandoffCapability)(value, {
+      onExcessProperty: "error",
+    });
+  } catch {
+    return { ok: false, reason: "invalid-document" };
+  }
+  if (!relyingPartyMatchesOrigin(capability.relyingParty.id, origin)) {
     return { ok: false, reason: "invalid-relying-party" };
   }
-  const displayName =
-    typeof relyingParty.displayName === "string" &&
-    relyingParty.displayName.trim().length > 0 &&
-    Array.from(relyingParty.displayName.trim()).length <= MAX_DISPLAY_NAME_LENGTH
-      ? relyingParty.displayName.trim()
-      : null;
   return {
     ok: true,
     capability: {
-      protocolVersion: document.protocolVersion,
-      nativeHandoff: {
-        mode: nativeHandoff.mode,
-        version: nativeHandoff.version,
-      },
+      protocolVersion: capability.protocolVersion,
+      nativeHandoff: capability.nativeHandoff,
       relyingParty: {
-        id: relyingParty.id.toLocaleLowerCase(),
-        displayName,
+        id: capability.relyingParty.id.toLocaleLowerCase(),
+        displayName: capability.relyingParty.displayName,
       },
     },
   };
@@ -169,15 +165,6 @@ export function createHubCapabilityClient(
       const decoded = decodeHubCapability(value, origin);
       if (!decoded.ok) {
         return { status: "incompatible", checkedAt, reason: decoded.reason };
-      }
-      if (decoded.capability.protocolVersion !== SUPPORTED_HUB_PROTOCOL_VERSION) {
-        return { status: "incompatible", checkedAt, reason: "unsupported-protocol" };
-      }
-      if (
-        decoded.capability.nativeHandoff.mode !== "system-browser" ||
-        decoded.capability.nativeHandoff.version !== SUPPORTED_HUB_HANDOFF_VERSION
-      ) {
-        return { status: "incompatible", checkedAt, reason: "unsupported-handoff" };
       }
       return { status: "compatible", checkedAt, capability: decoded.capability };
     },

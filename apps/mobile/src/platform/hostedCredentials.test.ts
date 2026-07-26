@@ -166,6 +166,46 @@ describe("bearer session credentials", () => {
     expect(kv.store.has(HOSTED_SESSION_TOKEN_KEY)).toBe(false);
   });
 
+  it("waits for durable removal before a Hub-domain change continues", async () => {
+    const kv = fakeSecretKV();
+    let releaseSet: (() => void) | undefined;
+    const credentials = createMobileSessionCredentials({
+      ...kv.service,
+      set: async (key, value) => {
+        await new Promise<void>((resolve) => {
+          releaseSet = resolve;
+        });
+        kv.store.set(key, value);
+        return true;
+      },
+    });
+
+    credentials.writeBearerToken?.("old-hub-token");
+    const clearing = credentials.clearBearerToken();
+    expect(credentials.readBearerToken?.()).toBeNull();
+    await Promise.resolve();
+    releaseSet?.();
+    await clearing;
+
+    expect(kv.store.has(HOSTED_SESSION_TOKEN_KEY)).toBe(false);
+  });
+
+  it("fails a Hub-domain change closed when durable removal fails", async () => {
+    const credentials = createMobileSessionCredentials({
+      get: async () => "old-hub-token",
+      set: async () => true,
+      remove: async () => {
+        throw new Error("raw keychain details");
+      },
+    });
+    await credentials.hydrate();
+
+    await expect(credentials.clearBearerToken()).rejects.toThrow(
+      "The Hub credential could not be cleared.",
+    );
+    expect(credentials.readBearerToken?.()).toBeNull();
+  });
+
   it("hydrates at most once", async () => {
     const kv = fakeSecretKV(new Map([[HOSTED_SESSION_TOKEN_KEY, "t"]]));
     const get = vi.fn(kv.service.get);

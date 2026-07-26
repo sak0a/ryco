@@ -32,14 +32,20 @@ export function getMobileHostedConfig(): MobileHostedConfig | null {
   if (hostedConfig === undefined) {
     const buildConfig = readMobileHostedConfig();
     const profile = readCachedMobileHubProfile();
-    // Profile hydration happens before hosted bootstrap. A custom domain uses
-    // the system-browser handoff contract and must never fall through to the
-    // build's native-passkey runtime; until that handoff is implemented, it
-    // intentionally leaves hosted mode unavailable while direct nodes continue.
+    // A saved profile is authoritative only after the exact origin has
+    // advertised the supported system-browser handoff. Unchecked or
+    // incompatible profiles fail closed while the independent direct plane
+    // continues unchanged.
     hostedConfig =
-      profile !== undefined && profile !== null && profile.origin !== buildConfig?.hubOrigin
-        ? null
-        : buildConfig;
+      profile === undefined || profile === null
+        ? buildConfig
+        : profile.compatibility.status === "compatible"
+          ? {
+              hubOrigin: profile.origin,
+              appUrl: profile.origin,
+              relyingParty: profile.compatibility.relyingPartyId,
+            }
+          : null;
   }
   return hostedConfig;
 }

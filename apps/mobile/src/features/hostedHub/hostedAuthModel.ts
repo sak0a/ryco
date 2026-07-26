@@ -12,7 +12,6 @@ import {
 
 import type { StatusTone } from "../../components/StatusPill";
 import { hostedHubController } from "../../hostedHub/state";
-import { openHostedFallbackSession } from "./HostedFallbackSession";
 
 /**
  * View models for every hosted-plane surface the native app renders.
@@ -51,7 +50,7 @@ export type HostedSignInSurface =
   | "signed-out"
   /** The Hub has no owner yet: registration is browser-transport-only. */
   | "first-run"
-  /** A passkey ceremony is in flight. */
+  /** A system-browser authorization handoff is in flight. */
   | "authenticating"
   | "session-expired"
   | "signing-out"
@@ -62,7 +61,6 @@ export type HostedSignInSurface =
 export type HostedAuthActionId =
   | "sign-in"
   | "cancel-authentication"
-  | "open-fallback"
   | "retry-hub"
   | "pair-device"
   | "dismiss-recovery-codes"
@@ -189,28 +187,6 @@ export interface HostedAccountViewInput {
 const DELIVERY_UNKNOWN_MESSAGE =
   "A request may or may not have reached the node. Ryco did not resend it automatically.";
 
-/**
- * Hand control to the Hub's own web app, then back to a native passkey login.
- *
- * This is a **login** fallback and nothing else. The routes it exists for are
- * the ones the Hub guards with `enforceSameOrigin` — owner bootstrap,
- * invitation registration, password sign-in, recovery-code redemption, and the
- * email recovery pair — which a native socket cannot satisfy. Credential
- * *management* is not among them: `/api/account/*` authorizes an
- * `Authorization: DPoP` request with no same-origin check, so the account
- * surface calls it natively (see `hostedAccountModel.ts`) and never appears
- * here.
- *
- * `openHostedFallbackSession` owns the URL validation and the transport
- * separation; the only thing decided here is that the return path is always
- * `signIn()`, because the app never adopts the browser's session.
- */
-function openFallbackSession(): void {
-  void openHostedFallbackSession({
-    completeWithNativeSignIn: () => hostedHubController.signIn(),
-  });
-}
-
 function action(
   id: HostedAuthActionId,
   label: string,
@@ -233,9 +209,6 @@ function action(
 
 const signInAction = (label: string): HostedAuthAction =>
   action("sign-in", label, () => void hostedHubController.signIn());
-
-const fallbackAction = (label: string): HostedAuthAction =>
-  action("open-fallback", label, openFallbackSession);
 
 function statusOf(state: HostedHubState): {
   readonly text: HostedConnectionStatusText;
@@ -369,8 +342,8 @@ export function deriveHostedSignInView(input: HostedSignInViewInput): HostedSign
     case "authenticating":
       return {
         ...base,
-        title: "Waiting for your passkey",
-        detail: "Approve the passkey request to finish signing in to your Hub.",
+        title: "Finish in your browser",
+        detail: "Sign in to your Hub and approve this device. Ryco will return here automatically.",
         busy: true,
         primaryAction: action("cancel-authentication", "Cancel", () =>
           hostedHubController.cancelAuthentication(),
@@ -387,18 +360,16 @@ export function deriveHostedSignInView(input: HostedSignInViewInput): HostedSign
       return {
         ...base,
         title: "Your session expired",
-        detail: "Sign in again with your passkey to reconnect to your Hub.",
-        primaryAction: signInAction("Sign in with passkey"),
-        secondaryAction: fallbackAction("Other ways to sign in"),
+        detail: "Continue in your browser to reconnect this device to your Hub.",
+        primaryAction: signInAction("Continue in browser"),
       };
     case "first-run":
       return {
         ...base,
         title: "Set up your Hub",
         detail:
-          "This Hub has no account yet. Ryco opens your browser to create the first owner and a passkey, then signs you in here.",
-        primaryAction: fallbackAction("Continue in browser"),
-        secondaryAction: signInAction("I already have a passkey"),
+          "This Hub has no account yet. Continue in your browser to create the first owner, then approve this device.",
+        primaryAction: signInAction("Continue in browser"),
       };
     case "recovery-codes":
       return {
@@ -430,9 +401,8 @@ export function deriveHostedSignInView(input: HostedSignInViewInput): HostedSign
         ...base,
         title: "Connect to your Hub",
         detail:
-          "Sign in with the passkey registered for this Hub. Every request from this device is signed with a key that never leaves its secure hardware.",
-        primaryAction: signInAction("Sign in with passkey"),
-        secondaryAction: fallbackAction("Other ways to sign in"),
+          "Continue in your browser, choose any sign-in method your Hub supports, then approve this device.",
+        primaryAction: signInAction("Continue in browser"),
       };
   }
 }
