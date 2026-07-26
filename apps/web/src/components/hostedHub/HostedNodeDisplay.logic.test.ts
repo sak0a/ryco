@@ -185,14 +185,38 @@ describe("directory order", () => {
 });
 
 describe("count line", () => {
-  it("counts only nodes that are both authorized and online", () => {
+  it("reads both halves of the sentence off the same set", () => {
+    // The revoked node is not authorized — the row for it two lines below says
+    // "Access revoked" — so it may not be counted as one. Counting it there
+    // while excluding it from "online" made one sentence use two definitions of
+    // its own subject and overstated the user's reach.
     expect(
       directoryCountLine([
         node({ id: "a", presence: { online: true, lastHeartbeatAt: NOW } }),
         node({ id: "b", presence: { online: false, lastHeartbeatAt: null } }),
         node({ id: "c", revokedAt: NOW, presence: { online: true, lastHeartbeatAt: NOW } }),
       ]),
-    ).toBe("3 authorized · 1 online");
+    ).toBe("2 authorized · 1 online · 1 revoked");
+  });
+
+  it("accounts for every row the list renders", () => {
+    // Revoked nodes are still listed, so dropping them from the count silently
+    // would leave "1 authorized" above two visible rows.
+    expect(
+      directoryCountLine([
+        node({ id: "a", presence: { online: false, lastHeartbeatAt: null } }),
+        node({ id: "b", revokedAt: NOW, presence: { online: false, lastHeartbeatAt: null } }),
+      ]),
+    ).toBe("1 authorized · none online · 1 revoked");
+  });
+
+  it("says nothing about revocation when nothing is revoked", () => {
+    expect(
+      directoryCountLine([
+        node({ id: "a", presence: { online: true, lastHeartbeatAt: NOW } }),
+        node({ id: "b", presence: { online: false, lastHeartbeatAt: null } }),
+      ]),
+    ).toBe("2 authorized · 1 online");
   });
 
   it("says 'none online' rather than a bare zero", () => {

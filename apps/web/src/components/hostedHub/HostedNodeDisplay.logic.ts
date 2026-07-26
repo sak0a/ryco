@@ -129,15 +129,36 @@ export function sortNodes(nodes: ReadonlyArray<HostedHubNode>): ReadonlyArray<Ho
   });
 }
 
+/** Nodes this account is still authorized on, for the header's count line. */
+export function authorizedNodeCount(nodes: ReadonlyArray<HostedHubNode>): number {
+  return nodes.filter((node) => node.revokedAt === null).length;
+}
+
 /** Nodes that are online and still authorized, for the header's count line. */
 export function onlineNodeCount(nodes: ReadonlyArray<HostedHubNode>): number {
   return nodes.filter((node) => node.revokedAt === null && node.presence.online).length;
 }
 
-/** `{n} authorized · {m} online`, or `· none online` when none are. */
+/**
+ * `{n} authorized · {m} online`, plus `· {k} revoked` when any are.
+ *
+ * Both counts read the same set. "Authorized" used to be `nodes.length`, which
+ * counted revoked nodes — a machine this account cannot connect to and that the
+ * rows two lines below label "Access revoked" — while "online" excluded them, so
+ * one sentence used two definitions of its own subject and overstated the user's
+ * reach by exactly the revoked nodes.
+ *
+ * The revoked segment exists so the header still accounts for every row the list
+ * renders: revoked nodes are shown (last), and dropping them from the count
+ * without saying so would trade an overstatement for an unexplained gap between
+ * "2 authorized" and three visible rows.
+ */
 export function directoryCountLine(nodes: ReadonlyArray<HostedHubNode>): string {
+  const authorized = authorizedNodeCount(nodes);
   const online = onlineNodeCount(nodes);
-  return `${String(nodes.length)} authorized · ${online === 0 ? "none online" : `${String(online)} online`}`;
+  const revoked = nodes.length - authorized;
+  const head = `${String(authorized)} authorized · ${online === 0 ? "none online" : `${String(online)} online`}`;
+  return revoked === 0 ? head : `${head} · ${String(revoked)} revoked`;
 }
 
 /**
