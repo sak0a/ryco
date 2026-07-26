@@ -17,10 +17,14 @@ import * as PlatformError from "effect/PlatformError";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { deepMerge } from "@ryco/shared/Struct";
-import { createModelCapabilities } from "@ryco/shared/model";
+import { createModelCapabilities, createModelSelection } from "@ryco/shared/model";
 
 import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
-import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
+import {
+  checkClaudeProviderStatus,
+  normalizeClaudeCliEffort,
+  resolveClaudeApiModelId,
+} from "./ClaudeProvider.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./ProviderInstanceRegistryHydration.ts";
@@ -1603,6 +1607,111 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           ),
       );
 
+      it.effect("includes Claude Opus 5 with the upstream static capabilities", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities(),
+          );
+          const opus5 = status.models.find((model) => model.slug === "claude-opus-5");
+          if (!opus5?.capabilities) {
+            assert.fail("Expected Claude Opus 5 capabilities on Claude Code v2.1.219.");
+          }
+
+          const effortDescriptor = opus5.capabilities.optionDescriptors?.find(
+            (descriptor) => descriptor.type === "select" && descriptor.id === "effort",
+          );
+          assert.deepStrictEqual(
+            effortDescriptor?.type === "select"
+              ? effortDescriptor.options.map((option) => option.id)
+              : undefined,
+            ["low", "medium", "high", "xhigh", "max", "ultracode", "ultrathink"],
+          );
+          assert.deepStrictEqual(
+            effortDescriptor?.type === "select"
+              ? effortDescriptor.options.find((option) => option.isDefault)
+              : undefined,
+            { id: "high", label: "High", isDefault: true },
+          );
+          assert.deepStrictEqual(
+            opus5.capabilities.optionDescriptors?.find(
+              (descriptor) => descriptor.type === "boolean" && descriptor.id === "fastMode",
+            ),
+            { id: "fastMode", label: "Fast Mode", type: "boolean" },
+          );
+
+          const contextWindowDescriptor = opus5.capabilities.optionDescriptors?.find(
+            (descriptor) => descriptor.type === "select" && descriptor.id === "contextWindow",
+          );
+          assert.deepStrictEqual(
+            contextWindowDescriptor?.type === "select"
+              ? contextWindowDescriptor.options.find((option) => option.isDefault)
+              : undefined,
+            { id: "1m", label: "1M", isDefault: true },
+          );
+          assert.strictEqual(
+            resolveClaudeApiModelId(
+              createModelSelection(ProviderInstanceId.make("claudeAgent"), "claude-opus-5", []),
+            ),
+            "claude-opus-5[1m]",
+          );
+          assert.strictEqual(normalizeClaudeCliEffort("ultracode", "claude-opus-5"), "xhigh");
+          assert.strictEqual(
+            resolveClaudeApiModelId(
+              createModelSelection(ProviderInstanceId.make("claudeAgent"), "claude-opus-5", [
+                { id: "contextWindow", value: "200k" },
+              ]),
+            ),
+            "claude-opus-5",
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.219\n", stderr: "", code: 0 };
+              if (joined === "auth status")
+                return {
+                  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                  stderr: "",
+                  code: 0,
+                };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("hides Claude Opus 5 before Claude Code v2.1.219", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities(),
+          );
+          assert.strictEqual(
+            status.models.some((model) => model.slug === "claude-opus-5"),
+            false,
+          );
+          assert.strictEqual(
+            status.message,
+            "Claude Code v2.1.218 is too old for Claude Opus 5. Upgrade to v2.1.219 or newer to access it.",
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.218\n", stderr: "", code: 0 };
+              if (joined === "auth status")
+                return {
+                  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                  stderr: "",
+                  code: 0,
+                };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
       it.effect("includes Claude Fable 5 without fast mode on supported versions", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(
@@ -1659,7 +1768,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             status.models.some((model) => model.slug === "claude-fable-5"),
             false,
           );
-          // Opus 4.8 is available on the current CLI, so the gate is Fable-specific.
+          // Opus 4.8 remains available even though newer models are still gated.
           assert.strictEqual(
             status.models.some((model) => model.slug === "claude-opus-4-8"),
             true,
@@ -1740,7 +1849,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           );
           assert.strictEqual(
             status.message,
-            "Claude Code v2.1.153 is too old for Claude Opus 4.8. Upgrade to v2.1.154 or newer to access it.",
+            "Claude Code v2.1.153 is too old for Claude Opus 4.8. Upgrade to v2.1.154 or newer to access it. Claude Code v2.1.153 is too old for Claude Opus 5. Upgrade to v2.1.219 or newer to access it.",
           );
         }).pipe(
           Effect.provide(
@@ -1775,7 +1884,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           );
           assert.strictEqual(
             status.message,
-            "Claude Code v2.1.110 is too old for Claude Opus 4.7. Upgrade to v2.1.111 or newer to access it. Claude Code v2.1.110 is too old for Claude Opus 4.8. Upgrade to v2.1.154 or newer to access it.",
+            "Claude Code v2.1.110 is too old for Claude Opus 4.7. Upgrade to v2.1.111 or newer to access it. Claude Code v2.1.110 is too old for Claude Opus 4.8. Upgrade to v2.1.154 or newer to access it. Claude Code v2.1.110 is too old for Claude Opus 5. Upgrade to v2.1.219 or newer to access it.",
           );
         }).pipe(
           Effect.provide(

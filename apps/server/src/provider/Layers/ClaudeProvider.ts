@@ -46,6 +46,7 @@ const CLAUDE_PRESENTATION = {
   showInteractionModeToggle: true,
   supportsAskMode: true,
 } as const;
+const MINIMUM_CLAUDE_OPUS_5_VERSION = "2.1.219";
 const MINIMUM_CLAUDE_OPUS_4_8_VERSION = "2.1.154";
 const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
 // Forward-looking gate: Claude Fable 5 is wired up but not yet selectable in
@@ -76,13 +77,13 @@ function buildClaudeEffortDescriptor(input: {
   });
 }
 
-function buildClaudeContextWindowDescriptor() {
+function buildClaudeContextWindowDescriptor(defaultContextWindow: "200k" | "1m" = "200k") {
   return buildSelectOptionDescriptor({
     id: "contextWindow",
     label: "Context Window",
     options: [
-      { value: "200k", label: "200k", isDefault: true },
-      { value: "1m", label: "1M" },
+      { value: "200k", label: "200k", isDefault: defaultContextWindow === "200k" },
+      { value: "1m", label: "1M", isDefault: defaultContextWindow === "1m" },
     ],
   });
 }
@@ -92,6 +93,7 @@ function buildClaudeOpusCapabilities(input: {
   readonly defaultEffort: ClaudeEffortLevel;
   readonly supportsFastMode: boolean;
   readonly supportsContextWindow: boolean;
+  readonly defaultContextWindow?: "200k" | "1m";
 }) {
   return createModelCapabilities({
     optionDescriptors: [
@@ -107,7 +109,9 @@ function buildClaudeOpusCapabilities(input: {
             }),
           ]
         : []),
-      ...(input.supportsContextWindow ? [buildClaudeContextWindowDescriptor()] : []),
+      ...(input.supportsContextWindow
+        ? [buildClaudeContextWindowDescriptor(input.defaultContextWindow)]
+        : []),
     ],
   });
 }
@@ -152,6 +156,19 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
       // Fable's context window is 1M by default and at maximum, so there is no
       // 200k/1m toggle to expose.
       supportsContextWindow: false,
+    }),
+  },
+  {
+    slug: "claude-opus-5",
+    name: "Claude Opus 5",
+    shortName: "Opus 5",
+    isCustom: false,
+    capabilities: buildClaudeOpusCapabilities({
+      effortLevels: CLAUDE_OPUS_4_8_EFFORT_LEVELS,
+      defaultEffort: "high",
+      supportsFastMode: true,
+      supportsContextWindow: true,
+      defaultContextWindow: "1m",
     }),
   },
   {
@@ -274,6 +291,10 @@ function supportsClaudeOpus48(version: string | null | undefined): boolean {
   return supportsMinimumClaudeVersion(version, MINIMUM_CLAUDE_OPUS_4_8_VERSION);
 }
 
+function supportsClaudeOpus5(version: string | null | undefined): boolean {
+  return supportsMinimumClaudeVersion(version, MINIMUM_CLAUDE_OPUS_5_VERSION);
+}
+
 function supportsClaudeOpus47(version: string | null | undefined): boolean {
   return supportsMinimumClaudeVersion(version, MINIMUM_CLAUDE_OPUS_4_7_VERSION);
 }
@@ -288,6 +309,9 @@ function getBuiltInClaudeModelsForVersion(
   return BUILT_IN_MODELS.filter((model) => {
     if (model.slug === "claude-fable-5") {
       return supportsClaudeFable5(version);
+    }
+    if (model.slug === "claude-opus-5") {
+      return supportsClaudeOpus5(version);
     }
     if (model.slug === "claude-opus-4-8") {
       return supportsClaudeOpus48(version);
@@ -313,6 +337,11 @@ function formatClaudeUpgradeMessages(version: string | null): ReadonlyArray<stri
   if (!supportsClaudeOpus48(version)) {
     messages.push(
       `Claude Code ${versionLabel} is too old for Claude Opus 4.8. Upgrade to v${MINIMUM_CLAUDE_OPUS_4_8_VERSION} or newer to access it.`,
+    );
+  }
+  if (!supportsClaudeOpus5(version)) {
+    messages.push(
+      `Claude Code ${versionLabel} is too old for Claude Opus 5. Upgrade to v${MINIMUM_CLAUDE_OPUS_5_VERSION} or newer to access it.`,
     );
   }
   return messages;
@@ -357,7 +386,7 @@ export function normalizeClaudeCliEffort(
     return undefined;
   }
   if (effort === "ultracode") {
-    return model === "claude-opus-4-8" ? "xhigh" : undefined;
+    return model === "claude-opus-5" || model === "claude-opus-4-8" ? "xhigh" : undefined;
   }
   return effort;
 }
@@ -366,8 +395,22 @@ export function isClaudeUltracodeEffort(effort: string | null | undefined): bool
   return effort === "ultracode";
 }
 
+export function resolveClaudeContextWindow(
+  modelSelection: ModelSelection | undefined,
+): string | undefined {
+  const caps = getClaudeModelCapabilities(modelSelection?.model);
+  const raw = getModelSelectionStringOptionValue(modelSelection, "contextWindow");
+  const descriptors = getProviderOptionDescriptors({
+    caps,
+    ...(raw ? { selections: [{ id: "contextWindow", value: raw }] } : {}),
+  });
+  const descriptor = descriptors.find((candidate) => candidate.id === "contextWindow");
+  const value = getProviderOptionCurrentValue(descriptor);
+  return typeof value === "string" ? value : undefined;
+}
+
 export function resolveClaudeApiModelId(modelSelection: ModelSelection): string {
-  switch (getModelSelectionStringOptionValue(modelSelection, "contextWindow")) {
+  switch (resolveClaudeContextWindow(modelSelection)) {
     case "1m":
       return `${modelSelection.model}[1m]`;
     default:
