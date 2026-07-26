@@ -306,6 +306,7 @@ describe("Hub node section when hosted mode is unavailable or signed out", () =>
       expect(signedOut.kind).toBe("signed-out");
       expect(signedOut.rows).toHaveLength(0);
       expect(signedOut.empty).not.toBeNull();
+      expect(signedOut.empty?.detail).toContain("Continue in your browser");
       expect(typeof signedOut.signIn).toBe("function");
       expect(signedOut.refresh).toBeUndefined();
     }
@@ -315,7 +316,7 @@ describe("Hub node section when hosted mode is unavailable or signed out", () =>
     hostedMock.state = state({ accountStatus: "signed-out" });
     const tree = HubNodeSection();
     const tappable = pressables(tree).filter((element) => element.props.onPress !== undefined);
-    // Only the EmptyState's "Sign in" capsule is tappable.
+    // Only the EmptyState's browser-handoff capsule is tappable.
     expect(tappable).toHaveLength(1);
     (tappable[0]?.props.onPress as () => void)();
     expect(navigationMock.navigate).toHaveBeenCalledWith("Onboarding");

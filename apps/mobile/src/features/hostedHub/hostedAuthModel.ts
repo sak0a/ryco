@@ -498,9 +498,9 @@ export function deriveHostedAccountView(input: HostedAccountViewInput): HostedAc
       title: "Not signed in",
       detail:
         state.accountStatus === "session-expired"
-          ? "Your Hub session expired. Sign in again with your passkey."
-          : "Sign in with your passkey to reach the nodes on your Hub.",
-      signInAction: action("sign-in", "Sign in", input.onSignIn),
+          ? "Your Hub session expired. Continue in your browser to reconnect this device."
+          : "Continue in your browser to sign in and reach the nodes on your Hub.",
+      signInAction: action("sign-in", "Continue in browser", input.onSignIn),
     };
   }
 

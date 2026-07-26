@@ -167,8 +167,7 @@ export function deriveHubNodeSectionModel(input: {
       kind: "signed-out",
       empty: {
         title: state.accountStatus === "session-expired" ? "Hub session expired" : "Not signed in",
-        detail:
-          "Sign in to the Hub with your passkey to reach nodes you do not have on this network.",
+        detail: "Continue in your browser, then approve this device to reach your Hub nodes.",
       },
       signIn: onSignIn,
     };
@@ -180,7 +179,7 @@ export function deriveHubNodeSectionModel(input: {
       kind: "busy",
       empty: {
         title: state.accountStatus === "signing-out" ? "Signing out" : "Signing in",
-        detail: "Finishing the Hub passkey ceremony.",
+        detail: "Finish signing in and approving this device in your browser.",
       },
     };
   }
@@ -289,7 +288,7 @@ export function HubNodeSectionView(props: { readonly model: HubNodeSectionModel 
             variant="plain"
             title={model.empty.title}
             detail={model.empty.detail}
-            actionLabel={model.signIn ? "Sign in" : undefined}
+            actionLabel={model.signIn ? "Continue in browser" : undefined}
             onAction={model.signIn}
           />
         </View>

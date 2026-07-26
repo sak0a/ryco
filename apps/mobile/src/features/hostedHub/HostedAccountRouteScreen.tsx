@@ -1,4 +1,4 @@
-import { useNavigation } from "@react-navigation/native";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, View } from "react-native";
 
@@ -41,11 +41,12 @@ import { useHostedModeAvailable } from "./useHostedMode";
  *
  * Every credential action below is a native, DPoP-bound controller call.
  * Nothing on this screen opens a browser: `/api/account/*` authorizes an
- * `Authorization: DPoP` request without a same-origin check, so the webview is
- * needed only for the no-passkey *login* fallback on the sign-in sheet.
+ * `Authorization: DPoP` request without a same-origin check. Only signed-out
+ * users leave this screen through the reviewed system-browser handoff.
  */
 export function HostedAccountRouteScreen() {
   const navigation = useNavigation();
+  const isFocused = useIsFocused();
   const hostedModeAvailable = useHostedModeAvailable();
   const state = useHostedHubStore((value) => value);
   const accountState = useHostedAccountStore((value) => value);
@@ -143,7 +144,7 @@ export function HostedAccountRouteScreen() {
               ) : null}
             </View>
 
-            {view.errorMessage ? (
+            {view.errorMessage && isFocused ? (
               <View className="mx-5 mt-4">
                 <ErrorBanner message={view.errorMessage} />
               </View>

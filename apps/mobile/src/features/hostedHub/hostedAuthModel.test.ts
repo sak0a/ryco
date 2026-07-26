@@ -279,6 +279,10 @@ describe("hosted account surface", () => {
     });
     expect(view.signedIn).toBe(false);
     expect(view.rows).toEqual([]);
+    expect(view.detail).toBe(
+      "Continue in your browser to sign in and reach the nodes on your Hub.",
+    );
+    expect(view.signInAction?.label).toBe("Continue in browser");
     view.signInAction?.run();
     expect(onSignIn).toHaveBeenCalledTimes(1);
   });
