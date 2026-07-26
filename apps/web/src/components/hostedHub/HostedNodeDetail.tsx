@@ -45,6 +45,14 @@ import {
 } from "./HostedNodeDisplay.logic";
 
 export interface HostedNodeDetailProps {
+  /**
+   * The node as the store holds it **right now**, or `null` when the sheet is
+   * closed. The caller must re-resolve this from `hostedHubStore.nodes` on
+   * every render rather than holding the object the sheet was opened with:
+   * presence, `clientVersion`, and above all `revokedAt` are replaced by a
+   * 20-second poll, and every claim below — including `Connect`'s own enabled
+   * state — is read straight off whatever is passed here.
+   */
   readonly node: HostedHubNode | null;
   readonly directoryStatus: string;
   readonly browserStatus: string;

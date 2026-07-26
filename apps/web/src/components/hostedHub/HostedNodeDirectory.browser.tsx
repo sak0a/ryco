@@ -199,6 +199,48 @@ describe("hosted node directory", () => {
     await expect.element(page.getByText("node_aaaaaaaaaaaaaaaaaaaaaa")).toBeVisible();
   });
 
+  it("re-reads the open detail sheet from the store rather than pinning it to open-time values", async () => {
+    // `listNodes` polls every 20 seconds and replaces every row. A sheet that
+    // captured the node *object* stops tracking the machine it describes: the
+    // revocation the poll delivered never renders, `nodeSelectionBlocked` reads
+    // `revokedAt` off the stale snapshot so Connect stays enabled, and the
+    // client version and heartbeat age keep reporting open-time values.
+    seedDirectory([node()]);
+    mounted = await render(<HostedHubRoot />);
+    await page.getByRole("button", { name: "Node details" }).click();
+
+    const sheetText = () =>
+      document.querySelector<HTMLElement>('[data-slot="sheet-popup"]')?.textContent ?? "";
+    await vi.waitFor(() => {
+      expect(sheetText()).toContain("0.9.7");
+    });
+    expect(sheetText()).toContain("Online");
+    await expect.element(page.getByRole("button", { name: "Connect" })).toBeEnabled();
+
+    // The poll lands while the sheet is up: revoked, offline, upgraded, and
+    // last heard from ten minutes ago.
+    useHostedHubStore.setState({
+      nodes: [
+        node({
+          revokedAt: NOW,
+          revocationReasonCode: "administrative",
+          clientVersion: "0.9.99",
+          presence: { online: false, lastHeartbeatAt: NOW - 600_000 },
+        }),
+      ],
+    });
+
+    await vi.waitFor(() => {
+      expect(sheetText(), "the sheet kept the open-time client version").toContain("0.9.99");
+    });
+    expect(sheetText(), "the sheet kept the open-time status").not.toContain("Online");
+    expect(sheetText()).toContain("Revoked");
+    expect(sheetText(), "the sheet kept the open-time heartbeat").toContain("10 min ago");
+    expect(sheetText()).toContain("Access to this node was revoked.");
+    // The decisive one: connecting to a node whose grant is gone.
+    await expect.element(page.getByRole("button", { name: "Connect" })).toBeDisabled();
+  });
+
   it("reports a grant role only when it differs from the role in effect", async () => {
     seedDirectory([node({ grant: { id: "grant_a", role: "owner" }, effectiveRole: "operator" })]);
     mounted = await render(<HostedHubRoot />);

@@ -757,7 +757,14 @@ function HostedNodeDirectory() {
   const navigate = useNavigate();
   const isPhoneTier = usePresentationTier() === "phone";
   const [enrolling, setEnrolling] = useState(false);
-  const [detailNode, setDetailNode] = useState<HostedHubNode | null>(null);
+  // The *id*, never the node object. `listNodes` polls every 20 seconds and
+  // replaces every row, so a captured `HostedHubNode` is a snapshot of the
+  // moment the sheet was opened and stops tracking the machine it describes: a
+  // revocation that lands while the sheet is up would leave `Connect` enabled
+  // against a `revokedAt` the poll had already set, and the sheet would keep
+  // printing an "Online" status, a superseded client version, and a heartbeat
+  // age that grows for a node that is heartbeating the whole time.
+  const [detailNodeId, setDetailNodeId] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const nowMs = useRelativeTimeTick(60_000);
 
@@ -785,6 +792,13 @@ function HostedNodeDirectory() {
   }
 
   const ordered = sortNodes(nodes);
+  // Re-resolved on every render, so the sheet reads the same store the rows
+  // under it read. A node that leaves the directory entirely closes the sheet
+  // rather than stranding it on a machine this account can no longer see.
+  const detailNode =
+    detailNodeId === null
+      ? null
+      : (nodes.find((candidate) => candidate.id === detailNodeId) ?? null);
   const isOwner = account?.role === "owner";
   const showEmptyState = status === "ready" && nodes.length === 0;
   // Exactly one enroll control exists at all times: when the empty state owns
@@ -930,7 +944,7 @@ function HostedNodeDirectory() {
                 nowMs={nowMs}
                 disabled={nodeSelectionBlocked({ directoryStatus: status, browserStatus, node })}
                 onConnect={() => void select(node)}
-                onOpenDetail={() => setDetailNode(node)}
+                onOpenDetail={() => setDetailNodeId(node.id)}
               />
             ))}
             {status === "loading" && nodes.length === 0 ? (
@@ -969,7 +983,7 @@ function HostedNodeDirectory() {
         directoryStatus={status}
         browserStatus={browserStatus}
         onOpenChange={(open) => {
-          if (!open) setDetailNode(null);
+          if (!open) setDetailNodeId(null);
         }}
         onConnect={(node) => void select(node)}
       />
