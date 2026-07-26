@@ -30,6 +30,13 @@ accepted through command-line arguments, URLs, or exported server settings.
 Enabling the connector starts no listener. It uses the existing Ryco HTTP server only for
 authenticated local status and enrollment controls.
 
+Connector state and identity state are reported separately, and the distinction matters: `disabled`
+is reported both for a node that was never enrolled and for an enrolled node whose connector is
+switched off. A caller that must not offer to re-point an already-enrolled node reads the bounded
+identity summary — `none`, `pending`, `active`, or `unknown` — rather than inferring it from state.
+`unknown` means key custody could not be read at all, and must be treated like `active`: refusing a
+destructive action is the safe answer when an identity may exist.
+
 ## Enrollment and key custody
 
 Start Ryco with the connector enabled, then run these commands against the same Ryco state

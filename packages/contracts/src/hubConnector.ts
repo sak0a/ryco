@@ -93,6 +93,28 @@ export const HubConnectorStatus = Schema.Struct({
 );
 export type HubConnectorStatus = typeof HubConnectorStatus.Type;
 
+/**
+ * Whether this node holds a Hub identity — a sibling of `HubConnectorStatus`,
+ * deliberately not a field on it.
+ *
+ * The status schema is closed and carries a cross-field invariant over every
+ * legal combination; a field with no invariant would weaken that. The two also
+ * answer different questions: status reports `disabled` both for a node that was
+ * never enrolled and for an enrolled node whose connector is switched off, so a
+ * caller that must not offer to re-point an enrolled node cannot use it.
+ *
+ * `unknown` is the fail-safe value, reported when key custody cannot be read at
+ * all (a locked or unavailable credential store). A caller must treat it like
+ * `active` — refuse destructive or re-pointing actions — because the alternative
+ * is offering to overwrite an identity that may well exist.
+ *
+ * Carries no origin, no node/key/environment identifier, and no fingerprint.
+ */
+export const HubIdentitySummary = Schema.Struct({
+  enrolled: Schema.Literals(["none", "pending", "active", "unknown"]),
+});
+export type HubIdentitySummary = typeof HubIdentitySummary.Type;
+
 export const HubNodePublicKeyFingerprint = Schema.String.check(
   Schema.isPattern(/^SHA256:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
 );

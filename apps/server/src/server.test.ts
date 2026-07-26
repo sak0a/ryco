@@ -626,6 +626,7 @@ const buildAppUnderTest = (options?: {
             enroll: async () => {
               throw new Error("not implemented in test");
             },
+            identitySummary: async () => ({ enrolled: "none" as const }),
             readEnrollment: async () => null,
             cancelEnrollment: async () => {
               throw new Error("not implemented in test");
@@ -1400,6 +1401,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 pollIntervalMs: 5_000,
               };
             },
+            identitySummary: async () => ({ enrolled: "none" as const }),
             readEnrollment: async () => null,
             cancelEnrollment: async () => {
               cancelCalls += 1;

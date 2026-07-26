@@ -6,6 +6,7 @@ import {
   HubConnectorStatus,
   HubEnrollmentCeremonyDetail,
   HubEnrollmentStartResult,
+  HubIdentitySummary,
 } from "./hubConnector.ts";
 
 const decode = Schema.decodeUnknownSync(HubConnectorStatus);
@@ -61,6 +62,27 @@ describe("HubConnectorStatus", () => {
     expect(() => decode({ ...disabled, reconnectAttempt: Number.MAX_SAFE_INTEGER })).toThrow();
   });
 
+  // Canary. The connector design declares this schema closed, and it carries a
+  // cross-field invariant over every legal combination of these fields. A new
+  // field arrives with no invariant and quietly weakens that property, so adding
+  // one must be a deliberate review event rather than a passing test run.
+  // Node-side state that is not connector state belongs in a sibling schema —
+  // see HubIdentitySummary.
+  it("exposes exactly the closed status field set", () => {
+    expect(Object.keys(HubConnectorStatus.fields).toSorted()).toEqual([
+      "activeChannels",
+      "degradedMode",
+      "failure",
+      "nextRetryAt",
+      "protocolMajor",
+      "protocolMinor",
+      "queuedBytes",
+      "reconnectAttempt",
+      "state",
+      "transitionedAt",
+    ]);
+  });
+
   it("does not admit URLs, identifiers, raw errors, or arbitrary failure text", () => {
     for (const extra of [
       { hubOrigin: "https://sensitive.example" },
@@ -73,6 +95,33 @@ describe("HubConnectorStatus", () => {
       expect(JSON.stringify(decoded)).not.toContain("sensitive");
     }
     expect(() => decode({ ...disabled, failure: "sensitive-failure" })).toThrow();
+  });
+});
+
+describe("HubIdentitySummary", () => {
+  const decodeSummary = Schema.decodeUnknownSync(HubIdentitySummary);
+
+  it("reports only whether an identity exists", () => {
+    for (const enrolled of ["none", "pending", "active", "unknown"] as const) {
+      expect(decodeSummary({ enrolled })).toEqual({ enrolled });
+    }
+  });
+
+  it("admits no origin, identifier, or fingerprint", () => {
+    const decoded = decodeSummary({
+      enrolled: "active",
+      hubOrigin: "https://sensitive.example",
+      nodeId: "node_sensitive",
+      fingerprint: `SHA256:${"A".repeat(43)}`,
+    });
+    expect(decoded).toEqual({ enrolled: "active" });
+    expect(JSON.stringify(decoded)).not.toContain("sensitive");
+    expect(JSON.stringify(decoded)).not.toContain("SHA256");
+  });
+
+  it("rejects an unknown enrollment phase", () => {
+    expect(() => decodeSummary({ enrolled: "revoked" })).toThrow();
+    expect(() => decodeSummary({})).toThrow();
   });
 });
 

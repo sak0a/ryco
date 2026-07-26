@@ -10,7 +10,11 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServer from "effect/unstable/http/HttpServer";
-import type { HubConnectorStatus, HubEnrollmentCeremonyDetail } from "@ryco/contracts";
+import type {
+  HubConnectorStatus,
+  HubEnrollmentCeremonyDetail,
+  HubIdentitySummary,
+} from "@ryco/contracts";
 
 import { AuthControlPlane } from "../auth/Services/AuthControlPlane.ts";
 import { AuthControlPlaneRuntimeLive } from "../auth/Layers/AuthControlPlane.ts";
@@ -64,6 +68,7 @@ interface ConnectorStub {
   readonly statuses: ReadonlyArray<HubConnectorStatus>;
   readonly resumeThrows?: boolean;
   readonly ceremony?: HubEnrollmentCeremonyDetail | null;
+  readonly identity?: HubIdentitySummary;
 }
 
 const makeConnectorStub = (stub: ConnectorStub) => {
@@ -81,6 +86,7 @@ const makeConnectorStub = (stub: ConnectorStub) => {
     enroll: async () => {
       throw new Error("not used");
     },
+    identitySummary: async () => stub.identity ?? { enrolled: "none" as const },
     readEnrollment: async () => stub.ceremony ?? null,
     cancelEnrollment: async () => stub.statuses[0]!,
     stop: async () => undefined,
@@ -253,6 +259,56 @@ it.layer(NodeServices.layer)("hub connector http routes", (it) => {
     ),
   );
 
+  // The case the whole route exists for: status cannot distinguish these two, so
+  // a panel gating the origin field on status alone would offer to re-point a
+  // node that is already enrolled.
+  it.effect("identity reports active while the connector is disabled", () =>
+    withHubRoutes(
+      {
+        statuses: [
+          {
+            state: "disabled",
+            transitionedAt: "1970-01-01T00:00:00.000Z",
+            activeChannels: 0,
+            queuedBytes: 0,
+          },
+        ],
+        identity: { enrolled: "active" },
+      },
+      ({ origin, ownerToken }) =>
+        Effect.gen(function* () {
+          const status = yield* get(origin, "/api/hub/status", ownerToken);
+          const identity = yield* get(origin, "/api/hub/identity", ownerToken);
+          const statusBody = (yield* Effect.promise(() => status.json())) as HubConnectorStatus;
+          const identityBody = (yield* Effect.promise(() => identity.json())) as HubIdentitySummary;
+
+          assert.equal(statusBody.state, "disabled");
+          assert.deepEqual(identityBody, { enrolled: "active" });
+        }),
+    ),
+  );
+
+  it.effect("identity reports every phase and nothing else", () =>
+    Effect.gen(function* () {
+      for (const enrolled of ["none", "pending", "active", "unknown"] as const) {
+        yield* withHubRoutes(
+          { statuses: [ONLINE_STATUS], identity: { enrolled } },
+          ({ origin, ownerToken }) =>
+            Effect.gen(function* () {
+              const response = yield* get(origin, "/api/hub/identity", ownerToken);
+              assert.equal(response.status, 200);
+              const body = (yield* Effect.promise(() => response.json())) as Record<
+                string,
+                unknown
+              >;
+              assert.deepEqual(body, { enrolled });
+              assert.deepEqual(Object.keys(body), ["enrolled"]);
+            }),
+        );
+      }
+    }),
+  );
+
   it.effect("a pending ceremony is re-readable after the start response is lost", () =>
     withHubRoutes({ statuses: [ONLINE_STATUS], ceremony: CEREMONY }, ({ origin, ownerToken }) =>
       Effect.gen(function* () {
@@ -303,12 +359,14 @@ it.layer(NodeServices.layer)("hub connector http routes", (it) => {
       Effect.gen(function* () {
         const status = yield* get(origin, "/api/hub/status", clientToken);
         const read = yield* get(origin, "/api/hub/enrollment", clientToken);
+        const identity = yield* get(origin, "/api/hub/identity", clientToken);
         const resume = yield* post(origin, "/api/hub/resume", clientToken);
         const enrollment = yield* post(origin, "/api/hub/enrollment", clientToken);
         const cancel = yield* post(origin, "/api/hub/enrollment/cancel", clientToken);
 
         assert.equal(status.status, 403);
         assert.equal(read.status, 403);
+        assert.equal(identity.status, 403);
         assert.equal(resume.status, 403);
         assert.equal(enrollment.status, 403);
         assert.equal(cancel.status, 403);
@@ -322,11 +380,12 @@ it.layer(NodeServices.layer)("hub connector http routes", (it) => {
       Effect.gen(function* () {
         const status = yield* get(origin, "/api/hub/status");
         const read = yield* get(origin, "/api/hub/enrollment");
+        const identity = yield* get(origin, "/api/hub/identity");
         const resume = yield* post(origin, "/api/hub/resume");
         const enrollment = yield* post(origin, "/api/hub/enrollment");
         const cancel = yield* post(origin, "/api/hub/enrollment/cancel");
 
-        for (const response of [status, read, resume, enrollment, cancel]) {
+        for (const response of [status, read, identity, resume, enrollment, cancel]) {
           assert.isTrue(
             response.status === 401 || response.status === 403,
             `expected an auth rejection, got ${response.status}`,

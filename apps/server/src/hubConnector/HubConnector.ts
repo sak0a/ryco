@@ -2,6 +2,7 @@ import type {
   HubConnectorStatus,
   HubEnrollmentCeremonyDetail,
   HubEnrollmentStartResult,
+  HubIdentitySummary,
 } from "@ryco/contracts";
 import type { RelayErrorFrame, RelayFrame } from "@ryco/contracts/relay";
 import { formatNodePublicKeyFingerprint } from "@ryco/shared/nodeIdentity";
@@ -215,6 +216,29 @@ export class HubConnector {
         failure: "enrollment_unavailable",
       });
       throw new Error("Hub enrollment could not be started.");
+    }
+  }
+
+  /**
+   * Whether this node holds a Hub identity, independent of connector state.
+   *
+   * `status()` reports `disabled` both when nothing was ever enrolled and when an
+   * identity exists with the connector switched off — `start()` returns before
+   * reading identity state in both the disabled and misconfigured branches — so a
+   * caller that must not offer to re-point an enrolled node cannot rely on it.
+   *
+   * A custody read that fails reports `unknown` rather than `none`: claiming "not
+   * enrolled" because the keychain is locked would invite overwriting a real
+   * identity.
+   */
+  async identitySummary(): Promise<HubIdentitySummary> {
+    try {
+      const state = await this.#identity.readState();
+      if (state.activeNode !== null) return { enrolled: "active" };
+      if (state.pendingEnrollment !== null) return { enrolled: "pending" };
+      return { enrolled: "none" };
+    } catch {
+      return { enrolled: "unknown" };
     }
   }
 

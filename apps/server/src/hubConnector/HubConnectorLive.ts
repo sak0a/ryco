@@ -20,6 +20,7 @@ export interface HubConnectorServiceShape {
   readonly resume: HubConnector["resume"];
   readonly enroll: HubConnector["enroll"];
   readonly readEnrollment: HubConnector["readEnrollment"];
+  readonly identitySummary: HubConnector["identitySummary"];
   readonly cancelEnrollment: HubConnector["cancelEnrollment"];
   readonly stop: HubConnector["stop"];
 }
@@ -128,6 +129,7 @@ export const HubConnectorLive = Layer.effect(
       resume: () => connector.resume(),
       enroll: () => connector.enroll(),
       readEnrollment: () => connector.readEnrollment(),
+      identitySummary: () => connector.identitySummary(),
       cancelEnrollment: () => connector.cancelEnrollment(),
       stop: () => connector.stop(),
     } satisfies HubConnectorServiceShape;

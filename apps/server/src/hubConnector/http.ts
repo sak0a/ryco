@@ -54,6 +54,25 @@ export const hubConnectorEnrollmentRouteLayer = HttpRouter.add(
 );
 
 /**
+ * Report whether this node holds a Hub identity.
+ *
+ * Separate from status because `disabled` is reported both for a never-enrolled
+ * node and for an enrolled node whose connector is off. The panel gates the
+ * origin field and every destructive action on this, so conflating the two would
+ * let it offer to re-point a node that is already enrolled.
+ */
+export const hubConnectorIdentityRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/hub/identity",
+  Effect.gen(function* () {
+    yield* authenticateOwner;
+    const connector = yield* HubConnectorService;
+    const summary = yield* Effect.promise(() => connector.identitySummary());
+    return HttpServerResponse.jsonUnsafe(summary, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
  * Re-read a pending enrollment ceremony.
  *
  * The device code, fingerprint, and expiry are otherwise only in the enrollment
@@ -131,4 +150,5 @@ export const hubConnectorRoutesLayer = Layer.mergeAll(
   hubConnectorEnrollmentCancelRouteLayer,
   hubConnectorResumeRouteLayer,
   hubConnectorEnrollmentReadRouteLayer,
+  hubConnectorIdentityRouteLayer,
 );
