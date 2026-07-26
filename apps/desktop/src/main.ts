@@ -48,6 +48,7 @@ import {
   setDesktopServerExposurePreference,
   setDesktopTailscaleServePreference,
   setDesktopUpdateChannelPreference,
+  resolveDefaultDesktopSettings,
   setDesktopHubPreference,
   writeDesktopSettings,
 } from "./desktopSettings.ts";
@@ -296,7 +297,27 @@ let desktopLogSink: RotatingFileSink | null = null;
 let backendLogSink: RotatingFileSink | null = null;
 let restoreStdIoCapture: (() => void) | null = null;
 let backendObservabilitySettings = readPersistedBackendObservabilitySettings();
-let desktopSettings = readDesktopSettings(DESKTOP_SETTINGS_PATH, app.getVersion());
+/**
+ * Read settings without letting a corrupt file stop the app from starting.
+ *
+ * `readDesktopSettings` throws rather than silently resetting, so a damaged file
+ * is never quietly overwritten with defaults. That is the right contract, but it
+ * runs at module scope: letting it escape would make an unparseable settings file
+ * an unbootable app with no in-product way back.
+ *
+ * So: fall back to defaults in memory, and record that the on-disk file was not
+ * understood. Nothing writes over it until the user changes a setting, which is
+ * an explicit act.
+ */
+let desktopSettingsUnreadable = false;
+let desktopSettings = ((): DesktopSettings => {
+  try {
+    return readDesktopSettings(DESKTOP_SETTINGS_PATH, app.getVersion());
+  } catch {
+    desktopSettingsUnreadable = true;
+    return resolveDefaultDesktopSettings(app.getVersion());
+  }
+})();
 let desktopServerExposureMode: DesktopServerExposureMode = desktopSettings.serverExposureMode;
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
@@ -402,6 +423,13 @@ function isDesktopAppUrl(rawUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+function warnIfDesktopSettingsUnreadable(): void {
+  if (!desktopSettingsUnreadable) return;
+  writeDesktopLogHeader(
+    "desktop settings file could not be parsed; running with defaults and leaving the file untouched",
+  );
 }
 
 function backendChildEnv(): NodeJS.ProcessEnv {
@@ -2830,6 +2858,7 @@ app.on("second-instance", () => {
 
 async function bootstrap(): Promise<void> {
   markDesktopStartupPhase("desktop.bootstrap.start");
+  warnIfDesktopSettingsUnreadable();
   const configuredBackendPort = resolveConfiguredDesktopBackendPort(readEnv("RYCO_PORT"));
   if (isDevelopment && configuredBackendPort === undefined) {
     throw new Error("RYCO_PORT is required in desktop development.");

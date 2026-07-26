@@ -310,6 +310,32 @@ it.layer(NodeServices.layer)("hub connector http routes", (it) => {
     }),
   );
 
+  // Regression: a fresh install has the connector disabled, so the full identity
+  // runtime is never constructed. If that reported "unknown", the panel would
+  // treat the node as possibly-enrolled, lock the Hub address field and offer a
+  // Leave button — making the feature impossible to configure at all.
+  it.effect("reports a never-enrolled node as none, not unknown", () =>
+    withHubRoutes(
+      {
+        statuses: [
+          {
+            state: "disabled",
+            transitionedAt: "1970-01-01T00:00:00.000Z",
+            activeChannels: 0,
+            queuedBytes: 0,
+          },
+        ],
+        identity: { enrolled: "none" },
+      },
+      ({ origin, ownerToken }) =>
+        Effect.gen(function* () {
+          const response = yield* get(origin, "/api/hub/identity", ownerToken);
+          const body = (yield* Effect.promise(() => response.json())) as HubIdentitySummary;
+          assert.equal(body.enrolled, "none");
+        }),
+    ),
+  );
+
   it.effect("a pending ceremony is re-readable after the start response is lost", () =>
     withHubRoutes({ statuses: [ONLINE_STATUS], ceremony: CEREMONY }, ({ origin, ownerToken }) =>
       Effect.gen(function* () {

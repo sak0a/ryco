@@ -12,6 +12,7 @@ import {
   type HubIdentityRuntimeShape,
   makeHubIdentityRuntime,
 } from "./HubIdentityRuntime.ts";
+import { makeLocalHubIdentityStateStore } from "../hubIdentity/LocalHubIdentityState.ts";
 import { makeHubRelayTransport } from "./HubRelayTransport.ts";
 import type { RelayChannelSessionFactory, RelayRpcChannelSession } from "./RelayChannelRegistry.ts";
 
@@ -58,6 +59,40 @@ const unavailableIdentity = (): HubIdentityRuntimeShape => {
   };
 };
 
+/**
+ * A runtime that can answer "is this node enrolled?" and nothing else.
+ *
+ * Used when the connector is switched off. Constructing the full runtime would
+ * open the platform credential store — a keychain prompt on every launch for
+ * users who never touch Hub — but identity *presence* lives in the local state
+ * file and needs no key custody to read.
+ *
+ * Without this, a disabled connector reports `unknown`, which callers must treat
+ * as "possibly enrolled". On a fresh install that locks the Hub address field
+ * and offers a Leave button, making the feature impossible to configure.
+ */
+const readOnlyIdentity = (statePath: string): HubIdentityRuntimeShape => {
+  const unavailable = async (): Promise<never> => {
+    throw new HubIdentityRuntimeError("identity_unavailable");
+  };
+  return {
+    backend: "permissioned-file",
+    readState: async () => {
+      const store = await makeLocalHubIdentityStateStore(statePath);
+      return store.readOrCreate();
+    },
+    leave: unavailable,
+    readPendingEnrollment: unavailable,
+    startEnrollment: unavailable,
+    pollEnrollment: unavailable,
+    cancelEnrollment: unavailable,
+    createRelayAuthenticationFrame: unavailable,
+    stageKeyRotation: unavailable,
+    resumeKeyRotation: unavailable,
+    confirmAuthenticatedKey: unavailable,
+  };
+};
+
 export const HubConnectorLive = Layer.effect(
   HubConnectorService,
   Effect.gen(function* () {
@@ -77,7 +112,7 @@ export const HubConnectorLive = Layer.effect(
             }),
           catch: () => new HubIdentityRuntimeError("identity_unavailable"),
         }).pipe(Effect.orElseSucceed(unavailableIdentity))
-      : unavailableIdentity();
+      : readOnlyIdentity(config.hubIdentityStatePath);
 
     const channelFactory: RelayChannelSessionFactory = {
       open: async ({ channelId, effectiveRole, send }) => {
