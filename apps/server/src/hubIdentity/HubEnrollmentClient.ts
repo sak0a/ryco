@@ -268,6 +268,8 @@ export function makeHubEnrollmentClient(
       hubOrigin,
       keySecretName,
       pollingSecretName,
+      // Unknown until the start response arrives; filled in by the commit below.
+      deviceCode: null,
       createdAt,
       expiresAt: null,
       pollIntervalMs: null,
@@ -316,6 +318,7 @@ export function makeHubEnrollmentClient(
           revision: current.revision + 1,
           pendingEnrollment: {
             ...pending,
+            deviceCode: response?.deviceCode ?? null,
             expiresAt: response?.expiresAt ?? null,
             pollIntervalMs: response?.pollIntervalMs ?? null,
           },

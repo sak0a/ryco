@@ -41,6 +41,7 @@ describe("local Hub identity state", () => {
         hubOrigin: "https://hub.example.com",
         keySecretName: "node-key.pending",
         pollingSecretName: "enrollment-poll.pending",
+        deviceCode: "ABCD-EFGH",
         createdAt: 1_784_160_000_000,
         expiresAt: 1_784_160_600_000,
         pollIntervalMs: 5_000,
@@ -51,6 +52,70 @@ describe("local Hub identity state", () => {
     const persisted = await readFile(path, "utf8");
     expect(persisted).toContain("enrollment-poll.pending");
     expect(persisted).not.toContain(pollingCanary);
+  });
+
+  it("reads a pending record written before device codes were persisted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-legacy-pending-"));
+    const path = join(root, "identity.json");
+    // Exactly the shape written by a build that predates `deviceCode`. Failing
+    // this closed would strand a live ceremony — and, worse, would fail the whole
+    // state read, taking an enrolled node offline for a field it never had.
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        revision: 3,
+        environmentId: `env_${"E".repeat(22)}`,
+        pendingEnrollment: {
+          hubOrigin: "https://hub.example.com",
+          keySecretName: "node-key.pending",
+          pollingSecretName: "enrollment-poll.pending",
+          createdAt: 1_784_160_000_000,
+          expiresAt: 1_784_160_600_000,
+          pollIntervalMs: 5_000,
+          cleanupRequested: false,
+        },
+        activeNode: null,
+        stagedRotation: null,
+      }),
+      { mode: 0o600 },
+    );
+
+    const store = await makeLocalHubIdentityStateStore(path);
+    const state = await store.readOrCreate();
+
+    expect(state.pendingEnrollment?.deviceCode).toBeNull();
+    expect(state.pendingEnrollment?.keySecretName).toBe("node-key.pending");
+    expect(state.revision).toBe(3);
+  });
+
+  it("rejects a pending device code that is unbounded or out of charset", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-bad-code-"));
+    const path = join(root, "identity.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        revision: 1,
+        environmentId: `env_${"E".repeat(22)}`,
+        pendingEnrollment: {
+          hubOrigin: "https://hub.example.com",
+          keySecretName: "node-key.pending",
+          pollingSecretName: "enrollment-poll.pending",
+          deviceCode: "x".repeat(4096),
+          createdAt: 1_784_160_000_000,
+          expiresAt: 1_784_160_600_000,
+          pollIntervalMs: 5_000,
+          cleanupRequested: false,
+        },
+        activeNode: null,
+        stagedRotation: null,
+      }),
+      { mode: 0o600 },
+    );
+
+    const store = await makeLocalHubIdentityStateStore(path);
+    await expect(store.readOrCreate()).rejects.toMatchObject({ code: "identity_state_corrupt" });
   });
 
   it("rejects environment replacement and invalid revision transitions", async () => {

@@ -175,10 +175,26 @@ const withLiveHubCliServer = <A, E, R>(baseDir: string, run: () => Effect.Effect
               status: waitingStatus,
               deviceCode: "ABCD-EFGH",
               fingerprint: `SHA256:${"A".repeat(43)}`,
+              label: "Test Node",
+              platformOs: "darwin" as const,
+              platformArch: "arm64" as const,
+              clientVersion: "0.0.0",
+              algorithm: "ed25519" as const,
               expiresAt: "1970-01-01T00:10:00.000Z",
               pollIntervalMs: 5_000,
             };
           },
+          readEnrollment: async () => ({
+            deviceCode: "ABCD-EFGH",
+            fingerprint: `SHA256:${"A".repeat(43)}`,
+            label: "Test Node",
+            platformOs: "darwin" as const,
+            platformArch: "arm64" as const,
+            clientVersion: "0.0.0",
+            algorithm: "ed25519" as const,
+            expiresAt: "1970-01-01T00:10:00.000Z",
+            pollIntervalMs: 5_000,
+          }),
           cancelEnrollment: async () => ({ ...waitingStatus, state: "enrolling" as const }),
           stop: async () => undefined,
         }),
@@ -439,6 +455,15 @@ it.layer(NodeServices.layer)("cli log-level parsing", (it) => {
             );
             const resumed = JSON.parse(resumeOutput.output) as { readonly state?: string };
             assert.equal(resumed.state, "awaiting_approval");
+
+            const pendingOutput = yield* captureStdout(
+              runCli(["hub", "pending", "--base-dir", baseDir]),
+            );
+            assert.include(pendingOutput.output, `Fingerprint: SHA256:${"A".repeat(43)}`);
+            assert.include(pendingOutput.output, "Device code: ABCD-EFGH");
+            assert.include(pendingOutput.output, "Compare every field");
+            assert.notInclude(pendingOutput.output, "pollingSecret");
+            assert.notInclude(pendingOutput.output, baseDir);
 
             const humanResumeOutput = yield* captureStdout(
               runCli(["hub", "resume", "--base-dir", baseDir]),

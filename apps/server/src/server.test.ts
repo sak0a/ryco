@@ -626,6 +626,7 @@ const buildAppUnderTest = (options?: {
             enroll: async () => {
               throw new Error("not implemented in test");
             },
+            readEnrollment: async () => null,
             cancelEnrollment: async () => {
               throw new Error("not implemented in test");
             },
@@ -1390,10 +1391,16 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 status,
                 deviceCode: "ABCD-EFGH",
                 fingerprint: `SHA256:${"A".repeat(43)}`,
+                label: "Test Node",
+                platformOs: "darwin" as const,
+                platformArch: "arm64" as const,
+                clientVersion: "0.0.0",
+                algorithm: "ed25519" as const,
                 expiresAt: "1970-01-01T00:10:00.000Z",
                 pollIntervalMs: 5_000,
               };
             },
+            readEnrollment: async () => null,
             cancelEnrollment: async () => {
               cancelCalls += 1;
               return { ...status, state: "enrolling" as const };

@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 
 import type { RelayNodeAuthHandshake } from "@ryco/contracts/relay";
+import { canonicalizeHubOrigin } from "@ryco/shared/nodeIdentity";
 
 import { ServerConfig } from "../config.ts";
 import {
@@ -60,9 +61,26 @@ export class HubRelayAuthenticationError extends Error {
   }
 }
 
+/**
+ * A pending ceremony, re-readable after the start response has been lost.
+ *
+ * The fingerprint is recomputed from the protected key rather than persisted, so
+ * a tampered state file cannot display a fingerprint that differs from the key
+ * that will actually sign the authentication transcript.
+ */
+export interface PendingHubEnrollmentDetail {
+  readonly deviceCode: string | null;
+  readonly fingerprint: Uint8Array;
+  readonly algorithm: "ed25519";
+  readonly expiresAt: number | null;
+  readonly pollIntervalMs: number | null;
+}
+
 export interface HubIdentityRuntimeShape {
   readonly backend: ProtectedSecretStoreBackend;
   readonly readState: () => Promise<LocalHubIdentityState>;
+  /** Null when no ceremony is pending for this origin. */
+  readonly readPendingEnrollment: (hubOrigin: string) => Promise<PendingHubEnrollmentDetail | null>;
   readonly startEnrollment: (
     hubOrigin: string,
     metadata: HubEnrollmentMetadata,
@@ -151,6 +169,23 @@ export async function makeHubIdentityRuntime(options: {
   return {
     backend: secretStore.backend,
     readState: () => bounded("identity_unavailable", () => stateStore.readOrCreate()),
+    readPendingEnrollment: (hubOrigin) =>
+      bounded("identity_unavailable", async () => {
+        const state = await stateStore.readOrCreate();
+        const pending = state.pendingEnrollment;
+        // A ceremony being torn down is not one an approver should still be
+        // shown, so a cleanup-marked record reads as absent.
+        if (pending === null || pending.cleanupRequested) return null;
+        if (pending.hubOrigin !== canonicalizeHubOrigin(hubOrigin)) return null;
+        const descriptor = await signingIdentity.getPublicDescriptor(pending.keySecretName);
+        return {
+          deviceCode: pending.deviceCode,
+          fingerprint: descriptor.fingerprint,
+          algorithm: descriptor.algorithm,
+          expiresAt: pending.expiresAt,
+          pollIntervalMs: pending.pollIntervalMs,
+        };
+      }),
     startEnrollment: (hubOrigin, metadata) =>
       bounded("enrollment_failed", () => enrollment.start(hubOrigin, metadata)),
     pollEnrollment: (hubOrigin) => bounded("enrollment_failed", () => enrollment.poll(hubOrigin)),

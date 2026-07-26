@@ -2,7 +2,11 @@ import { describe, expect, it } from "@effect/vitest";
 import { Schema } from "effect";
 
 import { RELAY_MAX_QUEUED_BYTES } from "./relay.ts";
-import { HubConnectorStatus, HubEnrollmentStartResult } from "./hubConnector.ts";
+import {
+  HubConnectorStatus,
+  HubEnrollmentCeremonyDetail,
+  HubEnrollmentStartResult,
+} from "./hubConnector.ts";
 
 const decode = Schema.decodeUnknownSync(HubConnectorStatus);
 
@@ -79,12 +83,46 @@ describe("HubEnrollmentStartResult", () => {
     status: { ...disabled, state: "awaiting_approval" },
     deviceCode: "ABCD-EFGH",
     fingerprint,
+    label: "Ryco node",
+    platformOs: "darwin",
+    platformArch: "arm64",
+    clientVersion: "0.1.8",
+    algorithm: "ed25519",
     expiresAt: "2026-07-16T00:05:00.000Z",
     pollIntervalMs: 1_000,
   } as const;
 
   it("accepts the canonical SHA-256 public-key fingerprint", () => {
     expect(decodeEnrollment(enrollment)).toEqual(enrollment);
+  });
+
+  it("carries every field the approval screen asks a reviewer to compare", () => {
+    // The node and the Hub are held side by side. A field on one and not the
+    // other silently narrows the comparison, so this set is deliberate.
+    expect(Object.keys(HubEnrollmentCeremonyDetail.fields).toSorted()).toEqual([
+      "algorithm",
+      "clientVersion",
+      "deviceCode",
+      "expiresAt",
+      "fingerprint",
+      "label",
+      "platformArch",
+      "platformOs",
+      "pollIntervalMs",
+    ]);
+  });
+
+  it("rejects an unbounded label or client version", () => {
+    expect(() => decodeEnrollment({ ...enrollment, label: "" })).toThrow();
+    expect(() => decodeEnrollment({ ...enrollment, label: "x".repeat(129) })).toThrow();
+    expect(() => decodeEnrollment({ ...enrollment, clientVersion: "" })).toThrow();
+    expect(() => decodeEnrollment({ ...enrollment, clientVersion: "x".repeat(65) })).toThrow();
+  });
+
+  it("rejects an unknown platform or signing algorithm", () => {
+    expect(() => decodeEnrollment({ ...enrollment, platformOs: "solaris" })).toThrow();
+    expect(() => decodeEnrollment({ ...enrollment, platformArch: "riscv" })).toThrow();
+    expect(() => decodeEnrollment({ ...enrollment, algorithm: "rsa" })).toThrow();
   });
 
   it("rejects non-canonical fingerprint prefixes, alphabets, padding, and lengths", () => {

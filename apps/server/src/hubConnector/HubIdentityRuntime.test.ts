@@ -129,6 +129,58 @@ describe("HubIdentityRuntime", () => {
     expect(JSON.stringify(error)).not.toContain("CANARY");
   });
 
+  it("re-reads a pending ceremony across a restart and recomputes its fingerprint", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-pending-read-"));
+    const store = makeMemoryStore();
+    const fetchImplementation = async (input: string | URL | Request) => {
+      if (String(input).endsWith("/api/node/enrollments")) {
+        return Response.json({
+          deviceCode: "ABCD-EFGH",
+          pollingSecret: Buffer.from(new Uint8Array(32).fill(0x51)).toString("base64url"),
+          expiresAt: 160_000,
+          pollIntervalMs: 1_000,
+        });
+      }
+      throw new Error("unexpected route");
+    };
+    const options = {
+      statePath: join(root, "hub-identity.json"),
+      fileSecretRoot: join(root, "secrets"),
+      allowFileFallback: false,
+      secretStore: store,
+      fetch: fetchImplementation,
+      now: () => 100_000,
+    } as const;
+
+    const runtime = await makeHubIdentityRuntime(options);
+    const started = await runtime.startEnrollment("https://relay.example", {
+      label: "Ryco node",
+      platformOs: "linux",
+      platformArch: "x64",
+      clientVersion: "0.1.8",
+    });
+
+    // A fresh process: nothing from the start response is in memory any more.
+    const restarted = await makeHubIdentityRuntime(options);
+    const pending = await restarted.readPendingEnrollment("https://relay.example");
+
+    expect(pending).not.toBeNull();
+    expect(pending?.deviceCode).toBe("ABCD-EFGH");
+    expect(pending?.expiresAt).toBe(160_000);
+    expect(pending?.pollIntervalMs).toBe(1_000);
+    // The security property: the fingerprint is derived from the key actually in
+    // custody, not read back from the state file, so it cannot be tampered into
+    // disagreeing with what will sign the authentication transcript.
+    expect(pending?.fingerprint).toEqual(started.publicKey.fingerprint);
+    expect(pending?.algorithm).toBe("ed25519");
+
+    // A different Hub must not see this node's pending ceremony.
+    expect(await restarted.readPendingEnrollment("https://other.example")).toBeNull();
+
+    await restarted.cancelEnrollment("https://relay.example");
+    expect(await restarted.readPendingEnrollment("https://relay.example")).toBeNull();
+  });
+
   it("fails restart with a bounded error when enrolled key custody is missing", async () => {
     const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-missing-"));
     const store = makeMemoryStore();

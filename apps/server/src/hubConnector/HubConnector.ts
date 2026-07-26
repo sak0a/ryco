@@ -1,4 +1,8 @@
-import type { HubConnectorStatus, HubEnrollmentStartResult } from "@ryco/contracts";
+import type {
+  HubConnectorStatus,
+  HubEnrollmentCeremonyDetail,
+  HubEnrollmentStartResult,
+} from "@ryco/contracts";
 import type { RelayErrorFrame, RelayFrame } from "@ryco/contracts/relay";
 import { formatNodePublicKeyFingerprint } from "@ryco/shared/nodeIdentity";
 
@@ -190,6 +194,11 @@ export class HubConnector {
         status: this.status(),
         deviceCode: started.deviceCode,
         fingerprint,
+        label: this.#enrollmentMetadata.label,
+        platformOs: this.#enrollmentMetadata.platformOs,
+        platformArch: this.#enrollmentMetadata.platformArch,
+        clientVersion: this.#enrollmentMetadata.clientVersion,
+        algorithm: started.publicKey.algorithm,
         expiresAt,
         pollIntervalMs: started.pollIntervalMs,
       };
@@ -207,6 +216,40 @@ export class HubConnector {
       });
       throw new Error("Hub enrollment could not be started.");
     }
+  }
+
+  /**
+   * Re-read the pending ceremony so the comparison survives losing the start
+   * response.
+   *
+   * Returns null when nothing is pending, and null when the ceremony predates
+   * device-code persistence — an approver cannot act on a code we cannot show,
+   * and reporting a partial ceremony would imply otherwise.
+   */
+  async readEnrollment(): Promise<HubEnrollmentCeremonyDetail | null> {
+    const origin = this.#enrollmentOrigin();
+    const pending = await this.#identity.readPendingEnrollment(origin);
+    if (
+      pending === null ||
+      pending.deviceCode === null ||
+      pending.expiresAt === null ||
+      pending.pollIntervalMs === null
+    ) {
+      // Either nothing is pending, or the start response never committed. A
+      // half-written ceremony is not one an approver can act on.
+      return null;
+    }
+    return {
+      deviceCode: pending.deviceCode,
+      fingerprint: formatNodePublicKeyFingerprint(pending.fingerprint),
+      label: this.#enrollmentMetadata.label,
+      platformOs: this.#enrollmentMetadata.platformOs,
+      platformArch: this.#enrollmentMetadata.platformArch,
+      clientVersion: this.#enrollmentMetadata.clientVersion,
+      algorithm: pending.algorithm,
+      expiresAt: new Date(pending.expiresAt).toISOString(),
+      pollIntervalMs: pending.pollIntervalMs,
+    };
   }
 
   async cancelEnrollment(): Promise<HubConnectorStatus> {

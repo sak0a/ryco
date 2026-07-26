@@ -4,6 +4,7 @@ import {
   AuthSessionId,
   CommandId,
   HubConnectorStatus,
+  HubEnrollmentCeremonyDetail,
   HubEnrollmentStartResult,
   OrchestrationReadModel,
   ProjectId,
@@ -925,6 +926,26 @@ const requestHubEnrollmentCancellation = (origin: string, bearerToken: string) =
     HUB_CLI_LIVE_SERVER_TIMEOUT,
   );
 
+const requestHubPendingEnrollment = (origin: string, bearerToken: string) =>
+  runLiveServerRequest(
+    HttpClientRequest.get(`${origin}/api/hub/enrollment`).pipe(
+      HttpClientRequest.acceptJson,
+      HttpClientRequest.bearerToken(bearerToken),
+    ),
+    HttpClientResponse.matchStatus({
+      "2xx": (response) =>
+        HttpClientResponse.schemaBodyJson(HubEnrollmentCeremonyDetail)(response).pipe(
+          Effect.map((detail): typeof HubEnrollmentCeremonyDetail.Type | null => detail),
+        ),
+      "404": () => Effect.succeed(null),
+      orElse: (response) =>
+        readErrorMessageFromResponse(response).pipe(
+          Effect.flatMap((message) => Effect.fail(new Error(message))),
+        ),
+    }),
+    HUB_CLI_LIVE_SERVER_TIMEOUT,
+  );
+
 const requestHubResume = (origin: string, bearerToken: string) =>
   runLiveServerRequest(
     HttpClientRequest.post(`${origin}/api/hub/resume`).pipe(
@@ -1230,6 +1251,41 @@ const hubCancelCommand = Command.make("cancel", {
   ),
 );
 
+const formatHubCeremony = (
+  detail: typeof HubEnrollmentCeremonyDetail.Type,
+  json: boolean,
+): string =>
+  json
+    ? JSON.stringify(detail)
+    : [
+        `Label: ${detail.label}`,
+        `Platform: ${detail.platformOs} · ${detail.platformArch}`,
+        `Version: ${detail.clientVersion}`,
+        `Algorithm: ${detail.algorithm}`,
+        `Fingerprint: ${detail.fingerprint}`,
+        `Expires: ${detail.expiresAt}`,
+        `Device code: ${detail.deviceCode}`,
+        "Compare every field, especially the fingerprint, in Hub before approving.",
+      ].join("\n");
+
+const hubPendingCommand = Command.make("pending", {
+  ...authLocationFlags,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Show the pending enrollment ceremony again so its fields can be compared in Hub.",
+  ),
+  Command.withHandler((flags) =>
+    runHubCommand(flags, (origin, token) => requestHubPendingEnrollment(origin, token)).pipe(
+      Effect.flatMap((detail) =>
+        detail === null
+          ? Console.log("No Hub enrollment is pending.")
+          : Console.log(formatHubCeremony(detail, flags.json)),
+      ),
+    ),
+  ),
+);
+
 const hubResumeCommand = Command.make("resume", {
   ...authLocationFlags,
   json: jsonFlag,
@@ -1246,7 +1302,13 @@ const hubResumeCommand = Command.make("resume", {
 
 const hubCommand = Command.make("hub").pipe(
   Command.withDescription("Manage the outbound Hub connector through the local Ryco server."),
-  Command.withSubcommands([hubStatusCommand, hubEnrollCommand, hubCancelCommand, hubResumeCommand]),
+  Command.withSubcommands([
+    hubStatusCommand,
+    hubEnrollCommand,
+    hubPendingCommand,
+    hubCancelCommand,
+    hubResumeCommand,
+  ]),
 );
 
 const projectAddCommand = Command.make("add", {

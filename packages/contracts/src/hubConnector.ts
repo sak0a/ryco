@@ -98,11 +98,28 @@ export const HubNodePublicKeyFingerprint = Schema.String.check(
 );
 export type HubNodePublicKeyFingerprint = typeof HubNodePublicKeyFingerprint.Type;
 
-export const HubEnrollmentStartResult = Schema.Struct({
-  status: HubConnectorStatus,
+/**
+ * The fields an approver compares, in the order the approval screen renders them.
+ *
+ * The node and the approval surface must show the same set: a reviewer holding
+ * both screens is asked to compare every field, so a field present on one and
+ * absent on the other silently narrows the check.
+ */
+export const HubEnrollmentCeremonyDetail = Schema.Struct({
   deviceCode: Schema.String.check(Schema.isPattern(/^[A-Z0-9-]{4,32}$/)),
   fingerprint: HubNodePublicKeyFingerprint,
+  label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  platformOs: Schema.Literals(["darwin", "linux", "windows", "unknown"]),
+  platformArch: Schema.Literals(["arm64", "x64", "other"]),
+  clientVersion: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  algorithm: Schema.Literals(["ed25519"]),
   expiresAt: IsoDateTime,
   pollIntervalMs: NonNegativeInt.check(Schema.isBetween({ minimum: 1_000, maximum: 60_000 })),
+});
+export type HubEnrollmentCeremonyDetail = typeof HubEnrollmentCeremonyDetail.Type;
+
+export const HubEnrollmentStartResult = Schema.Struct({
+  status: HubConnectorStatus,
+  ...HubEnrollmentCeremonyDetail.fields,
 });
 export type HubEnrollmentStartResult = typeof HubEnrollmentStartResult.Type;

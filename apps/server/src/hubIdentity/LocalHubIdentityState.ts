@@ -9,6 +9,19 @@ export interface PendingHubEnrollmentState {
   readonly hubOrigin: string;
   readonly keySecretName: string;
   readonly pollingSecretName: string;
+  /**
+   * The short human code the service issued for this ceremony.
+   *
+   * Bounded non-bearer routing metadata: it identifies which pending request an
+   * approver is looking at and proves nothing on its own. The polling secret,
+   * which is a bearer value, stays in the protected store.
+   *
+   * Null until the start response arrives, and null for records written before
+   * this field existed. A ceremony whose code is unknown is still pollable — it
+   * simply cannot be re-displayed, so a caller must treat null as "unreadable"
+   * rather than as a corrupt state.
+   */
+  readonly deviceCode: string | null;
   readonly createdAt: number;
   readonly expiresAt: number | null;
   readonly pollIntervalMs: number | null;
@@ -70,6 +83,13 @@ const NODE_ID = /^node_[A-Za-z0-9_-]{22,43}$/;
 const NODE_KEY_ID = /^nkey_[A-Za-z0-9_-]{22}$/;
 const ROTATION_ID = /^nrot_[A-Za-z0-9_-]{22}$/;
 const SECRET_NAME = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+/**
+ * Deliberately looser than the wire-format check in `HubEnrollmentClient`. This
+ * bounds charset and length so a state file cannot smuggle an unbounded or
+ * injectable value; it does not pin the service's code format, so a service that
+ * changes it cannot retroactively corrupt an existing state file.
+ */
+const DEVICE_CODE = /^[A-Z0-9-]{4,32}$/;
 const MAX_STATE_BYTES = 16 * 1024;
 
 function stateError(code: LocalHubIdentityStateErrorCode): never {
@@ -82,6 +102,11 @@ function isTimestamp(value: unknown): value is number {
 
 function isNullableTimestamp(value: unknown): value is number | null {
   return value === null || isTimestamp(value);
+}
+
+function isNullableDeviceCode(value: unknown): value is string | null {
+  if (value === undefined || value === null) return true;
+  return typeof value === "string" && DEVICE_CODE.test(value);
 }
 
 function isSecretName(value: unknown): value is string {
@@ -101,7 +126,8 @@ function parsePending(value: unknown): PendingHubEnrollmentState | null {
       (!Number.isSafeInteger(candidate.pollIntervalMs) ||
         Number(candidate.pollIntervalMs) < 1_000 ||
         Number(candidate.pollIntervalMs) > 60_000)) ||
-    (candidate.cleanupRequested !== undefined && typeof candidate.cleanupRequested !== "boolean")
+    (candidate.cleanupRequested !== undefined && typeof candidate.cleanupRequested !== "boolean") ||
+    !isNullableDeviceCode(candidate.deviceCode)
   ) {
     return stateError("identity_state_corrupt");
   }
@@ -115,6 +141,9 @@ function parsePending(value: unknown): PendingHubEnrollmentState | null {
     hubOrigin,
     keySecretName: candidate.keySecretName,
     pollingSecretName: candidate.pollingSecretName,
+    // Absent on records written before this field existed. Those ceremonies stay
+    // pollable; they just cannot be re-displayed.
+    deviceCode: candidate.deviceCode ?? null,
     createdAt: candidate.createdAt,
     expiresAt: candidate.expiresAt,
     pollIntervalMs: candidate.pollIntervalMs as number | null,

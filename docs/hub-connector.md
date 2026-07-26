@@ -38,6 +38,7 @@ directory:
 ```bash
 ryco hub status
 ryco hub enroll
+ryco hub pending
 ryco hub cancel
 ryco hub resume
 ```
@@ -47,10 +48,16 @@ short-lived owner credential from the local auth control plane, uses it only in 
 header to the existing local server, and revokes it after the operation. That credential is never a
 Hub credential and never enters a Hub WebSocket.
 
-`hub enroll` prints a short device code, the canonical `SHA256:<base64url>` public-key fingerprint,
-and expiry. `--json` returns the same bounded fingerprint field. Compare that node-side fingerprint
-exactly with the Hub approval screen before approving. Deny and investigate any mismatch; never
-approve by device code alone. Approval polling continues inside the running server and resumes from
+`hub enroll` prints the node label, platform, client version, key algorithm, the canonical
+`SHA256:<base64url>` public-key fingerprint, expiry, and a short device code — the same fields the
+Hub approval screen shows, so both can be compared item by item. `--json` returns the same bounded
+fields. Compare every field, and the fingerprint exactly, with the Hub approval screen before
+approving. Deny and investigate any mismatch; never approve by device code alone.
+
+`hub pending` reprints those fields for a ceremony that is already under way. The device code is
+persisted as bounded non-bearer routing metadata so a comparison survives a lost terminal or a
+restart; the polling secret is not, and stays in the protected store. A ceremony started before this
+was persisted cannot be reprinted and reports as absent. Approval polling continues inside the running server and resumes from
 protected local state after restart. `hub cancel` stops a pending ceremony and deletes its local key
 and polling-secret custody. Denial or expiry requires starting a new ceremony.
 

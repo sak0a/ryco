@@ -54,6 +54,37 @@ export const hubConnectorEnrollmentRouteLayer = HttpRouter.add(
 );
 
 /**
+ * Re-read a pending enrollment ceremony.
+ *
+ * The device code, fingerprint, and expiry are otherwise only in the enrollment
+ * start response, so losing that output — a scrolled terminal, a closed panel, a
+ * restart — strands a live ceremony with no way to finish it and no way back in
+ * except cancelling, which destroys key custody.
+ *
+ * 404 means nothing is pending, or a ceremony predates device-code persistence
+ * and therefore cannot be displayed.
+ */
+export const hubConnectorEnrollmentReadRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/hub/enrollment",
+  Effect.gen(function* () {
+    yield* authenticateOwner;
+    const connector = yield* HubConnectorService;
+    const enrollment = yield* Effect.tryPromise({
+      try: () => connector.readEnrollment(),
+      catch: enrollmentFailure,
+    });
+    if (enrollment === null) {
+      return HttpServerResponse.jsonUnsafe(
+        { message: "No Hub enrollment is pending." },
+        { status: 404 },
+      );
+    }
+    return HttpServerResponse.jsonUnsafe(enrollment, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
  * Retry a connector that stopped without scheduling its own retry.
  *
  * `connection_replaced` and a locked credential store both classify as
@@ -99,4 +130,5 @@ export const hubConnectorRoutesLayer = Layer.mergeAll(
   hubConnectorEnrollmentRouteLayer,
   hubConnectorEnrollmentCancelRouteLayer,
   hubConnectorResumeRouteLayer,
+  hubConnectorEnrollmentReadRouteLayer,
 );

@@ -54,6 +54,7 @@ function encoded(frame: RelayFrame): Uint8Array {
 function identity(overrides: Partial<HubIdentityRuntimeShape> = {}): HubIdentityRuntimeShape {
   return {
     backend: "keytar",
+    readPendingEnrollment: async () => null,
     readState: async () => ({
       version: 1,
       revision: 1,
@@ -693,6 +694,7 @@ describe("HubConnector", () => {
                 hubOrigin: "https://relay.example",
                 keySecretName: "node-key.fixture",
                 pollingSecretName: "enrollment-poll.fixture",
+                deviceCode: "ABCD-EFGH",
                 createdAt: 1,
                 expiresAt: 2_000_000,
                 pollIntervalMs: 1_000,
@@ -745,10 +747,19 @@ describe("HubConnector", () => {
       pollIntervalMs: 1_000,
       status: { state: "awaiting_approval" },
     });
+    // Canary: the enroll response carries exactly the fields an approver
+    // compares, and nothing else. Widening this set is a deliberate act — it
+    // must stay in step with the approval screen, and it must never grow to
+    // include the polling secret, the public key, or the Hub origin.
     expect(Object.keys(started).toSorted()).toEqual([
+      "algorithm",
+      "clientVersion",
       "deviceCode",
       "expiresAt",
       "fingerprint",
+      "label",
+      "platformArch",
+      "platformOs",
       "pollIntervalMs",
       "status",
     ]);
@@ -836,6 +847,7 @@ describe("HubConnector", () => {
         hubOrigin: "https://relay.example",
         keySecretName: "node-key.fixture",
         pollingSecretName: "enrollment-poll.fixture",
+        deviceCode: "ABCD-EFGH",
         createdAt: 1,
         expiresAt: 2_000_000,
         pollIntervalMs: 1_000,
@@ -889,6 +901,7 @@ describe("HubConnector", () => {
             hubOrigin: "https://relay.example",
             keySecretName: "node-key.fixture",
             pollingSecretName: "enrollment-poll.fixture",
+            deviceCode: "ABCD-EFGH",
             createdAt: 1,
             expiresAt: 2_000_000,
             pollIntervalMs: 1_000,
@@ -930,6 +943,7 @@ describe("HubConnector", () => {
             hubOrigin: "https://relay.example",
             keySecretName: "node-key.fixture",
             pollingSecretName: "enrollment-poll.fixture",
+            deviceCode: "ABCD-EFGH",
             createdAt: 1,
             expiresAt: 2_000_000,
             pollIntervalMs: 1_000,
