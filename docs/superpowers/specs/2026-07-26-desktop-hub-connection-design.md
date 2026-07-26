@@ -557,6 +557,11 @@ The confirmation dialog states plainly: this erases this machine's Hub key; reco
 new approval; and **it does not revoke anything at the Hub** — the node record survives there until
 an owner removes it.
 
+**It must additionally state that this machine cannot rejoin the same Hub until that record is
+removed there**, for the reason given in Hub obligation 3. Without the Hub-side capability that
+obligation names, this dialog is describing a one-way door, and the copy has to say so in those
+words rather than implying a reversible action.
+
 ### Client access
 
 Add these calls to the existing `createPrimaryAuth` factory in
@@ -684,12 +689,24 @@ Named as obligations, with no private detail:
    unilaterally degrades the comparison. This is a joint obligation, and the node is the follower.
 2. **Orphan node records.** After a local leave, the Hub-side record persists, bound to a key that no
    longer exists. Only a Hub owner can remove it. The node cannot signal its departure.
-3. **Re-enrollment against the same Hub.** A local leave preserves `environmentId` — the local store
-   forbids changing it (`LocalHubIdentityState.ts:394-399`). Whether the Hub accepts a fresh
-   enrollment carrying an already-known environment identifier is Hub-side behaviour that this design
-   does not assume. **This is unverified and must be settled before the leave route ships**; if the
-   Hub rejects it, same-Hub recovery is a Hub-authorized key-replacement flow, not a local leave, and
-   the confirmation copy must say so.
+3. **Re-enrollment against the same Hub is currently impossible, and this blocks slice 4.**
+   Investigated and resolved on 2026-07-26, stated here without Hub internals: the Hub binds **one
+   node record per environment identifier**, that binding is unique, it **survives revocation**, and
+   there is **no node-removal operation** on the Hub today. A local leave preserves `environmentId` —
+   the local store forbids changing it (`LocalHubIdentityState.ts:394-399`) — so a fresh enrollment
+   from the same machine to the same Hub collides with the orphaned record.
+
+   Two consequences, both serious:
+
+   - The failure lands at **approval time**, after the operator has already compared the fingerprint
+     and clicked Approve. It is the worst available moment to fail.
+   - Combined with obligation 2, **`revoked` has no in-product recovery path at all today**, even
+     with the leave route: leave erases the local key, and re-enrollment then fails.
+
+   The Hub must therefore provide **either** a node-removal operation **or** a key-replacement flow
+   that preserves the existing node and environment identifiers. Until one exists, shipping the leave
+   button would permanently prevent a machine from rejoining that Hub — a one-way door per machine,
+   per Hub. **Slice 4 does not ship before this lands.**
 4. **An approval deep link** would let *Open Hub* land on the approval screen rather than the origin
    root. It requires a Hub-supplied absolute URL in the enrollment start response — a contract and
    Hub-protocol change, explicitly out of scope here.
@@ -707,7 +724,7 @@ identity, credentials, or relay transport.
 | 1 | `POST /api/hub/resume` + route tests. Fixes `connection_replaced` and transient `identity_unavailable` without a relaunch. Independently useful to CLI users. | security-review |
 | 2 | Persist `deviceCode`; `GET /api/hub/enrollment`; extend `HubEnrollmentStartResult` with label/platform/version/algorithm. Makes a ceremony recoverable. | security-review |
 | 3 | `GET /api/hub/identity` returning `HubIdentitySummary` + closed-status canary test. | security-review |
-| 4 | `POST /api/hub/leave` as a crash-safe connector operation, with the teardown marker and resume-at-boot. **Blocked on Hub obligation 3.** | security-review |
+| 4 | `POST /api/hub/leave` as a crash-safe connector operation, with the teardown marker and resume-at-boot. **Hard-blocked on Hub obligation 3** — shipping it before the Hub can remove or re-key a node makes leaving a one-way door. | security-review |
 | 5 | Desktop config: `DesktopSettings` fields, bootstrap-envelope keys, `backendChildEnv` strip, `0600`/`0700` hardening, surfaced parse failure, `validateHubOrigin` bridge. | standard |
 | 6 | `hubStatus.ts` pure module + exhaustive unit tests over every state × degradedMode × failure code. No UI. | standard |
 | 7 | The Hub section: status row, enable/disable, origin field, relaunch confirmation. | standard |
@@ -743,8 +760,6 @@ Hub predates the current identity work:
 
 - **Every end-to-end enrollment path.** Approval, denial, and expiry all require a live Hub. Slices
   1–4 can only be tested against fakes.
-- **Hub obligation 3** — whether same-`environmentId` re-enrollment is accepted. This gates slice 4
-  and cannot be settled from this repository.
 - **Fingerprint rendering parity in practice** — that the two screens wrap identically at real
   window widths on real displays.
 - **`identity_origin_mismatch` and `revoked`** as lived states, and therefore whether the leave route
@@ -770,14 +785,19 @@ Hub predates the current identity work:
 5. **Empty-state prominence.** The Hub section is invisible to anyone who never opens Connections.
    Should first-run onboarding mention it? Recommendation: not until slice 4 has run against a live
    Hub.
-6. **Hub obligation 3 owner.** Who confirms the same-`environmentId` re-enrollment behaviour, and
-   does that work land in the Hub repo before slice 4?
+6. **Hub obligation 3 is now answered, and it needs Hub work.** Same-Hub re-enrollment after a leave
+   is blocked, and `revoked` consequently has no in-product recovery at all. The Hub needs a node
+   removal or key-replacement capability. Recommendation: schedule that Hub work now and treat slices
+   1–3 as the shippable set until it exists — they are useful on their own and unblocked. The
+   alternative, shipping leave with copy that admits it is irreversible per Hub, is worse than not
+   shipping the button.
 
 ## Known limitations
 
 - One Hub per state directory. Multi-Hub is a state-schema revision.
 - The panel cannot show who is connected through the Hub, only how many.
-- Leave does not revoke at the Hub.
+- Leave does not revoke at the Hub, and until Hub obligation 3 is met it also prevents the machine
+  from ever rejoining that Hub. `revoked` therefore has no in-product recovery path today.
 - The bootstrap-envelope shape is duplicated between `apps/server/src/cli.ts` and
   `apps/desktop/src/main.ts` with no shared type. This design adds two keys to that duplication.
   Accepted debt; extracting the envelope to `packages/contracts` is a separate slice.
