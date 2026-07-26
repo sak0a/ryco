@@ -202,19 +202,37 @@ hosted mode. Both constrain the bundle Ryco ships; neither constrains a modified
 drafts of this design called these "three independent layers." They are not, and this spec does not
 claim the margin.
 
-### A correction worth stating plainly
+### Two corrections worth stating plainly
 
-`authenticateOwner` checks `session.role` only. It does **not** check locality. An owner paired over
-LAN or Tailscale who can reach the node's listener can call these routes today. The accurate rule is
-therefore *any directly-connected owner*, not *any local owner*.
+**First: the routes are not locality-checked.** `authenticateOwner` checks `session.role` only. An
+owner paired over LAN or Tailscale who can reach the node's listener can call these routes. The
+accurate phrase is *any directly-connected owner*, not *any local owner*.
 
-That is defensible — such an owner was explicitly paired and already holds full node authority — but
-it is not what the phrase "direct local owner" implies, and identity-erasing operations deserve a
-tighter boundary than ordinary owner methods. **Owner decision required:** restrict the mutating
-Hub routes (`enrollment`, `enrollment/cancel`, `resume`, `leave`) to a loopback peer address in
-addition to owner authentication. `readRemoteAddressFromSource` already extracts peer addresses
-(`apps/server/src/auth/utils.ts:113`). This narrows access that exists today, so it is the owner's
-call, not the design's.
+**Second, and more important: the relay-unreachability property does not hold end to end.** The HTTP
+routes are genuinely unreachable over the relay. Connector *management* is not. `terminalOpen` and
+`terminalWrite` are classified `operator`, so a relayed operator gets a PTY running as the server
+user. The `ryco hub` CLI derives its authority from **filesystem access to the state directory** —
+it reads `server-runtime.json` and mints its own local owner session
+(`apps/server/src/cli.ts:862-869`), with no human credential anywhere in the path. A relayed operator
+can therefore run `ryco hub enroll` or `ryco hub cancel` in that terminal and manage the connector.
+
+This design does **not** claim otherwise, and the security review should not be told otherwise. The
+honest boundary is:
+
+- **Relayed viewers cannot manage or observe the connector.** Real and worth preserving — it is why
+  the Hub origin stays out of `ServerSettings` (Decision 2).
+- **Relayed operators and owners effectively can**, via the terminal, regardless of what guards the
+  HTTP routes. At operator and above, the Hub is a fully trusted control plane.
+
+**Consequently this design does not add a loopback restriction**, and the earlier open question
+asking for one is withdrawn. It would close nothing — the terminal that subsumes these routes is
+itself on loopback — while breaking the legitimate flow of administering a headless node's Hub
+connection from a paired laptop, which `REMOTE.md` actively encourages. A guard that stops no
+attacker and stops a real operator is a bad trade.
+
+Narrowing operator-tier authority is a much larger question about relay role semantics. It is real,
+it is out of scope here, and it should not be smuggled in as a route-level check that only appears to
+address it.
 
 ### Why not an RPC family in phase 1
 
@@ -772,9 +790,10 @@ Hub predates the current identity work:
 
 ## Open questions for the owner
 
-1. **Loopback restriction.** Should the mutating Hub routes require a loopback peer in addition to
-   owner authentication (Decision 3)? This narrows access that exists today. Recommendation: yes for
-   `leave`, and decide `enrollment` alongside it.
+1. ~~**Loopback restriction.**~~ **Withdrawn — answered in Decision 3.** A relayed operator already
+   reaches these operations through `terminalOpen` and the `ryco hub` CLI, whose authority is
+   filesystem access rather than a human credential. A loopback guard would close nothing and would
+   break administering a headless node from a paired laptop. No owner decision needed.
 2. **Device-code persistence.** Slice 2 changes a deliberate one-shot display policy. Recommendation:
    accept — the current behaviour makes a ceremony unrecoverable and pushes operators toward
    cancel-and-re-enroll, which destroys key custody.
