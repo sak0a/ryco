@@ -627,6 +627,12 @@ const buildAppUnderTest = (options?: {
               throw new Error("not implemented in test");
             },
             identitySummary: async () => ({ enrolled: "none" as const }),
+            leave: async () => ({
+              state: "disabled" as const,
+              transitionedAt: "1970-01-01T00:00:00.000Z",
+              activeChannels: 0,
+              queuedBytes: 0,
+            }),
             readEnrollment: async () => null,
             cancelEnrollment: async () => {
               throw new Error("not implemented in test");
@@ -1402,6 +1408,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               };
             },
             identitySummary: async () => ({ enrolled: "none" as const }),
+            leave: async () => ({
+              state: "disabled" as const,
+              transitionedAt: "1970-01-01T00:00:00.000Z",
+              activeChannels: 0,
+              queuedBytes: 0,
+            }),
             readEnrollment: async () => null,
             cancelEnrollment: async () => {
               cancelCalls += 1;

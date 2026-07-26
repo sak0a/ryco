@@ -1251,6 +1251,22 @@ const hubCancelCommand = Command.make("cancel", {
   ),
 );
 
+const requestHubLeave = (origin: string, bearerToken: string) =>
+  runLiveServerRequest(
+    HttpClientRequest.post(`${origin}/api/hub/leave`).pipe(
+      HttpClientRequest.acceptJson,
+      HttpClientRequest.bearerToken(bearerToken),
+    ),
+    HttpClientResponse.matchStatus({
+      "2xx": (response) => HttpClientResponse.schemaBodyJson(HubConnectorStatus)(response),
+      orElse: (response) =>
+        readErrorMessageFromResponse(response).pipe(
+          Effect.flatMap((message) => Effect.fail(new Error(message))),
+        ),
+    }),
+    HUB_CLI_LIVE_SERVER_TIMEOUT,
+  );
+
 const formatHubCeremony = (
   detail: typeof HubEnrollmentCeremonyDetail.Type,
   json: boolean,
@@ -1286,6 +1302,20 @@ const hubPendingCommand = Command.make("pending", {
   ),
 );
 
+const hubLeaveCommand = Command.make("leave", {
+  ...authLocationFlags,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Erase this node's local Hub identity. Destructive: reconnecting needs a new approval, and this does not revoke the node in Hub.",
+  ),
+  Command.withHandler((flags) =>
+    runHubCommand(flags, (origin, token) => requestHubLeave(origin, token)).pipe(
+      Effect.flatMap((status) => Console.log(formatHubStatus(status, flags.json))),
+    ),
+  ),
+);
+
 const hubResumeCommand = Command.make("resume", {
   ...authLocationFlags,
   json: jsonFlag,
@@ -1308,6 +1338,7 @@ const hubCommand = Command.make("hub").pipe(
     hubPendingCommand,
     hubCancelCommand,
     hubResumeCommand,
+    hubLeaveCommand,
   ]),
 );
 

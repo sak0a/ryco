@@ -87,6 +87,7 @@ const makeConnectorStub = (stub: ConnectorStub) => {
       throw new Error("not used");
     },
     identitySummary: async () => stub.identity ?? { enrolled: "none" as const },
+    leave: async () => stub.statuses[0]!,
     readEnrollment: async () => stub.ceremony ?? null,
     cancelEnrollment: async () => stub.statuses[0]!,
     stop: async () => undefined,
@@ -354,12 +355,24 @@ it.layer(NodeServices.layer)("hub connector http routes", (it) => {
     ),
   );
 
+  it.effect("leave returns the resulting status to an owner session", () =>
+    withHubRoutes({ statuses: [REVOKED_STATUS] }, ({ origin, ownerToken }) =>
+      Effect.gen(function* () {
+        const response = yield* post(origin, "/api/hub/leave", ownerToken);
+        assert.equal(response.status, 200);
+        const body = (yield* Effect.promise(() => response.json())) as HubConnectorStatus;
+        assert.equal(body.state, "revoked");
+      }),
+    ),
+  );
+
   it.effect("every hub route rejects a non-owner session", () =>
     withHubRoutes({ statuses: [ONLINE_STATUS] }, ({ origin, clientToken, resumeCalls }) =>
       Effect.gen(function* () {
         const status = yield* get(origin, "/api/hub/status", clientToken);
         const read = yield* get(origin, "/api/hub/enrollment", clientToken);
         const identity = yield* get(origin, "/api/hub/identity", clientToken);
+        const leave = yield* post(origin, "/api/hub/leave", clientToken);
         const resume = yield* post(origin, "/api/hub/resume", clientToken);
         const enrollment = yield* post(origin, "/api/hub/enrollment", clientToken);
         const cancel = yield* post(origin, "/api/hub/enrollment/cancel", clientToken);
@@ -367,6 +380,7 @@ it.layer(NodeServices.layer)("hub connector http routes", (it) => {
         assert.equal(status.status, 403);
         assert.equal(read.status, 403);
         assert.equal(identity.status, 403);
+        assert.equal(leave.status, 403);
         assert.equal(resume.status, 403);
         assert.equal(enrollment.status, 403);
         assert.equal(cancel.status, 403);
@@ -381,11 +395,12 @@ it.layer(NodeServices.layer)("hub connector http routes", (it) => {
         const status = yield* get(origin, "/api/hub/status");
         const read = yield* get(origin, "/api/hub/enrollment");
         const identity = yield* get(origin, "/api/hub/identity");
+        const leave = yield* post(origin, "/api/hub/leave");
         const resume = yield* post(origin, "/api/hub/resume");
         const enrollment = yield* post(origin, "/api/hub/enrollment");
         const cancel = yield* post(origin, "/api/hub/enrollment/cancel");
 
-        for (const response of [status, read, identity, resume, enrollment, cancel]) {
+        for (const response of [status, read, identity, leave, resume, enrollment, cancel]) {
           assert.isTrue(
             response.status === 401 || response.status === 403,
             `expected an auth rejection, got ${response.status}`,

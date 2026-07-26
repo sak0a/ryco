@@ -46,6 +46,22 @@ export interface StagedHubRotationState {
   readonly activatedAt: number | null;
 }
 
+/**
+ * A leave that has been committed to but not finished.
+ *
+ * Erasing an identity spans two stores, and a crash between them would either
+ * orphan protected secrets or leave state pointing at keys that are already
+ * gone. Recording the intent — and every secret name to erase — before touching
+ * either lets the next start finish the job. Mirrors the `cleanupRequested`
+ * marker the pending-enrollment teardown already uses, hoisted to the top level
+ * because a leave spans the active node, a pending ceremony, and a staged
+ * rotation at once.
+ */
+export interface PendingHubTeardownState {
+  readonly secretNames: ReadonlyArray<string>;
+  readonly requestedAt: number;
+}
+
 export interface LocalHubIdentityState {
   readonly version: 1;
   readonly revision: number;
@@ -53,6 +69,7 @@ export interface LocalHubIdentityState {
   readonly pendingEnrollment: PendingHubEnrollmentState | null;
   readonly activeNode: ActiveHubNodeState | null;
   readonly stagedRotation: StagedHubRotationState | null;
+  readonly pendingTeardown: PendingHubTeardownState | null;
 }
 
 export type LocalHubIdentityStateErrorCode =
@@ -76,6 +93,8 @@ export interface LocalHubIdentityStateStore {
   readonly update: (
     change: (current: LocalHubIdentityState) => LocalHubIdentityState,
   ) => Promise<LocalHubIdentityState>;
+  /** Discard the identity entirely and mint a fresh `EnvironmentId`. */
+  readonly reset: () => Promise<LocalHubIdentityState>;
 }
 
 const ENVIRONMENT_ID = /^env_[A-Za-z0-9_-]{22}$/;
@@ -215,6 +234,23 @@ function parseRotation(value: unknown): StagedHubRotationState | null {
   };
 }
 
+const MAX_TEARDOWN_SECRETS = 8;
+
+function parseTeardown(value: unknown): PendingHubTeardownState | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "object") return stateError("identity_state_corrupt");
+  const candidate = value as Partial<PendingHubTeardownState>;
+  if (
+    !Array.isArray(candidate.secretNames) ||
+    candidate.secretNames.length > MAX_TEARDOWN_SECRETS ||
+    !candidate.secretNames.every((name) => isSecretName(name)) ||
+    !isTimestamp(candidate.requestedAt)
+  ) {
+    return stateError("identity_state_corrupt");
+  }
+  return { secretNames: [...candidate.secretNames], requestedAt: candidate.requestedAt };
+}
+
 function parseState(value: unknown): LocalHubIdentityState {
   if (typeof value !== "object" || value === null) return stateError("identity_state_corrupt");
   const candidate = value as Partial<LocalHubIdentityState>;
@@ -234,6 +270,7 @@ function parseState(value: unknown): LocalHubIdentityState {
     pendingEnrollment: parsePending(candidate.pendingEnrollment),
     activeNode: parseActive(candidate.activeNode),
     stagedRotation: parseRotation(candidate.stagedRotation),
+    pendingTeardown: parseTeardown(candidate.pendingTeardown),
   };
   if (state.pendingEnrollment !== null && state.activeNode !== null) {
     return stateError("identity_state_corrupt");
@@ -249,6 +286,7 @@ function makeInitialState(): LocalHubIdentityState {
     pendingEnrollment: null,
     activeNode: null,
     stagedRotation: null,
+    pendingTeardown: null,
   };
 }
 
@@ -435,5 +473,21 @@ export async function makeLocalHubIdentityStateStore(
       return proposed;
     });
 
-  return { readOrCreate, update };
+  /**
+   * Replace the state with a fresh identity, under the same writer lock.
+   *
+   * Separate from `update` on purpose: `update` forbids replacing the
+   * `EnvironmentId`, which is exactly right for every ordinary mutation and
+   * exactly wrong for a leave. After the signing key is erased the machine can
+   * prove nothing about its former self, and reusing the identifier would
+   * collide with the node record it just abandoned on the service side.
+   */
+  const reset: LocalHubIdentityStateStore["reset"] = () =>
+    withLock(async () => {
+      const fresh = makeInitialState();
+      await writeState(statePath, fresh);
+      return fresh;
+    });
+
+  return { readOrCreate, update, reset };
 }

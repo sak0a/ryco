@@ -23,6 +23,12 @@ const enrollmentFailure = () =>
     status: 400,
   });
 
+const leaveFailure = () =>
+  new AuthError({
+    message: "Hub identity erasure failed.",
+    status: 400,
+  });
+
 const resumeFailure = () =>
   new AuthError({
     message: "Hub connector resume failed.",
@@ -144,6 +150,30 @@ export const hubConnectorEnrollmentCancelRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
+/**
+ * Erase this node's local Hub identity.
+ *
+ * The only exit from `revoked` and from a corrupt identity. Destructive and
+ * deliberately distinct from turning the connector off, which is reversible and
+ * keeps the key.
+ *
+ * It does not revoke anything at the Hub: the node record survives there until
+ * an owner removes it. The node rejoins as a new node.
+ */
+export const hubConnectorLeaveRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/hub/leave",
+  Effect.gen(function* () {
+    yield* authenticateOwner;
+    const connector = yield* HubConnectorService;
+    const status = yield* Effect.tryPromise({
+      try: () => connector.leave(),
+      catch: leaveFailure,
+    });
+    return HttpServerResponse.jsonUnsafe(status, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
 export const hubConnectorRoutesLayer = Layer.mergeAll(
   hubConnectorStatusRouteLayer,
   hubConnectorEnrollmentRouteLayer,
@@ -151,4 +181,5 @@ export const hubConnectorRoutesLayer = Layer.mergeAll(
   hubConnectorResumeRouteLayer,
   hubConnectorEnrollmentReadRouteLayer,
   hubConnectorIdentityRouteLayer,
+  hubConnectorLeaveRouteLayer,
 );

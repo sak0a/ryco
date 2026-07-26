@@ -307,11 +307,15 @@ export class HubConnector {
     return this.status();
   }
 
-  async stop(): Promise<void> {
-    if (this.#stopping) return this.#frameChain;
-    this.#stopping = true;
+  /**
+   * Drop every connection-owned resource without marking the connector stopped.
+   *
+   * Shared by `stop()` and `leave()`. `stop()` additionally sets `#stopping`,
+   * which is a one-way latch for the process lifetime; `leave()` must not set it,
+   * or the node could never re-enroll without a relaunch.
+   */
+  async #teardownConnection(): Promise<void> {
     this.#state.invalidateGeneration();
-    if (this.#state.snapshot().state !== "disabled") this.#state.transition("stopping");
     this.#clearAllTimers();
     const registry = this.#registry;
     this.#registry = undefined;
@@ -321,8 +325,55 @@ export class HubConnector {
     this.#session?.close();
     this.#session = undefined;
     await this.#frameChain.catch(() => undefined);
+  }
+
+  async stop(): Promise<void> {
+    if (this.#stopping) return this.#frameChain;
+    this.#stopping = true;
+    this.#state.invalidateGeneration();
+    if (this.#state.snapshot().state !== "disabled") this.#state.transition("stopping");
+    await this.#teardownConnection();
     this.#state.transition("disabled");
     this.#started = false;
+  }
+
+  /**
+   * Erase this node's local Hub identity.
+   *
+   * The only exit from `revoked` and from a corrupt or orphaned identity:
+   * `resume()` early-returns on `revoked`, and `enroll()` throws while an
+   * `activeNode` exists, so without this a revoked node is stuck for good.
+   *
+   * Ordering is load-bearing. An authenticated relay session is never
+   * revalidated against identity state, so deleting the key does not close it —
+   * channels must be torn down *before* custody is mutated, or the connector
+   * would keep serving relayed RPC under an identity that no longer exists.
+   *
+   * Deliberately not built on `stop()`: that latches `#stopping` forever, and a
+   * node that just left must be able to enroll again in the same process.
+   */
+  async leave(): Promise<HubConnectorStatus> {
+    if (this.#stopping) throw new Error("Hub identity cannot be erased while stopping.");
+    await this.#teardownConnection();
+    this.#started = false;
+    try {
+      await this.#identity.leave();
+    } catch {
+      this.#state.transition("degraded", {
+        degradedMode: "operator_action_required",
+        failure: "identity_unavailable",
+      });
+      throw new Error("Hub identity could not be erased.");
+    }
+    // `disabled` is legal from every state and is literally true here: no
+    // socket, timer, or channel survives the teardown above. `enrolling` is only
+    // honest once the connector is actually configured to enroll.
+    this.#state.transition("disabled");
+    if (this.#config.enabled && this.#config.configurationIssue === undefined) {
+      this.#state.transition("enrolling");
+      this.#started = true;
+    }
+    return this.status();
   }
 
   async #connect(): Promise<void> {

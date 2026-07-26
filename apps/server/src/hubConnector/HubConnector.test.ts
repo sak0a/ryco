@@ -55,6 +55,7 @@ function identity(overrides: Partial<HubIdentityRuntimeShape> = {}): HubIdentity
   return {
     backend: "keytar",
     readPendingEnrollment: async () => null,
+    leave: async () => undefined,
     readState: async () => ({
       version: 1,
       revision: 1,
@@ -69,6 +70,7 @@ function identity(overrides: Partial<HubIdentityRuntimeShape> = {}): HubIdentity
         enrolledAt: 1,
       },
       stagedRotation: null,
+      pendingTeardown: null,
     }),
     startEnrollment: async () => {
       throw new Error("unused");
@@ -564,6 +566,7 @@ describe("HubConnector", () => {
         stagedAt: 2,
         activatedAt: 3,
       },
+      pendingTeardown: null,
     };
     const connector = new HubConnector({
       config: enabledConfig,
@@ -703,6 +706,7 @@ describe("HubConnector", () => {
             : null,
           activeNode: null,
           stagedRotation: null,
+          pendingTeardown: null,
         }),
         startEnrollment: async () => {
           pending = true;
@@ -796,6 +800,7 @@ describe("HubConnector", () => {
           pendingEnrollment: null,
           activeNode: null,
           stagedRotation: null,
+          pendingTeardown: null,
         }),
         startEnrollment: async () => ({
           deviceCode: "ABCD-EFGH",
@@ -855,6 +860,7 @@ describe("HubConnector", () => {
       },
       activeNode: null,
       stagedRotation: null,
+      pendingTeardown: null,
     };
     const connector = new HubConnector({
       config: enabledConfig,
@@ -909,6 +915,7 @@ describe("HubConnector", () => {
           },
           activeNode: null,
           stagedRotation: null,
+          pendingTeardown: null,
         }),
         cancelEnrollment: async () => Promise.reject(new Error("custody unavailable")),
       }),
@@ -951,6 +958,7 @@ describe("HubConnector", () => {
           },
           activeNode: null,
           stagedRotation: null,
+          pendingTeardown: null,
         }),
         pollEnrollment: async () => ({ status: "unavailable" }),
       }),
@@ -993,6 +1001,7 @@ describe("HubConnector", () => {
           pendingEnrollment: null,
           activeNode: null,
           stagedRotation: null,
+          pendingTeardown: null,
         }),
         startEnrollment: async () => pendingStart,
       }),
@@ -1021,5 +1030,109 @@ describe("HubConnector", () => {
     });
     await expect(enrolling).rejects.toThrow("superseded");
     expect(connector.status().state).toBe("disabled");
+  });
+  it("closes the relay socket before erasing custody, and stays enrollable after", async () => {
+    const clock = scheduler();
+    const socket = new FakeSocket();
+    const order: string[] = [];
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        leave: async () => {
+          order.push("custody-erased");
+        },
+      }),
+      transport: { open: () => socket },
+      channels: {
+        open: async () => {
+          throw new Error("unused");
+        },
+      },
+      enrollmentMetadata,
+      scheduler: clock.value,
+    });
+    const socketClose = socket.close.bind(socket);
+    socket.close = () => {
+      order.push("socket-closed");
+      socketClose();
+    };
+
+    const starting = connector.start();
+    await settle();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await starting;
+    expect(connector.status().state).toBe("online");
+
+    const status = await connector.leave();
+
+    // An authenticated relay session is never revalidated against identity
+    // state, so deleting the key does not close it. The socket must be gone
+    // before custody is mutated, or the connector would keep serving relayed RPC
+    // under an identity that no longer exists.
+    expect(socket.closeCalls).toBe(1);
+    expect(order).toEqual(["socket-closed", "custody-erased"]);
+    expect([...socket.listeners.values()].every((set) => set.size === 0)).toBe(true);
+    expect(clock.timers.size).toBe(0);
+
+    // Leave must not latch `#stopping` the way `stop()` does, or the node could
+    // never enroll again without a relaunch.
+    expect(status.state).toBe("enrolling");
+  });
+
+  it("reports a bounded failure and does not claim success when custody erase fails", async () => {
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        leave: async () => {
+          throw new Error("keychain locked: /Users/someone/Library/Keychains");
+        },
+      }),
+      transport: { open: () => new FakeSocket() },
+      channels: {
+        open: async () => {
+          throw new Error("unused");
+        },
+      },
+      enrollmentMetadata,
+      scheduler: scheduler().value,
+    });
+
+    await expect(connector.leave()).rejects.toThrow("Hub identity could not be erased.");
+    expect(connector.status()).toMatchObject({
+      state: "degraded",
+      degradedMode: "operator_action_required",
+      failure: "identity_unavailable",
+    });
+    // The bounded message must not carry the underlying filesystem detail.
+    await expect(connector.leave()).rejects.not.toThrow("Keychains");
+  });
+
+  it("leaves a disabled connector disabled rather than claiming it is enrolling", async () => {
+    const connector = new HubConnector({
+      config: DEFAULT_HUB_CONNECTOR_CONFIG,
+      identity: identity(),
+      transport: {
+        open: () => {
+          throw new Error("unused");
+        },
+      },
+      channels: {
+        open: async () => {
+          throw new Error("unused");
+        },
+      },
+      enrollmentMetadata,
+    });
+    await connector.start();
+    const status = await connector.leave();
+    expect(status.state).toBe("disabled");
   });
 });

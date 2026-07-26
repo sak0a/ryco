@@ -79,6 +79,13 @@ export interface PendingHubEnrollmentDetail {
 export interface HubIdentityRuntimeShape {
   readonly backend: ProtectedSecretStoreBackend;
   readonly readState: () => Promise<LocalHubIdentityState>;
+  /**
+   * Erase this node's Hub identity and mint a fresh `EnvironmentId`.
+   *
+   * Idempotent and resumable: a crash mid-teardown leaves a durable marker that
+   * the next start completes.
+   */
+  readonly leave: () => Promise<void>;
   /** Null when no ceremony is pending for this origin. */
   readonly readPendingEnrollment: (hubOrigin: string) => Promise<PendingHubEnrollmentDetail | null>;
   readonly startEnrollment: (
@@ -155,6 +162,51 @@ export async function makeHubIdentityRuntime(options: {
     ...(options.now === undefined ? {} : { now: options.now }),
   });
 
+  const now = options.now ?? (() => Date.now());
+
+  /**
+   * Collect every protected-store name an identity owns.
+   *
+   * A leave must erase all of them: the active signing key, a staged rotation
+   * key, a pending ceremony's key, and any polling secret still awaiting
+   * cleanup. Missing one orphans key material in the OS credential store.
+   */
+  const ownedSecretNames = (state: LocalHubIdentityState): ReadonlyArray<string> =>
+    [
+      state.activeNode?.activeKeySecretName,
+      state.activeNode?.cleanupPollingSecretName,
+      state.stagedRotation?.newKeySecretName,
+      state.pendingEnrollment?.keySecretName,
+      state.pendingEnrollment?.pollingSecretName,
+    ].filter((name): name is string => typeof name === "string");
+
+  /**
+   * Phase two and three of the teardown: erase the recorded secrets, then drop
+   * the state.
+   *
+   * Deletion is best-effort per secret. A credential store that cannot delete
+   * must not strand the node in a half-left state forever — the marker has
+   * already recorded the intent, and an undeletable secret is inert once the
+   * state that references it is gone.
+   */
+  const completeTeardown = async (secretNames: ReadonlyArray<string>): Promise<void> => {
+    for (const name of secretNames) {
+      await signingIdentity.delete(name).catch(() => undefined);
+      await secretStore.remove(name).catch(() => undefined);
+    }
+    await stateStore.reset();
+  };
+
+  // Resume an interrupted leave before anything reads key custody: the keys it
+  // names may already be gone, which would otherwise fail the validation below
+  // and leave the node permanently unstartable.
+  await bounded("identity_unavailable", async () => {
+    const state = await stateStore.readOrCreate();
+    if (state.pendingTeardown !== null) {
+      await completeTeardown(state.pendingTeardown.secretNames);
+    }
+  });
+
   await bounded("identity_unavailable", async () => {
     const state = await stateStore.readOrCreate();
     if (state.activeNode !== null) {
@@ -169,6 +221,34 @@ export async function makeHubIdentityRuntime(options: {
   return {
     backend: secretStore.backend,
     readState: () => bounded("identity_unavailable", () => stateStore.readOrCreate()),
+    leave: () =>
+      bounded("identity_unavailable", async () => {
+        const state = await stateStore.readOrCreate();
+        if (state.pendingTeardown !== null) {
+          // A previous attempt committed but did not finish. Finish that one
+          // rather than starting a second, so its secret list is not lost.
+          await completeTeardown(state.pendingTeardown.secretNames);
+          return;
+        }
+        const secretNames = ownedSecretNames(state);
+        if (
+          state.activeNode === null &&
+          state.pendingEnrollment === null &&
+          state.stagedRotation === null
+        ) {
+          // Nothing to erase. Idempotent by design: the panel may retry a leave
+          // whose response was lost.
+          return;
+        }
+        // Phase one: record the intent, and everything it must erase, before
+        // touching either store.
+        await stateStore.update((current) => ({
+          ...current,
+          revision: current.revision + 1,
+          pendingTeardown: { secretNames, requestedAt: now() },
+        }));
+        await completeTeardown(secretNames);
+      }),
     readPendingEnrollment: (hubOrigin) =>
       bounded("identity_unavailable", async () => {
         const state = await stateStore.readOrCreate();

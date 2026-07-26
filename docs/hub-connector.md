@@ -48,6 +48,7 @@ ryco hub enroll
 ryco hub pending
 ryco hub cancel
 ryco hub resume
+ryco hub leave
 ```
 
 Add `--json` for bounded machine-readable output. The server must be running. The CLI obtains a
@@ -118,6 +119,20 @@ Only one connection generation and one reconnect timer can exist for the configu
 Configuration, key custody, origin mismatch, enrollment failure, authentication rejection,
 connection replacement, revocation, version incompatibility, and repeated early protocol failure
 require operator action. Restarting the process does not make a revoked identity retry.
+
+`ryco hub leave` erases this node's local Hub identity: the active signing key, any staged rotation
+key, a pending ceremony's key, and any polling secret still awaiting cleanup. It is the only exit
+from `revoked` and from a corrupt identity, because `resume` will not restart a revoked identity and
+enrollment refuses to start while an active node exists.
+
+It is destructive and distinct from turning the connector off, which is reversible and keeps the
+key. Leaving mints a fresh EnvironmentId, so the node can enrol again — as a **new** node, needing a
+new approval. It does **not** revoke anything at the Hub: the previous node record survives there
+until an owner removes it.
+
+The erase is crash-safe. A durable marker records the intent and every secret to remove before
+either store is touched, so an interrupted leave is completed on the next start rather than
+orphaning key material or leaving state that points at keys which are already gone.
 
 `ryco hub resume` retries a connector that stopped without scheduling its own retry, and prints the
 resulting status. Use it for `connection_replaced` and for a `identity_unavailable` caused by a

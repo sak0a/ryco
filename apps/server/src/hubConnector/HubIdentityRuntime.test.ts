@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -179,6 +179,104 @@ describe("HubIdentityRuntime", () => {
 
     await restarted.cancelEnrollment("https://relay.example");
     expect(await restarted.readPendingEnrollment("https://relay.example")).toBeNull();
+  });
+
+  it("erases every owned secret, mints a fresh EnvironmentId, and is idempotent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-leave-"));
+    const store = makeMemoryStore();
+    const options = {
+      statePath: join(root, "hub-identity.json"),
+      fileSecretRoot: join(root, "secrets"),
+      allowFileFallback: false,
+      secretStore: store,
+      fetch: async (input: string | URL | Request) => {
+        if (String(input).endsWith("/api/node/enrollments")) {
+          return Response.json({
+            deviceCode: "ABCD-EFGH",
+            pollingSecret: Buffer.from(new Uint8Array(32).fill(0x51)).toString("base64url"),
+            expiresAt: 160_000,
+            pollIntervalMs: 1_000,
+          });
+        }
+        throw new Error("unexpected route");
+      },
+      now: () => 100_000,
+    } as const;
+
+    const runtime = await makeHubIdentityRuntime(options);
+    const before = await runtime.readState();
+    await runtime.startEnrollment("https://relay.example", {
+      label: "Ryco node",
+      platformOs: "linux",
+      platformArch: "x64",
+      clientVersion: "0.1.8",
+    });
+    const pending = (await runtime.readState()).pendingEnrollment;
+    expect(pending).not.toBeNull();
+
+    await runtime.leave();
+
+    const after = await runtime.readState();
+    expect(after.pendingEnrollment).toBeNull();
+    expect(after.activeNode).toBeNull();
+    expect(after.stagedRotation).toBeNull();
+    expect(after.pendingTeardown).toBeNull();
+    // A fresh identifier is what lets the node rejoin the same Hub: the service
+    // binds one node record per environment id, and that binding outlives
+    // revocation.
+    expect(after.environmentId).not.toBe(before.environmentId);
+    // No key material may survive the erase.
+    expect(await store.get(pending!.keySecretName)).toBeNull();
+    expect(await store.get(pending!.pollingSecretName)).toBeNull();
+
+    // Idempotent: the panel may retry a leave whose response was lost.
+    await runtime.leave();
+    expect((await runtime.readState()).environmentId).toBe(after.environmentId);
+  });
+
+  it("finishes an interrupted leave on the next start, even with the keys already gone", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-leave-resume-"));
+    const store = makeMemoryStore();
+    const statePath = join(root, "hub-identity.json");
+    const options = {
+      statePath,
+      fileSecretRoot: join(root, "secrets"),
+      allowFileFallback: false,
+      secretStore: store,
+      now: () => 100_000,
+    } as const;
+
+    // A state file that crashed between phase one and phase three: the teardown
+    // marker is committed and the key it names is already deleted. Without the
+    // resume this is unstartable, because start-up validation reads custody for
+    // an activeNode whose key no longer exists.
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        version: 1,
+        revision: 4,
+        environmentId: `env_${"E".repeat(22)}`,
+        pendingEnrollment: null,
+        activeNode: {
+          hubOrigin: "https://relay.example",
+          nodeId: `node_${"N".repeat(22)}`,
+          activeKeyId: `nkey_${"K".repeat(22)}`,
+          activeKeySecretName: "node-key.gone",
+          cleanupPollingSecretName: null,
+          enrolledAt: 1,
+        },
+        stagedRotation: null,
+        pendingTeardown: { secretNames: ["node-key.gone"], requestedAt: 99_000 },
+      }),
+      { mode: 0o600 },
+    );
+
+    const runtime = await makeHubIdentityRuntime(options);
+    const state = await runtime.readState();
+
+    expect(state.activeNode).toBeNull();
+    expect(state.pendingTeardown).toBeNull();
+    expect(state.environmentId).not.toBe(`env_${"E".repeat(22)}`);
   });
 
   it("fails restart with a bounded error when enrolled key custody is missing", async () => {

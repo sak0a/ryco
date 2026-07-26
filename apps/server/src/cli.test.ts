@@ -185,6 +185,7 @@ const withLiveHubCliServer = <A, E, R>(baseDir: string, run: () => Effect.Effect
             };
           },
           identitySummary: async () => ({ enrolled: "pending" as const }),
+          leave: async () => waitingStatus,
           readEnrollment: async () => ({
             deviceCode: "ABCD-EFGH",
             fingerprint: `SHA256:${"A".repeat(43)}`,

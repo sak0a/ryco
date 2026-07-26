@@ -21,6 +21,7 @@ export interface HubConnectorServiceShape {
   readonly enroll: HubConnector["enroll"];
   readonly readEnrollment: HubConnector["readEnrollment"];
   readonly identitySummary: HubConnector["identitySummary"];
+  readonly leave: HubConnector["leave"];
   readonly cancelEnrollment: HubConnector["cancelEnrollment"];
   readonly stop: HubConnector["stop"];
 }
@@ -38,6 +39,7 @@ const unavailableIdentity = (): HubIdentityRuntimeShape => {
     backend: "permissioned-file",
     readState: unavailable,
     readPendingEnrollment: unavailable,
+    leave: unavailable,
     startEnrollment: unavailable,
     pollEnrollment: unavailable,
     cancelEnrollment: unavailable,
@@ -130,6 +132,7 @@ export const HubConnectorLive = Layer.effect(
       enroll: () => connector.enroll(),
       readEnrollment: () => connector.readEnrollment(),
       identitySummary: () => connector.identitySummary(),
+      leave: () => connector.leave(),
       cancelEnrollment: () => connector.cancelEnrollment(),
       stop: () => connector.stop(),
     } satisfies HubConnectorServiceShape;

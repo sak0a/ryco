@@ -64,6 +64,7 @@ function identity(): HubIdentityRuntimeShape {
   return {
     backend: "keytar",
     readPendingEnrollment: async () => null,
+    leave: async () => undefined,
     readState: async () => {
       throw new Error("unused");
     },
