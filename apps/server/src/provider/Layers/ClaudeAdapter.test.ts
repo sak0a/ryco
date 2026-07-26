@@ -147,6 +147,7 @@ function makeHarness(config?: {
   readonly baseDir?: string;
   readonly claudeConfig?: Partial<ClaudeSettings>;
   readonly instanceId?: ProviderInstanceId;
+  readonly resolveModelCapabilities?: ClaudeAdapterLiveOptions["resolveModelCapabilities"];
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -158,6 +159,9 @@ function makeHarness(config?: {
 
   const adapterOptions: ClaudeAdapterLiveOptions = {
     ...(config?.instanceId ? { instanceId: config.instanceId } : {}),
+    ...(config?.resolveModelCapabilities
+      ? { resolveModelCapabilities: config.resolveModelCapabilities }
+      : {}),
     createQuery: (input) => {
       createInput = input;
       return query;
@@ -596,6 +600,56 @@ describe("ClaudeAdapterLive", () => {
       });
 
       const createInput = harness.getLastCreateQueryInput();
+      assert.deepEqual(createInput?.options.settings, {
+        fastMode: true,
+      });
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("forwards discovered effort and fast mode for a dynamic Claude model", () => {
+    const dynamicCapabilities = {
+      optionDescriptors: [
+        {
+          id: "effort",
+          label: "Reasoning",
+          type: "select" as const,
+          options: [
+            { id: "high", label: "High" },
+            { id: "max", label: "Max" },
+          ],
+        },
+        {
+          id: "fastMode",
+          label: "Fast Mode",
+          type: "boolean" as const,
+        },
+      ],
+    };
+    const harness = makeHarness({
+      resolveModelCapabilities: (model) =>
+        model === "claude-opus-5" ? dynamicCapabilities : { optionDescriptors: [] },
+    });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("claudeAgent"),
+          "claude-opus-5",
+          [
+            { id: "effort", value: "max" },
+            { id: "fastMode", value: true },
+          ],
+        ),
+        runtimeMode: "full-access",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.effort, "max");
       assert.deepEqual(createInput?.options.settings, {
         fastMode: true,
       });

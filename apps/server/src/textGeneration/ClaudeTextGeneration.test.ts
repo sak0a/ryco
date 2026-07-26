@@ -6,6 +6,7 @@ import { createModelSelection } from "@ryco/shared/model";
 import { expect } from "vite-plus/test";
 
 import { ServerConfig } from "../config.ts";
+import type { ResolveClaudeModelCapabilities } from "../provider/Layers/ClaudeProvider.ts";
 import { type TextGenerationShape } from "./TextGeneration.ts";
 import { sanitizeThreadTitle } from "./TextGenerationUtils.ts";
 import { makeClaudeTextGeneration } from "./ClaudeTextGeneration.ts";
@@ -73,6 +74,7 @@ function withFakeClaudeEnv<A, E, R>(
     stdinMustContain?: string;
     homeMustBe?: string;
     claudeConfig?: Partial<ClaudeSettings>;
+    resolveModelCapabilities?: ResolveClaudeModelCapabilities;
   },
   effectFn: (textGeneration: TextGenerationShape) => Effect.Effect<A, E, R>,
 ) {
@@ -179,7 +181,11 @@ function withFakeClaudeEnv<A, E, R>(
     );
 
     const config = Schema.decodeSync(ClaudeSettings)(input.claudeConfig ?? {});
-    const textGeneration = yield* makeClaudeTextGeneration(config);
+    const textGeneration = yield* makeClaudeTextGeneration(
+      config,
+      process.env,
+      input.resolveModelCapabilities,
+    );
     return yield* effectFn(textGeneration);
   }).pipe(Effect.scoped);
 }
@@ -246,6 +252,62 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
           });
 
           expect(generated.title).toBe("Improve orchestration flow");
+        }),
+    ),
+  );
+
+  it.effect("forwards discovered options for a dynamic Claude model", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: {
+            title: "Use dynamic Claude options",
+            body: "Body",
+          },
+        }),
+        argsMustContain: '--effort max --settings {"fastMode":true}',
+        resolveModelCapabilities: (model) =>
+          model === "claude-opus-5"
+            ? {
+                optionDescriptors: [
+                  {
+                    id: "effort",
+                    label: "Reasoning",
+                    type: "select",
+                    options: [
+                      { id: "high", label: "High" },
+                      { id: "max", label: "Max" },
+                    ],
+                  },
+                  {
+                    id: "fastMode",
+                    label: "Fast Mode",
+                    type: "boolean",
+                  },
+                ],
+              }
+            : { optionDescriptors: [] },
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generatePrContent({
+            cwd: process.cwd(),
+            baseBranch: "main",
+            headBranch: "feature/dynamic-claude",
+            commitSummary: "Use discovered model",
+            diffSummary: "1 file changed",
+            diffPatch: "diff --git a/README.md b/README.md",
+            modelSelection: createModelSelection(
+              ProviderInstanceId.make("claudeAgent"),
+              "claude-opus-5",
+              [
+                { id: "effort", value: "max" },
+                { id: "fastMode", value: true },
+              ],
+            ),
+          });
+
+          expect(generated.title).toBe("Use dynamic Claude options");
         }),
     ),
   );

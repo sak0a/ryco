@@ -17,6 +17,7 @@ import {
 } from "@ryco/shared/model";
 import {
   query as claudeQuery,
+  type ModelInfo as ClaudeModelInfo,
   type SlashCommand as ClaudeSlashCommand,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -57,7 +58,10 @@ const MINIMUM_CLAUDE_FABLE_5_VERSION = "2.1.194";
 
 type ClaudeEffortLevel = "low" | "medium" | "high" | "xhigh" | "max" | "ultracode" | "ultrathink";
 
-function buildClaudeEffortOption(value: ClaudeEffortLevel, defaultEffort: ClaudeEffortLevel) {
+function buildClaudeEffortOption(
+  value: ClaudeEffortLevel,
+  defaultEffort?: ClaudeEffortLevel | undefined,
+) {
   const label =
     value === "xhigh" ? "Extra High" : value[0]!.toUpperCase() + value.slice(1).toLowerCase();
   return value === defaultEffort ? { value, label, isDefault: true } : { value, label };
@@ -65,7 +69,7 @@ function buildClaudeEffortOption(value: ClaudeEffortLevel, defaultEffort: Claude
 
 function buildClaudeEffortDescriptor(input: {
   readonly levels: ReadonlyArray<ClaudeEffortLevel>;
-  readonly defaultEffort: ClaudeEffortLevel;
+  readonly defaultEffort?: ClaudeEffortLevel | undefined;
 }) {
   const promptInjectedValues = input.levels.includes("ultrathink") ? ["ultrathink"] : undefined;
   return buildSelectOptionDescriptor({
@@ -263,6 +267,100 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   },
 ];
 
+const RYCO_ONLY_CLAUDE_EFFORT_LEVELS = new Set<ClaudeEffortLevel>(["ultracode", "ultrathink"]);
+
+function getStaticClaudeModel(model: string | null | undefined): ServerProviderModel | undefined {
+  const slug = model?.trim();
+  return BUILT_IN_MODELS.find((candidate) => candidate.slug === slug);
+}
+
+function buildDiscoveredClaudeCapabilities(
+  model: ClaudeModelInfo,
+  staticModel: ServerProviderModel | undefined,
+): ModelCapabilities {
+  const staticDescriptors = staticModel?.capabilities?.optionDescriptors ?? [];
+  const staticEffortDescriptor = staticDescriptors.find(
+    (descriptor) => descriptor.type === "select" && descriptor.id === "effort",
+  );
+  const supportsEffort =
+    model.supportsEffort !== false && (model.supportedEffortLevels?.length ?? 0) > 0;
+  const sdkEffortLevels = supportsEffort
+    ? (model.supportedEffortLevels ?? []).filter(
+        (level): level is Exclude<ClaudeEffortLevel, "ultracode" | "ultrathink"> =>
+          !RYCO_ONLY_CLAUDE_EFFORT_LEVELS.has(level),
+      )
+    : [];
+  const rycoOnlyEffortLevels =
+    staticEffortDescriptor?.type === "select"
+      ? staticEffortDescriptor.options.flatMap((option) =>
+          RYCO_ONLY_CLAUDE_EFFORT_LEVELS.has(option.id as ClaudeEffortLevel) &&
+          (option.id !== "ultracode" || sdkEffortLevels.includes("xhigh"))
+            ? [option.id as ClaudeEffortLevel]
+            : [],
+        )
+      : [];
+  const effortLevels = [...sdkEffortLevels, ...rycoOnlyEffortLevels];
+  const staticDefaultEffort =
+    staticEffortDescriptor?.type === "select"
+      ? staticEffortDescriptor.options.find(
+          (option) => option.isDefault && effortLevels.includes(option.id as ClaudeEffortLevel),
+        )?.id
+      : undefined;
+  const staticExtraDescriptors = staticDescriptors.filter(
+    (descriptor) =>
+      (descriptor.type === "select" && descriptor.id === "contextWindow") ||
+      (descriptor.type === "boolean" && descriptor.id === "thinking"),
+  );
+
+  return createModelCapabilities({
+    optionDescriptors: [
+      ...(effortLevels.length > 0
+        ? [
+            buildClaudeEffortDescriptor({
+              levels: effortLevels,
+              ...(staticDefaultEffort
+                ? { defaultEffort: staticDefaultEffort as ClaudeEffortLevel }
+                : {}),
+            }),
+          ]
+        : []),
+      ...(model.supportsFastMode === true
+        ? [
+            buildBooleanOptionDescriptor({
+              id: "fastMode",
+              label: "Fast Mode",
+            }),
+          ]
+        : []),
+      ...staticExtraDescriptors,
+    ],
+  });
+}
+
+export function mapClaudeInitializationModels(
+  models: ReadonlyArray<ClaudeModelInfo> | undefined,
+): ReadonlyArray<ServerProviderModel> {
+  const seen = new Set<string>();
+  return (models ?? []).flatMap((model) => {
+    const slug = typeof model.value === "string" ? model.value.trim() : "";
+    const name = typeof model.displayName === "string" ? model.displayName.trim() : "";
+    if (!slug || !name || seen.has(slug)) {
+      return [];
+    }
+    seen.add(slug);
+    const staticModel = getStaticClaudeModel(slug);
+    return [
+      {
+        slug,
+        name,
+        ...(staticModel?.shortName ? { shortName: staticModel.shortName } : {}),
+        isCustom: false,
+        capabilities: buildDiscoveredClaudeCapabilities(model, staticModel),
+      } satisfies ServerProviderModel,
+    ];
+  });
+}
+
 function supportsMinimumClaudeVersion(
   version: string | null | undefined,
   minimumVersion: string,
@@ -319,11 +417,55 @@ function formatClaudeUpgradeMessages(version: string | null): ReadonlyArray<stri
 }
 
 export function getClaudeModelCapabilities(model: string | null | undefined): ModelCapabilities {
-  const slug = model?.trim();
-  return (
-    BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ??
-    DEFAULT_CLAUDE_MODEL_CAPABILITIES
-  );
+  return getStaticClaudeModel(model)?.capabilities ?? DEFAULT_CLAUDE_MODEL_CAPABILITIES;
+}
+
+export type ResolveClaudeModelCapabilities = (
+  model: string | null | undefined,
+) => ModelCapabilities;
+
+export interface ClaudeModelInventoryState {
+  readonly resolveModels: (
+    discoveredModels: ReadonlyArray<ServerProviderModel> | undefined,
+    version: string | null,
+  ) => {
+    readonly models: ReadonlyArray<ServerProviderModel>;
+    readonly source: "discovered" | "retained" | "static";
+  };
+  readonly resolveCapabilities: ResolveClaudeModelCapabilities;
+}
+
+export function makeClaudeModelInventoryState(): ClaudeModelInventoryState {
+  let lastDiscoveredModels: ReadonlyArray<ServerProviderModel> | undefined;
+
+  return {
+    resolveModels: (discoveredModels, version) => {
+      if (discoveredModels !== undefined) {
+        lastDiscoveredModels = discoveredModels;
+        return {
+          models: discoveredModels,
+          source: "discovered",
+        };
+      }
+      if (lastDiscoveredModels !== undefined) {
+        return {
+          models: lastDiscoveredModels,
+          source: "retained",
+        };
+      }
+      return {
+        models: getBuiltInClaudeModelsForVersion(version),
+        source: "static",
+      };
+    },
+    resolveCapabilities: (model) => {
+      const slug = model?.trim();
+      return (
+        lastDiscoveredModels?.find((candidate) => candidate.slug === slug)?.capabilities ??
+        getClaudeModelCapabilities(slug)
+      );
+    },
+  };
 }
 
 export function resolveClaudeEffort(
@@ -487,6 +629,7 @@ type ClaudeCapabilitiesProbe = {
   readonly subscriptionType: string | undefined;
   readonly tokenSource: string | undefined;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
+  readonly models: ReadonlyArray<ServerProviderModel> | undefined;
 };
 
 type ResolveClaudeCapabilities = (
@@ -621,6 +764,7 @@ const probeClaudeCapabilities = (
         subscriptionType: account?.subscriptionType,
         tokenSource: account?.tokenSource,
         slashCommands: parseClaudeInitializationCommands(init.commands),
+        models: mapClaudeInitializationModels(init.models),
       } satisfies ClaudeCapabilitiesProbe;
     });
   }).pipe(
@@ -656,6 +800,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   resolveCapabilities?: ResolveClaudeCapabilities,
   environment: NodeJS.ProcessEnv = process.env,
   resolveRateLimits?: ResolveClaudeRateLimits,
+  modelInventory?: ClaudeModelInventoryState,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -747,17 +892,25 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  const capabilities = resolveCapabilities
+    ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
+    : undefined;
+  const modelResolution = modelInventory
+    ? modelInventory.resolveModels(capabilities?.models, parsedVersion)
+    : capabilities?.models !== undefined
+      ? { models: capabilities.models, source: "discovered" as const }
+      : {
+          models: getBuiltInClaudeModelsForVersion(parsedVersion),
+          source: "static" as const,
+        };
   const models = providerModelsFromSettings(
-    getBuiltInClaudeModelsForVersion(parsedVersion),
+    modelResolution.models,
     PROVIDER,
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   );
-  const upgradeMessage = formatClaudeUpgradeMessages(parsedVersion).join(" ");
-
-  const capabilities = resolveCapabilities
-    ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
-    : undefined;
+  const upgradeMessage =
+    modelResolution.source === "static" ? formatClaudeUpgradeMessages(parsedVersion).join(" ") : "";
   const slashCommands = capabilities?.slashCommands ?? [];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
   const rateLimits = resolveRateLimits

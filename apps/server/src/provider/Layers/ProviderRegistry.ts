@@ -48,6 +48,8 @@ import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMainte
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
 import { ignoreProviderBackgroundCause } from "../ignoreProviderBackgroundCause.ts";
 
+const CLAUDE_PROVIDER = ProviderDriverKind.make("claudeAgent");
+
 const loadProviders = (
   providerSources: ReadonlyArray<ProviderSnapshotSource>,
 ): Effect.Effect<ReadonlyArray<ServerProvider>> =>
@@ -102,7 +104,10 @@ export const mergeProviderSnapshot = (
     ? nextProvider
     : {
         ...nextProvider,
-        models: mergeProviderModels(previousProvider.models, nextProvider.models),
+        models:
+          nextProvider.driver === CLAUDE_PROVIDER
+            ? nextProvider.models
+            : mergeProviderModels(previousProvider.models, nextProvider.models),
       };
 
 export const mergeProviderSnapshots = (

@@ -10,6 +10,7 @@ import {
   ProviderInstanceId,
   ServerSettings,
   type ServerProvider,
+  type ServerProviderModel,
   type ServerProviderSlashCommand,
   type ServerSettings as ContractServerSettings,
 } from "@ryco/contracts";
@@ -20,7 +21,11 @@ import { deepMerge } from "@ryco/shared/Struct";
 import { createModelCapabilities } from "@ryco/shared/model";
 
 import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
-import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
+import {
+  checkClaudeProviderStatus,
+  makeClaudeModelInventoryState,
+  mapClaudeInitializationModels,
+} from "./ClaudeProvider.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./ProviderInstanceRegistryHydration.ts";
@@ -87,6 +92,7 @@ type TestClaudeCapabilities = {
   readonly subscriptionType: string | undefined;
   readonly tokenSource: string | undefined;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
+  readonly models: ReadonlyArray<ServerProviderModel> | undefined;
 };
 
 function claudeCapabilities(overrides: Partial<TestClaudeCapabilities> = {}) {
@@ -96,8 +102,22 @@ function claudeCapabilities(overrides: Partial<TestClaudeCapabilities> = {}) {
       subscriptionType: undefined,
       tokenSource: undefined,
       slashCommands: [],
+      models: undefined,
       ...overrides,
     });
+}
+
+function discoveredClaudeOpus5Models(): ReadonlyArray<ServerProviderModel> {
+  return mapClaudeInitializationModels([
+    {
+      value: "claude-opus-5",
+      displayName: "Claude Opus 5",
+      description: "Latest Claude Opus model",
+      supportsAdaptiveThinking: true,
+      supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
+      supportsFastMode: true,
+    },
+  ]);
 }
 
 const noClaudeCapabilities = () =>
@@ -133,6 +153,16 @@ function mockSpawnerLayer(
       return Effect.succeed(mockHandle(handler(cmd.args)));
     }),
   );
+}
+
+function claudeVersionSpawnerLayer(version: string) {
+  return mockSpawnerLayer((args) => {
+    const joined = args.join(" ");
+    if (joined === "--version") {
+      return { stdout: `${version}\n`, stderr: "", code: 0 };
+    }
+    throw new Error(`Unexpected args: ${joined}`);
+  });
 }
 
 function recordingMockSpawnerLayer(
@@ -472,6 +502,48 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
         ] as const satisfies ReadonlyArray<ServerProvider>;
 
         assert.strictEqual(haveProvidersChanged(providers, [...providers]), false);
+      });
+
+      it("replaces cached Claude models with the authoritative provider inventory", () => {
+        const previousProvider = {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          driver: ProviderDriverKind.make("claudeAgent"),
+          status: "warning",
+          enabled: true,
+          installed: true,
+          auth: { status: "unknown" },
+          checkedAt: "2026-07-26T00:00:00.000Z",
+          version: "2.1.220",
+          models: [
+            {
+              slug: "claude-opus-4-8",
+              name: "Claude Opus 4.8",
+              isCustom: false,
+              capabilities: createModelCapabilities({ optionDescriptors: [] }),
+            },
+          ],
+          slashCommands: [],
+          skills: [],
+        } as const satisfies ServerProvider;
+        const discoveredModels = discoveredClaudeOpus5Models();
+        const refreshedProvider = {
+          ...previousProvider,
+          status: "ready",
+          checkedAt: "2026-07-26T00:01:00.000Z",
+          models: discoveredModels,
+        } satisfies ServerProvider;
+
+        assert.deepStrictEqual(
+          mergeProviderSnapshot(previousProvider, refreshedProvider).models,
+          discoveredModels,
+        );
+        assert.deepStrictEqual(
+          mergeProviderSnapshot(previousProvider, {
+            ...refreshedProvider,
+            models: [],
+          }).models,
+          [],
+        );
       });
 
       it("preserves previously discovered provider models when a refresh returns none", () => {
@@ -1442,6 +1514,165 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           ),
         ),
       );
+
+      it.effect("uses dynamically discovered Claude Opus 5 models as authoritative", () =>
+        Effect.gen(function* () {
+          const discoveredModels = discoveredClaudeOpus5Models();
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities({ models: discoveredModels }),
+          );
+
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.message, undefined);
+          assert.deepStrictEqual(status.models, discoveredModels);
+          assert.deepStrictEqual(status.models[0]?.capabilities, {
+            optionDescriptors: [
+              {
+                id: "effort",
+                label: "Reasoning",
+                type: "select",
+                options: [
+                  { id: "low", label: "Low" },
+                  { id: "medium", label: "Medium" },
+                  { id: "high", label: "High" },
+                  { id: "xhigh", label: "Extra High" },
+                  { id: "max", label: "Max" },
+                ],
+              },
+              {
+                id: "fastMode",
+                label: "Fast Mode",
+                type: "boolean",
+              },
+            ],
+          });
+        }).pipe(Effect.provide(claudeVersionSpawnerLayer("2.1.220"))),
+      );
+
+      it.effect("merges custom Claude models into a discovered inventory without duplicates", () =>
+        Effect.gen(function* () {
+          const settings = Schema.decodeSync(ClaudeSettings)({
+            customModels: ["claude-opus-5", "company-claude"],
+          });
+          const status = yield* checkClaudeProviderStatus(
+            settings,
+            claudeCapabilities({ models: discoveredClaudeOpus5Models() }),
+          );
+
+          assert.deepStrictEqual(
+            status.models.map((model) => ({
+              slug: model.slug,
+              isCustom: model.isCustom,
+            })),
+            [
+              { slug: "claude-opus-5", isCustom: false },
+              { slug: "company-claude", isCustom: true },
+            ],
+          );
+        }).pipe(Effect.provide(claudeVersionSpawnerLayer("2.1.220"))),
+      );
+
+      it.effect("treats an empty successful Claude discovery as authoritative", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities({ models: [] }),
+          );
+
+          assert.strictEqual(status.status, "ready");
+          assert.deepStrictEqual(status.models, []);
+          assert.strictEqual(status.message, undefined);
+        }).pipe(Effect.provide(claudeVersionSpawnerLayer("2.1.220"))),
+      );
+
+      it.effect("retains the last successful Claude inventory after a later probe failure", () =>
+        Effect.gen(function* () {
+          const inventory = makeClaudeModelInventoryState();
+          const discoveredModels = discoveredClaudeOpus5Models();
+          const first = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities({ models: discoveredModels }),
+            process.env,
+            undefined,
+            inventory,
+          );
+          const second = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            noClaudeCapabilities,
+            process.env,
+            undefined,
+            inventory,
+          );
+
+          assert.strictEqual(first.status, "ready");
+          assert.strictEqual(second.status, "warning");
+          assert.deepStrictEqual(second.models, discoveredModels);
+        }).pipe(Effect.provide(claudeVersionSpawnerLayer("2.1.220"))),
+      );
+
+      it.effect("uses static Claude models when discovery has never succeeded", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            noClaudeCapabilities,
+            process.env,
+            undefined,
+            makeClaudeModelInventoryState(),
+          );
+
+          assert.strictEqual(status.status, "warning");
+          assert.strictEqual(
+            status.models.some((model) => model.slug === "claude-opus-4-8"),
+            true,
+          );
+          assert.strictEqual(
+            status.models.some((model) => model.slug === "claude-opus-5"),
+            false,
+          );
+        }).pipe(Effect.provide(claudeVersionSpawnerLayer("2.1.220"))),
+      );
+
+      it("overlays only exact-slug Ryco extras onto discovered Claude metadata", () => {
+        const [model] = mapClaudeInitializationModels([
+          {
+            value: "claude-opus-4-8",
+            displayName: "Account Opus",
+            description: "Known model with account-specific capabilities",
+            supportsEffort: true,
+            supportsAdaptiveThinking: true,
+            supportedEffortLevels: ["low", "high"],
+            supportsFastMode: false,
+          },
+        ]);
+
+        assert.strictEqual(model?.name, "Account Opus");
+        assert.strictEqual(model?.shortName, "Opus 4.8");
+        const descriptors = model?.capabilities?.optionDescriptors ?? [];
+        const effort = descriptors.find(
+          (descriptor) => descriptor.type === "select" && descriptor.id === "effort",
+        );
+        assert.deepStrictEqual(effort, {
+          id: "effort",
+          label: "Reasoning",
+          type: "select",
+          options: [
+            { id: "low", label: "Low" },
+            { id: "high", label: "High", isDefault: true },
+            { id: "ultrathink", label: "Ultrathink" },
+          ],
+          currentValue: "high",
+          promptInjectedValues: ["ultrathink"],
+        });
+        assert.strictEqual(
+          descriptors.some((descriptor) => descriptor.id === "fastMode"),
+          false,
+        );
+        assert.strictEqual(
+          descriptors.some((descriptor) => descriptor.id === "contextWindow"),
+          true,
+        );
+      });
 
       it.effect("includes Claude OAuth usage limits when the usage probe succeeds", () =>
         Effect.gen(function* () {
