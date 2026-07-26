@@ -75,16 +75,28 @@ describe("MVP route config", () => {
     for (const overlay of [
       "Connections",
       "ConnectionsNew",
-      "SettingsSheet",
       "ThreadReviewComment",
       "Onboarding",
     ] as const) {
       expect(overlays.has(overlay)).toBe(true);
     }
     // The workspace routes themselves are never overlays.
-    for (const workspace of ["Home", "Thread", "ThreadReview", "NotFound"] as const) {
+    for (const workspace of [
+      "Home",
+      "Thread",
+      "ThreadReview",
+      "SettingsSheet",
+      "NotFound",
+    ] as const) {
       expect(overlays.has(workspace)).toBe(false);
     }
+  });
+
+  it("presents Settings as a full-screen card instead of a form sheet", () => {
+    expect(MVP_ROOT_ROUTES.SettingsSheet.overlay).toBe(false);
+    expect(MVP_ROOT_ROUTES.SettingsSheet.ios.presentation).toBe("card");
+    expect("sheetAllowedDetents" in MVP_ROOT_ROUTES.SettingsSheet.ios).toBe(false);
+    expect(MVP_ROOT_ROUTES.SettingsSheet.android.presentation).toBe("card");
   });
 
   it("keeps ConnectionsNew a card (deliberate divergence from upstream's formSheet)", () => {
@@ -97,13 +109,15 @@ describe("MVP route config", () => {
       [
         "Settings",
         "SettingsAccount",
+        "SettingsAbout",
         "SettingsAppearance",
         "SettingsClientStorage",
-        "SettingsEnvironmentNew",
-        "SettingsEnvironments",
+        "SettingsHub",
+        "SettingsWorkspace",
       ].sort(),
     );
-    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsEnvironments.linking).toBe("environments");
+    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsHub.linking).toBe("hub");
+    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsWorkspace.linking).toBe("workspace");
     expect(MVP_SETTINGS_SHEET_ROUTES.SettingsAppearance.linking).toBe("appearance");
     // The hosted Hub account is the ONLY route the hosted plane adds, and it is
     // nested: the root route set above is unchanged by hosted mode.

@@ -1,47 +1,75 @@
 import { useNavigation } from "@react-navigation/native";
-import { ScrollView } from "react-native";
+import { useLayoutEffect } from "react";
+import { Pressable, ScrollView } from "react-native";
 
-import { useHostedModeAvailable } from "../hostedHub/useHostedMode";
+import { SymbolView } from "../../components/AppSymbol";
+import { useThemeColor } from "../../lib/useThemeColor";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 
-// Settings hub. The Hub account row renders only when hosted mode is actually
-// available — a build with no Hub, or a device with no hardware-backed key, has
-// no hosted plane to configure, and an inert row would imply a broken feature.
 export function SettingsRouteScreen() {
   const navigation = useNavigation();
-  const hostedModeAvailable = useHostedModeAvailable();
+  const iconColor = useThemeColor("--color-icon");
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: () => (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
+          onPress={() => navigation.getParent()?.goBack()}
+        >
+          <SymbolView
+            name="chevron.left"
+            size={19}
+            tintColor={iconColor as string}
+            type="monochrome"
+          />
+        </Pressable>
+      ),
+    });
+  }, [iconColor, navigation]);
+
   return (
     <ScrollView
       contentInsetAdjustmentBehavior="automatic"
       className="flex-1 bg-screen"
-      contentContainerStyle={{ paddingVertical: 12 }}
+      contentContainerStyle={{ paddingTop: 4, paddingBottom: 40 }}
     >
+      <SettingsSection title="Hub">
+        <SettingsRow
+          first
+          label="Hub and account"
+          onPress={() => navigation.navigate("SettingsHub" as never)}
+        />
+      </SettingsSection>
+
       <SettingsSection title="Workspace">
         <SettingsRow
           first
-          label="Environments"
-          onPress={() => navigation.navigate("SettingsEnvironments" as never)}
+          label="Defaults"
+          onPress={() => navigation.navigate("SettingsWorkspace" as never)}
         />
       </SettingsSection>
-      {hostedModeAvailable ? (
-        <SettingsSection title="Hub">
-          <SettingsRow
-            first
-            label="Account"
-            onPress={() => navigation.navigate("SettingsAccount" as never)}
-          />
-        </SettingsSection>
-      ) : null}
-      <SettingsSection title="Preferences">
+
+      <SettingsSection title="Appearance">
         <SettingsRow
           first
-          label="Appearance"
+          label="Text and code"
           onPress={() => navigation.navigate("SettingsAppearance" as never)}
         />
+      </SettingsSection>
+
+      <SettingsSection title="App">
         <SettingsRow
-          label="Client storage"
+          first
+          label="Local storage"
           onPress={() => navigation.navigate("SettingsClientStorage" as never)}
+        />
+        <SettingsRow
+          label="About Ryco"
+          onPress={() => navigation.navigate("SettingsAbout" as never)}
         />
       </SettingsSection>
     </ScrollView>

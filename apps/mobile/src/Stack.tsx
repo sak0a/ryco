@@ -23,9 +23,11 @@ import { OnboardingRouteScreen } from "./features/onboarding/OnboardingRouteScre
 import { ReviewCommentComposerSheet } from "./features/review/ReviewCommentComposerSheet";
 import { ReviewSheet } from "./features/review/ReviewSheet";
 import { SettingsAppearanceRouteScreen } from "./features/settings/SettingsAppearanceRouteScreen";
+import { SettingsAboutRouteScreen } from "./features/settings/SettingsAboutRouteScreen";
 import { SettingsClientStorageRouteScreen } from "./features/settings/SettingsClientStorageRouteScreen";
-import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnvironmentsRouteScreen";
+import { SettingsHubRouteScreen } from "./features/settings/SettingsHubRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
+import { SettingsWorkspaceRouteScreen } from "./features/settings/SettingsWorkspaceRouteScreen";
 import { ThreadRouteScreen } from "./features/threads/ThreadRouteScreen";
 import {
   MVP_ROOT_ROUTES,
@@ -91,10 +93,9 @@ const SHEET_SOLID_HEADER_OPTIONS: AppScreenOptions = {
   unstable_navigationItemStyle: undefined,
 };
 
-// Nested settings navigator hosted inside the SettingsSheet form sheet (a plain
-// formSheet cannot render a stack header — the header + in-sheet pushes come from
-// this nested stack). MVP subset: Settings, environments (+ add), Hub account,
-// appearance, client storage. Deferred: archive, waitlist, legal.
+// Full-screen Settings stack. Routine node switching and pairing live in the
+// Nodes Home mode; Settings owns account, defaults, appearance, storage, and
+// About without duplicating the connection browser.
 const SettingsSheetStack = createNativeStackNavigator({
   initialRouteName: "Settings",
   screenOptions: {
@@ -107,16 +108,15 @@ const SettingsSheetStack = createNativeStackNavigator({
       linking: "",
       options: { title: "Settings" },
     }),
-    SettingsEnvironments: createNativeStackScreen({
-      screen: SettingsEnvironmentsRouteScreen,
-      linking: "environments",
-      options: { title: "Environments" },
+    SettingsHub: createNativeStackScreen({
+      screen: SettingsHubRouteScreen,
+      linking: "hub",
+      options: { title: "Hub" },
     }),
-    SettingsEnvironmentNew: createNativeStackScreen({
-      // Reuses the pair-a-device screen (add an environment from settings).
-      screen: ConnectionsNewRouteScreen,
-      linking: "environment-new",
-      options: { title: "Add Environment" },
+    SettingsWorkspace: createNativeStackScreen({
+      screen: SettingsWorkspaceRouteScreen,
+      linking: "workspace",
+      options: { title: "Workspace defaults" },
     }),
     SettingsAccount: createNativeStackScreen({
       screen: HostedAccountRouteScreen,
@@ -132,6 +132,11 @@ const SettingsSheetStack = createNativeStackNavigator({
       screen: SettingsClientStorageRouteScreen,
       linking: "client-storage",
       options: { title: "Client Storage" },
+    }),
+    SettingsAbout: createNativeStackScreen({
+      screen: SettingsAboutRouteScreen,
+      linking: "about",
+      options: { title: "About" },
     }),
   },
 });
