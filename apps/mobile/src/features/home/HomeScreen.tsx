@@ -104,16 +104,20 @@ export function HomeScreen() {
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Settings"
+            accessibilityLabel="New Task"
             className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
-            onPress={() => navigation.navigate("SettingsSheet")}
+            onPress={() =>
+              navigation.navigate("NewTask", {
+                environmentId: currentNodeScope ?? undefined,
+              })
+            }
           >
-            <SymbolView name="gearshape" size={21} tintColor={iconColor} type="monochrome" />
+            <SymbolView name="plus" size={21} tintColor={iconColor} type="monochrome" />
           </Pressable>
         </View>
       ),
     });
-  }, [home.mode, iconColor, navigation, searchVisible]);
+  }, [currentNodeScope, home.mode, iconColor, navigation, searchVisible]);
 
   const selectMode = (mode: HomeMode) => {
     dispatch({ type: "select-mode", mode });

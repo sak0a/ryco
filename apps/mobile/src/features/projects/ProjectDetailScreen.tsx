@@ -310,6 +310,18 @@ export function ProjectDetailScreen(props: {
         <View className="flex-row gap-2">
           <Pressable
             accessibilityRole="button"
+            onPress={() =>
+              navigation.navigate("NewTask", {
+                environmentId: props.environmentId,
+                projectId: props.projectId,
+              })
+            }
+            className="h-12 flex-1 items-center justify-center rounded-full bg-card px-4 active:bg-card-alt"
+          >
+            <Text className="text-sm font-ryco-bold text-foreground">New task</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
             disabled={readOnly || visiblePendingWorktree !== null}
             onPress={() => setEditor({ kind: "create-worktree", initialValue: "" })}
             className="h-12 flex-1 flex-row items-center justify-center gap-2 rounded-full bg-primary px-4 active:opacity-80 disabled:opacity-40"
@@ -339,6 +351,13 @@ export function ProjectDetailScreen(props: {
               <WorktreeRow
                 worktree={group.worktree}
                 threadCount={group.threads.length}
+                onNewTask={() =>
+                  navigation.navigate("NewTask", {
+                    environmentId: props.environmentId,
+                    projectId: props.projectId,
+                    worktreeId: group.worktree.id,
+                  })
+                }
                 onRename={
                   readOnly
                     ? undefined

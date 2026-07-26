@@ -19,6 +19,7 @@ import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteSc
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
 import { HostedAccountRouteScreen } from "./features/hostedHub/HostedAccountRouteScreen";
+import { NewTaskRouteScreen } from "./features/newTask/NewTaskRouteScreen";
 import { OnboardingRouteScreen } from "./features/onboarding/OnboardingRouteScreen";
 import { AddProjectRouteScreen } from "./features/projects/AddProjectRouteScreen";
 import { ProjectRouteScreen } from "./features/projects/ProjectRouteScreen";
@@ -280,6 +281,11 @@ export const ROOT_STACK_SCREENS = {
     screen: ProjectRouteScreen,
     linking: MVP_ROOT_ROUTES.Project.linking,
     options: routeOptions("Project", { title: "Project" }),
+  }),
+  NewTask: createNativeStackScreen({
+    screen: NewTaskRouteScreen,
+    linking: MVP_ROOT_ROUTES.NewTask.linking,
+    options: routeOptions("NewTask", { title: "New Task" }),
   }),
   Thread: createNativeStackScreen({
     screen: ThreadRouteScreen,

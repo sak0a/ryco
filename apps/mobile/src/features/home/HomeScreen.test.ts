@@ -100,7 +100,7 @@ describe("C1 Home header", () => {
     expect(element.props.children.props.compact).toBe(true);
   });
 
-  it("gives Search and Settings separate 44-point targets", () => {
+  it("gives Search and New Task separate 44-point targets", () => {
     const element = renderHeaderOptions().headerRight?.() as ReactElement<{
       className: string;
       children: ReadonlyArray<ReactElement<{ className: string; accessibilityLabel: string }>>;
@@ -109,7 +109,7 @@ describe("C1 Home header", () => {
     expect(element.props.className).toContain("gap-2");
     expect(element.props.children.map((child) => child.props.accessibilityLabel)).toEqual([
       "Search Inbox",
-      "Settings",
+      "New Task",
     ]);
     for (const action of element.props.children) {
       expect(action.props.className).toContain("h-11");

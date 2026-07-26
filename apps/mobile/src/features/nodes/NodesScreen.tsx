@@ -44,14 +44,26 @@ export function NodesScreen(props: {
       onScroll={(event) => props.onScrollOffset?.(event.nativeEvent.contentOffset.y)}
       scrollEventThrottle={32}
     >
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Add a direct connection"
-        onPress={() => navigation.navigate("ConnectionsNew")}
-        className="mx-4 mt-5 h-12 flex-row items-center justify-center rounded-2xl bg-primary px-5 active:opacity-80"
-      >
-        <Text className="text-base font-ryco-bold text-primary-foreground">Direct connection</Text>
-      </Pressable>
+      <View className="mx-4 mt-5 flex-row gap-2">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Add a direct connection"
+          onPress={() => navigation.navigate("ConnectionsNew")}
+          className="h-12 flex-1 flex-row items-center justify-center rounded-2xl bg-primary px-5 active:opacity-80"
+        >
+          <Text className="text-base font-ryco-bold text-primary-foreground">
+            Direct connection
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Settings"
+          onPress={() => navigation.navigate("SettingsSheet")}
+          className="h-12 items-center justify-center rounded-2xl bg-card px-4 active:bg-card-alt"
+        >
+          <Text className="text-sm font-ryco-bold text-foreground">Settings</Text>
+        </Pressable>
+      </View>
 
       <HubNodeSection query={query} />
 

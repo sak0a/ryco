@@ -141,7 +141,7 @@ export function buildProjectNodeGroups(input: {
     const updatedAt =
       threads
         .map((thread) => thread.updatedAt ?? thread.createdAt)
-        .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ??
+        .toSorted((left, right) => Date.parse(right) - Date.parse(left))[0] ??
       project.updatedAt ??
       project.createdAt ??
       null;

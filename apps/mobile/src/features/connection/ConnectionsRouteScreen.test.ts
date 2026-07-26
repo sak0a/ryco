@@ -171,7 +171,7 @@ describe("Nodes — hosted mode absent", () => {
     const tree = ConnectionsRouteScreen();
     expect(texts(tree)).toContain("Studio Mac");
     const labels = buttons(tree).map((button) => button.label);
-    expect(labels).toEqual(["Direct connection", "Reconnect", "Remove"]);
+    expect(labels).toEqual(["Direct connection", "Settings", "Reconnect", "Remove"]);
     expect(texts(tree)).toContain("Hub nodes unavailable");
   });
 });

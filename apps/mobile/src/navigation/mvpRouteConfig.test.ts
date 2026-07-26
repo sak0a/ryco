@@ -15,6 +15,7 @@ describe("MVP route config", () => {
         "Connections",
         "ConnectionsNew",
         "Home",
+        "NewTask",
         "NotFound",
         "Onboarding",
         "Project",
@@ -43,6 +44,7 @@ describe("MVP route config", () => {
     expect(MVP_ROOT_ROUTES.Home.linking).toBe("");
     expect(MVP_ROOT_ROUTES.AddProject.linking).toBe("projects/new");
     expect(MVP_ROOT_ROUTES.Project.linking).toBe("projects/:environmentId/:projectId");
+    expect(MVP_ROOT_ROUTES.NewTask.linking).toBe("tasks/new");
     expect(MVP_ROOT_ROUTES.Thread.linking).toBe("threads/:environmentId/:threadId");
     expect(MVP_ROOT_ROUTES.ThreadReview.linking).toBe("threads/:environmentId/:threadId/review");
     expect(MVP_ROOT_ROUTES.ThreadReviewComment.linking).toBe(
@@ -88,6 +90,7 @@ describe("MVP route config", () => {
     // The workspace routes themselves are never overlays.
     for (const workspace of [
       "Home",
+      "NewTask",
       "Project",
       "Thread",
       "ThreadReview",

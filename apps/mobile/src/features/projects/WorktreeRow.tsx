@@ -34,6 +34,7 @@ function SmallAction(props: {
 export function WorktreeRow(props: {
   readonly worktree: SidebarWorktreeSummary;
   readonly threadCount: number;
+  readonly onNewTask?: () => void;
   readonly onRename?: () => void;
   readonly onArchive?: () => void;
   readonly onRestore?: () => void;
@@ -72,6 +73,7 @@ export function WorktreeRow(props: {
           <SmallAction label="Restore" onPress={props.onRestore} />
         ) : (
           <>
+            {props.onNewTask ? <SmallAction label="New task" onPress={props.onNewTask} /> : null}
             {props.onRename ? <SmallAction label="Rename" onPress={props.onRename} /> : null}
             {props.onArchive ? (
               <SmallAction label="Archive" destructive onPress={props.onArchive} />

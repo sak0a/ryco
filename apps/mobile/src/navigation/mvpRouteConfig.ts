@@ -52,6 +52,13 @@ export const MVP_ROOT_ROUTES = {
     ios: { presentation: "card" },
     android: { presentation: "card" },
   },
+  NewTask: {
+    linking: "tasks/new",
+    overlay: false,
+    headerPreset: "glass",
+    ios: { presentation: "card" },
+    android: { presentation: "card" },
+  },
   Thread: {
     linking: THREAD,
     overlay: false,
