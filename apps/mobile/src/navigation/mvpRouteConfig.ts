@@ -26,12 +26,27 @@ export interface MvpRouteDescriptor {
 }
 
 const THREAD = "threads/:environmentId/:threadId";
+const PROJECT = "projects/:environmentId/:projectId";
 
 // Flat root routes (Thread lives here, NOT in a nested navigator — required for
 // the iOS-26 shared-header morph). Order is the source order for the tree.
 export const MVP_ROOT_ROUTES = {
   Home: {
     linking: "",
+    overlay: false,
+    headerPreset: "glass",
+    ios: { presentation: "card" },
+    android: { presentation: "card" },
+  },
+  AddProject: {
+    linking: "projects/new",
+    overlay: true,
+    headerPreset: "sheet-solid",
+    ios: { presentation: "formSheet", sheetAllowedDetents: [0.7, 0.95], sheetGrabberVisible: true },
+    android: { presentation: "card" },
+  },
+  Project: {
+    linking: PROJECT,
     overlay: false,
     headerPreset: "glass",
     ios: { presentation: "card" },

@@ -29,8 +29,82 @@ export interface ProjectNodeGroup {
   readonly rows: ReadonlyArray<ProjectListRow>;
 }
 
+export interface ProjectWorktreeGroup {
+  readonly worktree: SidebarWorktreeSummary;
+  readonly threads: ReadonlyArray<SidebarThreadSummary>;
+}
+
+export interface ProjectDetailModel {
+  readonly project: Project;
+  readonly environment: ProjectEnvironment | null;
+  readonly activeWorktrees: ReadonlyArray<ProjectWorktreeGroup>;
+  readonly archivedWorktrees: ReadonlyArray<ProjectWorktreeGroup>;
+  readonly projectThreads: ReadonlyArray<SidebarThreadSummary>;
+}
+
 function scopedKey(environmentId: EnvironmentId, id: string): string {
   return `${environmentId}:${id}`;
+}
+
+function newestFirst(
+  left: { readonly updatedAt?: string | undefined; readonly createdAt?: string | undefined },
+  right: { readonly updatedAt?: string | undefined; readonly createdAt?: string | undefined },
+): number {
+  const leftTime = Date.parse(left.updatedAt ?? left.createdAt ?? "");
+  const rightTime = Date.parse(right.updatedAt ?? right.createdAt ?? "");
+  const delta = rightTime - leftTime;
+  return Number.isFinite(delta) ? delta : 0;
+}
+
+export function buildProjectDetail(input: {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+  readonly projects: ReadonlyArray<Project>;
+  readonly worktrees: ReadonlyArray<SidebarWorktreeSummary>;
+  readonly threads: ReadonlyArray<SidebarThreadSummary>;
+  readonly environments: ReadonlyArray<ProjectEnvironment>;
+}): ProjectDetailModel | null {
+  const project = input.projects.find(
+    (candidate) =>
+      candidate.environmentId === input.environmentId && candidate.id === input.projectId,
+  );
+  if (!project) return null;
+
+  const worktrees = input.worktrees
+    .filter(
+      (worktree) =>
+        worktree.environmentId === input.environmentId && worktree.projectId === input.projectId,
+    )
+    .toSorted(newestFirst);
+  const threads = input.threads
+    .filter(
+      (thread) =>
+        thread.environmentId === input.environmentId &&
+        thread.projectId === input.projectId &&
+        thread.archivedAt === null,
+    )
+    .toSorted(newestFirst);
+  const threadsByWorktree = new Map<string, SidebarThreadSummary[]>();
+  for (const thread of threads) {
+    if (!thread.worktreeId) continue;
+    const current = threadsByWorktree.get(thread.worktreeId) ?? [];
+    current.push(thread);
+    threadsByWorktree.set(thread.worktreeId, current);
+  }
+  const groups = worktrees.map((worktree) => ({
+    worktree,
+    threads: threadsByWorktree.get(worktree.id) ?? [],
+  }));
+
+  return {
+    project,
+    environment:
+      input.environments.find((environment) => environment.environmentId === input.environmentId) ??
+      null,
+    activeWorktrees: groups.filter((group) => group.worktree.archivedAt === null),
+    archivedWorktrees: groups.filter((group) => group.worktree.archivedAt !== null),
+    projectThreads: threads.filter((thread) => !thread.worktreeId),
+  };
 }
 
 export function buildProjectNodeGroups(input: {
@@ -90,7 +164,7 @@ export function buildProjectNodeGroups(input: {
   for (const environment of input.environments) {
     const rows = rowsByEnvironment.get(environment.environmentId) ?? [];
     if (rows.length === 0) continue;
-    rows.sort((left, right) => {
+    const sortedRows = rows.toSorted((left, right) => {
       const delta = Date.parse(right.updatedAt ?? "") - Date.parse(left.updatedAt ?? "");
       if (Number.isFinite(delta) && delta !== 0) return delta;
       return left.title.localeCompare(right.title);
@@ -99,7 +173,7 @@ export function buildProjectNodeGroups(input: {
       environmentId: environment.environmentId,
       nodeLabel: environment.label,
       connectionState: environment.connectionState,
-      rows,
+      rows: sortedRows,
     });
   }
   return groups;

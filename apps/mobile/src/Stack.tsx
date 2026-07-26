@@ -20,6 +20,8 @@ import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewR
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
 import { HostedAccountRouteScreen } from "./features/hostedHub/HostedAccountRouteScreen";
 import { OnboardingRouteScreen } from "./features/onboarding/OnboardingRouteScreen";
+import { AddProjectRouteScreen } from "./features/projects/AddProjectRouteScreen";
+import { ProjectRouteScreen } from "./features/projects/ProjectRouteScreen";
 import { ReviewCommentComposerSheet } from "./features/review/ReviewCommentComposerSheet";
 import { ReviewSheet } from "./features/review/ReviewSheet";
 import { SettingsAppearanceRouteScreen } from "./features/settings/SettingsAppearanceRouteScreen";
@@ -268,6 +270,16 @@ export const ROOT_STACK_SCREENS = {
       headerBackVisible: false,
       title: "Inbox",
     }),
+  }),
+  AddProject: createNativeStackScreen({
+    screen: AddProjectRouteScreen,
+    linking: MVP_ROOT_ROUTES.AddProject.linking,
+    options: routeOptions("AddProject", { title: "Add Project", gestureEnabled: true }),
+  }),
+  Project: createNativeStackScreen({
+    screen: ProjectRouteScreen,
+    linking: MVP_ROOT_ROUTES.Project.linking,
+    options: routeOptions("Project", { title: "Project" }),
   }),
   Thread: createNativeStackScreen({
     screen: ThreadRouteScreen,

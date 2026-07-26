@@ -93,11 +93,13 @@ export function ProjectsScreen(props: {
   readonly groups: ReadonlyArray<ProjectNodeGroup>;
   readonly hasConnections: boolean;
   readonly initialScrollOffset?: number;
+  readonly onAddProject: () => void;
   readonly onOpenProject?: (row: ProjectListRow) => void;
   readonly onOpenNodes: () => void;
   readonly onScrollOffset?: (offset: number) => void;
 }) {
   const data = flattenGroups(props.groups);
+  const primaryForeground = useThemeColor("--color-primary-foreground");
   const renderItem = ({ item }: LegendListRenderItemProps<ProjectListItem>) => {
     if (item.kind === "node") {
       return (
@@ -129,6 +131,26 @@ export function ProjectsScreen(props: {
       scrollEventThrottle={32}
       contentInsetAdjustmentBehavior="never"
       contentContainerStyle={{ paddingBottom: 40 }}
+      ListHeaderComponent={
+        props.hasConnections && data.length > 0 ? (
+          <View className="px-4 pt-4 pb-1">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add project"
+              onPress={props.onAddProject}
+              className="h-12 flex-row items-center justify-center gap-2 rounded-full bg-primary px-5 active:opacity-80"
+            >
+              <SymbolView
+                name="plus"
+                size={17}
+                tintColor={primaryForeground as string}
+                type="monochrome"
+              />
+              <Text className="text-sm font-ryco-bold text-primary-foreground">Add project</Text>
+            </Pressable>
+          </View>
+        ) : null
+      }
       ListEmptyComponent={
         <View className="px-2 py-14">
           <EmptyState
@@ -139,8 +161,8 @@ export function ProjectsScreen(props: {
                 ? "Add a remote workspace on one of your connected nodes to begin."
                 : "Use your Hub or pair a node directly before choosing a project."
             }
-            actionLabel={props.hasConnections ? undefined : "Open Nodes"}
-            onAction={props.hasConnections ? undefined : props.onOpenNodes}
+            actionLabel={props.hasConnections ? "Add project" : "Open Nodes"}
+            onAction={props.hasConnections ? props.onAddProject : props.onOpenNodes}
           />
         </View>
       }

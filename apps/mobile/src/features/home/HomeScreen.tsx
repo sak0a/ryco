@@ -2,7 +2,6 @@ import { useNavigation } from "@react-navigation/native";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useLayoutEffect, useMemo, useReducer, useState } from "react";
 import { Pressable, TextInput, View } from "react-native";
-import { useShallow } from "zustand/react/shallow";
 
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
 
@@ -10,8 +9,6 @@ import { HomeModeControl } from "../../components/HomeModeControl";
 import { NodeScopeControl } from "../../components/NodeScopeControl";
 import { RycoWordmark } from "../../components/RycoWordmark";
 import { SymbolView } from "../../components/AppSymbol";
-import { useSavedEnvironments } from "../connection/useConnectionController";
-import { useHostedHubStore } from "../../hostedHub/state";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useHomeWorkspaceData } from "../../state/homeData";
 import { useStore } from "../../state/threadsRuntime";
@@ -20,8 +17,8 @@ import { InboxScreen } from "../inbox/InboxScreen";
 import { NodesScreen } from "../nodes/NodesScreen";
 import { buildProjectNodeGroups } from "../projects/projectsModel";
 import { ProjectsScreen } from "../projects/ProjectsScreen";
-import { buildHomeEnvironments } from "./homeEnvironmentModel";
 import { createHomeModeState, reduceHomeModeState, type HomeMode } from "./homeMode";
+import { useHomeEnvironments } from "./useHomeEnvironments";
 
 const MODE_TITLE: Readonly<Record<HomeMode, string>> = {
   inbox: "Inbox",
@@ -38,37 +35,7 @@ export function HomeScreen() {
   const placeholderColor = useThemeColor("--color-placeholder");
   const textColor = useThemeColor("--color-foreground");
   const { projects, worktrees, threads } = useHomeWorkspaceData();
-  const { rows: directRows } = useSavedEnvironments();
-  const hosted = useHostedHubStore(
-    useShallow((state) => ({
-      selectedNode: state.selectedNode,
-      effectiveRole: state.effectiveRole,
-      transportStatus: state.transportStatus,
-      sessionStatus: state.sessionStatus,
-    })),
-  );
-
-  const environments = useMemo(
-    () =>
-      buildHomeEnvironments({
-        direct: directRows.map((row) => ({
-          environmentId: row.record.environmentId,
-          label: row.record.label,
-          connectionState: row.runtime.connectionState,
-          role: row.runtime.role,
-        })),
-        hosted: hosted.selectedNode
-          ? {
-              environmentId: hosted.selectedNode.environmentId,
-              label: hosted.selectedNode.label,
-              transportStatus: hosted.transportStatus,
-              sessionStatus: hosted.sessionStatus,
-              role: hosted.effectiveRole,
-            }
-          : null,
-      }),
-    [directRows, hosted],
-  );
+  const environments = useHomeEnvironments();
 
   const currentQuery = home.queryByMode[home.mode];
   const currentNodeScope = home.nodeScopeByMode[home.mode];
@@ -254,6 +221,13 @@ export function HomeScreen() {
             initialScrollOffset={home.scrollOffsetByMode.projects}
             onScrollOffset={(offset) =>
               dispatch({ type: "set-scroll-offset", mode: "projects", offset })
+            }
+            onAddProject={() => navigation.navigate("AddProject")}
+            onOpenProject={(row) =>
+              navigation.navigate("Project", {
+                environmentId: row.environmentId,
+                projectId: row.projectId,
+              })
             }
             onOpenNodes={() => selectMode("nodes")}
           />
