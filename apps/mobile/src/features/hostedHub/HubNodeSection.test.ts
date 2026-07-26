@@ -252,6 +252,20 @@ describe("Hub node actions", () => {
     model({ selectedNode: node(), transportStatus: "terminal-failure" }).retry?.();
     expect(hostedMock.controller.retrySelectedNode).toHaveBeenCalledTimes(1);
   });
+
+  it("filters Hub rows by bounded node metadata", () => {
+    const filtered = deriveHubNodeSectionModel({
+      state: state({
+        nodes: [node(), node({ id: "node-2", label: "Build Linux", platformOs: "linux" })],
+      }),
+      available: true,
+      actions: hostedMock.controller,
+      onSignIn: navigationMock.navigate,
+      query: "build",
+    });
+
+    expect(filtered.rows.map((row) => row.label)).toEqual(["Build Linux"]);
+  });
 });
 
 describe("Hub node section status text", () => {

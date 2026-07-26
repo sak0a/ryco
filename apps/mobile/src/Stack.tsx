@@ -261,7 +261,7 @@ export const ROOT_STACK_SCREENS = {
     options: routeOptions("Home", {
       contentStyle: { backgroundColor: "transparent" },
       headerBackVisible: false,
-      title: "Threads",
+      title: "Inbox",
     }),
   }),
   Thread: createNativeStackScreen({
@@ -282,7 +282,7 @@ export const ROOT_STACK_SCREENS = {
   Connections: createNativeStackScreen({
     screen: ConnectionsRouteScreen,
     linking: MVP_ROOT_ROUTES.Connections.linking,
-    options: routeOptions("Connections", { title: "Environments" }),
+    options: routeOptions("Connections", { title: "Nodes" }),
   }),
   ConnectionsNew: createNativeStackScreen({
     screen: ConnectionsNewRouteScreen,

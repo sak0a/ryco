@@ -124,6 +124,7 @@ export function deriveHubNodeSectionModel(input: {
   readonly available: boolean;
   readonly actions: HubNodeSectionActions;
   readonly onSignIn: () => void;
+  readonly query?: string;
 }): HubNodeSectionModel {
   const { state, available, actions, onSignIn } = input;
   const statusInput = {
@@ -183,23 +184,28 @@ export function deriveHubNodeSectionModel(input: {
     };
   }
 
-  const rows = state.nodes.map((node): HubNodeRowModel => {
-    const selectable = canSelectHubNode(state, node);
-    return {
-      nodeId: node.id,
-      label: node.label,
-      detail: rowDetail(node),
-      // The selected node's row shows the live connection status; every other
-      // row shows directory presence, which is all the directory knows.
-      tone:
-        state.selectedNode?.id === node.id && node.revokedAt === null
-          ? base.statusTone
-          : rowTone(node),
-      selected: state.selectedNode?.id === node.id,
-      disabled: !selectable,
-      onPress: selectable ? () => void actions.selectNode(node.id) : undefined,
-    };
-  });
+  const query = input.query?.trim().toLocaleLowerCase() ?? "";
+  const rows = state.nodes
+    .filter(
+      (node) => !query || `${node.label} ${rowDetail(node)}`.toLocaleLowerCase().includes(query),
+    )
+    .map((node): HubNodeRowModel => {
+      const selectable = canSelectHubNode(state, node);
+      return {
+        nodeId: node.id,
+        label: node.label,
+        detail: rowDetail(node),
+        // The selected node's row shows the live connection status; every other
+        // row shows directory presence, which is all the directory knows.
+        tone:
+          state.selectedNode?.id === node.id && node.revokedAt === null
+            ? base.statusTone
+            : rowTone(node),
+        selected: state.selectedNode?.id === node.id,
+        disabled: !selectable,
+        onPress: selectable ? () => void actions.selectNode(node.id) : undefined,
+      };
+    });
 
   return {
     ...base,
@@ -208,11 +214,13 @@ export function deriveHubNodeSectionModel(input: {
     empty:
       rows.length === 0
         ? {
-            title: "No Hub nodes",
+            title: query && state.nodes.length > 0 ? "No matching Hub nodes" : "No Hub nodes",
             detail:
-              state.directoryStatus === "ready"
-                ? "Enroll a Ryco node with your Hub to reach it from anywhere."
-                : "Loading the node directory.",
+              query && state.nodes.length > 0
+                ? "Change the search to see other Hub nodes."
+                : state.directoryStatus === "ready"
+                  ? "Enroll a Ryco node with your Hub to reach it from anywhere."
+                  : "Loading the node directory.",
           }
         : null,
     refresh: () => void actions.refreshDirectory(),
@@ -310,7 +318,7 @@ export function HubNodeSectionView(props: { readonly model: HubNodeSectionModel 
   );
 }
 
-export function HubNodeSection() {
+export function HubNodeSection(props: { readonly query?: string } = {}) {
   const navigation = useNavigation();
   const state = useHostedHubStore((current) => current);
   // Shared with the other hosted surfaces: it drives the single memoized
@@ -326,6 +334,7 @@ export function HubNodeSection() {
     // Sign-in lives on the Onboarding sheet (the hosted sign-in surface); this
     // section never runs a ceremony itself.
     onSignIn: () => navigation.navigate("Onboarding"),
+    query: props.query,
   });
 
   return <HubNodeSectionView model={model} />;
