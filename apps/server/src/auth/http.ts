@@ -45,6 +45,38 @@ function shouldSetSecureSessionCookie(
   return config.tailscaleServeEnabled;
 }
 
+/**
+ * Reject a state-changing request that a browser initiated from another origin.
+ *
+ * The session cookie is `SameSite=Lax`, which is not sufficient protection here:
+ * SameSite computes "site" from the registrable domain and **ignores the port**,
+ * so any page served from another port on the same loopback host — a local dev
+ * server, another local app — is same-site with this backend and its POSTs carry
+ * the cookie. A bodyless POST is also a CORS "simple request", so it is not
+ * preflighted; the attacker cannot read the reply but the operation still runs.
+ * That is enough to erase this node's Hub key.
+ *
+ * Browsers always send `Origin` on POST, same-origin or not, so requiring it to
+ * match is a complete defence for browser-initiated requests. A missing `Origin`
+ * means a non-browser caller — the `ryco hub` CLI authenticates with a bearer
+ * token and sends none — so absence is allowed rather than treated as suspect.
+ */
+export const rejectCrossOriginMutation = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const origin = request.headers.origin;
+  if (origin === undefined || origin === "" || origin === "null") return;
+  const host = request.headers.host;
+  let originHost: string;
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    return yield* new AuthError({ message: "Invalid request origin.", status: 403 });
+  }
+  if (host === undefined || originHost !== host) {
+    return yield* new AuthError({ message: "Invalid request origin.", status: 403 });
+  }
+});
+
 export const authSessionRouteLayer = HttpRouter.add(
   "GET",
   "/api/auth/session",
