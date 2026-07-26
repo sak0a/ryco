@@ -1,9 +1,33 @@
 import { EnvironmentId } from "@ryco/contracts";
+import {
+  NATIVE_HANDOFF_APPROVE_PATH_SUFFIX,
+  NATIVE_HANDOFF_CANCEL_PATH_SUFFIX,
+  NATIVE_HANDOFF_PRESENTATION_PATH_PREFIX,
+  NATIVE_HANDOFF_REDEEM_PATH,
+  NATIVE_HANDOFF_START_PATH,
+  NativeHandoffApproveResponse,
+  NativeHandoffCancelResponse,
+  NativeHandoffId,
+  NativeHandoffPresentation,
+  NativeHandoffRedeemRequest,
+  NativeHandoffRedeemResponse,
+  NativeHandoffStartRequest,
+  NativeHandoffStartResponse,
+  type NativeHandoffApproveResponse as NativeHandoffApproveResponseType,
+  type NativeHandoffCancelResponse as NativeHandoffCancelResponseType,
+  type NativeHandoffPresentation as NativeHandoffPresentationType,
+  type NativeHandoffRedeemRequest as NativeHandoffRedeemRequestType,
+  type NativeHandoffRedeemResponse as NativeHandoffRedeemResponseType,
+  type NativeHandoffStartRequest as NativeHandoffStartRequestType,
+  type NativeHandoffStartResponse as NativeHandoffStartResponseType,
+} from "@ryco/contracts/native-handoff";
+import { Schema } from "effect";
 
 import type {
   DpopSignerService,
   EndpointService,
   HttpClientService,
+  NativeAuthorizationService,
   PasskeyCeremonyService,
   SessionCredentialsService,
 } from "../platform/index.ts";
@@ -21,6 +45,7 @@ import {
   validatePasskeyAuthenticationOptions,
   validatePasskeyRegistrationOptions,
 } from "../relay/webauthn.ts";
+import { runNativeHandoff } from "./nativeHandoff.ts";
 
 const JSON_HEADERS = { accept: "application/json", "content-type": "application/json" } as const;
 
@@ -353,6 +378,20 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function decodeContract<S extends Schema.Top>(
+  schema: S,
+  value: unknown,
+  failure: "invalid_request" | "invalid_response",
+): S["Type"] {
+  try {
+    return Schema.decodeUnknownSync(schema as unknown as Schema.Decoder<unknown>)(value, {
+      onExcessProperty: "error",
+    }) as S["Type"];
+  } catch {
+    throw new HostedHubApiError(failure, failure === "invalid_request" ? 400 : 502);
+  }
+}
+
 function nullableNumber(value: unknown): value is number | null {
   return value === null || (typeof value === "number" && Number.isSafeInteger(value));
 }
@@ -538,6 +577,8 @@ export interface HostedHubApiDependencies {
   readonly sessionCredentials: SessionCredentialsService;
   /** Required when `sessionCredentials.mode` is `"bearer"`; unused in cookie mode. */
   readonly dpopSigner?: DpopSignerService;
+  /** Preferred bearer sign-in path for dynamic/self-hosted Hub domains. */
+  readonly nativeAuthorization?: NativeAuthorizationService;
 }
 
 export class HostedHubApi {
@@ -546,6 +587,7 @@ export class HostedHubApi {
   readonly #passkeyCeremony: PasskeyCeremonyService;
   readonly #sessionCredentials: SessionCredentialsService;
   readonly #dpopSigner: DpopSignerService | undefined;
+  readonly #nativeAuthorization: NativeAuthorizationService | undefined;
 
   constructor(dependencies: HostedHubApiDependencies) {
     this.#endpoint = dependencies.endpoint;
@@ -553,6 +595,7 @@ export class HostedHubApi {
     this.#passkeyCeremony = dependencies.passkeyCeremony;
     this.#sessionCredentials = dependencies.sessionCredentials;
     this.#dpopSigner = dependencies.dpopSigner;
+    this.#nativeAuthorization = dependencies.nativeAuthorization;
     if (this.#sessionCredentials.mode === "bearer") {
       // Fail closed: a bearer (native) session cannot be presented without a
       // DPoP signer and a token holder, so a misconfigured adapter must not
@@ -612,6 +655,23 @@ export class HostedHubApi {
   }
 
   async signIn(signal?: AbortSignal): Promise<HostedHubSessionResponse> {
+    if (this.#isBearer && this.#nativeAuthorization) {
+      const redeemed = await runNativeHandoff({
+        origin: this.#endpoint.origin(),
+        platform: this.#nativeAuthorization,
+        ...(signal ? { signal } : {}),
+        start: (request, handoffSignal) =>
+          this.#startNativeHandoff(request, handoffSignal) as Promise<unknown>,
+        redeem: (request, handoffSignal) =>
+          this.#redeemNativeHandoff(request, handoffSignal) as Promise<unknown>,
+      });
+      // `runNativeHandoff` validates the full contract and fences stale browser
+      // results before returning. Re-project the account/session through the
+      // long-standing runtime codec, then persist the token last.
+      const response = this.#accountAndSession(redeemed as unknown as Record<string, unknown>);
+      this.#writeBearerToken(redeemed.token);
+      return response;
+    }
     const base = this.#isBearer ? "/api/auth/native/passkey" : "/api/auth/passkey";
     const options = await this.#request(`${base}/options`, {
       method: "POST",
@@ -631,6 +691,121 @@ export class HostedHubApi {
         ...(signal ? { signal } : {}),
       }),
     );
+  }
+
+  async startNativeHandoff(
+    request: NativeHandoffStartRequestType,
+    signal?: AbortSignal,
+  ): Promise<NativeHandoffStartResponseType> {
+    return this.#startNativeHandoff(request, signal);
+  }
+
+  async #startNativeHandoff(
+    request: NativeHandoffStartRequestType,
+    signal?: AbortSignal,
+  ): Promise<NativeHandoffStartResponseType> {
+    if (!this.#isBearer) throw new HostedHubApiError("browser_only_transport", 400);
+    const body = decodeContract(NativeHandoffStartRequest, request, "invalid_request");
+    return decodeContract(
+      NativeHandoffStartResponse,
+      await this.#request(NATIVE_HANDOFF_START_PATH, {
+        method: "POST",
+        body,
+        dpop: "mint",
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async redeemNativeHandoff(
+    request: NativeHandoffRedeemRequestType,
+    signal?: AbortSignal,
+  ): Promise<HostedHubSessionResponse> {
+    const redeemed = await this.#redeemNativeHandoff(request, signal);
+    const response = this.#accountAndSession(redeemed as unknown as Record<string, unknown>);
+    this.#writeBearerToken(redeemed.token);
+    return response;
+  }
+
+  async #redeemNativeHandoff(
+    request: NativeHandoffRedeemRequestType,
+    signal?: AbortSignal,
+  ): Promise<NativeHandoffRedeemResponseType> {
+    if (!this.#isBearer) throw new HostedHubApiError("browser_only_transport", 400);
+    const body = decodeContract(NativeHandoffRedeemRequest, request, "invalid_request");
+    return decodeContract(
+      NativeHandoffRedeemResponse,
+      await this.#request(NATIVE_HANDOFF_REDEEM_PATH, {
+        method: "POST",
+        body,
+        dpop: "mint",
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async getNativeHandoffPresentation(
+    handoffId: string,
+    signal?: AbortSignal,
+  ): Promise<NativeHandoffPresentationType> {
+    this.#requireCookieTransport();
+    const id = decodeContract(NativeHandoffId, handoffId, "invalid_request");
+    return decodeContract(
+      NativeHandoffPresentation,
+      await this.#request(
+        `${NATIVE_HANDOFF_PRESENTATION_PATH_PREFIX}${id}`,
+        signal ? { signal } : {},
+      ),
+      "invalid_response",
+    );
+  }
+
+  async approveNativeHandoff(
+    handoffId: string,
+    signal?: AbortSignal,
+  ): Promise<NativeHandoffApproveResponseType> {
+    this.#requireCookieTransport();
+    const id = decodeContract(NativeHandoffId, handoffId, "invalid_request");
+    return decodeContract(
+      NativeHandoffApproveResponse,
+      await this.#request(
+        `${NATIVE_HANDOFF_PRESENTATION_PATH_PREFIX}${id}${NATIVE_HANDOFF_APPROVE_PATH_SUFFIX}`,
+        {
+          method: "POST",
+          body: {},
+          csrf: true,
+          ...(signal ? { signal } : {}),
+        },
+      ),
+      "invalid_response",
+    );
+  }
+
+  async cancelNativeHandoff(
+    handoffId: string,
+    signal?: AbortSignal,
+  ): Promise<NativeHandoffCancelResponseType> {
+    this.#requireCookieTransport();
+    const id = decodeContract(NativeHandoffId, handoffId, "invalid_request");
+    return decodeContract(
+      NativeHandoffCancelResponse,
+      await this.#request(
+        `${NATIVE_HANDOFF_PRESENTATION_PATH_PREFIX}${id}${NATIVE_HANDOFF_CANCEL_PATH_SUFFIX}`,
+        {
+          method: "POST",
+          body: {},
+          csrf: true,
+          ...(signal ? { signal } : {}),
+        },
+      ),
+      "invalid_response",
+    );
+  }
+
+  #requireCookieTransport(): void {
+    if (this.#isBearer) throw new HostedHubApiError("browser_only_transport", 400);
   }
 
   async redeemInvitation(

@@ -183,6 +183,32 @@ export class DpopSigner extends Context.Service<DpopSigner, DpopSignerService>()
   "@ryco/client-runtime/platform/DpopSigner",
 ) {}
 
+export type NativeAuthorizationBrowserResult =
+  | { readonly type: "success"; readonly url: string }
+  | { readonly type: "cancel" | "dismiss" | "locked" };
+
+/**
+ * Platform primitives for the native system-browser authorization handoff.
+ *
+ * The shared runtime owns PKCE, state, callback validation, and credential
+ * adoption. A platform adapter supplies only non-exportable primitives and the
+ * browser presentation; it never receives or stores the resulting session
+ * token.
+ */
+export interface NativeAuthorizationService {
+  /** One of the exact callback URIs supported by the public handoff contract. */
+  readonly callbackUri: () => string;
+  /** A short, user-recognizable device label sent to the browser consent view. */
+  readonly deviceLabel: () => string;
+  readonly randomBytes: (length: number) => Promise<Uint8Array>;
+  readonly sha256: (value: Uint8Array) => Promise<Uint8Array>;
+  readonly openSystemBrowser: (
+    authorizationUrl: string,
+    callbackUri: string,
+    signal?: AbortSignal,
+  ) => Promise<NativeAuthorizationBrowserResult>;
+}
+
 /**
  * Reads a pairing credential once and atomically destroys its source before returning it.
  * Implementations must never leave the credential available through history or a deep link.
