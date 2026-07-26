@@ -24,7 +24,6 @@ import {
   CheckIcon,
   CopyIcon,
   KeyRoundIcon,
-  MailIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
   Trash2Icon,
@@ -45,7 +44,7 @@ import {
   useHostedAccountStore,
   useHostedHubStore,
 } from "../../hostedHub/state";
-import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -66,11 +65,12 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import { Input } from "../ui/input";
+import { Input, TOUCH_INPUT_CLASS_NAME } from "../ui/input";
 import { Label } from "../ui/label";
 import { QRCodeSvg } from "../ui/qr-code";
 import { Spinner } from "../ui/spinner";
 import {
+  accountPosture,
   activePasskeys,
   emailIssue,
   EMAIL_MAX_LENGTH,
@@ -81,6 +81,7 @@ import {
   formatRecoveryCodesForClipboard,
   normalizePasskeyLabel,
   normalizeTotpCode,
+  orderPasskeys,
   passkeyBackupSummary,
   passkeyDisplayLabel,
   passwordIssue,
@@ -88,6 +89,7 @@ import {
   isSubmittableTotpCode,
   shouldRetryStepUp,
   stepUpDescription,
+  syncedPasskeyCount,
   stepUpTitle,
   STEP_UP_UNRESOLVED_MESSAGE,
   TOTP_CODE_MAX_LENGTH,
@@ -145,6 +147,15 @@ interface PendingStepUp {
   readonly action: AccountStepUpAction;
   readonly run: AccountActionThunk;
   readonly options: AccountActionOptions | undefined;
+  /**
+   * Whether the step-up code was the Hub's answer or this client's guess.
+   *
+   * `step_up_required` is synthesised from a bare `forbidden`, so the prompt
+   * must not assert what the Hub did not say. Carried on the refusal that
+   * opened the prompt rather than re-read from the store, which a concurrent
+   * action can overwrite.
+   */
+  readonly inferred: boolean;
 }
 
 /**
@@ -216,7 +227,12 @@ function useAccountAction() {
       if (isStepUpRefusal(outcome)) {
         setStepUpCode("");
         setStepUpRefusals(0);
-        setStepUp({ action, run: thunk, options });
+        setStepUp({
+          action,
+          run: thunk,
+          options,
+          inferred: outcome.inferredErrorCode === true,
+        });
         return;
       }
       if (outcome.status === "committed") options?.onCommitted?.();
@@ -305,6 +321,9 @@ function ActionLabel({ busy, children }: { readonly busy: boolean; readonly chil
 export function AccountSettingsPanel() {
   const accountStatus = useHostedHubStore((state) => state.accountStatus);
   const account = useHostedHubStore((state) => state.account);
+  // Lifted out of `PasskeysSection` so the posture alert's "Add passkey" opens
+  // the same dialog the section owns — one dialog, one piece of state.
+  const [addPasskeyOpen, setAddPasskeyOpen] = useState(false);
   const passkeys = useHostedAccountStore((state) => state.passkeys);
   const passkeysStatus = useHostedAccountStore((state) => state.passkeysStatus);
   const actionStatus = useHostedAccountStore((state) => state.actionStatus);
@@ -342,7 +361,13 @@ export function AccountSettingsPanel() {
     ? STEP_UP_UNRESOLVED_MESSAGE
     : inlineErrorMessage(errorMessage, errorCode, action.stepUp !== null);
   const passkeySessionGate = !action.stepUpUnresolved && isPasskeySessionRequired(errorCode);
+  const posture = accountPosture(passkeys, passkeysStatus);
 
+  // The page descends by strength: passkey, second factor, last-resort
+  // recovery, then the weak ways in. Recovery codes sit *above* the fallbacks
+  // because they are the thing a user has to act on early, before losing a
+  // device — under two write-only forms, one of which cannot deliver anything,
+  // they were the least likely row on the page to be read.
   return (
     <SettingsPageContainer>
       {inlineError ? (
@@ -350,6 +375,24 @@ export function AccountSettingsPanel() {
           <TriangleAlertIcon aria-hidden />
           <AlertTitle>{passkeySessionGate ? "Passkey needed" : "That did not work"}</AlertTitle>
           <AlertDescription>{inlineError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {posture ? (
+        <Alert variant={posture.variant} aria-live="polite">
+          <TriangleAlertIcon aria-hidden />
+          <AlertTitle>{posture.title}</AlertTitle>
+          <AlertDescription>{posture.description}</AlertDescription>
+          <AlertAction>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setAddPasskeyOpen(true)}
+            >
+              {posture.actionLabel}
+            </Button>
+          </AlertAction>
         </Alert>
       ) : null}
 
@@ -371,6 +414,8 @@ export function AccountSettingsPanel() {
         stale={passkeysStatus === "stale"}
         busy={busy}
         actionStatus={actionStatus}
+        addOpen={addPasskeyOpen}
+        setAddOpen={setAddPasskeyOpen}
         run={action.run}
         cancel={action.cancel}
       />
@@ -382,20 +427,22 @@ export function AccountSettingsPanel() {
         run={action.run}
       />
 
-      <PasswordSection
-        busy={busy}
-        actionStatus={actionStatus}
-        run={action.run}
-        cancel={action.cancel}
-      />
-
-      <EmailSection busy={busy} actionStatus={actionStatus} run={action.run} />
-
       <RecoveryCodesSection
         busy={busy}
         actionStatus={actionStatus}
         recoveryCodes={recoveryCodes}
         run={action.run}
+      />
+
+      {/* Password and email are both fallbacks and both write-only. Grouping
+          them says "these are the weak ways in" structurally, which makes the
+          never-equal-to-a-passkey rule a property of the layout rather than a
+          claim in copy. */}
+      <FallbackSignInSection
+        busy={busy}
+        actionStatus={actionStatus}
+        run={action.run}
+        cancel={action.cancel}
       />
 
       <StepUpDialog
@@ -428,6 +475,8 @@ function PasskeysSection({
   stale,
   busy,
   actionStatus,
+  addOpen,
+  setAddOpen,
   run,
   cancel,
 }: {
@@ -436,21 +485,24 @@ function PasskeysSection({
   readonly stale: boolean;
   readonly busy: boolean;
   readonly actionStatus: string;
+  readonly addOpen: boolean;
+  readonly setAddOpen: (open: boolean) => void;
   readonly run: RunAccountAction;
   readonly cancel: CancelAccountAction;
 }) {
-  const [addOpen, setAddOpen] = useState(false);
   const [label, setLabel] = useState("");
   const [pendingRevoke, setPendingRevoke] = useState<HostedHubPasskey | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const adding = actionStatus === "adding-passkey";
   const revoking = actionStatus === "revoking-passkey";
   const active = activePasskeys(passkeys);
+  const synced = syncedPasskeyCount(passkeys);
+  const ordered = orderPasskeys(passkeys);
 
   const closeAdd = useCallback(() => {
     setLabel("");
     setAddOpen(false);
-  }, []);
+  }, [setAddOpen]);
 
   const submitAdd = async (event: FormEvent) => {
     event.preventDefault();
@@ -500,9 +552,21 @@ function PasskeysSection({
         title="Passkeys on this account"
         description="A passkey is the strongest way in. Add one for every device you sign in from, and keep at least two so losing a device does not lock you out."
         status={
-          stale
-            ? "This list could not be refreshed and may be out of date."
-            : `${String(active.length)} usable ${active.length === 1 ? "passkey" : "passkeys"}`
+          stale ? (
+            "This list could not be refreshed and may be out of date."
+          ) : (
+            <>
+              {/* Its own element so the count stays independently addressable
+                  and readable, whether or not the sync clause follows it. */}
+              <span>{`${String(active.length)} usable ${active.length === 1 ? "passkey" : "passkeys"}`}</span>
+              {/* Only a positive count is reported. `backupState` is nullable
+                  and `null` means the Hub did not say, so "0 synced" would be
+                  a claim about credentials nobody made. */}
+              {synced > 0 ? (
+                <span>{` · ${String(synced)} synced to a password manager`}</span>
+              ) : null}
+            </>
+          )
         }
       />
       {loading && passkeys.length === 0 ? (
@@ -514,7 +578,7 @@ function PasskeysSection({
           description="Add one now — without a passkey you can only get back in through a fallback credential."
         />
       ) : null}
-      {passkeys.map((passkey) => {
+      {ordered.map((passkey) => {
         const revoked = isPasskeyRevoked(passkey);
         const backup = passkeyBackupSummary(passkey);
         const created = formatEpoch(passkey.createdAt);
@@ -594,6 +658,7 @@ function PasskeysSection({
                 autoComplete="off"
                 placeholder="Work laptop"
                 disabled={adding}
+                className={TOUCH_INPUT_CLASS_NAME}
                 onChange={(event) => setLabel(event.target.value)}
               />
             </DialogPanel>
@@ -630,6 +695,11 @@ function PasskeysSection({
           <AlertDialogHeader>
             <AlertDialogTitle>Revoke this passkey?</AlertDialogTitle>
             <AlertDialogDescription>
+              {/* Stated, never enforced: the Hub is the authority here and
+                  answers `conflict` on the last credential. A client-side
+                  disable would be a guess whenever the list is stale, and a
+                  client must not enforce a server rule it only inferred. */}
+              {active.length === 1 ? "This is the only usable passkey on this account. " : ""}
               {pendingRevoke ? passkeyDisplayLabel(pendingRevoke) : ""} will stop working
               immediately, on every device it is stored on. This cannot be undone — you would have
               to enrol the device again.
@@ -771,6 +841,7 @@ function TwoFactorSection({
                   autoComplete="one-time-code"
                   maxLength={TOTP_CODE_MAX_LENGTH}
                   disabled={confirming}
+                  className={TOUCH_INPUT_CLASS_NAME}
                   onChange={(event) => setCode(normalizeTotpCode(event.target.value))}
                 />
               </div>
@@ -814,9 +885,19 @@ function TwoFactorSection({
   );
 }
 
-/* ------------------------------------------------------------------ password */
+/* --------------------------------------------------------- fallback sign-in */
 
-function PasswordSection({
+/**
+ * Password and email in one section.
+ *
+ * Both are fallbacks, both are write-only, and neither has a read behind it —
+ * the Hub reports no "is a password set" and no address on file. One section
+ * headed "Fallback sign-in" places them structurally below the passkey and the
+ * second factor, which is a stronger statement of the never-equal rule than any
+ * sentence could be, and it avoids inventing a section-group heading level that
+ * would look identical to `SettingsSection`'s own.
+ */
+function FallbackSignInSection({
   busy,
   actionStatus,
   run,
@@ -878,10 +959,17 @@ function PasswordSection({
   };
 
   return (
-    <SettingsSection title="Password" icon={<KeyRoundIcon aria-hidden className="size-3.5" />}>
+    <SettingsSection
+      title="Fallback sign-in"
+      icon={<KeyRoundIcon aria-hidden className="size-3.5" />}
+    >
       <SettingsRow
         title="Fallback password"
         description="A password is a fallback, not an equal of a passkey: it can be phished and reused, and a session started with one has to prove itself again before changing credentials. Keep a passkey as your normal way in."
+        // Each unreadable state is named beside the control it qualifies,
+        // which beats one page-level disclaimer because it is adjacent to the
+        // decision it affects.
+        status="This Hub does not report whether a password is set, so both actions are always offered."
         control={
           <Button size="xs" variant="outline" disabled={busy} onClick={() => setOpen(true)}>
             <ActionLabel busy={setting}>Set or change</ActionLabel>
@@ -903,6 +991,7 @@ function PasswordSection({
           </Button>
         }
       />
+      <EmailRows busy={busy} actionStatus={actionStatus} run={run} />
 
       <Dialog
         open={open}
@@ -937,6 +1026,7 @@ function PasswordSection({
                   autoComplete="new-password"
                   maxLength={PASSWORD_MAX_LENGTH}
                   disabled={setting}
+                  className={TOUCH_INPUT_CLASS_NAME}
                   onChange={(event) => setPassword(event.target.value)}
                 />
               </div>
@@ -949,6 +1039,7 @@ function PasswordSection({
                   autoComplete="new-password"
                   maxLength={PASSWORD_MAX_LENGTH}
                   disabled={setting}
+                  className={TOUCH_INPUT_CLASS_NAME}
                   onChange={(event) => setConfirmation(event.target.value)}
                 />
               </div>
@@ -999,7 +1090,13 @@ function PasswordSection({
 
 /* --------------------------------------------------------------------- email */
 
-function EmailSection({
+/**
+ * The email rows, as rows rather than as a section of their own: an emailed
+ * link is a fallback sign-in, and the merged section is what says so. The copy,
+ * the delivery warning, and the "answers the same way either way" clause are
+ * unchanged — a committed outcome means *accepted*, never delivered.
+ */
+function EmailRows({
   busy,
   actionStatus,
   run,
@@ -1036,8 +1133,8 @@ function EmailSection({
   };
 
   return (
-    <SettingsSection title="Email" icon={<MailIcon aria-hidden className="size-3.5" />}>
-      <div className="px-4 pt-3.5 sm:px-5">
+    <>
+      <div className="border-t border-border/60 px-4 pt-3.5 sm:px-5">
         <Alert variant="warning">
           <TriangleAlertIcon aria-hidden />
           <AlertTitle>No mail will arrive yet</AlertTitle>
@@ -1062,6 +1159,7 @@ function EmailSection({
               placeholder="you@example.com"
               maxLength={EMAIL_MAX_LENGTH}
               disabled={requesting}
+              className={TOUCH_INPUT_CLASS_NAME}
               onChange={(event) => {
                 setEmail(event.target.value);
                 setAccepted(false);
@@ -1084,7 +1182,7 @@ function EmailSection({
           ) : null}
         </form>
       </SettingsRow>
-    </SettingsSection>
+    </>
   );
 }
 
@@ -1188,14 +1286,20 @@ function RecoveryCodesSection({
           <DialogHeader>
             <DialogTitle>Save your recovery codes</DialogTitle>
             <DialogDescription>
-              These are shown once and cannot be retrieved later. Store them somewhere only you can
-              reach — a password manager, or paper somewhere safe.
+              {/* The count is read from the set, never assumed: the Hub
+                  validates 1..256 codes, so copy or a layout that hard-assumes
+                  eight or ten is wrong the day an operator changes it. It sits
+                  in the sentence rather than in the heading because "Save your
+                  1 recovery codes" is what a heading template produces. */}
+              Save all {String(recoveryCodes.length)} codes — they are shown once and cannot be
+              retrieved later. Store them somewhere only you can reach — a password manager, or
+              paper somewhere safe.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
             <ul
               aria-label="Recovery codes"
-              className="grid gap-2 rounded-xl border border-border bg-background p-4 font-mono text-sm sm:grid-cols-2"
+              className="grid gap-2 rounded-xl border border-border bg-background p-4 font-mono text-sm break-all sm:grid-cols-2"
             >
               {recoveryCodes.map((code) => (
                 <li key={code}>{code}</li>
@@ -1261,7 +1365,9 @@ function StepUpDialog({
         >
           <DialogHeader>
             <DialogTitle>{pending ? stepUpTitle(pending.action) : ""}</DialogTitle>
-            <DialogDescription>{stepUpDescription(attempts)}</DialogDescription>
+            <DialogDescription>
+              {stepUpDescription(attempts, pending?.inferred ?? false)}
+            </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-2">
             <Label htmlFor="account-step-up-code">Authenticator code</Label>
@@ -1272,6 +1378,7 @@ function StepUpDialog({
               autoComplete="one-time-code"
               maxLength={TOTP_CODE_MAX_LENGTH}
               disabled={busy}
+              className={TOUCH_INPUT_CLASS_NAME}
               onChange={(event) => onCodeChange(normalizeTotpCode(event.target.value))}
             />
           </DialogPanel>

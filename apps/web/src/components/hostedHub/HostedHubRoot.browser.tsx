@@ -6,9 +6,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { render } from "vitest-browser-react";
 
 const navigate = vi.fn(async () => undefined);
+// These suites render the hosted root outside a `RouterProvider`. The toast
+// host the entry surfaces now mount reads route params to scope thread-scoped
+// toasts, which is neither what these suites exercise nor reachable here, so
+// the read is stubbed alongside the navigation that was already stubbed.
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useNavigate: () => navigate,
+  useParams: () => undefined,
+}));
+
+// Hosted mode, which no browser test gets by default: there is no `.env` in
+// this harness, so `isHostedHubMode()` answers false and every hosted gate runs
+// as the standard client. See `HostedNodeDirectory.browser.tsx` for the full
+// note.
+vi.mock("../../env", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../env")>()),
+  readRycoClientMode: () => "hosted-hub" as const,
+  isHostedHubMode: () => true,
 }));
 
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
@@ -102,7 +117,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
       });
       mounted = await render(<HostedHubRoot />);
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
-      const selectButton = page.getByRole("button", { name: /Studio online/ });
+      const selectButton = page.getByRole("button", { name: /^Studio online/ });
       await expect.element(selectButton).toBeVisible();
       const box = selectButton.element().getBoundingClientRect();
       expect(box.left).toBeGreaterThanOrEqual(0);
@@ -206,11 +221,11 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
         ],
       });
       mounted = await render(<HostedHubRoot />);
-      const onlineRow = page.getByRole("button", { name: /Studio online/ });
+      const onlineRow = page.getByRole("button", { name: /^Studio online/ });
       await expect.element(onlineRow).toBeVisible();
       expect(unnamedVisibleControls()).toEqual([]);
       expect(onlineRow.element().textContent).toContain("Online");
-      const offlineRow = page.getByRole("button", { name: /Travel offline/ });
+      const offlineRow = page.getByRole("button", { name: /^Travel offline/ });
       expect(offlineRow.element().textContent).toContain("Offline");
 
       useHostedHubStore.setState({ directoryStatus: "stale" });
@@ -305,8 +320,8 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     });
     mounted = await render(<HostedHubRoot />);
     await expect.element(page.getByRole("status")).toHaveTextContent(/Directory data is stale/);
-    await expect.element(page.getByRole("button", { name: /Studio online/ })).toBeDisabled();
-    await expect.element(page.getByRole("button", { name: /Travel offline/ })).toBeDisabled();
+    await expect.element(page.getByRole("button", { name: /^Studio online/ })).toBeDisabled();
+    await expect.element(page.getByRole("button", { name: /^Travel offline/ })).toBeDisabled();
     await expect.element(page.getByText("Online", { exact: true })).toBeVisible();
     await expect.element(page.getByText("Offline", { exact: true })).toBeVisible();
     await expect.element(page.getByText(HOSTED_RELAY_TRUST_DISCLOSURE)).toBeVisible();
@@ -337,20 +352,51 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
       .toBeVisible();
   });
 
-  it("keeps one-time recovery material out of browser storage", async () => {
+  it("keeps one-time recovery material out of browser storage, copy included", async () => {
+    const clipboard: Array<string> = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (value: string) => {
+          clipboard.push(value);
+          return Promise.resolve();
+        },
+      },
+    });
     useHostedHubStore.setState({
       accountStatus: "authenticated",
       account,
       session,
-      recoveryCodes: ["recovery-sensitive-browser-canary"],
+      recoveryCodes: ["recovery-sensitive-browser-canary", "second-sensitive-browser-canary"],
     });
     mounted = await render(<HostedHubRoot />);
     await expect
       .element(page.getByRole("heading", { name: "Save your recovery codes" }))
       .toBeVisible();
+    // The count comes from the set rather than from a hardcoded eight or ten.
+    await expect.element(page.getByText(/Save all 2 codes/)).toBeVisible();
     expect(JSON.stringify(localStorage)).not.toContain("recovery-sensitive-browser-canary");
     expect(JSON.stringify(sessionStorage)).not.toContain("recovery-sensitive-browser-canary");
     expect(location.href).not.toContain("recovery-sensitive-browser-canary");
+
+    // The copy control this surface gained is a second path the same secret can
+    // travel, and it must reach the clipboard and nowhere else.
+    await page.getByRole("button", { name: "Copy codes" }).click();
+    expect(clipboard).toEqual([
+      "recovery-sensitive-browser-canary\nsecond-sensitive-browser-canary",
+    ]);
+    expect(JSON.stringify(localStorage)).not.toContain("recovery-sensitive-browser-canary");
+    expect(JSON.stringify(sessionStorage)).not.toContain("recovery-sensitive-browser-canary");
+    expect(document.cookie).not.toContain("recovery-sensitive-browser-canary");
+    expect(location.href).not.toContain("recovery-sensitive-browser-canary");
+
+    // And the acknowledgement is still the group's last child, so it stays the
+    // primary action the fold assertions measure.
+    const acknowledge = [...document.querySelectorAll<HTMLElement>("button")].find(
+      (button) => button.textContent?.trim() === "I saved the codes",
+    );
+    expect(acknowledge).not.toBeUndefined();
+    expect(acknowledge!.parentElement!.lastElementChild).toBe(acknowledge);
   });
 
   it("keeps the node session UI unmounted until the initial snapshot is ready", async () => {
@@ -432,7 +478,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     });
     const selectNode = vi.spyOn(hostedHubController, "selectNode").mockResolvedValue();
     mounted = await render(<HostedHubRoot />);
-    await page.getByRole("button", { name: /Studio online/ }).click();
+    await page.getByRole("button", { name: /^Studio online/ }).click();
     expect(selectNode).toHaveBeenCalledWith(selectable.id);
   });
 
@@ -450,7 +496,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
 
     mounted = await render(<HostedHubRoot />);
 
-    const nodeButton = page.getByRole("button", { name: /Studio online/ });
+    const nodeButton = page.getByRole("button", { name: /^Studio online/ });
     await expect.element(nodeButton).toBeDisabled();
     expect(selectNode).not.toHaveBeenCalled();
   });
@@ -576,7 +622,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     });
     mounted = await render(<HostedHubRoot />);
     await expect.element(page.getByRole("alert")).toHaveTextContent(/Authorization.*removed/);
-    await expect.element(page.getByRole("button", { name: /Studio online/ })).toBeDisabled();
+    await expect.element(page.getByRole("button", { name: /^Studio online/ })).toBeDisabled();
     await expect.element(page.getByText("Revoked", { exact: true })).toBeVisible();
   });
 

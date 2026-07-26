@@ -112,6 +112,99 @@ export function activePasskeys(
 }
 
 /**
+ * Active credentials first, revoked ones after.
+ *
+ * Revoked keys are still **listed, never filtered** — the list is the only
+ * place a user learns why a device stopped working — but a dead credential
+ * sitting between two live ones makes the live set impossible to count at a
+ * glance. `toSorted` rather than `sort`: the array is the runtime store's own,
+ * and sorting it in place would reorder state a render is reading.
+ */
+export function orderPasskeys(
+  passkeys: ReadonlyArray<HostedHubPasskey>,
+): ReadonlyArray<HostedHubPasskey> {
+  return passkeys.toSorted((left, right) => {
+    const leftRevoked = isPasskeyRevoked(left) ? 1 : 0;
+    const rightRevoked = isPasskeyRevoked(right) ? 1 : 0;
+    return leftRevoked - rightRevoked;
+  });
+}
+
+/**
+ * How many usable credentials the Hub has positively reported as synced.
+ *
+ * Only `backupState === true` counts. `backupEligible` and `backupState` are
+ * independently nullable and `null` means the Hub did not say, so a zero here
+ * is indistinguishable from "unknown" — which is exactly why the caller must
+ * never render this count when it is zero.
+ */
+export function syncedPasskeyCount(passkeys: ReadonlyArray<HostedHubPasskey>): number {
+  return activePasskeys(passkeys).filter((passkey) => passkey.backupState === true).length;
+}
+
+/**
+ * The one honest security-posture signal this surface has.
+ *
+ * The Hub exposes no read for "is TOTP enrolled", "is a password set", or "is
+ * an email on file". `activePasskeys().length` is the *only* readable posture
+ * input on the page, so posture is one conditional alert about passkey count
+ * and nothing else. No score, no meter, no checklist: a checklist would render
+ * an unknown state for two-factor and password, and every user reads unknown as
+ * "off".
+ *
+ * A list that is loading or stale is never scored — scoring a list that could
+ * not be refreshed would warn about a credential set the surface cannot see.
+ * And there is no positive "you are secure" branch: silence is the only honest
+ * rendering of "nothing is wrong that I can detect".
+ */
+export interface AccountPosture {
+  readonly variant: "error" | "warning";
+  readonly title: string;
+  readonly description: string;
+  /**
+   * The action's label, which says what to do next rather than repeating the
+   * Passkeys header's own "Add passkey". Two controls on one page sharing an
+   * accessible name and a destination is an ambiguity for voice control and
+   * for anyone listing the buttons, and "Add another passkey" is better copy
+   * in the case that produces it.
+   */
+  readonly actionLabel: string;
+}
+
+export function accountPosture(
+  passkeys: ReadonlyArray<HostedHubPasskey>,
+  passkeysStatus: string,
+): AccountPosture | null {
+  if (passkeysStatus !== "ready") return null;
+  const usable = activePasskeys(passkeys).length;
+  if (usable === 0) {
+    return {
+      variant: "error",
+      title: "No usable passkey on this account",
+      description:
+        "Without one you can only get back in through a fallback credential. Adding a passkey is the only action on this page that makes the account stronger.",
+      actionLabel: "Add your first passkey",
+    };
+  }
+  if (usable === 1) {
+    return {
+      variant: "warning",
+      title: "One passkey on this account",
+      // No emailed link. Fourteen rows below, this same panel says this Hub has
+      // no mail transport configured, that verification messages are generated
+      // and discarded, and not to rely on email as the way back into the
+      // account. Naming it here — in the alert a user reads first, at the exact
+      // moment they are deciding whether they have a way back in — offers a
+      // recovery path that provably does not work.
+      description:
+        "If you lose this device you fall back to a password or a recovery code. Add a second passkey on another device.",
+      actionLabel: "Add another passkey",
+    };
+  }
+  return null;
+}
+
+/**
  * A display name for a credential the Hub did not label. The credential id is a
  * public handle, so showing a truncated form of it is safe and is the only
  * thing that distinguishes two unlabelled keys.
@@ -230,12 +323,33 @@ export function stepUpTitle(action: AccountStepUpAction): string {
 }
 
 /**
- * The prompt body. The second attempt cannot distinguish "no code" from "wrong
- * code" — the Hub answers both identically on purpose — so the retry copy says
- * only what is actually known, and points at the one cause the user can fix.
+ * The prompt body, as a four-cell matrix over (first attempt | retry) ×
+ * (the Hub said so | this client inferred it).
+ *
+ * The `inferred` axis is the one that matters. `step_up_required` is
+ * *synthesised* client-side by `narrowCode` from a bare `403 {"error":
+ * "forbidden"}` — the Hub never sends it. The previous copy read "This session
+ * was not started with a passkey", which asserts the session's provenance: the
+ * one thing neither the client nor the Hub exposes, and a claim that is simply
+ * false whenever the 403 came from a role check, a disabled account, or a
+ * gateway in front of the Hub. It was a guess rendered as a finding, and it
+ * sent people to an authenticator app that could not help them.
+ *
+ * No cell claims how the session was created, and no cell implies the session
+ * is weaker or stronger than it is. The inferred column names the inference as
+ * an inference and still says what to try.
+ *
+ * The second attempt cannot distinguish "no code" from "wrong code" — the Hub
+ * answers both identically on purpose — so the retry copy says only what is
+ * actually known.
  */
-export function stepUpDescription(attempts: number): string {
-  return attempts === 0
-    ? "This session was not started with a passkey, so this change needs a current code from your authenticator app."
+export function stepUpDescription(attempts: number, inferred: boolean): string {
+  if (attempts === 0) {
+    return inferred
+      ? "The Hub refused this change without saying why. The usual reason is that it wants a code from your authenticator app."
+      : "The Hub asked for a code from your authenticator app before making this change.";
+  }
+  return inferred
+    ? "That did not work. The Hub answers a wrong code and other refusals identically, so this may not be about the code at all. You can try the code showing now."
     : "That code was not accepted. Codes change every 30 seconds — enter the one showing now.";
 }

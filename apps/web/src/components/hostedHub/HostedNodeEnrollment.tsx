@@ -5,6 +5,9 @@ import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import { hostedHubController } from "../../hostedHub/state";
 import type { HostedNodeEnrollment } from "../../hostedHub/types";
 import { Button } from "../ui/button";
+import { DataList, DataListItem } from "../ui/data-list";
+import { Input, TOUCH_INPUT_CLASS_NAME } from "../ui/input";
+import { Label } from "../ui/label";
 
 export function HostedNodeEnrollmentFlow({ onClose }: { readonly onClose: () => void }) {
   const [input, setInput] = useState("");
@@ -152,20 +155,28 @@ export function HostedNodeEnrollmentFlow({ onClose }: { readonly onClose: () => 
           Compare every field, especially the fingerprint, with the node or a trusted operator
           channel before approving.
         </p>
-        <dl className="mt-5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 rounded-xl border border-border bg-background p-4 text-sm">
-          <dt className="text-muted-foreground">Label</dt>
-          <dd className="min-w-0 break-words font-medium">{enrollment.label}</dd>
-          <dt className="text-muted-foreground">Platform</dt>
-          <dd>{`${enrollment.platformOs} · ${enrollment.platformArch}`}</dd>
-          <dt className="text-muted-foreground">Version</dt>
-          <dd className="break-all">{enrollment.clientVersion}</dd>
-          <dt className="text-muted-foreground">Algorithm</dt>
-          <dd>{enrollment.algorithm}</dd>
-          <dt className="text-muted-foreground">Fingerprint</dt>
-          <dd className="break-all font-mono text-xs">{enrollment.fingerprint}</dd>
-          <dt className="text-muted-foreground">Expires</dt>
-          <dd>{new Date(enrollment.expiresAt).toLocaleString()}</dd>
-        </dl>
+        {/* The same primitive the node detail sheet uses. The fingerprint is
+            the security-critical comparison, and one shared identifier
+            treatment is what keeps it from wrapping differently on the two
+            screens a reviewer holds side by side. */}
+        <DataList className="mt-5 rounded-xl border border-border bg-background p-4">
+          <DataListItem term="Label">
+            <span className="font-medium break-words">{enrollment.label}</span>
+          </DataListItem>
+          <DataListItem term="Platform">
+            {`${enrollment.platformOs} · ${enrollment.platformArch}`}
+          </DataListItem>
+          <DataListItem term="Version" mono>
+            {enrollment.clientVersion}
+          </DataListItem>
+          <DataListItem term="Algorithm">{enrollment.algorithm}</DataListItem>
+          <DataListItem term="Fingerprint" mono>
+            {enrollment.fingerprint}
+          </DataListItem>
+          <DataListItem term="Expires">
+            {new Date(enrollment.expiresAt).toLocaleString()}
+          </DataListItem>
+        </DataList>
         {message ? (
           <p role="alert" className="mt-4 text-sm text-destructive">
             {message}
@@ -221,18 +232,16 @@ export function HostedNodeEnrollmentFlow({ onClose }: { readonly onClose: () => 
         </p>
       ) : null}
       <form className="mt-5 space-y-4" autoComplete="off" onSubmit={(event) => void lookup(event)}>
-        <div>
-          <label htmlFor="hub-node-device-code" className="text-sm font-medium">
-            Device code
-          </label>
-          <input
+        <div className="space-y-1.5">
+          <Label htmlFor="hub-node-device-code">Device code</Label>
+          <Input
             id="hub-node-device-code"
             required
             autoFocus
             maxLength={16}
             value={input}
+            className={`font-mono uppercase ${TOUCH_INPUT_CLASS_NAME}`}
             onChange={(event) => setInput(event.currentTarget.value)}
-            className="mt-1 h-10 w-full rounded-lg border border-input bg-background px-3 font-mono uppercase outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
         <div className="flex flex-wrap gap-2">

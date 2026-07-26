@@ -8,10 +8,26 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { render } from "vitest-browser-react";
 
 const navigate = vi.fn(async () => undefined);
+// These suites render the hosted root outside a `RouterProvider`. The toast
+// host the entry surfaces now mount reads route params to scope thread-scoped
+// toasts, which is neither what these suites exercise nor reachable here, so
+// the read is stubbed alongside the navigation that was already stubbed.
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useNavigate: () => navigate,
+  useParams: () => undefined,
 }));
+
+// Deliberately NOT mocked into hosted mode, unlike the other hosted browser
+// suites. Nothing this file exercises reads `isHostedHubMode()` — the desktop
+// menu, the phone sheet and the pill all gate on `selectedNode` — while the
+// header layout test mounts `ChatHeader` inside a `SidebarProvider`, and in
+// hosted mode that composition reaches
+// `createPrimaryEnvironmentClient` -> `HostedRelayAttemptFactory.nextUrl()`,
+// which finds no relay session in this harness and answers `expireSession()` ->
+// `clearAccount()`. The seeded `selectedNode` is gone before the first
+// assertion, and every control under test unmounts with it. Verified by
+// execution. Flipping the mode here would buy no coverage and cost the suite.
 
 import {
   resetPrimaryEnvironmentDescriptorForTests,
@@ -24,6 +40,7 @@ import {
   hostedConnectionStatusRepresentatives,
 } from "../../../test/hostedConnectionVocabulary";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import { useSettingsDialogStore } from "../../settingsDialogStore";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
 import {
@@ -138,6 +155,7 @@ describe("hosted connection controls", () => {
   beforeEach(() => {
     localStorage.clear();
     hostedHubController.resetForTests();
+    useSettingsDialogStore.setState({ open: false, section: "general" });
     navigate.mockClear();
   });
 
@@ -145,6 +163,7 @@ describe("hosted connection controls", () => {
     await mounted?.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    useSettingsDialogStore.setState({ open: false, section: "general" });
     resetPrimaryEnvironmentDescriptorForTests();
     vi.restoreAllMocks();
     document.body.innerHTML = "";
@@ -254,6 +273,26 @@ describe("hosted connection controls", () => {
     // to the router navigation plus the controller primitive.
     await vi.waitFor(() => expect(returnToDirectory).toHaveBeenCalledOnce());
     expect(navigate).toHaveBeenCalledWith({ to: "/", replace: true });
+  });
+
+  it("closes the desktop menu before opening account settings over it", async () => {
+    // The phone twin closes its sheet before `openSettings("account")` and says
+    // why. The desktop menu did not, so the modal settings dialog opened on top
+    // of a still-open disclosure: two owners of one dismissal, and an Escape
+    // that returns focus into a popover the user believes they already left.
+    seedConnectedState();
+    useHostedHubStore.setState({ transportStatus: "reconnecting", sessionStatus: "stale" });
+    mounted = await render(<HostedNodeMenu />);
+
+    await page.getByText("Reconnecting", { exact: true }).click();
+    const disclosure = document.querySelector<HTMLDetailsElement>("details");
+    expect(disclosure, "no desktop menu rendered").not.toBeNull();
+    expect(disclosure!.open, "the menu did not open, so this proves nothing").toBe(true);
+
+    await page.getByRole("button", { name: "Account" }).click();
+    expect(useSettingsDialogStore.getState().open).toBe(true);
+    expect(useSettingsDialogStore.getState().section).toBe("account");
+    expect(disclosure!.open, "the menu stayed open under the settings dialog").toBe(false);
   });
 
   it("opens the phone connection sheet from the pill with the full bounded control set", async () => {
