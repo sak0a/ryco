@@ -73,6 +73,12 @@ describe("ComposerFooterModeControls", () => {
     });
   });
 
+  it("renders the composer mode controls without visual dividers", async () => {
+    mounted = await render(<ComposerFooterModeControls {...baseProps} />);
+
+    expect(document.querySelector('[data-slot="separator"]')).toBeNull();
+  });
+
   it("overrides token mode style while auto-collapse is enabled", async () => {
     useUiStateStore.getState().setWideComposerControlsAutoCollapse(true);
     useUiStateStore.getState().setTokenModeControlStyle("text");

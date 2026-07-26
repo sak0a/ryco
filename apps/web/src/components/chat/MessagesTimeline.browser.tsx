@@ -212,6 +212,8 @@ describe("MessagesTimeline", () => {
       expect(hitStrip).not.toBeNull();
       expect(minimap!.className).toContain("hidden");
       expect(minimap!.className).toContain("[@media(pointer:fine)]:block");
+      expect(minimap!.className).toContain("opacity-100");
+      expect(minimap!.className).not.toContain("opacity-0");
 
       await vi.waitFor(() => {
         const strips = Array.from(document.querySelectorAll<HTMLElement>("[data-minimap-strip]"));

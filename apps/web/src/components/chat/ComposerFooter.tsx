@@ -28,7 +28,6 @@ import {
   runtimeModeConfig,
   runtimeModeOptions,
 } from "./sessionPolicyPresentation";
-import { Separator } from "../ui/separator";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { cn } from "~/lib/utils";
@@ -144,8 +143,6 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
 
   return (
     <>
-      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-
       {props.showInteractionModeToggle ? (
         <>
           <Select
@@ -212,8 +209,6 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
               })}
             </SelectPopup>
           </Select>
-
-          <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
         </>
       ) : null}
 
@@ -356,33 +351,30 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
       </Select>
 
       {props.showPlanToggle ? (
-        <>
-          <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-          <Button
-            variant="ghost"
-            className={cn(
-              "group/composer-label-control shrink-0 whitespace-nowrap px-1.5 sm:px-2",
-              props.planSidebarOpen
-                ? "text-blue-400 hover:text-blue-300"
-                : "text-muted-foreground/70 hover:text-foreground/80",
-            )}
-            size="xs"
-            type="button"
-            onClick={props.onTogglePlanSidebar}
-            aria-label={props.planSidebarLabel}
-            title={
-              props.planSidebarOpen
-                ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
-                : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`
-            }
-          >
-            <ComposerExpandableLabelControl
-              collapsed={wideComposerControlsAutoCollapse}
-              icon={<ListTodoIcon className="size-4 sm:size-3.5" />}
-              label={props.planSidebarLabel}
-            />
-          </Button>
-        </>
+        <Button
+          variant="ghost"
+          className={cn(
+            "group/composer-label-control shrink-0 whitespace-nowrap px-1.5 sm:px-2",
+            props.planSidebarOpen
+              ? "text-blue-400 hover:text-blue-300"
+              : "text-muted-foreground/70 hover:text-foreground/80",
+          )}
+          size="xs"
+          type="button"
+          onClick={props.onTogglePlanSidebar}
+          aria-label={props.planSidebarLabel}
+          title={
+            props.planSidebarOpen
+              ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
+              : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`
+          }
+        >
+          <ComposerExpandableLabelControl
+            collapsed={wideComposerControlsAutoCollapse}
+            icon={<ListTodoIcon className="size-4 sm:size-3.5" />}
+            label={props.planSidebarLabel}
+          />
+        </Button>
       ) : null}
     </>
   );
@@ -540,7 +532,6 @@ export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooter
           onSelectChangeRequest={props.onSelectChangeRequest}
           onAttachFile={props.onAttachFile}
         />
-        <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
         <ProviderModelPicker
           compact={props.isFooterCompact}
           activeInstanceId={props.selectedInstanceId}
@@ -623,12 +614,7 @@ export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooter
           />
         ) : (
           <>
-            {props.providerTraitsChips ? (
-              <>
-                <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-                {props.providerTraitsChips}
-              </>
-            ) : null}
+            {props.providerTraitsChips}
             <ComposerFooterModeControls
               showInteractionModeToggle={props.showInteractionModeToggle}
               askModeSupported={props.askModeSupported}
