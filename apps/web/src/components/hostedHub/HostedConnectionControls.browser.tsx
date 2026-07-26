@@ -18,6 +18,17 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   useParams: () => undefined,
 }));
 
+// Deliberately NOT mocked into hosted mode, unlike the other hosted browser
+// suites. Nothing this file exercises reads `isHostedHubMode()` — the desktop
+// menu, the phone sheet and the pill all gate on `selectedNode` — while the
+// header layout test mounts `ChatHeader` inside a `SidebarProvider`, and in
+// hosted mode that composition reaches
+// `createPrimaryEnvironmentClient` -> `HostedRelayAttemptFactory.nextUrl()`,
+// which finds no relay session in this harness and answers `expireSession()` ->
+// `clearAccount()`. The seeded `selectedNode` is gone before the first
+// assertion, and every control under test unmounts with it. Verified by
+// execution. Flipping the mode here would buy no coverage and cost the suite.
+
 import {
   resetPrimaryEnvironmentDescriptorForTests,
   writePrimaryEnvironmentDescriptor,

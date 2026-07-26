@@ -16,6 +16,16 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   useParams: () => undefined,
 }));
 
+// Hosted mode, which no browser test gets by default: there is no `.env` in
+// this harness, so `isHostedHubMode()` answers false and every hosted gate runs
+// as the standard client. See `HostedNodeDirectory.browser.tsx` for the full
+// note.
+vi.mock("../../env", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../env")>()),
+  readRycoClientMode: () => "hosted-hub" as const,
+  isHostedHubMode: () => true,
+}));
+
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import {
   installHostedNodeHistory,

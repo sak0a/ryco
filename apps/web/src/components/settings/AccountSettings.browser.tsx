@@ -22,6 +22,17 @@ import "../../index.css";
 import { page, userEvent } from "vite-plus/test/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
+
+// Hosted mode, which no browser test gets by default: there is no `.env` in
+// this harness, so `isHostedHubMode()` answers false and every hosted gate runs
+// as the standard client. See `HostedNodeDirectory.browser.tsx` for the full
+// note.
+vi.mock("../../env", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../env")>()),
+  readRycoClientMode: () => "hosted-hub" as const,
+  isHostedHubMode: () => true,
+}));
+
 import {
   HostedHubApiError,
   HOSTED_PASSKEY_UNCONFIRMED_MESSAGE,

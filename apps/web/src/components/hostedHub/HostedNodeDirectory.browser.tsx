@@ -27,6 +27,22 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   useParams: () => undefined,
 }));
 
+// The hosted client is what these suites are about, and nothing in a browser
+// test carries `VITE_RYCO_CLIENT_MODE`: there is no `.env` in this harness, so
+// `import.meta.env.VITE_RYCO_CLIENT_MODE` is replaced at build time with
+// `"standard"` and `isHostedHubMode()` answered **false** in every hosted
+// browser suite. Anything gated on it therefore ran in the wrong client:
+// `SettingsDialog` filtered the Account section out entirely and its own effect
+// rewrote `section` to `"general"`, so a test that opened account settings was
+// racing that rewrite and asserting against the standard dialog. The mode is
+// resolved once at module scope from a build-time constant, so a test cannot
+// set it — the module that reads it is the seam.
+vi.mock("../../env", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../env")>()),
+  readRycoClientMode: () => "hosted-hub" as const,
+  isHostedHubMode: () => true,
+}));
+
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
@@ -82,6 +98,15 @@ function seedDirectory(nodes: ReadonlyArray<HostedHubNode>, overrides: object = 
     nodes: [...nodes],
     ...overrides,
   });
+}
+
+/** The settings dialog's visible section list, which is client-mode dependent. */
+function navSections(): ReadonlyArray<string> {
+  const dialog = document.querySelector<HTMLElement>('[data-slot="dialog-popup"]');
+  if (!dialog) return [];
+  return [...dialog.querySelectorAll<HTMLElement>("nav button")].map(
+    (button) => button.textContent?.trim() ?? "",
+  );
 }
 
 /**
@@ -404,12 +429,22 @@ describe("account settings reachability", () => {
 
     await page.getByRole("button", { name: "Account settings" }).click();
     expect(useSettingsDialogStore.getState().open).toBe(true);
-    expect(useSettingsDialogStore.getState().section).toBe("account");
 
-    // The host actually renders, rather than the store flipping into a void.
+    // The host actually renders, rather than the store flipping into a void —
+    // and it renders the HOSTED dialog. Without the client-mode mock at the top
+    // of this file, `settingsSectionAvailable("account", false)` is false, the
+    // Account item is filtered out of the nav entirely, and `SettingsDialog`'s
+    // own effect rewrites `section` to `"general"`. A bare "a popup exists"
+    // assertion passes against that standard dialog without noticing.
     await vi.waitFor(() => {
       expect(document.querySelector('[data-slot="dialog-popup"]')).not.toBeNull();
+      expect(navSections(), "the standard dialog rendered instead of the hosted one").toContain(
+        "Account",
+      );
     });
+    // Asserted after the dialog has rendered, so it is the settled value rather
+    // than a read that beat the reconciliation effect to it.
+    expect(useSettingsDialogStore.getState().section).toBe("account");
   });
 
   it("mounts exactly one settings host, never one per surface", async () => {
@@ -444,6 +479,17 @@ describe("account settings reachability", () => {
     document.querySelector<HTMLElement>("summary")?.click();
     await page.getByRole("button", { name: "Account" }).click();
     expect(useSettingsDialogStore.getState().open).toBe(true);
+
+    // Same reason as above, and this assertion is why the mock exists: read
+    // straight after the click, `section` races `SettingsDialog`'s own
+    // reconciliation effect, which in standard mode rewrites it to `"general"`.
+    // This failed roughly one run in six.
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-slot="dialog-popup"]')).not.toBeNull();
+      expect(navSections(), "the standard dialog rendered instead of the hosted one").toContain(
+        "Account",
+      );
+    });
     expect(useSettingsDialogStore.getState().section).toBe("account");
   });
 });
