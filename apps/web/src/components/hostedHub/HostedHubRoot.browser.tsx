@@ -289,6 +289,58 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     expect(location.href).not.toContain("bootstrap-sensitive-browser-canary");
   });
 
+  it("offers every browser fallback sign-in without retaining submitted credentials", async () => {
+    const passwordSignIn = vi.spyOn(hostedHubApi, "signInWithPassword").mockResolvedValue({
+      account,
+      session,
+    });
+    const recoverySignIn = vi.spyOn(hostedHubApi, "signInWithRecoveryCode").mockResolvedValue({
+      account,
+      session,
+    });
+    const requestEmailRecovery = vi.spyOn(hostedHubApi, "requestEmailRecovery").mockResolvedValue();
+    const bootstrap = vi.spyOn(hostedHubController, "bootstrap").mockResolvedValue();
+    mounted = await render(<HostedHubRoot />);
+
+    await page.getByRole("button", { name: "Password, recovery code, or email" }).click();
+    await page.getByLabelText("Verified email").fill("ada@example.test");
+    await page.getByLabelText("Password").fill("password-sensitive-browser-canary");
+    await page.getByLabelText(/Authenticator code/).fill("123456");
+    await page.getByRole("button", { name: "Sign in with password" }).click();
+    expect(passwordSignIn).toHaveBeenCalledWith({
+      email: "ada@example.test",
+      password: "password-sensitive-browser-canary",
+      totpCode: "123456",
+    });
+    expect(bootstrap).toHaveBeenCalledOnce();
+    await expect.element(page.getByLabelText("Password")).toHaveValue("");
+    await expect.element(page.getByLabelText(/Authenticator code/)).toHaveValue("");
+
+    await page.getByRole("button", { name: "Recovery code" }).click();
+    await page.getByLabelText("Recovery code").fill("recovery-sensitive-browser-canary");
+    await page.getByRole("button", { name: "Use recovery code" }).click();
+    expect(recoverySignIn).toHaveBeenCalledWith("recovery-sensitive-browser-canary");
+    await expect.element(page.getByLabelText("Recovery code")).toHaveValue("");
+
+    await page.getByRole("button", { name: "Email" }).click();
+    await page.getByLabelText("Verified email").fill("ada@example.test");
+    await page.getByRole("button", { name: "Send recovery email" }).click();
+    expect(requestEmailRecovery).toHaveBeenCalledWith("ada@example.test");
+    await expect
+      .element(page.getByText(/If that verified address belongs to an account/))
+      .toBeVisible();
+
+    for (const sensitive of [
+      "password-sensitive-browser-canary",
+      "recovery-sensitive-browser-canary",
+      "123456",
+    ]) {
+      expect(JSON.stringify(localStorage)).not.toContain(sensitive);
+      expect(JSON.stringify(sessionStorage)).not.toContain(sensitive);
+      expect(location.href).not.toContain(sensitive);
+    }
+  });
+
   it("hides unavailable bootstrap without hiding invitation redemption", async () => {
     mounted = await render(<HostedHubRoot />);
     await expect.element(page.getByRole("button", { name: "Redeem invitation" })).toBeVisible();

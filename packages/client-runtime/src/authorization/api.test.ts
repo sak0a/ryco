@@ -1881,3 +1881,96 @@ describe("HostedHubApi native system-browser handoff", () => {
     });
   });
 });
+
+describe("HostedHubApi browser fallback authentication", () => {
+  it("supports password, recovery code, and email recovery only on cookie transport", async () => {
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      return requests.length === 3
+        ? response({ ok: true }, 202)
+        : requests.length === 5
+          ? response({ ok: true })
+          : response(session);
+    });
+    const credentials = inMemorySessionCredentials();
+    const api = new HostedHubApi({
+      endpoint: fakeEndpoint,
+      httpClient: fakeHttpClient,
+      sessionCredentials: credentials,
+      passkeyCeremony: { authenticate: vi.fn(), register: vi.fn() },
+    });
+
+    await api.signInWithPassword({
+      email: "ada@example.test",
+      password: "password-sensitive-canary",
+      totpCode: "123456",
+    });
+    await api.signInWithRecoveryCode("recovery-sensitive-canary");
+    await api.requestEmailRecovery("ada@example.test");
+    await api.confirmEmailRecovery({
+      token: "T".repeat(43),
+      totpCode: "654321",
+    });
+    await api.confirmEmailVerification("V".repeat(43));
+
+    expect(requests.map((request) => request.input)).toEqual([
+      "/api/auth/password",
+      "/api/auth/recovery",
+      "/api/auth/recovery/email/request",
+      "/api/auth/recovery/email/confirm",
+      "/api/auth/email/verify",
+    ]);
+    expect(requests.map((request) => JSON.parse(String(request.init?.body)))).toEqual([
+      {
+        email: "ada@example.test",
+        password: "password-sensitive-canary",
+        totpCode: "123456",
+      },
+      { code: "recovery-sensitive-canary" },
+      { email: "ada@example.test" },
+      { token: "T".repeat(43), totpCode: "654321" },
+      { token: "V".repeat(43) },
+    ]);
+    for (const request of requests) {
+      expect(request.init).toMatchObject({ method: "POST", credentials: "same-origin" });
+      const headers = headersOf(request.init);
+      expect(headers.get("Authorization")).toBeNull();
+      expect(headers.get("DPoP")).toBeNull();
+      expect(headers.get("X-Ryco-CSRF")).toBeNull();
+    }
+    expect(credentials.readCsrfToken()).toBe("csrf-canary");
+
+    const { service } = recordingDpopSigner();
+    const nativeApi = createBearerApi(service, inMemoryBearerCredentials());
+    await expect(
+      nativeApi.signInWithPassword({ email: "a@b.test", password: "pw" }),
+    ).rejects.toMatchObject({ code: "browser_only_transport" });
+    await expect(nativeApi.signInWithRecoveryCode("code")).rejects.toMatchObject({
+      code: "browser_only_transport",
+    });
+    await expect(nativeApi.requestEmailRecovery("a@b.test")).rejects.toMatchObject({
+      code: "browser_only_transport",
+    });
+  });
+
+  it("rejects malformed fallback input before any request", async () => {
+    const api = createApi();
+    const fetchSpy = vi.fn(async () => response(session));
+    globalThis.fetch = fetchSpy;
+
+    await expect(
+      api.signInWithPassword({ email: "x".repeat(255), password: "pw" }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(api.signInWithRecoveryCode("x".repeat(129))).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    await expect(api.confirmEmailRecovery({ token: "not-base64url=" })).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    await expect(api.confirmEmailVerification("short")).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});

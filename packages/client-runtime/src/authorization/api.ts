@@ -94,6 +94,11 @@ const MAX_REVOCATION_REASON_LENGTH = 256;
  */
 const MAX_TOTP_SECRET_LENGTH = 256;
 const MAX_TOTP_PROVISIONING_URI_LENGTH = 2048;
+const MAX_AUTH_EMAIL_LENGTH = 254;
+const MAX_AUTH_PASSWORD_LENGTH = 256;
+const MAX_AUTH_TOTP_LENGTH = 16;
+const MAX_AUTH_RECOVERY_CODE_LENGTH = 128;
+const AUTH_EMAIL_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 /**
  * The provisioning URI is an `otpauth://` key URI (RFC-style, what authenticator
@@ -506,6 +511,26 @@ function stepUpBody(input: HostedAccountStepUp | undefined): { readonly totpCode
   return trimmed.length > 0 ? { totpCode } : {};
 }
 
+function boundedAuthString(value: unknown, maxLength: number): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
+    throw new HostedHubApiError("invalid_request", 400);
+  }
+  return value;
+}
+
+function fallbackTotpBody(value: unknown): { readonly totpCode?: string } {
+  if (value === undefined || value === null || value === "") return {};
+  return { totpCode: boundedAuthString(value, MAX_AUTH_TOTP_LENGTH) };
+}
+
+function emailTokenValue(value: unknown): string {
+  const token = boundedAuthString(value, 64);
+  if (!AUTH_EMAIL_TOKEN_PATTERN.test(token)) {
+    throw new HostedHubApiError("invalid_request", 400);
+  }
+  return token;
+}
+
 /** The bounded TOTP enrolment secret, or `null` when the value is not one. */
 function totpSecretValue(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 && value.length <= MAX_TOTP_SECRET_LENGTH
@@ -691,6 +716,83 @@ export class HostedHubApi {
         ...(signal ? { signal } : {}),
       }),
     );
+  }
+
+  async signInWithPassword(
+    input: {
+      readonly email: string;
+      readonly password: string;
+      readonly totpCode?: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<HostedHubSessionResponse> {
+    this.#requireCookieTransport();
+    return this.#finishLogin(
+      await this.#request("/api/auth/password", {
+        method: "POST",
+        body: {
+          email: boundedAuthString(input.email, MAX_AUTH_EMAIL_LENGTH),
+          password: boundedAuthString(input.password, MAX_AUTH_PASSWORD_LENGTH),
+          ...fallbackTotpBody(input.totpCode),
+        },
+        ...(signal ? { signal } : {}),
+      }),
+    );
+  }
+
+  async signInWithRecoveryCode(
+    code: string,
+    signal?: AbortSignal,
+  ): Promise<HostedHubSessionResponse> {
+    this.#requireCookieTransport();
+    return this.#finishLogin(
+      await this.#request("/api/auth/recovery", {
+        method: "POST",
+        body: { code: boundedAuthString(code, MAX_AUTH_RECOVERY_CODE_LENGTH) },
+        ...(signal ? { signal } : {}),
+      }),
+    );
+  }
+
+  async requestEmailRecovery(email: string, signal?: AbortSignal): Promise<void> {
+    this.#requireCookieTransport();
+    const result = await this.#request("/api/auth/recovery/email/request", {
+      method: "POST",
+      body: { email: boundedAuthString(email, MAX_AUTH_EMAIL_LENGTH) },
+      ...(signal ? { signal } : {}),
+    });
+    if (Object.keys(result).length !== 1 || result.ok !== true) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
+  }
+
+  async confirmEmailRecovery(
+    input: { readonly token: string; readonly totpCode?: string },
+    signal?: AbortSignal,
+  ): Promise<HostedHubSessionResponse> {
+    this.#requireCookieTransport();
+    return this.#finishLogin(
+      await this.#request("/api/auth/recovery/email/confirm", {
+        method: "POST",
+        body: {
+          token: emailTokenValue(input.token),
+          ...fallbackTotpBody(input.totpCode),
+        },
+        ...(signal ? { signal } : {}),
+      }),
+    );
+  }
+
+  async confirmEmailVerification(token: string, signal?: AbortSignal): Promise<void> {
+    this.#requireCookieTransport();
+    const result = await this.#request("/api/auth/email/verify", {
+      method: "POST",
+      body: { token: emailTokenValue(token) },
+      ...(signal ? { signal } : {}),
+    });
+    if (Object.keys(result).length !== 1 || result.ok !== true) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
   }
 
   async startNativeHandoff(
