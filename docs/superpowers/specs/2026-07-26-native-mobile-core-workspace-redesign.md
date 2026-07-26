@@ -1,6 +1,6 @@
 # Native mobile core workspace redesign
 
-**Status:** Design decisions approved; written specification awaiting final review
+**Status:** Approved 2026-07-26
 
 **Scope:** Public `apps/mobile` and shared public client/runtime contracts. The required private
 Hub capability is outlined as an integration boundary but is not authorized or implemented here.
