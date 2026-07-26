@@ -14,10 +14,10 @@ import type { StatusTone } from "../../components/StatusPill";
  * Native account management for the hosted plane.
  *
  * Every credential operation on this surface is a **direct, DPoP-bound call**
- * through `hostedHubController`. Nothing here opens a browser. The C2 fallback
- * webview (`HostedFallbackSession.ts`) survives, but only as the no-passkey
- * *login* entry point on the sign-in sheet — `/api/account/*` is served to the
- * native transport, so credential *management* has no reason to leave the app.
+ * through `hostedHubController`. Nothing here opens a browser. The sign-in
+ * sheet uses the reviewed system-browser handoff, while `/api/account/*` is
+ * served to the native transport, so credential *management* has no reason to
+ * leave the app.
  *
  * Like `hostedAuthModel.ts` this module is free of `react-native` and of React:
  * the RN packages ship untranspiled Flow that the vp/node runner cannot parse,

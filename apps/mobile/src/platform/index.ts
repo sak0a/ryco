@@ -9,6 +9,12 @@ export { createMobileEndpoint } from "./endpoint";
 export { mobileClock, mobileFrameScheduler } from "./frame";
 export { createMobileHttpClient } from "./httpClient";
 export { createMobileKV, mobileKV, type AsyncKeyValueStore } from "./kv";
+export {
+  createMobileNativeAuthorization,
+  mobileAuthorizationCallbackUri,
+  mobileNativeAuthorization,
+  type MobileNativeAuthorizationDependencies,
+} from "./nativeAuthorization";
 export { mobileObservability } from "./observability";
 export {
   createMobilePairingCredentialSource,
@@ -34,6 +40,7 @@ export {
   resetMobileDpopSignerForTests,
 } from "./dpopSigner";
 export {
+  clearMobileHostedSessionToken,
   createMobileSessionCredentials,
   hydrateMobileHostedSessionToken,
   mobileSessionCredentials,

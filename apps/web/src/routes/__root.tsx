@@ -163,9 +163,11 @@ function RootRoutePendingView() {
 
 function RootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
+  const nativeAuthorizationRoute = pathname.startsWith("/native/authorize/");
   const { authGateState } = Route.useRouteContext();
   const canShowInterstitial =
     pathname !== "/pair" &&
+    !nativeAuthorizationRoute &&
     (authGateState.status === "authenticated" ||
       authGateState.status === "hosted-static" ||
       authGateState.status === "hosted-hub");
@@ -210,7 +212,7 @@ function RootRouteView() {
     </Suspense>
   ) : null;
 
-  if (pathname === "/pair") {
+  if (pathname === "/pair" || nativeAuthorizationRoute) {
     return <Outlet />;
   }
 

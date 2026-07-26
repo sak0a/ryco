@@ -22,6 +22,33 @@ export async function interruptThreadTurn(api: EnvironmentApi, threadId: ThreadI
   });
 }
 
+export async function renameThread(
+  api: EnvironmentApi,
+  threadId: ThreadId,
+  title: string,
+): Promise<void> {
+  const trimmed = title.trim();
+  if (!trimmed) throw new Error("Task title cannot be empty.");
+  await api.orchestration.dispatchCommand({
+    type: "thread.meta.update",
+    commandId: newCommandId(),
+    threadId,
+    title: trimmed,
+  });
+}
+
+export async function setThreadArchived(
+  api: EnvironmentApi,
+  threadId: ThreadId,
+  archived: boolean,
+): Promise<void> {
+  await api.orchestration.dispatchCommand({
+    type: archived ? "thread.archive" : "thread.unarchive",
+    commandId: newCommandId(),
+    threadId,
+  });
+}
+
 export async function respondToThreadApproval(input: {
   api: EnvironmentApi;
   threadId: ThreadId;

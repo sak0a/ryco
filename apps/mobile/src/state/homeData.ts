@@ -3,6 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import {
   selectProjectsAcrossEnvironments,
   selectSidebarThreadsAcrossEnvironments,
+  selectSidebarWorktreesAcrossEnvironments,
   useStore,
 } from "./threadsRuntime";
 import {
@@ -14,6 +15,13 @@ import { usePreferences } from "./preferencesStore";
 
 export { buildHomeThreadGroups, resolveHomeGroupingMode } from "./homeGrouping";
 export type { HomeThreadGroup } from "./homeGrouping";
+
+export function useHomeWorkspaceData() {
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const worktrees = useStore(useShallow(selectSidebarWorktreesAcrossEnvironments));
+  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  return { projects, worktrees, threads } as const;
+}
 
 export function useHomeThreadGroups(): ReadonlyArray<HomeThreadGroup> {
   const preferences = usePreferences();

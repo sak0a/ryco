@@ -15,20 +15,10 @@ const controller = vi.hoisted(() => ({
   acknowledgeDeliveryUnknown: vi.fn(),
 }));
 
-const fallback = vi.hoisted(() => ({
-  openHostedFallbackSession: vi.fn(async (_input: unknown) => ({
-    status: "native-sign-in-attempted" as const,
-    returnedVia: "dismissed" as const,
-  })),
-}));
-
 // Mocked rather than injected: the real module configures the hosted runtime,
 // which reaches the enclave device key, SecureStore, and `expo-constants`.
 // Nothing in this suite should touch the native bridge.
 vi.mock("../../hostedHub/state", () => ({ hostedHubController: controller }));
-vi.mock("./HostedFallbackSession", () => ({
-  openHostedFallbackSession: fallback.openHostedFallbackSession,
-}));
 
 import {
   deriveHostedAccountView,
@@ -146,26 +136,22 @@ beforeEach(() => {
 });
 
 describe("hosted sign-in surface", () => {
-  it("offers a passkey sign-in when signed out, and calls signIn()", () => {
+  it("offers one browser sign-in when signed out, and calls signIn()", () => {
     const view = signInView();
     expect(view.surface).toBe("signed-out");
     expect(view.primaryAction?.id).toBe("sign-in");
+    expect(view.primaryAction?.label).toBe("Continue in browser");
+    expect(view.secondaryAction).toBeNull();
     view.primaryAction?.run();
     expect(controller.signIn).toHaveBeenCalledTimes(1);
   });
 
-  it("routes first run to the browser rather than a native registration call", () => {
+  it("routes first run through the same browser handoff", () => {
     const view = signInView({ bootstrapAvailable: true });
     expect(view.surface).toBe("first-run");
-    expect(view.primaryAction?.id).toBe("open-fallback");
+    expect(view.primaryAction?.id).toBe("sign-in");
+    expect(view.secondaryAction).toBeNull();
     view.primaryAction?.run();
-    expect(fallback.openHostedFallbackSession).toHaveBeenCalledTimes(1);
-    // The browser never hands the app a session: the return path is always a
-    // native passkey login.
-    const input = fallback.openHostedFallbackSession.mock.calls[0]?.[0] as {
-      completeWithNativeSignIn: () => void;
-    };
-    input.completeWithNativeSignIn();
     expect(controller.signIn).toHaveBeenCalledTimes(1);
   });
 
@@ -183,8 +169,7 @@ describe("hosted sign-in surface", () => {
     expect(view.surface).toBe("session-expired");
     view.primaryAction?.run();
     expect(controller.signIn).toHaveBeenCalledTimes(1);
-    view.secondaryAction?.run();
-    expect(fallback.openHostedFallbackSession).toHaveBeenCalledTimes(1);
+    expect(view.secondaryAction).toBeNull();
   });
 
   it("explains an unreachable Hub and retries through bootstrap()", () => {
@@ -294,6 +279,10 @@ describe("hosted account surface", () => {
     });
     expect(view.signedIn).toBe(false);
     expect(view.rows).toEqual([]);
+    expect(view.detail).toBe(
+      "Continue in your browser to sign in and reach the nodes on your Hub.",
+    );
+    expect(view.signInAction?.label).toBe("Continue in browser");
     view.signInAction?.run();
     expect(onSignIn).toHaveBeenCalledTimes(1);
   });
@@ -324,7 +313,7 @@ describe("hosted account surface", () => {
     for (const row of view.rows) row.run();
     view.dismissRecoveryCodes?.run();
     view.deliveryUnknown?.action.run();
-    expect(fallback.openHostedFallbackSession).not.toHaveBeenCalled();
+    expect(controller.signIn).not.toHaveBeenCalled();
   });
 
   /**

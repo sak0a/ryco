@@ -9,18 +9,21 @@ import {
 
 describe("MVP route config", () => {
   it("registers exactly the MVP root route set plus the NotFound catch-all", () => {
-    expect(Object.keys(MVP_ROOT_ROUTES).sort()).toEqual(
+    expect(Object.keys(MVP_ROOT_ROUTES).toSorted()).toEqual(
       [
+        "AddProject",
         "Connections",
         "ConnectionsNew",
         "Home",
+        "NewTask",
         "NotFound",
         "Onboarding",
+        "Project",
         "SettingsSheet",
         "Thread",
         "ThreadReview",
         "ThreadReviewComment",
-      ].sort(),
+      ].toSorted(),
     );
     // Deferred routes must be absent from the tree.
     for (const absent of [
@@ -39,6 +42,9 @@ describe("MVP route config", () => {
 
   it("uses the exact MVP linking path strings", () => {
     expect(MVP_ROOT_ROUTES.Home.linking).toBe("");
+    expect(MVP_ROOT_ROUTES.AddProject.linking).toBe("projects/new");
+    expect(MVP_ROOT_ROUTES.Project.linking).toBe("projects/:environmentId/:projectId");
+    expect(MVP_ROOT_ROUTES.NewTask.linking).toBe("tasks/new");
     expect(MVP_ROOT_ROUTES.Thread.linking).toBe("threads/:environmentId/:threadId");
     expect(MVP_ROOT_ROUTES.ThreadReview.linking).toBe("threads/:environmentId/:threadId/review");
     expect(MVP_ROOT_ROUTES.ThreadReviewComment.linking).toBe(
@@ -75,16 +81,37 @@ describe("MVP route config", () => {
     for (const overlay of [
       "Connections",
       "ConnectionsNew",
-      "SettingsSheet",
+      "AddProject",
       "ThreadReviewComment",
       "Onboarding",
     ] as const) {
       expect(overlays.has(overlay)).toBe(true);
     }
     // The workspace routes themselves are never overlays.
-    for (const workspace of ["Home", "Thread", "ThreadReview", "NotFound"] as const) {
+    for (const workspace of [
+      "Home",
+      "NewTask",
+      "Project",
+      "Thread",
+      "ThreadReview",
+      "SettingsSheet",
+      "NotFound",
+    ] as const) {
       expect(overlays.has(workspace)).toBe(false);
     }
+  });
+
+  it("presents Settings as a full-screen card instead of a form sheet", () => {
+    expect(MVP_ROOT_ROUTES.SettingsSheet.overlay).toBe(false);
+    expect(MVP_ROOT_ROUTES.SettingsSheet.ios.presentation).toBe("card");
+    expect("sheetAllowedDetents" in MVP_ROOT_ROUTES.SettingsSheet.ios).toBe(false);
+    expect(MVP_ROOT_ROUTES.SettingsSheet.android.presentation).toBe("card");
+  });
+
+  it("presents Add Project as a workspace overlay and Project as a push", () => {
+    expect(MVP_ROOT_ROUTES.AddProject.ios.presentation).toBe("formSheet");
+    expect(MVP_ROOT_ROUTES.AddProject.ios.sheetAllowedDetents).toEqual([0.7, 0.95]);
+    expect(MVP_ROOT_ROUTES.Project.ios.presentation).toBe("card");
   });
 
   it("keeps ConnectionsNew a card (deliberate divergence from upstream's formSheet)", () => {
@@ -93,17 +120,19 @@ describe("MVP route config", () => {
   });
 
   it("nests the MVP settings sub-routes with their linking paths", () => {
-    expect(Object.keys(MVP_SETTINGS_SHEET_ROUTES).sort()).toEqual(
+    expect(Object.keys(MVP_SETTINGS_SHEET_ROUTES).toSorted()).toEqual(
       [
         "Settings",
         "SettingsAccount",
+        "SettingsAbout",
         "SettingsAppearance",
         "SettingsClientStorage",
-        "SettingsEnvironmentNew",
-        "SettingsEnvironments",
-      ].sort(),
+        "SettingsHub",
+        "SettingsWorkspace",
+      ].toSorted(),
     );
-    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsEnvironments.linking).toBe("environments");
+    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsHub.linking).toBe("hub");
+    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsWorkspace.linking).toBe("workspace");
     expect(MVP_SETTINGS_SHEET_ROUTES.SettingsAppearance.linking).toBe("appearance");
     // The hosted Hub account is the ONLY route the hosted plane adds, and it is
     // nested: the root route set above is unchanged by hosted mode.

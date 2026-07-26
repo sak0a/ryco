@@ -19,13 +19,18 @@ import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteSc
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
 import { HostedAccountRouteScreen } from "./features/hostedHub/HostedAccountRouteScreen";
+import { NewTaskRouteScreen } from "./features/newTask/NewTaskRouteScreen";
 import { OnboardingRouteScreen } from "./features/onboarding/OnboardingRouteScreen";
+import { AddProjectRouteScreen } from "./features/projects/AddProjectRouteScreen";
+import { ProjectRouteScreen } from "./features/projects/ProjectRouteScreen";
 import { ReviewCommentComposerSheet } from "./features/review/ReviewCommentComposerSheet";
 import { ReviewSheet } from "./features/review/ReviewSheet";
 import { SettingsAppearanceRouteScreen } from "./features/settings/SettingsAppearanceRouteScreen";
+import { SettingsAboutRouteScreen } from "./features/settings/SettingsAboutRouteScreen";
 import { SettingsClientStorageRouteScreen } from "./features/settings/SettingsClientStorageRouteScreen";
-import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnvironmentsRouteScreen";
+import { SettingsHubRouteScreen } from "./features/settings/SettingsHubRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
+import { SettingsWorkspaceRouteScreen } from "./features/settings/SettingsWorkspaceRouteScreen";
 import { ThreadRouteScreen } from "./features/threads/ThreadRouteScreen";
 import {
   MVP_ROOT_ROUTES,
@@ -91,10 +96,9 @@ const SHEET_SOLID_HEADER_OPTIONS: AppScreenOptions = {
   unstable_navigationItemStyle: undefined,
 };
 
-// Nested settings navigator hosted inside the SettingsSheet form sheet (a plain
-// formSheet cannot render a stack header — the header + in-sheet pushes come from
-// this nested stack). MVP subset: Settings, environments (+ add), Hub account,
-// appearance, client storage. Deferred: archive, waitlist, legal.
+// Full-screen Settings stack. Routine node switching and pairing live in the
+// Nodes Home mode; Settings owns account, defaults, appearance, storage, and
+// About without duplicating the connection browser.
 const SettingsSheetStack = createNativeStackNavigator({
   initialRouteName: "Settings",
   screenOptions: {
@@ -107,16 +111,15 @@ const SettingsSheetStack = createNativeStackNavigator({
       linking: "",
       options: { title: "Settings" },
     }),
-    SettingsEnvironments: createNativeStackScreen({
-      screen: SettingsEnvironmentsRouteScreen,
-      linking: "environments",
-      options: { title: "Environments" },
+    SettingsHub: createNativeStackScreen({
+      screen: SettingsHubRouteScreen,
+      linking: "hub",
+      options: { title: "Hub" },
     }),
-    SettingsEnvironmentNew: createNativeStackScreen({
-      // Reuses the pair-a-device screen (add an environment from settings).
-      screen: ConnectionsNewRouteScreen,
-      linking: "environment-new",
-      options: { title: "Add Environment" },
+    SettingsWorkspace: createNativeStackScreen({
+      screen: SettingsWorkspaceRouteScreen,
+      linking: "workspace",
+      options: { title: "Workspace defaults" },
     }),
     SettingsAccount: createNativeStackScreen({
       screen: HostedAccountRouteScreen,
@@ -132,6 +135,11 @@ const SettingsSheetStack = createNativeStackNavigator({
       screen: SettingsClientStorageRouteScreen,
       linking: "client-storage",
       options: { title: "Client Storage" },
+    }),
+    SettingsAbout: createNativeStackScreen({
+      screen: SettingsAboutRouteScreen,
+      linking: "about",
+      options: { title: "About" },
     }),
   },
 });
@@ -261,8 +269,23 @@ export const ROOT_STACK_SCREENS = {
     options: routeOptions("Home", {
       contentStyle: { backgroundColor: "transparent" },
       headerBackVisible: false,
-      title: "Threads",
+      title: "Inbox",
     }),
+  }),
+  AddProject: createNativeStackScreen({
+    screen: AddProjectRouteScreen,
+    linking: MVP_ROOT_ROUTES.AddProject.linking,
+    options: routeOptions("AddProject", { title: "Add Project", gestureEnabled: true }),
+  }),
+  Project: createNativeStackScreen({
+    screen: ProjectRouteScreen,
+    linking: MVP_ROOT_ROUTES.Project.linking,
+    options: routeOptions("Project", { title: "Project" }),
+  }),
+  NewTask: createNativeStackScreen({
+    screen: NewTaskRouteScreen,
+    linking: MVP_ROOT_ROUTES.NewTask.linking,
+    options: routeOptions("NewTask", { title: "New Task" }),
   }),
   Thread: createNativeStackScreen({
     screen: ThreadRouteScreen,
@@ -282,7 +305,7 @@ export const ROOT_STACK_SCREENS = {
   Connections: createNativeStackScreen({
     screen: ConnectionsRouteScreen,
     linking: MVP_ROOT_ROUTES.Connections.linking,
-    options: routeOptions("Connections", { title: "Environments" }),
+    options: routeOptions("Connections", { title: "Nodes" }),
   }),
   ConnectionsNew: createNativeStackScreen({
     screen: ConnectionsNewRouteScreen,

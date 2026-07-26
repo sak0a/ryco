@@ -7,8 +7,8 @@ import { loadMobileEnv, resolveAppVariant, type AppVariant } from "./config/env.
 // assets, the default telemetry endpoint, widgets, share extension, quick
 // actions, and the camera-showcase rig are all stripped per the design spec's
 // strip list. Direct-node bearer pairing is one auth plane; the hosted plane
-// (associated domains + `extra.hosted` below) activates only when a Hub origin
-// is configured.
+// uses a system-browser public-client handoff and activates only when a Hub
+// origin is configured.
 const repoEnv = loadMobileEnv();
 Object.assign(process.env, repoEnv);
 
@@ -113,29 +113,15 @@ const appleTeamId = repoEnv.RYCO_IOS_APPLE_TEAM_ID?.trim();
 
 // Hosted Hub plane. `EXPO_PUBLIC_RYCO_HUB_URL` must be the Hub's *public origin*
 // (the host that serves the API and the relay upgrade), because every DPoP proof
-// signs `htu` against that origin. `EXPO_PUBLIC_RYCO_HUB_APP_URL` is the hosted
-// web app the fallback (registration/recovery) browser session opens.
+// signs `htu` against that origin. `EXPO_PUBLIC_RYCO_HUB_APP_URL` is optional
+// hosted-web metadata; native authorization starts from the Hub API itself.
 const hostedHubBaseUrl = repoEnv.EXPO_PUBLIC_RYCO_HUB_URL?.trim() || null;
 const hostedHubAppUrl = repoEnv.EXPO_PUBLIC_RYCO_HUB_APP_URL?.trim() || null;
 
-// Fail closed at config time: a hosted build whose associated domains can never
-// resolve is worse than no hosted build, because the failure only surfaces on a
-// device at passkey time.
+// Fail closed at config time on malformed deployment metadata. A Personal Team
+// build intentionally omits associated-domain entitlements and still supports
+// hosted sign-in through the custom-scheme system-browser handoff.
 if (hostedHubBaseUrl) {
-  // `webcredentials:` resolves against TEAMID.BUNDLEID; without a team id the
-  // association document can never name this app.
-  if (!appleTeamId) {
-    throw new Error(
-      "RYCO_IOS_APPLE_TEAM_ID is required when EXPO_PUBLIC_RYCO_HUB_URL is set: the webcredentials association resolves against TEAMID.BUNDLEID, so a hosted build without an Apple Developer Team id can never associate with the relying party.",
-    );
-  }
-  // The personal-team escape hatch rewrites the bundle identifier, which breaks
-  // the association document ↔ bundle binding the passkey ceremony depends on.
-  if (isIosPersonalTeamBuild || personalTeamBundleIdentifier) {
-    throw new Error(
-      "RYCO_IOS_PERSONAL_TEAM / RYCO_IOS_PERSONAL_TEAM_BUNDLE_ID cannot be combined with EXPO_PUBLIC_RYCO_HUB_URL: the personal-team override changes the iOS bundle identifier, so it no longer matches the TEAMID.BUNDLEID entry in the relying party's apple-app-site-association document. Build hosted variants with the real team's bundle identifier, or unset EXPO_PUBLIC_RYCO_HUB_URL for a direct-node-only local build.",
-    );
-  }
   // A Hub on a domain that the relying party does not cover can never serve the
   // association documents the ceremony reads, and that failure is only visible
   // on a device at passkey time — so surface it here instead. The RP id must be
@@ -183,9 +169,14 @@ const config: ExpoConfig = {
     supportsTablet: true,
     bundleIdentifier: iosBundleIdentifier,
     ...(appleTeamId ? { appleTeamId } : {}),
-    // Native passkeys (webcredentials) and universal links (applinks) for the
-    // hosted plane's relying party.
-    associatedDomains: [`applinks:${relyingParty}`, `webcredentials:${relyingParty}`],
+    // Paid/team builds may keep native passkey and universal-link support.
+    // Personal Team builds omit this entitlement; hosted browser sign-in uses
+    // the app's custom scheme and remains available.
+    ...(!isIosPersonalTeamBuild && appleTeamId && hostedHubBaseUrl
+      ? {
+          associatedDomains: [`applinks:${relyingParty}`, `webcredentials:${relyingParty}`],
+        }
+      : {}),
     infoPlist: {
       NSAppTransportSecurity: {
         // Allow LAN/tailnet connections to a local or staging node over http.

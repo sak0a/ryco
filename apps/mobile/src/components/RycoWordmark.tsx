@@ -14,6 +14,14 @@ export function RycoWordmark(props: { readonly compact?: boolean; readonly stage
   const compact = props.compact ?? false;
   const stageLabel = props.stageLabel ?? DEFAULT_STAGE_LABEL;
 
+  if (compact) {
+    return (
+      <View className="h-11 w-11 items-center justify-center">
+        <Text className="text-xl font-ryco-bold tracking-[-0.8px] text-foreground">R</Text>
+      </View>
+    );
+  }
+
   return (
     <View className="flex-row items-center gap-3">
       <View className="gap-1">
@@ -25,11 +33,9 @@ export function RycoWordmark(props: { readonly compact?: boolean; readonly stage
             </Text>
           </View>
         </View>
-        {!compact ? (
-          <Text className="text-xs font-medium text-foreground-muted">
-            Mobile control surface for your live coding environments
-          </Text>
-        ) : null}
+        <Text className="text-xs font-medium text-foreground-muted">
+          Mobile control surface for your live coding environments
+        </Text>
       </View>
     </View>
   );

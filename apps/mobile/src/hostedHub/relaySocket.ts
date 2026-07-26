@@ -271,8 +271,9 @@ export class MobileHostedRelaySocket {
       // appends rather than replaces, so nothing passed here can remove it. It
       // also always sets `Origin`, which the Hub does not check on this branch.
       // The protection is therefore upstream: no in-app WebView ships, and the
-      // fallback flow uses an ephemeral/Custom Tab session whose cookies never
-      // reach that store. Owner acceptance row 8 is what proves it end to end.
+      // authorization handoff uses the OS-managed system browser whose cookies
+      // never enter the app-global store. Owner acceptance row 8 is what proves
+      // it end to end.
       const socket = (options.createSocket ?? defaultCreateSocket)(this.url, {
         Authorization: `DPoP ${token}`,
         DPoP: proof,

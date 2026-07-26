@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { HostedHubState } from "@ryco/client-runtime/authorization";
 
-// The environment switcher's direct half. The screen is invoked as a plain
+// The Nodes compatibility route. The screen is invoked as a plain
 // function with react-native mocked (no React renderer exists in this suite);
 // the hosted section below it renders for real, so the hosted controller spies
 // are a genuine tripwire on device-row interactions.
@@ -11,7 +11,9 @@ import type { HostedHubState } from "@ryco/client-runtime/authorization";
 const navigationMock = vi.hoisted(() => ({ navigate: vi.fn() }));
 const actionsMock = vi.hoisted(() => ({
   reconnectSavedEnvironment: vi.fn(() => Promise.resolve()),
+  disconnectSavedEnvironment: vi.fn(() => Promise.resolve()),
   removeSavedEnvironment: vi.fn(() => Promise.resolve()),
+  renameSavedEnvironment: vi.fn(),
 }));
 const rowsMock = vi.hoisted(() => ({
   rows: [] as ReadonlyArray<unknown>,
@@ -27,6 +29,12 @@ const hostedMock = vi.hoisted(() => ({
   },
 }));
 const mountEffects = vi.hoisted(() => [] as Array<() => void>);
+const confirmMock = vi.hoisted(() =>
+  vi.fn((request: { readonly onConfirm: () => void }) => request.onConfirm()),
+);
+const threadsStoreMock = vi.hoisted(() => ({
+  setActiveEnvironmentId: vi.fn(),
+}));
 
 vi.mock("react-native", () => ({
   Pressable: "Pressable",
@@ -47,6 +55,19 @@ vi.mock("react", async (importOriginal) => {
   };
 });
 vi.mock("@react-navigation/native", () => ({ useNavigation: () => navigationMock }));
+vi.mock("../../components/ConfirmDialogHost", () => ({ showConfirmDialog: confirmMock }));
+vi.mock("../../lib/useThemeColor", () => ({ useThemeColor: () => "#000000" }));
+vi.mock("../../state/threadsRuntime", () => {
+  const state = {
+    activeEnvironmentId: null,
+    setActiveEnvironmentId: threadsStoreMock.setActiveEnvironmentId,
+  };
+  return {
+    useStore: Object.assign((selector: (input: typeof state) => unknown) => selector(state), {
+      getState: () => state,
+    }),
+  };
+});
 vi.mock("./useConnectionController", () => ({
   useSavedEnvironments: () => ({ rows: rowsMock.rows, isLoading: false }),
   useConnectionActions: () => actionsMock,
@@ -54,6 +75,7 @@ vi.mock("./useConnectionController", () => ({
 vi.mock("../../hostedHub/state", () => ({
   ensureMobileHostedSession: hostedMock.ensureMobileHostedSession,
   isMobileHostedModeAvailable: () => hostedMock.available,
+  subscribeMobileHostedModeAvailability: () => () => undefined,
   hostedHubController: hostedMock.controller,
   useHostedHubStore: (selector: (state: HostedHubState) => unknown) =>
     selector(hostedState as HostedHubState),
@@ -81,10 +103,14 @@ const hostedState: HostedHubState = {
 
 import { ConnectionsRouteScreen } from "./ConnectionsRouteScreen";
 
-function savedRow(environmentId: string, label: string) {
+function savedRow(
+  environmentId: string,
+  label: string,
+  connectionState: "connected" | "disconnected" | "error" = "connected",
+) {
   return {
-    record: { environmentId, label },
-    runtime: { connectionState: "connected", authState: "authenticated" },
+    record: { environmentId, label, httpBaseUrl: "https://mac.local:44342" },
+    runtime: { connectionState, authState: "authenticated", role: "owner" },
     tone: { label: "Connected", pillClassName: "bg-success-bg", textClassName: "text-success" },
     statusLabel: "Connected",
   };
@@ -121,7 +147,10 @@ function buttons(element: unknown): ReadonlyArray<{ label: string; press: () => 
 beforeEach(() => {
   navigationMock.navigate.mockClear();
   actionsMock.reconnectSavedEnvironment.mockClear();
+  actionsMock.disconnectSavedEnvironment.mockClear();
   actionsMock.removeSavedEnvironment.mockClear();
+  actionsMock.renameSavedEnvironment.mockClear();
+  confirmMock.mockClear();
   hostedMock.ensureMobileHostedSession.mockClear();
   hostedMock.controller.selectNode.mockClear();
   hostedMock.controller.returnToDirectory.mockClear();
@@ -129,49 +158,70 @@ beforeEach(() => {
   hostedMock.controller.retrySelectedNode.mockClear();
   mountEffects.length = 0;
   hostedMock.available = false;
+  threadsStoreMock.setActiveEnvironmentId.mockClear();
   rowsMock.rows = [savedRow("env-1", "Studio Mac")];
 });
 
-describe("Connections switcher — Devices section (direct plane)", () => {
+describe("Nodes — direct plane", () => {
   it("labels both planes as separate sections", () => {
     const rendered = texts(ConnectionsRouteScreen());
-    expect(rendered).toContain("Devices");
+    expect(rendered).toContain("Direct connections");
     expect(rendered).toContain("Hub nodes");
   });
 
-  it("keeps the Pair a device CTA", () => {
+  it("keeps the direct connection CTA", () => {
     buttons(ConnectionsRouteScreen())
-      .find((button) => button.label === "Pair a device")
+      .find((button) => button.label === "Direct connection")
       ?.press();
     expect(navigationMock.navigate).toHaveBeenCalledWith("ConnectionsNew");
   });
 
-  it("reconnects and removes a saved environment through the direct actions", () => {
+  it("selects, disconnects, and forgets a saved environment through direct actions", () => {
     const tree = ConnectionsRouteScreen();
     buttons(tree)
-      .find((button) => button.label === "Reconnect")
+      .find((button) => button.label === "Use")
       ?.press();
     buttons(tree)
-      .find((button) => button.label === "Remove")
+      .find((button) => button.label === "Disconnect")
+      ?.press();
+    buttons(tree)
+      .find((button) => button.label === "Forget")
+      ?.press();
+    expect(threadsStoreMock.setActiveEnvironmentId).toHaveBeenCalledWith("env-1");
+    expect(actionsMock.disconnectSavedEnvironment).toHaveBeenCalledWith("env-1");
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(actionsMock.removeSavedEnvironment).toHaveBeenCalledWith("env-1");
+  });
+
+  it("retries a failed direct connection", () => {
+    rowsMock.rows = [savedRow("env-1", "Studio Mac", "error")];
+    buttons(ConnectionsRouteScreen())
+      .find((button) => button.label === "Retry")
       ?.press();
     expect(actionsMock.reconnectSavedEnvironment).toHaveBeenCalledWith("env-1");
-    expect(actionsMock.removeSavedEnvironment).toHaveBeenCalledWith("env-1");
   });
 
   it("still renders the empty state with no saved environments", () => {
     rowsMock.rows = [];
     const rendered = texts(ConnectionsRouteScreen());
-    expect(rendered).toContain("No environments");
-    expect(rendered).toContain("Pair a device");
+    expect(rendered).toContain("No direct nodes");
+    expect(rendered).toContain("Direct connection");
   });
 });
 
-describe("Connections switcher — hosted mode absent", () => {
-  it("is Devices-only: the hosted section offers no tappable node row", () => {
+describe("Nodes — hosted mode absent", () => {
+  it("keeps direct actions isolated from the unavailable Hub section", () => {
     const tree = ConnectionsRouteScreen();
     expect(texts(tree)).toContain("Studio Mac");
     const labels = buttons(tree).map((button) => button.label);
-    expect(labels).toEqual(["Pair a device", "Reconnect", "Remove"]);
+    expect(labels).toEqual([
+      "Direct connection",
+      "Settings",
+      "Use",
+      "Disconnect",
+      "Rename",
+      "Forget",
+    ]);
     expect(texts(tree)).toContain("Hub nodes unavailable");
   });
 });
@@ -181,13 +231,13 @@ describe("two-plane isolation (direct → hosted)", () => {
     for (const available of [false, true]) {
       hostedMock.available = available;
       const tree = ConnectionsRouteScreen();
-      for (const label of ["Pair a device", "Reconnect", "Remove"]) {
+      for (const label of ["Direct connection", "Use", "Disconnect", "Forget"]) {
         buttons(tree)
           .find((button) => button.label === label)
           ?.press();
       }
     }
-    expect(actionsMock.reconnectSavedEnvironment).toHaveBeenCalledTimes(2);
+    expect(threadsStoreMock.setActiveEnvironmentId).toHaveBeenCalledTimes(2);
     expect(hostedMock.controller.selectNode).not.toHaveBeenCalled();
     expect(hostedMock.controller.returnToDirectory).not.toHaveBeenCalled();
     expect(hostedMock.controller.refreshDirectory).not.toHaveBeenCalled();

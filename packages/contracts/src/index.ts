@@ -3,6 +3,7 @@ export * from "./auth.ts";
 export * from "./environment.ts";
 export * from "./remoteAccess.ts";
 export * from "./relay.ts";
+export * from "./nativeHandoff.ts";
 export * from "./hubConnector.ts";
 export * from "./ipc.ts";
 export * from "./terminal.ts";

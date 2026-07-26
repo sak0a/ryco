@@ -91,6 +91,41 @@ describe("executeSendTurn", () => {
     expect(types).toEqual(["thread.turn.start"]);
   });
 
+  it("carries image data URLs into the outgoing turn payload", async () => {
+    const image = {
+      type: "image" as const,
+      id: "image-1",
+      name: "screen.png",
+      mimeType: "image/png",
+      sizeBytes: 3,
+      previewUrl: "data:image/png;base64,AQID",
+    };
+    const { input, dispatchCommand } = baseInput({
+      composer: {
+        prompt: "",
+        images: [image],
+        selectedModelSelection: modelSelection,
+        selectedModel: "gpt-5",
+        hasSelectedModel: true,
+      },
+    });
+
+    await executeSendTurn(input);
+
+    const start = dispatchCommand.mock.calls.find(
+      (call) => (call[0] as { type: string }).type === "thread.turn.start",
+    )![0] as {
+      message: {
+        text: string;
+        attachments: ReadonlyArray<{ dataUrl: string }>;
+      };
+    };
+    expect(start.message.attachments).toEqual([
+      expect.objectContaining({ dataUrl: "data:image/png;base64,AQID" }),
+    ]);
+    expect(start.message.text).toBeTruthy();
+  });
+
   it("rolls back the draft and records the error when dispatch fails", async () => {
     const { input, restoreDraft, setThreadError } = baseInput();
     (

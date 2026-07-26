@@ -2,6 +2,7 @@ import type { EnvironmentId, RelayEffectiveRole } from "@ryco/contracts";
 
 import { HostedHubApiError, type HostedAccountStepUp } from "./api.ts";
 import { activateHostedNode, deactivateHostedNode, suspendHostedNode } from "./environment.ts";
+import { NativeHandoffClientError } from "./nativeHandoff.ts";
 import { getHostedHubApi, getHostedRuntimeConfiguration } from "./runtime.ts";
 import type {
   HostedAccountOutcome,
@@ -224,6 +225,9 @@ function patchAccountState(patch: Partial<HostedAccountState>): void {
 
 function errorMessage(error: unknown): string {
   if (error instanceof HostedHubApiError) return error.message;
+  if (error instanceof NativeHandoffClientError) {
+    return error.code === "cancelled" || error.code === "superseded" ? "" : error.message;
+  }
   if (
     typeof error === "object" &&
     error !== null &&

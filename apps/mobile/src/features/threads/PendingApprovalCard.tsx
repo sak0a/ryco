@@ -36,8 +36,8 @@ export function PendingApprovalCard(props: {
   };
 
   return (
-    <View className="mx-4 my-2 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4">
-      <Text className="text-xs font-ryco-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+    <View className="mx-4 my-2 rounded-2xl border border-warning-border bg-warning-bg p-4">
+      <Text className="text-xs font-ryco-bold uppercase tracking-wide text-warning">
         Approval needed
       </Text>
       <Text className="mt-1 font-sans text-base text-foreground">
@@ -48,18 +48,18 @@ export function PendingApprovalCard(props: {
           {props.approval.detail}
         </Text>
       ) : null}
-      <View className="mt-3 flex-row gap-2">
+      <View className="mt-3 flex-row flex-wrap gap-2">
         <Pressable
           disabled={pending !== null}
           onPress={() => void respond("accept")}
-          className="flex-1 items-center rounded-full bg-primary px-4 py-2.5 active:opacity-70 disabled:opacity-50"
+          className="h-11 min-w-28 flex-1 items-center justify-center rounded-full bg-primary px-4 active:opacity-70 disabled:opacity-50"
         >
           <Text className="text-sm font-ryco-bold text-primary-foreground">Allow</Text>
         </Pressable>
         <Pressable
           disabled={pending !== null}
           onPress={() => void respond("decline")}
-          className="flex-1 items-center rounded-full border border-border px-4 py-2.5 active:opacity-70 disabled:opacity-50"
+          className="h-11 min-w-28 flex-1 items-center justify-center rounded-full border border-border px-4 active:opacity-70 disabled:opacity-50"
         >
           <Text className="text-sm font-ryco-bold text-foreground">Deny</Text>
         </Pressable>

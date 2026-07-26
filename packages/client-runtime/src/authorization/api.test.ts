@@ -5,6 +5,7 @@ import type {
   DpopSignerService,
   EndpointService,
   HttpClientService,
+  NativeAuthorizationService,
   PasskeyCeremonyService,
   SessionCredentialsService,
 } from "@ryco/client-runtime/platform";
@@ -1702,5 +1703,274 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     api.clearSessionMaterial();
     expect(credentials.current()).toBeNull();
     expect(api.hasSessionMaterial).toBe(false);
+  });
+});
+
+describe("HostedHubApi native system-browser handoff", () => {
+  const state = "A".repeat(43);
+  const verifier = encodeBase64Url(new Uint8Array(32).fill(4));
+  const challenge = encodeBase64Url(new Uint8Array(32).fill(8));
+  const code = "D".repeat(43);
+  const handoffId = "E".repeat(43);
+  const token = "F".repeat(43);
+  const now = 1_752_710_400_000;
+
+  function nativeAuthorization(): NativeAuthorizationService {
+    let randomCall = 0;
+    return {
+      callbackUri: () => "ryco-dev://hosted/complete",
+      deviceLabel: () => "Laurin’s iPhone",
+      randomBytes: vi.fn(async () => {
+        randomCall += 1;
+        return new Uint8Array(32).fill(randomCall === 1 ? 0 : 4);
+      }),
+      sha256: vi.fn(async () => new Uint8Array(32).fill(8)),
+      openSystemBrowser: vi.fn(async () => ({
+        type: "success",
+        url: `ryco-dev://hosted/complete?code=${code}&state=${state}&handoff_id=${handoffId}`,
+      })),
+    };
+  }
+
+  it("uses the browser handoff for bearer sign-in and adopts only the validated native token", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const { calls, service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    const authorization = nativeAuthorization();
+    const authenticate = vi.fn();
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      if (requests.length === 1) {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          redirectUri: "ryco-dev://hosted/complete",
+          codeChallenge: challenge,
+          codeChallengeMethod: "S256",
+          state,
+          deviceLabel: "Laurin’s iPhone",
+        });
+        return response({
+          handoffId,
+          authorizationUrl: `https://hub.example.test/native/authorize/${handoffId}`,
+          expiresAt: now + 60_000,
+        });
+      }
+      expect(JSON.parse(String(init?.body))).toEqual({ handoffId, code, codeVerifier: verifier });
+      return response({
+        account: session.account,
+        session: {
+          ...session.session,
+          familyId: "sfam_aaaaaaaaaaaaaaaaaaaaaa",
+          clientLabel: "Laurin’s iPhone",
+          kind: "native",
+          replacedBySessionId: null,
+        },
+        token,
+      });
+    });
+    const api = new HostedHubApi({
+      endpoint: fakeEndpoint,
+      httpClient: fakeHttpClient,
+      sessionCredentials: credentials,
+      dpopSigner: service,
+      nativeAuthorization: authorization,
+      passkeyCeremony: { authenticate, register: vi.fn() },
+    });
+
+    const result = await api.signIn();
+
+    expect(requests.map((request) => request.input)).toEqual([
+      "https://hub.example.test/api/auth/native/handoff/start",
+      "https://hub.example.test/api/auth/native/handoff/redeem",
+    ]);
+    for (const request of requests) {
+      const headers = headersOf(request.init);
+      expect(headers.get("DPoP")).toBeTruthy();
+      expect(headers.get("Authorization")).toBeNull();
+      expect(headers.get("Cookie")).toBeNull();
+      expect(request.init?.credentials).toBe("omit");
+    }
+    expect(calls.every((call) => call.token === undefined)).toBe(true);
+    expect(authorization.openSystemBrowser).toHaveBeenCalledWith(
+      `https://hub.example.test/native/authorize/${handoffId}`,
+      "ryco-dev://hosted/complete",
+      expect.any(AbortSignal),
+    );
+    expect(authenticate).not.toHaveBeenCalled();
+    expect(credentials.current()).toBe(token);
+    expect(JSON.stringify(result)).not.toContain(token);
+    expect(result).toMatchObject({ account: session.account, session: session.session });
+  });
+
+  it("does not replace existing credentials when the full redeem response is malformed", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const { service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("existing-native-token");
+    let request = 0;
+    globalThis.fetch = vi.fn(async () => {
+      request += 1;
+      return request === 1
+        ? response({
+            handoffId,
+            authorizationUrl: `https://hub.example.test/native/authorize/${handoffId}`,
+            expiresAt: now + 60_000,
+          })
+        : response({ account: session.account, token });
+    });
+    const api = new HostedHubApi({
+      endpoint: fakeEndpoint,
+      httpClient: fakeHttpClient,
+      sessionCredentials: credentials,
+      dpopSigner: service,
+      nativeAuthorization: nativeAuthorization(),
+      passkeyCeremony: { authenticate: vi.fn(), register: vi.fn() },
+    });
+
+    await expect(api.signIn()).rejects.toBeTruthy();
+    expect(credentials.current()).toBe("existing-native-token");
+  });
+
+  it("keeps presentation and consent on cookie plus CSRF transport and refuses them natively", async () => {
+    const credentials = inMemorySessionCredentials();
+    credentials.writeCsrfToken("csrf-canary");
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      if (requests.length === 1) {
+        return response({ status: "pending", deviceLabel: "Phone", expiresAt: now + 60_000 });
+      }
+      return response({
+        redirectUri:
+          requests.length === 2
+            ? `ryco-dev://hosted/complete?code=${code}&state=${state}&handoff_id=${handoffId}`
+            : `ryco-dev://hosted/complete?error=access_denied&state=${state}&handoff_id=${handoffId}`,
+      });
+    });
+    const api = new HostedHubApi({
+      endpoint: fakeEndpoint,
+      httpClient: fakeHttpClient,
+      sessionCredentials: credentials,
+      passkeyCeremony: { authenticate: vi.fn(), register: vi.fn() },
+    });
+
+    await expect(api.getNativeHandoffPresentation(handoffId)).resolves.toMatchObject({
+      status: "pending",
+    });
+    await expect(api.approveNativeHandoff(handoffId)).resolves.toBeTruthy();
+    await expect(api.cancelNativeHandoff(handoffId)).resolves.toBeTruthy();
+
+    expect(requests.map((request) => request.input)).toEqual([
+      `/api/auth/native/handoff/${handoffId}`,
+      `/api/auth/native/handoff/${handoffId}/approve`,
+      `/api/auth/native/handoff/${handoffId}/cancel`,
+    ]);
+    expect(requests[0]?.init).toMatchObject({ method: "GET", credentials: "same-origin" });
+    for (const request of requests.slice(1)) {
+      const headers = headersOf(request.init);
+      expect(request.init).toMatchObject({ method: "POST", credentials: "same-origin" });
+      expect(headers.get("X-Ryco-CSRF")).toBe("csrf-canary");
+      expect(headers.get("Authorization")).toBeNull();
+      expect(headers.get("DPoP")).toBeNull();
+    }
+
+    const { service } = recordingDpopSigner();
+    const nativeApi = createBearerApi(service, inMemoryBearerCredentials());
+    await expect(nativeApi.getNativeHandoffPresentation(handoffId)).rejects.toMatchObject({
+      code: "browser_only_transport",
+    });
+  });
+});
+
+describe("HostedHubApi browser fallback authentication", () => {
+  it("supports password, recovery code, and email recovery only on cookie transport", async () => {
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      return requests.length === 3
+        ? response({ ok: true }, 202)
+        : requests.length === 5
+          ? response({ ok: true })
+          : response(session);
+    });
+    const credentials = inMemorySessionCredentials();
+    const api = new HostedHubApi({
+      endpoint: fakeEndpoint,
+      httpClient: fakeHttpClient,
+      sessionCredentials: credentials,
+      passkeyCeremony: { authenticate: vi.fn(), register: vi.fn() },
+    });
+
+    await api.signInWithPassword({
+      email: "ada@example.test",
+      password: "password-sensitive-canary",
+      totpCode: "123456",
+    });
+    await api.signInWithRecoveryCode("recovery-sensitive-canary");
+    await api.requestEmailRecovery("ada@example.test");
+    await api.confirmEmailRecovery({
+      token: "T".repeat(43),
+      totpCode: "654321",
+    });
+    await api.confirmEmailVerification("V".repeat(43));
+
+    expect(requests.map((request) => request.input)).toEqual([
+      "/api/auth/password",
+      "/api/auth/recovery",
+      "/api/auth/recovery/email/request",
+      "/api/auth/recovery/email/confirm",
+      "/api/auth/email/verify",
+    ]);
+    expect(requests.map((request) => JSON.parse(String(request.init?.body)))).toEqual([
+      {
+        email: "ada@example.test",
+        password: "password-sensitive-canary",
+        totpCode: "123456",
+      },
+      { code: "recovery-sensitive-canary" },
+      { email: "ada@example.test" },
+      { token: "T".repeat(43), totpCode: "654321" },
+      { token: "V".repeat(43) },
+    ]);
+    for (const request of requests) {
+      expect(request.init).toMatchObject({ method: "POST", credentials: "same-origin" });
+      const headers = headersOf(request.init);
+      expect(headers.get("Authorization")).toBeNull();
+      expect(headers.get("DPoP")).toBeNull();
+      expect(headers.get("X-Ryco-CSRF")).toBeNull();
+    }
+    expect(credentials.readCsrfToken()).toBe("csrf-canary");
+
+    const { service } = recordingDpopSigner();
+    const nativeApi = createBearerApi(service, inMemoryBearerCredentials());
+    await expect(
+      nativeApi.signInWithPassword({ email: "a@b.test", password: "pw" }),
+    ).rejects.toMatchObject({ code: "browser_only_transport" });
+    await expect(nativeApi.signInWithRecoveryCode("code")).rejects.toMatchObject({
+      code: "browser_only_transport",
+    });
+    await expect(nativeApi.requestEmailRecovery("a@b.test")).rejects.toMatchObject({
+      code: "browser_only_transport",
+    });
+  });
+
+  it("rejects malformed fallback input before any request", async () => {
+    const api = createApi();
+    const fetchSpy = vi.fn(async () => response(session));
+    globalThis.fetch = fetchSpy;
+
+    await expect(
+      api.signInWithPassword({ email: "x".repeat(255), password: "pw" }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(api.signInWithRecoveryCode("x".repeat(129))).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    await expect(api.confirmEmailRecovery({ token: "not-base64url=" })).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    await expect(api.confirmEmailVerification("short")).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

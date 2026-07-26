@@ -12,8 +12,8 @@ import {
 import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusPill, type StatusTone } from "../../components/StatusPill";
-import { cn } from "../../lib/cn";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import { NodeRow } from "../nodes/NodeRow";
 import { hostedStatusTone } from "./hostedAuthModel";
 import { useHostedModeAvailable } from "./useHostedMode";
 
@@ -67,6 +67,7 @@ export interface HubNodeRowModel {
   readonly label: string;
   /** Bounded presence/role summary. Never an id, token, ticket, or raw error. */
   readonly detail: string;
+  readonly transportLabel: "Hub relay";
   readonly tone: StatusTone;
   readonly selected: boolean;
   readonly disabled: boolean;
@@ -124,6 +125,7 @@ export function deriveHubNodeSectionModel(input: {
   readonly available: boolean;
   readonly actions: HubNodeSectionActions;
   readonly onSignIn: () => void;
+  readonly query?: string;
 }): HubNodeSectionModel {
   const { state, available, actions, onSignIn } = input;
   const statusInput = {
@@ -165,8 +167,7 @@ export function deriveHubNodeSectionModel(input: {
       kind: "signed-out",
       empty: {
         title: state.accountStatus === "session-expired" ? "Hub session expired" : "Not signed in",
-        detail:
-          "Sign in to the Hub with your passkey to reach nodes you do not have on this network.",
+        detail: "Continue in your browser, then approve this device to reach your Hub nodes.",
       },
       signIn: onSignIn,
     };
@@ -178,28 +179,34 @@ export function deriveHubNodeSectionModel(input: {
       kind: "busy",
       empty: {
         title: state.accountStatus === "signing-out" ? "Signing out" : "Signing in",
-        detail: "Finishing the Hub passkey ceremony.",
+        detail: "Finish signing in and approving this device in your browser.",
       },
     };
   }
 
-  const rows = state.nodes.map((node): HubNodeRowModel => {
-    const selectable = canSelectHubNode(state, node);
-    return {
-      nodeId: node.id,
-      label: node.label,
-      detail: rowDetail(node),
-      // The selected node's row shows the live connection status; every other
-      // row shows directory presence, which is all the directory knows.
-      tone:
-        state.selectedNode?.id === node.id && node.revokedAt === null
-          ? base.statusTone
-          : rowTone(node),
-      selected: state.selectedNode?.id === node.id,
-      disabled: !selectable,
-      onPress: selectable ? () => void actions.selectNode(node.id) : undefined,
-    };
-  });
+  const query = input.query?.trim().toLocaleLowerCase() ?? "";
+  const rows = state.nodes
+    .filter(
+      (node) => !query || `${node.label} ${rowDetail(node)}`.toLocaleLowerCase().includes(query),
+    )
+    .map((node): HubNodeRowModel => {
+      const selectable = canSelectHubNode(state, node);
+      return {
+        nodeId: node.id,
+        label: node.label,
+        detail: rowDetail(node),
+        transportLabel: "Hub relay",
+        // The selected node's row shows the live connection status; every other
+        // row shows directory presence, which is all the directory knows.
+        tone:
+          state.selectedNode?.id === node.id && node.revokedAt === null
+            ? base.statusTone
+            : rowTone(node),
+        selected: state.selectedNode?.id === node.id,
+        disabled: !selectable,
+        onPress: selectable ? () => void actions.selectNode(node.id) : undefined,
+      };
+    });
 
   return {
     ...base,
@@ -208,11 +215,13 @@ export function deriveHubNodeSectionModel(input: {
     empty:
       rows.length === 0
         ? {
-            title: "No Hub nodes",
+            title: query && state.nodes.length > 0 ? "No matching Hub nodes" : "No Hub nodes",
             detail:
-              state.directoryStatus === "ready"
-                ? "Enroll a Ryco node with your Hub to reach it from anywhere."
-                : "Loading the node directory.",
+              query && state.nodes.length > 0
+                ? "Change the search to see other Hub nodes."
+                : state.directoryStatus === "ready"
+                  ? "Enroll a Ryco node with your Hub to reach it from anywhere."
+                  : "Loading the node directory.",
           }
         : null,
     refresh: () => void actions.refreshDirectory(),
@@ -230,7 +239,7 @@ function ActionPill(props: { readonly label: string; readonly onPress: () => voi
       accessibilityRole="button"
       accessibilityLabel={props.label}
       onPress={props.onPress}
-      className="rounded-full border border-border px-3 py-1.5 active:opacity-70"
+      className="h-11 items-center justify-center rounded-full border border-border px-3 active:opacity-70"
     >
       <Text className="text-xs font-ryco-bold text-foreground">{props.label}</Text>
     </Pressable>
@@ -257,32 +266,18 @@ export function HubNodeSectionView(props: { readonly model: HubNodeSectionModel 
       {model.rows.length > 0 ? (
         <View className="mx-5 overflow-hidden rounded-2xl border border-border bg-card">
           {model.rows.map((row, index) => (
-            <Pressable
+            <NodeRow
               key={row.nodeId}
-              accessibilityRole="button"
-              accessibilityLabel={`${row.label}, ${row.detail}`}
-              accessibilityState={{ disabled: row.disabled, selected: row.selected }}
+              label={row.label}
+              detail={row.detail}
+              transportLabel={row.transportLabel}
+              statusTone={row.tone}
+              selected={row.selected}
+              selectable
               disabled={row.disabled}
+              showDivider={index > 0}
               onPress={row.onPress}
-              className={cn(
-                "flex-row items-center gap-3 px-5 py-4 active:bg-subtle",
-                index > 0 && "border-t border-border-subtle",
-                row.disabled && "opacity-40",
-              )}
-            >
-              <View className="flex-1 gap-1">
-                <Text className="font-sans text-base text-foreground" numberOfLines={1}>
-                  {row.label}
-                </Text>
-                <Text className="text-xs font-ryco-medium text-foreground-muted">{row.detail}</Text>
-              </View>
-              <StatusPill
-                size="compact"
-                label={row.tone.label}
-                pillClassName={row.tone.pillClassName}
-                textClassName={row.tone.textClassName}
-              />
-            </Pressable>
+            />
           ))}
         </View>
       ) : null}
@@ -293,7 +288,7 @@ export function HubNodeSectionView(props: { readonly model: HubNodeSectionModel 
             variant="plain"
             title={model.empty.title}
             detail={model.empty.detail}
-            actionLabel={model.signIn ? "Sign in" : undefined}
+            actionLabel={model.signIn ? "Continue in browser" : undefined}
             onAction={model.signIn}
           />
         </View>
@@ -310,7 +305,7 @@ export function HubNodeSectionView(props: { readonly model: HubNodeSectionModel 
   );
 }
 
-export function HubNodeSection() {
+export function HubNodeSection(props: { readonly query?: string } = {}) {
   const navigation = useNavigation();
   const state = useHostedHubStore((current) => current);
   // Shared with the other hosted surfaces: it drives the single memoized
@@ -326,6 +321,7 @@ export function HubNodeSection() {
     // Sign-in lives on the Onboarding sheet (the hosted sign-in surface); this
     // section never runs a ceremony itself.
     onSignIn: () => navigation.navigate("Onboarding"),
+    query: props.query,
   });
 
   return <HubNodeSectionView model={model} />;

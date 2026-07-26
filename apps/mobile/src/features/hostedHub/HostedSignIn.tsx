@@ -26,9 +26,9 @@ import { useHostedModeAvailable } from "./useHostedMode";
  * There is deliberately no owner-bootstrap or invitation form here. Those
  * registrations are browser-transport-only on the Hub — a native socket cannot
  * satisfy the browser `Origin`/`Sec-Fetch-Site` conditions they require — so
- * the first-run state routes to the Hub's own web app and comes back through a
- * native passkey login. Sign-in and recovery-code display are the whole native
- * surface.
+ * the first-run state routes through the reviewed system-browser handoff and
+ * comes back with a one-time PKCE code. Sign-in and recovery-code display are
+ * the whole native surface.
  */
 export function HostedSignIn() {
   const navigation = useNavigation();

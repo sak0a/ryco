@@ -25,6 +25,8 @@ export const HOSTED_SESSION_TOKEN_KEY = "ryco.hostedHub.sessionToken";
 export interface MobileSessionCredentials extends SessionCredentialsService {
   /** Read the persisted token into the synchronous cache exactly once. */
   readonly hydrate: () => Promise<void>;
+  /** Clear memory and durable storage, waiting until the removal has landed. */
+  readonly clearBearerToken: () => Promise<void>;
 }
 
 export function createMobileSessionCredentials(
@@ -35,6 +37,23 @@ export function createMobileSessionCredentials(
   let hydration: Promise<void> | undefined;
   /** Serializes SecretKV writes so they land in call order. */
   let persistence: Promise<void> = Promise.resolve();
+  const persistBearerToken = (token: string | null, requireSuccess = false): Promise<void> => {
+    const operation = persistence.then(async () => {
+      try {
+        if (token === null) await secretKV.remove(HOSTED_SESSION_TOKEN_KEY);
+        else await secretKV.set(HOSTED_SESSION_TOKEN_KEY, token);
+      } catch {
+        if (requireSuccess) {
+          throw new Error("The Hub credential could not be cleared.");
+        }
+        // Persistence is best-effort; never surface the token in an error.
+      }
+    });
+    // A failed required clear is reported to its caller, while the queue itself
+    // recovers so a later retry is not permanently skipped.
+    persistence = operation.catch(() => undefined);
+    return operation;
+  };
 
   return {
     mode: "bearer",
@@ -54,14 +73,11 @@ export function createMobileSessionCredentials(
       //
       // Failures are swallowed: losing persistence costs the user a re-login,
       // but must not surface the token in an error path.
-      persistence = persistence.then(async () => {
-        try {
-          if (token === null) await secretKV.remove(HOSTED_SESSION_TOKEN_KEY);
-          else await secretKV.set(HOSTED_SESSION_TOKEN_KEY, token);
-        } catch {
-          // Persistence is best-effort; never surface the token in an error.
-        }
-      });
+      void persistBearerToken(token);
+    },
+    clearBearerToken: async () => {
+      bearerToken = null;
+      await persistBearerToken(null, true);
     },
     hydrate: () => {
       hydration ??= (async () => {
@@ -85,4 +101,9 @@ export const mobileSessionCredentials = createMobileSessionCredentials();
 /** Read the persisted hosted session token into the synchronous holder. */
 export function hydrateMobileHostedSessionToken(): Promise<void> {
   return mobileSessionCredentials.hydrate();
+}
+
+/** Clear a Hub credential before changing the origin it would be sent to. */
+export function clearMobileHostedSessionToken(): Promise<void> {
+  return mobileSessionCredentials.clearBearerToken();
 }

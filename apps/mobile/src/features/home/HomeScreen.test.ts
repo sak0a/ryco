@@ -1,38 +1,64 @@
 import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-// Task 8 entry point: Home's top-left brand mark opens the environment
-// switcher. There is no React renderer in this suite (react-native cannot be
-// transformed under node), so the screen is invoked as a plain function with
-// its hook dependencies mocked — the pattern established by
-// `src/state/homeData.stability.test.ts`.
-
 const navigationMock = vi.hoisted(() => ({ setOptions: vi.fn(), navigate: vi.fn() }));
+const dispatchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("react-native", () => ({
   Pressable: "Pressable",
-  ScrollView: "ScrollView",
+  TextInput: "TextInput",
   View: "View",
 }));
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
-  return { ...actual, useLayoutEffect: (effect: () => void) => effect() };
+  return {
+    ...actual,
+    useLayoutEffect: (effect: () => void) => effect(),
+    useMemo: <T>(factory: () => T) => factory(),
+    useReducer: <T>(
+      _reducer: unknown,
+      initial: T,
+      initializer: ((input: T) => unknown) | undefined,
+    ) => [initializer ? initializer(initial) : initial, dispatchMock] as const,
+    useState: <T>(initial: T) => [initial, vi.fn()] as const,
+  };
 });
 vi.mock("@react-navigation/native", () => ({ useNavigation: () => navigationMock }));
+vi.mock("@react-navigation/elements", () => ({ useHeaderHeight: () => 96 }));
+vi.mock("zustand/react/shallow", () => ({ useShallow: (selector: unknown) => selector }));
 vi.mock("../../lib/useThemeColor", () => ({ useThemeColor: () => "#ededed" }));
 vi.mock("../../components/AppSymbol", () => ({ SymbolView: "SymbolView" }));
 vi.mock("../../components/RycoWordmark", () => ({ RycoWordmark: "RycoWordmark" }));
-vi.mock("../../state/homeData", () => ({ useHomeThreadGroups: () => [] }));
+vi.mock("../../components/HomeModeControl", () => ({ HomeModeControl: "HomeModeControl" }));
+vi.mock("../../components/NodeScopeControl", () => ({ NodeScopeControl: "NodeScopeControl" }));
+vi.mock("../inbox/InboxScreen", () => ({ InboxScreen: "InboxScreen" }));
+vi.mock("../nodes/NodesScreen", () => ({ NodesScreen: "NodesScreen" }));
+vi.mock("../projects/ProjectsScreen", () => ({ ProjectsScreen: "ProjectsScreen" }));
+vi.mock("../connection/useConnectionController", () => ({
+  useSavedEnvironments: () => ({ rows: [], isLoading: false }),
+}));
+vi.mock("../../hostedHub/state", () => ({
+  useHostedHubStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      selectedNode: null,
+      effectiveRole: null,
+      transportStatus: "idle",
+      sessionStatus: "closed",
+    }),
+}));
+vi.mock("../../state/homeData", () => ({
+  useHomeWorkspaceData: () => ({ projects: [], worktrees: [], threads: [] }),
+}));
 vi.mock("../../state/threadsRuntime", () => ({
   useStore: Object.assign(() => undefined, {
     getState: () => ({ setActiveEnvironmentId: () => undefined }),
   }),
 }));
-vi.mock("./WorkspaceConnectionStatus", () => ({ WorkspaceConnectionStatus: "Banner" }));
 
 import { HomeScreen } from "./HomeScreen";
 
 interface HeaderOptions {
+  readonly title?: string;
   readonly headerLeft?: () => ReactElement;
   readonly headerRight?: () => ReactElement;
 }
@@ -44,39 +70,60 @@ function renderHeaderOptions(): HeaderOptions {
   return calls[calls.length - 1]?.[0] as HeaderOptions;
 }
 
-describe("Home header brand mark (environment switcher entry point)", () => {
+describe("C1 Home header", () => {
   beforeEach(() => {
     navigationMock.setOptions.mockClear();
     navigationMock.navigate.mockClear();
+    dispatchMock.mockClear();
   });
 
-  it("registers a headerLeft brand mark alongside the existing headerRight actions", () => {
+  it("labels the initial workspace Inbox and registers both header sides", () => {
     const options = renderHeaderOptions();
+    expect(options.title).toBe("Inbox");
     expect(typeof options.headerLeft).toBe("function");
     expect(typeof options.headerRight).toBe("function");
   });
 
-  it("renders the compact Ryco wordmark as an accessible button with hit slop", () => {
+  it("renders the R-only compact mark in a 44-point Nodes button", () => {
     const element = renderHeaderOptions().headerLeft?.() as ReactElement<{
       accessibilityRole: string;
       accessibilityLabel: string;
-      hitSlop: number;
+      className: string;
       children: ReactElement<{ compact: boolean }>;
     }>;
     expect(element.type).toBe("Pressable");
     expect(element.props.accessibilityRole).toBe("button");
-    expect(element.props.accessibilityLabel.length).toBeGreaterThan(0);
-    expect(element.props.hitSlop).toBeGreaterThan(0);
+    expect(element.props.accessibilityLabel).toBe("Open Nodes");
+    expect(element.props.className).toContain("h-11");
+    expect(element.props.className).toContain("w-11");
     expect(element.props.children.type).toBe("RycoWordmark");
     expect(element.props.children.props.compact).toBe(true);
   });
 
-  it("opens the Connections switcher sheet when pressed", () => {
+  it("gives Search and New Task separate 44-point targets", () => {
+    const element = renderHeaderOptions().headerRight?.() as ReactElement<{
+      className: string;
+      children: ReadonlyArray<ReactElement<{ className: string; accessibilityLabel: string }>>;
+    }>;
+
+    expect(element.props.className).toContain("gap-2");
+    expect(element.props.children.map((child) => child.props.accessibilityLabel)).toEqual([
+      "Search Inbox",
+      "New Task",
+    ]);
+    for (const action of element.props.children) {
+      expect(action.props.className).toContain("h-11");
+      expect(action.props.className).toContain("w-11");
+    }
+  });
+
+  it("switches the R button to Nodes without opening another navigation layer", () => {
     const element = renderHeaderOptions().headerLeft?.() as ReactElement<{
       onPress: () => void;
     }>;
     element.props.onPress();
-    expect(navigationMock.navigate).toHaveBeenCalledTimes(1);
-    expect(navigationMock.navigate).toHaveBeenCalledWith("Connections");
+
+    expect(dispatchMock).toHaveBeenCalledWith({ type: "select-mode", mode: "nodes" });
+    expect(navigationMock.navigate).not.toHaveBeenCalled();
   });
 });
