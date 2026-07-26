@@ -220,6 +220,14 @@ describe("MessagesTimeline", () => {
         expect(strips.map((strip) => strip.dataset.inView)).toEqual(["true", "true", "false"]);
       });
 
+      // The class gate above is the desktop contract; from here the test drives
+      // pointer/keyboard interaction, which needs a real layout box. Device-less
+      // CI reports `pointer: none`, so `[@media(pointer:fine)]` never matches
+      // there and the container stays `display: none` — collapsing every rect to
+      // zero and stranding the pointer-to-index math. Force the desktop
+      // presentation so the interaction leg runs on every platform.
+      minimap!.style.display = "block";
+
       const hitStripRect = hitStrip!.getBoundingClientRect();
       hitStrip!.dispatchEvent(
         new MouseEvent("mousemove", {
