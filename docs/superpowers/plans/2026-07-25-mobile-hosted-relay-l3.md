@@ -1,5 +1,13 @@
 # Mobile hosted relay (Layer 3): native passkey login, C2 fallback webview, env/node switcher, relay data channel
 
+> **Status (2026-07-26): implemented and merged (#232), then extended by #233/#235/#237/#238/#241.**
+> This plan is kept as the historical record of how the work was planned. For the current
+> state of the program — what shipped, what is still outstanding, and what has never run on
+> hardware — read **`docs/superpowers/plans/2026-07-26-mobile-program-status.md`**, which is
+> authoritative wherever it disagrees with this file. §0.3 below has been corrected in place
+> because it would actively mislead someone acting on it today; the task bodies have not been
+> rewritten. **All nine rows of Task 9's owner acceptance matrix remain open.**
+
 **Goal:** Activate the hosted plane in `apps/mobile` end to end — a hardware-key-bound native passkey session against the Hub, the Hub node directory, and reaching a node **through the Hub relay** — plus the env/node switcher that presents direct saved devices and hosted Hub nodes from one entry point. The direct-node plane (B1/B2) keeps working, unchanged, throughout.
 
 **Design spec:** `docs/superpowers/specs/2026-07-23-native-mobile-app-design.md` — §"Auth story (two planes) and the workstream-C dependency" and §"Platform adapters" are authoritative for the plane model; the hosted plane it defers is exactly what this plan builds. The **client contract** is the merged Layer-2 runtime in this repo (`packages/client-runtime/src/{platform,authorization,relay}`) plus the wire contract in §"Wire contract" below. Read those before writing code — the runtime already owns proof construction, ticket consumption, framing, and the state machine; L3 supplies platform seams only.
@@ -34,13 +42,27 @@ when `mode === "bearer"` and either `dpopSigner` is missing **or** `readBearerTo
 
 ### 0.3 Reconciliation — the deployed Hub serves fewer native endpoints than the runtime can call
 
-The runtime's bearer branch routes owner-bootstrap and invitation registration to `/api/auth/native/bootstrap/registration/*` and `/api/auth/native/invitations/registration/*` (`api.ts:237-254`). **The deployed Hub does not serve those.** The only `/api/auth/native/*` pair it serves is the passkey **login** pair (`…/passkey/options`, `…/passkey/verify`). The four registration endpoints and every password/email/TOTP/recovery route are **browser-transport-only**: they require a browser `Origin` matching the Hub's configured WebAuthn origins, with `Sec-Fetch-Site` absent or `same-origin` — conditions a native socket cannot satisfy.
+> **Corrected 2026-07-26.** As written, this section was wrong in two ways and the corrections
+> are folded in below. (a) It described adding a passkey and fetching recovery codes as
+> "natively reachable" when `HostedHubApi` had **no method for either** — `addPasskey` and
+> `regenerateRecoveryCodes` first landed in `513abe4b` (#233), _after_ this plan. (b) It framed
+> the account routes as an exception carved out of a browser-only surface; they are not.
+> **Every `/api/account/*` route is DPoP-native.** The Hub's `authorizePresentedSession` takes
+> the DPoP branch whenever `Authorization: DPoP` is present and applies **no** same-origin
+> check. Only the fallback _login_ routes under `/api/auth/*` are same-origin-gated. Mobile does
+> credential management natively; the webview is only the no-passkey login path.
+> _(The Hub itself is not in this repo, so `authorizePresentedSession` could not be read here.
+> The in-repo corroboration is the runtime's own browser-only allow-list, quoted below.)_
+
+The runtime's bearer branch routes owner-bootstrap and invitation registration to `/api/auth/native/bootstrap/registration/*` and `/api/auth/native/invitations/registration/*` (`api.ts:237-254`). **The deployed Hub does not serve those.** The only `/api/auth/native/*` pair it serves is the passkey **login** pair (`…/passkey/options`, `…/passkey/verify`). Those four registration endpoints, and the password/email/TOTP/recovery-code routes used to _sign in without a passkey_, are **browser-transport-only**: they require a browser `Origin` matching the Hub's configured WebAuthn origins, with `Sec-Fetch-Site` absent or `same-origin` — conditions a native socket cannot satisfy.
+
+That list is exhaustive and is encoded in the runtime as `BROWSER_ONLY_BEARER_PATH_PREFIXES` (`api.ts:98-101`), which contains **exactly two prefixes** — the two registrations — and **no `/api/account/*` entry**. Everything not in it takes the bearer branch at `api.ts:1367-1384`: `Authorization: DPoP <token>` + a proof, `credentials: "omit"`, no CSRF header.
 
 **Decisions that follow, and that this plan builds to:**
 
 1. **The native app can only _log in_ with an already-enrolled passkey.** Do **not** ship native owner-bootstrap or invitation-redemption screens that call `hostedHubController.bootstrapOwner(...)` / `redeemInvitation(...)` in bearer mode — they would hit endpoints that are not served. Task 6 ships sign-in + recovery-code display only; Task 7's webview is the registration and account-recovery path.
-2. **Adding a passkey to an _existing_ account _is_ natively reachable** (`/api/account/passkeys/registration/*` accepts the DPoP session) — that is the "add this phone" flow, and it is the only registration ceremony the native app performs.
-3. `hostedHubController.dismissRecoveryCodes()` and the `recoveryCodes` state slot are still reachable natively, because `/api/account/recovery-codes` returns codes over a DPoP session. Task 6 renders them.
+2. **The whole `/api/account/*` surface is natively reachable over the DPoP session** — passkey list/add/revoke, recovery-code rotation, password set/remove, TOTP enrol/verify/revoke, and email verification. Adding a passkey to an existing account (`/api/account/passkeys/registration/*`) is the "add this phone" flow and the only registration ceremony the native app performs. **None of these methods existed when this plan was written**; they arrived in #233/#235 and the mobile surface for them in #237. Task 6 as scoped below therefore under-describes what eventually shipped — see `HostedAccountRouteScreen.tsx`.
+3. `hostedHubController.regenerateRecoveryCodes()` — **not** a `getRecoveryCodes`, and **not a read**. `POST /api/account/recovery-codes` (`api.ts:753-770`) is a rotation: the Hub calls `service.regenerateRecoveryCodes`, mints a fresh set, and **invalidates every code the user previously saved**. It also rotates the session. Call it only from an explicit, confirmed user action — never on mount, focus, retry, or reconnect — and only while a display lease is live, or the destructive half succeeds and the replacement cannot be shown (exactly the defect fixed in `b8b5f61b`, #241). `dismissRecoveryCodes()` and the `recoveryCodes` slot are reachable natively; Task 6 renders them.
 
 ### 0.4 Owner-only / not-agent-verifiable realities — state these plainly, never fabricate around them
 
@@ -354,7 +376,7 @@ _(b) The inward `RelaySocket` seam handed to `HostedRelayEngine`_ (`packages/cli
 
 Bind to `hostedHubController` / `hostedHubStore` (`packages/client-runtime/src/authorization/state.ts`); never re-derive state the runtime already computes.
 
-**Route strategy — deliberately zero root-route churn.** `Onboarding` is already registered as an overlay `formSheet` with detents `[0.6, 0.95]` + grabber on both platforms, title "Connect" (`apps/mobile/src/navigation/mvpRouteConfig.ts:88-98`, `Stack.tsx:291-295`), and its screen is a 17-line `EmptyState` placeholder. Build the hosted sign-in surface **inside** `OnboardingRouteScreen` — the root route set in `mvpRouteConfig.test.ts:11-38` stays untouched. The Settings account surface adds **one nested** route (`SettingsAccount`) to `MVP_SETTINGS_SHEET_ROUTES` (`mvpRouteConfig.ts:112-118`) plus a screen in `SettingsSheetStack` (`Stack.tsx:97-131`) — **that nested set is pinned exactly** by `mvpRouteConfig.test.ts:95-106` (`toEqual` over sorted keys), so update the expected array in the same commit.
+**Route strategy — deliberately zero root-route churn.** `Onboarding` is already registered as an overlay `formSheet` with detents `[0.6, 0.95]` + grabber on both platforms, title "Connect" (`apps/mobile/src/navigation/mvpRouteConfig.ts:88-98`, `Stack.tsx:291-295`), and its screen is a 17-line `EmptyState` placeholder. _(Done: `OnboardingRouteScreen.tsx` now renders `<HostedSignIn />` and is navigated to from `HubNodeSection.tsx:328` and `HostedAccountRouteScreen.tsx:88`. Note the consequence — the route no longer presents on first run for anyone, so a new **direct-plane** user gets Home's empty state and "Pair a device", and there is no first-run welcome.)_ Build the hosted sign-in surface **inside** `OnboardingRouteScreen` — the root route set in `mvpRouteConfig.test.ts:11-38` stays untouched. The Settings account surface adds **one nested** route (`SettingsAccount`) to `MVP_SETTINGS_SHEET_ROUTES` (`mvpRouteConfig.ts:112-118`) plus a screen in `SettingsSheetStack` (`Stack.tsx:97-131`) — **that nested set is pinned exactly** by `mvpRouteConfig.test.ts:95-106` (`toEqual` over sorted keys), so update the expected array in the same commit.
 
 **Files:**
 
@@ -365,16 +387,16 @@ Bind to `hostedHubController` / `hostedHubStore` (`packages/client-runtime/src/a
 
 **Surfaces and their controller calls:**
 
-| Surface                | State read                                                                      | Action                                                                              |
-| ---------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Sign in with passkey   | `accountStatus`, `errorMessage`                                                 | `signIn()` / `cancelAuthentication()`                                               |
-| Authenticating         | `accountStatus === "authenticating"`                                            | Cancel → `cancelAuthentication()`                                                   |
-| Session expired        | `accountStatus === "session-expired"`                                           | Sign in again                                                                       |
-| Hosted unavailable     | `isMobileHostedModeAvailable() === false`, or `accountStatus === "unavailable"` | Explain (no hardware key / not configured); offer the direct-node path              |
-| First run / no account | `bootstrapAvailable`                                                            | **Open the webview (Task 7)** — native registration endpoints are not served (§0.3) |
-| Recovery codes         | `recoveryCodes`                                                                 | `dismissRecoveryCodes()`                                                            |
-| Account (Settings)     | `account`, `session`, connection status                                         | `signOut()`; add-this-device passkey; "Get recovery codes"                          |
-| Delivery-unknown ack   | `sessionStatus === "delivery-unknown"`                                          | `acknowledgeDeliveryUnknown()` — **mandatory**, do not auto-dismiss                 |
+| Surface                | State read                                                                      | Action                                                                                                                                                                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sign in with passkey   | `accountStatus`, `errorMessage`                                                 | `signIn()` / `cancelAuthentication()`                                                                                                                                                                                                     |
+| Authenticating         | `accountStatus === "authenticating"`                                            | Cancel → `cancelAuthentication()`                                                                                                                                                                                                         |
+| Session expired        | `accountStatus === "session-expired"`                                           | Sign in again                                                                                                                                                                                                                             |
+| Hosted unavailable     | `isMobileHostedModeAvailable() === false`, or `accountStatus === "unavailable"` | Explain (no hardware key / not configured); offer the direct-node path                                                                                                                                                                    |
+| First run / no account | `bootstrapAvailable`                                                            | **Open the webview (Task 7)** — native registration endpoints are not served (§0.3)                                                                                                                                                       |
+| Recovery codes         | `recoveryCodes`                                                                 | `dismissRecoveryCodes()`                                                                                                                                                                                                                  |
+| Account (Settings)     | `account`, `session`, connection status                                         | `signOut()`; add-this-device passkey; **"Replace recovery codes"** — `regenerateRecoveryCodes()` rotates and invalidates the saved set, so it needs an explicit confirmation and a live display lease. Never label or treat it as a read. |
+| Delivery-unknown ack   | `sessionStatus === "delivery-unknown"`                                          | `acknowledgeDeliveryUnknown()` — **mandatory**, do not auto-dismiss                                                                                                                                                                       |
 
 **Status rendering:** do not hand-roll status strings. Use `deriveHostedConnectionStatusText({browserStatus, sessionStatus, selectionStatus, transportStatus})` (`connectionStatus.ts:126`) and `deriveHostedConnectionStatusIndicator(...)` → `{shortLabel, connected}` (`:222`). Gate action affordances with `resolveHostedRpcCapability` (`capabilities.ts:10`).
 

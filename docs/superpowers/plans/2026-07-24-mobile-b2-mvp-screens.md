@@ -401,6 +401,11 @@ again."`). Note: the route table's `createPrimaryAuth` pairing cell is supersede
   flow; the hosted passkey SignIn surface renders only behind the hosted-mode switch and is
   inert (`mobilePasskeyCeremony` throws "hosted mode not available") — it activates with C,
   with no dead Clerk code.
+  **[stale, 2026-07-26 — the first-run presentation never shipped and will not from this
+  route. L3 repurposed `Onboarding` as the hosted sign-in sheet (`HostedSignIn`), reached on
+  demand from `HubNodeSection.tsx:328` and `HostedAccountRouteScreen.tsx:88`. A new
+  direct-plane user gets Home's empty state → "Pair a device" → `ConnectionsNew`; there is no
+  first-run welcome. The passkey ceremony is no longer inert.]**
 - Take-once invariant: an initial-URL pairing token is consumed once via
   `mobilePairingCredentialSource` and cleared; deep links never carry credentials.
 - Call `useStore.getState().setActiveEnvironmentId` after successful pair/selection. Delete
