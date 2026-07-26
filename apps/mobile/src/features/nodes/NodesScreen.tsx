@@ -10,7 +10,11 @@ import { StatusPill } from "../../components/StatusPill";
 import { HubNodeSection } from "../hostedHub/HubNodeSection";
 import { useConnectionActions, useSavedEnvironments } from "../connection/useConnectionController";
 
-export function NodesScreen(props: { readonly query?: string }) {
+export function NodesScreen(props: {
+  readonly query?: string;
+  readonly initialScrollOffset?: number;
+  readonly onScrollOffset?: (offset: number) => void;
+}) {
   const navigation = useNavigation();
   const { rows } = useSavedEnvironments();
   const actions = useConnectionActions();
@@ -36,6 +40,9 @@ export function NodesScreen(props: { readonly query?: string }) {
       contentInsetAdjustmentBehavior="never"
       className="flex-1"
       contentContainerStyle={{ paddingBottom: 40 }}
+      contentOffset={{ x: 0, y: props.initialScrollOffset ?? 0 }}
+      onScroll={(event) => props.onScrollOffset?.(event.nativeEvent.contentOffset.y)}
+      scrollEventThrottle={32}
     >
       <Pressable
         accessibilityRole="button"

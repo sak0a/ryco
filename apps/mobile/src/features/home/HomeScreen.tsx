@@ -228,13 +228,14 @@ export function HomeScreen() {
         />
       ) : null}
       <View className="min-h-0 flex-1">
-        <View
-          className="min-h-0 flex-1"
-          style={{ display: home.mode === "inbox" ? "flex" : "none" }}
-        >
+        {home.mode === "inbox" ? (
           <InboxScreen
             sections={inboxSections}
             emptyState={inboxEmptyState}
+            initialScrollOffset={home.scrollOffsetByMode.inbox}
+            onScrollOffset={(offset) =>
+              dispatch({ type: "set-scroll-offset", mode: "inbox", offset })
+            }
             onOpenThread={(row) => openThread(row)}
             onEmptyAction={(state) => {
               if (state === "connect-node") {
@@ -246,23 +247,25 @@ export function HomeScreen() {
               }
             }}
           />
-        </View>
-        <View
-          className="min-h-0 flex-1"
-          style={{ display: home.mode === "projects" ? "flex" : "none" }}
-        >
+        ) : home.mode === "projects" ? (
           <ProjectsScreen
             groups={projectGroups}
             hasConnections={environments.length > 0}
+            initialScrollOffset={home.scrollOffsetByMode.projects}
+            onScrollOffset={(offset) =>
+              dispatch({ type: "set-scroll-offset", mode: "projects", offset })
+            }
             onOpenNodes={() => selectMode("nodes")}
           />
-        </View>
-        <View
-          className="min-h-0 flex-1"
-          style={{ display: home.mode === "nodes" ? "flex" : "none" }}
-        >
-          <NodesScreen query={home.queryByMode.nodes} />
-        </View>
+        ) : (
+          <NodesScreen
+            query={home.queryByMode.nodes}
+            initialScrollOffset={home.scrollOffsetByMode.nodes}
+            onScrollOffset={(offset) =>
+              dispatch({ type: "set-scroll-offset", mode: "nodes", offset })
+            }
+          />
+        )}
       </View>
     </View>
   );

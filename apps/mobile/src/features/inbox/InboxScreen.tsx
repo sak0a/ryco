@@ -49,8 +49,10 @@ const EMPTY_COPY: Readonly<
 export function InboxScreen(props: {
   readonly sections: ReadonlyArray<InboxSection>;
   readonly emptyState: InboxEmptyState;
+  readonly initialScrollOffset?: number;
   readonly onOpenThread: (row: InboxThreadRow) => void;
   readonly onEmptyAction: (state: Exclude<InboxEmptyState, null>) => void;
+  readonly onScrollOffset?: (offset: number) => void;
 }) {
   const data = flattenSections(props.sections);
   const empty = props.emptyState ? EMPTY_COPY[props.emptyState] : null;
@@ -73,6 +75,9 @@ export function InboxScreen(props: {
       keyExtractor={(item) => item.key}
       recycleItems
       maintainVisibleContentPosition
+      initialScrollOffset={props.initialScrollOffset}
+      onScroll={(event) => props.onScrollOffset?.(event.nativeEvent.contentOffset.y)}
+      scrollEventThrottle={32}
       contentInsetAdjustmentBehavior="never"
       contentContainerStyle={{ paddingBottom: 40 }}
       ListHeaderComponent={<WorkspaceConnectionStatus />}

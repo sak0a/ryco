@@ -92,8 +92,10 @@ function ProjectRow(props: { readonly row: ProjectListRow; readonly onPress?: ()
 export function ProjectsScreen(props: {
   readonly groups: ReadonlyArray<ProjectNodeGroup>;
   readonly hasConnections: boolean;
+  readonly initialScrollOffset?: number;
   readonly onOpenProject?: (row: ProjectListRow) => void;
   readonly onOpenNodes: () => void;
+  readonly onScrollOffset?: (offset: number) => void;
 }) {
   const data = flattenGroups(props.groups);
   const renderItem = ({ item }: LegendListRenderItemProps<ProjectListItem>) => {
@@ -122,6 +124,9 @@ export function ProjectsScreen(props: {
       keyExtractor={(item) => item.key}
       recycleItems
       maintainVisibleContentPosition
+      initialScrollOffset={props.initialScrollOffset}
+      onScroll={(event) => props.onScrollOffset?.(event.nativeEvent.contentOffset.y)}
+      scrollEventThrottle={32}
       contentInsetAdjustmentBehavior="never"
       contentContainerStyle={{ paddingBottom: 40 }}
       ListEmptyComponent={
