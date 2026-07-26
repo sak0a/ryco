@@ -357,6 +357,24 @@ describe("account posture", () => {
     expect(accountPosture(many, "ready")).toBeNull();
   });
 
+  it("names no recovery path this Hub cannot deliver", () => {
+    // The same panel, fourteen rows below this alert, says the Hub has no mail
+    // transport configured, that verification messages are generated and
+    // discarded, and not to rely on email as the way back in. The alert is what
+    // a user reads first, at the exact moment they are deciding whether they
+    // have a way back into the account, so it may not offer a path that
+    // provably does not work.
+    for (const passkeys of [[], [passkey()]]) {
+      const description = accountPosture(passkeys, "ready")?.description ?? "";
+      expect(description.toLowerCase(), "the posture alert offers an email path").not.toContain(
+        "email",
+      );
+      expect(description.toLowerCase(), "the posture alert offers an email path").not.toContain(
+        "mail",
+      );
+    }
+  });
+
   it("labels its action distinctly from the Passkeys section's own control", () => {
     // Two buttons on one page with the same accessible name and the same
     // destination are an ambiguity for voice control and for anyone listing

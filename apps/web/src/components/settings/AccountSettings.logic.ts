@@ -190,8 +190,14 @@ export function accountPosture(
     return {
       variant: "warning",
       title: "One passkey on this account",
+      // No emailed link. Fourteen rows below, this same panel says this Hub has
+      // no mail transport configured, that verification messages are generated
+      // and discarded, and not to rely on email as the way back into the
+      // account. Naming it here — in the alert a user reads first, at the exact
+      // moment they are deciding whether they have a way back in — offers a
+      // recovery path that provably does not work.
       description:
-        "If you lose this device you fall back to a password, an emailed link, or a recovery code. Add a second passkey on another device.",
+        "If you lose this device you fall back to a password or a recovery code. Add a second passkey on another device.",
       actionLabel: "Add another passkey",
     };
   }
