@@ -13,9 +13,9 @@ is not modified.
 
 **Design spec:** `docs/superpowers/specs/2026-07-26-desktop-hub-connection-design.md`
 
-**Scope:** Slices 1–3 only. Slice 4 (`POST /api/hub/leave`) is **hard-blocked** on Hub-side node
-removal — see Hub obligation 3 in the spec — and is not in this plan. No UI work here; the desktop
-and web slices (5–8) follow separately and depend on slice 3.
+**Scope:** Slices 1–3 only. Slice 4 (`POST /api/hub/leave`) is unblocked but out of scope here; it
+mints a fresh `EnvironmentId`, so rejoining the same Hub works without any Hub-side change. No UI
+work here; the desktop and web slices (5–8) follow separately and depend on slice 3.
 
 ## Execution rules
 
@@ -217,8 +217,8 @@ the desktop cannot make the origin field read-only once enrolled, and the perman
 ## What these slices deliberately do not do
 
 - No UI. The desktop and web slices depend on task 3 and follow separately.
-- No `POST /api/hub/leave`. Hard-blocked on Hub-side node removal; shipping it first would make
-  leaving a one-way door per machine, per Hub.
+- No `POST /api/hub/leave`. Unblocked, but its own slice: it is a crash-safe connector operation
+  with a teardown marker and a fresh `EnvironmentId`, and deserves separate review.
 - No loopback restriction on the routes. Withdrawn in the spec — a relayed operator already reaches
   these operations through `terminalOpen` and the CLI, so the guard would close nothing while
   breaking administration of a headless node from a paired laptop.

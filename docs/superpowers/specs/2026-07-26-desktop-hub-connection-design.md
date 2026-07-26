@@ -589,10 +589,9 @@ The confirmation dialog states plainly: this erases this machine's Hub key; reco
 new approval; and **it does not revoke anything at the Hub** — the node record survives there until
 an owner removes it.
 
-**It must additionally state that this machine cannot rejoin the same Hub until that record is
-removed there**, for the reason given in Hub obligation 3. Without the Hub-side capability that
-obligation names, this dialog is describing a one-way door, and the copy has to say so in those
-words rather than implying a reversible action.
+Rejoining works — the node returns as a new node, with a new identity and a fresh approval — so the
+copy must not imply a one-way door. What it must not imply either is that leaving tidies up after
+itself: the abandoned record stays on the Hub until an owner removes it.
 
 ### Client access
 
