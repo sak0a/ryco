@@ -56,7 +56,7 @@ The Hub separates human identity (passkey, browser session) from node identity (
 with no human credential). The arguments below are ordered by how much weight they actually carry.
 
 **1. Identity separation is the load-bearing reason.** The node machine already holds the Ed25519
-signing key that *is* this node's identity. Adding a human Hub owner session to the same machine
+signing key that _is_ this node's identity. Adding a human Hub owner session to the same machine
 means a single compromise yields both "I am this node" and "I am the human who governs this node" —
 including the authority to approve enrollments and grant other people access to it. That collapse is
 the thing the Hub's two-identity model exists to prevent. Node-only is a least-authority decision:
@@ -66,8 +66,8 @@ it bounds the blast radius of an Electron compromise to the node, not to the acc
 `backendHttpUrl` (`apps/desktop/src/main.ts:795`, `:2723`), which is `http://127.0.0.1:<port>`. A
 WebAuthn RP ID must be the caller's effective domain or a registrable domain suffix of it, and no
 loopback origin can be a registrable-domain suffix of a remote Hub domain. Note precisely what this
-does and does not say: Electron *can* open a `BrowserWindow` on the Hub and run a ceremony there —
-what it cannot do is assert the Hub's RP ID *from the Ryco renderer's own origin*. Any real
+does and does not say: Electron _can_ open a `BrowserWindow` on the Hub and run a ceremony there —
+what it cannot do is assert the Hub's RP ID _from the Ryco renderer's own origin_. Any real
 desktop account feature would therefore be a browser handoff, and the desktop registers no
 `setAsDefaultProtocolClient`, no `open-url` handler, and no `second-instance` handler today, so the
 return leg is unbuilt.
@@ -80,7 +80,7 @@ DPoP bearer mode, so this is a bounded cost rather than a wall. It is listed for
 not why we are choosing A.
 
 **What this decision does not claim.** It does not claim self-approval is prevented. A solo operator
-will click *Open Hub*, land in Safari on the same Mac, and approve with Touch ID. That is the
+will click _Open Hub_, land in Safari on the same Mac, and approve with Touch ID. That is the
 expected path and it is fine. It also does not claim host-compromise resistance: a browser session
 on the same machine is still on the same machine. The separation this buys is process, storage, and
 origin isolation against a renderer-scoped compromise — real, but narrower than "the key and the
@@ -127,7 +127,7 @@ actually configures.
 
 The tempting argument is that a relayed owner could re-point the node's Hub via
 `serverUpdateSettings`. **That argument is dead and this spec does not make it.** A relayed
-*operator* already holds `projectsWriteFile` and `terminalOpen`/`terminalWrite`
+_operator_ already holds `projectsWriteFile` and `terminalOpen`/`terminalWrite`
 (`packages/shared/src/rpcAccessPolicy.ts`), so `desktop-settings.json` is a file such a session can
 already rewrite. At operator and above, the Hub is a fully trusted control plane. Any design that
 pretends otherwise is decoration.
@@ -138,7 +138,7 @@ make it readable by every relayed viewer, contradicting the connector's standing
 and errors omit origins (`docs/hub-connector.md:164`). Keeping it out preserves that.
 
 The stronger justification is ordinary engineering: the connector is constructed during server
-startup from `ServerConfig`, so its origin must be known *before* the settings store is usable.
+startup from `ServerConfig`, so its origin must be known _before_ the settings store is usable.
 Launch configuration belongs on the launch channel. The bootstrap fd is already exactly that
 channel, schema-validated, and — unlike the environment — not inherited by every provider subprocess
 the backend later spawns.
@@ -178,7 +178,7 @@ non-test code path clears `activeNode`** outside `makeInitialState()`. So today,
 after enrollment is a permanent dead end with no in-product recovery.
 
 The origin field is therefore **read-only whenever a local identity exists**, and changing it
-requires an explicit *Leave this Hub* first. Enforcing that needs a signal the current contract does
+requires an explicit _Leave this Hub_ first. Enforcing that needs a signal the current contract does
 not carry — see [Decision 7](#decision-7--the-server-surface). Applying a change relaunches the app,
 reusing the existing confirmation dialog and `relaunchDesktopApp()` (`main.ts:588-613`).
 
@@ -206,10 +206,10 @@ claim the margin.
 
 **First: the routes are not locality-checked.** `authenticateOwner` checks `session.role` only. An
 owner paired over LAN or Tailscale who can reach the node's listener can call these routes. The
-accurate phrase is *any directly-connected owner*, not *any local owner*.
+accurate phrase is _any directly-connected owner_, not _any local owner_.
 
 **Second, and more important: the relay-unreachability property does not hold end to end.** The HTTP
-routes are genuinely unreachable over the relay. Connector *management* is not. `terminalOpen` and
+routes are genuinely unreachable over the relay. Connector _management_ is not. `terminalOpen` and
 `terminalWrite` are classified `operator`, so a relayed operator gets a PTY running as the server
 user. The `ryco hub` CLI derives its authority from **filesystem access to the state directory** —
 it reads `server-runtime.json` and mints its own local owner session
@@ -260,7 +260,7 @@ desktop does not hold.
 
 The Hub section therefore shows:
 
-- an authored, static explainer of what each effective role can do to *this machine*, derived from
+- an authored, static explainer of what each effective role can do to _this machine_, derived from
   the real policy: `viewer` reads, `operator` performs ordinary workspace mutations including file
   writes and terminals, `owner` additionally changes credentials, providers, integrations, and
   server policy;
@@ -283,8 +283,8 @@ This is a reversal of the obvious first instinct, and the reason matters.
 
 `apps/web/src/components/hostedHub/HostedNodeEnrollment.tsx:149-179` is the Hub-side approval
 review. It renders exactly six fields through the shared `DataList` primitive — **Label, Platform,
-Version (mono), Algorithm, Fingerprint (mono), Expires** — under the instruction *"Compare every
-field, especially the fingerprint, with the node or a trusted operator channel before approving."*
+Version (mono), Algorithm, Fingerprint (mono), Expires** — under the instruction _"Compare every
+field, especially the fingerprint, with the node or a trusted operator channel before approving."_
 
 The primitive's own documentation settles the typography question
 (`apps/web/src/components/ui/data-list.tsx:5-18`, `:52-56`):
@@ -339,8 +339,8 @@ available for the whole approval window" structurally true rather than aspiratio
   only**. The node derives exactly one route from the origin (the relay endpoint); synthesizing an
   approval path would invent a Hub routing detail the node has no contract for.
 - **Copy device code** — on the device-code row.
-- **Cancel enrollment** — `destructive-outline`, adjacent to a warning line reading: *if the
-  fingerprint on the Hub differs by even one character, deny it there and cancel here.*
+- **Cancel enrollment** — `destructive-outline`, adjacent to a warning line reading: _if the
+  fingerprint on the Hub differs by even one character, deny it there and cancel here._
 - **No "Done — I compared this" button.** It writes nothing, gates nothing, and is self-attestation
   theatre. The affirmative act happens on the Hub.
 - **Never** auto-copy, and **never** surface the fingerprint in a toast.
@@ -373,30 +373,30 @@ code fails the typecheck until copy exists for it.
 `transitionedAt` is present on every row. `nextRetryAt` is present **only** with
 `degradedMode: "backing_off"`, which the schema enforces.
 
-| State | Degraded mode | Retrying? | What the operator is told | Action offered |
-| --- | --- | --- | --- | --- |
-| `disabled`, no identity | — | no | Not connected to a Hub. | Configure + **Enable** |
-| `disabled`, identity present | — | no | Turned off. This machine stays enrolled. | **Enable**, **Leave this Hub** |
-| `enrolling` | — | no | **Ready to enroll — waiting for you.** | **Start enrollment** |
-| `awaiting_approval` | — | no | Waiting for approval on the Hub. | **Open Hub**, **Copy device code**, **Cancel** |
-| `connecting` | — | n/a | Connecting. | — |
-| `authenticating` | — | n/a | Authenticating. | — |
-| `online` | — | n/a | Connected. *N* active sessions. | **Turn off** |
-| `degraded` | `backing_off` | **yes** | Reconnecting — next attempt in *T*. | **Retry now** |
-| `degraded` | `operator_action_required` | **no** | Per failure code, below. | Per failure code |
-| `revoked` | — | **no** | **Revoked at the Hub. This will not retry.** | **Leave this Hub** |
-| `version_incompatible` | — | **no** | **Incompatible relay version. This will not retry.** | Update guidance |
-| `stopping` | — | n/a | Shutting down. | — |
+| State                        | Degraded mode              | Retrying? | What the operator is told                            | Action offered                                 |
+| ---------------------------- | -------------------------- | --------- | ---------------------------------------------------- | ---------------------------------------------- |
+| `disabled`, no identity      | —                          | no        | Not connected to a Hub.                              | Configure + **Enable**                         |
+| `disabled`, identity present | —                          | no        | Turned off. This machine stays enrolled.             | **Enable**, **Leave this Hub**                 |
+| `enrolling`                  | —                          | no        | **Ready to enroll — waiting for you.**               | **Start enrollment**                           |
+| `awaiting_approval`          | —                          | no        | Waiting for approval on the Hub.                     | **Open Hub**, **Copy device code**, **Cancel** |
+| `connecting`                 | —                          | n/a       | Connecting.                                          | —                                              |
+| `authenticating`             | —                          | n/a       | Authenticating.                                      | —                                              |
+| `online`                     | —                          | n/a       | Connected. _N_ active sessions.                      | **Turn off**                                   |
+| `degraded`                   | `backing_off`              | **yes**   | Reconnecting — next attempt in _T_.                  | **Retry now**                                  |
+| `degraded`                   | `operator_action_required` | **no**    | Per failure code, below.                             | Per failure code                               |
+| `revoked`                    | —                          | **no**    | **Revoked at the Hub. This will not retry.**         | **Leave this Hub**                             |
+| `version_incompatible`       | —                          | **no**    | **Incompatible relay version. This will not retry.** | Update guidance                                |
+| `stopping`                   | —                          | n/a       | Shutting down.                                       | —                                              |
 
 Three corrections this table encodes, each of which an earlier draft got wrong:
 
 - **`online` is a state**, not an absence of one.
 - **`enrolling` is not self-driving.** Startup enters it when no identity exists and then waits
-  indefinitely for an explicit enrollment call. It is a *waiting-on-a-human* state and its row must
+  indefinitely for an explicit enrollment call. It is a _waiting-on-a-human_ state and its row must
   contain a button.
 - **The failure code alone can never drive the button.** `protocol_invalid` and
   `authentication_failed` each appear in both a retrying and a non-retrying form
-  (`apps/server/src/hubConnector/HubConnectorState.ts:35-77`), and `revoked` is reported *as*
+  (`apps/server/src/hubConnector/HubConnectorState.ts:35-77`), and `revoked` is reported _as_
   `authentication_failed` with a terminal state. Presentation keys on `(state, degradedMode)`;
   remedy keys on `failure` plus identity phase.
 
@@ -406,15 +406,15 @@ Seven failure codes reach `degraded` / `operator_action_required`, and they do n
 Offering a blanket "Enroll" is actively harmful: in the origin-mismatch case it throws and surfaces
 `"Hub enrollment operation failed."`
 
-| Failure | What it means | Action |
-| --- | --- | --- |
-| `configuration_invalid` | The Hub configuration this backend launched with is invalid. | Edit origin → relaunch |
-| `identity_unavailable` | The system keychain is locked or unavailable. | **Retry now**; restart guidance |
-| `identity_origin_mismatch` | Enrolled against a different Hub. | **Leave this Hub** |
-| `enrollment_unavailable` | The ceremony expired, or was denied or cancelled at the Hub. | **Start enrollment** |
-| `authentication_failed` | The Hub rejected this node's key. | **Open Hub**; **Leave this Hub** |
-| `connection_replaced` | Another process connected as this node. | **Retry now** |
-| `protocol_invalid` (post-stability) | Repeated protocol violations. | Update guidance |
+| Failure                             | What it means                                                | Action                           |
+| ----------------------------------- | ------------------------------------------------------------ | -------------------------------- |
+| `configuration_invalid`             | The Hub configuration this backend launched with is invalid. | Edit origin → relaunch           |
+| `identity_unavailable`              | The system keychain is locked or unavailable.                | **Retry now**; restart guidance  |
+| `identity_origin_mismatch`          | Enrolled against a different Hub.                            | **Leave this Hub**               |
+| `enrollment_unavailable`            | The ceremony expired, or was denied or cancelled at the Hub. | **Start enrollment**             |
+| `authentication_failed`             | The Hub rejected this node's key.                            | **Open Hub**; **Leave this Hub** |
+| `connection_replaced`               | Another process connected as this node.                      | **Retry now**                    |
+| `protocol_invalid` (post-stability) | Repeated protocol violations.                                | Update guidance                  |
 
 Two of these deserve splitting, and this design asks for it as a **contract refinement, gated on
 owner approval**:
@@ -432,7 +432,7 @@ Neither split leaks anything: both name a condition, not a value.
 
 `configuration_invalid` stays a single opaque sentence. `resolveHubConnectorConfig` collapses every
 distinct misconfiguration into one flag (`apps/server/src/config.ts:104-140`), and with the origin
-now validated in the desktop *before* it is persisted, this code should be unreachable from the GUI
+now validated in the desktop _before_ it is persisted, this code should be unreachable from the GUI
 path. A bounded field-naming detail enum is an open question, not a slice.
 
 ### Polling
@@ -443,7 +443,7 @@ path. A bounded field-naming detail enum is an open question, not a slice.
   the local status snapshot only reflects what that poll has already found. A faster local poll adds
   load and buys nothing.
 - **A failed poll marks the panel stale** — retain the last snapshot, render it explicitly as
-  "Last checked *N* ago" with a muted dot. Never keep rendering "Online" over a dead control plane.
+  "Last checked _N_ ago" with a muted dot. Never keep rendering "Online" over a dead control plane.
 - A `nextRetryAt` in the past clamps to "retrying now".
 
 ### Nothing outside the settings panel
@@ -518,7 +518,7 @@ the recovery path — cancel and re-enroll — silently destroys key custody.
 ### 3. `GET /api/hub/identity` — a sibling schema, not a status field
 
 ```ts
-HubIdentitySummary = { enrolled: "none" | "pending" | "active" }
+HubIdentitySummary = { enrolled: "none" | "pending" | "active" };
 ```
 
 No origin. No node, key, or environment identifier. No fingerprint.
@@ -538,12 +538,12 @@ exactly as designed.
 
 **Two distinct operations, never conflated in the UI:**
 
-| | Turn off Hub connection | Leave this Hub |
-| --- | --- | --- |
-| Reversible | yes | **no** |
-| Local key | retained | **erased** |
-| Mechanism | `hubConnectorEnabled: false` + relaunch | this route |
-| Confirmation | none | destructive `AlertDialog` |
+|              | Turn off Hub connection                 | Leave this Hub            |
+| ------------ | --------------------------------------- | ------------------------- |
+| Reversible   | yes                                     | **no**                    |
+| Local key    | retained                                | **erased**                |
+| Mechanism    | `hubConnectorEnabled: false` + relaunch | this route                |
+| Confirmation | none                                    | destructive `AlertDialog` |
 
 Rationale, corrected: **leave is the only exit from `revoked` and from a corrupt or orphaned
 identity.** `resume()` returns immediately on `revoked`, `enroll()` throws because `activeNode` is
@@ -597,15 +597,15 @@ unknown/stale, not as a distinct error state.
 
 ### Access classification
 
-| Operation | Transport | Auth | Relay-reachable |
-| --- | --- | --- | --- |
-| `GET /api/hub/status` | node HTTP | owner | no — no HTTP over relay |
-| `GET /api/hub/enrollment` | node HTTP | owner | no |
-| `GET /api/hub/identity` | node HTTP | owner | no |
-| `POST /api/hub/enrollment` | node HTTP | owner | no |
-| `POST /api/hub/enrollment/cancel` | node HTTP | owner | no |
-| `POST /api/hub/resume` | node HTTP | owner | no |
-| `POST /api/hub/leave` | node HTTP | owner | no |
+| Operation                         | Transport | Auth  | Relay-reachable         |
+| --------------------------------- | --------- | ----- | ----------------------- |
+| `GET /api/hub/status`             | node HTTP | owner | no — no HTTP over relay |
+| `GET /api/hub/enrollment`         | node HTTP | owner | no                      |
+| `GET /api/hub/identity`           | node HTTP | owner | no                      |
+| `POST /api/hub/enrollment`        | node HTTP | owner | no                      |
+| `POST /api/hub/enrollment/cancel` | node HTTP | owner | no                      |
+| `POST /api/hub/resume`            | node HTTP | owner | no                      |
+| `POST /api/hub/leave`             | node HTTP | owner | no                      |
 
 If any of these ever becomes a WebSocket RPC, its classification is `direct_owner`.
 
@@ -715,7 +715,6 @@ Named as obligations, with no private detail:
    from the same machine to the same Hub collides with the orphaned record.
 
    Two consequences, both serious:
-
    - The failure lands at **approval time**, after the operator has already compared the fingerprint
      and clicked Approve. It is the worst available moment to fail.
    - Combined with obligation 2, **`revoked` has no in-product recovery path at all today**, even
@@ -725,7 +724,8 @@ Named as obligations, with no private detail:
    that preserves the existing node and environment identifiers. Until one exists, shipping the leave
    button would permanently prevent a machine from rejoining that Hub — a one-way door per machine,
    per Hub. **Slice 4 does not ship before this lands.**
-4. **An approval deep link** would let *Open Hub* land on the approval screen rather than the origin
+
+4. **An approval deep link** would let _Open Hub_ land on the approval screen rather than the origin
    root. It requires a Hub-supplied absolute URL in the enrollment start response — a contract and
    Hub-protocol change, explicitly out of scope here.
 5. **Enrollment denial versus expiry** must be distinguishable in the poll response for the
@@ -737,19 +737,19 @@ Each slice is independently reviewable and independently revertable. Slices 1–
 carry no UI risk. **Slices 1–4 are `/security-review`-gated with owner sign-off** — they touch
 identity, credentials, or relay transport.
 
-| # | Slice | Gate |
-| --- | --- | --- |
-| 1 | `POST /api/hub/resume` + route tests. Fixes `connection_replaced` and transient `identity_unavailable` without a relaunch. Independently useful to CLI users. | security-review |
-| 2 | Persist `deviceCode`; `GET /api/hub/enrollment`; extend `HubEnrollmentStartResult` with label/platform/version/algorithm. Makes a ceremony recoverable. | security-review |
-| 3 | `GET /api/hub/identity` returning `HubIdentitySummary` + closed-status canary test. | security-review |
-| 4 | `POST /api/hub/leave` as a crash-safe connector operation, with the teardown marker and resume-at-boot. **Hard-blocked on Hub obligation 3** — shipping it before the Hub can remove or re-key a node makes leaving a one-way door. | security-review |
-| 5 | Desktop config: `DesktopSettings` fields, bootstrap-envelope keys, `backendChildEnv` strip, `0600`/`0700` hardening, surfaced parse failure, `validateHubOrigin` bridge. | standard |
-| 6 | `hubStatus.ts` pure module + exhaustive unit tests over every state × degradedMode × failure code. No UI. | standard |
-| 7 | The Hub section: status row, enable/disable, origin field, relaunch confirmation. | standard |
-| 8 | Enrollment expansion, `DataList` comparison, copy device code, Open Hub, cancel. | standard |
-| 9 | Leave dialog and its destructive confirmation copy. | standard |
-| 10 | `app.requestSingleInstanceLock()`. Independent. | standard |
-| 11 | Contract refinements: split `enrollment_unavailable` and `identity_unavailable`. Requires owner approval to touch the failure enum. | security-review |
+| #   | Slice                                                                                                                                                                                                                               | Gate            |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| 1   | `POST /api/hub/resume` + route tests. Fixes `connection_replaced` and transient `identity_unavailable` without a relaunch. Independently useful to CLI users.                                                                       | security-review |
+| 2   | Persist `deviceCode`; `GET /api/hub/enrollment`; extend `HubEnrollmentStartResult` with label/platform/version/algorithm. Makes a ceremony recoverable.                                                                             | security-review |
+| 3   | `GET /api/hub/identity` returning `HubIdentitySummary` + closed-status canary test.                                                                                                                                                 | security-review |
+| 4   | `POST /api/hub/leave` as a crash-safe connector operation, with the teardown marker and resume-at-boot. **Hard-blocked on Hub obligation 3** — shipping it before the Hub can remove or re-key a node makes leaving a one-way door. | security-review |
+| 5   | Desktop config: `DesktopSettings` fields, bootstrap-envelope keys, `backendChildEnv` strip, `0600`/`0700` hardening, surfaced parse failure, `validateHubOrigin` bridge.                                                            | standard        |
+| 6   | `hubStatus.ts` pure module + exhaustive unit tests over every state × degradedMode × failure code. No UI.                                                                                                                           | standard        |
+| 7   | The Hub section: status row, enable/disable, origin field, relaunch confirmation.                                                                                                                                                   | standard        |
+| 8   | Enrollment expansion, `DataList` comparison, copy device code, Open Hub, cancel.                                                                                                                                                    | standard        |
+| 9   | Leave dialog and its destructive confirmation copy.                                                                                                                                                                                 | standard        |
+| 10  | `app.requestSingleInstanceLock()`. Independent.                                                                                                                                                                                     | standard        |
+| 11  | Contract refinements: split `enrollment_unavailable` and `identity_unavailable`. Requires owner approval to touch the failure enum.                                                                                                 | security-review |
 
 Slices 1–3 can land in parallel. Slice 7 depends on 3, 5, and 6. Slice 8 depends on 2.
 

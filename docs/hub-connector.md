@@ -39,6 +39,7 @@ directory:
 ryco hub status
 ryco hub enroll
 ryco hub cancel
+ryco hub resume
 ```
 
 Add `--json` for bounded machine-readable output. The server must be running. The CLI obtains a
@@ -104,6 +105,12 @@ Configuration, key custody, origin mismatch, enrollment failure, authentication 
 connection replacement, revocation, version incompatibility, and repeated early protocol failure
 require operator action. Restarting the process does not make a revoked identity retry.
 
+`ryco hub resume` retries a connector that stopped without scheduling its own retry, and prints the
+resulting status. Use it for `connection_replaced` and for a `identity_unavailable` caused by a
+credential store that was locked and has since been unlocked; neither schedules a retry timer, so
+neither recovers on its own. Resume is deliberately a no-op for `revoked`, for a stopping connector,
+and for a disabled one — it reports the unchanged state rather than implying it acted.
+
 ## Relay channels, limits, and roles
 
 Ryco explicitly accepts only protocol 1.2 `channel.open` frames with capability `ryco.rpc`, an
@@ -153,7 +160,9 @@ and the normal server listener follow their existing shutdown path.
 - `identity_origin_mismatch`: use the origin to which the identity was enrolled or perform an
   approved re-enrollment.
 - `authentication_failed` or `revoked`: verify approval, key rotation, and node status with the Hub
-  operator; retries are intentionally stopped.
+  operator; retries are intentionally stopped. `ryco hub resume` will not restart a revoked identity.
+- `connection_replaced`: another process authenticated as this node. Stop it, then run
+  `ryco hub resume`. No retry is scheduled for this failure, so it does not clear on its own.
 - `protocol_invalid` or `version_incompatible`: upgrade the incompatible endpoint. Do not modify
   relay schemas or fixtures locally.
 - Repeated `network_unavailable`, `tls_unavailable`, or `heartbeat_timeout`: check DNS, egress, TLS

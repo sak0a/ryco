@@ -925,6 +925,22 @@ const requestHubEnrollmentCancellation = (origin: string, bearerToken: string) =
     HUB_CLI_LIVE_SERVER_TIMEOUT,
   );
 
+const requestHubResume = (origin: string, bearerToken: string) =>
+  runLiveServerRequest(
+    HttpClientRequest.post(`${origin}/api/hub/resume`).pipe(
+      HttpClientRequest.acceptJson,
+      HttpClientRequest.bearerToken(bearerToken),
+    ),
+    HttpClientResponse.matchStatus({
+      "2xx": (response) => HttpClientResponse.schemaBodyJson(HubConnectorStatus)(response),
+      orElse: (response) =>
+        readErrorMessageFromResponse(response).pipe(
+          Effect.flatMap((message) => Effect.fail(new Error(message))),
+        ),
+    }),
+    HUB_CLI_LIVE_SERVER_TIMEOUT,
+  );
+
 const formatHubStatus = (status: typeof HubConnectorStatus.Type, json: boolean): string => {
   if (json) return JSON.stringify(status);
   const details = [
@@ -1214,9 +1230,23 @@ const hubCancelCommand = Command.make("cancel", {
   ),
 );
 
+const hubResumeCommand = Command.make("resume", {
+  ...authLocationFlags,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Retry a Hub connector that stopped without scheduling its own retry. Prints the resulting status.",
+  ),
+  Command.withHandler((flags) =>
+    runHubCommand(flags, (origin, token) => requestHubResume(origin, token)).pipe(
+      Effect.flatMap((status) => Console.log(formatHubStatus(status, flags.json))),
+    ),
+  ),
+);
+
 const hubCommand = Command.make("hub").pipe(
   Command.withDescription("Manage the outbound Hub connector through the local Ryco server."),
-  Command.withSubcommands([hubStatusCommand, hubEnrollCommand, hubCancelCommand]),
+  Command.withSubcommands([hubStatusCommand, hubEnrollCommand, hubCancelCommand, hubResumeCommand]),
 );
 
 const projectAddCommand = Command.make("add", {

@@ -394,46 +394,60 @@ it.layer(NodeServices.layer)("cli log-level parsing", (it) => {
     }),
   );
 
-  it.effect("uses ephemeral local authorization for Hub status, enrollment, and cancellation", () =>
-    Effect.gen(function* () {
-      const baseDir = mkdtempSync(join(tmpdir(), "ryco-cli-hub-live-test-"));
-      yield* withLiveHubCliServer(baseDir, () =>
-        Effect.gen(function* () {
-          const statusOutput = yield* captureStdout(
-            runCli(["hub", "status", "--base-dir", baseDir, "--json"]),
-          );
-          const status = JSON.parse(statusOutput.output) as { readonly state?: string };
-          assert.equal(status.state, "awaiting_approval");
+  it.effect(
+    "uses ephemeral local authorization for Hub status, enrollment, cancellation, and resume",
+    () =>
+      Effect.gen(function* () {
+        const baseDir = mkdtempSync(join(tmpdir(), "ryco-cli-hub-live-test-"));
+        yield* withLiveHubCliServer(baseDir, () =>
+          Effect.gen(function* () {
+            const statusOutput = yield* captureStdout(
+              runCli(["hub", "status", "--base-dir", baseDir, "--json"]),
+            );
+            const status = JSON.parse(statusOutput.output) as { readonly state?: string };
+            assert.equal(status.state, "awaiting_approval");
 
-          const enrollmentOutput = yield* captureStdout(
-            runCli(["hub", "enroll", "--base-dir", baseDir, "--json"]),
-          );
-          const enrollment = JSON.parse(enrollmentOutput.output) as {
-            readonly deviceCode?: string;
-            readonly fingerprint?: string;
-          };
-          assert.equal(enrollment.deviceCode, "ABCD-EFGH");
-          assert.equal(enrollment.fingerprint, `SHA256:${"A".repeat(43)}`);
+            const enrollmentOutput = yield* captureStdout(
+              runCli(["hub", "enroll", "--base-dir", baseDir, "--json"]),
+            );
+            const enrollment = JSON.parse(enrollmentOutput.output) as {
+              readonly deviceCode?: string;
+              readonly fingerprint?: string;
+            };
+            assert.equal(enrollment.deviceCode, "ABCD-EFGH");
+            assert.equal(enrollment.fingerprint, `SHA256:${"A".repeat(43)}`);
 
-          const humanEnrollmentOutput = yield* captureStdout(
-            runCli(["hub", "enroll", "--base-dir", baseDir]),
-          );
-          assert.include(humanEnrollmentOutput.output, `Fingerprint: SHA256:${"A".repeat(43)}`);
-          assert.include(humanEnrollmentOutput.output, "Compare this fingerprint in Hub");
-          assert.notInclude(humanEnrollmentOutput.output, "pollingSecret");
-          assert.notInclude(humanEnrollmentOutput.output, "publicKey");
-          assert.notInclude(humanEnrollmentOutput.output, baseDir);
+            const humanEnrollmentOutput = yield* captureStdout(
+              runCli(["hub", "enroll", "--base-dir", baseDir]),
+            );
+            assert.include(humanEnrollmentOutput.output, `Fingerprint: SHA256:${"A".repeat(43)}`);
+            assert.include(humanEnrollmentOutput.output, "Compare this fingerprint in Hub");
+            assert.notInclude(humanEnrollmentOutput.output, "pollingSecret");
+            assert.notInclude(humanEnrollmentOutput.output, "publicKey");
+            assert.notInclude(humanEnrollmentOutput.output, baseDir);
 
-          const cancellationOutput = yield* captureStdout(
-            runCli(["hub", "cancel", "--base-dir", baseDir, "--json"]),
-          );
-          const cancellation = JSON.parse(cancellationOutput.output) as {
-            readonly state?: string;
-          };
-          assert.equal(cancellation.state, "enrolling");
-        }),
-      );
-    }),
+            const cancellationOutput = yield* captureStdout(
+              runCli(["hub", "cancel", "--base-dir", baseDir, "--json"]),
+            );
+            const cancellation = JSON.parse(cancellationOutput.output) as {
+              readonly state?: string;
+            };
+            assert.equal(cancellation.state, "enrolling");
+
+            const resumeOutput = yield* captureStdout(
+              runCli(["hub", "resume", "--base-dir", baseDir, "--json"]),
+            );
+            const resumed = JSON.parse(resumeOutput.output) as { readonly state?: string };
+            assert.equal(resumed.state, "awaiting_approval");
+
+            const humanResumeOutput = yield* captureStdout(
+              runCli(["hub", "resume", "--base-dir", baseDir]),
+            );
+            assert.include(humanResumeOutput.output, "Hub connector: awaiting_approval");
+            assert.notInclude(humanResumeOutput.output, baseDir);
+          }),
+        );
+      }),
   );
 
   it.effect("rejects dev-url on project commands", () =>

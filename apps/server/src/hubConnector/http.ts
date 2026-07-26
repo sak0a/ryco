@@ -23,6 +23,12 @@ const enrollmentFailure = () =>
     status: 400,
   });
 
+const resumeFailure = () =>
+  new AuthError({
+    message: "Hub connector resume failed.",
+    status: 400,
+  });
+
 export const hubConnectorStatusRouteLayer = HttpRouter.add(
   "GET",
   "/api/hub/status",
@@ -47,6 +53,33 @@ export const hubConnectorEnrollmentRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
+/**
+ * Retry a connector that stopped without scheduling its own retry.
+ *
+ * `connection_replaced` and a locked credential store both classify as
+ * operator-action failures, so no reconnect timer exists for them. Without this
+ * route the only recovery is restarting the process, which in the desktop tears
+ * down every provider session and terminal to retry one outbound socket.
+ *
+ * `resume()` is deliberately a no-op for `revoked`, a stopping connector, and a
+ * disabled one. Returning the resulting status rather than an error keeps those
+ * cases honest: the caller sees the unchanged state instead of a success that
+ * implies something happened.
+ */
+export const hubConnectorResumeRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/hub/resume",
+  Effect.gen(function* () {
+    yield* authenticateOwner;
+    const connector = yield* HubConnectorService;
+    yield* Effect.tryPromise({
+      try: () => connector.resume(),
+      catch: resumeFailure,
+    });
+    return HttpServerResponse.jsonUnsafe(connector.status(), { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
 export const hubConnectorEnrollmentCancelRouteLayer = HttpRouter.add(
   "POST",
   "/api/hub/enrollment/cancel",
@@ -65,4 +98,5 @@ export const hubConnectorRoutesLayer = Layer.mergeAll(
   hubConnectorStatusRouteLayer,
   hubConnectorEnrollmentRouteLayer,
   hubConnectorEnrollmentCancelRouteLayer,
+  hubConnectorResumeRouteLayer,
 );
