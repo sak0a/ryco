@@ -1,4 +1,11 @@
 import { Pressable, ScrollView, TextInput, View } from "react-native";
+import Animated, {
+  FadeIn,
+  FadeOut,
+  ReduceMotion,
+  SlideInDown,
+  SlideOutDown,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
@@ -43,7 +50,10 @@ function OptionRail(props: {
           accessibilityLabel={`${boolean.label}, ${boolean.enabled ? "on" : "off"}`}
           onPress={() => props.onSelectOption(boolean.id, !boolean.enabled)}
           className={cn(
-            "h-10 items-center justify-center rounded-full border active:opacity-70",
+            // A circle: fast mode is one binary thing, and a round target
+            // reads as a toggle rather than as another segment of the stack
+            // below it.
+            "h-10 w-10 self-center items-center justify-center rounded-full border active:opacity-70",
             boolean.enabled ? "border-warning/40 bg-warning-bg" : "border-border bg-subtle",
           )}
         >
@@ -59,7 +69,10 @@ function OptionRail(props: {
         <View
           accessibilityRole="radiogroup"
           accessibilityLabel={select.label}
-          className="flex-1 gap-1 rounded-full bg-subtle p-1"
+          // Softened rather than fully pill: a stadium track next to a circular
+          // toggle made the two read as one control. Concentric radii — track
+          // 16, minus the 4pt inset, gives 12 on each segment.
+          className="flex-1 gap-1 rounded-2xl bg-subtle p-1"
         >
           {/* Reversed: the provider declares low -> high, and the strongest
               belongs at the top so the stack reads as a scale. */}
@@ -71,7 +84,7 @@ function OptionRail(props: {
               accessibilityLabel={`${select.label}: ${choice.label}`}
               onPress={() => props.onSelectOption(select.id, choice.id)}
               className={cn(
-                "min-h-9 flex-1 items-center justify-center rounded-full active:opacity-70",
+                "min-h-9 flex-1 items-center justify-center rounded-xl active:opacity-70",
                 choice.selected ? "bg-card" : "bg-transparent",
               )}
             >
@@ -110,13 +123,24 @@ export function ModelPickerSheet(props: {
 
   return (
     <OverlayPortal>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Close model picker"
-        onPress={props.onClose}
-        className="absolute inset-0 bg-backdrop"
-      />
-      <View
+      <Animated.View
+        entering={FadeIn.duration(160).reduceMotion(ReduceMotion.System)}
+        exiting={FadeOut.duration(140).reduceMotion(ReduceMotion.System)}
+        className="absolute inset-0"
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close model picker"
+          onPress={props.onClose}
+          className="flex-1 bg-backdrop"
+        />
+      </Animated.View>
+      <Animated.View
+        // The panel rises; the scrim only fades. Moving both reads as the whole
+        // screen lurching. ReduceMotion.System honours the OS setting, which
+        // turns these into a plain cross-fade.
+        entering={SlideInDown.duration(260).reduceMotion(ReduceMotion.System)}
+        exiting={SlideOutDown.duration(200).reduceMotion(ReduceMotion.System)}
         pointerEvents="box-none"
         className="absolute inset-x-0 bottom-0 px-3"
         style={{ paddingBottom: Math.max(12, insets.bottom) }}
@@ -241,7 +265,7 @@ export function ModelPickerSheet(props: {
             ) : null}
           </View>
         </GlassSurface>
-      </View>
+      </Animated.View>
     </OverlayPortal>
   );
 }
