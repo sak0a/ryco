@@ -56,6 +56,7 @@ export function ThreadComposer(props: {
   const primaryFg = useThemeColor("--color-primary-foreground");
   const iconSubtle = useThemeColor("--color-icon-subtle");
   const iconColor = useThemeColor("--color-icon");
+  const warningColor = useThemeColor("--color-warning");
 
   const canSend = (text.trim().length > 0 || attachments.length > 0) && !sending && !props.disabled;
 
@@ -120,14 +121,28 @@ export function ThreadComposer(props: {
                   accessibilityLabel={props.modelAccessibilityLabel ?? props.modelLabel}
                   disabled={props.policyDisabled}
                   onPress={props.onOpenModel}
+                  className="max-w-full flex-1"
                 />
               ) : null}
+              {/* Icon only. The glyph alone says which access mode the task is
+                  in — open padlock for full access, closed for supervised,
+                  pencil for auto-accept — and dropping the word gives the model
+                  name the width it actually needs. The full mode name still
+                  reaches screen readers through accessibilityLabel, and the
+                  caution mode keeps its amber tint so it is not silent. */}
               <ComposerToolbarButton
-                icon={props.policyIcon}
-                label={props.policyLabel}
+                iconNode={
+                  <SymbolView
+                    name={props.policyIcon ?? "lock"}
+                    size={16}
+                    tintColor={(props.policyCaution ? warningColor : iconColor) as string}
+                    type="monochrome"
+                  />
+                }
                 accessibilityLabel={props.policyAccessibilityLabel ?? props.policyLabel}
                 active={props.policyCaution}
                 disabled={props.policyDisabled}
+                showChevron={false}
                 onPress={props.onOpenPolicy}
               />
             </ComposerToolbarRow>
