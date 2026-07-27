@@ -201,8 +201,16 @@ export class RelayChannelRegistry {
         effectiveRole: role,
         send: (bytes) => {
           if (entry === undefined || entry.closed || outputSequence > 0xffff_ffff) return false;
+          // Two different failures used to collapse into one close reason. An
+          // oversized frame is a `transfer_limit` — exactly what the inbound
+          // check reports for the identical condition below — while a full
+          // queue is genuine backpressure and stays `slow_consumer`. Reporting
+          // the first as the second makes an application bug ("this node emitted
+          // a frame larger than the negotiated limit") look like a network
+          // problem, which is why it went undiagnosed.
+          const oversized = bytes.byteLength > this.#limits.maxDataChunkBytes;
           const accepted =
-            bytes.byteLength <= this.#limits.maxDataChunkBytes &&
+            !oversized &&
             this.#sendQueue.enqueueData({
               type: "data",
               ...version,
@@ -215,8 +223,9 @@ export class RelayChannelRegistry {
             entry.outboundSequence = outputSequence;
             this.#onOutboundReady();
           } else {
+            const reason: RelayCloseReason = oversized ? "transfer_limit" : "slow_consumer";
             queueMicrotask(() => {
-              void this.closeChannel(frame.channelId, "slow_consumer").catch(this.#onFatal);
+              void this.closeChannel(frame.channelId, reason).catch(this.#onFatal);
             });
           }
           return accepted;
