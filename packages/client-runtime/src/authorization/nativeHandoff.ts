@@ -34,6 +34,8 @@ const ERROR_MESSAGES: Readonly<Record<NativeHandoffClientErrorCode, string>> = {
   superseded: "A newer authorization request replaced this one.",
 };
 
+const NATIVE_HANDOFF_CLOCK_SKEW_TOLERANCE_MS = 60_000;
+
 /** Bounded, secret-free errors safe for the shared controller to present. */
 export class NativeHandoffClientError extends Error {
   readonly code: NativeHandoffClientErrorCode;
@@ -146,6 +148,25 @@ function beginAttempt(
 function assertCurrent(active: ActiveAttempt, isCurrent: () => boolean): void {
   if (isCurrent()) return;
   throw new NativeHandoffClientError(active.superseded ? "superseded" : "cancelled");
+}
+
+function assertStartExpiry(expiresAt: number, clientNow: number): void {
+  const remainingMs = expiresAt - clientNow;
+  if (remainingMs < -NATIVE_HANDOFF_CLOCK_SKEW_TOLERANCE_MS) {
+    throw new NativeHandoffClientError("expired");
+  }
+  if (
+    remainingMs >
+    NATIVE_HANDOFF_TRANSACTION_LIFETIME_MS + NATIVE_HANDOFF_CLOCK_SKEW_TOLERANCE_MS
+  ) {
+    throw new NativeHandoffClientError("authorization_rejected");
+  }
+}
+
+function assertBrowserResultNotExpired(expiresAt: number, clientNow: number): void {
+  if (clientNow - expiresAt > NATIVE_HANDOFF_CLOCK_SKEW_TOLERANCE_MS) {
+    throw new NativeHandoffClientError("expired");
+  }
 }
 
 function callbackValues(
@@ -275,15 +296,10 @@ export async function runNativeHandoff(
     } catch {
       throw new NativeHandoffClientError("authorization_rejected");
     }
-    if (
-      authorizationUrl.origin !== new URL(input.origin).origin ||
-      start.expiresAt <= issuedAt ||
-      start.expiresAt > issuedAt + NATIVE_HANDOFF_TRANSACTION_LIFETIME_MS
-    ) {
-      throw new NativeHandoffClientError(
-        start.expiresAt <= issuedAt ? "expired" : "authorization_rejected",
-      );
+    if (authorizationUrl.origin !== new URL(input.origin).origin) {
+      throw new NativeHandoffClientError("authorization_rejected");
     }
+    assertStartExpiry(start.expiresAt, issuedAt);
     const browserResult = await input.platform.openSystemBrowser(
       start.authorizationUrl,
       attempt.callbackUri,
@@ -295,7 +311,7 @@ export async function runNativeHandoff(
         browserResult.type === "locked" ? "authorization_rejected" : "cancelled",
       );
     }
-    if (now() >= start.expiresAt) throw new NativeHandoffClientError("expired");
+    assertBrowserResultNotExpired(start.expiresAt, now());
     const { code } = callbackValues(browserResult.url, {
       callbackUri: attempt.callbackUri,
       state: attempt.state,

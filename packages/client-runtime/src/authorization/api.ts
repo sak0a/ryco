@@ -33,6 +33,7 @@ import type {
 } from "../platform/index.ts";
 
 import type {
+  HostedAccountSecurity,
   HostedAddPasskeyResult,
   HostedHubNode,
   HostedHubPasskey,
@@ -99,6 +100,8 @@ const MAX_AUTH_PASSWORD_LENGTH = 256;
 const MAX_AUTH_TOTP_LENGTH = 16;
 const MAX_AUTH_RECOVERY_CODE_LENGTH = 128;
 const AUTH_EMAIL_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const ACCOUNT_SECURITY_KEYS = new Set(["passwordConfigured", "totpEnrolled", "email"]);
+const ACCOUNT_SECURITY_EMAIL_KEYS = new Set(["address", "verified"]);
 
 /**
  * The provisioning URI is an `otpauth://` key URI (RFC-style, what authenticator
@@ -477,6 +480,53 @@ function passkeyValue(value: unknown): HostedHubPasskey | null {
       record.revocationReasonCode.length <= MAX_REVOCATION_REASON_LENGTH
         ? record.revocationReasonCode
         : null,
+  };
+}
+
+/**
+ * Strictly decode the authenticated account-security self-read.
+ *
+ * Unlike the passkey projection, this response is an exact, tiny contract. An
+ * unexpected member is rejected rather than silently carried forward so Hub
+ * credential metadata can never reach a surface by accident.
+ */
+function accountSecurityValue(value: unknown): HostedAccountSecurity | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (
+    keys.length !== ACCOUNT_SECURITY_KEYS.size ||
+    keys.some((key) => !ACCOUNT_SECURITY_KEYS.has(key))
+  ) {
+    return null;
+  }
+  if (typeof record.passwordConfigured !== "boolean" || typeof record.totpEnrolled !== "boolean") {
+    return null;
+  }
+  if (record.email === null) {
+    return {
+      passwordConfigured: record.passwordConfigured,
+      totpEnrolled: record.totpEnrolled,
+      email: null,
+    };
+  }
+  if (typeof record.email !== "object" || Array.isArray(record.email)) return null;
+  const email = record.email as Record<string, unknown>;
+  const emailKeys = Object.keys(email);
+  if (
+    emailKeys.length !== ACCOUNT_SECURITY_EMAIL_KEYS.size ||
+    emailKeys.some((key) => !ACCOUNT_SECURITY_EMAIL_KEYS.has(key)) ||
+    typeof email.address !== "string" ||
+    email.address.length === 0 ||
+    email.address.length > MAX_AUTH_EMAIL_LENGTH ||
+    typeof email.verified !== "boolean"
+  ) {
+    return null;
+  }
+  return {
+    passwordConfigured: record.passwordConfigured,
+    totpEnrolled: record.totpEnrolled,
+    email: { address: email.address, verified: email.verified },
   };
 }
 
@@ -969,6 +1019,21 @@ export class HostedHubApi {
       if (!passkey) throw new HostedHubApiError("invalid_response", 502);
       return passkey;
     });
+  }
+
+  /**
+   * Read the signed-in account's bounded credential posture.
+   *
+   * `GET /api/account/security` contains no secret material. The user's own
+   * email address is PII, so this client validates and returns it but never
+   * logs it or includes it in an error.
+   */
+  async getAccountSecurity(signal?: AbortSignal): Promise<HostedAccountSecurity> {
+    const result = accountSecurityValue(
+      await this.#request("/api/account/security", signal ? { signal } : {}),
+    );
+    if (!result) throw new HostedHubApiError("invalid_response", 502);
+    return result;
   }
 
   /**

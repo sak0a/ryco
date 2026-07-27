@@ -346,8 +346,8 @@ export function createMobileEnvironmentDriver(
         pushSequenceMonitor: noopPushSequenceMonitor,
         applyShellEvent: (event, environmentId) =>
           getSupervisor().applyShellEvent(event, environmentId),
-        syncShellSnapshot: (snapshot, environmentId) =>
-          getSupervisor().syncShellSnapshot(snapshot, environmentId),
+        syncShellSnapshot: (snapshot, environmentId, callbacks) =>
+          getSupervisor().syncShellSnapshot(snapshot, environmentId, callbacks),
       }),
     listSavedEnvironmentRecords: () => catalog.list(),
     hasSavedEnvironmentRegistryHydrated: () => catalog.hasHydrated(),

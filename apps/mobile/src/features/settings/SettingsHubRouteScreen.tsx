@@ -23,6 +23,10 @@ import {
 } from "../../hostedHub/state";
 import { invalidateMobileHostedRuntime } from "../../hostedHub/runtime";
 import { isMobileDevelopmentBuild, readMobileHostedConfig } from "../../platform/config";
+import {
+  openHostedSignInPreview,
+  resolveHostedSignInPreviewUrl,
+} from "../../platform/hostedSignInPreview";
 import { mobileKV } from "../../platform/kv";
 import { clearMobileHostedSessionToken } from "../../platform/sessionCredentials";
 import { useHostedModeAvailable } from "../hostedHub/useHostedMode";
@@ -51,6 +55,7 @@ export function SettingsHubRouteScreen() {
   );
   const [editorVisible, setEditorVisible] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [previewBusy, setPreviewBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const rootNavigation = navigation.getParent();
 
@@ -66,6 +71,11 @@ export function SettingsHubRouteScreen() {
     [buildConfig, development],
   );
   const profile = storedProfile ?? buildProfile;
+  const previewUrl = resolveHostedSignInPreviewUrl({
+    developmentBuild: development,
+    hostedModeAvailable: hostedAvailable,
+    profile,
+  });
   useEffect(() => {
     let active = true;
     void hydrateMobileHubProfile(mobileKV).then((next) => {
@@ -82,6 +92,19 @@ export function SettingsHubRouteScreen() {
     setStoredProfile(nextProfile);
     invalidateMobileHostedRuntime();
     void ensureMobileHostedSession();
+  };
+
+  const openSignInPreview = async () => {
+    if (previewUrl === null || previewBusy) return;
+    setPreviewBusy(true);
+    setError(null);
+    try {
+      await openHostedSignInPreview(previewUrl);
+    } catch {
+      setError("Ryco could not open the Hub sign-in preview.");
+    } finally {
+      setPreviewBusy(false);
+    }
   };
 
   const replaceProfile = (nextProfile: HubProfile | null) => {
@@ -178,15 +201,26 @@ export function SettingsHubRouteScreen() {
             first
             label="Account"
             value={accountLabel(profile, hostedAvailable)}
-            disabled={!hostedAvailable || busy}
+            disabled={!hostedAvailable || busy || previewBusy}
             onPress={() => navigation.navigate("SettingsAccount" as never)}
           />
+          {previewUrl ? (
+            <SettingsRow
+              label="Preview Hub sign-in"
+              value={previewBusy ? "Opening…" : "Simulator"}
+              disabled={busy || previewBusy}
+              onPress={() => void openSignInPreview()}
+            />
+          ) : null}
         </SettingsSection>
 
         {profile?.compatibility.status === "compatible" && !hostedAvailable ? (
           <Text className="mt-2 px-5 font-sans text-xs leading-relaxed text-foreground-muted">
             This Hub is compatible, but this device could not create the hardware-backed key its
             session requires. Direct nodes keep working.
+            {previewUrl
+              ? " The preview opens an isolated browser so you can test the passkey QR code; it cannot connect Hub nodes in the Simulator."
+              : ""}
           </Text>
         ) : null}
       </ScrollView>

@@ -1,8 +1,15 @@
 import {
   createEnvironmentConnection,
   type EnvironmentConnection,
+  type EnvironmentConnectionSupervisor,
   type OrchestrationHandlers,
 } from "@ryco/client-runtime/connection";
+import {
+  hostedHubStore,
+  markHostedSessionReady,
+  markHostedSessionReplaying,
+  reportHostedShellSnapshotFailure,
+} from "@ryco/client-runtime/authorization";
 import {
   attachEnvironmentDescriptor,
   createKnownEnvironment,
@@ -29,8 +36,9 @@ import { getMobileHostedConfig } from "./runtimeConfig";
  */
 export interface HostedPrimaryConnectionDeps extends Pick<
   OrchestrationHandlers,
-  "applyShellEvent" | "syncShellSnapshot"
+  "applyShellEvent"
 > {
+  readonly syncShellSnapshot: EnvironmentConnectionSupervisor["syncShellSnapshot"];
   readonly pushSequenceMonitor: Parameters<
     typeof createEnvironmentConnection
   >[0]["pushSequenceMonitor"];
@@ -41,6 +49,8 @@ export function createHostedPrimaryConnection(
 ): EnvironmentConnection | null {
   const descriptor = readPrimaryEnvironmentDescriptor();
   if (descriptor === null) return null;
+  const hostedGeneration = hostedHubStore.getState().generation;
+  const acceptsEvent = () => hostedHubStore.getState().generation === hostedGeneration;
 
   const attemptFactory = getHostedRelayAttemptFactory();
   const client = createWsRpcClient(
@@ -72,8 +82,20 @@ export function createHostedPrimaryConnection(
     knownEnvironment,
     client,
     pushSequenceMonitor: deps.pushSequenceMonitor,
-    applyShellEvent: deps.applyShellEvent,
-    syncShellSnapshot: deps.syncShellSnapshot,
+    onResubscribe: (environmentId) => markHostedSessionReplaying(environmentId, hostedGeneration),
+    onShellError: (environmentId) =>
+      reportHostedShellSnapshotFailure(environmentId, hostedGeneration),
+    applyShellEvent: (event, environmentId) => {
+      if (!acceptsEvent()) return;
+      deps.applyShellEvent(event, environmentId);
+    },
+    syncShellSnapshot: (snapshot, environmentId) => {
+      if (!acceptsEvent()) return;
+      deps.syncShellSnapshot(snapshot, environmentId, {
+        onCurrent: () => markHostedSessionReady(environmentId, hostedGeneration),
+        onReady: () => markHostedSessionReady(environmentId, hostedGeneration),
+      });
+    },
     // Terminal streaming is deferred, matching the direct plane.
     applyTerminalEvent: () => undefined,
   });

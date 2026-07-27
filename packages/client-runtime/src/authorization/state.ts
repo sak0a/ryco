@@ -8,6 +8,7 @@ import type {
   HostedAccountOutcome,
   HostedAccountRefusalReason,
   HostedAccountRefused,
+  HostedAccountSecurity,
   HostedAccountStatus,
   HostedAddPasskeyOutcome,
   HostedAddPasskeyResult,
@@ -86,6 +87,7 @@ const initialState: HostedHubState = {
 };
 
 export type HostedPasskeyDirectoryStatus = "idle" | "loading" | "ready" | "stale";
+export type HostedAccountSecurityStatus = "idle" | "loading" | "ready" | "stale";
 
 export type HostedAccountActionStatus =
   | "idle"
@@ -116,6 +118,8 @@ export type HostedAccountActionStatus =
 export interface HostedAccountState {
   readonly passkeys: ReadonlyArray<HostedHubPasskey>;
   readonly passkeysStatus: HostedPasskeyDirectoryStatus;
+  readonly security: HostedAccountSecurity | null;
+  readonly securityStatus: HostedAccountSecurityStatus;
   readonly actionStatus: HostedAccountActionStatus;
   readonly errorMessage: string | null;
   /**
@@ -144,6 +148,8 @@ export interface HostedAccountState {
 const initialAccountState: HostedAccountState = {
   passkeys: [],
   passkeysStatus: "idle",
+  security: null,
+  securityStatus: "idle",
   actionStatus: "idle",
   errorMessage: null,
   errorCode: null,
@@ -401,6 +407,8 @@ class HostedHubController {
   #recoveryCodesLeaseSettleQueued = false;
   #passkeysOperation: AbortController | null = null;
   #passkeysPromise: Promise<void> | null = null;
+  #securityOperation: AbortController | null = null;
+  #securityPromise: Promise<void> | null = null;
   #accountOperation: AbortController | null = null;
 
   bootstrap(): Promise<void> {
@@ -736,6 +744,67 @@ class HostedHubController {
   }
 
   /**
+   * Load the signed-in account's bounded password, TOTP, and email posture.
+   *
+   * Unknown is represented by `security:null`, never by an all-false value.
+   * A failed refresh retains the last known posture but marks it stale, so a
+   * surface can remain useful without presenting cached state as current.
+   */
+  refreshAccountSecurity(options?: { readonly force?: boolean }): Promise<void> {
+    const force = options?.force === true;
+    if (this.#securityPromise && !force) return this.#securityPromise;
+    const state = hostedHubStore.getState();
+    if (state.accountStatus !== "authenticated") return Promise.resolve();
+    if (force) {
+      this.#securityOperation?.abort();
+      this.#securityPromise = null;
+    }
+    const operation = new AbortController();
+    this.#securityOperation = operation;
+    const promise = this.#refreshAccountSecurity(operation, state.session?.id ?? null).finally(
+      () => {
+        if (this.#securityOperation === operation) this.#securityOperation = null;
+        if (this.#securityPromise === promise) this.#securityPromise = null;
+      },
+    );
+    this.#securityPromise = promise;
+    if (hostedAccountStore.getState().security === null) {
+      patchAccountState({ securityStatus: "loading" });
+    }
+    return promise;
+  }
+
+  async #refreshAccountSecurity(
+    operation: AbortController,
+    sessionId: string | null,
+  ): Promise<void> {
+    try {
+      const security = await getHostedHubApi().getAccountSecurity(operation.signal);
+      if (operation.signal.aborted) return;
+      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) {
+        this.#discardStaleSecurity();
+        return;
+      }
+      patchAccountState({ security, securityStatus: "ready" });
+    } catch (error) {
+      if (operation.signal.aborted) return;
+      if (isSessionFailure(error)) {
+        await this.#expireSessionHandled();
+        return;
+      }
+      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) {
+        this.#discardStaleSecurity();
+        return;
+      }
+      patchAccountState({ securityStatus: "stale" });
+    }
+  }
+
+  #discardStaleSecurity(): void {
+    patchAccountState({ security: null, securityStatus: "idle" });
+  }
+
+  /**
    * Enrol an additional passkey on the signed-in account ("add this device").
    *
    * Success is confirmed against the Hub, not against the ceremony: the Hub's
@@ -884,18 +953,26 @@ class HostedHubController {
   async setPassword(
     input: { readonly password: string } & HostedAccountStepUp,
   ): Promise<HostedAccountOutcome> {
-    return this.#accountAction("setting-password", async (signal) => {
+    const outcome = await this.#accountAction("setting-password", async (signal) => {
       await getHostedHubApi().setPassword(input, signal);
       return () => undefined;
     });
+    if (outcome.status === "committed") {
+      await this.refreshAccountSecurity({ force: true });
+    }
+    return outcome;
   }
 
   /** Remove the account's fallback password. */
   async removePassword(input?: HostedAccountStepUp): Promise<HostedAccountOutcome> {
-    return this.#accountAction("removing-password", async (signal) => {
+    const outcome = await this.#accountAction("removing-password", async (signal) => {
       await getHostedHubApi().removePassword(input, signal);
       return () => undefined;
     });
+    if (outcome.status === "committed") {
+      await this.refreshAccountSecurity({ force: true });
+    }
+    return outcome;
   }
 
   /**
@@ -951,24 +1028,32 @@ class HostedHubController {
    * no further reason to.
    */
   async confirmTotpEnrollment(input: { readonly code: string }): Promise<HostedAccountOutcome> {
-    return this.#accountAction("confirming-totp", async (signal) => {
+    const outcome = await this.#accountAction("confirming-totp", async (signal) => {
       await getHostedHubApi().confirmTotpEnrollment(input, signal);
       return () => {
         this.#totpEnrollmentFence.bump();
         patchState({ totpEnrollment: null });
       };
     });
+    if (outcome.status === "committed") {
+      await this.refreshAccountSecurity({ force: true });
+    }
+    return outcome;
   }
 
   /** Remove TOTP from the account, dropping any half-finished enrolment with it. */
   async revokeTotp(input?: HostedAccountStepUp): Promise<HostedAccountOutcome> {
-    return this.#accountAction("revoking-totp", async (signal) => {
+    const outcome = await this.#accountAction("revoking-totp", async (signal) => {
       await getHostedHubApi().revokeTotp(input, signal);
       return () => {
         this.#totpEnrollmentFence.bump();
         patchState({ totpEnrollment: null });
       };
     });
+    if (outcome.status === "committed") {
+      await this.refreshAccountSecurity({ force: true });
+    }
+    return outcome;
   }
 
   /**
@@ -980,10 +1065,14 @@ class HostedHubController {
   async requestEmailVerification(
     input: { readonly email: string } & HostedAccountStepUp,
   ): Promise<HostedAccountOutcome> {
-    return this.#accountAction("requesting-email-verification", async (signal) => {
+    const outcome = await this.#accountAction("requesting-email-verification", async (signal) => {
       await getHostedHubApi().requestEmailVerification(input, signal);
       return () => undefined;
     });
+    if (outcome.status === "committed") {
+      await this.refreshAccountSecurity({ force: true });
+    }
+    return outcome;
   }
 
   /**
@@ -1105,6 +1194,9 @@ class HostedHubController {
     this.#passkeysOperation?.abort();
     this.#passkeysOperation = null;
     this.#passkeysPromise = null;
+    this.#securityOperation?.abort();
+    this.#securityOperation = null;
+    this.#securityPromise = null;
     this.#accountOperation?.abort();
     this.#accountOperation = null;
     hostedAccountStore.setState(initialAccountState, true);

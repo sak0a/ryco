@@ -1,5 +1,6 @@
 import {
   NATIVE_HANDOFF_CALLBACK_URIS,
+  NATIVE_HANDOFF_TRANSACTION_LIFETIME_MS,
   type NativeHandoffRedeemResponse,
   type NativeHandoffStartRequest,
 } from "@ryco/contracts/native-handoff";
@@ -17,6 +18,7 @@ const OPAQUE_B = "B".repeat(43);
 const CALLBACK = NATIVE_HANDOFF_CALLBACK_URIS[0];
 const ORIGIN = "https://hub.example.test";
 const NOW = 1_752_710_400_000;
+const CLOCK_SKEW_TOLERANCE_MS = 60_000;
 
 function platform(
   result: Awaited<ReturnType<NativeAuthorizationService["openSystemBrowser"]>> = {
@@ -160,7 +162,7 @@ describe("runNativeHandoff", () => {
         start: {
           handoffId: OPAQUE_A,
           authorizationUrl: `${ORIGIN}/native/authorize/${OPAQUE_A}`,
-          expiresAt: NOW,
+          expiresAt: NOW - CLOCK_SKEW_TOLERANCE_MS - 1,
         },
         service: platform(),
         code: "expired",
@@ -188,6 +190,116 @@ describe("runNativeHandoff", () => {
         }),
       ).rejects.toMatchObject({ code: testCase.code });
       expect(redeem).not.toHaveBeenCalled();
+    }
+  });
+
+  it("accepts start expiries at the bounded clock-skew limits", async () => {
+    const expiries = [
+      NOW - CLOCK_SKEW_TOLERANCE_MS,
+      NOW + NATIVE_HANDOFF_TRANSACTION_LIFETIME_MS + CLOCK_SKEW_TOLERANCE_MS,
+    ];
+
+    for (const expiresAt of expiries) {
+      const service = platform();
+      const redeem = vi.fn(async () => redeemed);
+
+      await expect(
+        runNativeHandoff({
+          origin: ORIGIN,
+          platform: service,
+          now: () => NOW,
+          start: async () => ({
+            handoffId: OPAQUE_A,
+            authorizationUrl: `${ORIGIN}/native/authorize/${OPAQUE_A}`,
+            expiresAt,
+          }),
+          redeem,
+        }),
+      ).resolves.toEqual(redeemed);
+      expect(service.openSystemBrowser).toHaveBeenCalledOnce();
+      expect(redeem).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("rejects start expiries beyond the bounded clock-skew limits", async () => {
+    const cases = [
+      {
+        expiresAt: NOW - CLOCK_SKEW_TOLERANCE_MS - 1,
+        code: "expired",
+      },
+      {
+        expiresAt: NOW + NATIVE_HANDOFF_TRANSACTION_LIFETIME_MS + CLOCK_SKEW_TOLERANCE_MS + 1,
+        code: "authorization_rejected",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const service = platform();
+      const redeem = vi.fn(async () => redeemed);
+
+      await expect(
+        runNativeHandoff({
+          origin: ORIGIN,
+          platform: service,
+          now: () => NOW,
+          start: async () => ({
+            handoffId: OPAQUE_A,
+            authorizationUrl: `${ORIGIN}/native/authorize/${OPAQUE_A}`,
+            expiresAt: testCase.expiresAt,
+          }),
+          redeem,
+        }),
+      ).rejects.toMatchObject({ code: testCase.code });
+      expect(service.openSystemBrowser).not.toHaveBeenCalled();
+      expect(redeem).not.toHaveBeenCalled();
+    }
+  });
+
+  it("applies the bounded clock-skew tolerance when the browser returns", async () => {
+    const expiresAt = NOW + 60_000;
+    const cases = [
+      {
+        callbackNow: expiresAt + CLOCK_SKEW_TOLERANCE_MS,
+        code: null,
+      },
+      {
+        callbackNow: expiresAt + CLOCK_SKEW_TOLERANCE_MS + 1,
+        code: "expired",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      let currentTime = NOW;
+      const service: NativeAuthorizationService = {
+        ...platform(),
+        openSystemBrowser: vi.fn(async () => {
+          currentTime = testCase.callbackNow;
+          return {
+            type: "success",
+            url: `${CALLBACK}?code=${OPAQUE_B}&state=${OPAQUE_A}&handoff_id=${OPAQUE_A}`,
+          };
+        }),
+      };
+      const redeem = vi.fn(async () => redeemed);
+      const result = runNativeHandoff({
+        origin: ORIGIN,
+        platform: service,
+        now: () => currentTime,
+        start: async () => ({
+          handoffId: OPAQUE_A,
+          authorizationUrl: `${ORIGIN}/native/authorize/${OPAQUE_A}`,
+          expiresAt,
+        }),
+        redeem,
+      });
+
+      if (testCase.code === null) {
+        await expect(result).resolves.toEqual(redeemed);
+        expect(redeem).toHaveBeenCalledOnce();
+      } else {
+        await expect(result).rejects.toMatchObject({ code: testCase.code });
+        expect(redeem).not.toHaveBeenCalled();
+      }
     }
   });
 
