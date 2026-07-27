@@ -185,6 +185,11 @@ const config: ExpoConfig = {
       NSLocalNetworkUsageDescription:
         "Allow Ryco to connect to Ryco nodes on your local network or tailnet.",
       ITSAppUsesNonExemptEncryption: false,
+      // expo-dev-menu floats its own draggable gear FAB, on by default, in the
+      // same corner as Home's new-task button. Two overlapping circles make
+      // every dev-build screenshot ambiguous. The dev menu is still reachable by
+      // shake and by the ⌘D / ⌘M keyboard shortcut.
+      EXDevMenuShowFloatingActionButton: false,
     },
   },
   android: {

@@ -84,6 +84,7 @@ describe("MVP route config", () => {
       "AddProject",
       "ThreadReviewComment",
       "Onboarding",
+      "SettingsSheet",
     ] as const) {
       expect(overlays.has(overlay)).toBe(true);
     }
@@ -94,17 +95,19 @@ describe("MVP route config", () => {
       "Project",
       "Thread",
       "ThreadReview",
-      "SettingsSheet",
       "NotFound",
     ] as const) {
       expect(overlays.has(workspace)).toBe(false);
     }
   });
 
-  it("presents Settings as a full-screen card instead of a form sheet", () => {
-    expect(MVP_ROOT_ROUTES.SettingsSheet.overlay).toBe(false);
-    expect(MVP_ROOT_ROUTES.SettingsSheet.ios.presentation).toBe("card");
-    expect("sheetAllowedDetents" in MVP_ROOT_ROUTES.SettingsSheet.ios).toBe(false);
+  it("presents Settings as a large iOS form sheet that floats over the workspace", () => {
+    expect(MVP_ROOT_ROUTES.SettingsSheet.overlay).toBe(true);
+    expect(MVP_ROOT_ROUTES.SettingsSheet.ios.presentation).toBe("formSheet");
+    expect(MVP_ROOT_ROUTES.SettingsSheet.ios.sheetAllowedDetents).toEqual([0.95]);
+    expect(MVP_ROOT_ROUTES.SettingsSheet.ios.sheetGrabberVisible).toBe(true);
+    // Android keeps the card: a nested stack inside an Android form sheet is
+    // unverified and there is no Android QA yet.
     expect(MVP_ROOT_ROUTES.SettingsSheet.android.presentation).toBe("card");
   });
 

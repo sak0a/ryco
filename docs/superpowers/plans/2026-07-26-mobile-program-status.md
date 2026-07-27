@@ -1,12 +1,20 @@
 # Ryco native mobile — program status
 
-**Verified at `180e340a` (main, 2026-07-26).** Everything below was checked against the tree
-and the commands were run; where a claim could not be verified from this repository it says
-so explicitly and names what would settle it. This document supersedes the "current state"
-sections of the B1/B2/glass/L3 plans and of the mobile design spec wherever they disagree.
+**Re-verified at `ffb0dd871` (main, 2026-07-27),** after the core-workspace redesign (#244)
+and the Hub auth / account-security stabilization (#245) merged. Everything below was checked
+against the tree and the commands were run; where a claim could not be verified from this
+repository it says so explicitly and names what would settle it. This document supersedes the
+"current state" sections of the B1/B2/glass/L3 plans and of the mobile design spec wherever
+they disagree.
 
 Read §1 first. The two constraints in it shaped every decision in the program and will shape
 the next person's; several defects have already been caused by not knowing them.
+
+**What changed since the `180e340a` pass (2026-07-26):** the redesigned workspace landed, and
+with it three items this document previously listed as outstanding are now **closed** — the
+de-hardcode sweep (§5.1), the user-bubble decision (§5.2), and most of the unwired-module list
+(§5.3). Gate counts moved from 54 files / 470 tests to **69 files / 526 tests**. §4 (no device
+verification) and §5.4–§5.9 are unchanged and still open.
 
 ---
 
@@ -72,14 +80,35 @@ or use the exit code.**
 
 ---
 
-## 2. Gate status at `180e340a`
+## 2. Gate status at `ffb0dd871`
 
 | Gate         | Command                          | Result                                      |
 | ------------ | -------------------------------- | ------------------------------------------- |
-| Mobile tests | `bun run --cwd apps/mobile test` | **54 files / 470 tests, all pass** (~1.4 s) |
+| Mobile tests | `bun run --cwd apps/mobile test` | **69 files / 526 tests, all pass** (~1.6 s) |
 | Typecheck    | `bun typecheck` (ANSI-stripped)  | 12/12 tasks successful, **0 `error TS`**    |
 
-File shape in `apps/mobile/src`: 68 `.tsx`, 109 non-test `.ts`, 54 `.test.ts`, 0 `.test.tsx`.
+File shape in `apps/mobile/src`: **90** `.tsx`, **124** non-test `.ts`, **68** `.test.ts`,
+**0** `.test.tsx`. The `.test.tsx` count is structural, not incidental — see §1.1.
+
+A fresh worktree has no `node_modules`; `bun install --frozen-lockfile` from the repo root is
+a prerequisite for every gate, and `expo` resolves to `apps/mobile/node_modules/.bin/expo`
+(not the repo root's `node_modules/.bin`).
+
+The table is a snapshot **at `ffb0dd871`**. The `home-ia` slice on top of it adds
+`homeChromeModel.ts` + its test and two `HomeScreen.test.ts` cases, moving the mobile gate to
+**70 files / 536 tests**.
+
+### 2.1 Hub staging compatibility (checked 2026-07-27, non-mutating)
+
+`GET https://staging.ryco.space/api/account/security` returns **401**, while a sibling
+nonexistent path under the same prefix returns **404**. The route is deployed and auth-gated,
+which is what the mobile account surface requires. Nothing was mutated to establish this — two
+unauthenticated GETs, no session, no writes.
+
+Re-confirmed independently later the same day, same result (401 vs 404). The 401 response
+carries `content-type: application/json`, `cache-control: no-store`, HSTS, and a CSP whose
+`connect-src` is `'self' wss://staging.ryco.space` — i.e. the app shell and the relay origin
+agree. Still two unauthenticated GETs; staging was neither deployed nor modified.
 
 ---
 
@@ -168,11 +197,45 @@ and an `autoVerify` App Links intent filter are emitted for the RP host.
 
 ## 4. Device verification: nothing in this program has run on real hardware
 
-**No passkey ceremony, no Secure Enclave / StrongBox key generation, and no relay data path
-has ever executed on a device.** The Simulator physically cannot do any of them: there is no
-Secure Enclave, no Credential Manager, and no camera. Everything claimed above is
-model-level and gate-level. No device evidence is claimed anywhere in the branch history,
-and none should be added without an actual run.
+**No passkey ceremony and no Secure Enclave / StrongBox key generation has ever executed on a
+device.** The Simulator physically cannot do either: there is no Secure Enclave, no Credential
+Manager, and no camera. Everything claimed above is model-level and gate-level, except what
+§4.1 records as directly observed. No further device evidence is claimed anywhere in the branch
+history, and none should be added without an actual run.
+
+### 4.1 The relay data path **does** run on the Simulator (observed 2026-07-27)
+
+This corrects a standing assumption — repeated in several plans and hand-offs — that the
+Simulator "cannot connect to Hub nodes". It can, and does.
+
+Directly observed on a booted **iPhone 17 Pro, iOS 26.5**, dev client `dev.ryco.app.dev`
+against Metro from this worktree, with `staging.ryco.space` as the Hub:
+
+- **Nodes → Hub nodes** listed a real node (`Hub relay · Online · Owner`) with a green
+  **Online** pill, and the group header flipped from `Idle` to `Online`.
+- Tapping the row marked it **SELECTED** and revealed an `All nodes` control.
+- **Inbox** then populated with three real threads carrying real `node · project · worktree`
+  context.
+- Opening a thread rendered the **full timeline over the relay** — user message, assistant
+  markdown, work entries — and the context bar reported **Ready**.
+
+What this does **not** establish: how the device key was backed on this Simulator, whether a
+passkey ceremony ever ran here, or any of the acceptance rows that need hardware. It
+establishes only that **rows 3 and 4 of the acceptance matrix — `/api/nodes` with presence, and
+`selectNode` → relay → thread list — are reachable from a Simulator** and do not require a
+physical iPhone to iterate on Threads UI. That matters practically: the whole Threads/task
+design program can be developed and visually verified without device turnaround.
+
+Two operational notes for anyone repeating this:
+
+1. The Hub session must already exist on that Simulator; a cold Simulator still cannot create
+   one. The relay stays down until the node row is **explicitly tapped** — listing a node
+   Online is not the same as selecting it, and Inbox shows the "Connect a node" empty state
+   until you do.
+2. If the host Mac uses a **non-US keyboard layout**, Simulator text automation types through
+   it: `:` arrives as `Ö`, `/` as `-`, `#` as `§`, `=` as a dead acute. Send the US keycode that
+   lands on the character you want (`>` → `:`, `&` → `/`, `\` → `#`, `)` → `=`), or use
+   `xcrun simctl pbcopy` and paste.
 
 **All nine rows of the L3 owner acceptance matrix are open** (plan §"Task 9", repeated in
 PR #232's body): enclave key creation and persistence; native passkey sign-in and
@@ -181,8 +244,10 @@ PR #232's body): enclave key creation and persistence; native passkey sign-in an
 node switching teardown; the C2 webview round trip; the Android post-webview relay upgrade;
 and direct-plane regression with and without hosted mode.
 
-The only agent-checkable half of any row is row 1's negative: with no hardware backing
-reported, `ensureKey` fails closed and no hosted session is configured.
+They are open **as device rows**: §4.1's Simulator run is not device evidence and closes none of
+them. It narrows what is _unknown_, not what is _accepted_ — rows 3 and 4 now have a working
+non-hardware reproduction, so a failure there on device is a hardware/entitlement problem rather
+than an unimplemented path.
 
 **Prerequisites before any of it can be attempted:**
 
@@ -208,64 +273,61 @@ operator wires a sending domain. "No email arrived" is not a client bug.
 
 ## 5. Outstanding — audited today, not copied from the old list
 
-### 5.1 The de-hardcode sweep is not done
+### 5.1 The de-hardcode sweep — **done** (closed 2026-07-27)
 
 Glass-plan task T2.7 ("remove every `dark:` variant… grep proves no stray hardcoded
-amber/sky/rose/violet"). Three files still carry both a `dark:` prefix and a raw Tailwind
-palette colour:
+amber/sky/rose/violet"). The three offenders this document listed at `180e340a`
+(`PendingUserInputCard.tsx`, `PendingApprovalCard.tsx`, `ThreadDetailScreen.tsx`) no longer
+carry a `dark:` prefix or a raw Tailwind palette colour.
 
-| File                       | Line    | What is there                                                                   |
-| -------------------------- | ------- | ------------------------------------------------------------------------------- |
-| `PendingUserInputCard.tsx` | 63-64   | `border-sky-500/40 bg-sky-500/10`, `text-sky-700 dark:text-sky-300`             |
-| `PendingApprovalCard.tsx`  | 39-40   | `border-amber-500/40 bg-amber-500/10`, `text-amber-700 dark:text-amber-300`     |
-| `ThreadDetailScreen.tsx`   | 172-174 | `border-violet-500/40 bg-violet-500/10`, `text-violet-700 dark:text-violet-300` |
+Verification at `ffb0dd871`: `grep -rn "dark:" apps/mobile/src` returns **only** the two
+sanctioned non-token hits — `Stack.tsx:50` (`DynamicColorIOS({light, dark})`) and
+`shikiReviewHighlighter.ts` (a shiki theme key). Both are correct and must not be swept.
 
-`rg -c 'dark:'` is `1` for each. Two other `dark:` hits in `apps/mobile/src` are **not**
-token classes and should not be swept: `Stack.tsx:46` (`DynamicColorIOS({light, dark})`) and
-`shikiReviewHighlighter.ts:59` (a shiki theme key). The intended replacements are already
-named in the glass plan §5: `--color-accent`, `--color-warning`, and a violet/plan token that
-does not yet exist.
+### 5.2 The user-message bubble — **resolved** (closed 2026-07-27)
 
-### 5.2 The user-message bubble is unresolved, and code and tokens disagree
+The three `--color-user-bubble*` tokens are now **wired**, through a tested pure module rather
+than an inline class: `features/threads/threadPresentation.ts:14-15` returns
+`bubbleClassName: "bg-user-bubble"` / `textClassName: "text-user-bubble-foreground"`, consumed
+by `ThreadMessage.tsx:62-65`, and pinned by `threadPresentation.test.ts:10-11`.
 
-`global.css` defines `--color-user-bubble` (`#007aff` light / `#0a84ff` dark),
-`--color-user-bubble-foreground`, and `--color-user-bubble-foreground-muted`, commented
-"iMessage-style user bubble". **All three have zero consumers** anywhere in `apps/mobile`.
+The token **values also changed** away from the iMessage blue this document recorded: they are
+now neutral (`global.css:104-106` light `#e4e4e7` / `#27272a`; `global.css:222-224` dark
+`#27272a` / `#f4f4f5`). So the surviving comment "iMessage-style user bubble" is itself stale —
+the shipped treatment is a neutral grey bubble, not a blue one.
 
-What actually renders is `ThreadDetailScreen.tsx:154-161`: `bg-primary` /
-`text-primary-foreground` — i.e. white-on-black in dark, black-on-white in light. So the
-owner decision is still pending _and_ the tokens are dead code that will mislead the next
-person. Settling it means either deleting the tokens or wiring them.
+### 5.3 Unwired vendored modules and dependencies — **mostly closed** (updated 2026-07-27)
 
-### 5.3 Unwired vendored modules and dependencies
-
-Real consumers counted across `apps/mobile/src`:
+Real consumers counted across `apps/mobile/src` at `ffb0dd871`:
 
 | Thing                                                        | Consumers                                                                                       | Status             |
 | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ------------------ |
 | `ryco-device-key`                                            | `platform/deviceKey.ts`                                                                         | **wired**          |
 | `ryco-composer-editor`                                       | `native/ComposerEditor.{ios,native}.tsx` → `components/ComposerEditor.tsx`                      | **wired**          |
-| `ryco-review-diff`                                           | `features/review/ReviewSheet.tsx` (registered at `Stack.tsx:273`)                               | **wired**          |
-| `ryco-native-controls` — iOS `RycoKeyboardCommands`          | `native/KeyboardCommands.ios.tsx` → `HardwareKeyboardCommandProvider` (mounted `Stack.tsx:213`) | **wired**          |
-| `ryco-native-controls` — Android `RycoHeaderButtonView`      | `native/HeaderButton.android.tsx`, which **nothing imports**                                    | **zero consumers** |
-| `ryco-markdown-text` — native renderer                       | `native/SelectableMarkdownText.{tsx,ios.tsx}`, which **nothing imports**                        | **zero consumers** |
+| `ryco-review-diff`                                           | `features/review/ReviewSheet.tsx`                                                               | **wired**          |
+| `ryco-native-controls` — iOS `RycoKeyboardCommands`          | `native/KeyboardCommands.ios.tsx` → `HardwareKeyboardCommandProvider` (mounted `Stack.tsx:221`) | **wired**          |
+| `ryco-markdown-text` — native renderer                       | `native/SelectableMarkdownText.{tsx,ios.tsx}` → **`ThreadMessage.tsx:75-84`**                   | **wired** (new)    |
 | `ryco-markdown-text` — JS submodules `/file-icons`, `/links` | the composer (`ComposerEditor.{ios,native}.tsx`)                                                | wired              |
-| `@legendapp/list@3.2.0`                                      | none                                                                                            | **zero consumers** |
+| `@legendapp/list@3.2.0`                                      | `InboxScreen.tsx`, `ProjectsScreen.tsx`, `ThreadDetailScreen.tsx`                               | **wired** (new)    |
+| `ryco-native-controls` — Android `RycoHeaderButtonView`      | `native/HeaderButton.android.tsx`, which **nothing imports**                                    | **zero consumers** |
 | `react-native-webview@^13.16.1`                              | none                                                                                            | **zero consumers** |
 
-Notes on the last three:
+What changed:
 
-- The **native markdown renderer is dark**: assistant messages render as a plain
-  `<Text className="font-sans text-base …">` (`ThreadDetailScreen.tsx:159-163`). No markdown,
-  no shiki, no selection. The whole `RycoMarkdownText` Fabric component, its shadow nodes,
-  and its 60-odd file icons are compiled and shipped for nothing today.
-- **`@legendapp/list` is unused because both feeds are plain `ScrollView`s**
-  (`HomeScreen.tsx:119`, `ThreadDetailScreen.tsx:127`). The design spec calls for
-  `KeyboardAwareLegendList` with the iOS-26 content-inset math. Nothing is virtualized; long
-  threads will be a problem.
-- **`react-native-webview` is unused by design**, not by oversight — `HostedFallbackSession.ts`
-  documents at length why the in-app WebView path is refused on Android. It should be dropped
-  from `package.json` unless something else wants it.
+- **The native markdown renderer is now live.** Assistant messages render through
+  `SelectableMarkdownText` with a full `NativeMarkdownTextStyle` built from tokens
+  (`ThreadMessage.tsx:35-54`), behind a `hasNativeSelectableMarkdownText()` capability check
+  that falls back to plain `<Text>` (`ThreadMessage.tsx:67-74`). User messages deliberately
+  stay plain text.
+- **Both feeds are virtualized.** The claim "both feeds are plain `ScrollView`s" is dead:
+  `InboxScreen.tsx` and `ProjectsScreen.tsx` use `LegendList` with `recycleItems`, and
+  `ThreadDetailScreen.tsx:322-333` uses it with `alignItemsAtEnd` / `maintainScrollAtEnd` /
+  `maintainVisibleContentPosition`.
+- **`react-native-webview` is still unused by design**, not by oversight —
+  `HostedFallbackSession.ts` documents why the in-app WebView path is refused on Android. It is
+  still declared at `apps/mobile/package.json:93` and should be dropped unless something wants
+  it.
+- **`HeaderButton.android.tsx` still has zero importers.** Android remains unexercised (§5.5).
 
 ### 5.4 WCAG AA contrast audit — not done
 

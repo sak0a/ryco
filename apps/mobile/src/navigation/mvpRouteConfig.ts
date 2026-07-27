@@ -104,9 +104,15 @@ export const MVP_ROOT_ROUTES = {
   },
   SettingsSheet: {
     linking: "settings",
-    overlay: false,
+    // Floats over the workspace: opening Settings from the Home header must not
+    // change which thread the workspace is on (see WORKSPACE_OVERLAY_ROUTES).
+    overlay: true,
     headerPreset: "none",
-    ios: { presentation: "card" },
+    // A large single-detent sheet rather than a full-screen card, so the name
+    // stops lying and the grabber/swipe dismiss it. Its nested settings stack
+    // supplies the headers inside. Android keeps the card: a nested stack inside
+    // an Android form sheet is unverified, and there is no Android QA yet.
+    ios: { presentation: "formSheet", sheetAllowedDetents: [0.95], sheetGrabberVisible: true },
     android: { presentation: "card" },
   },
   Onboarding: {
