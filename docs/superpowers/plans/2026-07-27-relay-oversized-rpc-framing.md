@@ -35,7 +35,60 @@ and works perfectly over the relay; a larger one kills the channel. That intermi
 repository size is the signature of this bug, and it is why it has not been read as a framing
 problem before.
 
-**Status of this claim: PROVED from constants and code paths, NOT yet observed at runtime.** See §5.
+### Observed at runtime
+
+Driving the real `RelayChannelRegistry` with `RELAY_INITIAL_LIMITS`:
+
+```
+size=262144  accepted=true   frames=[data]                         wireBytes=262245  open=true
+size=262145  accepted=false  frames=[channel.close(slow_consumer)] wireBytes=108     open=false
+```
+
+The ceiling is **262,144 payload bytes inclusive**, CBOR frame overhead is 101 bytes, and one byte
+over destroys the channel. The receiver never sees the payload at all — 108 bytes reach the wire,
+which is the `channel.close` alone.
+
+**This repository's own file browser already exceeds the limit today.** Measured over its real
+file list: 2,968 entries → 340,057 bytes, **1.3× the ceiling**, first breach at ~2,268 entries
+(114.6 B/entry). Browsing `node_modules/.bun` via `filesystem.browse` breaches it too — 1,359
+directories → 270,032 bytes.
+
+### It is not a filesystem bug
+
+Two different RPCs get called "file listing" and only one is the file browser:
+
+- **`projects.listEntries`** — the file browser. Capped at `WORKSPACE_INDEX_MAX_ENTRIES = 25_000`,
+  ~11× above the byte ceiling. 25,000 entries ≈ 2.9 MB. This is the bad one.
+- **`filesystem.browse`** — the path picker. Returns directories only
+  (`WorkspaceEntries.ts:708` filters on `pointsToDirectory`), so it breaches at ~1,300–4,200
+  entries. Real but rarer.
+- **`projects.searchEntries`** — safe, and the only one that is:
+  `PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200` is genuinely below the ceiling.
+
+Any RPC whose response exceeds 256 KiB has this defect. Framing it as a filesystem problem
+understates it.
+
+### The bug in the bug: the close reason is wrong
+
+The registry closes with **`slow_consumer`**, which describes backpressure — a peer that cannot
+keep up. The actual condition is an oversized frame, and `transfer_limit` is the stable reason
+already used for the _identical_ inbound check at `RelayChannelRegistry.ts:273`, already present
+in `RELAY_MINOR_2_CLOSE_REASONS`.
+
+**This mislabel is very likely why the defect was never diagnosed from Hub telemetry.** It reads
+as a network problem rather than "the node emitted a frame that is too large". Correcting it is a
+one-line, wire-legal observability fix and is the recommended first change — independent of, and
+far smaller than, the chunking work.
+
+Two further details worth having right:
+
+- The registry's `send()` **returns `false`**; it does not throw. The throw is one level up at
+  `HubConnectorLive.ts:78-79` — `"Relay channel output is full."` — a defect that kills the RPC
+  server fiber.
+- One RPC response is unconditionally one relay frame:
+  `RpcSerialization.json` is `encode: (response) => JSON.stringify(response)` with
+  `includesFraming: false`, and `RpcByteSession.ts:55-63` hands the whole encoded response to the
+  sink in a single call.
 
 ---
 
@@ -113,20 +166,27 @@ spec quoted in §2 is the basis for that. See §5 for the residual risk.
 
 ## 4. Scope of the symptom
 
-`projects.listEntries` and the filesystem browse are the two confirmed oversized responses.
-Thread and shell snapshot replays are plausible candidates and have not been measured. If more
-methods breach 256 KiB, this stops being "the filesystem doesn't work over relay" and becomes a
-general relay defect, which raises its priority.
+`projects.listEntries` and `filesystem.browse` are measured and confirmed (§1). Thread and shell
+snapshot replays are plausible candidates and have not been measured. The only pagination anywhere
+near this RPC group is `ORCHESTRATION_REPLAY_PAGE_MAX_LIMIT = 1_000`, which covers event replay,
+not these paths.
+
+## 4.1 Recommended order
+
+1. **Fix the close reason** — `slow_consumer` → `transfer_limit` at
+   `RelayChannelRegistry.ts:219`. One line, wire-legal, no behaviour change, and it makes every
+   future occurrence diagnosable from telemetry instead of looking like a network problem.
+2. **Commit the reproduction** as a regression test.
+3. **Then** the chunking work in §2, once §5.2 is answered.
 
 ---
 
 ## 5. What must be settled before writing code
 
-1. **Observe the failure.** Everything above is derived from constants and code paths. The
-   cheapest decisive reproduction is a unit test driving an oversized buffer through
-   `RelayChannelRegistry` / `relayEngine` — both already have test files
-   (`RelayChannelRegistry.test.ts`, `relayEngine.test.ts`). Do this first; it is also the
-   regression test.
+1. ~~**Observe the failure.**~~ **Settled** — see §1. The failure was reproduced against the real
+   `RelayChannelRegistry` with `RELAY_INITIAL_LIMITS`, and the exact ceiling, overhead and close
+   behaviour are recorded there. That reproduction should be committed as the regression test
+   (`RelayChannelRegistry.test.ts` is the natural home).
 2. **Confirm the deployed Hub forwards `data.payload` byte-for-byte.** The spec says a conforming
    relay must not parse it, and the whole no-negotiation design rests on that. The spec is a strong
    normative guarantee, but it is not the same as having read the Hub's forwarding code. If the
