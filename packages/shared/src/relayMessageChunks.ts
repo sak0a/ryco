@@ -20,10 +20,23 @@ import {
 // frame boundary would decode incorrectly if each frame were decoded as text on
 // arrival. Here the bytes are concatenated first and decoded once.
 
+/**
+ * A legacy-compatible chunk-support advertisement. JSON permits exactly these
+ * four leading whitespace bytes; repeating them gives us a marker the
+ * canonical RPC encoder will never emit while old decoders still accept it.
+ */
+export const RELAY_CHUNK_CAPABILITY_PRELUDE = Uint8Array.from([
+  0x20, 0x09, 0x0d, 0x0a, 0x20, 0x09, 0x0d, 0x0a,
+]);
+
 export type ChunkPushResult =
   | { readonly kind: "pending" }
   | { readonly kind: "done"; readonly message: Uint8Array }
   | { readonly kind: "error"; readonly reason: ChunkError };
+
+export type PreparedRelayMessage =
+  | { readonly kind: "ready"; readonly payloads: ReadonlyArray<Uint8Array> }
+  | { readonly kind: "error"; readonly reason: "message_too_large" | "peer_unsupported" };
 
 export type ChunkError =
   | "bad_header"
@@ -40,6 +53,27 @@ export type ChunkError =
  */
 export function isChunkedPayload(bytes: Uint8Array): boolean {
   return bytes.byteLength >= RELAY_CHUNK_HEADER_BYTES && bytes[0] === RELAY_CHUNK_MAGIC;
+}
+
+function startsWithChunkCapabilityPrelude(bytes: Uint8Array): boolean {
+  if (bytes.byteLength < RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength) return false;
+  for (let index = 0; index < RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength; index += 1) {
+    if (bytes[index] !== RELAY_CHUNK_CAPABILITY_PRELUDE[index]) return false;
+  }
+  return true;
+}
+
+export function stripRelayChunkCapabilityPrelude(bytes: Uint8Array): {
+  readonly advertised: boolean;
+  readonly message: Uint8Array;
+} {
+  if (!startsWithChunkCapabilityPrelude(bytes)) {
+    return { advertised: false, message: bytes };
+  }
+  return {
+    advertised: true,
+    message: bytes.subarray(RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength),
+  };
 }
 
 function writeHeader(target: Uint8Array, totalBytes: number, final: boolean): void {
@@ -91,33 +125,93 @@ export function splitRelayMessage(
 }
 
 /**
+ * Prepare one logical message for the relay.
+ *
+ * Fitting messages advertise chunk support using JSON whitespace whenever
+ * there is frame headroom. Oversized messages are emitted only after this
+ * channel has observed peer support, keeping independently upgraded peers
+ * compatible without changing relay protocol 1.2.
+ */
+export function prepareRelayMessage(
+  message: Uint8Array,
+  options: {
+    readonly maxChunkBytes: number;
+    readonly maxMessageBytes: number;
+    readonly peerSupportsChunking: boolean;
+  },
+): PreparedRelayMessage {
+  if (
+    !Number.isSafeInteger(options.maxChunkBytes) ||
+    options.maxChunkBytes <= 0 ||
+    !Number.isSafeInteger(options.maxMessageBytes) ||
+    options.maxMessageBytes < 0
+  ) {
+    throw new TypeError(
+      "Relay chunk limits must be positive and message limits non-negative safe integers.",
+    );
+  }
+  if (message.byteLength > options.maxMessageBytes) {
+    return { kind: "error", reason: "message_too_large" };
+  }
+  if (message.byteLength <= options.maxChunkBytes) {
+    if (message.byteLength + RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength <= options.maxChunkBytes) {
+      const advertised = new Uint8Array(
+        RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength + message.byteLength,
+      );
+      advertised.set(RELAY_CHUNK_CAPABILITY_PRELUDE);
+      advertised.set(message, RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength);
+      return { kind: "ready", payloads: [advertised] };
+    }
+    return { kind: "ready", payloads: [message] };
+  }
+  if (!options.peerSupportsChunking) {
+    return { kind: "error", reason: "peer_unsupported" };
+  }
+  return {
+    kind: "ready",
+    payloads: splitRelayMessage(message, options.maxChunkBytes),
+  };
+}
+
+/**
  * Reassembles chunks arriving in order on one channel.
  *
  * `heldBytes` is exposed so flow-control accounting can include buffered bytes:
  * without it a peer can hold megabytes that backpressure cannot see.
  */
 export class RelayMessageAssembler {
-  #buffer: Uint8Array | null = null;
+  #parts: Uint8Array[] = [];
   #received = 0;
   #total = 0;
+  #peerSupportsChunking = false;
 
   /** Bytes currently buffered awaiting completion. */
   get heldBytes(): number {
     return this.#received;
   }
 
+  get peerSupportsChunking(): boolean {
+    return this.#peerSupportsChunking;
+  }
+
   push(payload: Uint8Array): ChunkPushResult {
     if (!isChunkedPayload(payload)) {
       // A legacy payload arriving mid-message means the peer interleaved, or a
       // chunk was lost. Either way the buffer can no longer be trusted.
-      if (this.#buffer !== null) {
+      if (this.#total !== 0) {
         this.reset();
         return { kind: "error", reason: "interleaved_legacy" };
       }
-      return { kind: "done", message: payload };
+      const stripped = stripRelayChunkCapabilityPrelude(payload);
+      if (stripped.advertised) this.#peerSupportsChunking = true;
+      return { kind: "done", message: stripped.message };
     }
 
-    if (payload[1] !== RELAY_CHUNK_VERSION || payload[3] !== 0) {
+    if (
+      payload[1] !== RELAY_CHUNK_VERSION ||
+      (payload[2]! & ~RELAY_CHUNK_FLAG_FINAL) !== 0 ||
+      payload[3] !== 0
+    ) {
       this.reset();
       return { kind: "error", reason: "bad_header" };
     }
@@ -126,13 +220,17 @@ export class RelayMessageAssembler {
     const body = payload.subarray(RELAY_CHUNK_HEADER_BYTES);
     const final = (payload[2]! & RELAY_CHUNK_FLAG_FINAL) !== 0;
 
-    if (this.#buffer === null) {
-      // Reject before allocating, so a hostile `totalBytes` cannot make us
-      // reserve memory we then discard.
+    if (body.byteLength === 0) {
+      this.reset();
+      return { kind: "error", reason: "bad_header" };
+    }
+
+    if (this.#total === 0) {
+      // Reject before retaining body bytes, so a hostile `totalBytes` cannot
+      // reserve memory it has not actually sent.
       if (total > RELAY_MAX_RPC_MESSAGE_BYTES || total === 0) {
         return { kind: "error", reason: "message_too_large" };
       }
-      this.#buffer = new Uint8Array(total);
       this.#total = total;
       this.#received = 0;
     } else if (total !== this.#total) {
@@ -145,7 +243,12 @@ export class RelayMessageAssembler {
       return { kind: "error", reason: "overflow" };
     }
 
-    this.#buffer.set(body, this.#received);
+    this.#peerSupportsChunking = true;
+    // Retain exactly the body bytes we account for, rather than a subarray
+    // whose backing buffer also keeps the frame header alive.
+    const retainedBody = Uint8Array.from(body);
+    body.fill(0);
+    this.#parts.push(retainedBody);
     this.#received += body.byteLength;
 
     if (!final) return { kind: "pending" };
@@ -155,8 +258,14 @@ export class RelayMessageAssembler {
       return { kind: "error", reason: "truncated" };
     }
 
-    const message = this.#buffer;
-    this.#buffer = null;
+    const message = new Uint8Array(this.#total);
+    let offset = 0;
+    for (const part of this.#parts) {
+      message.set(part, offset);
+      offset += part.byteLength;
+      part.fill(0);
+    }
+    this.#parts = [];
     this.#received = 0;
     this.#total = 0;
     return { kind: "done", message };
@@ -164,9 +273,10 @@ export class RelayMessageAssembler {
 
   /** Drops and zeroes any partial message. */
   reset(): void {
-    this.#buffer?.fill(0);
-    this.#buffer = null;
+    for (const part of this.#parts) part.fill(0);
+    this.#parts = [];
     this.#received = 0;
     this.#total = 0;
+    this.#peerSupportsChunking = false;
   }
 }

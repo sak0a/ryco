@@ -9,7 +9,7 @@ import type {
   RelayLimits,
 } from "@ryco/contracts/relay";
 import { RELAY_MAX_RPC_MESSAGE_BYTES } from "@ryco/contracts/relay";
-import { splitRelayMessage } from "@ryco/shared/relayMessageChunks";
+import { prepareRelayMessage } from "@ryco/shared/relayMessageChunks";
 
 import { RelaySendQueue } from "./RelaySendQueue.ts";
 
@@ -18,6 +18,7 @@ const version = { protocolMajor: 1, protocolMinor: 2 } as const;
 export interface RelayRpcChannelSession {
   readonly receive: (bytes: Uint8Array) => Promise<boolean>;
   readonly queuedBytes: () => Promise<number>;
+  readonly supportsChunkedMessages: () => boolean;
   readonly close: () => Promise<void>;
 }
 
@@ -228,24 +229,31 @@ export class RelayChannelRegistry {
           // A message larger than one data frame is split across several. All
           // chunks of one message go into the per-channel FIFO synchronously
           // here, so they cannot interleave with another message.
-          const oversized = bytes.byteLength > RELAY_MAX_RPC_MESSAGE_BYTES;
-          const chunks = oversized ? [] : splitRelayMessage(bytes, this.#limits.maxDataChunkBytes);
+          const prepared = prepareRelayMessage(bytes, {
+            maxChunkBytes: this.#limits.maxDataChunkBytes,
+            maxMessageBytes: Math.min(
+              RELAY_MAX_RPC_MESSAGE_BYTES,
+              this.#limits.maxQueuedBytes - this.#limits.maxControlFrameBytes,
+            ),
+            peerSupportsChunking: entry.session.supportsChunkedMessages(),
+          });
           const accepted =
-            !oversized &&
-            chunks.every((chunk) =>
+            prepared.kind === "ready" &&
+            prepared.payloads.every((payload) =>
               this.#sendQueue.enqueueData({
                 type: "data",
                 ...version,
                 channelId: frame.channelId,
                 sequence: outputSequence++ as RelayDataFrame["sequence"],
-                payload: Uint8Array.from(chunk),
+                payload: Uint8Array.from(payload),
               }),
             );
           if (accepted) {
             entry.outboundSequence = outputSequence;
             this.#onOutboundReady();
           } else {
-            const reason: RelayCloseReason = oversized ? "transfer_limit" : "slow_consumer";
+            const reason: RelayCloseReason =
+              prepared.kind === "error" ? "transfer_limit" : "slow_consumer";
             queueMicrotask(() => {
               void this.closeChannel(frame.channelId, reason).catch(this.#onFatal);
             });

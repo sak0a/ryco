@@ -9,6 +9,7 @@ import type {
 } from "@ryco/contracts/relay";
 import { RELAY_MAX_RPC_MESSAGE_BYTES } from "@ryco/contracts/relay";
 import { decodeRelayFrame } from "@ryco/shared/relayCodec";
+import { stripRelayChunkCapabilityPrelude } from "@ryco/shared/relayMessageChunks";
 
 import {
   RelayChannelProtocolError,
@@ -63,6 +64,7 @@ function harness() {
     RelayRpcChannelSession & {
       queued: number;
       closes: number;
+      chunkSupport: boolean;
       send: (bytes: Uint8Array) => boolean;
     }
   >();
@@ -76,12 +78,14 @@ function harness() {
         const session = {
           queued: 0,
           closes: 0,
+          chunkSupport: false,
           send,
           receive: async (bytes: Uint8Array) => {
             values.push(Uint8Array.from(bytes));
             return true;
           },
           queuedBytes: async () => session.queued,
+          supportsChunkedMessages: () => session.chunkSupport,
           close: async () => {
             session.closes += 1;
           },
@@ -117,7 +121,9 @@ describe("RelayChannelRegistry", () => {
     sendQueue.flush();
     const output = decodeAll(sent).at(-1);
     expect(output).toMatchObject({ type: "data", channelId: channelA, sequence: 0 });
-    expect(output?.type === "data" && output.payload).toEqual(Uint8Array.of(9, 0, 8));
+    expect(
+      output?.type === "data" && stripRelayChunkCapabilityPrelude(output.payload).message,
+    ).toEqual(Uint8Array.of(9, 0, 8));
   });
 
   it("closes an oversized outbound frame as transfer_limit, not slow_consumer", async () => {
@@ -159,7 +165,9 @@ describe("RelayChannelRegistry", () => {
     // rather than exercise the split.
     const message = new Uint8Array(limits.maxDataChunkBytes * 2 - 64);
     for (let i = 0; i < message.byteLength; i += 1) message[i] = i % 251;
-    expect(sessions.get(channelA as string)!.send(message)).toBe(true);
+    const session = sessions.get(channelA as string)!;
+    session.chunkSupport = true;
+    expect(session.send(message)).toBe(true);
     sendQueue.flush();
 
     const frames = decodeAll(sent);
@@ -176,6 +184,27 @@ describe("RelayChannelRegistry", () => {
     expect(frames.map((frame) => (frame.type === "data" ? frame.sequence : -1))).toEqual(
       frames.map((_, index) => index),
     );
+  });
+
+  it("closes with transfer_limit instead of sending chunks before peer support", async () => {
+    const { registry, sendQueue, sent, sessions } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+    sent.length = 0;
+
+    const message = new Uint8Array(limits.maxDataChunkBytes + 1);
+    expect(sessions.get(channelA as string)!.send(message)).toBe(false);
+    await Promise.resolve();
+    sendQueue.flush();
+
+    const frames = decodeAll(sent);
+    expect(frames).toEqual([
+      expect.objectContaining({
+        type: "channel.close",
+        channelId: channelA,
+        reason: "transfer_limit",
+      }),
+    ]);
   });
 
   it("rejects unsupported and duplicate channels without constructing extra sessions", async () => {

@@ -1,17 +1,29 @@
-import { EnvironmentId, type ProjectSearchEntriesResult } from "@ryco/contracts";
+import {
+  EnvironmentId,
+  type FilesystemBrowseResult,
+  type ProjectSearchEntriesResult,
+} from "@ryco/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-const { searchEntries } = vi.hoisted(() => ({ searchEntries: vi.fn() }));
+const { readEnvironmentApi, searchEntries } = vi.hoisted(() => ({
+  readEnvironmentApi: vi.fn(),
+  searchEntries: vi.fn(),
+}));
 
 vi.mock("~/environmentApi", () => ({
   ensureEnvironmentApi: vi.fn(() => ({ projects: { searchEntries } })),
+  readEnvironmentApi,
 }));
 
+import { appAtomRegistry } from "@ryco/client-runtime/rpc";
 import {
+  getFilesystemBrowseStateAtom,
   getProjectSearchEntriesSnapshot,
   invalidateProjectSearchEntries,
   releaseProjectSearchEntriesScope,
+  requestFilesystemBrowse,
   requestProjectSearchEntries,
+  resolveFilesystemBrowseKey,
   resetProjectAtomsForTests,
   retainProjectSearchEntriesScope,
 } from "./projectAtoms";
@@ -62,6 +74,44 @@ afterEach(() => {
 });
 
 describe("projectAtoms", () => {
+  it("keeps a missing environment API retryable instead of caching an empty browse", async () => {
+    const browse = vi.fn<() => Promise<FilesystemBrowseResult>>().mockResolvedValue({
+      parentPath: "/workspace",
+      entries: [],
+    });
+    const input = {
+      environmentId: ENVIRONMENT_ID,
+      partialPath: "/workspace/",
+    };
+    const key = resolveFilesystemBrowseKey(input);
+    if (key === null) throw new Error("expected filesystem browse key");
+
+    readEnvironmentApi.mockReturnValueOnce(undefined);
+    requestFilesystemBrowse(input);
+    await flush();
+
+    expect(appAtomRegistry.get(getFilesystemBrowseStateAtom(key))).toMatchObject({
+      data: null,
+      isFetching: false,
+      isPending: false,
+      error: expect.objectContaining({
+        message: expect.stringContaining("temporarily unavailable"),
+      }),
+    });
+
+    readEnvironmentApi.mockReturnValue({ filesystem: { browse } });
+    requestFilesystemBrowse(input);
+    await flush();
+
+    expect(browse).toHaveBeenCalledWith({ partialPath: "/workspace/" });
+    expect(appAtomRegistry.get(getFilesystemBrowseStateAtom(key))).toMatchObject({
+      data: { parentPath: "/workspace", entries: [] },
+      isFetching: false,
+      isPending: false,
+      error: null,
+    });
+  });
+
   it("does not fetch when the query is empty, gating is disabled, or scope is incomplete", () => {
     requestProjectSearchEntries({ environmentId: ENVIRONMENT_ID, cwd: CWD, query: "" });
     requestProjectSearchEntries({

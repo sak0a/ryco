@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
+import { RELAY_CHUNK_CAPABILITY_PRELUDE } from "@ryco/shared/relayMessageChunks";
 
 import { makeRpcByteSession } from "./RpcByteSession.ts";
 
@@ -22,6 +23,36 @@ const request = (id: string, value: string) =>
   );
 
 describe("RpcByteSession", () => {
+  it.effect("records a legacy-compatible chunk capability advertisement", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const output = yield* Deferred.make<Uint8Array>();
+        const handlers = TestGroup.toLayer(
+          Effect.succeed(
+            TestGroup.of({
+              echo: ({ value }) => Effect.succeed({ value }),
+            }),
+          ),
+        );
+        const session = yield* makeRpcByteSession(TestGroup, handlers, (bytes) =>
+          Deferred.succeed(output, Uint8Array.from(bytes)).pipe(Effect.asVoid),
+        );
+        expect(session.supportsChunkedMessages()).toBe(false);
+        const legacyCompatibleRequest = new Uint8Array(
+          RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength + request("1", "relay").byteLength,
+        );
+        legacyCompatibleRequest.set(RELAY_CHUNK_CAPABILITY_PRELUDE);
+        legacyCompatibleRequest.set(
+          request("1", "relay"),
+          RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength,
+        );
+        expect(yield* session.receive(legacyCompatibleRequest)).toBe(true);
+        yield* Deferred.await(output);
+        expect(session.supportsChunkedMessages()).toBe(true);
+      }),
+    ),
+  );
+
   it.effect("runs a real Effect RPC request through ordered bytes", () =>
     Effect.scoped(
       Effect.gen(function* () {

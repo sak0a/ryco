@@ -1,6 +1,7 @@
 import { RELAY_INITIAL_LIMITS, type RelayChannelId, type RelayFrame } from "@ryco/contracts";
 import { encodeBase64Url } from "@ryco/client-runtime/relay";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
+import { stripRelayChunkCapabilityPrelude } from "@ryco/shared/relayMessageChunks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { BrowserHostedRelaySocket, hostedRelayWebSocketUrl } from "./relaySocket";
@@ -94,7 +95,9 @@ function authenticate(socket: MockWebSocket) {
 
 function lastPayload(socket: MockWebSocket): number[] | null {
   const decoded = decodeRelayFrame(new Uint8Array(socket.sent.at(-1)!));
-  return decoded.ok && decoded.value.type === "data" ? [...decoded.value.payload] : null;
+  return decoded.ok && decoded.value.type === "data"
+    ? [...stripRelayChunkCapabilityPrelude(decoded.value.payload).message]
+    : null;
 }
 
 beforeEach(() => {

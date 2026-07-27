@@ -5,6 +5,7 @@ import {
   DEFAULT_MODEL,
   ORCHESTRATION_WS_METHODS,
   WS_METHODS,
+  type EnvironmentApi,
   type EnvironmentId,
   type FilesystemBrowseResult,
   type ProjectId,
@@ -22,6 +23,7 @@ import {
   ArrowDownIcon,
   ArrowLeftIcon,
   ArrowUpIcon,
+  CircleAlertIcon,
   CornerLeftUpIcon,
   FolderIcon,
   FolderPlusIcon,
@@ -1163,10 +1165,35 @@ function OpenCommandPaletteDialog() {
   });
 
   const handleAddProject = useCallback(
-    async (rawCwd: string) => {
-      if (!browseEnvironmentId) return;
-      const api = readEnvironmentApi(browseEnvironmentId);
-      if (!api) return;
+    async (
+      rawCwd: string,
+      target?: {
+        readonly environmentId: EnvironmentId;
+        readonly api: EnvironmentApi;
+      },
+    ) => {
+      const environmentId = target?.environmentId ?? browseEnvironmentId;
+      if (!environmentId) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to add project",
+            description: "Choose an environment and try again.",
+          }),
+        );
+        return;
+      }
+      const api = target?.api ?? readEnvironmentApi(environmentId);
+      if (!api) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to add project",
+            description: "The environment is still reconnecting. Try again shortly.",
+          }),
+        );
+        return;
+      }
 
       if (isUnsupportedWindowsProjectPath(rawCwd.trim(), browseEnvironmentPlatform)) {
         toastManager.add(
@@ -1194,7 +1221,7 @@ function OpenCommandPaletteDialog() {
       if (cwd.length === 0) return;
 
       const existing = findProjectByPath(
-        projects.filter((project) => project.environmentId === browseEnvironmentId),
+        projects.filter((project) => project.environmentId === environmentId),
         cwd,
       );
       if (existing) {
@@ -1238,7 +1265,7 @@ function OpenCommandPaletteDialog() {
           },
           createdAt: new Date().toISOString(),
         });
-        await handleNewThread(scopeProjectRef(browseEnvironmentId, projectId), {
+        await handleNewThread(scopeProjectRef(environmentId, projectId), {
           envMode: settings.defaultThreadEnvMode,
         }).catch(() => undefined);
         setOpen(false);
@@ -1421,7 +1448,10 @@ function OpenCommandPaletteDialog() {
             }),
         destinationPath,
       });
-      await handleAddProject(result.cwd);
+      await handleAddProject(result.cwd, {
+        environmentId: addProjectCloneFlow.environmentId,
+        api,
+      });
     } catch (error) {
       toastManager.add(
         stackedThreadToast({
@@ -1471,23 +1501,41 @@ function OpenCommandPaletteDialog() {
   const canBrowseUp =
     isBrowsing && !relativePathNeedsActiveProject && canNavigateUp(browseDirectoryPath);
 
-  const browseGroups = buildBrowseGroups({
-    browseEntries: filteredBrowseEntries,
-    browseQuery: query,
-    canBrowseUp,
-    upIcon: <CornerLeftUpIcon className={ITEM_ICON_CLASS} />,
-    directoryIcon: <FolderIcon className={ITEM_ICON_CLASS} />,
-    symlinkIcon: <FolderSymlinkIcon className={ITEM_ICON_CLASS} />,
-    browseUp,
-    browseTo,
-    browseToPath,
-  });
-  const cloneDestinationBrowseGroups = useMemo(
-    () =>
-      browseGroups.map((group) =>
-        group.value === "directories" ? { ...group, label: "Select where to clone" } : group,
-      ),
-    [browseGroups],
+  const browseGroups: CommandPaletteView["groups"] = [
+    ...(browseQuery.error
+      ? [
+          {
+            value: "browse-status",
+            label: "Filesystem",
+            items: [
+              {
+                kind: "action" as const,
+                value: "browse-status:error",
+                searchTerms: ["filesystem", "unavailable", "error"],
+                title: "Unable to browse folders",
+                description: errorMessage(browseQuery.error),
+                icon: <CircleAlertIcon className={ITEM_ICON_CLASS} />,
+                disabled: true,
+                run: async () => {},
+              },
+            ],
+          },
+        ]
+      : []),
+    ...buildBrowseGroups({
+      browseEntries: filteredBrowseEntries,
+      browseQuery: query,
+      canBrowseUp,
+      upIcon: <CornerLeftUpIcon className={ITEM_ICON_CLASS} />,
+      directoryIcon: <FolderIcon className={ITEM_ICON_CLASS} />,
+      symlinkIcon: <FolderSymlinkIcon className={ITEM_ICON_CLASS} />,
+      browseUp,
+      browseTo,
+      browseToPath,
+    }),
+  ];
+  const cloneDestinationBrowseGroups = browseGroups.map((group) =>
+    group.value === "directories" ? { ...group, label: "Select where to clone" } : group,
   );
 
   const remoteProjectContext = useMemo(() => {

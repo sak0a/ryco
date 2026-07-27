@@ -1,10 +1,14 @@
 import { RELAY_CHUNK_HEADER_BYTES, RELAY_MAX_RPC_MESSAGE_BYTES } from "@ryco/contracts/relay";
+import { RpcSerialization } from "effect/unstable/rpc";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  prepareRelayMessage,
+  RELAY_CHUNK_CAPABILITY_PRELUDE,
   isChunkedPayload,
   RelayMessageAssembler,
   splitRelayMessage,
+  stripRelayChunkCapabilityPrelude,
 } from "./relayMessageChunks.ts";
 
 const LIMIT = 64;
@@ -51,6 +55,90 @@ describe("splitRelayMessage", () => {
 
   it("refuses a limit too small to carry a header", () => {
     expect(() => splitRelayMessage(new Uint8Array(100), RELAY_CHUNK_HEADER_BYTES)).toThrow();
+  });
+});
+
+describe("chunk capability negotiation", () => {
+  it("uses a prelude that the legacy JSON RPC decoder accepts as whitespace", () => {
+    const parser = RpcSerialization.json.makeUnsafe();
+    const message = new TextEncoder().encode("[]");
+    const advertised = new Uint8Array(
+      RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength + message.byteLength,
+    );
+    advertised.set(RELAY_CHUNK_CAPABILITY_PRELUDE);
+    advertised.set(message, RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength);
+
+    expect(parser.decode(advertised)).toEqual([]);
+  });
+
+  it("detects and strips the exact capability prelude", () => {
+    const message = new TextEncoder().encode('{"ok":true}');
+    const prepared = prepareRelayMessage(message, {
+      maxChunkBytes: LIMIT,
+      maxMessageBytes: 1_024,
+      peerSupportsChunking: false,
+    });
+
+    expect(prepared.kind).toBe("ready");
+    if (prepared.kind !== "ready") return;
+    expect(prepared.payloads).toHaveLength(1);
+    expect(prepared.payloads[0]).not.toBe(message);
+    expect(stripRelayChunkCapabilityPrelude(prepared.payloads[0]!)).toEqual({
+      advertised: true,
+      message,
+    });
+  });
+
+  it("leaves unadvertised legacy payloads byte-identical", () => {
+    const legacy = new TextEncoder().encode('{"legacy":true}');
+    expect(stripRelayChunkCapabilityPrelude(legacy)).toEqual({
+      advertised: false,
+      message: legacy,
+    });
+  });
+
+  it("does not emit chunks before the peer advertises support", () => {
+    const message = new Uint8Array(LIMIT + 1);
+    expect(
+      prepareRelayMessage(message, {
+        maxChunkBytes: LIMIT,
+        maxMessageBytes: 1_024,
+        peerSupportsChunking: false,
+      }),
+    ).toEqual({ kind: "error", reason: "peer_unsupported" });
+  });
+
+  it("chunks an oversized frame after the peer advertises support", () => {
+    const message = new Uint8Array(LIMIT + 1);
+    const prepared = prepareRelayMessage(message, {
+      maxChunkBytes: LIMIT,
+      maxMessageBytes: 1_024,
+      peerSupportsChunking: true,
+    });
+    expect(prepared.kind).toBe("ready");
+    if (prepared.kind !== "ready") return;
+    expect(prepared.payloads.length).toBeGreaterThan(1);
+    expect(prepared.payloads.every(isChunkedPayload)).toBe(true);
+  });
+
+  it("enforces the negotiated logical-message ceiling before framing", () => {
+    expect(
+      prepareRelayMessage(new Uint8Array(101), {
+        maxChunkBytes: LIMIT,
+        maxMessageBytes: 100,
+        peerSupportsChunking: true,
+      }),
+    ).toEqual({ kind: "error", reason: "message_too_large" });
+  });
+
+  it("rejects cleanly when negotiated queue limits leave no message headroom", () => {
+    expect(
+      prepareRelayMessage(new Uint8Array(1), {
+        maxChunkBytes: LIMIT,
+        maxMessageBytes: 0,
+        peerSupportsChunking: true,
+      }),
+    ).toEqual({ kind: "error", reason: "message_too_large" });
   });
 });
 
@@ -139,6 +227,28 @@ describe("RelayMessageAssembler", () => {
     }
   });
 
+  it("rejects unsupported chunk flag bits", () => {
+    const assembler = new RelayMessageAssembler();
+    const chunk = Uint8Array.from(splitRelayMessage(new Uint8Array(200), LIMIT)[0]!);
+    chunk[2] = 0x02;
+    expect(assembler.push(chunk)).toEqual({ kind: "error", reason: "bad_header" });
+  });
+
+  it("retains only received body bytes instead of allocating the declared total", () => {
+    const assembler = new RelayMessageAssembler();
+    const chunk = new Uint8Array(RELAY_CHUNK_HEADER_BYTES + 1);
+    chunk[0] = 0x00;
+    chunk[1] = 0x01;
+    chunk[4] = (RELAY_MAX_RPC_MESSAGE_BYTES >>> 24) & 0xff;
+    chunk[5] = (RELAY_MAX_RPC_MESSAGE_BYTES >>> 16) & 0xff;
+    chunk[6] = (RELAY_MAX_RPC_MESSAGE_BYTES >>> 8) & 0xff;
+    chunk[7] = RELAY_MAX_RPC_MESSAGE_BYTES & 0xff;
+    chunk[8] = 0x7f;
+
+    expect(assembler.push(chunk)).toEqual({ kind: "pending" });
+    expect(assembler.heldBytes).toBe(1);
+  });
+
   it("rejects a chunk whose total disagrees with the first", () => {
     const assembler = new RelayMessageAssembler();
     const chunks = splitRelayMessage(new Uint8Array(200), LIMIT);
@@ -190,8 +300,12 @@ describe("RelayMessageAssembler", () => {
 
   it("drops held bytes on reset", () => {
     const assembler = new RelayMessageAssembler();
-    assembler.push(splitRelayMessage(new Uint8Array(200), LIMIT)[0]!);
+    const first = Uint8Array.from(splitRelayMessage(new Uint8Array(200).fill(0x7f), LIMIT)[0]!);
+    assembler.push(first);
     assembler.reset();
     expect(assembler.heldBytes).toBe(0);
+    expect([...first.subarray(RELAY_CHUNK_HEADER_BYTES)]).toEqual(
+      Array.from({ length: first.byteLength - RELAY_CHUNK_HEADER_BYTES }, () => 0),
+    );
   });
 });

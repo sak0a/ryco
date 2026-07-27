@@ -7,6 +7,7 @@ import type { RpcGroup } from "effect/unstable/rpc";
 
 export interface RpcByteSession {
   readonly receive: (bytes: Uint8Array) => Effect.Effect<boolean>;
+  readonly supportsChunkedMessages: () => boolean;
   readonly close: Effect.Effect<void>;
   readonly queuedMessages: Effect.Effect<number>;
   readonly queuedBytes: Effect.Effect<number>;
@@ -102,6 +103,7 @@ export function makeRpcByteSession<Rpcs extends Rpc.Any, E, R>(
       Effect.gen(function* () {
         clients.clear();
         queuedBytes = 0;
+        assembler.reset();
         yield* Queue.offer(disconnects, 0);
         yield* Queue.shutdown(incoming);
         yield* Queue.shutdown(disconnects);
@@ -123,6 +125,7 @@ export function makeRpcByteSession<Rpcs extends Rpc.Any, E, R>(
           ),
         );
       },
+      supportsChunkedMessages: () => assembler.peerSupportsChunking,
       close: Effect.sync(() => {
         queuedBytes = 0;
         assembler.reset();
