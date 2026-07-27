@@ -384,8 +384,37 @@ Three things found while building it, worth carrying forward:
 3. **`?? []` on an atom-derived array defeats every downstream `useMemo`.** It recomputed the
    policy model on each composer keystroke until memoized.
 
-**Still open:** `thread-model-picker`, `thread-activity-fold`,
-`worktree-change-request-badge`, `thread-ci-checks`.
+**`worktree-change-request-badge` — done.** `InboxThreadRow` and `ThreadHeaderModel` widened (both
+discarded the fields at their output boundary), badge derived in `lib/changeRequestBadge.ts`,
+rendered outlined-not-filled in the inbox row and thread context bar with "Last known state." in
+every accessibility label. Wording is hard-coded "Pull request" — provider-aware wording still
+needs the VCS status stream mobile has never subscribed to.
+
+**`thread-model-picker` — done.** Grouped per provider instance with brand marks, searchable,
+locked to the thread's provider once a session exists, with `loading` distinguished from
+"no models" and from "search matched nothing". `ProviderIcon` now covers all five drivers with
+marks copied byte-for-byte from web; an unknown driver gets a neutral glyph rather than a wrong
+brand. Three of the five viewBoxes are non-square and must be width-derived, or react-native-svg
+letterboxes them.
+
+**`thread-activity-fold` — done.** Consecutive work entries collapse into
+"Working…" / "Worked for 2.9s · 4 steps", expanding to tool rows with command previews and
+tap-to-open output plus exit code. **Deviates from §0's "hoist, don't copy"** — see the commit for
+why: web's `deriveTurnFolds` returns a Map keyed for a row pipeline mobile does not have. Wording,
+grouping key and the running/settled split are identical.
+
+**Still open: `thread-ci-checks`** — the `(icon) 3/9` checks summary. Slice 5 shipped the PR badge,
+but not this. It still needs the `readRpcClient` accessor (Path B, §6), a re-implementation of
+`getOverviewSummary` (not React-free), the token/styling split of `prCheckStatus`, and a
+polling/battery story for M worktree lookups across N inbox threads.
+
+Two more constraints found while building these three:
+
+4. **Exit code 0 is falsy and meaningful.** Any "did it fail" check has to compare against null
+   first. Same shape of bug as `prNumber: 0`.
+5. **A default-open row cannot use a plain "expanded" id set.** Collapsing it must be recorded as
+   its own fact or it springs back open on the next rebuild — and a running fold rebuilds every
+   second.
 
 ## 9. Recommended order
 
