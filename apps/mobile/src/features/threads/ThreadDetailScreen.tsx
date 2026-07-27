@@ -42,8 +42,11 @@ import {
   renameThread,
   setThreadArchived,
   setThreadInteractionMode,
+  setThreadModelSelection,
   setThreadRuntimeMode,
 } from "./sessionActions";
+import { buildModelPickerModel, resolveModelPickerSelection } from "./modelPickerModel";
+import { ModelPickerSheet } from "./ModelPickerSheet";
 import { buildSessionPolicyModel, resolveSessionPolicySelection } from "./sessionPolicyModel";
 import { SessionPolicySheet } from "./SessionPolicySheet";
 import { ThreadActionsSheet } from "./ThreadActionsSheet";
@@ -141,6 +144,8 @@ export function ThreadDetailScreen(props: {
   const [actionError, setActionError] = useState<string | null>(null);
   const [policyVisible, setPolicyVisible] = useState(false);
   const [policyBusy, setPolicyBusy] = useState(false);
+  const [modelVisible, setModelVisible] = useState(false);
+  const [modelQuery, setModelQuery] = useState("");
   const serverConfig = useAtomValue(serverConfigAtom);
 
   // Retain the supervisor's thread-detail subscription while mounted, and make
@@ -215,6 +220,21 @@ export function ThreadDetailScreen(props: {
           })
         : null,
     [providers, thread, threadProviderDriver],
+  );
+
+  const modelPicker = useMemo(
+    () =>
+      thread
+        ? buildModelPickerModel({
+            serverConfig,
+            currentSelection: thread.modelSelection ?? project?.defaultModelSelection ?? null,
+            // A thread with a live session has committed to a provider; the
+            // picker must not offer a way to swap it mid-session.
+            providerLocked: thread.session !== null,
+            query: modelQuery,
+          })
+        : null,
+    [modelQuery, project?.defaultModelSelection, serverConfig, thread],
   );
 
   const applyPolicy = useCallback(async (apply: () => Promise<void>) => {
@@ -449,7 +469,33 @@ export function ThreadDetailScreen(props: {
         policyAccessibilityLabel={policyModel?.pillAccessibilityLabel}
         policyDisabled={policyBusy}
         onOpenPolicy={policyModel ? () => setPolicyVisible(true) : undefined}
+        modelLabel={modelPicker?.pillLabel}
+        modelProviderDriver={modelPicker?.pillProviderDriver}
+        modelAccessibilityLabel={modelPicker?.pillAccessibilityLabel}
+        onOpenModel={modelPicker ? () => setModelVisible(true) : undefined}
       />
+
+      {modelPicker ? (
+        <ModelPickerSheet
+          visible={modelVisible}
+          model={modelPicker}
+          query={modelQuery}
+          onChangeQuery={setModelQuery}
+          onClose={() => {
+            setModelVisible(false);
+            setModelQuery("");
+          }}
+          onSelect={(key) => {
+            const next = resolveModelPickerSelection(modelPicker, key);
+            if (!next) return;
+            setModelVisible(false);
+            setModelQuery("");
+            void applyPolicy(() =>
+              setThreadModelSelection(ensureEnvironmentApi(environmentId), threadId, next),
+            );
+          }}
+        />
+      ) : null}
 
       {policyModel ? (
         <SessionPolicySheet

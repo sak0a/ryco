@@ -8,6 +8,7 @@ import { SymbolView } from "../../components/AppSymbol";
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
 import { ComposerToolbarButton, ComposerToolbarRow } from "../../components/ComposerToolbarTrigger";
 import { GlassSurface } from "../../components/GlassSurface";
+import { ProviderIcon } from "../../components/ProviderIcon";
 import {
   convertPastedImagesToAttachments,
   pickComposerImages,
@@ -41,6 +42,11 @@ export function ThreadComposer(props: {
   readonly policyAccessibilityLabel?: string;
   readonly policyDisabled?: boolean;
   readonly onOpenPolicy?: () => void;
+  /** Provider+model pill. Rendered left of the policy pill when supplied. */
+  readonly modelLabel?: string;
+  readonly modelProviderDriver?: string | null;
+  readonly modelAccessibilityLabel?: string;
+  readonly onOpenModel?: () => void;
 }) {
   const safeAreaInsets = useSafeAreaInsets();
   const [text, setText] = useState("");
@@ -107,6 +113,15 @@ export function ThreadComposer(props: {
         <View className="gap-1">
           {props.onOpenPolicy && props.policyLabel ? (
             <ComposerToolbarRow paddingTop={2} paddingBottom={2} paddingHorizontal={2}>
+              {props.onOpenModel && props.modelLabel ? (
+                <ComposerToolbarButton
+                  iconNode={<ProviderIcon provider={props.modelProviderDriver} size={14} />}
+                  label={props.modelLabel}
+                  accessibilityLabel={props.modelAccessibilityLabel ?? props.modelLabel}
+                  disabled={props.policyDisabled}
+                  onPress={props.onOpenModel}
+                />
+              ) : null}
               <ComposerToolbarButton
                 icon={props.policyIcon}
                 label={props.policyLabel}

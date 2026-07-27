@@ -2,6 +2,7 @@ import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
+import { ChangeRequestBadge } from "../../components/ChangeRequestBadge";
 import { useThemeColor } from "../../lib/useThemeColor";
 import type { ThreadHeaderModel } from "./threadHeaderModel";
 
@@ -39,9 +40,14 @@ export function ThreadContextBar(props: {
             {props.model.statusLabel}
           </Text>
         </View>
-        <Text className="mt-0.5 text-sm font-ryco-medium text-foreground" numberOfLines={1}>
-          {props.model.projectLabel} · {props.model.worktreeLabel}
-        </Text>
+        <View className="mt-0.5 flex-row items-center gap-2">
+          <Text className="shrink text-sm font-ryco-medium text-foreground" numberOfLines={1}>
+            {props.model.projectLabel} · {props.model.worktreeLabel}
+          </Text>
+          {props.model.changeRequest ? (
+            <ChangeRequestBadge badge={props.model.changeRequest} />
+          ) : null}
+        </View>
       </View>
       <SymbolView
         name="chevron.right"

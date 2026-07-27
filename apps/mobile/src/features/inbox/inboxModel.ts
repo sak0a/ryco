@@ -5,6 +5,8 @@ import type {
 } from "@ryco/client-runtime/state/threads";
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
 
+import { buildChangeRequestBadge, type ChangeRequestBadge } from "../../lib/changeRequestBadge";
+
 export type InboxThreadState =
   | "needs-input"
   | "delivery-unknown"
@@ -32,6 +34,11 @@ export interface InboxThreadRow {
   readonly state: InboxThreadState;
   readonly statusLabel: string;
   readonly updatedAt: string;
+  /**
+   * The worktree's pull request / work item, when it has one. Last known state
+   * — nothing refreshes it in the background. See changeRequestBadge.ts.
+   */
+  readonly changeRequest: ChangeRequestBadge | null;
 }
 
 export interface InboxSection {
@@ -162,6 +169,7 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
       state,
       statusLabel: statusLabel(state),
       updatedAt: timestamp(thread),
+      changeRequest: buildChangeRequestBadge(worktree),
     });
   }
 

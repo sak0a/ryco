@@ -1,6 +1,7 @@
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
+import { ChangeRequestBadge } from "../../components/ChangeRequestBadge";
 import { relativeTime } from "../../lib/time";
 import type { InboxThreadRow as InboxThreadRowModel, InboxThreadState } from "./inboxModel";
 
@@ -64,12 +65,15 @@ export function InboxThreadRow(props: {
         <Text className="font-sans text-xs text-foreground-muted" numberOfLines={1}>
           {props.row.contextLabel}
         </Text>
-        <Text
-          className={`text-xs font-ryco-medium ${statusTextClassName(props.row.state)}`}
-          numberOfLines={1}
-        >
-          {props.row.statusLabel}
-        </Text>
+        <View className="flex-row items-center gap-2">
+          <Text
+            className={`shrink text-xs font-ryco-medium ${statusTextClassName(props.row.state)}`}
+            numberOfLines={1}
+          >
+            {props.row.statusLabel}
+          </Text>
+          {props.row.changeRequest ? <ChangeRequestBadge badge={props.row.changeRequest} /> : null}
+        </View>
       </View>
     </Pressable>
   );
