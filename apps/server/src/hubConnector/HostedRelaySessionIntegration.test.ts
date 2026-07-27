@@ -226,6 +226,7 @@ describe("hosted relay session integration", () => {
           return {
             receive: (bytes: Uint8Array) => Effect.runPromise(session.receive(bytes)),
             queuedBytes: () => Effect.runPromise(session.queuedBytes),
+            supportsChunkedMessages: session.supportsChunkedMessages,
             close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
           };
         },

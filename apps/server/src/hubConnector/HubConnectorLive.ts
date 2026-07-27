@@ -84,6 +84,7 @@ export const HubConnectorLive = Layer.effect(
           return {
             receive: (bytes) => runPromise(session.receive(bytes)),
             queuedBytes: () => runPromise(session.queuedBytes),
+            supportsChunkedMessages: session.supportsChunkedMessages,
             close: () => runPromise(Scope.close(scope, Exit.void)),
           } satisfies RelayRpcChannelSession;
         } catch (error: unknown) {

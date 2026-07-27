@@ -30,8 +30,9 @@ export const RELAY_AUTHENTICATION_DEADLINE_MS = 5_000;
 // protocol version bump and nothing from the Hub.
 //
 // Header: magic(1) version(1) flags(1) reserved(1) totalBytes(4, big-endian).
-// A payload that already fits is sent UNCHUNKED, byte-identical to before, so
-// the common path is unchanged and an old receiver keeps working.
+// A payload that already fits stays unchunked. New endpoints may prefix it
+// with JSON whitespace to advertise chunk support; legacy JSON decoders accept
+// that marker unchanged, so independently upgraded peers remain compatible.
 export const RELAY_CHUNK_HEADER_BYTES = 8;
 /** JSON payloads never start with NUL, so this distinguishes chunked from legacy. */
 export const RELAY_CHUNK_MAGIC = 0x00;

@@ -466,14 +466,11 @@ async function runBrowseController(controller: BrowseController): Promise<void> 
       return;
     }
     controller.fetching = false;
-    controller.hasData = true;
-    controller.lastFetchedAt = Date.now();
-    controller.lastResult = null;
     setFilesystemBrowseState(controller.compositeKey, {
-      data: null,
+      data: current.data,
       isLoading: false,
       isFetching: false,
-      error: null,
+      error: new Error("The environment is temporarily unavailable. Reconnecting…"),
       isPending: false,
     });
     return;

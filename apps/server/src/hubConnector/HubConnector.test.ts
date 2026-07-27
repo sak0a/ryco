@@ -7,6 +7,7 @@ import {
   type RelayNodeAuthHandshake,
 } from "@ryco/contracts/relay";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
+import { stripRelayChunkCapabilityPrelude } from "@ryco/shared/relayMessageChunks";
 
 import { DEFAULT_HUB_CONNECTOR_CONFIG, type HubConnectorConfig } from "../config.ts";
 import { HubRelayAuthenticationError, type HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
@@ -314,6 +315,7 @@ describe("HubConnector", () => {
           return {
             receive: async () => true,
             queuedBytes: async () => 0,
+            supportsChunkedMessages: () => false,
             close: async () => undefined,
           };
         },
@@ -355,9 +357,11 @@ describe("HubConnector", () => {
       ok: true,
       value: { type: "data", channelId, sequence: 0 },
     });
-    expect(output.ok && output.value.type === "data" && output.value.payload).toEqual(
-      Uint8Array.of(0, 255, 7),
-    );
+    expect(
+      output.ok &&
+        output.value.type === "data" &&
+        stripRelayChunkCapabilityPrelude(output.value.payload).message,
+    ).toEqual(Uint8Array.of(0, 255, 7));
     await connector.stop();
   });
 
@@ -385,6 +389,7 @@ describe("HubConnector", () => {
         open: async () => ({
           receive: async () => true,
           queuedBytes: async () => 0,
+          supportsChunkedMessages: () => false,
           close: async () => undefined,
         }),
       },

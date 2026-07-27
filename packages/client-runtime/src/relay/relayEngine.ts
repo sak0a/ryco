@@ -14,7 +14,7 @@ import {
   type RelayLimits,
 } from "@ryco/contracts";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
-import { RelayMessageAssembler, splitRelayMessage } from "@ryco/shared/relayMessageChunks";
+import { prepareRelayMessage, RelayMessageAssembler } from "@ryco/shared/relayMessageChunks";
 
 import { decodeBase64Url } from "./base64url.ts";
 import type {
@@ -195,14 +195,25 @@ export class HostedRelayEngine {
     // completes (channel.accept); a channel that is merely open is not enough.
     if (this.#closed || !this.#accepted || !this.#channel || !this.#limits)
       throw new Error("Relay channel is not open.");
-    // Only a message above the reassembly ceiling is refused now; anything
-    // between the frame limit and that ceiling is split across frames.
-    if (payload.byteLength > RELAY_MAX_RPC_MESSAGE_BYTES) {
+    const maxMessageBytes = Math.min(
+      RELAY_MAX_RPC_MESSAGE_BYTES,
+      this.#limits.maxQueuedBytes - this.#limits.maxControlFrameBytes,
+    );
+    const prepared = prepareRelayMessage(payload, {
+      maxChunkBytes: this.#limits.maxDataChunkBytes,
+      maxMessageBytes,
+      peerSupportsChunking: this.#assembler.peerSupportsChunking,
+    });
+    if (prepared.kind === "error") {
       payload.fill(0);
       this.#fail(failure("transfer_limit"));
-      throw new Error("RPC payload exceeds the maximum relay message size.");
+      throw new Error(
+        prepared.reason === "peer_unsupported"
+          ? "Relay peer does not support multi-frame RPC messages."
+          : "RPC payload exceeds the maximum relay message size.",
+      );
     }
-    for (const chunk of splitRelayMessage(payload, this.#limits.maxDataChunkBytes)) {
+    for (const chunk of prepared.payloads) {
       this.#enqueueOutbound(Uint8Array.from(chunk));
     }
   }
@@ -324,18 +335,30 @@ export class HostedRelayEngine {
       return this.#fail(failure("channel_rejected"));
     this.#inboundSequence += 1;
     const payload = Uint8Array.from(frame.payload);
-    if (this.#inboundQueuedBytes + payload.byteLength > this.#limits.maxQueuedBytes) {
+    if (this.#inboundOwnedBytes() + payload.byteLength > this.#limits.maxQueuedBytes) {
       payload.fill(0);
       return this.#fail(failure("slow_consumer"));
     }
     this.#inboundQueue.push(payload);
     this.#inboundQueuedBytes += payload.byteLength;
-    const highWater = Math.floor(this.#limits.maxQueuedBytes * 0.75);
-    if (!this.#inboundPaused && this.#inboundQueuedBytes >= highWater && this.#channel) {
+    this.#refreshInboundFlow();
+    this.#drainInbound();
+  }
+
+  #inboundOwnedBytes(): number {
+    return this.#inboundQueuedBytes + this.#assembler.heldBytes;
+  }
+
+  #refreshInboundFlow(): void {
+    if (!this.#limits || !this.#channel) return;
+    const ownedBytes = this.#inboundOwnedBytes();
+    if (!this.#inboundPaused && ownedBytes >= Math.floor(this.#limits.maxQueuedBytes * 0.75)) {
       this.#inboundPaused = true;
       this.#frame({ type: "flow.pause", ...VERSION, channelId: this.#channel });
+    } else if (this.#inboundPaused && ownedBytes <= Math.floor(this.#limits.maxQueuedBytes * 0.5)) {
+      this.#inboundPaused = false;
+      this.#frame({ type: "flow.resume", ...VERSION, channelId: this.#channel });
     }
-    this.#drainInbound();
   }
 
   #drainInbound(): void {
@@ -359,15 +382,7 @@ export class HostedRelayEngine {
         }
         if (assembled.kind === "done") this.options.events.onData(assembled.message);
       }
-      if (
-        this.#inboundPaused &&
-        this.#limits &&
-        this.#inboundQueuedBytes <= Math.floor(this.#limits.maxQueuedBytes * 0.5) &&
-        this.#channel
-      ) {
-        this.#inboundPaused = false;
-        this.#frame({ type: "flow.resume", ...VERSION, channelId: this.#channel });
-      }
+      this.#refreshInboundFlow();
       if (this.#inboundQueue.length > 0) this.#drainInbound();
     });
   }
@@ -454,6 +469,7 @@ export class HostedRelayEngine {
     this.#auth = null;
     for (const item of this.#outboundQueue) item.bytes.fill(0);
     for (const item of this.#inboundQueue) item.fill(0);
+    this.#assembler.reset();
     this.#outboundQueue = [];
     this.#inboundQueue = [];
     this.#outboundQueuedBytes = 0;
