@@ -81,6 +81,14 @@ export interface ModelPickerModel {
   readonly hasOptionRail: boolean;
   /** Rail pill text: the short model name, or a stand-in while config loads. */
   readonly pillLabel: string;
+  /**
+   * The selected reasoning level, short form, for the composer chip. Null when
+   * the model declares no reasoning option — the chip must then show nothing
+   * rather than a placeholder.
+   */
+  readonly pillReasoningLabel: string | null;
+  /** True only when the model declares fast mode AND it is on. */
+  readonly pillFastEnabled: boolean;
   readonly pillProviderDriver: string | null;
   readonly pillAccessibilityLabel: string;
   readonly groups: ReadonlyArray<ModelPickerGroup>;
@@ -155,14 +163,30 @@ export function buildModelPickerModel(input: ModelPickerInput): ModelPickerModel
     })
     .filter((group) => group.entries.length > 0);
 
+  const reasoning = controls.find((control) => control.kind === "select");
+  const fastControl = controls.find((control) => control.kind === "boolean");
+
   return {
     options: controls,
     hasOptionRail: controls.length > 0,
+    pillReasoningLabel: reasoning?.choices.find((choice) => choice.selected)?.shortLabel ?? null,
+    pillFastEnabled: fastControl?.enabled === true,
     pillLabel:
       selectedOption?.label ?? input.currentSelection?.model ?? (loading ? "Loading…" : "Model"),
     pillProviderDriver: selectedOption?.providerDriver ?? null,
+    // The chip shows the reasoning level and a bolt, so the spoken label has to
+    // say them too — and it uses the FULL reasoning label, not the abbreviation,
+    // because "UCode" is meaningless read aloud.
     pillAccessibilityLabel: selectedOption
-      ? `Model: ${selectedOption.label}, ${selectedOption.providerLabel}.`
+      ? [
+          `Model: ${selectedOption.label}, ${selectedOption.providerLabel}.`,
+          reasoning
+            ? `${reasoning.label}: ${reasoning.choices.find((choice) => choice.selected)?.label ?? "default"}.`
+            : null,
+          fastControl?.enabled === true ? `${fastControl.label} on.` : null,
+        ]
+          .filter(Boolean)
+          .join(" ")
       : loading
         ? "Model: loading."
         : "Model: none selected.",

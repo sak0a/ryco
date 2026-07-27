@@ -513,6 +513,8 @@ export function ThreadDetailScreen(props: {
         modelLabel={modelPicker?.pillLabel}
         modelProviderDriver={modelPicker?.pillProviderDriver}
         modelAccessibilityLabel={modelPicker?.pillAccessibilityLabel}
+        modelReasoningLabel={modelPicker?.pillReasoningLabel}
+        modelFastEnabled={modelPicker?.pillFastEnabled}
         onOpenModel={modelPicker ? () => setModelVisible(true) : undefined}
       />
 

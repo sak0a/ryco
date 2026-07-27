@@ -245,3 +245,51 @@ describe("shortChoiceLabel", () => {
     }
   });
 });
+
+describe("composer chip summary", () => {
+  const CAPS = { reasoningEfforts: ["low", "medium", "high"], supportsFastMode: true } as never;
+  const withCaps = () =>
+    ({
+      instanceId: "claude-1",
+      driver: "claudeAgent",
+      displayName: undefined,
+      enabled: true,
+      installed: true,
+      auth: { status: "authenticated" },
+      models: [{ slug: "opus-5", name: "Opus 5", capabilities: CAPS }],
+    }) as unknown as ReturnType<typeof provider>;
+
+  it("shows nothing extra when the model declares no options", () => {
+    const model = buildModelPickerModel({
+      serverConfig: config(CODEX),
+      currentSelection: selection("codex-1", "gpt-5.4"),
+      providerLocked: false,
+    });
+    // A placeholder would be worse than silence: there is no level to report.
+    expect(model.pillReasoningLabel).toBeNull();
+    expect(model.pillFastEnabled).toBe(false);
+  });
+
+  it("keeps the chip quiet while the config is loading", () => {
+    const model = buildModelPickerModel({
+      serverConfig: null,
+      currentSelection: selection("claude-1", "opus-5"),
+      providerLocked: false,
+    });
+    expect(model.pillReasoningLabel).toBeNull();
+    expect(model.pillFastEnabled).toBe(false);
+  });
+
+  it("speaks the full reasoning label, not the rail abbreviation", () => {
+    // "UCode" read aloud is meaningless; the chip may abbreviate, the label may not.
+    const model = buildModelPickerModel({
+      serverConfig: config(withCaps()),
+      currentSelection: selection("claude-1", "opus-5"),
+      providerLocked: false,
+    });
+    if (model.pillReasoningLabel !== null) {
+      expect(model.pillAccessibilityLabel).not.toContain(model.pillReasoningLabel + ".");
+    }
+    expect(model.pillAccessibilityLabel).toContain("Model:");
+  });
+});
