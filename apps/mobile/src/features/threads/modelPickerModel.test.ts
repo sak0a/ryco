@@ -1,7 +1,11 @@
 import type { ModelSelection, ServerConfig } from "@ryco/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildModelPickerModel, resolveModelPickerSelection } from "./modelPickerModel";
+import {
+  buildModelPickerModel,
+  resolveModelPickerSelection,
+  shortChoiceLabel,
+} from "./modelPickerModel";
 
 function provider(instanceId: string, driver: string, models: ReadonlyArray<string>) {
   return {
@@ -143,5 +147,149 @@ describe("resolveModelPickerSelection", () => {
   it("ignores the already-selected entry and unknown keys", () => {
     expect(resolveModelPickerSelection(model, "codex-1:gpt-5.4")).toBeNull();
     expect(resolveModelPickerSelection(model, "nope")).toBeNull();
+  });
+});
+
+describe("model options", () => {
+  const CAPS = {
+    reasoningEfforts: ["low", "medium", "high"],
+    supportsFastMode: true,
+  } as never;
+
+  function withCaps(models: ReadonlyArray<string>) {
+    return {
+      instanceId: "claude-1",
+      driver: "claudeAgent",
+      displayName: undefined,
+      enabled: true,
+      installed: true,
+      auth: { status: "authenticated" },
+      models: models.map((slug) => ({ slug, name: slug, capabilities: CAPS })),
+    } as unknown as ReturnType<typeof provider>;
+  }
+
+  it("has no rail when the selected model declares no options", () => {
+    // The state that matters: a model without options must get NO rail rather
+    // than an empty or disabled one.
+    const model = buildModelPickerModel({
+      serverConfig: config(CODEX),
+      currentSelection: selection("codex-1", "gpt-5.4"),
+      providerLocked: false,
+    });
+    expect(model.options).toEqual([]);
+    expect(model.hasOptionRail).toBe(false);
+  });
+
+  it("carries capabilities onto every entry so options can be derived", () => {
+    const model = buildModelPickerModel({
+      serverConfig: config(withCaps(["opus-5"])),
+      currentSelection: selection("claude-1", "opus-5"),
+      providerLocked: false,
+    });
+    const entry = model.groups.flatMap((group) => group.entries)[0];
+    expect(entry?.capabilities).not.toBeUndefined();
+  });
+
+  it("reports no rail while the config is still loading", () => {
+    const model = buildModelPickerModel({
+      serverConfig: null,
+      currentSelection: selection("claude-1", "opus-5"),
+      providerLocked: false,
+    });
+    expect(model.hasOptionRail).toBe(false);
+  });
+});
+
+describe("shortChoiceLabel", () => {
+  it("abbreviates every reasoning level a driver actually declares", () => {
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      ["none", "None"],
+      ["minimal", "Min"],
+      ["low", "Low"],
+      ["medium", "Med"],
+      ["high", "High"],
+      ["xhigh", "XHigh"],
+      ["max", "Max"],
+      ["ultra", "Ultra"],
+      ["ultracode", "UCode"],
+      ["ultrathink", "UThink"],
+    ];
+    for (const [id, expected] of cases) {
+      expect(shortChoiceLabel({ id, label: "ignored" })).toBe(expected);
+    }
+  });
+
+  it("keys off the id, not the label", () => {
+    // Ids are normalized by every driver; labels are upstream text that can
+    // change, so matching on them would silently stop working.
+    expect(shortChoiceLabel({ id: "ultracode", label: "Something Else Entirely" })).toBe("UCode");
+    expect(shortChoiceLabel({ id: "XHIGH", label: "whatever" })).toBe("XHigh");
+  });
+
+  it("passes short labels through untouched", () => {
+    expect(shortChoiceLabel({ id: "unknown-id", label: "272K" })).toBe("272K");
+    expect(shortChoiceLabel({ id: "unknown-id", label: "Build" })).toBe("Build");
+  });
+
+  it("compresses a two-word label to five characters plus an initial", () => {
+    expect(shortChoiceLabel({ id: "ultra-deep", label: "Ultra Deep" })).toBe("UltraD");
+  });
+
+  it("truncates a long single word", () => {
+    expect(shortChoiceLabel({ id: "nope", label: "Exhaustive" })).toBe("Exhaus");
+  });
+
+  it("never exceeds six characters, whatever it is given", () => {
+    for (const label of ["Extremely Long Reasoning Level", "aaaaaaaaaaaaaaa", "A B C D"]) {
+      expect(shortChoiceLabel({ id: "x", label }).length).toBeLessThanOrEqual(6);
+    }
+  });
+});
+
+describe("composer chip summary", () => {
+  const CAPS = { reasoningEfforts: ["low", "medium", "high"], supportsFastMode: true } as never;
+  const withCaps = () =>
+    ({
+      instanceId: "claude-1",
+      driver: "claudeAgent",
+      displayName: undefined,
+      enabled: true,
+      installed: true,
+      auth: { status: "authenticated" },
+      models: [{ slug: "opus-5", name: "Opus 5", capabilities: CAPS }],
+    }) as unknown as ReturnType<typeof provider>;
+
+  it("shows nothing extra when the model declares no options", () => {
+    const model = buildModelPickerModel({
+      serverConfig: config(CODEX),
+      currentSelection: selection("codex-1", "gpt-5.4"),
+      providerLocked: false,
+    });
+    // A placeholder would be worse than silence: there is no level to report.
+    expect(model.pillReasoningLabel).toBeNull();
+    expect(model.pillFastEnabled).toBe(false);
+  });
+
+  it("keeps the chip quiet while the config is loading", () => {
+    const model = buildModelPickerModel({
+      serverConfig: null,
+      currentSelection: selection("claude-1", "opus-5"),
+      providerLocked: false,
+    });
+    expect(model.pillReasoningLabel).toBeNull();
+    expect(model.pillFastEnabled).toBe(false);
+  });
+
+  it("speaks the full reasoning label, not the rail abbreviation", () => {
+    // "UCode" read aloud is meaningless; the chip may abbreviate, the label may not.
+    const model = buildModelPickerModel({
+      serverConfig: config(withCaps()),
+      currentSelection: selection("claude-1", "opus-5"),
+      providerLocked: false,
+    });
+    if (model.pillReasoningLabel !== null) {
+      expect(model.pillAccessibilityLabel).not.toContain(model.pillReasoningLabel + ".");
+    }
+    expect(model.pillAccessibilityLabel).toContain("Model:");
   });
 });

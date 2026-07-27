@@ -46,6 +46,9 @@ export function ThreadComposer(props: {
   readonly modelLabel?: string;
   readonly modelProviderDriver?: string | null;
   readonly modelAccessibilityLabel?: string;
+  /** Selected reasoning level, short form. Quieter than the model name. */
+  readonly modelReasoningLabel?: string | null;
+  readonly modelFastEnabled?: boolean;
   readonly onOpenModel?: () => void;
 }) {
   const safeAreaInsets = useSafeAreaInsets();
@@ -118,6 +121,9 @@ export function ThreadComposer(props: {
                 <ComposerToolbarButton
                   iconNode={<ProviderIcon provider={props.modelProviderDriver} size={14} />}
                   label={props.modelLabel}
+                  suffixLabel={props.modelReasoningLabel ?? undefined}
+                  suffixIcon={props.modelFastEnabled ? "bolt.fill" : undefined}
+                  suffixIconColor={warningColor as string}
                   accessibilityLabel={props.modelAccessibilityLabel ?? props.modelLabel}
                   disabled={props.policyDisabled}
                   onPress={props.onOpenModel}

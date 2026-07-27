@@ -1,4 +1,11 @@
 import { Pressable, ScrollView, View } from "react-native";
+import Animated, {
+  FadeIn,
+  FadeOut,
+  ReduceMotion,
+  SlideInDown,
+  SlideOutDown,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
@@ -97,13 +104,23 @@ export function SessionPolicySheet(props: {
 
   return (
     <OverlayPortal>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Close session policy"
-        onPress={props.onClose}
-        className="absolute inset-0 bg-backdrop"
-      />
-      <View
+      <Animated.View
+        entering={FadeIn.duration(160).reduceMotion(ReduceMotion.System)}
+        exiting={FadeOut.duration(140).reduceMotion(ReduceMotion.System)}
+        className="absolute inset-0"
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close session policy"
+          onPress={props.onClose}
+          className="flex-1 bg-backdrop"
+        />
+      </Animated.View>
+      <Animated.View
+        // Matches the model picker exactly: two sibling sheets opened from the
+        // same rail, so one animating and the other not would read as a bug.
+        entering={SlideInDown.duration(260).reduceMotion(ReduceMotion.System)}
+        exiting={SlideOutDown.duration(200).reduceMotion(ReduceMotion.System)}
         pointerEvents="box-none"
         className="absolute inset-x-0 bottom-0 px-3"
         style={{ paddingBottom: Math.max(12, insets.bottom) }}
@@ -137,7 +154,7 @@ export function SessionPolicySheet(props: {
             <PolicyGroup group={props.model.access} onSelect={props.onSelectRuntimeMode} />
           </ScrollView>
         </GlassSurface>
-      </View>
+      </Animated.View>
     </OverlayPortal>
   );
 }
