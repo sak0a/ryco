@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useHeaderHeight } from "@react-navigation/elements";
@@ -5,7 +6,15 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "reac
 import { Pressable, ScrollView, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
-import { getWsConnectionStatus, getWsConnectionUiState } from "@ryco/client-runtime/rpc";
+import {
+  getWsConnectionStatus,
+  getWsConnectionUiState,
+  serverConfigAtom,
+} from "@ryco/client-runtime/rpc";
+import {
+  getProviderInteractionModeToggle,
+  getProviderSupportsAskMode,
+} from "@ryco/client-runtime/state/composer";
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { TimelineEntry } from "@ryco/client-runtime/state/session";
 import { EnvironmentId, ThreadId } from "@ryco/contracts";
@@ -28,7 +37,15 @@ import { executeSendTurn } from "./executeSendTurn";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { PendingUserInputCard } from "./PendingUserInputCard";
 import { sendThreadTurn } from "./sendThreadTurn";
-import { interruptThreadTurn, renameThread, setThreadArchived } from "./sessionActions";
+import {
+  interruptThreadTurn,
+  renameThread,
+  setThreadArchived,
+  setThreadInteractionMode,
+  setThreadRuntimeMode,
+} from "./sessionActions";
+import { buildSessionPolicyModel, resolveSessionPolicySelection } from "./sessionPolicyModel";
+import { SessionPolicySheet } from "./SessionPolicySheet";
 import { ThreadActionsSheet } from "./ThreadActionsSheet";
 import { ThreadComposer } from "./ThreadComposer";
 import { ThreadContextBar } from "./ThreadContextBar";
@@ -122,6 +139,9 @@ export function ThreadDetailScreen(props: {
   const [actionsVisible, setActionsVisible] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [policyVisible, setPolicyVisible] = useState(false);
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const serverConfig = useAtomValue(serverConfigAtom);
 
   // Retain the supervisor's thread-detail subscription while mounted, and make
   // this node authoritative for the active task.
@@ -163,6 +183,55 @@ export function ThreadDetailScreen(props: {
         : null,
     [nodeLabel, pendingApprovals.length, pendingUserInputs.length, project, thread, worktree],
   );
+
+  // The capability gates key off the DRIVER, not the instance id, so resolve the
+  // thread's provider instance through the server config first. A null/lagging
+  // config (it is scoped to the active environment and nulls on switch) must not
+  // hide the rail — the gates keep their upstream defaults, which is the same
+  // thing web shows before its config arrives.
+  // Memoized: `?? []` would allocate a fresh array every render and defeat both
+  // memos below, recomputing the policy model on every keystroke in the composer.
+  const providers = useMemo(() => serverConfig?.providers ?? [], [serverConfig]);
+  const threadProviderDriver = useMemo(() => {
+    const instanceId =
+      thread?.modelSelection?.instanceId ?? project?.defaultModelSelection?.instanceId;
+    if (!instanceId) return null;
+    return providers.find((provider) => provider.instanceId === instanceId)?.driver ?? null;
+  }, [project?.defaultModelSelection?.instanceId, providers, thread?.modelSelection?.instanceId]);
+
+  const policyModel = useMemo(
+    () =>
+      thread
+        ? buildSessionPolicyModel({
+            runtimeMode: thread.runtimeMode,
+            interactionMode: thread.interactionMode,
+            interactionModeSupported: threadProviderDriver
+              ? getProviderInteractionModeToggle(providers, threadProviderDriver)
+              : true,
+            askModeSupported: threadProviderDriver
+              ? getProviderSupportsAskMode(providers, threadProviderDriver)
+              : false,
+            mutationBlockedReason: thread.archivedAt !== null ? "This task is archived." : null,
+          })
+        : null,
+    [providers, thread, threadProviderDriver],
+  );
+
+  const applyPolicy = useCallback(async (apply: () => Promise<void>) => {
+    setPolicyBusy(true);
+    setSendError(null);
+    try {
+      await apply();
+    } catch (error) {
+      // Never fail silently: a policy change that did not land would otherwise
+      // leave the pill showing a setting the node never received.
+      setSendError(
+        error instanceof Error ? error.message : "The session policy change did not apply.",
+      );
+    } finally {
+      setPolicyBusy(false);
+    }
+  }, []);
 
   const openReview = useCallback(
     () =>
@@ -372,7 +441,38 @@ export function ThreadDetailScreen(props: {
         </ScrollView>
       ) : null}
 
-      <ThreadComposer onSend={onSend} />
+      <ThreadComposer
+        onSend={onSend}
+        policyLabel={policyModel?.pillLabel}
+        policyIcon={policyModel?.pillIcon}
+        policyCaution={policyModel?.pillTone === "caution"}
+        policyAccessibilityLabel={policyModel?.pillAccessibilityLabel}
+        policyDisabled={policyBusy}
+        onOpenPolicy={policyModel ? () => setPolicyVisible(true) : undefined}
+      />
+
+      {policyModel ? (
+        <SessionPolicySheet
+          visible={policyVisible}
+          model={policyModel}
+          onClose={() => setPolicyVisible(false)}
+          onSelectRuntimeMode={(value) => {
+            const next = resolveSessionPolicySelection(policyModel.access, value);
+            if (!next) return;
+            void applyPolicy(() =>
+              setThreadRuntimeMode(ensureEnvironmentApi(environmentId), threadId, next),
+            );
+          }}
+          onSelectInteractionMode={(value) => {
+            if (!policyModel.mode) return;
+            const next = resolveSessionPolicySelection(policyModel.mode, value);
+            if (!next) return;
+            void applyPolicy(() =>
+              setThreadInteractionMode(ensureEnvironmentApi(environmentId), threadId, next),
+            );
+          }}
+        />
+      ) : null}
 
       {headerModel ? (
         <ThreadActionsSheet

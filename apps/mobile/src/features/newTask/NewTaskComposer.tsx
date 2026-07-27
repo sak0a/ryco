@@ -7,15 +7,17 @@ import { SymbolView } from "../../components/AppSymbol";
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
 import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import { useThemeColor } from "../../lib/useThemeColor";
+import { runtimeModeConfig, runtimeModeOptions } from "../threads/sessionPolicyPresentation";
 
-const RUNTIME_OPTIONS: ReadonlyArray<{
-  readonly value: RuntimeMode;
-  readonly label: string;
-}> = [
-  { value: "approval-required", label: "Ask" },
-  { value: "auto-accept-edits", label: "Auto edit" },
-  { value: "full-access", label: "Full access" },
-];
+// Access vocabulary comes from the shared table, not a local copy. The old
+// local labels were wrong twice over: "Ask" is also the name of an
+// interaction-mode value, so the same word named two different controls, and
+// "Auto edit" matched neither the web label nor its short form.
+const RUNTIME_OPTIONS = runtimeModeOptions.map((value) => ({
+  value,
+  label: runtimeModeConfig[value].triggerLabel,
+  caution: runtimeModeConfig[value].tone === "caution",
+}));
 
 export function NewTaskComposer(props: {
   readonly prompt: string;
@@ -133,13 +135,18 @@ export function NewTaskComposer(props: {
                   disabled={props.busy}
                   onPress={() => props.onChangeRuntimeMode(option.value)}
                   className={`h-11 flex-1 items-center justify-center rounded-xl px-2 ${
-                    selected ? "bg-card" : ""
+                    selected ? (option.caution ? "bg-warning-bg" : "bg-card") : ""
                   }`}
                 >
                   <Text
                     className={`text-xs font-ryco-bold ${
-                      selected ? "text-foreground" : "text-foreground-muted"
+                      selected
+                        ? option.caution
+                          ? "text-warning"
+                          : "text-foreground"
+                        : "text-foreground-muted"
                     }`}
+                    numberOfLines={1}
                   >
                     {option.label}
                   </Text>

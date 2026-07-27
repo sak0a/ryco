@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -5,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
+import { ComposerToolbarButton, ComposerToolbarRow } from "../../components/ComposerToolbarTrigger";
 import { GlassSurface } from "../../components/GlassSurface";
 import {
   convertPastedImagesToAttachments,
@@ -25,6 +27,20 @@ export function ThreadComposer(props: {
     attachments: ReadonlyArray<DraftComposerImageAttachment>,
   ) => boolean | void | Promise<boolean | void>;
   readonly disabled?: boolean;
+  /**
+   * Session-policy rail. Omitted on surfaces that have no thread to configure,
+   * in which case no rail renders at all — the composer keeps its old shape.
+   *
+   * `policyDisabled` gates only the rail. It is deliberately separate from
+   * `disabled`, which gates attach/send: a thread can be un-sendable while its
+   * policy is still readable, and vice versa.
+   */
+  readonly policyLabel?: string;
+  readonly policyIcon?: ComponentProps<typeof SymbolView>["name"];
+  readonly policyCaution?: boolean;
+  readonly policyAccessibilityLabel?: string;
+  readonly policyDisabled?: boolean;
+  readonly onOpenPolicy?: () => void;
 }) {
   const safeAreaInsets = useSafeAreaInsets();
   const [text, setText] = useState("");
@@ -89,6 +105,18 @@ export function ThreadComposer(props: {
         style={{ paddingHorizontal: 6, paddingVertical: 6 }}
       >
         <View className="gap-1">
+          {props.onOpenPolicy && props.policyLabel ? (
+            <ComposerToolbarRow paddingTop={2} paddingBottom={2} paddingHorizontal={2}>
+              <ComposerToolbarButton
+                icon={props.policyIcon}
+                label={props.policyLabel}
+                accessibilityLabel={props.policyAccessibilityLabel ?? props.policyLabel}
+                active={props.policyCaution}
+                disabled={props.policyDisabled}
+                onPress={props.onOpenPolicy}
+              />
+            </ComposerToolbarRow>
+          ) : null}
           <View className="px-2">
             <ComposerAttachmentStrip
               attachments={attachments}

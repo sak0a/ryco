@@ -2,6 +2,8 @@ import type { EnvironmentApi } from "@ryco/contracts";
 import {
   type ApprovalRequestId,
   type ProviderApprovalDecision,
+  type ProviderInteractionMode,
+  type RuntimeMode,
   type ThreadId,
 } from "@ryco/contracts";
 
@@ -34,6 +36,37 @@ export async function renameThread(
     commandId: newCommandId(),
     threadId,
     title: trimmed,
+  });
+}
+
+// Note the asymmetry with `thread.meta.update` above: the mode-set commands
+// REQUIRE `createdAt` and `thread.meta.update` has no such field at all. Adding
+// it to the meta command fails schema validation at the server.
+export async function setThreadRuntimeMode(
+  api: EnvironmentApi,
+  threadId: ThreadId,
+  runtimeMode: RuntimeMode,
+): Promise<void> {
+  await api.orchestration.dispatchCommand({
+    type: "thread.runtime-mode.set",
+    commandId: newCommandId(),
+    threadId,
+    runtimeMode,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+export async function setThreadInteractionMode(
+  api: EnvironmentApi,
+  threadId: ThreadId,
+  interactionMode: ProviderInteractionMode,
+): Promise<void> {
+  await api.orchestration.dispatchCommand({
+    type: "thread.interaction-mode.set",
+    commandId: newCommandId(),
+    threadId,
+    interactionMode,
+    createdAt: new Date().toISOString(),
   });
 }
 
