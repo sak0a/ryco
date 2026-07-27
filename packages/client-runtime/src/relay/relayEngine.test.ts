@@ -1,5 +1,6 @@
 import {
   RELAY_INITIAL_LIMITS,
+  RELAY_MAX_RPC_MESSAGE_BYTES,
   RelayLimits,
   type RelayChannelId,
   type RelayFrame,
@@ -256,7 +257,7 @@ describe("HostedRelayEngine", () => {
     expect(secondHandlers.onFailure).not.toHaveBeenCalled();
   });
 
-  it("rejects oversized data payloads against the negotiated chunk limit", () => {
+  it("rejects data payloads above the reassembly ceiling", () => {
     const handlers = callbacks();
     const { engine, socket } = create(handlers);
     socket.open();
@@ -278,8 +279,10 @@ describe("HostedRelayEngine", () => {
       effectiveRole: "operator",
     });
     socket.frame({ type: "channel.accept", ...VERSION, channelId: CHANNEL_ID });
-    expect(() => engine.send(new Uint8Array(1_025))).toThrow(
-      "RPC payload exceeds the negotiated relay limit.",
+    // A message over the per-frame limit is now split rather than refused, so
+    // only one above the reassembly ceiling is rejected.
+    expect(() => engine.send(new Uint8Array(RELAY_MAX_RPC_MESSAGE_BYTES + 1))).toThrow(
+      "RPC payload exceeds the maximum relay message size.",
     );
     expect(handlers.onFailure).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "protocol", retryable: false }),
