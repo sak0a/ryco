@@ -43,7 +43,7 @@ function OptionRail(props: {
           accessibilityLabel={`${boolean.label}, ${boolean.enabled ? "on" : "off"}`}
           onPress={() => props.onSelectOption(boolean.id, !boolean.enabled)}
           className={cn(
-            "h-10 items-center justify-center rounded-xl border active:opacity-70",
+            "h-10 items-center justify-center rounded-full border active:opacity-70",
             boolean.enabled ? "border-warning/40 bg-warning-bg" : "border-border bg-subtle",
           )}
         >
@@ -59,7 +59,7 @@ function OptionRail(props: {
         <View
           accessibilityRole="radiogroup"
           accessibilityLabel={select.label}
-          className="flex-1 gap-0.5 rounded-xl bg-subtle p-1"
+          className="flex-1 gap-1 rounded-full bg-subtle p-1"
         >
           {/* Reversed: the provider declares low -> high, and the strongest
               belongs at the top so the stack reads as a scale. */}
@@ -71,7 +71,7 @@ function OptionRail(props: {
               accessibilityLabel={`${select.label}: ${choice.label}`}
               onPress={() => props.onSelectOption(select.id, choice.id)}
               className={cn(
-                "min-h-9 flex-1 items-center justify-center rounded-lg active:opacity-70",
+                "min-h-9 flex-1 items-center justify-center rounded-full active:opacity-70",
                 choice.selected ? "bg-card" : "bg-transparent",
               )}
             >
@@ -82,7 +82,7 @@ function OptionRail(props: {
                 )}
                 numberOfLines={1}
               >
-                {choice.label}
+                {choice.shortLabel}
               </Text>
             </Pressable>
           ))}

@@ -60,6 +60,8 @@ export interface ModelPickerGroup {
 export interface ModelOptionChoice {
   readonly id: string;
   readonly label: string;
+  /** <=6 characters, for the 58pt rail. `label` still reaches screen readers. */
+  readonly shortLabel: string;
   readonly selected: boolean;
 }
 
@@ -172,6 +174,35 @@ export function buildModelPickerModel(input: ModelPickerInput): ModelPickerModel
   };
 }
 
+/**
+ * Rail-width abbreviations, keyed by the provider's choice ID rather than its
+ * label. Ids are normalized by every driver; labels are upstream text that can
+ * change under us, so keying on them would silently stop matching.
+ */
+const CHOICE_ABBREVIATION: Readonly<Record<string, string>> = {
+  none: "None",
+  minimal: "Min",
+  low: "Low",
+  medium: "Med",
+  high: "High",
+  xhigh: "XHigh",
+  max: "Max",
+  ultra: "Ultra",
+  ultracode: "UCode",
+  ultrathink: "UThink",
+};
+
+/** Deterministic fallback for ids no driver has declared yet. */
+export function shortChoiceLabel(choice: { readonly id: string; readonly label: string }): string {
+  const mapped = CHOICE_ABBREVIATION[choice.id.trim().toLocaleLowerCase()];
+  if (mapped) return mapped;
+  const label = choice.label.trim().replace(/\s+/g, " ");
+  if (label.length <= 6) return label;
+  const [first = "", second] = label.split(" ");
+  // "Ultra Deep" -> "UltraD"; "Ultracode" -> "Ultrac".
+  return second ? `${first.slice(0, 5)}${second[0]!.toLocaleUpperCase()}` : first.slice(0, 6);
+}
+
 function toControl(descriptor: ProviderOptionDescriptor): ModelOptionControl {
   if (descriptor.type === "boolean") {
     return {
@@ -191,6 +222,7 @@ function toControl(descriptor: ProviderOptionDescriptor): ModelOptionControl {
     choices: descriptor.options.map((choice) => ({
       id: choice.id,
       label: choice.label,
+      shortLabel: shortChoiceLabel(choice),
       selected: choice.id === descriptor.currentValue,
     })),
     enabled: false,

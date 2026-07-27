@@ -1,7 +1,11 @@
 import type { ModelSelection, ServerConfig } from "@ryco/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildModelPickerModel, resolveModelPickerSelection } from "./modelPickerModel";
+import {
+  buildModelPickerModel,
+  resolveModelPickerSelection,
+  shortChoiceLabel,
+} from "./modelPickerModel";
 
 function provider(instanceId: string, driver: string, models: ReadonlyArray<string>) {
   return {
@@ -193,5 +197,51 @@ describe("model options", () => {
       providerLocked: false,
     });
     expect(model.hasOptionRail).toBe(false);
+  });
+});
+
+describe("shortChoiceLabel", () => {
+  it("abbreviates every reasoning level a driver actually declares", () => {
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      ["none", "None"],
+      ["minimal", "Min"],
+      ["low", "Low"],
+      ["medium", "Med"],
+      ["high", "High"],
+      ["xhigh", "XHigh"],
+      ["max", "Max"],
+      ["ultra", "Ultra"],
+      ["ultracode", "UCode"],
+      ["ultrathink", "UThink"],
+    ];
+    for (const [id, expected] of cases) {
+      expect(shortChoiceLabel({ id, label: "ignored" })).toBe(expected);
+    }
+  });
+
+  it("keys off the id, not the label", () => {
+    // Ids are normalized by every driver; labels are upstream text that can
+    // change, so matching on them would silently stop working.
+    expect(shortChoiceLabel({ id: "ultracode", label: "Something Else Entirely" })).toBe("UCode");
+    expect(shortChoiceLabel({ id: "XHIGH", label: "whatever" })).toBe("XHigh");
+  });
+
+  it("passes short labels through untouched", () => {
+    expect(shortChoiceLabel({ id: "unknown-id", label: "272K" })).toBe("272K");
+    expect(shortChoiceLabel({ id: "unknown-id", label: "Build" })).toBe("Build");
+  });
+
+  it("compresses a two-word label to five characters plus an initial", () => {
+    expect(shortChoiceLabel({ id: "ultra-deep", label: "Ultra Deep" })).toBe("UltraD");
+  });
+
+  it("truncates a long single word", () => {
+    expect(shortChoiceLabel({ id: "nope", label: "Exhaustive" })).toBe("Exhaus");
+  });
+
+  it("never exceeds six characters, whatever it is given", () => {
+    for (const label of ["Extremely Long Reasoning Level", "aaaaaaaaaaaaaaa", "A B C D"]) {
+      expect(shortChoiceLabel({ id: "x", label }).length).toBeLessThanOrEqual(6);
+    }
   });
 });
