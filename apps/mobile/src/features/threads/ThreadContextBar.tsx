@@ -3,11 +3,14 @@ import { Pressable, View } from "react-native";
 import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
 import { ChangeRequestBadge } from "../../components/ChangeRequestBadge";
+import { CheckSummaryBadge } from "../../components/CheckSummaryBadge";
 import { useThemeColor } from "../../lib/useThemeColor";
+import type { CheckSummary } from "./prCheckSummary";
 import type { ThreadHeaderModel } from "./threadHeaderModel";
 
 export function ThreadContextBar(props: {
   readonly model: ThreadHeaderModel;
+  readonly checks?: CheckSummary | null;
   readonly onPress: () => void;
 }) {
   const iconColor = useThemeColor("--color-icon-muted");
@@ -47,6 +50,7 @@ export function ThreadContextBar(props: {
           {props.model.changeRequest ? (
             <ChangeRequestBadge badge={props.model.changeRequest} />
           ) : null}
+          {props.checks ? <CheckSummaryBadge summary={props.checks} /> : null}
         </View>
       </View>
       <SymbolView
