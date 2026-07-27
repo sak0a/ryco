@@ -119,6 +119,30 @@ describe("RelayChannelRegistry", () => {
     expect(output?.type === "data" && output.payload).toEqual(Uint8Array.of(9, 0, 8));
   });
 
+  it("closes an oversized outbound frame as transfer_limit, not slow_consumer", async () => {
+    // Regression: a response larger than maxDataChunkBytes and a genuinely full
+    // send queue used to collapse into one close reason. Reporting the first as
+    // `slow_consumer` makes an application bug -- this node emitted a frame over
+    // the negotiated limit -- read as a network problem in relay telemetry, and
+    // that is why oversized RPC responses went undiagnosed. The inbound path has
+    // always called the identical condition `transfer_limit`.
+    const { registry, sendQueue, sent, sessions } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+    sent.length = 0;
+
+    // One byte over the limit. The boundary itself must still be accepted.
+    const session = sessions.get(channelA as string)!;
+    expect(session.send(new Uint8Array(limits.maxDataChunkBytes))).toBe(true);
+    expect(session.send(new Uint8Array(limits.maxDataChunkBytes + 1))).toBe(false);
+
+    await Promise.resolve();
+    sendQueue.flush();
+    const close = decodeAll(sent).find((frame) => frame.type === "channel.close");
+    expect(close).toMatchObject({ channelId: channelA, reason: "transfer_limit" });
+    expect(close?.type === "channel.close" && close.reason).not.toBe("slow_consumer");
+  });
+
   it("rejects unsupported and duplicate channels without constructing extra sessions", async () => {
     const { registry, sendQueue, sent, sessions } = harness();
     await registry.handle(openFrame(channelA, "viewer"));
