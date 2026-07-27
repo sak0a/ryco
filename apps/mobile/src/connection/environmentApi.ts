@@ -22,11 +22,44 @@ function registry() {
 }
 const environmentApiOverridesForTests = new Map<EnvironmentId, EnvironmentApi>();
 
+function readClientForEnvironment(environmentId: EnvironmentId): WsRpcClient | null {
+  return registry().driver.supervisor.read(environmentId)?.client ?? null;
+}
+
 const lookup = createEnvironmentApiLookup({
   canReadConnections: () => true,
-  readClient: (environmentId): WsRpcClient | null =>
-    registry().driver.supervisor.read(environmentId)?.client ?? null,
+  readClient: readClientForEnvironment,
 });
+
+const rpcClientOverridesForTests = new Map<EnvironmentId, WsRpcClient>();
+
+/**
+ * The raw RPC client, for methods the typed `EnvironmentApi` facade omits.
+ *
+ * `EnvironmentApi.sourceControl` (contracts/src/ipc.ts) exposes only
+ * lookupRepository / searchRepositories / cloneRepository / publishRepository,
+ * while the live client also carries the source-control CHECK family —
+ * `sourceControl.getChangeRequestDetail`, `.listWorkflowRuns`,
+ * `.getWorkflowRunJobs`. apps/web reaches those off the same live client rather
+ * than through the facade, and this is mobile doing the same thing, so no shared
+ * package has to change to read CI state.
+ *
+ * Prefer `readEnvironmentApi()` for anything the facade already covers.
+ */
+export function readRpcClient(environmentId: EnvironmentId): WsRpcClient | null {
+  return rpcClientOverridesForTests.get(environmentId) ?? readClientForEnvironment(environmentId);
+}
+
+export function __setRpcClientOverrideForTests(
+  environmentId: EnvironmentId,
+  client: WsRpcClient,
+): void {
+  rpcClientOverridesForTests.set(environmentId, client);
+}
+
+export function __resetRpcClientOverridesForTests(): void {
+  rpcClientOverridesForTests.clear();
+}
 
 export function readEnvironmentApi(environmentId: EnvironmentId): EnvironmentApi | undefined {
   return environmentApiOverridesForTests.get(environmentId) ?? lookup.read(environmentId);

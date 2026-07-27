@@ -45,6 +45,7 @@ import {
   setThreadModelSelection,
   setThreadRuntimeMode,
 } from "./sessionActions";
+import { useThreadChecks } from "./useThreadChecks";
 import { buildThreadTimelineRows, toggleFold, type ThreadTimelineRow } from "./threadActivityFold";
 import { ThreadActivityFoldRow } from "./ThreadActivityFoldRow";
 import { buildModelPickerModel, resolveModelPickerSelection } from "./modelPickerModel";
@@ -252,6 +253,14 @@ export function ThreadDetailScreen(props: {
     }
   }, []);
 
+  // One lookup for the open thread only. See useThreadChecks for why the inbox
+  // deliberately does not do this.
+  const checks = useThreadChecks({
+    environmentId,
+    cwd: worktree?.worktreePath ?? thread?.worktreePath ?? null,
+    prNumber: worktree?.prNumber ?? null,
+  });
+
   const openReview = useCallback(
     () =>
       navigation.navigate("ThreadReview", {
@@ -427,6 +436,7 @@ export function ThreadDetailScreen(props: {
       {headerModel ? (
         <ThreadContextBar
           model={headerModel}
+          checks={checks}
           onPress={() => {
             setActionError(null);
             setActionsVisible(true);
