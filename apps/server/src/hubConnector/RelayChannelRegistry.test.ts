@@ -7,6 +7,7 @@ import type {
   RelayFrame,
   RelayLimits,
 } from "@ryco/contracts/relay";
+import { RELAY_MAX_RPC_MESSAGE_BYTES } from "@ryco/contracts/relay";
 import { decodeRelayFrame } from "@ryco/shared/relayCodec";
 
 import {
@@ -131,16 +132,50 @@ describe("RelayChannelRegistry", () => {
     sendQueue.flush();
     sent.length = 0;
 
-    // One byte over the limit. The boundary itself must still be accepted.
+    // A message over the per-frame limit is now SPLIT rather than refused, so
+    // only one above the reassembly ceiling is rejected — and when it is, the
+    // reason must name the real cause.
     const session = sessions.get(channelA as string)!;
-    expect(session.send(new Uint8Array(limits.maxDataChunkBytes))).toBe(true);
-    expect(session.send(new Uint8Array(limits.maxDataChunkBytes + 1))).toBe(false);
+    expect(session.send(new Uint8Array(RELAY_MAX_RPC_MESSAGE_BYTES + 1))).toBe(false);
 
     await Promise.resolve();
     sendQueue.flush();
     const close = decodeAll(sent).find((frame) => frame.type === "channel.close");
     expect(close).toMatchObject({ channelId: channelA, reason: "transfer_limit" });
     expect(close?.type === "channel.close" && close.reason).not.toBe("slow_consumer");
+  });
+
+  it("splits a message larger than one data frame instead of killing the channel", async () => {
+    // The defect this fixes: one RPC response was unconditionally one relay
+    // frame, so any response over the limit destroyed the channel. Repositories
+    // of a few thousand files already exceeded it.
+    const { registry, sendQueue, sent, sessions } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+    sent.length = 0;
+
+    // Two frames' worth. Each frame also costs ~101 bytes of CBOR overhead
+    // against the 4 KiB queue budget, so a larger message would trip the queue
+    // rather than exercise the split.
+    const message = new Uint8Array(limits.maxDataChunkBytes * 2 - 64);
+    for (let i = 0; i < message.byteLength; i += 1) message[i] = i % 251;
+    expect(sessions.get(channelA as string)!.send(message)).toBe(true);
+    sendQueue.flush();
+
+    const frames = decodeAll(sent);
+    expect(frames.every((frame) => frame.type === "data")).toBe(true);
+    expect(frames.length).toBeGreaterThan(1);
+    // Every frame stays inside the negotiated limit, and the channel survives.
+    for (const frame of frames) {
+      expect(frame.type === "data" && frame.payload.byteLength).toBeLessThanOrEqual(
+        limits.maxDataChunkBytes,
+      );
+    }
+    expect(registry.has(channelA)).toBe(true);
+    // Sequence numbers advance once per FRAME, not once per message.
+    expect(frames.map((frame) => (frame.type === "data" ? frame.sequence : -1))).toEqual(
+      frames.map((_, index) => index),
+    );
   });
 
   it("rejects unsupported and duplicate channels without constructing extra sessions", async () => {
@@ -186,20 +221,18 @@ describe("RelayChannelRegistry", () => {
       sequence: 0 as never,
       payload: new Uint8Array(1_000),
     });
-    await registry.handle({
-      type: "data",
-      ...version,
-      channelId: channelB,
-      sequence: 1 as never,
-      payload: Uint8Array.of(2),
-    });
-    await registry.handle({
-      type: "data",
-      ...version,
-      channelId: channelB,
-      sequence: 2 as never,
-      payload: Uint8Array.of(3),
-    });
+    // A paused channel now gets enough grace for one whole message to land,
+    // since a message can be many frames. Drive past that allowance.
+    const allowance = Math.ceil(limits.maxQueuedBytes / limits.maxDataChunkBytes) + 1;
+    for (let sequence = 1; sequence <= allowance + 1; sequence += 1) {
+      await registry.handle({
+        type: "data",
+        ...version,
+        channelId: channelB,
+        sequence: sequence as never,
+        payload: Uint8Array.of(2),
+      });
+    }
     expect(registry.has(channelB)).toBe(false);
     expect(sessionB.closes).toBe(1);
     sendQueue.flush();

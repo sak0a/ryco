@@ -8,6 +8,10 @@
       "types": "./src/advertisedEndpoint.ts",
       "import": "./src/advertisedEndpoint.ts"
     },
+    "./relayMessageChunks": {
+      "types": "./src/relayMessageChunks.ts",
+      "import": "./src/relayMessageChunks.ts"
+    },
     "./model": {
       "types": "./src/model.ts",
       "import": "./src/model.ts"

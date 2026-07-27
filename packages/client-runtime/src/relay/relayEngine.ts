@@ -2,6 +2,7 @@ import {
   RELAY_AUTHENTICATION_DEADLINE_MS,
   RELAY_MAX_CONTROL_FRAME_BYTES,
   RELAY_MAX_DATA_CHUNK_BYTES,
+  RELAY_MAX_RPC_MESSAGE_BYTES,
   RELAY_MAX_DATA_FRAME_BYTES,
   RELAY_MAX_DATA_FRAME_OVERHEAD_BYTES,
   RELAY_PROTOCOL_MAJOR,
@@ -13,6 +14,7 @@ import {
   type RelayLimits,
 } from "@ryco/contracts";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
+import { RelayMessageAssembler, splitRelayMessage } from "@ryco/shared/relayMessageChunks";
 
 import { decodeBase64Url } from "./base64url.ts";
 import type {
@@ -182,6 +184,8 @@ export class HostedRelayEngine {
   }
 
   /** Socket backpressure plus everything still awaiting a flow.resume flush. */
+  readonly #assembler = new RelayMessageAssembler();
+
   get bufferedAmount(): number {
     return this.options.socket.bufferedAmount + this.#outboundQueuedBytes;
   }
@@ -191,12 +195,16 @@ export class HostedRelayEngine {
     // completes (channel.accept); a channel that is merely open is not enough.
     if (this.#closed || !this.#accepted || !this.#channel || !this.#limits)
       throw new Error("Relay channel is not open.");
-    if (payload.byteLength > this.#limits.maxDataChunkBytes) {
+    // Only a message above the reassembly ceiling is refused now; anything
+    // between the frame limit and that ceiling is split across frames.
+    if (payload.byteLength > RELAY_MAX_RPC_MESSAGE_BYTES) {
       payload.fill(0);
       this.#fail(failure("transfer_limit"));
-      throw new Error("RPC payload exceeds the negotiated relay limit.");
+      throw new Error("RPC payload exceeds the maximum relay message size.");
     }
-    this.#enqueueOutbound(payload);
+    for (const chunk of splitRelayMessage(payload, this.#limits.maxDataChunkBytes)) {
+      this.#enqueueOutbound(Uint8Array.from(chunk));
+    }
   }
 
   close(code = 1000, reason = "closed"): void {
@@ -341,7 +349,15 @@ export class HostedRelayEngine {
         this.#inboundQueuedBytes -= payload.byteLength;
         const delivered = Uint8Array.from(payload);
         payload.fill(0);
-        this.options.events.onData(delivered);
+        // Reassemble before delivering. An unchunked payload passes straight
+        // through, so an old peer is unaffected; a partial message is held
+        // until its final chunk arrives.
+        const assembled = this.#assembler.push(delivered);
+        if (assembled.kind === "error") {
+          this.#fail(failure("transfer_limit"));
+          return;
+        }
+        if (assembled.kind === "done") this.options.events.onData(assembled.message);
       }
       if (
         this.#inboundPaused &&

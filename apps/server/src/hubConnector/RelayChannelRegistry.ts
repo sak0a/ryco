@@ -8,6 +8,8 @@ import type {
   RelayFrame,
   RelayLimits,
 } from "@ryco/contracts/relay";
+import { RELAY_MAX_RPC_MESSAGE_BYTES } from "@ryco/contracts/relay";
+import { splitRelayMessage } from "@ryco/shared/relayMessageChunks";
 
 import { RelaySendQueue } from "./RelaySendQueue.ts";
 
@@ -131,6 +133,21 @@ export class RelayChannelRegistry {
     }
   }
 
+  /**
+   * How many frames a paused channel may still deliver before it counts as a
+   * slow consumer.
+   *
+   * This used to be 1, on the assumption that one message is one frame. A
+   * message can now arrive as several, so a one-frame grace would kill a
+   * channel mid-message the moment it paused. The bound is the queue budget
+   * rather than RELAY_MAX_RPC_MESSAGE_BYTES: a peer cannot have more than
+   * `maxQueuedBytes` in flight regardless, so this is the tightest allowance
+   * that cannot sever a legitimate message.
+   */
+  #graceFrameAllowance(): number {
+    return Math.ceil(this.#limits.maxQueuedBytes / this.#limits.maxDataChunkBytes) + 1;
+  }
+
   async closeChannel(channelId: RelayChannelId, reason?: RelayCloseReason) {
     const key = channelId as string;
     const entry = this.#channels.get(key);
@@ -208,18 +225,23 @@ export class RelayChannelRegistry {
           // the first as the second makes an application bug ("this node emitted
           // a frame larger than the negotiated limit") look like a network
           // problem, which is why it went undiagnosed.
-          const oversized = bytes.byteLength > this.#limits.maxDataChunkBytes;
+          // A message larger than one data frame is split across several. All
+          // chunks of one message go into the per-channel FIFO synchronously
+          // here, so they cannot interleave with another message.
+          const oversized = bytes.byteLength > RELAY_MAX_RPC_MESSAGE_BYTES;
+          const chunks = oversized ? [] : splitRelayMessage(bytes, this.#limits.maxDataChunkBytes);
           const accepted =
             !oversized &&
-            this.#sendQueue.enqueueData({
-              type: "data",
-              ...version,
-              channelId: frame.channelId,
-              sequence: outputSequence as RelayDataFrame["sequence"],
-              payload: Uint8Array.from(bytes),
-            });
+            chunks.every((chunk) =>
+              this.#sendQueue.enqueueData({
+                type: "data",
+                ...version,
+                channelId: frame.channelId,
+                sequence: outputSequence++ as RelayDataFrame["sequence"],
+                payload: Uint8Array.from(chunk),
+              }),
+            );
           if (accepted) {
-            outputSequence += 1;
             entry.outboundSequence = outputSequence;
             this.#onOutboundReady();
           } else {
@@ -284,7 +306,10 @@ export class RelayChannelRegistry {
     }
     if (entry.inboundPaused) {
       entry.graceFrames += 1;
-      if (entry.graceFrames > 1) {
+      // One message can now arrive as many frames, so a one-frame grace would
+      // kill a channel mid-message the instant it paused. Allow a whole
+      // maximum-size message to land, plus one.
+      if (entry.graceFrames > this.#graceFrameAllowance()) {
         await this.closeChannel(frame.channelId, "slow_consumer");
         return;
       }
