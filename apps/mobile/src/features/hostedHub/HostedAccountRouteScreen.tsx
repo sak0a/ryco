@@ -64,13 +64,14 @@ export function HostedAccountRouteScreen() {
 
   const signedIn = state.accountStatus === "authenticated";
 
-  // A read, not a mutation: `refreshPasskeys` deduplicates, no-ops while signed
-  // out, and touches nothing. Regenerating recovery codes deliberately has no
+  // Reads, not mutations: both calls deduplicate, no-op while signed out, and
+  // touch no credentials. Regenerating recovery codes deliberately has no
   // equivalent here — that rotates, so it only ever runs from an explicit,
   // confirmed submit.
   useEffect(() => {
     if (!hostedModeAvailable || !signedIn) return;
     void hostedHubController.refreshPasskeys();
+    void hostedHubController.refreshAccountSecurity();
   }, [hostedModeAvailable, signedIn]);
 
   // This screen displays the account's one-time recovery codes, and saying so
@@ -156,6 +157,25 @@ export function HostedAccountRouteScreen() {
               </View>
             ) : null}
 
+            {management.securityMessage ? (
+              <View className="mx-5 mt-4 rounded-2xl border border-border bg-card px-4 py-3">
+                <Text className="font-sans text-xs leading-relaxed text-foreground-muted">
+                  {management.securityMessage}
+                </Text>
+              </View>
+            ) : null}
+
+            {management.securityRetry ? (
+              <SettingsSection title="Account security">
+                <SettingsRow
+                  first
+                  label={management.securityRetry.label}
+                  disabled={management.securityRetry.disabled}
+                  onPress={management.securityRetry.run}
+                />
+              </SettingsSection>
+            ) : null}
+
             {view.deliveryUnknown ? (
               <HostedDeliveryUnknownNotice view={view.deliveryUnknown} />
             ) : null}
@@ -175,6 +195,9 @@ export function HostedAccountRouteScreen() {
               ? management.sections.map((section) => (
                   <View key={section.id}>
                     <SettingsSection title={section.title}>
+                      {section.status !== null ? (
+                        <SettingsRow first label="Status" value={section.status} />
+                      ) : null}
                       {section.id === "passkeys" ? (
                         <HostedPasskeyList
                           rows={management.passkeyRows}
@@ -186,7 +209,9 @@ export function HostedAccountRouteScreen() {
                           key={row.id}
                           // The passkey list occupies the top of its own card,
                           // so the action beneath it always keeps a separator.
-                          first={section.id !== "passkeys" && index === 0}
+                          first={
+                            section.status === null && section.id !== "passkeys" && index === 0
+                          }
                           label={row.label}
                           destructive={row.destructive}
                           disabled={row.disabled}

@@ -69,6 +69,7 @@ const hostedHubApi = {
   redeemInvitation: vi.fn(),
   listNodes: vi.fn(),
   listPasskeys: vi.fn(),
+  getAccountSecurity: vi.fn(),
   addPasskey: vi.fn(),
   revokePasskey: vi.fn(),
   regenerateRecoveryCodes: vi.fn(),
@@ -160,6 +161,12 @@ const sessionResponse: HostedHubSessionResponse = {
   csrfToken: "csrf-sensitive-canary",
 };
 
+const emptySecurity = {
+  passwordConfigured: false,
+  totpEnrolled: false,
+  email: null,
+} as const;
+
 function node(
   id = "node_aaaaaaaaaaaaaaaaaaaaaa",
   role: "viewer" | "operator" | "owner" = "operator",
@@ -184,6 +191,7 @@ function node(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(hostedHubApi.getAccountSecurity).mockResolvedValue(emptySecurity);
   hasHostedRelayPendingRequests.mockReturnValue(false);
   configureHostedRuntime(fakeRuntime(), hostedHubApi);
 });
@@ -1258,6 +1266,68 @@ describe("hosted account management state", () => {
     expect(hostedAccountStore.getState().passkeysStatus).toBe("idle");
   });
 
+  it("loads account security once for concurrent callers without inventing an empty posture", async () => {
+    await authenticate();
+    let resolveSecurity:
+      | ((value: { passwordConfigured: boolean; totpEnrolled: boolean; email: null }) => void)
+      | null = null;
+    const getAccountSecurity = vi.spyOn(hostedHubApi, "getAccountSecurity").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSecurity = resolve;
+        }),
+    );
+
+    const first = hostedHubController.refreshAccountSecurity();
+    const second = hostedHubController.refreshAccountSecurity();
+    expect(hostedAccountStore.getState()).toMatchObject({
+      security: null,
+      securityStatus: "loading",
+    });
+    resolveSecurity?.(emptySecurity);
+    await Promise.all([first, second]);
+
+    expect(getAccountSecurity).toHaveBeenCalledOnce();
+    expect(hostedAccountStore.getState()).toMatchObject({
+      security: emptySecurity,
+      securityStatus: "ready",
+    });
+  });
+
+  it("marks a failed security refresh stale and retains only a prior known posture", async () => {
+    await authenticate();
+    const configured = {
+      passwordConfigured: true,
+      totpEnrolled: true,
+      email: { address: "ada@example.test", verified: true },
+    } as const;
+    vi.spyOn(hostedHubApi, "getAccountSecurity").mockResolvedValueOnce(configured);
+    await hostedHubController.refreshAccountSecurity();
+
+    vi.spyOn(hostedHubApi, "getAccountSecurity").mockRejectedValueOnce(
+      new HostedHubApiError("unavailable", 0),
+    );
+    await hostedHubController.refreshAccountSecurity({ force: true });
+
+    expect(hostedHubStore.getState().accountStatus).toBe("authenticated");
+    expect(hostedAccountStore.getState()).toMatchObject({
+      security: configured,
+      securityStatus: "stale",
+    });
+  });
+
+  it("expires the session when the account-security read is unauthenticated", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "getAccountSecurity").mockRejectedValue(
+      new HostedHubApiError("session_invalid", 401),
+    );
+
+    await hostedHubController.refreshAccountSecurity();
+
+    expect(hostedHubStore.getState().accountStatus).toBe("session-expired");
+    expect(hostedAccountStore.getState()).toEqual(hostedAccountStore.getInitialState());
+  });
+
   it("reports a bounded passkey read failure without dropping the session", async () => {
     await authenticate();
     vi.spyOn(hostedHubApi, "listPasskeys").mockRejectedValue(
@@ -1878,6 +1948,41 @@ describe("hosted account management state", () => {
 
     expect(hostedHubStore.getState().accountStatus).toBe("session-expired");
     expect(hostedAccountStore.getState()).toEqual(hostedAccountStore.getInitialState());
+  });
+
+  it("forces a security-state refresh after every committed posture mutation", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "setPassword").mockResolvedValue();
+    vi.spyOn(hostedHubApi, "removePassword").mockResolvedValue();
+    vi.spyOn(hostedHubApi, "confirmTotpEnrollment").mockResolvedValue();
+    vi.spyOn(hostedHubApi, "revokeTotp").mockResolvedValue();
+    vi.spyOn(hostedHubApi, "requestEmailVerification").mockResolvedValue();
+    const getAccountSecurity = vi.spyOn(hostedHubApi, "getAccountSecurity");
+
+    await hostedHubController.setPassword({ password: "pw" });
+    await hostedHubController.removePassword();
+    await hostedHubController.confirmTotpEnrollment({ code: "123456" });
+    await hostedHubController.revokeTotp();
+    await hostedHubController.requestEmailVerification({ email: "ada@example.test" });
+
+    expect(getAccountSecurity).toHaveBeenCalledTimes(5);
+  });
+
+  it("keeps a committed credential outcome when its confirming security read fails", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "setPassword").mockResolvedValue();
+    vi.spyOn(hostedHubApi, "getAccountSecurity").mockRejectedValue(
+      new HostedHubApiError("unavailable", 0),
+    );
+
+    await expect(hostedHubController.setPassword({ password: "pw" })).resolves.toEqual({
+      status: "committed",
+    });
+    expect(hostedAccountStore.getState()).toMatchObject({
+      security: null,
+      securityStatus: "stale",
+      actionStatus: "idle",
+    });
   });
 
   it("runs one credential change at a time across the whole account surface", async () => {

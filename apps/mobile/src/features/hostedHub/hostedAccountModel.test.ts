@@ -101,6 +101,12 @@ function accountState(overrides: Partial<HostedAccountState> = {}): HostedAccoun
   return {
     passkeys: [passkey()],
     passkeysStatus: "ready",
+    security: {
+      passwordConfigured: false,
+      totpEnrolled: false,
+      email: null,
+    },
+    securityStatus: "ready",
     actionStatus: "idle",
     errorMessage: null,
     ...overrides,
@@ -178,6 +184,7 @@ function harness(initial?: {
 
   const actions = {
     refreshPasskeys: vi.fn(),
+    refreshAccountSecurity: vi.fn(),
     addPasskey: vi.fn(async () => commit()),
     revokePasskey: vi.fn(async () => commit()),
     regenerateRecoveryCodes: vi.fn(async () => commit()),
@@ -290,7 +297,7 @@ describe("hosted account management surface", () => {
     }
   });
 
-  it("offers every capability the runtime now exposes, natively", () => {
+  it("offers only setup actions when fallback credentials are not configured", () => {
     const view = harness().view();
     expect(view.sections.map((section) => section.id)).toEqual([
       "passkeys",
@@ -303,11 +310,56 @@ describe("hosted account management surface", () => {
       "add-passkey",
       "regenerate-recovery-codes",
       "set-password",
-      "remove-password",
       "enroll-totp",
+      "verify-email",
+    ]);
+    expect(view.sections.find((section) => section.id === "password")?.status).toBe("Not set");
+    expect(view.sections.find((section) => section.id === "two-factor")?.status).toBe("Off");
+  });
+
+  it("offers only change/removal actions when password and TOTP are configured", () => {
+    const view = harness({
+      account: {
+        security: {
+          passwordConfigured: true,
+          totpEnrolled: true,
+          email: { address: "ada@example.test", verified: true },
+        },
+      },
+    }).view();
+
+    expect(view.sections.flatMap((section) => section.rows.map((row) => row.id))).toEqual([
+      "add-passkey",
+      "regenerate-recovery-codes",
+      "set-password",
+      "remove-password",
       "revoke-totp",
       "verify-email",
     ]);
+    expect(view.sections.find((section) => section.id === "password")?.status).toBe("Set");
+    expect(view.sections.find((section) => section.id === "two-factor")?.status).toBe("On");
+    expect(view.sections.find((section) => section.id === "email")?.status).toBe("Verified");
+  });
+
+  it("withholds credential actions until security state is known and exposes a stale retry", () => {
+    const loading = harness({
+      account: { security: null, securityStatus: "loading" },
+    }).view();
+    expect(
+      loading.sections
+        .filter((section) => ["password", "two-factor", "email"].includes(section.id))
+        .flatMap((section) => section.rows),
+    ).toEqual([]);
+    expect(loading.securityMessage).toContain("Checking");
+    expect(loading.securityRetry).toBeNull();
+
+    const test = harness({
+      account: { security: null, securityStatus: "stale" },
+    });
+    const stale = test.view();
+    expect(stale.securityMessage).toContain("could not be loaded");
+    stale.securityRetry?.run();
+    expect(test.actions.refreshAccountSecurity).toHaveBeenCalledWith({ force: true });
   });
 
   /**

@@ -34,6 +34,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 
 import type {
   HostedAccountOutcome,
+  HostedAccountSecurity,
   HostedAccountStepUp,
   HostedHubPasskey,
 } from "@ryco/client-runtime/authorization";
@@ -326,6 +327,8 @@ export function AccountSettingsPanel() {
   const [addPasskeyOpen, setAddPasskeyOpen] = useState(false);
   const passkeys = useHostedAccountStore((state) => state.passkeys);
   const passkeysStatus = useHostedAccountStore((state) => state.passkeysStatus);
+  const security = useHostedAccountStore((state) => state.security);
+  const securityStatus = useHostedAccountStore((state) => state.securityStatus);
   const actionStatus = useHostedAccountStore((state) => state.actionStatus);
   const errorMessage = useHostedAccountStore((state) => state.errorMessage);
   const errorCode = useHostedAccountStore((state) => state.errorCode ?? null);
@@ -338,6 +341,7 @@ export function AccountSettingsPanel() {
 
   useEffect(() => {
     void hostedHubController.refreshPasskeys();
+    void hostedHubController.refreshAccountSecurity();
   }, []);
 
   if (accountStatus !== "authenticated") {
@@ -375,6 +379,42 @@ export function AccountSettingsPanel() {
           <TriangleAlertIcon aria-hidden />
           <AlertTitle>{passkeySessionGate ? "Passkey needed" : "That did not work"}</AlertTitle>
           <AlertDescription>{inlineError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {security === null && securityStatus !== "stale" ? (
+        <Alert variant="info" aria-live="polite">
+          <ShieldCheckIcon aria-hidden />
+          <AlertTitle>Checking account security</AlertTitle>
+          <AlertDescription>
+            Reading which fallback sign-in methods are configured on this Hub.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {securityStatus === "stale" ? (
+        <Alert variant="warning" aria-live="polite">
+          <TriangleAlertIcon aria-hidden />
+          <AlertTitle>
+            {security === null
+              ? "Account security unavailable"
+              : "Account security may be outdated"}
+          </AlertTitle>
+          <AlertDescription>
+            {security === null
+              ? "Ryco could not read the current password, authenticator, and email state."
+              : "These controls use the last state Ryco successfully read from the Hub."}
+          </AlertDescription>
+          <AlertAction>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={busy}
+              onClick={() => void hostedHubController.refreshAccountSecurity({ force: true })}
+            >
+              Retry
+            </Button>
+          </AlertAction>
         </Alert>
       ) : null}
 
@@ -424,6 +464,7 @@ export function AccountSettingsPanel() {
         busy={busy}
         actionStatus={actionStatus}
         enrollment={totpEnrollment}
+        enrolled={security?.totpEnrolled ?? null}
         run={action.run}
       />
 
@@ -441,6 +482,7 @@ export function AccountSettingsPanel() {
       <FallbackSignInSection
         busy={busy}
         actionStatus={actionStatus}
+        security={security}
         run={action.run}
         cancel={action.cancel}
       />
@@ -723,11 +765,13 @@ function TwoFactorSection({
   busy,
   actionStatus,
   enrollment,
+  enrolled,
   run,
 }: {
   readonly busy: boolean;
   readonly actionStatus: string;
   readonly enrollment: { readonly secretBase32: string; readonly provisioningUri: string } | null;
+  readonly enrolled: boolean | null;
   readonly run: RunAccountAction;
 }) {
   const [code, setCode] = useState("");
@@ -764,31 +808,28 @@ function TwoFactorSection({
       <SettingsRow
         title="Authenticator app"
         description="A six-digit code from an authenticator app, required whenever you change credentials from a session that was not started with a passkey. Signing in with a passkey never asks for one."
-        status="This Hub does not report whether an authenticator is already enrolled — setting one up when one exists will be refused."
+        status={enrolled === null ? "Checking current state…" : enrolled ? "On" : "Off"}
         control={
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={busy}
-            onClick={() => void hostedHubController.beginTotpEnrollment()}
-          >
-            <ActionLabel busy={enrolling}>Set up</ActionLabel>
-          </Button>
-        }
-      />
-      <SettingsRow
-        title="Remove two-factor authentication"
-        description="Stops the Hub asking for a code and leaves fallback sign-ins protected by the credential alone."
-        control={
-          <Button
-            size="xs"
-            variant="destructive-outline"
-            aria-label="Turn off two-factor authentication"
-            disabled={busy}
-            onClick={() => setConfirmRevokeOpen(true)}
-          >
-            <ActionLabel busy={revoking}>Remove</ActionLabel>
-          </Button>
+          enrolled === null ? null : enrolled ? (
+            <Button
+              size="xs"
+              variant="destructive-outline"
+              aria-label="Turn off two-factor authentication"
+              disabled={busy}
+              onClick={() => setConfirmRevokeOpen(true)}
+            >
+              <ActionLabel busy={revoking}>Turn off</ActionLabel>
+            </Button>
+          ) : (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={busy}
+              onClick={() => void hostedHubController.beginTotpEnrollment()}
+            >
+              <ActionLabel busy={enrolling}>Set up</ActionLabel>
+            </Button>
+          )
         }
       />
 
@@ -890,21 +931,22 @@ function TwoFactorSection({
 /**
  * Password and email in one section.
  *
- * Both are fallbacks, both are write-only, and neither has a read behind it —
- * the Hub reports no "is a password set" and no address on file. One section
- * headed "Fallback sign-in" places them structurally below the passkey and the
- * second factor, which is a stronger statement of the never-equal rule than any
- * sentence could be, and it avoids inventing a section-group heading level that
- * would look identical to `SettingsSection`'s own.
+ * Both are fallbacks, and the Hub's authenticated security read determines
+ * which password action and email status are valid. One section headed
+ * "Fallback sign-in" places them structurally below the passkey and the second
+ * factor, which is a stronger statement of the never-equal rule than any
+ * sentence could be.
  */
 function FallbackSignInSection({
   busy,
   actionStatus,
+  security,
   run,
   cancel,
 }: {
   readonly busy: boolean;
   readonly actionStatus: string;
+  readonly security: HostedAccountSecurity | null;
   readonly run: RunAccountAction;
   readonly cancel: CancelAccountAction;
 }) {
@@ -966,32 +1008,42 @@ function FallbackSignInSection({
       <SettingsRow
         title="Fallback password"
         description="A password is a fallback, not an equal of a passkey: it can be phished and reused, and a session started with one has to prove itself again before changing credentials. Keep a passkey as your normal way in."
-        // Each unreadable state is named beside the control it qualifies,
-        // which beats one page-level disclaimer because it is adjacent to the
-        // decision it affects.
-        status="This Hub does not report whether a password is set, so both actions are always offered."
+        status={
+          security === null
+            ? "Checking current state…"
+            : security.passwordConfigured
+              ? "Set"
+              : "Not set"
+        }
         control={
-          <Button size="xs" variant="outline" disabled={busy} onClick={() => setOpen(true)}>
-            <ActionLabel busy={setting}>Set or change</ActionLabel>
-          </Button>
+          security === null ? null : (
+            <div className="flex flex-wrap gap-2">
+              <Button size="xs" variant="outline" disabled={busy} onClick={() => setOpen(true)}>
+                <ActionLabel busy={setting}>
+                  {security.passwordConfigured ? "Change" : "Set password"}
+                </ActionLabel>
+              </Button>
+              {security.passwordConfigured ? (
+                <Button
+                  size="xs"
+                  variant="destructive-outline"
+                  aria-label="Delete the fallback password"
+                  disabled={busy}
+                  onClick={() => setConfirmRemoveOpen(true)}
+                >
+                  <ActionLabel busy={removing}>Remove</ActionLabel>
+                </Button>
+              ) : null}
+            </div>
+          )
         }
       />
-      <SettingsRow
-        title="Remove the password"
-        description="Leaves your passkeys and recovery codes in place and removes the weakest way in."
-        control={
-          <Button
-            size="xs"
-            variant="destructive-outline"
-            aria-label="Delete the fallback password"
-            disabled={busy}
-            onClick={() => setConfirmRemoveOpen(true)}
-          >
-            <ActionLabel busy={removing}>Remove</ActionLabel>
-          </Button>
-        }
+      <EmailRows
+        busy={busy}
+        actionStatus={actionStatus}
+        email={security === null ? undefined : security.email}
+        run={run}
       />
-      <EmailRows busy={busy} actionStatus={actionStatus} run={run} />
 
       <Dialog
         open={open}
@@ -1099,10 +1151,13 @@ function FallbackSignInSection({
 function EmailRows({
   busy,
   actionStatus,
+  email: configuredEmail,
   run,
 }: {
   readonly busy: boolean;
   readonly actionStatus: string;
+  /** `undefined` means the security read has not produced a value yet. */
+  readonly email: HostedAccountSecurity["email"] | undefined;
   readonly run: RunAccountAction;
 }) {
   const [email, setEmail] = useState("");
@@ -1146,41 +1201,62 @@ function EmailRows({
         </Alert>
       </div>
       <SettingsRow
-        title="Verify an email address"
+        title="Recovery email"
         description="Used for account recovery once mail delivery is switched on. The Hub answers the same way whether or not the address is already known, so this never confirms who owns it."
+        status={
+          configuredEmail === undefined
+            ? "Checking current state…"
+            : configuredEmail === null
+              ? "Not set"
+              : `${configuredEmail.verified ? "Verified" : "Verification pending"} · ${configuredEmail.address}`
+        }
       >
-        <form className="pt-3 pb-3.5" onSubmit={(event) => void submit(event)}>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              aria-label="Email address"
-              type="email"
-              value={email}
-              autoComplete="email"
-              placeholder="you@example.com"
-              maxLength={EMAIL_MAX_LENGTH}
-              disabled={requesting}
-              className={TOUCH_INPUT_CLASS_NAME}
-              onChange={(event) => {
-                setEmail(event.target.value);
-                setAccepted(false);
-              }}
-            />
-            <Button type="submit" size="sm" variant="outline" disabled={busy} className="shrink-0">
-              <ActionLabel busy={requesting}>Send verification</ActionLabel>
-            </Button>
-          </div>
-          {touched && issue ? (
-            <p role="alert" className="pt-2 text-xs text-destructive-foreground">
-              {issue}
-            </p>
-          ) : null}
-          {accepted ? (
-            <p role="status" className="pt-2 text-xs text-muted-foreground">
-              Request accepted by the Hub. No message will be delivered until a mail transport is
-              configured.
-            </p>
-          ) : null}
-        </form>
+        {configuredEmail !== undefined ? (
+          <form className="pt-3 pb-3.5" onSubmit={(event) => void submit(event)}>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                aria-label="Email address"
+                type="email"
+                value={email}
+                autoComplete="email"
+                placeholder="you@example.com"
+                maxLength={EMAIL_MAX_LENGTH}
+                disabled={requesting}
+                className={TOUCH_INPUT_CLASS_NAME}
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  setAccepted(false);
+                }}
+              />
+              <Button
+                type="submit"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                className="shrink-0"
+              >
+                <ActionLabel busy={requesting}>
+                  {configuredEmail === null
+                    ? "Send verification"
+                    : configuredEmail.verified
+                      ? "Change email"
+                      : "Resend or change"}
+                </ActionLabel>
+              </Button>
+            </div>
+            {touched && issue ? (
+              <p role="alert" className="pt-2 text-xs text-destructive-foreground">
+                {issue}
+              </p>
+            ) : null}
+            {accepted ? (
+              <p role="status" className="pt-2 text-xs text-muted-foreground">
+                Request accepted by the Hub. No message will be delivered until a mail transport is
+                configured.
+              </p>
+            ) : null}
+          </form>
+        ) : null}
       </SettingsRow>
     </>
   );

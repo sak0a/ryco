@@ -412,6 +412,59 @@ describe("HostedHubApi", () => {
     expect(JSON.stringify(passkeys)).not.toContain("passkey-sensitive-canary");
   });
 
+  it("reads a strict bounded account-security posture over the cookie transport", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      return requests.length === 1
+        ? response(session)
+        : response({
+            passwordConfigured: true,
+            totpEnrolled: false,
+            email: { address: "ada@example.test", verified: true },
+          });
+    });
+    const api = createApi();
+    await api.restoreSession();
+
+    await expect(api.getAccountSecurity()).resolves.toEqual({
+      passwordConfigured: true,
+      totpEnrolled: false,
+      email: { address: "ada@example.test", verified: true },
+    });
+    expect(requests[1]?.input).toBe("/api/account/security");
+    expect(requests[1]?.init).toMatchObject({
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+  });
+
+  it("rejects malformed or widened account-security responses", async () => {
+    const api = createApi();
+    globalThis.fetch = vi.fn(async () => response(session));
+    await api.restoreSession();
+
+    for (const payload of [
+      { passwordConfigured: false, totpEnrolled: false },
+      { passwordConfigured: "false", totpEnrolled: false, email: null },
+      {
+        passwordConfigured: false,
+        totpEnrolled: false,
+        email: { address: "ada@example.test", verified: false, token: "sensitive-canary" },
+      },
+      {
+        passwordConfigured: false,
+        totpEnrolled: false,
+        email: null,
+        passwordHash: "sensitive-canary",
+      },
+    ]) {
+      globalThis.fetch = vi.fn(async () => response(payload));
+      await expect(api.getAccountSecurity()).rejects.toMatchObject({ code: "invalid_response" });
+    }
+  });
+
   it("rejects malformed passkey lists", async () => {
     const api = createApi();
     globalThis.fetch = vi.fn(async () => response(session));
@@ -1478,20 +1531,26 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     await expect(api.listPasskeys()).resolves.toEqual([]);
   });
 
-  it("lists passkeys and fetches recovery codes over DPoP with no CSRF", async () => {
+  it("reads account state and fetches recovery codes over DPoP with no CSRF", async () => {
     const { service } = recordingDpopSigner();
     const credentials = inMemoryBearerCredentials();
     credentials.writeBearerToken?.("native-token-canary");
     const requests: Array<{ input: string; init?: RequestInit }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({ input: String(input), ...(init ? { init } : {}) });
-      return requests.length === 1
-        ? response({ passkeys: [{ id: "credential-aaa" }] })
-        : response({
-            ...accountAndSession,
-            token: "native-token-rotated-canary",
-            recoveryCodes: ["recovery-sensitive-canary"],
-          });
+      if (requests.length === 1) return response({ passkeys: [{ id: "credential-aaa" }] });
+      if (requests.length === 2) {
+        return response({
+          passwordConfigured: false,
+          totpEnrolled: true,
+          email: null,
+        });
+      }
+      return response({
+        ...accountAndSession,
+        token: "native-token-rotated-canary",
+        recoveryCodes: ["recovery-sensitive-canary"],
+      });
     });
     const api = createBearerApi(service, credentials);
 
@@ -1507,13 +1566,19 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
         revocationReasonCode: null,
       },
     ]);
+    await expect(api.getAccountSecurity()).resolves.toEqual({
+      passwordConfigured: false,
+      totpEnrolled: true,
+      email: null,
+    });
     await expect(api.regenerateRecoveryCodes()).resolves.toEqual(["recovery-sensitive-canary"]);
 
     expect(requests.map((request) => request.input)).toEqual([
       "https://hub.example.test/api/account/passkeys",
+      "https://hub.example.test/api/account/security",
       "https://hub.example.test/api/account/recovery-codes",
     ]);
-    expect(requests.map((request) => request.init?.method)).toEqual(["GET", "POST"]);
+    expect(requests.map((request) => request.init?.method)).toEqual(["GET", "GET", "POST"]);
     for (const request of requests) {
       const headers = request.init?.headers as Headers;
       expect(headers.get("Authorization")).toBe("DPoP native-token-canary");

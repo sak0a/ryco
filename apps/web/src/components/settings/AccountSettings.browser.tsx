@@ -325,12 +325,23 @@ describe("AccountSettingsPanel", () => {
       true,
     );
     hostedAccountStore.setState(
-      { ...hostedAccountStore.getInitialState(), passkeys: [passkey()], passkeysStatus: "ready" },
+      {
+        ...hostedAccountStore.getInitialState(),
+        passkeys: [passkey()],
+        passkeysStatus: "ready",
+        security: {
+          passwordConfigured: false,
+          totpEnrolled: false,
+          email: null,
+        },
+        securityStatus: "ready",
+      },
       true,
     );
     // The mount read is a read; it must never be the thing that reaches the Hub
     // in a test about mutations.
     vi.spyOn(hostedHubController, "refreshPasskeys").mockResolvedValue();
+    vi.spyOn(hostedHubController, "refreshAccountSecurity").mockResolvedValue();
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: {
@@ -403,6 +414,81 @@ describe("AccountSettingsPanel", () => {
   });
 
   /* ------------------------------------------- destructive actions confirm */
+
+  it("shows only the credential actions supported by the confirmed Hub state", async () => {
+    await mount();
+
+    await expect.element(page.getByRole("button", { name: "Set password" })).toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Set up" })).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "Delete the fallback password" }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Turn off two-factor authentication" }))
+      .not.toBeInTheDocument();
+
+    hostedAccountStore.setState({
+      security: {
+        passwordConfigured: true,
+        totpEnrolled: true,
+        email: { address: "ada@example.com", verified: true },
+      },
+      securityStatus: "ready",
+    });
+
+    await expect.element(page.getByRole("button", { name: "Change", exact: true })).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "Delete the fallback password" }))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "Turn off two-factor authentication" }))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "Set password" }))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Set up" })).not.toBeInTheDocument();
+    await expect.element(page.getByText(/Verified · ada@example\.com/)).toBeVisible();
+  });
+
+  it("hides credential mutations until the Hub security state is known", async () => {
+    hostedAccountStore.setState({ security: null, securityStatus: "loading" });
+
+    await mount();
+
+    await expect.element(page.getByText("Checking account security")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "Set password" }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Change", exact: true }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Delete the fallback password" }))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Set up" })).not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Turn off two-factor authentication" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("retries a stale account security read without discarding the last known state", async () => {
+    hostedAccountStore.setState({
+      security: {
+        passwordConfigured: true,
+        totpEnrolled: false,
+        email: null,
+      },
+      securityStatus: "stale",
+    });
+    const refresh = vi.mocked(hostedHubController.refreshAccountSecurity);
+
+    await mount();
+    await expect.element(page.getByText("Account security may be outdated")).toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Change", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Retry" }).click();
+
+    expect(refresh).toHaveBeenLastCalledWith({ force: true });
+  });
 
   it("rotates recovery codes only after an explicit confirmation that says what it destroys", async () => {
     const regenerate = vi
@@ -644,6 +730,14 @@ describe("AccountSettingsPanel", () => {
         errorMessage: PASSKEY_SESSION_MESSAGE,
       }),
     );
+    hostedAccountStore.setState({
+      security: {
+        passwordConfigured: false,
+        totpEnrolled: true,
+        email: null,
+      },
+      securityStatus: "ready",
+    });
 
     await mount();
     await page.getByRole("button", { name: "Turn off two-factor authentication" }).click();
@@ -780,7 +874,7 @@ describe("AccountSettingsPanel", () => {
     });
 
     await mount();
-    await page.getByRole("button", { name: "Set or change" }).click();
+    await page.getByRole("button", { name: "Set password" }).click();
     await page.getByLabelText("New password").fill("correct horse battery staple");
     await page.getByLabelText("Confirm password").fill("correct horse battery staple");
     await page.getByRole("button", { name: "Save password" }).click();
@@ -791,7 +885,7 @@ describe("AccountSettingsPanel", () => {
     await expect.element(page.getByText("Set a fallback password")).not.toBeInTheDocument();
 
     // Reopening must not hand the abandoned plaintext back.
-    await page.getByRole("button", { name: "Set or change" }).click();
+    await page.getByRole("button", { name: "Set password" }).click();
     await expect.element(page.getByLabelText("New password")).toHaveValue("");
   });
 
