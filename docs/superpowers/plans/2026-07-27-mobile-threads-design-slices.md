@@ -360,6 +360,33 @@ focus, resubscribe on reconnect. Neither slice budgets it.
 
 **Build order confirmed:** `home-ia` first.
 
+## 8.1 Shipped so far (PR #246, both commits CI-green)
+
+**`home-ia` — done.** Mark → Inbox (a `select-mode` dispatch, not a route), header-right
+`[Search, Settings]`, new task on a glass FAB bottom-right, Settings pill removed from Nodes,
+`SettingsSheet` converted to a real `formSheet` + overlay, one shared list-padding constant,
+`EXDevMenuShowFloatingActionButton: false`.
+
+**`thread-session-policy` — done, minus Tokens.** Rail pill in the composer opening a sheet with
+Mode and Access. `sessionPolicyPresentation.ts` + `sessionPolicyModel.ts` are pure and tested
+(17 tests); `NewTaskComposer` now reads the same table and its local `RUNTIME_OPTIONS` is gone.
+Caution treatment lands on `full-access` in both places. Five SF Symbols were added to
+`ANDROID_ICON_BY_SF_SYMBOL` — an unmapped name renders nothing on Android.
+
+Three things found while building it, worth carrying forward:
+
+1. **Tokens is still deferred and the reason got sharper.** `QueuedThreadMessage` has no
+   `tokenMode` and the drain hardcodes `"balanced"`, so the control cannot ship before the
+   persisted schema carries the field.
+2. **Segment width is ~92pt at three-up.** "Auto-accept edits" truncates, and so does
+   "Auto-accept" once a 14pt icon and its gap are in the row. Segments render `shortLabel` with
+   no icon; the glyph lives on the pill. Any future three-up control inherits this constraint.
+3. **`?? []` on an atom-derived array defeats every downstream `useMemo`.** It recomputed the
+   policy model on each composer keystroke until memoized.
+
+**Still open:** `thread-model-picker`, `thread-activity-fold`,
+`worktree-change-request-badge`, `thread-ci-checks`.
+
 ## 9. Recommended order
 
 `home-ia` → `thread-session-policy` + `thread-model-picker` (one rail, shipped together) →
