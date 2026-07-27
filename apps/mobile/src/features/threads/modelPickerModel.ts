@@ -1,4 +1,13 @@
-import type { ModelSelection, ServerConfig } from "@ryco/contracts";
+import type {
+  ModelSelection,
+  ProviderOptionDescriptor,
+  ProviderOptionSelectionValue,
+  ServerConfig,
+} from "@ryco/contracts";
+import {
+  buildProviderOptionSelectionsFromDescriptors,
+  getModelSelectionOptionDescriptors,
+} from "@ryco/shared/model";
 
 import { buildModelOptions, groupByProvider, type ModelOption } from "../../lib/modelOptions";
 
@@ -25,6 +34,8 @@ export interface ModelPickerEntry {
   readonly providerKey: string;
   readonly providerDriver: string;
   readonly selection: ModelSelection;
+  /** Needed to derive this model's own option descriptors. */
+  readonly capabilities: ModelOption["capabilities"];
   readonly selected: boolean;
   readonly disabled: boolean;
   readonly disabledReason: string | null;
@@ -37,7 +48,35 @@ export interface ModelPickerGroup {
   readonly entries: ReadonlyArray<ModelPickerEntry>;
 }
 
+/**
+ * A model's own adjustable options — reasoning effort, fast mode — as declared
+ * by the provider for THAT model.
+ *
+ * They belong to the model, not the thread: a model that does not declare fast
+ * mode simply has none, so the rail carrying these must disappear rather than
+ * render an empty or disabled control. `hasRail` says whether there is anything
+ * to show at all.
+ */
+export interface ModelOptionChoice {
+  readonly id: string;
+  readonly label: string;
+  readonly selected: boolean;
+}
+
+export interface ModelOptionControl {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: "select" | "boolean";
+  /** Select only. Ordered as the provider declared them. */
+  readonly choices: ReadonlyArray<ModelOptionChoice>;
+  /** Boolean only. */
+  readonly enabled: boolean;
+}
+
 export interface ModelPickerModel {
+  /** Controls for the CURRENTLY SELECTED model. Empty when it declares none. */
+  readonly options: ReadonlyArray<ModelOptionControl>;
+  readonly hasOptionRail: boolean;
   /** Rail pill text: the short model name, or a stand-in while config loads. */
   readonly pillLabel: string;
   readonly pillProviderDriver: string | null;
@@ -84,6 +123,12 @@ export function buildModelPickerModel(input: ModelPickerInput): ModelPickerModel
     : null;
   const selectedOption = options.find((option) => option.key === selectedKey) ?? null;
 
+  const descriptors = getModelSelectionOptionDescriptors(
+    input.currentSelection,
+    selectedOption?.capabilities,
+  );
+  const controls = descriptors.map((descriptor) => toControl(descriptor));
+
   const groups = groupByProvider(options)
     .map((group) => {
       const locked = lockedProviderKey !== null && group.providerKey !== lockedProviderKey;
@@ -99,6 +144,7 @@ export function buildModelPickerModel(input: ModelPickerInput): ModelPickerModel
             providerKey: option.providerKey,
             providerDriver: option.providerDriver,
             selection: option.selection,
+            capabilities: option.capabilities,
             selected: option.key === selectedKey,
             disabled: locked,
             disabledReason: locked ? LOCK_NOTICE : null,
@@ -108,6 +154,8 @@ export function buildModelPickerModel(input: ModelPickerInput): ModelPickerModel
     .filter((group) => group.entries.length > 0);
 
   return {
+    options: controls,
+    hasOptionRail: controls.length > 0,
     pillLabel:
       selectedOption?.label ?? input.currentSelection?.model ?? (loading ? "Loading…" : "Model"),
     pillProviderDriver: selectedOption?.providerDriver ?? null,
@@ -122,6 +170,52 @@ export function buildModelPickerModel(input: ModelPickerInput): ModelPickerModel
     lockNotice: lockedProviderKey !== null ? LOCK_NOTICE : null,
     emptyForQuery: query.length > 0 && groups.length === 0,
   };
+}
+
+function toControl(descriptor: ProviderOptionDescriptor): ModelOptionControl {
+  if (descriptor.type === "boolean") {
+    return {
+      id: descriptor.id,
+      label: descriptor.label,
+      kind: "boolean",
+      choices: [],
+      enabled: descriptor.currentValue === true,
+    };
+  }
+  return {
+    id: descriptor.id,
+    label: descriptor.label,
+    kind: "select",
+    // Declaration order is the provider's ordering and carries meaning
+    // (low -> high); do not sort it.
+    choices: descriptor.options.map((choice) => ({
+      id: choice.id,
+      label: choice.label,
+      selected: choice.id === descriptor.currentValue,
+    })),
+    enabled: false,
+  };
+}
+
+/**
+ * A new `ModelSelection` with one option changed.
+ *
+ * Options ride ON the selection, so changing reasoning or fast mode is the same
+ * kind of write as changing the model itself — it goes through
+ * `thread.meta.update` like any other selection change.
+ */
+export function applyModelOption(
+  selection: ModelSelection,
+  capabilities: Parameters<typeof getModelSelectionOptionDescriptors>[1],
+  optionId: string,
+  value: ProviderOptionSelectionValue,
+): ModelSelection {
+  const descriptors = getModelSelectionOptionDescriptors(selection, capabilities);
+  const next = descriptors.map((descriptor) =>
+    descriptor.id === optionId ? { ...descriptor, currentValue: value } : descriptor,
+  ) as ReadonlyArray<ProviderOptionDescriptor>;
+  const options = buildProviderOptionSelectionsFromDescriptors(next);
+  return options ? { ...selection, options } : selection;
 }
 
 /** The selection a tap should produce, or null when the tap must be ignored. */

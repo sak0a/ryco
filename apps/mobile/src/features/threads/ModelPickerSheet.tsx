@@ -8,12 +8,89 @@ import { OverlayPortal } from "../../components/OverlayPortal";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { cn } from "../../lib/cn";
 import { useThemeColor } from "../../lib/useThemeColor";
-import type { ModelPickerModel } from "./modelPickerModel";
+import type { ModelOptionControl, ModelPickerModel } from "./modelPickerModel";
 
 // Grouped model picker, one section per provider instance, with the provider's
 // brand mark on the section header. Like the policy sheet it goes through
 // OverlayPortal rather than a Modal so opening it does not dismiss the
 // composer's keyboard.
+
+/**
+ * The model's own options, stacked vertically beside the list.
+ *
+ * Vertical rather than horizontal for two reasons: three reasoning levels fit in
+ * 58pt where a horizontal control cannot, and stacking the strongest at the TOP
+ * gives the scale a direction that needs no legend.
+ *
+ * Rendered only when the selected model declares options. A model with none —
+ * Haiku, for one — gets no rail at all rather than an empty or disabled one.
+ */
+function OptionRail(props: {
+  readonly options: ReadonlyArray<ModelOptionControl>;
+  readonly onSelectOption: (optionId: string, value: string | boolean) => void;
+}) {
+  const iconColor = useThemeColor("--color-icon");
+  const cautionColor = useThemeColor("--color-warning");
+  const boolean = props.options.find((option) => option.kind === "boolean");
+  const select = props.options.find((option) => option.kind === "select");
+
+  return (
+    <View className="w-[58px] shrink-0 gap-1.5">
+      {boolean ? (
+        <Pressable
+          accessibilityRole="switch"
+          accessibilityState={{ checked: boolean.enabled }}
+          accessibilityLabel={`${boolean.label}, ${boolean.enabled ? "on" : "off"}`}
+          onPress={() => props.onSelectOption(boolean.id, !boolean.enabled)}
+          className={cn(
+            "h-10 items-center justify-center rounded-xl border active:opacity-70",
+            boolean.enabled ? "border-warning/40 bg-warning-bg" : "border-border bg-subtle",
+          )}
+        >
+          <SymbolView
+            name="bolt.fill"
+            size={15}
+            tintColor={(boolean.enabled ? cautionColor : iconColor) as string}
+            type="monochrome"
+          />
+        </Pressable>
+      ) : null}
+      {select ? (
+        <View
+          accessibilityRole="radiogroup"
+          accessibilityLabel={select.label}
+          className="flex-1 gap-0.5 rounded-xl bg-subtle p-1"
+        >
+          {/* Reversed: the provider declares low -> high, and the strongest
+              belongs at the top so the stack reads as a scale. */}
+          {[...select.choices].reverse().map((choice) => (
+            <Pressable
+              key={choice.id}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: choice.selected }}
+              accessibilityLabel={`${select.label}: ${choice.label}`}
+              onPress={() => props.onSelectOption(select.id, choice.id)}
+              className={cn(
+                "min-h-9 flex-1 items-center justify-center rounded-lg active:opacity-70",
+                choice.selected ? "bg-card" : "bg-transparent",
+              )}
+            >
+              <Text
+                className={cn(
+                  "text-2xs",
+                  choice.selected ? "font-ryco-bold text-foreground" : "text-foreground-muted",
+                )}
+                numberOfLines={1}
+              >
+                {choice.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 export function ModelPickerSheet(props: {
   readonly visible: boolean;
@@ -22,6 +99,7 @@ export function ModelPickerSheet(props: {
   readonly onChangeQuery: (query: string) => void;
   readonly onClose: () => void;
   readonly onSelect: (key: string) => void;
+  readonly onSelectOption: (optionId: string, value: string | boolean) => void;
 }) {
   const insets = useSafeAreaInsets();
   const iconColor = useThemeColor("--color-icon");
@@ -87,76 +165,81 @@ export function ModelPickerSheet(props: {
             </Text>
           ) : null}
 
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ gap: 14, paddingBottom: 4 }}
-            style={{ maxHeight: 380 }}
-          >
-            {props.model.loading ? (
-              <Text className="px-1 py-6 text-center text-sm text-foreground-muted">
-                Loading models from the node…
-              </Text>
-            ) : props.model.groups.length === 0 ? (
-              <Text className="px-1 py-6 text-center text-sm text-foreground-muted">
-                {props.model.emptyForQuery
-                  ? "No models match that search."
-                  : "This node has no available models."}
-              </Text>
-            ) : (
-              props.model.groups.map((group) => (
-                <View key={group.providerKey} className="gap-1.5">
-                  <View className="flex-row items-center gap-2 px-1">
-                    <ProviderIcon provider={group.providerDriver} size={14} />
-                    <Text className="text-xs font-ryco-bold uppercase tracking-wide text-foreground-tertiary">
-                      {group.providerLabel}
-                    </Text>
-                  </View>
-                  <View className="overflow-hidden rounded-2xl bg-subtle">
-                    {group.entries.map((entry, index) => (
-                      <Pressable
-                        key={entry.key}
-                        accessibilityRole="radio"
-                        accessibilityState={{ checked: entry.selected, disabled: entry.disabled }}
-                        accessibilityLabel={
-                          entry.disabled && entry.disabledReason
-                            ? `${entry.label}. ${entry.disabledReason}`
-                            : entry.label
-                        }
-                        disabled={entry.disabled}
-                        onPress={() => props.onSelect(entry.key)}
-                        className={cn(
-                          "min-h-11 flex-row items-center justify-between gap-3 px-3.5 py-2.5 active:bg-card-alt",
-                          index > 0 && "border-t border-border-subtle",
-                          entry.disabled && "opacity-40",
-                        )}
-                      >
-                        <Text
+          <View className="flex-row gap-2">
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ gap: 14, paddingBottom: 4 }}
+              style={{ maxHeight: 380, flex: 1 }}
+            >
+              {props.model.loading ? (
+                <Text className="px-1 py-6 text-center text-sm text-foreground-muted">
+                  Loading models from the node…
+                </Text>
+              ) : props.model.groups.length === 0 ? (
+                <Text className="px-1 py-6 text-center text-sm text-foreground-muted">
+                  {props.model.emptyForQuery
+                    ? "No models match that search."
+                    : "This node has no available models."}
+                </Text>
+              ) : (
+                props.model.groups.map((group) => (
+                  <View key={group.providerKey} className="gap-1.5">
+                    <View className="flex-row items-center gap-2 px-1">
+                      <ProviderIcon provider={group.providerDriver} size={14} />
+                      <Text className="text-xs font-ryco-bold uppercase tracking-wide text-foreground-tertiary">
+                        {group.providerLabel}
+                      </Text>
+                    </View>
+                    <View className="overflow-hidden rounded-2xl bg-subtle">
+                      {group.entries.map((entry, index) => (
+                        <Pressable
+                          key={entry.key}
+                          accessibilityRole="radio"
+                          accessibilityState={{ checked: entry.selected, disabled: entry.disabled }}
+                          accessibilityLabel={
+                            entry.disabled && entry.disabledReason
+                              ? `${entry.label}. ${entry.disabledReason}`
+                              : entry.label
+                          }
+                          disabled={entry.disabled}
+                          onPress={() => props.onSelect(entry.key)}
                           className={cn(
-                            "shrink text-sm",
-                            entry.selected
-                              ? "font-ryco-bold text-foreground"
-                              : "font-ryco-medium text-foreground",
+                            "min-h-11 flex-row items-center justify-between gap-3 px-3.5 py-2.5 active:bg-card-alt",
+                            index > 0 && "border-t border-border-subtle",
+                            entry.disabled && "opacity-40",
                           )}
-                          numberOfLines={1}
                         >
-                          {entry.label}
-                        </Text>
-                        {entry.selected ? (
-                          <SymbolView
-                            name="checkmark"
-                            size={14}
-                            tintColor={iconColor as string}
-                            type="monochrome"
-                          />
-                        ) : null}
-                      </Pressable>
-                    ))}
+                          <Text
+                            className={cn(
+                              "shrink text-sm",
+                              entry.selected
+                                ? "font-ryco-bold text-foreground"
+                                : "font-ryco-medium text-foreground",
+                            )}
+                            numberOfLines={1}
+                          >
+                            {entry.label}
+                          </Text>
+                          {entry.selected ? (
+                            <SymbolView
+                              name="checkmark"
+                              size={14}
+                              tintColor={iconColor as string}
+                              type="monochrome"
+                            />
+                          ) : null}
+                        </Pressable>
+                      ))}
+                    </View>
                   </View>
-                </View>
-              ))
-            )}
-          </ScrollView>
+                ))
+              )}
+            </ScrollView>
+            {props.model.hasOptionRail ? (
+              <OptionRail options={props.model.options} onSelectOption={props.onSelectOption} />
+            ) : null}
+          </View>
         </GlassSurface>
       </View>
     </OverlayPortal>

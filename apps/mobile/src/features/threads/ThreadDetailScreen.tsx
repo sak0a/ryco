@@ -48,7 +48,11 @@ import {
 import { useThreadChecks } from "./useThreadChecks";
 import { buildThreadTimelineRows, toggleFold, type ThreadTimelineRow } from "./threadActivityFold";
 import { ThreadActivityFoldRow } from "./ThreadActivityFoldRow";
-import { buildModelPickerModel, resolveModelPickerSelection } from "./modelPickerModel";
+import {
+  applyModelOption,
+  buildModelPickerModel,
+  resolveModelPickerSelection,
+} from "./modelPickerModel";
 import { ModelPickerSheet } from "./ModelPickerSheet";
 import { buildSessionPolicyModel, resolveSessionPolicySelection } from "./sessionPolicyModel";
 import { SessionPolicySheet } from "./SessionPolicySheet";
@@ -521,6 +525,19 @@ export function ThreadDetailScreen(props: {
           onClose={() => {
             setModelVisible(false);
             setModelQuery("");
+          }}
+          onSelectOption={(optionId, value) => {
+            // Options ride on the ModelSelection, so changing reasoning or fast
+            // mode is the same write as changing the model itself.
+            const current = thread?.modelSelection ?? project?.defaultModelSelection ?? null;
+            if (!current) return;
+            const capabilities =
+              modelPicker.groups.flatMap((group) => group.entries).find((entry) => entry.selected)
+                ?.capabilities ?? null;
+            const next = applyModelOption(current, capabilities, optionId, value);
+            void applyPolicy(() =>
+              setThreadModelSelection(ensureEnvironmentApi(environmentId), threadId, next),
+            );
           }}
           onSelect={(key) => {
             const next = resolveModelPickerSelection(modelPicker, key);

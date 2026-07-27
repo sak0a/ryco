@@ -145,3 +145,53 @@ describe("resolveModelPickerSelection", () => {
     expect(resolveModelPickerSelection(model, "nope")).toBeNull();
   });
 });
+
+describe("model options", () => {
+  const CAPS = {
+    reasoningEfforts: ["low", "medium", "high"],
+    supportsFastMode: true,
+  } as never;
+
+  function withCaps(models: ReadonlyArray<string>) {
+    return {
+      instanceId: "claude-1",
+      driver: "claudeAgent",
+      displayName: undefined,
+      enabled: true,
+      installed: true,
+      auth: { status: "authenticated" },
+      models: models.map((slug) => ({ slug, name: slug, capabilities: CAPS })),
+    } as unknown as ReturnType<typeof provider>;
+  }
+
+  it("has no rail when the selected model declares no options", () => {
+    // The state that matters: a model without options must get NO rail rather
+    // than an empty or disabled one.
+    const model = buildModelPickerModel({
+      serverConfig: config(CODEX),
+      currentSelection: selection("codex-1", "gpt-5.4"),
+      providerLocked: false,
+    });
+    expect(model.options).toEqual([]);
+    expect(model.hasOptionRail).toBe(false);
+  });
+
+  it("carries capabilities onto every entry so options can be derived", () => {
+    const model = buildModelPickerModel({
+      serverConfig: config(withCaps(["opus-5"])),
+      currentSelection: selection("claude-1", "opus-5"),
+      providerLocked: false,
+    });
+    const entry = model.groups.flatMap((group) => group.entries)[0];
+    expect(entry?.capabilities).not.toBeUndefined();
+  });
+
+  it("reports no rail while the config is still loading", () => {
+    const model = buildModelPickerModel({
+      serverConfig: null,
+      currentSelection: selection("claude-1", "opus-5"),
+      providerLocked: false,
+    });
+    expect(model.hasOptionRail).toBe(false);
+  });
+});
