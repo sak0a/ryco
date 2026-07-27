@@ -1,5 +1,7 @@
 import type { Project, SidebarWorktreeSummary, Thread } from "@ryco/client-runtime/state/threads";
 
+import { buildChangeRequestBadge, type ChangeRequestBadge } from "../../lib/changeRequestBadge";
+
 export type ThreadMoreAction = "rename" | "archive" | "unarchive" | "stop" | "details";
 
 export interface ThreadHeaderModel {
@@ -11,6 +13,8 @@ export interface ThreadHeaderModel {
   readonly contextAccessibilityLabel: string;
   readonly reviewVisible: boolean;
   readonly moreActions: ReadonlyArray<ThreadMoreAction>;
+  /** Last known pull request / work item for the thread's worktree, if any. */
+  readonly changeRequest: ChangeRequestBadge | null;
 }
 
 function basename(path: string): string {
@@ -52,7 +56,19 @@ export function buildThreadHeaderModel(input: {
     | "worktreePath"
   >;
   readonly project: Pick<Project, "name"> | null;
-  readonly worktree: Pick<SidebarWorktreeSummary, "title" | "branch"> | null;
+  readonly worktree: Pick<
+    SidebarWorktreeSummary,
+    | "title"
+    | "branch"
+    | "prNumber"
+    | "prState"
+    | "prIsDraft"
+    | "issueNumber"
+    | "issueState"
+    | "workItemKey"
+    | "workItemState"
+    | "workItemStateName"
+  > | null;
   readonly nodeLabel: string | null;
   readonly hasPendingApproval: boolean;
   readonly hasPendingUserInput: boolean;
@@ -89,5 +105,6 @@ export function buildThreadHeaderModel(input: {
     contextAccessibilityLabel: `Working in node ${nodeLabel}, project ${projectLabel}, worktree ${worktreeLabel}. ${statusLabel}.`,
     reviewVisible: input.thread.turnDiffSummaries.some((summary) => summary.files.length > 0),
     moreActions,
+    changeRequest: buildChangeRequestBadge(input.worktree),
   };
 }

@@ -4,6 +4,8 @@ import {
   getProviderOptionDescriptors,
 } from "@ryco/shared/model";
 
+import { shortModelName } from "./modelDisplayName";
+
 export type ModelOption = {
   readonly key: string;
   readonly label: string;
@@ -70,7 +72,10 @@ export function buildModelOptions(
       const key = `${provider.instanceId}:${model.slug}`;
       options.set(key, {
         key,
-        label: model.name,
+        // The provider is already named by the group header and the pill glyph,
+        // so "Claude Opus 4.8" reads as the provider twice. `subtitle` keeps the
+        // full context for anywhere that needs it.
+        label: shortModelName(model.name, providerLabel),
         subtitle: providerLabel,
         providerKey: provider.instanceId,
         providerLabel,

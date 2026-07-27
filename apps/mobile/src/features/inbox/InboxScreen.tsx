@@ -5,6 +5,7 @@ import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
 import type { InboxEmptyState, InboxSection, InboxThreadRow } from "./inboxModel";
 import { InboxThreadRow as ThreadRow } from "./InboxThreadRow";
+import { HOME_LIST_PADDING_BOTTOM } from "../home/homeChromeModel";
 import { WorkspaceConnectionStatus } from "../home/WorkspaceConnectionStatus";
 
 type InboxListItem =
@@ -79,7 +80,7 @@ export function InboxScreen(props: {
       onScroll={(event) => props.onScrollOffset?.(event.nativeEvent.contentOffset.y)}
       scrollEventThrottle={32}
       contentInsetAdjustmentBehavior="never"
-      contentContainerStyle={{ paddingBottom: 40 }}
+      contentContainerStyle={{ paddingBottom: HOME_LIST_PADDING_BOTTOM }}
       ListHeaderComponent={<WorkspaceConnectionStatus />}
       ListEmptyComponent={
         empty ? (

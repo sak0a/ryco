@@ -6,6 +6,7 @@ import { Pressable, TextInput, View } from "react-native";
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
 
 import { HomeModeControl } from "../../components/HomeModeControl";
+import { NewTaskFab } from "../../components/NewTaskFab";
 import { NodeScopeControl } from "../../components/NodeScopeControl";
 import { RycoWordmark } from "../../components/RycoWordmark";
 import { SymbolView } from "../../components/AppSymbol";
@@ -17,14 +18,9 @@ import { InboxScreen } from "../inbox/InboxScreen";
 import { NodesScreen } from "../nodes/NodesScreen";
 import { buildProjectNodeGroups } from "../projects/projectsModel";
 import { ProjectsScreen } from "../projects/ProjectsScreen";
+import { buildHomeChromeModel } from "./homeChromeModel";
 import { createHomeModeState, reduceHomeModeState, type HomeMode } from "./homeMode";
 import { useHomeEnvironments } from "./useHomeEnvironments";
-
-const MODE_TITLE: Readonly<Record<HomeMode, string>> = {
-  inbox: "Inbox",
-  projects: "Projects",
-  nodes: "Nodes",
-};
 
 export function HomeScreen() {
   const navigation = useNavigation();
@@ -78,15 +74,22 @@ export function HomeScreen() {
     ],
   );
 
+  const chrome = buildHomeChromeModel({ mode: home.mode, searchVisible });
+
+  const openNewTask = () =>
+    navigation.navigate("NewTask", {
+      environmentId: currentNodeScope ?? undefined,
+    });
+
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: MODE_TITLE[home.mode],
+      title: chrome.title,
       headerLeft: () => (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Open Nodes"
+          accessibilityLabel={chrome.headerLeft.accessibilityLabel}
           className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
-          onPress={() => dispatch({ type: "select-mode", mode: "nodes" })}
+          onPress={() => dispatch({ type: "select-mode", mode: chrome.headerLeftTargetMode })}
         >
           <RycoWordmark compact />
         </Pressable>
@@ -95,8 +98,8 @@ export function HomeScreen() {
         <View className="flex-row items-center gap-2">
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={searchVisible ? "Hide search" : `Search ${MODE_TITLE[home.mode]}`}
-            accessibilityState={{ expanded: searchVisible }}
+            accessibilityLabel={chrome.headerRight[0].accessibilityLabel}
+            accessibilityState={{ expanded: chrome.searchExpanded }}
             className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
             onPress={() => setSearchVisible((visible) => !visible)}
           >
@@ -104,20 +107,16 @@ export function HomeScreen() {
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="New Task"
+            accessibilityLabel={chrome.headerRight[1].accessibilityLabel}
             className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
-            onPress={() =>
-              navigation.navigate("NewTask", {
-                environmentId: currentNodeScope ?? undefined,
-              })
-            }
+            onPress={() => navigation.navigate("SettingsSheet")}
           >
-            <SymbolView name="plus" size={21} tintColor={iconColor} type="monochrome" />
+            <SymbolView name="gearshape" size={20} tintColor={iconColor} type="monochrome" />
           </Pressable>
         </View>
       ),
     });
-  }, [currentNodeScope, home.mode, iconColor, navigation, searchVisible]);
+  }, [chrome, iconColor, navigation]);
 
   const selectMode = (mode: HomeMode) => {
     dispatch({ type: "select-mode", mode });
@@ -159,10 +158,10 @@ export function HomeScreen() {
           />
           <TextInput
             autoFocus
-            accessibilityLabel={`Search ${MODE_TITLE[home.mode]}`}
+            accessibilityLabel={`Search ${chrome.title}`}
             value={currentQuery}
             onChangeText={(query) => dispatch({ type: "set-query", mode: home.mode, query })}
-            placeholder={`Search ${MODE_TITLE[home.mode].toLocaleLowerCase()}`}
+            placeholder={`Search ${chrome.title.toLocaleLowerCase()}`}
             placeholderTextColor={placeholderColor as string}
             className="h-11 flex-1 px-3 font-sans text-base"
             style={{ color: textColor as string }}
@@ -245,6 +244,7 @@ export function HomeScreen() {
           />
         )}
       </View>
+      <NewTaskFab accessibilityLabel={chrome.newTask.accessibilityLabel} onPress={openNewTask} />
     </View>
   );
 }

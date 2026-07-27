@@ -38,7 +38,9 @@ function directState(input: DirectHomeEnvironmentInput): InboxEnvironment["conne
   return "offline";
 }
 
-function hostedState(input: HostedHomeEnvironmentInput): InboxEnvironment["connectionState"] {
+export function hostedState(
+  input: HostedHomeEnvironmentInput,
+): InboxEnvironment["connectionState"] {
   if (input.transportStatus === "online" && input.sessionStatus === "ready") {
     return input.role === "viewer" ? "read-only" : "connected";
   }

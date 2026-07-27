@@ -5,6 +5,7 @@ import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
 import { EmptyState } from "../../components/EmptyState";
 import { useThemeColor } from "../../lib/useThemeColor";
+import { HOME_LIST_PADDING_BOTTOM } from "../home/homeChromeModel";
 import type { ProjectListRow, ProjectNodeGroup } from "./projectsModel";
 
 type ProjectListItem =
@@ -130,7 +131,7 @@ export function ProjectsScreen(props: {
       onScroll={(event) => props.onScrollOffset?.(event.nativeEvent.contentOffset.y)}
       scrollEventThrottle={32}
       contentInsetAdjustmentBehavior="never"
-      contentContainerStyle={{ paddingBottom: 40 }}
+      contentContainerStyle={{ paddingBottom: HOME_LIST_PADDING_BOTTOM }}
       ListHeaderComponent={
         props.hasConnections && data.length > 0 ? (
           <View className="px-4 pt-4 pb-1">

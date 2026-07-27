@@ -15,6 +15,7 @@ import {
   useConnectionActions,
   useSavedEnvironments,
 } from "../connection/useConnectionController";
+import { HOME_LIST_PADDING_BOTTOM } from "../home/homeChromeModel";
 import { HubNodeSection } from "../hostedHub/HubNodeSection";
 import { NodeRow, type NodeRowAction } from "./NodeRow";
 import { directRoleLabel, directTransportLabel } from "./nodesModel";
@@ -190,11 +191,13 @@ export function NodesScreen(props: {
       <ScrollView
         contentInsetAdjustmentBehavior="never"
         className="flex-1"
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: HOME_LIST_PADDING_BOTTOM }}
         contentOffset={{ x: 0, y: props.initialScrollOffset ?? 0 }}
         onScroll={(event) => props.onScrollOffset?.(event.nativeEvent.contentOffset.y)}
         scrollEventThrottle={32}
       >
+        {/* Settings moved to the Home header gear — this row is now purely about
+            adding connections, which is what Nodes is for. */}
         <View className="mx-4 mt-5 flex-row gap-2">
           <Pressable
             accessibilityRole="button"
@@ -205,14 +208,6 @@ export function NodesScreen(props: {
             <Text className="text-base font-ryco-bold text-primary-foreground">
               Direct connection
             </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Settings"
-            onPress={() => navigation.navigate("SettingsSheet")}
-            className="h-12 items-center justify-center rounded-2xl bg-card px-4 active:bg-card-alt"
-          >
-            <Text className="text-sm font-ryco-bold text-foreground">Settings</Text>
           </Pressable>
         </View>
 

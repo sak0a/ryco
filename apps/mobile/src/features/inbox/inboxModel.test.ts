@@ -192,3 +192,34 @@ describe("Inbox model", () => {
     ).toBe("clear-filter");
   });
 });
+
+describe("inbox change-request badge", () => {
+  it("carries the worktree's pull request onto the row", () => {
+    // The fields were already reaching this module and being discarded at the
+    // output boundary — that is the regression this pins.
+    const tree = {
+      ...worktree(NODE_A, "tree-a", "project-a", "feat/mobile"),
+      prNumber: 42,
+      prState: "open" as const,
+    };
+    const sections = buildInboxSections({
+      projects: [project(NODE_A, "project-a", "Ryco")],
+      worktrees: [tree],
+      threads: [thread(NODE_A, "thread-a", "project-a", { worktreeId: "tree-a" })],
+      environments: [{ environmentId: NODE_A, label: "Studio", connectionState: "connected" }],
+    });
+    const row = sections.flatMap((section) => section.rows)[0];
+    expect(row?.changeRequest?.label).toBe("#42");
+    expect(row?.changeRequest?.tone).toBe("open");
+  });
+
+  it("leaves the badge null when the worktree has no linked work", () => {
+    const sections = buildInboxSections({
+      projects: [project(NODE_A, "project-a", "Ryco")],
+      worktrees: [worktree(NODE_A, "tree-a", "project-a", "feat/mobile")],
+      threads: [thread(NODE_A, "thread-a", "project-a", { worktreeId: "tree-a" })],
+      environments: [{ environmentId: NODE_A, label: "Studio", connectionState: "connected" }],
+    });
+    expect(sections.flatMap((section) => section.rows)[0]?.changeRequest).toBeNull();
+  });
+});
