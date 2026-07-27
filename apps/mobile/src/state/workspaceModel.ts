@@ -98,3 +98,52 @@ export function projectWorkspaceState(input: {
     networkStatus: input.networkStatus,
   };
 }
+
+// ─── Hosted plane ────────────────────────────────────────────────────────────
+//
+// `useWorkspaceState` builds its environment list from the DIRECT plane's
+// saved-environment catalog, and the hosted plane never writes to those stores —
+// that isolation is deliberate (hostedHub/nodeLifecycle.ts). The consequence was
+// a lie on screen: with a Hub-relay-only node selected and serving data, the
+// workspace saw zero environments and the Inbox header said "Not connected"
+// while the thread it linked to said "Ready".
+//
+// The fix projects the hosted node into the workspace vocabulary at the read
+// boundary. Nothing is written back into the direct stores, so the two planes
+// stay isolated; they only meet in this derivation.
+
+/** What `hostedState` in homeEnvironmentModel produces. */
+export type HostedConnectionState = "connected" | "reconnecting" | "offline" | "read-only";
+
+export function hostedWorkspacePhase(state: HostedConnectionState): EnvironmentConnectionPhase {
+  switch (state) {
+    case "connected":
+    // `read-only` is a REACHABLE node. This banner answers "can I reach a
+    // node", not "may I write to it" — a viewer-role device that can see its
+    // threads is connected, and saying otherwise is the same lie in a
+    // narrower case.
+    case "read-only":
+      return "connected";
+    case "reconnecting":
+      return "reconnecting";
+    case "offline":
+      return "offline";
+  }
+}
+
+/**
+ * Merge the hosted environment into the direct list.
+ *
+ * A node can be reachable on BOTH planes at once — paired directly and also
+ * enrolled in the Hub — and the Hub descriptor reuses the same environment id.
+ * Hosted wins, matching how `buildHomeEnvironments` already resolves the same
+ * collision, so the two derivations cannot disagree about one node.
+ */
+export function mergeWorkspaceEnvironments(
+  direct: ReadonlyArray<WorkspaceEnvironment>,
+  hosted: WorkspaceEnvironment | null,
+): ReadonlyArray<WorkspaceEnvironment> {
+  if (!hosted) return direct;
+  const merged = direct.filter((environment) => environment.environmentId !== hosted.environmentId);
+  return [...merged, hosted];
+}
