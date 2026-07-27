@@ -45,6 +45,8 @@ import {
   setThreadModelSelection,
   setThreadRuntimeMode,
 } from "./sessionActions";
+import { buildThreadTimelineRows, toggleFold, type ThreadTimelineRow } from "./threadActivityFold";
+import { ThreadActivityFoldRow } from "./ThreadActivityFoldRow";
 import { buildModelPickerModel, resolveModelPickerSelection } from "./modelPickerModel";
 import { ModelPickerSheet } from "./ModelPickerSheet";
 import { buildSessionPolicyModel, resolveSessionPolicySelection } from "./sessionPolicyModel";
@@ -91,13 +93,9 @@ function TimelineRow(props: { readonly entry: TimelineEntry }) {
       </View>
     );
   }
-  return (
-    <View className="px-6 py-1.5">
-      <Text className="font-mono text-xs text-foreground-muted" numberOfLines={3} selectable>
-        {entry.entry.label ?? "Working…"}
-      </Text>
-    </View>
-  );
+  // Work entries never reach here — buildThreadTimelineRows folds them before
+  // the list sees them. This is the remaining unknown-kind fallback.
+  return null;
 }
 
 function HeaderActions(props: {
@@ -146,6 +144,7 @@ export function ThreadDetailScreen(props: {
   const [policyBusy, setPolicyBusy] = useState(false);
   const [modelVisible, setModelVisible] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
+  const [expandedFoldIds, setExpandedFoldIds] = useState<ReadonlySet<string>>(() => new Set());
   const serverConfig = useAtomValue(serverConfigAtom);
 
   // Retain the supervisor's thread-detail subscription while mounted, and make
@@ -384,9 +383,37 @@ export function ThreadDetailScreen(props: {
     }
   };
 
-  const renderItem = ({ item }: LegendListRenderItemProps<TimelineEntry>) => (
-    <TimelineRow entry={item} />
+  // The running fold shows a live timer, so it needs a clock that advances. One
+  // interval for the whole screen, and only while something is actually running.
+  const runningTurnId =
+    thread?.latestTurn?.state === "running" ? (thread.latestTurn.turnId ?? null) : null;
+  const [nowIso, setNowIso] = useState(() => new Date().toISOString());
+  useEffect(() => {
+    if (runningTurnId === null) return;
+    const timer = setInterval(() => setNowIso(new Date().toISOString()), 1000);
+    return () => clearInterval(timer);
+  }, [runningTurnId]);
+
+  const timelineRows = useMemo(
+    () =>
+      buildThreadTimelineRows({
+        entries: built?.timeline ?? [],
+        runningTurnId,
+        expandedFoldIds,
+        now: nowIso,
+      }),
+    [built?.timeline, expandedFoldIds, nowIso, runningTurnId],
   );
+
+  const renderItem = ({ item }: LegendListRenderItemProps<ThreadTimelineRow>) =>
+    item.kind === "activity-fold" ? (
+      <ThreadActivityFoldRow
+        fold={item}
+        onToggle={() => setExpandedFoldIds((current) => toggleFold(current, item))}
+      />
+    ) : (
+      <TimelineRow entry={item.entry} />
+    );
   const visibleError = sendError ?? thread?.error ?? null;
   const hasPrompts = pendingApprovals.length > 0 || pendingUserInputs.length > 0;
 
@@ -409,9 +436,9 @@ export function ThreadDetailScreen(props: {
       {visibleError ? <ErrorBanner message={visibleError} /> : null}
 
       <LegendList
-        data={built?.timeline ?? []}
+        data={timelineRows}
         renderItem={renderItem}
-        keyExtractor={(entry) => entry.id}
+        keyExtractor={(row) => row.id}
         alignItemsAtEnd
         initialScrollAtEnd
         maintainScrollAtEnd={{ animated: true, on: { dataChange: true, itemLayout: true } }}
