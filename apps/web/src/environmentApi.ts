@@ -16,6 +16,16 @@ export function readEnvironmentApi(environmentId: EnvironmentId): EnvironmentApi
   return environmentApiOverridesForTests.get(environmentId) ?? lookup.read(environmentId);
 }
 
+export function readEnvironmentApiForConnection(
+  environmentId: EnvironmentId,
+  client: WsRpcClient | null,
+): EnvironmentApi | undefined {
+  return (
+    environmentApiOverridesForTests.get(environmentId) ??
+    (client ? createEnvironmentApi(client) : undefined)
+  );
+}
+
 export function ensureEnvironmentApi(environmentId: EnvironmentId): EnvironmentApi {
   const api = readEnvironmentApi(environmentId);
   if (!api) throw new Error(`Environment API not found for environment ${environmentId}`);

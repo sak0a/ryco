@@ -5,6 +5,7 @@ import {
   readEnvironmentConnection,
   subscribeEnvironmentConnections,
 } from "../environments/runtime";
+import { readEnvironmentApiForConnection } from "../environmentApi";
 
 import {
   EMPTY_FILESYSTEM_BROWSE_STATE,
@@ -81,7 +82,17 @@ export function useFilesystemBrowse(input: FilesystemBrowseInput): FilesystemBro
   const inputRef = useRef(input);
   inputRef.current = input;
 
-  useEffect(() => watchFilesystemBrowse(inputRef.current), [browseKey, environmentConnection]);
+  useEffect(() => {
+    const currentInput = inputRef.current;
+    const api =
+      currentInput.environmentId === null
+        ? undefined
+        : readEnvironmentApiForConnection(
+            currentInput.environmentId,
+            environmentConnection?.client ?? null,
+          );
+    return watchFilesystemBrowse(currentInput, api ?? null);
+  }, [browseKey, environmentConnection]);
 
   const state = useAtomValue(getFilesystemBrowseStateAtom(browseKey));
   return browseKey === null ? EMPTY_FILESYSTEM_BROWSE_STATE : state;
