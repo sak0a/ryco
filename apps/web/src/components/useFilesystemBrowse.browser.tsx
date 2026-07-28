@@ -44,8 +44,10 @@ vi.mock("../environments/runtime", () => ({
 import { AppAtomRegistryProvider, resetAppAtomRegistryForTests } from "../rpc/atomRegistry";
 import { resetProjectAtomsForTests } from "../rpc/projectAtoms";
 import { useFilesystemBrowse } from "../rpc/useProject";
+import { resolveCanonicalPrimaryEnvironmentId } from "./RootAppShell.logic";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-hosted");
+const SERVER_ENVIRONMENT_ID = EnvironmentId.make("server-environment-id");
 
 function BrowseProbe() {
   const state = useFilesystemBrowse({
@@ -54,6 +56,23 @@ function BrowseProbe() {
   });
   return (
     <div data-testid="browse-state">
+      {state.error ? state.error.message : (state.data?.parentPath ?? "pending")}
+    </div>
+  );
+}
+
+function HostedBrowseProbe() {
+  const environmentId = resolveCanonicalPrimaryEnvironmentId({
+    hosted: true,
+    primaryEnvironmentId: ENVIRONMENT_ID,
+    serverEnvironmentId: SERVER_ENVIRONMENT_ID,
+  });
+  const state = useFilesystemBrowse({
+    environmentId,
+    partialPath: "~/",
+  });
+  return (
+    <div data-testid="hosted-browse-state">
       {state.error ? state.error.message : (state.data?.parentPath ?? "pending")}
     </div>
   );
@@ -79,6 +98,29 @@ afterEach(() => {
 });
 
 describe("useFilesystemBrowse", () => {
+  it("keeps hosted browsing on the Hub-keyed connection when the server identity differs", async () => {
+    const browse = vi.fn().mockResolvedValue({
+      parentPath: "~/",
+      entries: [{ name: "Development", fullPath: "~/Development" }],
+    });
+    publishConnection({
+      environmentId: ENVIRONMENT_ID,
+      client: { api: { filesystem: { browse } } },
+    });
+
+    const mounted = await render(
+      <AppAtomRegistryProvider>
+        <HostedBrowseProbe />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByTestId("hosted-browse-state")).toHaveTextContent("~/");
+    expect(browse).toHaveBeenCalledOnce();
+    expect(browse).toHaveBeenCalledWith({ partialPath: "~/" });
+
+    await mounted.unmount();
+  });
+
   it("retries the same path when its environment connection appears", async () => {
     const browse = vi.fn().mockResolvedValue({
       parentPath: "~/",
