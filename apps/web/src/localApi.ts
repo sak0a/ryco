@@ -11,10 +11,12 @@ import {
 } from "./environments/runtime";
 import {
   getPrimaryEnvironmentConnection,
+  readEnvironmentConnection,
   resetEnvironmentServiceForTests,
 } from "./environments/runtime";
 import { getPrimaryKnownEnvironment } from "./environments/primary";
 import { type WsRpcClient } from "@ryco/client-runtime/rpc";
+import { isHostedHubMode } from "./env";
 import { showContextMenuFallback } from "./contextMenuFallback";
 import { isContextMenuSheetHostMounted, presentContextMenuSheet } from "./contextMenuSheetState";
 import { getPresentationTier } from "./lib/presentationTier";
@@ -35,7 +37,23 @@ function unavailableLocalBackendError(): Error {
   return new Error("Local backend API is unavailable before a backend is paired.");
 }
 
-function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
+type RpcClientResolver = () => WsRpcClient | undefined;
+
+function withRpcClient<T>(
+  readRpcClient: RpcClientResolver,
+  operation: (rpcClient: WsRpcClient) => Promise<T>,
+): Promise<T> {
+  const rpcClient = readRpcClient();
+  return rpcClient ? operation(rpcClient) : Promise.reject(unavailableLocalBackendError());
+}
+
+function createBrowserLocalApi(
+  rpcClientOrResolver?: WsRpcClient | RpcClientResolver,
+  options?: { readonly includeMcp?: boolean },
+): LocalApi {
+  const readRpcClient: RpcClientResolver =
+    typeof rpcClientOrResolver === "function" ? rpcClientOrResolver : () => rpcClientOrResolver;
+
   return {
     dialogs: {
       pickFolder: async (options) => {
@@ -51,9 +69,7 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
     },
     shell: {
       openInEditor: (cwd, editor) =>
-        rpcClient
-          ? rpcClient.shell.openInEditor({ cwd, editor })
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.shell.openInEditor({ cwd, editor })),
       openExternal: async (url) => {
         if (window.desktopBridge) {
           const opened = await window.desktopBridge.openExternal(url);
@@ -131,75 +147,59 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
       },
     },
     server: {
-      getConfig: () =>
-        rpcClient ? rpcClient.server.getConfig() : Promise.reject(unavailableLocalBackendError()),
+      getConfig: () => withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.getConfig()),
       getAdvertisedEndpoints: () =>
-        rpcClient
-          ? rpcClient.server.getAdvertisedEndpoints()
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.getAdvertisedEndpoints()),
       getDiagnosticsMetrics: () =>
-        rpcClient
-          ? rpcClient.server.getDiagnosticsMetrics()
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.getDiagnosticsMetrics()),
       getStatistics: () =>
-        rpcClient
-          ? rpcClient.server.getStatistics()
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.getStatistics()),
       refreshProviders: () =>
-        rpcClient
-          ? rpcClient.server.refreshProviders()
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.refreshProviders()),
       updateProvider: (input) =>
-        rpcClient
-          ? rpcClient.server.updateProvider(input)
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.updateProvider(input)),
       upsertKeybinding: (input) =>
-        rpcClient
-          ? rpcClient.server.upsertKeybinding(input)
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.upsertKeybinding(input)),
       getSettings: () =>
-        rpcClient ? rpcClient.server.getSettings() : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.getSettings()),
       updateSettings: (patch) =>
-        rpcClient
-          ? rpcClient.server.updateSettings(patch)
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.updateSettings(patch)),
       getDiagnosticsSnapshot: () =>
-        rpcClient
-          ? rpcClient.server.getDiagnosticsSnapshot()
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.getDiagnosticsSnapshot()),
       discoverSourceControl: () =>
-        rpcClient
-          ? rpcClient.server.discoverSourceControl()
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.discoverSourceControl()),
       listOpinionatedPlugins: () =>
-        rpcClient
-          ? rpcClient.server.listOpinionatedPlugins()
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.listOpinionatedPlugins()),
       checkOpinionatedPlugins: (input) =>
-        rpcClient
-          ? rpcClient.server.checkOpinionatedPlugins(input)
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) =>
+          rpcClient.server.checkOpinionatedPlugins(input),
+        ),
       installOpinionatedPlugin: (input) =>
-        rpcClient
-          ? rpcClient.server.installOpinionatedPlugin(input)
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) =>
+          rpcClient.server.installOpinionatedPlugin(input),
+        ),
     },
     keybindings: {
       replaceCustom: (input) =>
-        rpcClient
-          ? rpcClient.keybindings.replaceCustom(input)
-          : Promise.reject(unavailableLocalBackendError()),
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.keybindings.replaceCustom(input)),
     },
-    ...(rpcClient
+    ...((options?.includeMcp ?? rpcClientOrResolver !== undefined)
       ? {
           mcp: {
-            listWorkspaces: () => rpcClient.mcp.listWorkspaces(),
-            listServers: (input) => rpcClient.mcp.listServers(input),
-            upsertServer: (input) => rpcClient.mcp.upsertServer(input),
-            setServerEnabled: (input) => rpcClient.mcp.setServerEnabled(input),
-            removeServer: (input) => rpcClient.mcp.removeServer(input),
-            reloadServers: (input) => rpcClient.mcp.reloadServers(input),
-            startOauthLogin: (input) => rpcClient.mcp.startOauthLogin(input),
+            listWorkspaces: () =>
+              withRpcClient(readRpcClient, (rpcClient) => rpcClient.mcp.listWorkspaces()),
+            listServers: (input) =>
+              withRpcClient(readRpcClient, (rpcClient) => rpcClient.mcp.listServers(input)),
+            upsertServer: (input) =>
+              withRpcClient(readRpcClient, (rpcClient) => rpcClient.mcp.upsertServer(input)),
+            setServerEnabled: (input) =>
+              withRpcClient(readRpcClient, (rpcClient) => rpcClient.mcp.setServerEnabled(input)),
+            removeServer: (input) =>
+              withRpcClient(readRpcClient, (rpcClient) => rpcClient.mcp.removeServer(input)),
+            reloadServers: (input) =>
+              withRpcClient(readRpcClient, (rpcClient) => rpcClient.mcp.reloadServers(input)),
+            startOauthLogin: (input) =>
+              withRpcClient(readRpcClient, (rpcClient) => rpcClient.mcp.startOauthLogin(input)),
           },
         }
       : {}),
@@ -249,10 +249,19 @@ export function readLocalApi(): LocalApi | undefined {
     return cachedApi;
   }
 
-  const primaryEnvironment = getPrimaryKnownEnvironment();
-  cachedApi = primaryEnvironment
-    ? createLocalApi(getPrimaryEnvironmentConnection().client)
-    : createBrowserLocalApi();
+  const hasPrimaryEnvironment = getPrimaryKnownEnvironment() !== null;
+  cachedApi = createBrowserLocalApi(
+    () => {
+      const primaryEnvironment = getPrimaryKnownEnvironment();
+      if (!primaryEnvironment) return undefined;
+      const currentClient = primaryEnvironment.environmentId
+        ? readEnvironmentConnection(primaryEnvironment.environmentId)?.client
+        : undefined;
+      if (currentClient || isHostedHubMode()) return currentClient;
+      return getPrimaryEnvironmentConnection().client;
+    },
+    { includeMcp: hasPrimaryEnvironment },
+  );
   return cachedApi;
 }
 

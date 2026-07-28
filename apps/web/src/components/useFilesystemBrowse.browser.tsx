@@ -4,20 +4,32 @@ import { page } from "vite-plus/test/browser";
 import { render } from "vitest-browser-react";
 
 const harness = vi.hoisted(() => ({
-  api: null as null | {
-    readonly filesystem: {
-      readonly browse: (input: { readonly partialPath: string }) => Promise<FilesystemBrowseResult>;
+  connection: null as null | {
+    readonly environmentId: string;
+    readonly client: {
+      readonly api: {
+        readonly filesystem: {
+          readonly browse: (input: {
+            readonly partialPath: string;
+          }) => Promise<FilesystemBrowseResult>;
+        };
+      };
     };
   },
-  connection: null as null | { readonly environmentId: string },
   listeners: new Set<() => void>(),
 }));
 
 vi.mock("~/environmentApi", () => ({
+  readEnvironmentApiForConnection: (
+    _environmentId: string,
+    client: NonNullable<typeof harness.connection>["client"] | null,
+  ) => client?.api,
   ensureEnvironmentApi: () => {
     throw new Error("not used by filesystem browse");
   },
-  readEnvironmentApi: () => harness.api ?? undefined,
+  readEnvironmentApi: () => {
+    throw new Error("filesystem browse must use the observed connection");
+  },
 }));
 
 vi.mock("../environments/runtime", () => ({
@@ -53,7 +65,6 @@ function publishConnection(connection: typeof harness.connection): void {
 }
 
 beforeEach(() => {
-  harness.api = null;
   harness.connection = null;
   harness.listeners.clear();
   resetProjectAtomsForTests();
@@ -61,7 +72,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  harness.api = null;
   harness.connection = null;
   harness.listeners.clear();
   resetProjectAtomsForTests();
@@ -84,12 +94,57 @@ describe("useFilesystemBrowse", () => {
       .element(page.getByTestId("browse-state"))
       .toHaveTextContent("temporarily unavailable");
 
-    harness.api = { filesystem: { browse } };
-    publishConnection({ environmentId: ENVIRONMENT_ID });
+    publishConnection({
+      environmentId: ENVIRONMENT_ID,
+      client: { api: { filesystem: { browse } } },
+    });
 
     await expect.element(page.getByTestId("browse-state")).toHaveTextContent("~/");
     expect(browse).toHaveBeenCalledOnce();
     expect(browse).toHaveBeenCalledWith({ partialPath: "~/" });
+
+    await mounted.unmount();
+  });
+
+  it("uses the exact replacement connection and ignores a superseded response", async () => {
+    let resolveFirst!: (result: FilesystemBrowseResult) => void;
+    const firstBrowse = vi.fn(
+      () =>
+        new Promise<FilesystemBrowseResult>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    const secondBrowse = vi.fn().mockResolvedValue({
+      parentPath: "~/replacement",
+      entries: [{ name: "Current", fullPath: "~/replacement/Current" }],
+    });
+    const mounted = await render(
+      <AppAtomRegistryProvider>
+        <BrowseProbe />
+      </AppAtomRegistryProvider>,
+    );
+
+    publishConnection({
+      environmentId: ENVIRONMENT_ID,
+      client: { api: { filesystem: { browse: firstBrowse } } },
+    });
+    await vi.waitFor(() => expect(firstBrowse).toHaveBeenCalledOnce());
+
+    publishConnection({
+      environmentId: ENVIRONMENT_ID,
+      client: { api: { filesystem: { browse: secondBrowse } } },
+    });
+
+    await expect.element(page.getByTestId("browse-state")).toHaveTextContent("~/replacement");
+    expect(secondBrowse).toHaveBeenCalledOnce();
+
+    resolveFirst({
+      parentPath: "~/superseded",
+      entries: [{ name: "Old", fullPath: "~/superseded/Old" }],
+    });
+    await Promise.resolve();
+
+    await expect.element(page.getByTestId("browse-state")).toHaveTextContent("~/replacement");
 
     await mounted.unmount();
   });

@@ -21,6 +21,11 @@ interface CapturedTransport {
 interface CapturedClient {
   readonly reconnect: ReturnType<typeof vi.fn>;
   readonly dispose: ReturnType<typeof vi.fn>;
+  readonly server: {
+    readonly discoverSourceControl: ReturnType<typeof vi.fn>;
+    readonly subscribeConfig: ReturnType<typeof vi.fn>;
+    readonly subscribeLifecycle: ReturnType<typeof vi.fn>;
+  };
   emitShellSnapshot(snapshot: OrchestrationShellSnapshot): void;
 }
 
@@ -95,6 +100,10 @@ function makeClient(): CapturedClient & Record<string, unknown> {
     server: {
       subscribeLifecycle: vi.fn(() => () => undefined),
       subscribeConfig: vi.fn(() => () => undefined),
+      discoverSourceControl: vi.fn(async () => ({
+        versionControlSystems: [],
+        sourceControlProviders: [],
+      })),
     },
     orchestration: {
       subscribeShell: vi.fn((listener: typeof shellListener) => {
@@ -143,6 +152,70 @@ afterEach(async () => {
 });
 
 describe("hosted browser lifecycle integration", () => {
+  it("keeps generic local API access on the lifecycle-owned current client", async () => {
+    const { hostedHubApi } = await import("./api");
+    const { activateHostedNode } = await import("./environment");
+    const { writePrimaryEnvironmentDescriptor } = await import("../environments/primary");
+    const { listEnvironmentConnections } = await import("../environments/runtime/service");
+    const { readLocalApi } = await import("../localApi");
+    const { hostedHubController, useHostedHubStore } = await import("./state");
+
+    vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
+      ticket: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      expiresAt: Date.now() + 60_000,
+      protocolMajor: 1,
+      protocolMinor: 2,
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([selectedNode]);
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+      directoryStatus: "ready",
+      nodes: [selectedNode],
+      selectedNode,
+      selectionStatus: "online",
+      effectiveRole: "operator",
+      transportStatus: "online",
+      sessionStatus: "synchronizing",
+      sessionEstablished: false,
+      browserStatus: "current",
+      generation: 4,
+    });
+
+    writePrimaryEnvironmentDescriptor({
+      environmentId,
+      label: selectedNode.label,
+      platform: { os: selectedNode.platformOs, arch: selectedNode.platformArch },
+      serverVersion: selectedNode.clientVersion,
+      capabilities: { repositoryIdentity: false },
+    });
+    const localApi = readLocalApi();
+
+    expect(localApi).toBeDefined();
+    expect(listEnvironmentConnections()).toHaveLength(0);
+    await expect(localApi!.server.discoverSourceControl()).rejects.toThrow(
+      "Local backend API is unavailable before a backend is paired.",
+    );
+
+    await activateHostedNode(selectedNode, null);
+    expect(capturedClients).toHaveLength(1);
+    expect(listEnvironmentConnections()).toHaveLength(1);
+    await localApi!.server.discoverSourceControl();
+    expect(capturedClients[0]!.server.discoverSourceControl).toHaveBeenCalledOnce();
+
+    hostedHubController.suspendBrowser("offline");
+    await vi.waitFor(() => expect(capturedClients[0]!.dispose).toHaveBeenCalledOnce());
+    await hostedHubController.resumeBrowser();
+    expect(capturedClients).toHaveLength(2);
+    expect(listEnvironmentConnections()).toHaveLength(1);
+
+    await localApi!.server.discoverSourceControl();
+    expect(capturedClients[0]!.server.discoverSourceControl).toHaveBeenCalledOnce();
+    expect(capturedClients[1]!.server.discoverSourceControl).toHaveBeenCalledOnce();
+  });
+
   it("disposes the stale transport before same-node recovery and accepts only a fresh snapshot", async () => {
     const { hostedHubApi } = await import("./api");
     const { activateHostedNode } = await import("./environment");
