@@ -1,4 +1,14 @@
+import type { EnvironmentId } from "@ryco/contracts";
+
 import type { PresentationTier } from "../lib/presentationTier";
+
+export function resolveCanonicalPrimaryEnvironmentId(input: {
+  readonly hosted: boolean;
+  readonly primaryEnvironmentId: EnvironmentId | null;
+  readonly serverEnvironmentId: EnvironmentId;
+}): EnvironmentId | null {
+  return input.hosted ? input.primaryEnvironmentId : input.serverEnvironmentId;
+}
 
 /**
  * Whether the welcome payload's bootstrap thread should replace the logical
