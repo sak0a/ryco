@@ -28,6 +28,7 @@ flags while preserving environment-variable fallback and centralized fail-closed
 - Modify `apps/server/src/cli-config.test.ts`.
 - Verify environment-only behavior when flags are absent.
 - Verify presence-style booleans override environment `false`.
+- Verify standard negative boolean forms override environment `true`.
 - Verify the CLI origin overrides the environment origin.
 - Verify mixed flag/environment configuration.
 - Verify an invalid CLI origin fails closed without reflecting its input.

@@ -25,8 +25,7 @@ changing connector behavior, enrollment, identity custody, relay protocol, or Hu
 
 - Exposing reconnect timing or jitter settings as CLI flags.
 - Adding a persistent Hub connector configuration file.
-- Adding negative boolean forms or changing an environment value from `true` to `false` through a
-  CLI flag.
+- Adding custom boolean aliases beyond the CLI library's standard positive and `--no-…` forms.
 - Accepting credentials, enrollment material, keys, proofs, tickets, or secrets on the command
   line.
 - Changing the relay protocol or requiring an intermediary change.
@@ -41,10 +40,12 @@ The shared server command flags gain:
 | `--hub-origin <origin>`         | String value | `RYCO_HUB_ORIGIN`                  |
 | `--hub-allow-file-secret-store` | Presence     | `RYCO_HUB_ALLOW_FILE_SECRET_STORE` |
 
-The boolean flags resolve to `true` when present. When absent, their environment variables retain
-the existing exact `true` or `false` parsing. The origin flag remains a string until it reaches the
-existing canonical-origin resolver so invalid origins continue to produce
-`configuration_invalid` without reflecting sensitive input.
+The positive boolean flags resolve to `true` when present. The CLI library also supplies its
+standard `--no-hub-connector-enabled` and `--no-hub-allow-file-secret-store` forms for an explicit
+`false` override. When neither form is present, the environment variables retain the existing exact
+`true` or `false` parsing. The origin flag remains a string until it reaches the existing
+canonical-origin resolver so invalid origins continue to produce `configuration_invalid` without
+reflecting sensitive input.
 
 An invocation can therefore configure the ordinary startup surface entirely with flags:
 
@@ -63,7 +64,7 @@ ryco serve \
 
 Each new field resolves independently:
 
-1. Explicit CLI flag.
+1. Explicit positive or negative CLI flag.
 2. Corresponding environment variable.
 3. Existing default in `resolveHubConnectorConfig`.
 
