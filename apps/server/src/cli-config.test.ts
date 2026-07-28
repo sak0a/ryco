@@ -1,4 +1,5 @@
 import os from "node:os";
+import { join } from "node:path";
 
 import { assert, expect, it } from "@effect/vitest";
 import { ConfigProvider, Effect, FileSystem, Layer, Option, Path } from "effect";
@@ -70,6 +71,139 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     const { fd } = yield* fs.open(filePath, { flag: "r" });
     return fd;
   });
+
+  type ResolveServerFlags = Parameters<typeof resolveServerConfig>[0];
+
+  const makeServerFlags = (
+    baseDir: string,
+    overrides: Partial<ResolveServerFlags> = {},
+  ): ResolveServerFlags => ({
+    mode: Option.none(),
+    port: Option.some(0),
+    host: Option.some("127.0.0.1"),
+    baseDir: Option.some(baseDir),
+    cwd: Option.none(),
+    devUrl: Option.none(),
+    noBrowser: Option.none(),
+    bootstrapFd: Option.none(),
+    autoBootstrapProjectFromCwd: Option.none(),
+    logWebSocketEvents: Option.none(),
+    tailscaleServeEnabled: Option.none(),
+    tailscaleServePort: Option.none(),
+    ...overrides,
+  });
+
+  const resolveHubServerConfig = (
+    testName: string,
+    overrides: Partial<ResolveServerFlags>,
+    env: Record<string, string>,
+  ) =>
+    resolveServerConfig(
+      makeServerFlags(join(os.tmpdir(), `ryco-cli-config-hub-${testName}`), overrides),
+      Option.none(),
+    ).pipe(
+      Effect.provide(
+        Layer.mergeAll(ConfigProvider.layer(ConfigProvider.fromEnv({ env })), NetService.layer),
+      ),
+    );
+
+  it.effect("preserves Hub environment configuration when CLI flags are omitted", () =>
+    Effect.gen(function* () {
+      const resolved = yield* resolveHubServerConfig(
+        "environment",
+        {},
+        {
+          RYCO_HUB_CONNECTOR_ENABLED: "true",
+          RYCO_HUB_ORIGIN: "https://environment.example",
+          RYCO_HUB_ALLOW_FILE_SECRET_STORE: "true",
+        },
+      );
+
+      expect(resolved.hubConnector).toEqual({
+        ...DEFAULT_HUB_CONNECTOR_CONFIG,
+        enabled: true,
+        origin: "https://environment.example",
+        allowFileSecretStore: true,
+      });
+    }),
+  );
+
+  it.effect("uses positive Hub CLI flags before environment values", () =>
+    Effect.gen(function* () {
+      const resolved = yield* resolveHubServerConfig(
+        "positive-flags",
+        {
+          hubConnectorEnabled: Option.some(true),
+          hubOrigin: Option.some("https://cli.example"),
+          hubAllowFileSecretStore: Option.some(true),
+        },
+        {
+          RYCO_HUB_CONNECTOR_ENABLED: "false",
+          RYCO_HUB_ORIGIN: "https://environment.example",
+          RYCO_HUB_ALLOW_FILE_SECRET_STORE: "false",
+        },
+      );
+
+      expect(resolved.hubConnector).toEqual({
+        ...DEFAULT_HUB_CONNECTOR_CONFIG,
+        enabled: true,
+        origin: "https://cli.example",
+        allowFileSecretStore: true,
+      });
+    }),
+  );
+
+  it.effect("uses negative Hub CLI flags before true environment values", () =>
+    Effect.gen(function* () {
+      const disabled = yield* resolveHubServerConfig(
+        "disabled-flag",
+        { hubConnectorEnabled: Option.some(false) },
+        {
+          RYCO_HUB_CONNECTOR_ENABLED: "true",
+          RYCO_HUB_ORIGIN: "https://environment.example",
+          RYCO_HUB_ALLOW_FILE_SECRET_STORE: "true",
+        },
+      );
+      expect(disabled.hubConnector).toEqual(DEFAULT_HUB_CONNECTOR_CONFIG);
+
+      const fileFallbackDisabled = yield* resolveHubServerConfig(
+        "file-fallback-disabled",
+        {
+          hubConnectorEnabled: Option.some(true),
+          hubOrigin: Option.some("https://cli.example"),
+          hubAllowFileSecretStore: Option.some(false),
+        },
+        {
+          RYCO_HUB_ALLOW_FILE_SECRET_STORE: "true",
+        },
+      );
+      expect(fileFallbackDisabled.hubConnector).toEqual({
+        ...DEFAULT_HUB_CONNECTOR_CONFIG,
+        enabled: true,
+        origin: "https://cli.example",
+      });
+    }),
+  );
+
+  it.effect("keeps invalid CLI origins fail-closed and out of resolved configuration", () =>
+    Effect.gen(function* () {
+      const resolved = yield* resolveHubServerConfig(
+        "invalid-origin",
+        {
+          hubConnectorEnabled: Option.some(true),
+          hubOrigin: Option.some("https://private-canary@example.test/path"),
+        },
+        {},
+      );
+
+      expect(resolved.hubConnector).toEqual({
+        ...DEFAULT_HUB_CONNECTOR_CONFIG,
+        enabled: true,
+        configurationIssue: "configuration_invalid",
+      });
+      expect(JSON.stringify(resolved.hubConnector)).not.toContain("private-canary");
+    }),
+  );
 
   it.effect("falls back to effect/config values when flags are omitted", () =>
     Effect.gen(function* () {

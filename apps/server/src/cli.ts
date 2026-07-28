@@ -132,6 +132,20 @@ const logWebSocketEventsFlag = Flag.boolean("log-websocket-events").pipe(
   Flag.withAlias("log-ws-events"),
   Flag.optional,
 );
+const hubConnectorEnabledFlag = Flag.boolean("hub-connector-enabled").pipe(
+  Flag.withDescription("Enable the outbound Hub connector (overrides RYCO_HUB_CONNECTOR_ENABLED)."),
+  Flag.optional,
+);
+const hubOriginFlag = Flag.string("hub-origin").pipe(
+  Flag.withDescription("Canonical Hub HTTPS origin (overrides RYCO_HUB_ORIGIN)."),
+  Flag.optional,
+);
+const hubAllowFileSecretStoreFlag = Flag.boolean("hub-allow-file-secret-store").pipe(
+  Flag.withDescription(
+    "Allow the permissioned-file Hub secret-store fallback (overrides RYCO_HUB_ALLOW_FILE_SECRET_STORE).",
+  ),
+  Flag.optional,
+);
 const tailscaleServeFlag = Flag.boolean("tailscale-serve").pipe(
   Flag.withDescription(
     "Configure Tailscale Serve to expose this backend over HTTPS on the Tailnet.",
@@ -238,6 +252,9 @@ interface CliServerFlags {
   readonly bootstrapFd: Option.Option<number>;
   readonly autoBootstrapProjectFromCwd: Option.Option<boolean>;
   readonly logWebSocketEvents: Option.Option<boolean>;
+  readonly hubConnectorEnabled?: Option.Option<boolean>;
+  readonly hubOrigin?: Option.Option<string>;
+  readonly hubAllowFileSecretStore?: Option.Option<boolean>;
   readonly tailscaleServeEnabled: Option.Option<boolean>;
   readonly tailscaleServePort: Option.Option<number>;
 }
@@ -287,6 +304,9 @@ export const resolveServerConfig = (
       bootstrapFd: flags.bootstrapFd ?? Option.none(),
       autoBootstrapProjectFromCwd: flags.autoBootstrapProjectFromCwd ?? Option.none(),
       logWebSocketEvents: flags.logWebSocketEvents ?? Option.none(),
+      hubConnectorEnabled: flags.hubConnectorEnabled ?? Option.none(),
+      hubOrigin: flags.hubOrigin ?? Option.none(),
+      hubAllowFileSecretStore: flags.hubAllowFileSecretStore ?? Option.none(),
       tailscaleServeEnabled: flags.tailscaleServeEnabled ?? Option.none(),
       tailscaleServePort: flags.tailscaleServePort ?? Option.none(),
     } satisfies CliServerFlags;
@@ -424,13 +444,25 @@ export const resolveServerConfig = (
     );
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
     const hubConnector = resolveHubConnectorConfig({
-      enabled: env.hubConnectorEnabled,
-      origin: env.hubOrigin,
+      enabled: Option.getOrUndefined(
+        resolveOptionPrecedence(
+          Option.map(normalizedFlags.hubConnectorEnabled, String),
+          Option.fromUndefinedOr(env.hubConnectorEnabled),
+        ),
+      ),
+      origin: Option.getOrUndefined(
+        resolveOptionPrecedence(normalizedFlags.hubOrigin, Option.fromUndefinedOr(env.hubOrigin)),
+      ),
       reconnectBaseMs: env.hubReconnectBaseMs,
       reconnectMaxMs: env.hubReconnectMaxMs,
       reconnectStableMs: env.hubReconnectStableMs,
       reconnectJitterRatio: env.hubReconnectJitterRatio,
-      allowFileSecretStore: env.hubAllowFileSecretStore,
+      allowFileSecretStore: Option.getOrUndefined(
+        resolveOptionPrecedence(
+          Option.map(normalizedFlags.hubAllowFileSecretStore, String),
+          Option.fromUndefinedOr(env.hubAllowFileSecretStore),
+        ),
+      ),
     });
 
     const config: ServerConfigShape = {
@@ -962,6 +994,9 @@ const sharedServerCommandFlags = {
   bootstrapFd: bootstrapFdFlag,
   autoBootstrapProjectFromCwd: autoBootstrapProjectFromCwdFlag,
   logWebSocketEvents: logWebSocketEventsFlag,
+  hubConnectorEnabled: hubConnectorEnabledFlag,
+  hubOrigin: hubOriginFlag,
+  hubAllowFileSecretStore: hubAllowFileSecretStoreFlag,
   tailscaleServeEnabled: tailscaleServeFlag,
   tailscaleServePort: tailscaleServePortFlag,
 } as const;
