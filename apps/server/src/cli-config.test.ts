@@ -19,6 +19,7 @@ it("resolves bounded connector defaults and invalid enabled configuration withou
     resolveHubConnectorConfig({
       enabled: "true",
       origin: "https://relay.example",
+      nodeName: "  Build node  ",
       reconnectBaseMs: "250",
       reconnectMaxMs: "300000",
       reconnectStableMs: "5000",
@@ -28,6 +29,7 @@ it("resolves bounded connector defaults and invalid enabled configuration withou
   ).toEqual({
     enabled: true,
     origin: "https://relay.example",
+    nodeName: "Build node",
     reconnectBaseMs: 250,
     reconnectMaxMs: 300_000,
     reconnectStableMs: 5_000,
@@ -48,6 +50,19 @@ it("resolves bounded connector defaults and invalid enabled configuration withou
     configurationIssue: "configuration_invalid",
   });
   expect(JSON.stringify(invalid)).not.toContain("sensitive");
+
+  const invalidName = resolveHubConnectorConfig({
+    enabled: "true",
+    origin: "https://relay.example",
+    nodeName: `private-canary-${"x".repeat(100)}`,
+  });
+  expect(invalidName).toEqual({
+    ...DEFAULT_HUB_CONNECTOR_CONFIG,
+    enabled: true,
+    origin: "https://relay.example",
+    configurationIssue: "configuration_invalid",
+  });
+  expect(JSON.stringify(invalidName)).not.toContain("private-canary");
 });
 
 it.layer(NodeServices.layer)("cli config resolution", (it) => {
@@ -115,6 +130,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         {
           RYCO_HUB_CONNECTOR_ENABLED: "true",
           RYCO_HUB_ORIGIN: "https://environment.example",
+          RYCO_HUB_NODE_NAME: "Environment node",
           RYCO_HUB_ALLOW_FILE_SECRET_STORE: "true",
         },
       );
@@ -123,6 +139,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         ...DEFAULT_HUB_CONNECTOR_CONFIG,
         enabled: true,
         origin: "https://environment.example",
+        nodeName: "Environment node",
         allowFileSecretStore: true,
       });
     }),
@@ -135,11 +152,13 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         {
           hubConnectorEnabled: Option.some(true),
           hubOrigin: Option.some("https://cli.example"),
+          hubNodeName: Option.some("CLI node"),
           hubAllowFileSecretStore: Option.some(true),
         },
         {
           RYCO_HUB_CONNECTOR_ENABLED: "false",
           RYCO_HUB_ORIGIN: "https://environment.example",
+          RYCO_HUB_NODE_NAME: "Environment node",
           RYCO_HUB_ALLOW_FILE_SECRET_STORE: "false",
         },
       );
@@ -148,6 +167,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         ...DEFAULT_HUB_CONNECTOR_CONFIG,
         enabled: true,
         origin: "https://cli.example",
+        nodeName: "CLI node",
         allowFileSecretStore: true,
       });
     }),
@@ -424,6 +444,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: true,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        hubConnectorEnabled: true,
+        hubOrigin: "https://bootstrap.example",
+        hubNodeName: "Bootstrap node",
+        hubAllowFileSecretStore: true,
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
       });
@@ -463,7 +487,13 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Info",
         ...defaultObservabilityConfig,
-        ...defaultConnectorConfig,
+        hubConnector: {
+          ...DEFAULT_HUB_CONNECTOR_CONFIG,
+          enabled: true,
+          origin: "https://bootstrap.example",
+          nodeName: "Bootstrap node",
+          allowFileSecretStore: true,
+        },
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
         mode: "desktop",
@@ -609,6 +639,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: false,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        hubConnectorEnabled: false,
+        hubOrigin: "https://bootstrap.example",
+        hubNodeName: "Bootstrap node",
+        hubAllowFileSecretStore: true,
       });
       const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:4173"));
 
@@ -640,6 +674,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   RYCO_NO_BROWSER: "true",
                   RYCO_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
                   RYCO_LOG_WS_EVENTS: "true",
+                  RYCO_HUB_CONNECTOR_ENABLED: "true",
+                  RYCO_HUB_ORIGIN: "https://environment.example",
+                  RYCO_HUB_NODE_NAME: "Environment node",
+                  RYCO_HUB_ALLOW_FILE_SECRET_STORE: "false",
                 },
               }),
             ),
@@ -651,7 +689,13 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Debug",
         ...defaultObservabilityConfig,
-        ...defaultConnectorConfig,
+        hubConnector: {
+          ...DEFAULT_HUB_CONNECTOR_CONFIG,
+          enabled: true,
+          origin: "https://environment.example",
+          nodeName: "Environment node",
+          allowFileSecretStore: false,
+        },
         mode: "web",
         port: 8788,
         cwd: process.cwd(),

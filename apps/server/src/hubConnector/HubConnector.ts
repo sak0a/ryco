@@ -1,4 +1,9 @@
-import type { HubConnectorStatus, HubEnrollmentStartResult } from "@ryco/contracts";
+import type {
+  HubConnectorStatus,
+  HubEnrollmentCeremonyDetail,
+  HubEnrollmentStartResult,
+  HubIdentitySummary,
+} from "@ryco/contracts";
 import type { RelayErrorFrame, RelayFrame } from "@ryco/contracts/relay";
 import { formatNodePublicKeyFingerprint } from "@ryco/shared/nodeIdentity";
 
@@ -9,7 +14,7 @@ import {
   type ConnectorFailureKind,
   HubConnectorStateMachine,
 } from "./HubConnectorState.ts";
-import type { HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
+import { HubIdentityRuntimeError, type HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
 import type { HubRelayTransport } from "./HubRelayTransport.ts";
 import {
   relayErrorKind,
@@ -22,6 +27,7 @@ import {
   RelayChannelRegistry,
   type RelayChannelSessionFactory,
 } from "./RelayChannelRegistry.ts";
+import { resolveHubEnrollmentLabel } from "./HubEnrollmentLabel.ts";
 import { reconnectDelay } from "./ReconnectPolicy.ts";
 import { RelaySendQueue } from "./RelaySendQueue.ts";
 
@@ -29,6 +35,19 @@ export interface HubConnectorScheduler extends RelaySessionScheduler {
   readonly now: () => number;
   readonly random: () => number;
 }
+
+/**
+ * Distinguish a custody read that may succeed later from one that cannot.
+ *
+ * A construction failure is latched into a stub whose every method throws for
+ * the process lifetime, so `resume()` provably cannot repair it. Reporting both
+ * as `identity_unavailable` would have the panel offer a Retry that does
+ * nothing.
+ */
+const identityFailure = (error: unknown): "identity_unavailable" | "identity_store_unavailable" =>
+  error instanceof HubIdentityRuntimeError && error.code === "identity_store_unavailable"
+    ? "identity_store_unavailable"
+    : "identity_unavailable";
 
 const defaultScheduler: HubConnectorScheduler = {
   now: Date.now,
@@ -96,11 +115,11 @@ export class HubConnector {
     let identity;
     try {
       identity = await this.#identity.readState();
-    } catch {
+    } catch (error: unknown) {
       if (!this.#state.isCurrent(generation) || this.#stopping) return;
       this.#state.transition("degraded", {
         degradedMode: "operator_action_required",
-        failure: "identity_unavailable",
+        failure: identityFailure(error),
       });
       return;
     }
@@ -134,15 +153,18 @@ export class HubConnector {
       return;
     }
     const generation = this.#state.generation;
-    const identity = await this.#identity.readState().catch(() => undefined);
-    if (!this.#state.isCurrent(generation) || this.#stopping) return;
-    if (identity === undefined) {
+    let identity;
+    try {
+      identity = await this.#identity.readState();
+    } catch (error: unknown) {
+      if (!this.#state.isCurrent(generation) || this.#stopping) return;
       this.#state.transition("degraded", {
         degradedMode: "operator_action_required",
-        failure: "identity_unavailable",
+        failure: identityFailure(error),
       });
       return;
     }
+    if (!this.#state.isCurrent(generation) || this.#stopping) return;
     if (identity.activeNode === null) {
       if (identity.pendingEnrollment === null) {
         this.#state.transition("enrolling");
@@ -177,7 +199,15 @@ export class HubConnector {
     this.#state.transition("enrolling");
     let enrollmentStarted = false;
     try {
-      const started = await this.#identity.startEnrollment(origin, this.#enrollmentMetadata);
+      const enrollmentMetadata: HubEnrollmentMetadata = {
+        ...this.#enrollmentMetadata,
+        label: resolveHubEnrollmentLabel({
+          configuredNodeName: this.#config.nodeName,
+          machineLabel: this.#enrollmentMetadata.label,
+          environmentId: state.environmentId,
+        }),
+      };
+      const started = await this.#identity.startEnrollment(origin, enrollmentMetadata);
       enrollmentStarted = true;
       if (!this.#state.isCurrent(generation) || this.#stopping) {
         throw new Error("Hub enrollment start was superseded.");
@@ -190,6 +220,11 @@ export class HubConnector {
         status: this.status(),
         deviceCode: started.deviceCode,
         fingerprint,
+        label: enrollmentMetadata.label,
+        platformOs: enrollmentMetadata.platformOs,
+        platformArch: enrollmentMetadata.platformArch,
+        clientVersion: enrollmentMetadata.clientVersion,
+        algorithm: started.publicKey.algorithm,
         expiresAt,
         pollIntervalMs: started.pollIntervalMs,
       };
@@ -207,6 +242,68 @@ export class HubConnector {
       });
       throw new Error("Hub enrollment could not be started.");
     }
+  }
+
+  /**
+   * Whether this node holds a Hub identity, independent of connector state.
+   *
+   * `status()` reports `disabled` both when nothing was ever enrolled and when an
+   * identity exists with the connector switched off — `start()` returns before
+   * reading identity state in both the disabled and misconfigured branches — so a
+   * caller that must not offer to re-point an enrolled node cannot rely on it.
+   *
+   * A custody read that fails reports `unknown` rather than `none`: claiming "not
+   * enrolled" because the keychain is locked would invite overwriting a real
+   * identity.
+   */
+  async identitySummary(): Promise<HubIdentitySummary> {
+    try {
+      const state = await this.#identity.readState();
+      // A committed teardown means the erase is under way: the keys it names may
+      // already be gone. Reporting the surviving activeNode as "active" would
+      // present an enrollment with nothing behind it, lock the Hub address, and
+      // leave no in-panel way to correct it.
+      if (state.pendingTeardown !== null) return { enrolled: "none" };
+      if (state.activeNode !== null) return { enrolled: "active" };
+      if (state.pendingEnrollment !== null) return { enrolled: "pending" };
+      return { enrolled: "none" };
+    } catch {
+      return { enrolled: "unknown" };
+    }
+  }
+
+  /**
+   * Re-read the pending ceremony so the comparison survives losing the start
+   * response.
+   *
+   * Returns null when nothing is pending, and null when the ceremony predates
+   * device-code persistence — an approver cannot act on a code we cannot show,
+   * and reporting a partial ceremony would imply otherwise.
+   */
+  async readEnrollment(): Promise<HubEnrollmentCeremonyDetail | null> {
+    const origin = this.#enrollmentOrigin();
+    const pending = await this.#identity.readPendingEnrollment(origin);
+    if (
+      pending === null ||
+      pending.deviceCode === null ||
+      pending.expiresAt === null ||
+      pending.pollIntervalMs === null
+    ) {
+      // Either nothing is pending, or the start response never committed. A
+      // half-written ceremony is not one an approver can act on.
+      return null;
+    }
+    return {
+      deviceCode: pending.deviceCode,
+      fingerprint: formatNodePublicKeyFingerprint(pending.fingerprint),
+      label: pending.label ?? this.#enrollmentMetadata.label,
+      platformOs: this.#enrollmentMetadata.platformOs,
+      platformArch: this.#enrollmentMetadata.platformArch,
+      clientVersion: this.#enrollmentMetadata.clientVersion,
+      algorithm: pending.algorithm,
+      expiresAt: new Date(pending.expiresAt).toISOString(),
+      pollIntervalMs: pending.pollIntervalMs,
+    };
   }
 
   async cancelEnrollment(): Promise<HubConnectorStatus> {
@@ -240,11 +337,15 @@ export class HubConnector {
     return this.status();
   }
 
-  async stop(): Promise<void> {
-    if (this.#stopping) return this.#frameChain;
-    this.#stopping = true;
+  /**
+   * Drop every connection-owned resource without marking the connector stopped.
+   *
+   * Shared by `stop()` and `leave()`. `stop()` additionally sets `#stopping`,
+   * which is a one-way latch for the process lifetime; `leave()` must not set it,
+   * or the node could never re-enroll without a relaunch.
+   */
+  async #teardownConnection(): Promise<void> {
     this.#state.invalidateGeneration();
-    if (this.#state.snapshot().state !== "disabled") this.#state.transition("stopping");
     this.#clearAllTimers();
     const registry = this.#registry;
     this.#registry = undefined;
@@ -254,8 +355,57 @@ export class HubConnector {
     this.#session?.close();
     this.#session = undefined;
     await this.#frameChain.catch(() => undefined);
+  }
+
+  async stop(): Promise<void> {
+    if (this.#stopping) return this.#frameChain;
+    this.#stopping = true;
+    this.#state.invalidateGeneration();
+    if (this.#state.snapshot().state !== "disabled") this.#state.transition("stopping");
+    await this.#teardownConnection();
     this.#state.transition("disabled");
     this.#started = false;
+  }
+
+  /**
+   * Erase this node's local Hub identity.
+   *
+   * The only exit from `revoked` and from a corrupt or orphaned identity:
+   * `resume()` early-returns on `revoked`, and `enroll()` throws while an
+   * `activeNode` exists, so without this a revoked node is stuck for good.
+   *
+   * Ordering is load-bearing. An authenticated relay session is never
+   * revalidated against identity state, so deleting the key does not close it —
+   * channels must be torn down *before* custody is mutated, or the connector
+   * would keep serving relayed RPC under an identity that no longer exists.
+   *
+   * Deliberately not built on `stop()`: that latches `#stopping` forever, and a
+   * node that just left must be able to enroll again in the same process.
+   */
+  async leave(): Promise<HubConnectorStatus> {
+    if (this.#stopping) throw new Error("Hub identity cannot be erased while stopping.");
+    await this.#teardownConnection();
+    this.#started = false;
+    try {
+      await this.#identity.leave();
+    } catch (error: unknown) {
+      this.#state.transition("degraded", {
+        degradedMode: "operator_action_required",
+        failure: identityFailure(error),
+      });
+      // The cause aids local diagnosis; it never reaches a caller, because the
+      // route replaces this error with a bounded message.
+      throw new Error("Hub identity could not be erased.", { cause: error });
+    }
+    // `disabled` is legal from every state and is literally true here: no
+    // socket, timer, or channel survives the teardown above. `enrolling` is only
+    // honest once the connector is actually configured to enroll.
+    this.#state.transition("disabled");
+    if (this.#config.enabled && this.#config.configurationIssue === undefined) {
+      this.#state.transition("enrolling");
+      this.#started = true;
+    }
+    return this.status();
   }
 
   async #connect(): Promise<void> {
@@ -397,9 +547,12 @@ export class HubConnector {
       return;
     }
     if (result.status === "unavailable") {
+      // Expiry and denial need opposite operator instructions, so they must not
+      // collapse into one code: an expired ceremony is simply restarted, a
+      // denied one means a human said no and wants finding out why first.
       this.#state.transition("degraded", {
         degradedMode: "operator_action_required",
-        failure: "enrollment_unavailable",
+        failure: result.reason === "expired" ? "enrollment_expired" : "enrollment_unavailable",
       });
       return;
     }

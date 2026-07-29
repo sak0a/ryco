@@ -260,6 +260,32 @@ export interface DesktopTurnCompleteNotification {
   readonly body?: string | undefined;
 }
 
+export interface DesktopHubLaunchConfig {
+  readonly enabled: boolean;
+  readonly origin: string | null;
+  readonly nodeName: string | null;
+  readonly allowFileSecretStore: boolean;
+  /** Whether this host can use the hardened permissioned-file fallback. */
+  readonly fileSecretStoreFallbackSupported: boolean;
+}
+
+export type DesktopHubOriginRejection =
+  | "empty"
+  | "too_long"
+  | "not_a_url"
+  | "insecure_scheme"
+  | "has_credentials"
+  | "has_path"
+  | "invalid";
+
+export type DesktopHubOriginValidation =
+  | { readonly ok: true; readonly origin: string; readonly normalized: boolean }
+  | {
+      readonly ok: false;
+      readonly reason: DesktopHubOriginRejection;
+      readonly suggestion?: string;
+    };
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
@@ -296,6 +322,22 @@ export interface DesktopBridge {
     readonly enabled: boolean;
     readonly port?: number;
   }) => Promise<DesktopServerExposureState>;
+  getHubLaunchConfig: () => Promise<DesktopHubLaunchConfig>;
+  /**
+   * Persist hub launch configuration and relaunch to apply it.
+   *
+   * The connector is built during server startup, so a change cannot take effect
+   * in the running process — the same reason network access and Tailscale Serve
+   * relaunch. Callers must confirm with the operator first.
+   */
+  setHubLaunchConfig: (input: {
+    readonly enabled?: boolean;
+    readonly origin?: string | null;
+    readonly nodeName?: string | null;
+    readonly allowFileSecretStore?: boolean;
+  }) => Promise<void>;
+  /** Validate a typed Hub address without persisting it. */
+  validateHubOrigin: (raw: string) => Promise<DesktopHubOriginValidation>;
   getAdvertisedEndpoints: () => Promise<readonly AdvertisedEndpoint[]>;
   getPathForFile?: (file: File) => string;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;

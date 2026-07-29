@@ -4,6 +4,7 @@ import {
   AuthSessionId,
   CommandId,
   HubConnectorStatus,
+  HubEnrollmentCeremonyDetail,
   HubEnrollmentStartResult,
   OrchestrationReadModel,
   ProjectId,
@@ -85,6 +86,10 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   logWebSocketEvents: Schema.optional(Schema.Boolean),
   tailscaleServeEnabled: Schema.optional(Schema.Boolean),
   tailscaleServePort: Schema.optional(PortSchema),
+  hubConnectorEnabled: Schema.optional(Schema.Boolean),
+  hubOrigin: Schema.optional(Schema.String),
+  hubNodeName: Schema.optional(Schema.String),
+  hubAllowFileSecretStore: Schema.optional(Schema.Boolean),
   otlpTracesUrl: Schema.optional(Schema.String),
   otlpMetricsUrl: Schema.optional(Schema.String),
 });
@@ -145,6 +150,10 @@ const hubConnectorEnabledFlag = Flag.boolean("hub-connector-enabled").pipe(
 );
 const hubOriginFlag = Flag.string("hub-origin").pipe(
   Flag.withDescription("Canonical Hub HTTPS origin (overrides RYCO_HUB_ORIGIN)."),
+  Flag.optional,
+);
+const hubNodeNameFlag = Flag.string("hub-node-name").pipe(
+  Flag.withDescription("Name proposed when this node enrolls (overrides RYCO_HUB_NODE_NAME)."),
   Flag.optional,
 );
 const hubAllowFileSecretStoreFlag = Flag.boolean("hub-allow-file-secret-store").pipe(
@@ -226,6 +235,10 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  hubNodeName: Config.string("RYCO_HUB_NODE_NAME").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   hubReconnectBaseMs: Config.string("RYCO_HUB_RECONNECT_BASE_MS").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -262,6 +275,7 @@ interface CliServerFlags {
   readonly logWebSocketEvents: Option.Option<boolean>;
   readonly hubConnectorEnabled?: Option.Option<boolean>;
   readonly hubOrigin?: Option.Option<string>;
+  readonly hubNodeName?: Option.Option<string>;
   readonly hubAllowFileSecretStore?: Option.Option<boolean>;
   readonly tailscaleServeEnabled: Option.Option<boolean>;
   readonly tailscaleServePort: Option.Option<number>;
@@ -315,6 +329,7 @@ export const resolveServerConfig = (
       logWebSocketEvents: flags.logWebSocketEvents ?? Option.none(),
       hubConnectorEnabled: flags.hubConnectorEnabled ?? Option.none(),
       hubOrigin: flags.hubOrigin ?? Option.none(),
+      hubNodeName: flags.hubNodeName ?? Option.none(),
       hubAllowFileSecretStore: flags.hubAllowFileSecretStore ?? Option.none(),
       tailscaleServeEnabled: flags.tailscaleServeEnabled ?? Option.none(),
       tailscaleServePort: flags.tailscaleServePort ?? Option.none(),
@@ -455,15 +470,31 @@ export const resolveServerConfig = (
       () => (mode === "desktop" ? "127.0.0.1" : undefined),
     );
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
+    // Explicit flags win over env, and env wins over the bootstrap envelope,
+    // matching every other option here. In the desktop that contest never
+    // happens: `backendChildEnv()` strips the Hub variables, so the envelope is
+    // the only source. A headless `ryco serve` sends no envelope.
     const hubConnector = resolveHubConnectorConfig({
       enabled: Option.getOrUndefined(
         resolveOptionPrecedence(
           Option.map(normalizedFlags.hubConnectorEnabled, String),
           Option.fromUndefinedOr(env.hubConnectorEnabled),
+          Option.map(Option.fromUndefinedOr(bootstrap?.hubConnectorEnabled), String),
         ),
       ),
       origin: Option.getOrUndefined(
-        resolveOptionPrecedence(normalizedFlags.hubOrigin, Option.fromUndefinedOr(env.hubOrigin)),
+        resolveOptionPrecedence(
+          normalizedFlags.hubOrigin,
+          Option.fromUndefinedOr(env.hubOrigin),
+          Option.fromUndefinedOr(bootstrap?.hubOrigin),
+        ),
+      ),
+      nodeName: Option.getOrUndefined(
+        resolveOptionPrecedence(
+          normalizedFlags.hubNodeName,
+          Option.fromUndefinedOr(env.hubNodeName),
+          Option.fromUndefinedOr(bootstrap?.hubNodeName),
+        ),
       ),
       reconnectBaseMs: env.hubReconnectBaseMs,
       reconnectMaxMs: env.hubReconnectMaxMs,
@@ -473,6 +504,7 @@ export const resolveServerConfig = (
         resolveOptionPrecedence(
           Option.map(normalizedFlags.hubAllowFileSecretStore, String),
           Option.fromUndefinedOr(env.hubAllowFileSecretStore),
+          Option.map(Option.fromUndefinedOr(bootstrap?.hubAllowFileSecretStore), String),
         ),
       ),
     });
@@ -976,6 +1008,42 @@ const requestHubEnrollmentCancellation = (origin: string, bearerToken: string) =
     HUB_CLI_LIVE_SERVER_TIMEOUT,
   );
 
+const requestHubPendingEnrollment = (origin: string, bearerToken: string) =>
+  runLiveServerRequest(
+    HttpClientRequest.get(`${origin}/api/hub/enrollment`).pipe(
+      HttpClientRequest.acceptJson,
+      HttpClientRequest.bearerToken(bearerToken),
+    ),
+    HttpClientResponse.matchStatus({
+      "2xx": (response) =>
+        HttpClientResponse.schemaBodyJson(HubEnrollmentCeremonyDetail)(response).pipe(
+          Effect.map((detail): typeof HubEnrollmentCeremonyDetail.Type | null => detail),
+        ),
+      "404": () => Effect.succeed(null),
+      orElse: (response) =>
+        readErrorMessageFromResponse(response).pipe(
+          Effect.flatMap((message) => Effect.fail(new Error(message))),
+        ),
+    }),
+    HUB_CLI_LIVE_SERVER_TIMEOUT,
+  );
+
+const requestHubResume = (origin: string, bearerToken: string) =>
+  runLiveServerRequest(
+    HttpClientRequest.post(`${origin}/api/hub/resume`).pipe(
+      HttpClientRequest.acceptJson,
+      HttpClientRequest.bearerToken(bearerToken),
+    ),
+    HttpClientResponse.matchStatus({
+      "2xx": (response) => HttpClientResponse.schemaBodyJson(HubConnectorStatus)(response),
+      orElse: (response) =>
+        readErrorMessageFromResponse(response).pipe(
+          Effect.flatMap((message) => Effect.fail(new Error(message))),
+        ),
+    }),
+    HUB_CLI_LIVE_SERVER_TIMEOUT,
+  );
+
 const formatHubStatus = (status: typeof HubConnectorStatus.Type, json: boolean): string => {
   if (json) return JSON.stringify(status);
   const details = [
@@ -1016,6 +1084,7 @@ const sharedServerCommandFlags = {
   logWebSocketEvents: logWebSocketEventsFlag,
   hubConnectorEnabled: hubConnectorEnabledFlag,
   hubOrigin: hubOriginFlag,
+  hubNodeName: hubNodeNameFlag,
   hubAllowFileSecretStore: hubAllowFileSecretStoreFlag,
   tailscaleServeEnabled: tailscaleServeFlag,
   tailscaleServePort: tailscaleServePortFlag,
@@ -1269,9 +1338,95 @@ const hubCancelCommand = Command.make("cancel", {
   ),
 );
 
+const requestHubLeave = (origin: string, bearerToken: string) =>
+  runLiveServerRequest(
+    HttpClientRequest.post(`${origin}/api/hub/leave`).pipe(
+      HttpClientRequest.acceptJson,
+      HttpClientRequest.bearerToken(bearerToken),
+    ),
+    HttpClientResponse.matchStatus({
+      "2xx": (response) => HttpClientResponse.schemaBodyJson(HubConnectorStatus)(response),
+      orElse: (response) =>
+        readErrorMessageFromResponse(response).pipe(
+          Effect.flatMap((message) => Effect.fail(new Error(message))),
+        ),
+    }),
+    HUB_CLI_LIVE_SERVER_TIMEOUT,
+  );
+
+const formatHubCeremony = (
+  detail: typeof HubEnrollmentCeremonyDetail.Type,
+  json: boolean,
+): string =>
+  json
+    ? JSON.stringify(detail)
+    : [
+        `Label: ${detail.label}`,
+        `Platform: ${detail.platformOs} · ${detail.platformArch}`,
+        `Version: ${detail.clientVersion}`,
+        `Algorithm: ${detail.algorithm}`,
+        `Fingerprint: ${detail.fingerprint}`,
+        `Expires: ${detail.expiresAt}`,
+        `Device code: ${detail.deviceCode}`,
+        "Compare every field, especially the fingerprint, in Hub before approving.",
+      ].join("\n");
+
+const hubPendingCommand = Command.make("pending", {
+  ...authLocationFlags,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Show the pending enrollment ceremony again so its fields can be compared in Hub.",
+  ),
+  Command.withHandler((flags) =>
+    runHubCommand(flags, (origin, token) => requestHubPendingEnrollment(origin, token)).pipe(
+      Effect.flatMap((detail) =>
+        detail === null
+          ? Console.log("No Hub enrollment is pending.")
+          : Console.log(formatHubCeremony(detail, flags.json)),
+      ),
+    ),
+  ),
+);
+
+const hubLeaveCommand = Command.make("leave", {
+  ...authLocationFlags,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Erase this node's local Hub identity. Destructive: reconnecting needs a new approval, and this does not revoke the node in Hub.",
+  ),
+  Command.withHandler((flags) =>
+    runHubCommand(flags, (origin, token) => requestHubLeave(origin, token)).pipe(
+      Effect.flatMap((status) => Console.log(formatHubStatus(status, flags.json))),
+    ),
+  ),
+);
+
+const hubResumeCommand = Command.make("resume", {
+  ...authLocationFlags,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Retry a Hub connector that stopped without scheduling its own retry. Prints the resulting status.",
+  ),
+  Command.withHandler((flags) =>
+    runHubCommand(flags, (origin, token) => requestHubResume(origin, token)).pipe(
+      Effect.flatMap((status) => Console.log(formatHubStatus(status, flags.json))),
+    ),
+  ),
+);
+
 const hubCommand = Command.make("hub").pipe(
   Command.withDescription("Manage the outbound Hub connector through the local Ryco server."),
-  Command.withSubcommands([hubStatusCommand, hubEnrollCommand, hubCancelCommand]),
+  Command.withSubcommands([
+    hubStatusCommand,
+    hubEnrollCommand,
+    hubPendingCommand,
+    hubCancelCommand,
+    hubResumeCommand,
+    hubLeaveCommand,
+  ]),
 );
 
 const projectAddCommand = Command.make("add", {

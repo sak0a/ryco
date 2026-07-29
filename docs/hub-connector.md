@@ -17,24 +17,35 @@ The connector is disabled by default. Configure it through the server process en
 | ---------------------------------- | ------- | ----------------------------------------------------- |
 | `RYCO_HUB_CONNECTOR_ENABLED`       | `false` | Exact `true` or `false`                               |
 | `RYCO_HUB_ORIGIN`                  | unset   | Exact HTTPS origin; loopback HTTP is development-only |
+| `RYCO_HUB_NODE_NAME`               | unset   | Proposed enrollment label; trimmed, 1–100 characters  |
 | `RYCO_HUB_RECONNECT_BASE_MS`       | `1000`  | 250–60,000 ms                                         |
 | `RYCO_HUB_RECONNECT_MAX_MS`        | `60000` | 250–300,000 ms and not below the base                 |
 | `RYCO_HUB_RECONNECT_STABLE_MS`     | `60000` | 5,000–600,000 ms                                      |
 | `RYCO_HUB_RECONNECT_JITTER_RATIO`  | `0.2`   | 0–0.5                                                 |
 | `RYCO_HUB_ALLOW_FILE_SECRET_STORE` | `false` | Explicit POSIX permissioned-file fallback             |
 
-The three ordinary startup settings also have shared server CLI flags:
+The four ordinary startup settings also have shared server CLI flags:
 
 | CLI flag                        | Environment fallback               |
 | ------------------------------- | ---------------------------------- |
 | `--hub-connector-enabled`       | `RYCO_HUB_CONNECTOR_ENABLED`       |
 | `--hub-origin <origin>`         | `RYCO_HUB_ORIGIN`                  |
+| `--hub-node-name <name>`        | `RYCO_HUB_NODE_NAME`               |
 | `--hub-allow-file-secret-store` | `RYCO_HUB_ALLOW_FILE_SECRET_STORE` |
 
-An explicit CLI flag takes precedence over its corresponding environment variable. If a flag is
-omitted, the environment variable continues to work unchanged. The boolean flags use standard
-presence syntax and support the canonical `--no-hub-connector-enabled` and
-`--no-hub-allow-file-secret-store` forms for explicit `false` overrides.
+Startup values resolve in this order: an explicit CLI flag, its corresponding environment variable,
+the private desktop bootstrap envelope, then the default. A headless `ryco serve` process has no
+desktop bootstrap envelope, so an omitted flag continues to fall back to the environment unchanged.
+The boolean flags use standard presence syntax and support the canonical
+`--no-hub-connector-enabled` and `--no-hub-allow-file-secret-store` forms for explicit `false`
+overrides.
+
+The desktop app deliberately owns these four values for its bundled server. It persists them in
+desktop settings, removes matching `RYCO_HUB_*` variables from the backend child environment, and
+passes the values over the private bootstrap channel. This keeps the visible desktop controls
+authoritative. The Hub card keeps the address and pre-enrollment node name visible and puts key
+fallback, startup ownership, CLI equivalents, and bounded relay counters behind **Show advanced
+options**. Changing a desktop launch value restarts Ryco.
 
 For example:
 
@@ -42,6 +53,7 @@ For example:
 ryco serve \
   --hub-connector-enabled \
   --hub-origin https://hub.example.test \
+  --hub-node-name "Build node" \
   --hub-allow-file-secret-store \
   --restrict-to-cwd \
   --host 127.0.0.1 \
@@ -70,6 +82,13 @@ accepted through command-line arguments, URLs, or exported server settings.
 Enabling the connector starts no listener. It uses the existing Ryco HTTP server only for
 authenticated local status and enrollment controls.
 
+Connector state and identity state are reported separately, and the distinction matters: `disabled`
+is reported both for a node that was never enrolled and for an enrolled node whose connector is
+switched off. A caller that must not offer to re-point an already-enrolled node reads the bounded
+identity summary — `none`, `pending`, `active`, or `unknown` — rather than inferring it from state.
+`unknown` means key custody could not be read at all, and must be treated like `active`: refusing a
+destructive action is the safe answer when an identity may exist.
+
 ## Enrollment and key custody
 
 Start Ryco with the connector enabled, then run these commands against the same Ryco state
@@ -78,7 +97,10 @@ directory:
 ```bash
 ryco hub status
 ryco hub enroll
+ryco hub pending
 ryco hub cancel
+ryco hub resume
+ryco hub leave
 ```
 
 Add `--json` for bounded machine-readable output. The server must be running. The CLI obtains a
@@ -86,10 +108,29 @@ short-lived owner credential from the local auth control plane, uses it only in 
 header to the existing local server, and revokes it after the operation. That credential is never a
 Hub credential and never enters a Hub WebSocket.
 
-`hub enroll` prints a short device code, the canonical `SHA256:<base64url>` public-key fingerprint,
-and expiry. `--json` returns the same bounded fingerprint field. Compare that node-side fingerprint
-exactly with the Hub approval screen before approving. Deny and investigate any mismatch; never
-approve by device code alone. Approval polling continues inside the running server and resumes from
+`hub enroll` prints the node label, platform, client version, key algorithm, the canonical
+`SHA256:<base64url>` public-key fingerprint, expiry, and a short device code — the same fields the
+Hub approval screen shows, so both can be compared item by item. `--json` returns the same bounded
+fields. Compare every field, and the fingerprint exactly, with the Hub approval screen before
+approving. Deny and investigate any mismatch; never approve by device code alone.
+
+When no node name is configured, Ryco proposes `<machine label> · <node code>`. The four-character
+Crockford Base32 node code is derived deterministically from the persistent EnvironmentId, so two
+Ryco state directories on the same machine receive distinguishable, stable proposals. The complete
+label is truncated without splitting a Unicode character and never exceeds 100 JavaScript UTF-16
+code units. An explicit `--hub-node-name`, `RYCO_HUB_NODE_NAME`, or Desktop value replaces that
+automatic proposal after trimming.
+
+The exact proposal is persisted with a pending ceremony before the enrollment request is sent.
+Restarting or changing launch configuration cannot silently change the label an owner is comparing
+on the Hub. Once approved, the Hub's stored label is authoritative: a Hub owner can rename it from
+the desktop/tablet node-detail surface, while node, viewer, and operator sessions cannot rename it.
+The frozen web phone presentation displays refreshed names but does not expose node management.
+
+`hub pending` reprints those fields for a ceremony that is already under way. The device code is
+persisted as bounded non-bearer routing metadata so a comparison survives a lost terminal or a
+restart; the polling secret is not, and stays in the protected store. A ceremony started before this
+was persisted cannot be reprinted and reports as absent. Approval polling continues inside the running server and resumes from
 protected local state after restart. `hub cancel` stops a pending ceremony and deletes its local key
 and polling-secret custody. Denial or expiry requires starting a new ceremony.
 
@@ -98,6 +139,17 @@ platform protected store described in [Node identity primitives](./node-identity
 contains only bounded non-bearer metadata and protected-store references. The permissioned-file
 fallback is opt-in, POSIX-only, and enforces `0700` directories and `0600` regular key files. An
 enrolled node never silently replaces a missing, locked, or corrupt key.
+
+The non-secret local identity state records the pending ceremony's exact proposed label and whether
+its protected material belongs to the `os` or
+`permissioned-file` custody class. Once material exists, Ryco reopens that same class on future
+starts instead of silently switching because another backend became available. A legacy identity
+without the marker is migrated only when all required material is found in exactly one eligible
+store. Missing, split, or ambiguous custody fails closed as `identity_store_unavailable`.
+
+The standalone [relay architecture atlas](./relay-architecture.html) shows enrollment, client relay
+connection, hosted reconnect, actor capabilities, role intersection, and which data each component
+retains.
 
 ## Authentication
 
@@ -144,6 +196,26 @@ Configuration, key custody, origin mismatch, enrollment failure, authentication 
 connection replacement, revocation, version incompatibility, and repeated early protocol failure
 require operator action. Restarting the process does not make a revoked identity retry.
 
+`ryco hub leave` erases this node's local Hub identity: the active signing key, any staged rotation
+key, a pending ceremony's key, and any polling secret still awaiting cleanup. It is the only exit
+from `revoked` and from a corrupt identity, because `resume` will not restart a revoked identity and
+enrollment refuses to start while an active node exists.
+
+It is destructive and distinct from turning the connector off, which is reversible and keeps the
+key. Leaving mints a fresh EnvironmentId, so the node can enrol again — as a **new** node, needing a
+new approval. It does **not** revoke anything at the Hub: the previous node record survives there
+until an owner removes it.
+
+The erase is crash-safe. A durable marker records the intent and every secret to remove before
+either store is touched, so an interrupted leave is completed on the next start rather than
+orphaning key material or leaving state that points at keys which are already gone.
+
+`ryco hub resume` retries a connector that stopped without scheduling its own retry, and prints the
+resulting status. Use it for `connection_replaced` and for a `identity_unavailable` caused by a
+credential store that was locked and has since been unlocked; neither schedules a retry timer, so
+neither recovers on its own. Resume is deliberately a no-op for `revoked`, for a stopping connector,
+and for a disabled one — it reports the unchanged state rather than implying it acted.
+
 ## Relay channels, limits, and roles
 
 Ryco explicitly accepts only protocol 1.2 `channel.open` frames with capability `ryco.rpc`, an
@@ -188,12 +260,19 @@ and the normal server listener follow their existing shutdown path.
 ## Troubleshooting
 
 - `configuration_invalid`: check the exact boolean spellings, HTTPS origin, and reconnect ranges.
-- `identity_unavailable`: unlock or restore the platform credential store; do not copy a node ID or
-  generate a replacement key manually.
+- `identity_unavailable`: unlock or restore the platform credential store, then `ryco hub resume`;
+  do not copy a node ID or generate a replacement key manually.
+- `identity_store_unavailable`: the credential store could not be opened at all when this process
+  started, and no retry can repair it. Fix the store, then restart Ryco.
+- `enrollment_expired`: the ceremony's own expiry passed. Start a new one.
 - `identity_origin_mismatch`: use the origin to which the identity was enrolled or perform an
   approved re-enrollment.
+- `enrollment_unavailable`: the ceremony was denied or cancelled at the Hub. Find out why before
+  starting another; a denial is a human saying no.
 - `authentication_failed` or `revoked`: verify approval, key rotation, and node status with the Hub
-  operator; retries are intentionally stopped.
+  operator; retries are intentionally stopped. `ryco hub resume` will not restart a revoked identity.
+- `connection_replaced`: another process authenticated as this node. Stop it, then run
+  `ryco hub resume`. No retry is scheduled for this failure, so it does not clear on its own.
 - `protocol_invalid` or `version_incompatible`: upgrade the incompatible endpoint. Do not modify
   relay schemas or fixtures locally.
 - Repeated `network_unavailable`, `tls_unavailable`, or `heartbeat_timeout`: check DNS, egress, TLS

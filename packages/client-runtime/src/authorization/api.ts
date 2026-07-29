@@ -53,6 +53,8 @@ const JSON_HEADERS = { accept: "application/json", "content-type": "application/
 const MAX_BEARER_TOKEN_LENGTH = 4096;
 const MAX_PASSKEY_LABEL_LENGTH = 256;
 const MAX_PASSKEYS = 256;
+const MAX_HUB_NODE_LABEL_LENGTH = 100;
+const HUB_NODE_ID_PATTERN = /^node_[A-Za-z0-9_-]{22,43}$/;
 
 /**
  * Bounds for the *newly added* recovery-code route only, set well clear of any
@@ -1477,6 +1479,27 @@ export class HostedHubApi {
     });
   }
 
+  async renameNode(nodeId: string, label: string, signal?: AbortSignal): Promise<void> {
+    const normalizedLabel = label.trim();
+    if (
+      !HUB_NODE_ID_PATTERN.test(nodeId) ||
+      normalizedLabel.length === 0 ||
+      normalizedLabel.length > MAX_HUB_NODE_LABEL_LENGTH
+    ) {
+      throw new HostedHubApiError("invalid_request", 400);
+    }
+
+    const result = await this.#request(`/api/admin/nodes/${encodeURIComponent(nodeId)}/rename`, {
+      method: "POST",
+      body: { label: normalizedLabel },
+      csrf: true,
+      ...(signal ? { signal } : {}),
+    });
+    if (Object.keys(result).length !== 1 || result.ok !== true) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
+  }
+
   async lookupNodeEnrollment(
     deviceCode: string,
     signal?: AbortSignal,
@@ -1532,7 +1555,7 @@ export class HostedHubApi {
     const grant = objectValue(result.grant);
     if (
       typeof node.id !== "string" ||
-      !/^node_[A-Za-z0-9_-]{22,43}$/.test(node.id) ||
+      !HUB_NODE_ID_PATTERN.test(node.id) ||
       typeof node.environmentId !== "string" ||
       !/^env_[A-Za-z0-9_-]{22}$/.test(node.environmentId) ||
       typeof grant.id !== "string" ||

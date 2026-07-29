@@ -55,10 +55,13 @@ function encoded(frame: RelayFrame): Uint8Array {
 function identity(overrides: Partial<HubIdentityRuntimeShape> = {}): HubIdentityRuntimeShape {
   return {
     backend: "keytar",
+    readPendingEnrollment: async () => null,
+    leave: async () => undefined,
     readState: async () => ({
       version: 1,
       revision: 1,
       environmentId: `env_${"E".repeat(22)}`,
+      protectedStoreBackend: "os" as const,
       pendingEnrollment: null,
       activeNode: {
         hubOrigin: "https://relay.example",
@@ -69,6 +72,7 @@ function identity(overrides: Partial<HubIdentityRuntimeShape> = {}): HubIdentity
         enrolledAt: 1,
       },
       stagedRotation: null,
+      pendingTeardown: null,
     }),
     startEnrollment: async () => {
       throw new Error("unused");
@@ -551,6 +555,7 @@ describe("HubConnector", () => {
       version: 1 as const,
       revision: 2,
       environmentId: `env_${"E".repeat(22)}`,
+      protectedStoreBackend: "os" as const,
       pendingEnrollment: null,
       activeNode: {
         hubOrigin: "https://relay.example",
@@ -568,6 +573,7 @@ describe("HubConnector", () => {
         stagedAt: 2,
         activatedAt: 3,
       },
+      pendingTeardown: null,
     };
     const connector = new HubConnector({
       config: enabledConfig,
@@ -686,6 +692,7 @@ describe("HubConnector", () => {
     const socket = new FakeSocket();
     let pending = false;
     let polls = 0;
+    let proposedLabel = "";
     const connector = new HubConnector({
       config: enabledConfig,
       identity: identity({
@@ -693,11 +700,14 @@ describe("HubConnector", () => {
           version: 1,
           revision: 1,
           environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
           pendingEnrollment: pending
             ? {
                 hubOrigin: "https://relay.example",
                 keySecretName: "node-key.fixture",
                 pollingSecretName: "enrollment-poll.fixture",
+                label: proposedLabel,
+                deviceCode: "ABCD-EFGH",
                 createdAt: 1,
                 expiresAt: 2_000_000,
                 pollIntervalMs: 1_000,
@@ -706,8 +716,10 @@ describe("HubConnector", () => {
             : null,
           activeNode: null,
           stagedRotation: null,
+          pendingTeardown: null,
         }),
-        startEnrollment: async () => {
+        startEnrollment: async (_origin, metadata) => {
+          proposedLabel = metadata.label;
           pending = true;
           return {
             deviceCode: "ABCD-EFGH",
@@ -747,13 +759,24 @@ describe("HubConnector", () => {
     expect(started).toMatchObject({
       deviceCode: "ABCD-EFGH",
       fingerprint: `SHA256:${"A".repeat(43)}`,
+      label: proposedLabel,
       pollIntervalMs: 1_000,
       status: { state: "awaiting_approval" },
     });
+    expect(proposedLabel).toMatch(/^Test node · [0-9A-HJKMNP-TV-Z]{4}$/);
+    // Canary: the enroll response carries exactly the fields an approver
+    // compares, and nothing else. Widening this set is a deliberate act — it
+    // must stay in step with the approval screen, and it must never grow to
+    // include the polling secret, the public key, or the Hub origin.
     expect(Object.keys(started).toSorted()).toEqual([
+      "algorithm",
+      "clientVersion",
       "deviceCode",
       "expiresAt",
       "fingerprint",
+      "label",
+      "platformArch",
+      "platformOs",
       "pollIntervalMs",
       "status",
     ]);
@@ -787,9 +810,11 @@ describe("HubConnector", () => {
           version: 1,
           revision: 1,
           environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
           pendingEnrollment: null,
           activeNode: null,
           stagedRotation: null,
+          pendingTeardown: null,
         }),
         startEnrollment: async () => ({
           deviceCode: "ABCD-EFGH",
@@ -829,6 +854,47 @@ describe("HubConnector", () => {
     await connector.stop();
   });
 
+  it("uses the configured node name as the exact enrollment proposal", async () => {
+    let proposedLabel = "";
+    const connector = new HubConnector({
+      config: { ...enabledConfig, nodeName: "Configured node" },
+      identity: identity({
+        readState: async () => ({
+          version: 1,
+          revision: 1,
+          environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
+          pendingEnrollment: null,
+          activeNode: null,
+          stagedRotation: null,
+          pendingTeardown: null,
+        }),
+        startEnrollment: async (_origin, metadata) => {
+          proposedLabel = metadata.label;
+          return {
+            deviceCode: "ABCD-EFGH",
+            expiresAt: 2_000_000,
+            pollIntervalMs: 1_000,
+            environmentId: `env_${"E".repeat(22)}`,
+            publicKey: {
+              algorithm: "ed25519",
+              publicKey: new Uint8Array(32),
+              fingerprint: new Uint8Array(32),
+            },
+          };
+        },
+      }),
+      transport: { open: () => new FakeSocket() },
+      channels: { open: async () => Promise.reject(new Error("unused")) },
+      enrollmentMetadata,
+    });
+
+    await connector.start();
+    expect((await connector.enroll()).label).toBe("Configured node");
+    expect(proposedLabel).toBe("Configured node");
+    await connector.stop();
+  });
+
   it("resumes pending enrollment after restart and cancels without leaving a poll timer", async () => {
     const clock = scheduler();
     let cancelled = 0;
@@ -837,10 +903,13 @@ describe("HubConnector", () => {
       version: 1 as const,
       revision: 1,
       environmentId: `env_${"E".repeat(22)}`,
+      protectedStoreBackend: "os" as const,
       pendingEnrollment: {
         hubOrigin: "https://relay.example",
         keySecretName: "node-key.fixture",
         pollingSecretName: "enrollment-poll.fixture",
+        label: "Persisted proposal",
+        deviceCode: "ABCD-EFGH",
         createdAt: 1,
         expiresAt: 2_000_000,
         pollIntervalMs: 1_000,
@@ -848,11 +917,20 @@ describe("HubConnector", () => {
       },
       activeNode: null,
       stagedRotation: null,
+      pendingTeardown: null,
     };
     const connector = new HubConnector({
       config: enabledConfig,
       identity: identity({
         readState: async () => pendingState,
+        readPendingEnrollment: async () => ({
+          deviceCode: "ABCD-EFGH",
+          label: "Persisted proposal",
+          fingerprint: new Uint8Array(32),
+          algorithm: "ed25519",
+          expiresAt: 2_000_000,
+          pollIntervalMs: 1_000,
+        }),
         pollEnrollment: async () => {
           polls += 1;
           return { status: "pending", retryAfterMs: 1_000 };
@@ -872,12 +950,59 @@ describe("HubConnector", () => {
     });
     await connector.start();
     expect(connector.status().state).toBe("awaiting_approval");
+    expect(await connector.readEnrollment()).toMatchObject({
+      deviceCode: "ABCD-EFGH",
+      label: "Persisted proposal",
+    });
     await clock.advance(0);
     expect(polls).toBe(1);
     await connector.cancelEnrollment();
     expect(cancelled).toBe(1);
     expect(connector.status().state).toBe("enrolling");
     expect(clock.timers.size).toBe(0);
+    await connector.stop();
+  });
+
+  it("uses the pre-feature machine label for a legacy pending ceremony", async () => {
+    const connector = new HubConnector({
+      config: { ...enabledConfig, nodeName: "New configured name" },
+      identity: identity({
+        readState: async () => ({
+          version: 1,
+          revision: 1,
+          environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
+          pendingEnrollment: {
+            hubOrigin: "https://relay.example",
+            keySecretName: "node-key.fixture",
+            pollingSecretName: "enrollment-poll.fixture",
+            label: null,
+            deviceCode: "ABCD-EFGH",
+            createdAt: 1,
+            expiresAt: 2_000_000,
+            pollIntervalMs: 1_000,
+            cleanupRequested: false,
+          },
+          activeNode: null,
+          stagedRotation: null,
+          pendingTeardown: null,
+        }),
+        readPendingEnrollment: async () => ({
+          deviceCode: "ABCD-EFGH",
+          label: null,
+          fingerprint: new Uint8Array(32),
+          algorithm: "ed25519",
+          expiresAt: 2_000_000,
+          pollIntervalMs: 1_000,
+        }),
+      }),
+      transport: { open: () => new FakeSocket() },
+      channels: { open: async () => Promise.reject(new Error("unused")) },
+      enrollmentMetadata,
+    });
+
+    await connector.start();
+    expect(await connector.readEnrollment()).toMatchObject({ label: "Test node" });
     await connector.stop();
   });
 
@@ -890,10 +1015,13 @@ describe("HubConnector", () => {
           version: 1,
           revision: 1,
           environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
           pendingEnrollment: {
             hubOrigin: "https://relay.example",
             keySecretName: "node-key.fixture",
             pollingSecretName: "enrollment-poll.fixture",
+            label: "Persisted proposal",
+            deviceCode: "ABCD-EFGH",
             createdAt: 1,
             expiresAt: 2_000_000,
             pollIntervalMs: 1_000,
@@ -901,6 +1029,7 @@ describe("HubConnector", () => {
           },
           activeNode: null,
           stagedRotation: null,
+          pendingTeardown: null,
         }),
         cancelEnrollment: async () => Promise.reject(new Error("custody unavailable")),
       }),
@@ -931,10 +1060,13 @@ describe("HubConnector", () => {
           version: 1,
           revision: 1,
           environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
           pendingEnrollment: {
             hubOrigin: "https://relay.example",
             keySecretName: "node-key.fixture",
             pollingSecretName: "enrollment-poll.fixture",
+            label: "Persisted proposal",
+            deviceCode: "ABCD-EFGH",
             createdAt: 1,
             expiresAt: 2_000_000,
             pollIntervalMs: 1_000,
@@ -942,8 +1074,9 @@ describe("HubConnector", () => {
           },
           activeNode: null,
           stagedRotation: null,
+          pendingTeardown: null,
         }),
-        pollEnrollment: async () => ({ status: "unavailable" }),
+        pollEnrollment: async () => ({ status: "unavailable", reason: "rejected" }),
       }),
       transport: { open: () => new FakeSocket() },
       channels: {
@@ -981,9 +1114,11 @@ describe("HubConnector", () => {
           version: 1,
           revision: 1,
           environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
           pendingEnrollment: null,
           activeNode: null,
           stagedRotation: null,
+          pendingTeardown: null,
         }),
         startEnrollment: async () => pendingStart,
       }),
@@ -1012,5 +1147,145 @@ describe("HubConnector", () => {
     });
     await expect(enrolling).rejects.toThrow("superseded");
     expect(connector.status().state).toBe("disabled");
+  });
+  it("closes the relay socket before erasing custody, and stays enrollable after", async () => {
+    const clock = scheduler();
+    const socket = new FakeSocket();
+    const order: string[] = [];
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        leave: async () => {
+          order.push("custody-erased");
+        },
+      }),
+      transport: { open: () => socket },
+      channels: {
+        open: async () => {
+          throw new Error("unused");
+        },
+      },
+      enrollmentMetadata,
+      scheduler: clock.value,
+    });
+    const socketClose = socket.close.bind(socket);
+    socket.close = () => {
+      order.push("socket-closed");
+      socketClose();
+    };
+
+    const starting = connector.start();
+    await settle();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await starting;
+    expect(connector.status().state).toBe("online");
+
+    const status = await connector.leave();
+
+    // An authenticated relay session is never revalidated against identity
+    // state, so deleting the key does not close it. The socket must be gone
+    // before custody is mutated, or the connector would keep serving relayed RPC
+    // under an identity that no longer exists.
+    expect(socket.closeCalls).toBe(1);
+    expect(order).toEqual(["socket-closed", "custody-erased"]);
+    expect([...socket.listeners.values()].every((set) => set.size === 0)).toBe(true);
+    expect(clock.timers.size).toBe(0);
+
+    // Leave must not latch `#stopping` the way `stop()` does, or the node could
+    // never enroll again without a relaunch.
+    expect(status.state).toBe("enrolling");
+  });
+
+  it("reports a bounded failure and does not claim success when custody erase fails", async () => {
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        leave: async () => {
+          throw new Error("keychain locked: /Users/someone/Library/Keychains");
+        },
+      }),
+      transport: { open: () => new FakeSocket() },
+      channels: {
+        open: async () => {
+          throw new Error("unused");
+        },
+      },
+      enrollmentMetadata,
+      scheduler: scheduler().value,
+    });
+
+    await expect(connector.leave()).rejects.toThrow("Hub identity could not be erased.");
+    expect(connector.status()).toMatchObject({
+      state: "degraded",
+      degradedMode: "operator_action_required",
+      failure: "identity_unavailable",
+    });
+    // The bounded message must not carry the underlying filesystem detail.
+    await expect(connector.leave()).rejects.not.toThrow("Keychains");
+  });
+
+  it("leaves a disabled connector disabled rather than claiming it is enrolling", async () => {
+    const connector = new HubConnector({
+      config: DEFAULT_HUB_CONNECTOR_CONFIG,
+      identity: identity(),
+      transport: {
+        open: () => {
+          throw new Error("unused");
+        },
+      },
+      channels: {
+        open: async () => {
+          throw new Error("unused");
+        },
+      },
+      enrollmentMetadata,
+    });
+    await connector.start();
+    const status = await connector.leave();
+    expect(status.state).toBe("disabled");
+  });
+
+  it("does not report a half-erased identity as enrolled", async () => {
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        readState: async () => ({
+          version: 1,
+          revision: 9,
+          environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
+          pendingEnrollment: null,
+          // A leave that committed its marker and deleted the secrets, then
+          // crashed before clearing state. The keys are gone.
+          activeNode: {
+            hubOrigin: "https://relay.example",
+            nodeId: `node_${"N".repeat(22)}`,
+            activeKeyId: `nkey_${"K".repeat(22)}`,
+            activeKeySecretName: "node-key.gone",
+            cleanupPollingSecretName: null,
+            enrolledAt: 1,
+          },
+          stagedRotation: null,
+          pendingTeardown: { secretNames: ["node-key.gone"], requestedAt: 1 },
+        }),
+      }),
+      transport: { open: () => new FakeSocket() },
+      channels: {
+        open: async () => {
+          throw new Error("unused");
+        },
+      },
+      enrollmentMetadata,
+    });
+
+    expect(await connector.identitySummary()).toEqual({ enrolled: "none" });
   });
 });

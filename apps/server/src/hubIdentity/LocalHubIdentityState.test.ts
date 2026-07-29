@@ -17,6 +17,7 @@ describe("local Hub identity state", () => {
     const created = await store.readOrCreate();
     expect(created.environmentId).toMatch(/^env_[A-Za-z0-9_-]{22}$/);
     expect(created.revision).toBe(0);
+    expect(created.protectedStoreBackend).toBeNull();
     expect(created.activeNode).toBeNull();
 
     const restarted = await makeLocalHubIdentityStateStore(path);
@@ -41,6 +42,8 @@ describe("local Hub identity state", () => {
         hubOrigin: "https://hub.example.com",
         keySecretName: "node-key.pending",
         pollingSecretName: "enrollment-poll.pending",
+        label: "Build node",
+        deviceCode: "ABCD-EFGH",
         createdAt: 1_784_160_000_000,
         expiresAt: 1_784_160_600_000,
         pollIntervalMs: 5_000,
@@ -50,7 +53,151 @@ describe("local Hub identity state", () => {
     expect(updated.environmentId).toBe(initial.environmentId);
     const persisted = await readFile(path, "utf8");
     expect(persisted).toContain("enrollment-poll.pending");
+    expect(persisted).toContain('"label":"Build node"');
     expect(persisted).not.toContain(pollingCanary);
+  });
+
+  it("reads a pending record written before device codes were persisted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-legacy-pending-"));
+    const path = join(root, "identity.json");
+    // Exactly the shape written by a build that predates `deviceCode`. Failing
+    // this closed would strand a live ceremony — and, worse, would fail the whole
+    // state read, taking an enrolled node offline for a field it never had.
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        revision: 3,
+        environmentId: `env_${"E".repeat(22)}`,
+        pendingEnrollment: {
+          hubOrigin: "https://hub.example.com",
+          keySecretName: "node-key.pending",
+          pollingSecretName: "enrollment-poll.pending",
+          createdAt: 1_784_160_000_000,
+          expiresAt: 1_784_160_600_000,
+          pollIntervalMs: 5_000,
+          cleanupRequested: false,
+        },
+        activeNode: null,
+        stagedRotation: null,
+      }),
+      { mode: 0o600 },
+    );
+
+    const store = await makeLocalHubIdentityStateStore(path);
+    const state = await store.readOrCreate();
+
+    expect(state.pendingEnrollment?.deviceCode).toBeNull();
+    expect(state.pendingEnrollment?.label).toBeNull();
+    expect(state.protectedStoreBackend).toBeNull();
+    expect(state.pendingEnrollment?.keySecretName).toBe("node-key.pending");
+    expect(state.revision).toBe(3);
+  });
+
+  it("persists only the bounded protected-store custody class", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-backend-"));
+    const path = join(root, "identity.json");
+    const store = await makeLocalHubIdentityStateStore(path);
+    await store.readOrCreate();
+    const updated = await store.update((current) => ({
+      ...current,
+      revision: current.revision + 1,
+      protectedStoreBackend: "permissioned-file",
+    }));
+
+    expect(updated.protectedStoreBackend).toBe("permissioned-file");
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({
+      protectedStoreBackend: "permissioned-file",
+    });
+  });
+
+  it("rejects an unbounded protected-store backend value", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-bad-backend-"));
+    const path = join(root, "identity.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        revision: 1,
+        environmentId: `env_${"E".repeat(22)}`,
+        protectedStoreBackend: "remote-private-canary",
+        pendingEnrollment: null,
+        activeNode: null,
+        stagedRotation: null,
+        pendingTeardown: null,
+      }),
+      { mode: 0o600 },
+    );
+
+    const store = await makeLocalHubIdentityStateStore(path);
+    await expect(store.readOrCreate()).rejects.toMatchObject({ code: "identity_state_corrupt" });
+  });
+
+  it("rejects a pending device code that is unbounded or out of charset", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-bad-code-"));
+    const path = join(root, "identity.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        revision: 1,
+        environmentId: `env_${"E".repeat(22)}`,
+        pendingEnrollment: {
+          hubOrigin: "https://hub.example.com",
+          keySecretName: "node-key.pending",
+          pollingSecretName: "enrollment-poll.pending",
+          deviceCode: "x".repeat(4096),
+          createdAt: 1_784_160_000_000,
+          expiresAt: 1_784_160_600_000,
+          pollIntervalMs: 5_000,
+          cleanupRequested: false,
+        },
+        activeNode: null,
+        stagedRotation: null,
+      }),
+      { mode: 0o600 },
+    );
+
+    const store = await makeLocalHubIdentityStateStore(path);
+    await expect(store.readOrCreate()).rejects.toMatchObject({ code: "identity_state_corrupt" });
+  });
+
+  it("rejects an invalid persisted pending label without reflecting it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-bad-label-"));
+    const path = join(root, "identity.json");
+    const canary = `private-machine-${"x".repeat(100)}`;
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        revision: 1,
+        environmentId: `env_${"E".repeat(22)}`,
+        pendingEnrollment: {
+          hubOrigin: "https://hub.example.com",
+          keySecretName: "node-key.pending",
+          pollingSecretName: "enrollment-poll.pending",
+          label: canary,
+          deviceCode: "ABCD-EFGH",
+          createdAt: 1_784_160_000_000,
+          expiresAt: 1_784_160_600_000,
+          pollIntervalMs: 5_000,
+          cleanupRequested: false,
+        },
+        activeNode: null,
+        stagedRotation: null,
+      }),
+      { mode: 0o600 },
+    );
+
+    const store = await makeLocalHubIdentityStateStore(path);
+    let error: unknown;
+    try {
+      await store.readOrCreate();
+    } catch (cause) {
+      error = cause;
+    }
+    expect(error).toMatchObject({ code: "identity_state_corrupt" });
+    expect(String(error)).not.toContain(canary);
   });
 
   it("rejects environment replacement and invalid revision transitions", async () => {

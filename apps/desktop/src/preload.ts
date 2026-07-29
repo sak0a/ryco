@@ -40,6 +40,9 @@ const RESOLVE_SSH_PASSWORD_PROMPT_CHANNEL = "desktop:resolve-ssh-password-prompt
 const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
+const GET_HUB_LAUNCH_CONFIG_CHANNEL = "desktop:get-hub-launch-config";
+const SET_HUB_LAUNCH_CONFIG_CHANNEL = "desktop:set-hub-launch-config";
+const VALIDATE_HUB_ORIGIN_CHANNEL = "desktop:validate-hub-origin";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
 const NOTIFY_TURN_COMPLETE_CHANNEL = "desktop:notify-turn-complete";
 const TURN_COMPLETE_NOTIFICATION_ACTIVATED_CHANNEL = "desktop:turn-complete-notification-activated";
@@ -119,6 +122,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   setServerExposureMode: (mode) => ipcRenderer.invoke(SET_SERVER_EXPOSURE_MODE_CHANNEL, mode),
   setTailscaleServeEnabled: (input) =>
     ipcRenderer.invoke(SET_TAILSCALE_SERVE_ENABLED_CHANNEL, input),
+  getHubLaunchConfig: () => ipcRenderer.invoke(GET_HUB_LAUNCH_CONFIG_CHANNEL),
+  setHubLaunchConfig: (input: {
+    readonly enabled?: boolean;
+    readonly origin?: string | null;
+    readonly nodeName?: string | null;
+    readonly allowFileSecretStore?: boolean;
+  }) => ipcRenderer.invoke(SET_HUB_LAUNCH_CONFIG_CHANNEL, input),
+  validateHubOrigin: (raw: string) => ipcRenderer.invoke(VALIDATE_HUB_ORIGIN_CHANNEL, raw),
   getAdvertisedEndpoints: () => ipcRenderer.invoke(GET_ADVERTISED_ENDPOINTS_CHANNEL),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   pickFolder: (options) => ipcRenderer.invoke(PICK_FOLDER_CHANNEL, options),

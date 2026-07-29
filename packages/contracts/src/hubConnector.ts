@@ -31,8 +31,10 @@ export type HubConnectorDegradedMode = typeof HubConnectorDegradedMode.Type;
 export const HUB_CONNECTOR_FAILURE_CODES = [
   "configuration_invalid",
   "identity_unavailable",
+  "identity_store_unavailable",
   "identity_origin_mismatch",
   "enrollment_unavailable",
+  "enrollment_expired",
   "network_unavailable",
   "tls_unavailable",
   "authentication_timeout",
@@ -93,16 +95,55 @@ export const HubConnectorStatus = Schema.Struct({
 );
 export type HubConnectorStatus = typeof HubConnectorStatus.Type;
 
+/**
+ * Whether this node holds a Hub identity — a sibling of `HubConnectorStatus`,
+ * deliberately not a field on it.
+ *
+ * The status schema is closed and carries a cross-field invariant over every
+ * legal combination; a field with no invariant would weaken that. The two also
+ * answer different questions: status reports `disabled` both for a node that was
+ * never enrolled and for an enrolled node whose connector is switched off, so a
+ * caller that must not offer to re-point an enrolled node cannot use it.
+ *
+ * `unknown` is the fail-safe value, reported when key custody cannot be read at
+ * all (a locked or unavailable credential store). A caller must treat it like
+ * `active` — refuse destructive or re-pointing actions — because the alternative
+ * is offering to overwrite an identity that may well exist.
+ *
+ * Carries no origin, no node/key/environment identifier, and no fingerprint.
+ */
+export const HubIdentitySummary = Schema.Struct({
+  enrolled: Schema.Literals(["none", "pending", "active", "unknown"]),
+});
+export type HubIdentitySummary = typeof HubIdentitySummary.Type;
+
 export const HubNodePublicKeyFingerprint = Schema.String.check(
   Schema.isPattern(/^SHA256:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
 );
 export type HubNodePublicKeyFingerprint = typeof HubNodePublicKeyFingerprint.Type;
 
-export const HubEnrollmentStartResult = Schema.Struct({
-  status: HubConnectorStatus,
+/**
+ * The fields an approver compares, in the order the approval screen renders them.
+ *
+ * The node and the approval surface must show the same set: a reviewer holding
+ * both screens is asked to compare every field, so a field present on one and
+ * absent on the other silently narrows the check.
+ */
+export const HubEnrollmentCeremonyDetail = Schema.Struct({
   deviceCode: Schema.String.check(Schema.isPattern(/^[A-Z0-9-]{4,32}$/)),
   fingerprint: HubNodePublicKeyFingerprint,
+  label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+  platformOs: Schema.Literals(["darwin", "linux", "windows", "unknown"]),
+  platformArch: Schema.Literals(["arm64", "x64", "other"]),
+  clientVersion: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  algorithm: Schema.Literals(["ed25519"]),
   expiresAt: IsoDateTime,
   pollIntervalMs: NonNegativeInt.check(Schema.isBetween({ minimum: 1_000, maximum: 60_000 })),
+});
+export type HubEnrollmentCeremonyDetail = typeof HubEnrollmentCeremonyDetail.Type;
+
+export const HubEnrollmentStartResult = Schema.Struct({
+  status: HubConnectorStatus,
+  ...HubEnrollmentCeremonyDetail.fields,
 });
 export type HubEnrollmentStartResult = typeof HubEnrollmentStartResult.Type;

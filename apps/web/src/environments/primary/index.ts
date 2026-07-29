@@ -15,8 +15,15 @@ export {
 } from "./context";
 
 export {
+  cancelHubEnrollment,
   createServerPairingCredential,
+  fetchHubEnrollment,
+  fetchHubIdentity,
+  fetchHubStatus,
   fetchSessionState,
+  leaveHub,
+  resumeHubConnector,
+  startHubEnrollment,
   issuePrimaryWebSocketToken,
   listServerClientSessions,
   listServerPairingLinks,

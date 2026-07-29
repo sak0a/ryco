@@ -10,7 +10,9 @@ import {
   equalNodeIdentityBytes,
   fingerprintNodePublicKey,
   formatNodePublicKeyFingerprint,
+  HUB_NODE_NAME_MAX_LENGTH,
   NodeIdentityValidationError,
+  normalizeHubNodeName,
   validateNodePublicKey,
 } from "./nodeIdentity.ts";
 
@@ -128,6 +130,26 @@ describe("node identity canonical cryptography", () => {
     ]) {
       expect(() => canonicalizeHubOrigin(value)).toThrow(NodeIdentityValidationError);
     }
+  });
+
+  it("normalizes bounded Hub node names without reflecting invalid input", () => {
+    expect(normalizeHubNodeName("  Build node  ")).toBe("Build node");
+    expect(normalizeHubNodeName("a".repeat(HUB_NODE_NAME_MAX_LENGTH))).toHaveLength(
+      HUB_NODE_NAME_MAX_LENGTH,
+    );
+    expect(() => normalizeHubNodeName(" \n ")).toThrow(NodeIdentityValidationError);
+    expect(() => normalizeHubNodeName("s".repeat(HUB_NODE_NAME_MAX_LENGTH + 1))).toThrow(
+      NodeIdentityValidationError,
+    );
+
+    const canary = "private-machine-name";
+    let error: unknown;
+    try {
+      normalizeHubNodeName(`${canary}${"x".repeat(HUB_NODE_NAME_MAX_LENGTH)}`);
+    } catch (cause) {
+      error = cause;
+    }
+    expect(String(error)).not.toContain(canary);
   });
 
   it("validates key encodings and copies accepted public bytes", () => {

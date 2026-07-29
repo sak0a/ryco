@@ -39,7 +39,18 @@ export type HubEnrollmentPollResponse =
       readonly activeKeyId: string;
       readonly enrolledAt: number;
     }
-  | { readonly status: "unavailable" };
+  | {
+      readonly status: "unavailable";
+      /**
+       * Why the ceremony ended.
+       *
+       * `expired` is known locally from the ceremony's own expiry; `rejected`
+       * covers denial or cancellation at the service. The two need opposite
+       * operator instructions — start a new one versus find out who denied it —
+       * so they must not collapse into a single code.
+       */
+      readonly reason: "expired" | "rejected";
+    };
 
 export interface HubEnrollmentTransport {
   readonly start: (request: HubEnrollmentStartRequest) => Promise<HubEnrollmentStartResponse>;
@@ -268,6 +279,9 @@ export function makeHubEnrollmentClient(
       hubOrigin,
       keySecretName,
       pollingSecretName,
+      label: metadata.label,
+      // Unknown until the start response arrives; filled in by the commit below.
+      deviceCode: null,
       createdAt,
       expiresAt: null,
       pollIntervalMs: null,
@@ -316,6 +330,7 @@ export function makeHubEnrollmentClient(
           revision: current.revision + 1,
           pendingEnrollment: {
             ...pending,
+            deviceCode: response?.deviceCode ?? null,
             expiresAt: response?.expiresAt ?? null,
             pollIntervalMs: response?.pollIntervalMs ?? null,
           },
@@ -363,11 +378,11 @@ export function makeHubEnrollmentClient(
     }
     if (pending.cleanupRequested) {
       await clearPending(pending).catch(() => clientError("enrollment_local_state_failed"));
-      return { status: "unavailable" };
+      return { status: "unavailable", reason: "rejected" };
     }
     if (now() >= pending.expiresAt) {
       await clearPending(pending).catch(() => clientError("enrollment_local_state_failed"));
-      return { status: "unavailable" };
+      return { status: "unavailable", reason: "expired" };
     }
     const pollingSecret = await dependencies.secretStore.get(pending.pollingSecretName);
     if (pollingSecret === null || pollingSecret.byteLength !== 32) {

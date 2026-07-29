@@ -315,6 +315,82 @@ describe("HostedHubApi", () => {
     expect(JSON.stringify(nodes)).not.toContain("directory-sensitive-canary");
   });
 
+  it("renames a node with a trimmed bounded body and session-bound CSRF", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      return requests.length === 1 ? response(session) : response({ ok: true });
+    });
+    const api = createApi();
+    await api.restoreSession();
+
+    await expect(
+      api.renameNode("node_aaaaaaaaaaaaaaaaaaaaaa", "  Release node  "),
+    ).resolves.toBeUndefined();
+
+    expect(requests[1]?.input).toBe("/api/admin/nodes/node_aaaaaaaaaaaaaaaaaaaaaa/rename");
+    expect(requests[1]?.init).toMatchObject({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    expect(headersOf(requests[1]?.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
+    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ label: "Release node" });
+  });
+
+  it("rejects invalid node rename input before any I/O", async () => {
+    const fetchSpy = vi.fn(async () => response({ ok: true }));
+    globalThis.fetch = fetchSpy;
+    const api = createApi();
+
+    await expect(api.renameNode("node_bad", "Studio")).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    await expect(api.renameNode("node_aaaaaaaaaaaaaaaaaaaaaa", " ")).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    await expect(
+      api.renameNode("node_aaaaaaaaaaaaaaaaaaaaaa", "N".repeat(101)),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on malformed and forbidden node rename responses", async () => {
+    const api = createApi();
+    globalThis.fetch = vi.fn(async () => response(session));
+    await api.restoreSession();
+
+    globalThis.fetch = vi.fn(async () => response({ ok: true, detail: "rename-sensitive-canary" }));
+    const malformed = await api
+      .renameNode("node_aaaaaaaaaaaaaaaaaaaaaa", "Studio")
+      .catch((cause) => cause);
+    expect(malformed).toMatchObject({ code: "invalid_response" });
+    expect((malformed as Error).message).not.toContain("rename-sensitive-canary");
+
+    globalThis.fetch = vi.fn(async () => response({ error: "forbidden" }, 403));
+    await expect(api.renameNode("node_aaaaaaaaaaaaaaaaaaaaaa", "Studio")).rejects.toMatchObject({
+      code: "forbidden",
+      status: 403,
+    });
+  });
+
+  it("forwards caller cancellation through a node rename", async () => {
+    const api = createApi();
+    globalThis.fetch = vi.fn(async () => response(session));
+    await api.restoreSession();
+
+    const controller = new AbortController();
+    controller.abort();
+    globalThis.fetch = vi.fn(async (_input, init) => {
+      expect(init?.signal?.aborted).toBe(true);
+      throw new DOMException("cancelled", "AbortError");
+    });
+
+    await expect(
+      api.renameNode("node_aaaaaaaaaaaaaaaaaaaaaa", "Studio", controller.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("looks up, approves, and denies enrollments with session-bound CSRF", async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     const enrollment = {
@@ -1379,6 +1455,30 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     // The directory refresh (a GET) works under bearer mode with no CSRF.
     globalThis.fetch = vi.fn(async () => response({ nodes: [] }));
     await expect(api.listNodes()).resolves.toEqual([]);
+  });
+
+  it("renames a node over DPoP without cookies or CSRF", async () => {
+    const { calls, service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      return response({ ok: true });
+    });
+    const api = createBearerApi(service, credentials);
+
+    await api.renameNode("node_aaaaaaaaaaaaaaaaaaaaaa", "Studio");
+
+    const url = "https://hub.example.test/api/admin/nodes/node_aaaaaaaaaaaaaaaaaaaaaa/rename";
+    expect(requests[0]?.input).toBe(url);
+    expect(requests[0]?.init).toMatchObject({ method: "POST", credentials: "omit" });
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({ label: "Studio" });
+    const headers = headersOf(requests[0]?.init);
+    expect(headers.get("Authorization")).toBe("DPoP native-token-canary");
+    expect(headers.get("DPoP")).toBe(`proof:POST:${url}:ath`);
+    expect(headers.get("X-Ryco-CSRF")).toBeNull();
+    expect(calls[0]).toEqual({ method: "POST", url, token: "native-token-canary" });
   });
 
   it("fails closed on an authenticated bearer request with no persisted token", async () => {

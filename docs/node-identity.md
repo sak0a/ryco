@@ -95,6 +95,7 @@ The local identity state contains only:
 - a stable random `EnvironmentId`;
 - non-bearer node and key identifiers;
 - protected-store entry names;
+- the exact bounded label proposed by a pending enrollment; and
 - bounded enrollment and rotation timestamps.
 
 Polling secrets remain in the protected store, and challenges and signatures are never persisted.
@@ -108,7 +109,8 @@ a well-formed lock whose recorded PID no longer exists is reclaimed after its in
 The enrollment client:
 
 1. Creates the Ed25519 key and EnvironmentId locally.
-2. Sends only the public key and bounded node metadata.
+2. Persists the exact bounded proposed label, then sends only the public key and bounded node
+   metadata.
 3. Receives a short human device code and an independent 32-byte polling secret.
 4. Stores only a protected-store reference in local JSON.
 5. Polls no faster than the server-provided bounded interval, for at most 120 attempts.
@@ -122,6 +124,9 @@ path. Server cancellation remains an authenticated administration operation.
 If the first approved poll response is lost, the protected polling secret and pending local state
 allow the same ceremony to resume. If local approval processing commits but the caller loses the
 result, subsequent polling returns the persisted active identity without another network request.
+Because the proposed label is part of that pending state, a restart cannot present a different name
+from the one awaiting approval. The enrollment label is metadata, not identity: after approval the
+service owns its canonical display value, while NodeId and EnvironmentId remain immutable.
 
 Native HTTPS transports omit ambient credentials, disable caching and redirects, send bounded JSON,
 enforce a 15-second request/read deadline, and reject oversized or malformed responses. A 404/410

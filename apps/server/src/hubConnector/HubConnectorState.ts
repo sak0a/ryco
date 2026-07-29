@@ -8,8 +8,10 @@ import { RELAY_PROTOCOL_MAJOR, RELAY_PROTOCOL_MINOR } from "@ryco/contracts/rela
 export type ConnectorFailureKind =
   | "configuration_invalid"
   | "identity_unavailable"
+  | "identity_store_unavailable"
   | "identity_origin_mismatch"
   | "enrollment_unavailable"
+  | "enrollment_expired"
   | "dns"
   | "network"
   | "tls"
@@ -61,8 +63,10 @@ export function classifyConnectorFailure(
         : { action: "operator", failure: "protocol_invalid" };
     case "configuration_invalid":
     case "identity_unavailable":
+    case "identity_store_unavailable":
     case "identity_origin_mismatch":
     case "enrollment_unavailable":
+    case "enrollment_expired":
     case "authentication_failed":
     case "connection_replaced":
       return { action: "operator", failure: kind };

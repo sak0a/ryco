@@ -3,12 +3,32 @@ import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import { canonicalizeHubOrigin } from "@ryco/shared/nodeIdentity";
+import { canonicalizeHubOrigin, normalizeHubNodeName } from "@ryco/shared/nodeIdentity";
 
 export interface PendingHubEnrollmentState {
   readonly hubOrigin: string;
   readonly keySecretName: string;
   readonly pollingSecretName: string;
+  /**
+   * Exact bounded label proposed to the Hub for this ceremony.
+   *
+   * Null only for records written before label persistence existed. It is
+   * display metadata, never an identity or bearer value.
+   */
+  readonly label: string | null;
+  /**
+   * The short human code the service issued for this ceremony.
+   *
+   * Bounded non-bearer routing metadata: it identifies which pending request an
+   * approver is looking at and proves nothing on its own. The polling secret,
+   * which is a bearer value, stays in the protected store.
+   *
+   * Null until the start response arrives, and null for records written before
+   * this field existed. A ceremony whose code is unknown is still pollable — it
+   * simply cannot be re-displayed, so a caller must treat null as "unreadable"
+   * rather than as a corrupt state.
+   */
+  readonly deviceCode: string | null;
   readonly createdAt: number;
   readonly expiresAt: number | null;
   readonly pollIntervalMs: number | null;
@@ -33,13 +53,39 @@ export interface StagedHubRotationState {
   readonly activatedAt: number | null;
 }
 
+/**
+ * A leave that has been committed to but not finished.
+ *
+ * Erasing an identity spans two stores, and a crash between them would either
+ * orphan protected secrets or leave state pointing at keys that are already
+ * gone. Recording the intent — and every secret name to erase — before touching
+ * either lets the next start finish the job. Mirrors the `cleanupRequested`
+ * marker the pending-enrollment teardown already uses, hoisted to the top level
+ * because a leave spans the active node, a pending ceremony, and a staged
+ * rotation at once.
+ */
+export interface PendingHubTeardownState {
+  readonly secretNames: ReadonlyArray<string>;
+  readonly requestedAt: number;
+}
+
+/**
+ * The class of protected store that owns this identity's secret material.
+ *
+ * This is non-secret affinity metadata. It prevents a restart from silently
+ * selecting a different store when OS credential-store availability changes.
+ */
+export type HubProtectedStoreBackend = "os" | "permissioned-file";
+
 export interface LocalHubIdentityState {
   readonly version: 1;
   readonly revision: number;
   readonly environmentId: string;
+  readonly protectedStoreBackend: HubProtectedStoreBackend | null;
   readonly pendingEnrollment: PendingHubEnrollmentState | null;
   readonly activeNode: ActiveHubNodeState | null;
   readonly stagedRotation: StagedHubRotationState | null;
+  readonly pendingTeardown: PendingHubTeardownState | null;
 }
 
 export type LocalHubIdentityStateErrorCode =
@@ -63,6 +109,8 @@ export interface LocalHubIdentityStateStore {
   readonly update: (
     change: (current: LocalHubIdentityState) => LocalHubIdentityState,
   ) => Promise<LocalHubIdentityState>;
+  /** Discard the identity entirely and mint a fresh `EnvironmentId`. */
+  readonly reset: () => Promise<LocalHubIdentityState>;
 }
 
 const ENVIRONMENT_ID = /^env_[A-Za-z0-9_-]{22}$/;
@@ -70,6 +118,13 @@ const NODE_ID = /^node_[A-Za-z0-9_-]{22,43}$/;
 const NODE_KEY_ID = /^nkey_[A-Za-z0-9_-]{22}$/;
 const ROTATION_ID = /^nrot_[A-Za-z0-9_-]{22}$/;
 const SECRET_NAME = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+/**
+ * Deliberately looser than the wire-format check in `HubEnrollmentClient`. This
+ * bounds charset and length so a state file cannot smuggle an unbounded or
+ * injectable value; it does not pin the service's code format, so a service that
+ * changes it cannot retroactively corrupt an existing state file.
+ */
+const DEVICE_CODE = /^[A-Z0-9-]{4,32}$/;
 const MAX_STATE_BYTES = 16 * 1024;
 
 function stateError(code: LocalHubIdentityStateErrorCode): never {
@@ -84,8 +139,29 @@ function isNullableTimestamp(value: unknown): value is number | null {
   return value === null || isTimestamp(value);
 }
 
+function isNullableDeviceCode(value: unknown): value is string | null {
+  if (value === undefined || value === null) return true;
+  return typeof value === "string" && DEVICE_CODE.test(value);
+}
+
+function isNullableLabel(value: unknown): value is string | null {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== "string") return false;
+  try {
+    return normalizeHubNodeName(value) === value;
+  } catch {
+    return false;
+  }
+}
+
 function isSecretName(value: unknown): value is string {
   return typeof value === "string" && SECRET_NAME.test(value);
+}
+
+function parseProtectedStoreBackend(value: unknown): HubProtectedStoreBackend | null {
+  if (value === undefined || value === null) return null;
+  if (value === "os" || value === "permissioned-file") return value;
+  return stateError("identity_state_corrupt");
 }
 
 function parsePending(value: unknown): PendingHubEnrollmentState | null {
@@ -101,7 +177,9 @@ function parsePending(value: unknown): PendingHubEnrollmentState | null {
       (!Number.isSafeInteger(candidate.pollIntervalMs) ||
         Number(candidate.pollIntervalMs) < 1_000 ||
         Number(candidate.pollIntervalMs) > 60_000)) ||
-    (candidate.cleanupRequested !== undefined && typeof candidate.cleanupRequested !== "boolean")
+    (candidate.cleanupRequested !== undefined && typeof candidate.cleanupRequested !== "boolean") ||
+    !isNullableDeviceCode(candidate.deviceCode) ||
+    !isNullableLabel(candidate.label)
   ) {
     return stateError("identity_state_corrupt");
   }
@@ -115,6 +193,12 @@ function parsePending(value: unknown): PendingHubEnrollmentState | null {
     hubOrigin,
     keySecretName: candidate.keySecretName,
     pollingSecretName: candidate.pollingSecretName,
+    // Absent on legacy records. They stay pollable and use the pre-feature
+    // friendly machine label when their ceremony is displayed.
+    label: candidate.label ?? null,
+    // Absent on records written before this field existed. Those ceremonies stay
+    // pollable; they just cannot be re-displayed.
+    deviceCode: candidate.deviceCode ?? null,
     createdAt: candidate.createdAt,
     expiresAt: candidate.expiresAt,
     pollIntervalMs: candidate.pollIntervalMs as number | null,
@@ -186,6 +270,23 @@ function parseRotation(value: unknown): StagedHubRotationState | null {
   };
 }
 
+const MAX_TEARDOWN_SECRETS = 8;
+
+function parseTeardown(value: unknown): PendingHubTeardownState | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "object") return stateError("identity_state_corrupt");
+  const candidate = value as Partial<PendingHubTeardownState>;
+  if (
+    !Array.isArray(candidate.secretNames) ||
+    candidate.secretNames.length > MAX_TEARDOWN_SECRETS ||
+    !candidate.secretNames.every((name) => isSecretName(name)) ||
+    !isTimestamp(candidate.requestedAt)
+  ) {
+    return stateError("identity_state_corrupt");
+  }
+  return { secretNames: [...candidate.secretNames], requestedAt: candidate.requestedAt };
+}
+
 function parseState(value: unknown): LocalHubIdentityState {
   if (typeof value !== "object" || value === null) return stateError("identity_state_corrupt");
   const candidate = value as Partial<LocalHubIdentityState>;
@@ -202,9 +303,11 @@ function parseState(value: unknown): LocalHubIdentityState {
     version: 1,
     revision: candidate.revision as number,
     environmentId: candidate.environmentId,
+    protectedStoreBackend: parseProtectedStoreBackend(candidate.protectedStoreBackend),
     pendingEnrollment: parsePending(candidate.pendingEnrollment),
     activeNode: parseActive(candidate.activeNode),
     stagedRotation: parseRotation(candidate.stagedRotation),
+    pendingTeardown: parseTeardown(candidate.pendingTeardown),
   };
   if (state.pendingEnrollment !== null && state.activeNode !== null) {
     return stateError("identity_state_corrupt");
@@ -217,9 +320,11 @@ function makeInitialState(): LocalHubIdentityState {
     version: 1,
     revision: 0,
     environmentId: `env_${randomBytes(16).toString("base64url")}`,
+    protectedStoreBackend: null,
     pendingEnrollment: null,
     activeNode: null,
     stagedRotation: null,
+    pendingTeardown: null,
   };
 }
 
@@ -406,5 +511,21 @@ export async function makeLocalHubIdentityStateStore(
       return proposed;
     });
 
-  return { readOrCreate, update };
+  /**
+   * Replace the state with a fresh identity, under the same writer lock.
+   *
+   * Separate from `update` on purpose: `update` forbids replacing the
+   * `EnvironmentId`, which is exactly right for every ordinary mutation and
+   * exactly wrong for a leave. After the signing key is erased the machine can
+   * prove nothing about its former self, and reusing the identifier would
+   * collide with the node record it just abandoned on the service side.
+   */
+  const reset: LocalHubIdentityStateStore["reset"] = () =>
+    withLock(async () => {
+      const fresh = makeInitialState();
+      await writeState(statePath, fresh);
+      return fresh;
+    });
+
+  return { readOrCreate, update, reset };
 }

@@ -9,7 +9,7 @@
 import path from "node:path";
 
 import { Effect, FileSystem, Layer, LogLevel, Path, Schema, Context } from "effect";
-import { canonicalizeHubOrigin } from "@ryco/shared/nodeIdentity";
+import { canonicalizeHubOrigin, normalizeHubNodeName } from "@ryco/shared/nodeIdentity";
 
 export const DEFAULT_PORT = 3773;
 
@@ -46,6 +46,7 @@ export interface ServerDerivedPaths {
 export interface HubConnectorConfig {
   readonly enabled: boolean;
   readonly origin: string | undefined;
+  readonly nodeName: string | undefined;
   readonly reconnectBaseMs: number;
   readonly reconnectMaxMs: number;
   readonly reconnectStableMs: number;
@@ -57,6 +58,7 @@ export interface HubConnectorConfig {
 export const DEFAULT_HUB_CONNECTOR_CONFIG: HubConnectorConfig = {
   enabled: false,
   origin: undefined,
+  nodeName: undefined,
   reconnectBaseMs: 1_000,
   reconnectMaxMs: 60_000,
   reconnectStableMs: 60_000,
@@ -68,6 +70,7 @@ export const DEFAULT_HUB_CONNECTOR_CONFIG: HubConnectorConfig = {
 interface RawHubConnectorConfig {
   readonly enabled?: string | undefined;
   readonly origin?: string | undefined;
+  readonly nodeName?: string | undefined;
   readonly reconnectBaseMs?: string | undefined;
   readonly reconnectMaxMs?: string | undefined;
   readonly reconnectStableMs?: string | undefined;
@@ -113,15 +116,22 @@ export function resolveHubConnectorConfig(raw: RawHubConnectorConfig): HubConnec
   const reconnectJitterRatio = parseRatio(raw.reconnectJitterRatio, 0.2);
   const allowFileSecretStore = parseBoolean(raw.allowFileSecretStore, false);
   let origin: string | undefined;
+  let nodeName: string | undefined;
   try {
     origin = raw.origin === undefined ? undefined : canonicalizeHubOrigin(raw.origin);
   } catch {
     origin = undefined;
   }
+  try {
+    nodeName = raw.nodeName === undefined ? undefined : normalizeHubNodeName(raw.nodeName);
+  } catch {
+    nodeName = undefined;
+  }
 
   const invalid =
     enabled !== true ||
     origin === undefined ||
+    (raw.nodeName !== undefined && nodeName === undefined) ||
     reconnectBaseMs === undefined ||
     reconnectMaxMs === undefined ||
     reconnectMaxMs < reconnectBaseMs ||
@@ -132,6 +142,7 @@ export function resolveHubConnectorConfig(raw: RawHubConnectorConfig): HubConnec
   return {
     enabled: true,
     origin,
+    nodeName,
     reconnectBaseMs: reconnectBaseMs ?? DEFAULT_HUB_CONNECTOR_CONFIG.reconnectBaseMs,
     reconnectMaxMs: reconnectMaxMs ?? DEFAULT_HUB_CONNECTOR_CONFIG.reconnectMaxMs,
     reconnectStableMs: reconnectStableMs ?? DEFAULT_HUB_CONNECTOR_CONFIG.reconnectStableMs,

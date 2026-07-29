@@ -9,6 +9,7 @@
 // including while the directory is stale.
 
 import { CheckIcon, CopyIcon } from "lucide-react";
+import { useState } from "react";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
@@ -34,6 +35,7 @@ import {
   SheetTitle,
 } from "../ui/sheet";
 import { NodePresence } from "./HostedConnectionControls";
+import { HostedNodeRenameDialog } from "./HostedNodeRenameDialog";
 import {
   formatEpoch,
   nodeMetaLine,
@@ -56,8 +58,10 @@ export interface HostedNodeDetailProps {
   readonly node: HostedHubNode | null;
   readonly directoryStatus: string;
   readonly browserStatus: string;
+  readonly canRename: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly onConnect: (node: HostedHubNode) => void;
+  readonly onRename: (node: HostedHubNode, label: string) => Promise<void>;
 }
 
 function NodeDetailBody({ node }: { readonly node: HostedHubNode }) {
@@ -141,10 +145,13 @@ export function HostedNodeDetail({
   node,
   directoryStatus,
   browserStatus,
+  canRename,
   onOpenChange,
   onConnect,
+  onRename,
 }: HostedNodeDetailProps) {
   const isPhoneTier = usePresentationTier() === "phone";
+  const [renameOpen, setRenameOpen] = useState(false);
   const open = node !== null;
   if (!node) return null;
 
@@ -177,27 +184,43 @@ export function HostedNodeDetail({
   }
 
   return (
-    <Sheet
-      open={open}
-      onOpenChange={(next) => {
-        onOpenChange(next);
-      }}
-    >
-      <SheetPopup side="right" className="w-full sm:max-w-md">
-        <SheetHeader>
-          <SheetTitle className="truncate">{node.label}</SheetTitle>
-          <SheetDescription>{nodeMetaLine(node)}</SheetDescription>
-        </SheetHeader>
-        <SheetPanel>
-          <NodeDetailBody node={node} />
-          {reason ? <p className="mt-4 text-xs text-muted-foreground">{reason}</p> : null}
-        </SheetPanel>
-        <SheetFooter>
-          <Button disabled={blocked} onClick={connect}>
-            Connect
-          </Button>
-        </SheetFooter>
-      </SheetPopup>
-    </Sheet>
+    <>
+      <Sheet
+        open={open}
+        onOpenChange={(next) => {
+          if (!next) setRenameOpen(false);
+          onOpenChange(next);
+        }}
+      >
+        <SheetPopup side="right" className="w-full sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle className="truncate">{node.label}</SheetTitle>
+            <SheetDescription>{nodeMetaLine(node)}</SheetDescription>
+          </SheetHeader>
+          <SheetPanel>
+            <NodeDetailBody node={node} />
+            {reason ? <p className="mt-4 text-xs text-muted-foreground">{reason}</p> : null}
+          </SheetPanel>
+          <SheetFooter>
+            {canRename ? (
+              <Button variant="outline" onClick={() => setRenameOpen(true)}>
+                Rename
+              </Button>
+            ) : null}
+            <Button disabled={blocked} onClick={connect}>
+              Connect
+            </Button>
+          </SheetFooter>
+        </SheetPopup>
+      </Sheet>
+      {canRename ? (
+        <HostedNodeRenameDialog
+          node={node}
+          open={renameOpen}
+          onOpenChange={setRenameOpen}
+          onRename={(label) => onRename(node, label)}
+        />
+      ) : null}
+    </>
   );
 }

@@ -1314,10 +1314,15 @@ function HostedNodeDirectory() {
         node={detailNode}
         directoryStatus={status}
         browserStatus={browserStatus}
+        canRename={isOwner}
         onOpenChange={(open) => {
           if (!open) setDetailNodeId(null);
         }}
         onConnect={(node) => void select(node)}
+        onRename={async (node, label) => {
+          await hostedHubApi.renameNode(node.id, label);
+          await hostedHubController.refreshDirectory();
+        }}
       />
     </Surface>
   );

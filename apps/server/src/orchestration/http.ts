@@ -8,6 +8,7 @@ import { Effect } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { ServerAuth } from "../auth/Services/ServerAuth.ts";
+import { rejectCrossOriginMutation } from "../auth/http.ts";
 import { normalizeDispatchCommand } from "./Normalizer.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
@@ -68,6 +69,12 @@ export const orchestrationDispatchRouteLayer = HttpRouter.add(
   "/api/orchestration/dispatch",
   Effect.gen(function* () {
     yield* authenticateOwnerSession;
+    // Only the `ryco` CLI posts here, with a bearer token and no Origin. Nothing
+    // in the browser clients calls this route, so requiring a matching Origin
+    // costs nothing and closes the same cross-origin write that the Hub routes
+    // had: SameSite=Lax ignores the port, so any page on another loopback port
+    // is same-site with this backend.
+    yield* rejectCrossOriginMutation;
     const orchestrationEngine = yield* OrchestrationEngineService;
     const command = yield* HttpServerRequest.schemaBodyJson(ClientOrchestrationCommand).pipe(
       Effect.mapError(
