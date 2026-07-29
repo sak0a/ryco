@@ -154,8 +154,9 @@ Headless startup adds:
 
 The value follows existing server precedence: explicit flag, then environment variable, then the
 desktop bootstrap envelope. Supplying an empty, whitespace-only, or overlong flag/environment value
-is a startup configuration error rather than a silent fallback. Omitting it selects the automatic
-label.
+puts an enabled Hub connector into its existing bounded `configuration_invalid` state rather than
+silently selecting the automatic fallback. Local server startup and local Ryco work remain
+available, matching invalid Hub-origin behavior. Omitting the value selects the automatic label.
 
 Example:
 
@@ -200,8 +201,8 @@ explanation that Desktop owns its bundled server's launch values.
 the existing DPoP behavior for native sessions. It validates the node ID and trimmed 1–100
 character label before sending and accepts only the bounded `{ ok: true }` response.
 
-The hosted node-detail sheet receives the authenticated account role. For owners it provides a
-`Rename` action:
+The hosted node-detail surface receives the authenticated account role. On the desktop/tablet
+presentation, owners receive a `Rename` action:
 
 - selecting it opens a focused dialog with the current label prefilled;
 - Save is disabled for an unchanged or invalid label;
@@ -213,6 +214,11 @@ The hosted node-detail sheet receives the authenticated account role. For owners
 
 Viewers and operators do not receive a disabled control; no rename affordance is rendered for
 them. The server remains authoritative and still rejects unauthorized direct requests.
+
+The frozen `apps/web` phone tier receives no new control. It continues to display the canonical
+label returned by the directory. Adding node-management UI to the intended native `apps/mobile`
+experience is a separate parity change; the shared client API remains available for that future
+surface.
 
 The private Hub service requires no behavior change because the owner-authenticated rename route,
 transaction, persistence operation, and audit event already exist. Deployment pinning remains a
@@ -234,7 +240,7 @@ separate operation.
 
 ### Owner rename
 
-1. An owner opens a node detail sheet in the hosted directory.
+1. An owner opens a node detail sheet in the desktop/tablet hosted directory.
 2. The client validates and sends the rename mutation for the immutable node ID.
 3. The Hub authenticates the owner, updates `nodes.label` transactionally, and writes the existing
    `node.renamed` audit event.
@@ -243,7 +249,8 @@ separate operation.
 
 ## Failure handling
 
-- Invalid headless naming configuration fails startup with a bounded configuration error.
+- Invalid headless naming configuration fails the Hub connector closed with
+  `configuration_invalid` while leaving the local server available.
 - Invalid Desktop input is rejected in the Electron main process and does not overwrite the last
   valid settings file.
 - A failed desktop settings write does not restart Ryco.
@@ -286,7 +293,7 @@ Hosted client tests will cover:
 - unchanged/invalid input behavior;
 - successful rename with immediate directory refresh and stable selection by node ID;
 - failure recovery; and
-- desktop and phone sheet presentation.
+- desktop/tablet presentation plus an assertion that the frozen web phone tier remains unchanged.
 
 Repository validation follows `AGENTS.md`:
 
