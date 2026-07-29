@@ -66,12 +66,10 @@ export const rejectCrossOriginMutation = Effect.gen(function* () {
   const origin = request.headers.origin;
   if (origin === undefined || origin === "" || origin === "null") return;
   const host = request.headers.host;
-  let originHost: string;
-  try {
-    originHost = new URL(origin).host;
-  } catch {
-    return yield* new AuthError({ message: "Invalid request origin.", status: 403 });
-  }
+  const originHost = yield* Effect.try({
+    try: () => new URL(origin).host,
+    catch: () => new AuthError({ message: "Invalid request origin.", status: 403 }),
+  });
   if (host === undefined || originHost !== host) {
     return yield* new AuthError({ message: "Invalid request origin.", status: 403 });
   }

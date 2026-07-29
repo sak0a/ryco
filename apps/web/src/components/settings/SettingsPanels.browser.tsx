@@ -353,6 +353,10 @@ const createDesktopBridgeStub = (overrides?: {
   readonly advertisedEndpoints?: Awaited<ReturnType<DesktopBridge["getAdvertisedEndpoints"]>>;
   readonly setServerExposureMode?: DesktopBridge["setServerExposureMode"];
   readonly setUpdateChannel?: DesktopBridge["setUpdateChannel"];
+  readonly getHubLaunchConfig?: DesktopBridge["getHubLaunchConfig"];
+  readonly setHubLaunchConfig?: DesktopBridge["setHubLaunchConfig"];
+  readonly confirm?: DesktopBridge["confirm"];
+  readonly openExternal?: DesktopBridge["openExternal"];
 }): DesktopBridge => {
   const idleUpdateState: DesktopUpdateState = {
     enabled: false,
@@ -372,8 +376,15 @@ const createDesktopBridgeStub = (overrides?: {
   };
 
   return {
-    getHubLaunchConfig: async () => ({ enabled: false, origin: null }),
-    setHubLaunchConfig: async () => undefined,
+    getHubLaunchConfig:
+      overrides?.getHubLaunchConfig ??
+      (async () => ({
+        enabled: false,
+        origin: null,
+        allowFileSecretStore: false,
+        fileSecretStoreFallbackSupported: true,
+      })),
+    setHubLaunchConfig: overrides?.setHubLaunchConfig ?? vi.fn().mockResolvedValue(undefined),
     validateHubOrigin: async () => ({ ok: false as const, reason: "empty" as const }),
     getAppBranding: vi.fn().mockReturnValue(null),
     getLocalEnvironmentBootstrap: () => ({
@@ -461,10 +472,10 @@ const createDesktopBridgeStub = (overrides?: {
     })),
     getAdvertisedEndpoints: vi.fn().mockResolvedValue(overrides?.advertisedEndpoints ?? []),
     pickFolder: vi.fn().mockResolvedValue(null),
-    confirm: vi.fn().mockResolvedValue(false),
+    confirm: overrides?.confirm ?? vi.fn().mockResolvedValue(false),
     setTheme: vi.fn().mockResolvedValue(undefined),
     showContextMenu: vi.fn().mockResolvedValue(null),
-    openExternal: vi.fn().mockResolvedValue(true),
+    openExternal: overrides?.openExternal ?? vi.fn().mockResolvedValue(true),
     onMenuAction: () => () => {},
     getUpdateState: vi.fn().mockResolvedValue(idleUpdateState),
     setUpdateChannel:
@@ -1057,7 +1068,7 @@ describe("GeneralSettingsPanel observability", () => {
 
     await expect.element(page.getByText("Authorized clients")).toBeInTheDocument();
     await expect.element(page.getByText("Revoke others")).toBeInTheDocument();
-    await expect.element(page.getByText("This Mac")).toBeInTheDocument();
+    await expect.element(page.getByText("This Mac", { exact: true })).toBeInTheDocument();
     await page.getByRole("button", { name: "Create link", exact: true }).click();
     await expect.element(page.getByText("Create pairing link")).toBeInTheDocument();
     await page.getByRole("button", { name: "Create link", exact: true }).click();
@@ -1152,7 +1163,7 @@ describe("GeneralSettingsPanel observability", () => {
 
     await expect.element(page.getByText("Julius iPhone")).toBeInTheDocument();
     await page.getByRole("button", { name: "Revoke others", exact: true }).click();
-    await expect.element(page.getByText("This Mac")).toBeInTheDocument();
+    await expect.element(page.getByText("This Mac", { exact: true })).toBeInTheDocument();
     await expect.element(page.getByText("Julius iPhone")).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalled();
   });
@@ -1538,7 +1549,10 @@ describe("ConnectionsSettings Hub section", () => {
     return fetchMock;
   };
 
-  const renderHub = async (hubConfig?: { enabled: boolean; origin: string | null }) => {
+  const renderHub = async (
+    hubConfig?: Partial<Awaited<ReturnType<DesktopBridge["getHubLaunchConfig"]>>>,
+    bridgeOverrides?: Parameters<typeof createDesktopBridgeStub>[0],
+  ) => {
     window.desktopBridge = createDesktopBridgeStub({
       serverExposureState: {
         mode: "local-only",
@@ -1547,10 +1561,15 @@ describe("ConnectionsSettings Hub section", () => {
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
       },
+      getHubLaunchConfig: async () => ({
+        enabled: false,
+        origin: null,
+        allowFileSecretStore: false,
+        fileSecretStoreFallbackSupported: true,
+        ...hubConfig,
+      }),
+      ...bridgeOverrides,
     });
-    if (hubConfig) {
-      window.desktopBridge.getHubLaunchConfig = async () => hubConfig;
-    }
     setServerConfigSnapshot(createBaseServerConfig());
     mounted = await render(
       <AppAtomRegistryProvider>
@@ -1724,5 +1743,80 @@ describe("ConnectionsSettings Hub section", () => {
     await expect.element(page.getByText("Connected")).toBeInTheDocument();
     await expect.element(page.getByText("2 active sessions")).toBeInTheDocument();
     await expect.element(page.getByText(/Managed on the Hub, not here/)).toBeInTheDocument();
+  });
+
+  it("keeps advanced launch settings collapsed until they are requested", async () => {
+    stubHubFetch({
+      status: { ...baseStatus, state: "disabled" },
+      identity: { enrolled: "none" },
+    });
+    await renderHub();
+
+    await expect.element(page.getByRole("button", { name: /Show advanced options/ })).toBeVisible();
+    await expect.element(page.getByText("Protected key fallback")).not.toBeInTheDocument();
+
+    await page.getByRole("button", { name: /Show advanced options/ }).click();
+
+    await expect.element(page.getByText("Protected key fallback")).toBeVisible();
+    await expect
+      .element(page.getByRole("switch", { name: "Allow permissioned-file Hub key storage" }))
+      .toBeEnabled();
+    await expect.element(page.getByText(/--hub-connector-enabled/, { exact: false })).toBeVisible();
+  });
+
+  it("confirms and restarts before enabling permissioned-file key storage", async () => {
+    const confirm = vi.fn().mockResolvedValue(true);
+    const setHubLaunchConfig = vi.fn().mockResolvedValue(undefined);
+    stubHubFetch({
+      status: { ...baseStatus, state: "disabled" },
+      identity: { enrolled: "none" },
+    });
+    await renderHub(undefined, { confirm, setHubLaunchConfig });
+
+    await page.getByRole("button", { name: /Show advanced options/ }).click();
+    await page.getByRole("switch", { name: "Allow permissioned-file Hub key storage" }).click();
+
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining("Ryco will restart. Existing keys are not moved."),
+    );
+    expect(setHubLaunchConfig).toHaveBeenCalledWith({ allowFileSecretStore: true });
+  });
+
+  it("locks key custody after enrollment and explains why", async () => {
+    stubHubFetch({
+      status: { ...baseStatus, state: "disabled" },
+      identity: { enrolled: "active" },
+    });
+    await renderHub({ allowFileSecretStore: false });
+
+    await page.getByRole("button", { name: /Show advanced options/ }).click();
+
+    await expect
+      .element(page.getByRole("switch", { name: "Allow permissioned-file Hub key storage" }))
+      .toBeDisabled();
+    await expect.element(page.getByText(/Locked while this machine holds/)).toBeVisible();
+  });
+
+  it("shows bounded relay diagnostics and opens the standalone guide", async () => {
+    const openExternal = vi.fn().mockResolvedValue(true);
+    stubHubFetch({
+      status: {
+        ...baseStatus,
+        state: "online",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        activeChannels: 3,
+        queuedBytes: 1536,
+      },
+      identity: { enrolled: "active" },
+    });
+    await renderHub({ enabled: true, origin: "https://hub.example.com" }, { openExternal });
+
+    await page.getByRole("button", { name: /Show advanced options/ }).click();
+
+    await expect.element(page.getByText("1.2", { exact: true })).toBeVisible();
+    await expect.element(page.getByText("1.5 KiB", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Open relay guide" }).click();
+    expect(openExternal).toHaveBeenCalledWith(expect.stringContaining("relay-architecture"));
   });
 });

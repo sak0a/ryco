@@ -17,7 +17,6 @@ import type {
 } from "@ryco/contracts";
 
 import { AuthControlPlane } from "../auth/Services/AuthControlPlane.ts";
-import { AuthControlPlaneRuntimeLive } from "../auth/Layers/AuthControlPlane.ts";
 import { ServerAuthLive } from "../auth/Layers/ServerAuth.ts";
 import { ServerSecretStoreLive } from "../auth/Layers/ServerSecretStore.ts";
 import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "../config.ts";
@@ -150,7 +149,7 @@ const withHubRoutes = <A, E, R>(
     }).pipe(
       Layer.provide(Layer.succeed(HubConnectorService, connector.service)),
       Layer.provideMerge(
-        Layer.mergeAll(ServerAuthLive, AuthControlPlaneRuntimeLive).pipe(
+        ServerAuthLive.pipe(
           Layer.provideMerge(SqlitePersistenceLayerLive),
           Layer.provide(ServerSecretStoreLive),
         ),

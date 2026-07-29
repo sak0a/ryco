@@ -1,10 +1,12 @@
 import { TriangleAlertIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  DesktopHubLaunchConfig,
   HubConnectorStatus,
   HubEnrollmentCeremonyDetail,
   HubIdentitySummary,
 } from "@ryco/contracts";
+import relayArchitectureGuideUrl from "../../../../../docs/relay-architecture.html?url";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import {
@@ -29,6 +31,7 @@ import {
 import { Button } from "../ui/button";
 import { DataList, DataListItem } from "../ui/data-list";
 import { Input } from "../ui/input";
+import { HubAdvancedOptions } from "./HubAdvancedOptions";
 import { SettingsRow, SettingsSection, useRelativeTimeTick } from "./settingsLayout";
 import { canEditHubOrigin, presentHubStatus, type HubAction } from "./hubStatus";
 
@@ -36,7 +39,7 @@ import { canEditHubOrigin, presentHubStatus, type HubAction } from "./hubStatus"
  * Matches the diagnostics panel's cadence.
  *
  * One interval for every state. Polling faster while awaiting approval cannot
- * surface an approval sooner — the server's own enrollment poll runs at the
+ * surface an approval sooner because the server's own enrollment poll runs at the
  * Hub-dictated interval, and this only reads the resulting local snapshot.
  */
 const HUB_STATUS_POLL_MS = 5_000;
@@ -69,12 +72,14 @@ export function HubSection({
 }) {
   const nowMs = useRelativeTimeTick(1_000);
   const [snapshot, setSnapshot] = useState<HubSnapshot | null>(null);
-  const [config, setConfig] = useState<{ enabled: boolean; origin: string | null } | null>(null);
+  const [config, setConfig] = useState<DesktopHubLaunchConfig | null>(null);
   const [originDraft, setOriginDraft] = useState("");
   const [originError, setOriginError] = useState<string | null>(null);
   const [originSuggestion, setOriginSuggestion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<HubAction | null>(null);
+  const [savingFileFallback, setSavingFileFallback] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const mountedRef = useRef(true);
   const { copyToClipboard } = useCopyToClipboard();
@@ -102,7 +107,7 @@ export function HubSection({
       setError(null);
     } catch (cause) {
       if (!mountedRef.current) return;
-      // Keep the last good snapshot, but stop calling it current — see the
+      // Keep the last good snapshot, but stop calling it current. See the
       // staleness note below. Never let a dead control plane keep rendering
       // "Connected".
       setError(cause instanceof Error ? cause.message : "Unable to read Hub status.");
@@ -117,11 +122,20 @@ export function HubSection({
 
   useEffect(() => {
     if (!desktopBridge) return;
-    void desktopBridge.getHubLaunchConfig().then((value) => {
-      if (!mountedRef.current) return;
-      setConfig(value);
-      setOriginDraft(value.origin ?? "");
-    });
+    void desktopBridge
+      .getHubLaunchConfig()
+      .then((value) => {
+        if (!mountedRef.current) return;
+        setConfig(value);
+        setOriginDraft(value.origin ?? "");
+        setConfigError(null);
+      })
+      .catch((cause: unknown) => {
+        if (!mountedRef.current) return;
+        setConfigError(
+          cause instanceof Error ? cause.message : "Unable to read Hub launch configuration.",
+        );
+      });
   }, [desktopBridge]);
 
   const runAction = useCallback(
@@ -211,6 +225,43 @@ export function HubSection({
     [desktopBridge],
   );
 
+  const setFileSecretStoreFallback = useCallback(
+    async (enabled: boolean) => {
+      if (!desktopBridge) return;
+      const confirmed = await desktopBridge.confirm(
+        enabled
+          ? "Allow permissioned-file storage when the system credential store is unavailable? Ryco will restart. Existing keys are not moved."
+          : "Stop allowing permissioned-file Hub key storage? Ryco will restart.",
+      );
+      if (!confirmed || !mountedRef.current) return;
+      setSavingFileFallback(true);
+      setConfigError(null);
+      try {
+        await desktopBridge.setHubLaunchConfig({ allowFileSecretStore: enabled });
+      } catch (cause) {
+        if (!mountedRef.current) return;
+        setConfigError(
+          cause instanceof Error ? cause.message : "Unable to save the key storage setting.",
+        );
+        setSavingFileFallback(false);
+      }
+    },
+    [desktopBridge],
+  );
+
+  const openRelayGuide = useCallback(async () => {
+    if (!desktopBridge) return;
+    try {
+      const guideUrl = new URL(relayArchitectureGuideUrl, window.location.href).toString();
+      const opened = await desktopBridge.openExternal(guideUrl);
+      if (!opened) throw new Error("The relay guide could not be opened.");
+      setConfigError(null);
+    } catch (cause) {
+      if (!mountedRef.current) return;
+      setConfigError(cause instanceof Error ? cause.message : "Unable to open the relay guide.");
+    }
+  }, [desktopBridge]);
+
   if (!desktopBridge) return null;
 
   const stale = snapshot !== null && nowMs - snapshot.readAt > STALE_AFTER_MS;
@@ -245,7 +296,7 @@ export function HubSection({
           presentation === null
             ? "Loading…"
             : presentation.detail === null
-              ? "Reach this Mac from anywhere — including behind NAT or CGNAT — without opening a port."
+              ? "Reach this Mac from anywhere, including behind NAT or CGNAT, without opening a port."
               : presentation.detail
         }
         status={
@@ -407,6 +458,17 @@ export function HubSection({
         />
       ) : null}
 
+      <HubAdvancedOptions
+        config={config}
+        identity={snapshot?.identity ?? null}
+        status={snapshot?.status ?? null}
+        nowMs={nowMs}
+        savingFileFallback={savingFileFallback || pendingAction !== null}
+        configError={configError}
+        onFileFallbackChange={(enabled) => void setFileSecretStoreFallback(enabled)}
+        onOpenGuide={() => void openRelayGuide()}
+      />
+
       <AlertDialog open={leaveOpen} onOpenChange={setLeaveOpen}>
         <AlertDialogPopup>
           <AlertDialogHeader>
@@ -416,7 +478,7 @@ export function HubSection({
               join as a new machine and needs a new approval.
               <br />
               <br />
-              It does <strong>not</strong> revoke anything on the Hub — the old entry stays there
+              It does <strong>not</strong> revoke anything on the Hub. The old entry stays there
               until an owner removes it.
             </AlertDialogDescription>
           </AlertDialogHeader>

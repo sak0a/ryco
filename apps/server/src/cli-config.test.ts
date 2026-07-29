@@ -424,6 +424,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: true,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        hubConnectorEnabled: true,
+        hubOrigin: "https://bootstrap.example",
+        hubAllowFileSecretStore: true,
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
       });
@@ -463,7 +466,12 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Info",
         ...defaultObservabilityConfig,
-        ...defaultConnectorConfig,
+        hubConnector: {
+          ...DEFAULT_HUB_CONNECTOR_CONFIG,
+          enabled: true,
+          origin: "https://bootstrap.example",
+          allowFileSecretStore: true,
+        },
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
         mode: "desktop",
@@ -609,6 +617,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: false,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        hubConnectorEnabled: false,
+        hubOrigin: "https://bootstrap.example",
+        hubAllowFileSecretStore: true,
       });
       const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:4173"));
 
@@ -640,6 +651,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   RYCO_NO_BROWSER: "true",
                   RYCO_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
                   RYCO_LOG_WS_EVENTS: "true",
+                  RYCO_HUB_CONNECTOR_ENABLED: "true",
+                  RYCO_HUB_ORIGIN: "https://environment.example",
+                  RYCO_HUB_ALLOW_FILE_SECRET_STORE: "false",
                 },
               }),
             ),
@@ -651,7 +665,12 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Debug",
         ...defaultObservabilityConfig,
-        ...defaultConnectorConfig,
+        hubConnector: {
+          ...DEFAULT_HUB_CONNECTOR_CONFIG,
+          enabled: true,
+          origin: "https://environment.example",
+          allowFileSecretStore: false,
+        },
         mode: "web",
         port: 8788,
         cwd: process.cwd(),

@@ -88,6 +88,7 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   tailscaleServePort: Schema.optional(PortSchema),
   hubConnectorEnabled: Schema.optional(Schema.Boolean),
   hubOrigin: Schema.optional(Schema.String),
+  hubAllowFileSecretStore: Schema.optional(Schema.Boolean),
   otlpTracesUrl: Schema.optional(Schema.String),
   otlpMetricsUrl: Schema.optional(Schema.String),
 });
@@ -485,6 +486,7 @@ export const resolveServerConfig = (
         resolveOptionPrecedence(
           Option.map(normalizedFlags.hubAllowFileSecretStore, String),
           Option.fromUndefinedOr(env.hubAllowFileSecretStore),
+          Option.map(Option.fromUndefinedOr(bootstrap?.hubAllowFileSecretStore), String),
         ),
       ),
     });

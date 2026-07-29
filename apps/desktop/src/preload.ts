@@ -123,8 +123,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   setTailscaleServeEnabled: (input) =>
     ipcRenderer.invoke(SET_TAILSCALE_SERVE_ENABLED_CHANNEL, input),
   getHubLaunchConfig: () => ipcRenderer.invoke(GET_HUB_LAUNCH_CONFIG_CHANNEL),
-  setHubLaunchConfig: (input: { readonly enabled?: boolean; readonly origin?: string | null }) =>
-    ipcRenderer.invoke(SET_HUB_LAUNCH_CONFIG_CHANNEL, input),
+  setHubLaunchConfig: (input: {
+    readonly enabled?: boolean;
+    readonly origin?: string | null;
+    readonly allowFileSecretStore?: boolean;
+  }) => ipcRenderer.invoke(SET_HUB_LAUNCH_CONFIG_CHANNEL, input),
   validateHubOrigin: (raw: string) => ipcRenderer.invoke(VALIDATE_HUB_ORIGIN_CHANNEL, raw),
   getAdvertisedEndpoints: () => ipcRenderer.invoke(GET_ADVERTISED_ENDPOINTS_CHANNEL),
   getPathForFile: (file) => webUtils.getPathForFile(file),

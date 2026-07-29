@@ -17,6 +17,7 @@ describe("local Hub identity state", () => {
     const created = await store.readOrCreate();
     expect(created.environmentId).toMatch(/^env_[A-Za-z0-9_-]{22}$/);
     expect(created.revision).toBe(0);
+    expect(created.protectedStoreBackend).toBeNull();
     expect(created.activeNode).toBeNull();
 
     const restarted = await makeLocalHubIdentityStateStore(path);
@@ -85,8 +86,48 @@ describe("local Hub identity state", () => {
     const state = await store.readOrCreate();
 
     expect(state.pendingEnrollment?.deviceCode).toBeNull();
+    expect(state.protectedStoreBackend).toBeNull();
     expect(state.pendingEnrollment?.keySecretName).toBe("node-key.pending");
     expect(state.revision).toBe(3);
+  });
+
+  it("persists only the bounded protected-store custody class", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-backend-"));
+    const path = join(root, "identity.json");
+    const store = await makeLocalHubIdentityStateStore(path);
+    await store.readOrCreate();
+    const updated = await store.update((current) => ({
+      ...current,
+      revision: current.revision + 1,
+      protectedStoreBackend: "permissioned-file",
+    }));
+
+    expect(updated.protectedStoreBackend).toBe("permissioned-file");
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({
+      protectedStoreBackend: "permissioned-file",
+    });
+  });
+
+  it("rejects an unbounded protected-store backend value", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-bad-backend-"));
+    const path = join(root, "identity.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        revision: 1,
+        environmentId: `env_${"E".repeat(22)}`,
+        protectedStoreBackend: "remote-private-canary",
+        pendingEnrollment: null,
+        activeNode: null,
+        stagedRotation: null,
+        pendingTeardown: null,
+      }),
+      { mode: 0o600 },
+    );
+
+    const store = await makeLocalHubIdentityStateStore(path);
+    await expect(store.readOrCreate()).rejects.toMatchObject({ code: "identity_state_corrupt" });
   });
 
   it("rejects a pending device code that is unbounded or out of charset", async () => {

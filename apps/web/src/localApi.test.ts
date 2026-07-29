@@ -178,7 +178,12 @@ function createLocalStorageStub(): Storage {
 
 function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridge {
   return {
-    getHubLaunchConfig: async () => ({ enabled: false, origin: null }),
+    getHubLaunchConfig: async () => ({
+      enabled: false,
+      origin: null,
+      allowFileSecretStore: false,
+      fileSecretStoreFallbackSupported: true,
+    }),
     setHubLaunchConfig: async () => undefined,
     validateHubOrigin: async () => ({ ok: false as const, reason: "empty" as const }),
     getAppBranding: () => null,

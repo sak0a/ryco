@@ -44,6 +44,7 @@ import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backe
 import {
   type DesktopSettings,
   DEFAULT_DESKTOP_SETTINGS,
+  isDesktopHubFileSecretStoreSupported,
   readDesktopSettings,
   setDesktopServerExposurePreference,
   setDesktopTailscaleServePreference,
@@ -96,6 +97,7 @@ import {
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch.ts";
 import { resolveDesktopAppBranding } from "./appBranding.ts";
 import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal.ts";
+import { resolveBundledRelayGuidePath } from "./bundledGuide.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
 import { validateHubOrigin } from "./hubOrigin.ts";
 import {
@@ -444,13 +446,14 @@ function backendChildEnv(): NodeJS.ProcessEnv {
   deleteEnv(env, "RYCO_DESKTOP_HTTPS_ENDPOINTS");
   deleteEnv(env, "RYCO_TAILSCALE_SERVE");
   deleteEnv(env, "RYCO_TAILSCALE_SERVE_PORT");
-  // The desktop is the single owner of these two: it persists them and passes
+  // The desktop is the single owner of these values: it persists them and passes
   // them on the bootstrap channel. Leaving the environment able to override
   // would give the settings panel a toggle that silently does nothing, guarded
   // by a lock icon any same-user process could forge with `launchctl setenv`.
   // `ryco serve` is unaffected and stays fully env-configurable.
   deleteEnv(env, "RYCO_HUB_CONNECTOR_ENABLED");
   deleteEnv(env, "RYCO_HUB_ORIGIN");
+  deleteEnv(env, "RYCO_HUB_ALLOW_FILE_SECRET_STORE");
   // VITE_DEV_SERVER_URL must never reach the packaged backend: if a developer's
   // shell exports it, the server's Config.url parser throws and the backend
   // exits before HTTP listen, causing the desktop to spin in a restart loop.
@@ -2030,6 +2033,7 @@ function startBackend(): void {
         tailscaleServePort: desktopSettings.tailscaleServePort,
         hubConnectorEnabled: desktopSettings.hubConnectorEnabled,
         ...(desktopSettings.hubOrigin === null ? {} : { hubOrigin: desktopSettings.hubOrigin }),
+        hubAllowFileSecretStore: desktopSettings.hubAllowFileSecretStore,
         ...(backendObservabilitySettings.otlpTracesUrl
           ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
           : {}),
@@ -2303,6 +2307,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle(GET_HUB_LAUNCH_CONFIG_CHANNEL, () => ({
     enabled: desktopSettings.hubConnectorEnabled,
     origin: desktopSettings.hubOrigin,
+    allowFileSecretStore: desktopSettings.hubAllowFileSecretStore,
+    fileSecretStoreFallbackSupported: isDesktopHubFileSecretStoreSupported(process.platform),
   }));
 
   ipcMain.removeHandler(VALIDATE_HUB_ORIGIN_CHANNEL);
@@ -2315,9 +2321,25 @@ function registerIpcHandlers(): void {
     if (typeof rawInput !== "object" || rawInput === null) {
       throw new Error("Invalid Hub launch configuration input.");
     }
-    const input = rawInput as { readonly enabled?: unknown; readonly origin?: unknown };
+    const input = rawInput as {
+      readonly enabled?: unknown;
+      readonly origin?: unknown;
+      readonly allowFileSecretStore?: unknown;
+    };
     if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
       throw new Error("Invalid Hub launch configuration input.");
+    }
+    if (
+      input.allowFileSecretStore !== undefined &&
+      typeof input.allowFileSecretStore !== "boolean"
+    ) {
+      throw new Error("Invalid Hub launch configuration input.");
+    }
+    if (
+      input.allowFileSecretStore === true &&
+      !isDesktopHubFileSecretStoreSupported(process.platform)
+    ) {
+      throw new Error("Permissioned-file Hub key storage is unavailable on this platform.");
     }
 
     let origin: string | null | undefined;
@@ -2338,6 +2360,9 @@ function registerIpcHandlers(): void {
     desktopSettings = setDesktopHubPreference(desktopSettings, {
       ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
       ...(origin === undefined ? {} : { origin }),
+      ...(input.allowFileSecretStore === undefined
+        ? {}
+        : { allowFileSecretStore: input.allowFileSecretStore }),
     });
     writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
     // Never log the origin: it says where this machine is reachable.
@@ -2505,18 +2530,20 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.removeHandler(OPEN_EXTERNAL_CHANNEL);
-  ipcMain.handle(OPEN_EXTERNAL_CHANNEL, async (_event, rawUrl: unknown) => {
+  ipcMain.handle(OPEN_EXTERNAL_CHANNEL, async (event, rawUrl: unknown) => {
     const externalUrl = getSafeExternalUrl(rawUrl);
-    if (!externalUrl) {
-      return false;
+    if (externalUrl) {
+      try {
+        await shell.openExternal(externalUrl);
+        return true;
+      } catch {
+        return false;
+      }
     }
 
-    try {
-      await shell.openExternal(externalUrl);
-      return true;
-    } catch {
-      return false;
-    }
+    const guidePath = resolveBundledRelayGuidePath(rawUrl, event.sender.getURL());
+    if (guidePath === null) return false;
+    return (await shell.openPath(guidePath)) === "";
   });
 
   ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);

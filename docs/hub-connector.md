@@ -31,10 +31,19 @@ The three ordinary startup settings also have shared server CLI flags:
 | `--hub-origin <origin>`         | `RYCO_HUB_ORIGIN`                  |
 | `--hub-allow-file-secret-store` | `RYCO_HUB_ALLOW_FILE_SECRET_STORE` |
 
-An explicit CLI flag takes precedence over its corresponding environment variable. If a flag is
-omitted, the environment variable continues to work unchanged. The boolean flags use standard
-presence syntax and support the canonical `--no-hub-connector-enabled` and
-`--no-hub-allow-file-secret-store` forms for explicit `false` overrides.
+Startup values resolve in this order: an explicit CLI flag, its corresponding environment variable,
+the private desktop bootstrap envelope, then the default. A headless `ryco serve` process has no
+desktop bootstrap envelope, so an omitted flag continues to fall back to the environment unchanged.
+The boolean flags use standard presence syntax and support the canonical
+`--no-hub-connector-enabled` and `--no-hub-allow-file-secret-store` forms for explicit `false`
+overrides.
+
+The desktop app deliberately owns these three values for its bundled server. It persists them in
+desktop settings, removes matching `RYCO_HUB_*` variables from the backend child environment, and
+passes the values over the private bootstrap channel. This keeps the visible desktop controls
+authoritative. The Hub card keeps the common connection controls visible and puts key fallback,
+startup ownership, CLI equivalents, and bounded relay counters behind **Show advanced options**.
+Changing a desktop launch value is confirmed and restarts Ryco.
 
 For example:
 
@@ -114,6 +123,16 @@ platform protected store described in [Node identity primitives](./node-identity
 contains only bounded non-bearer metadata and protected-store references. The permissioned-file
 fallback is opt-in, POSIX-only, and enforces `0700` directories and `0600` regular key files. An
 enrolled node never silently replaces a missing, locked, or corrupt key.
+
+The non-secret local identity state records whether its protected material belongs to the `os` or
+`permissioned-file` custody class. Once material exists, Ryco reopens that same class on future
+starts instead of silently switching because another backend became available. A legacy identity
+without the marker is migrated only when all required material is found in exactly one eligible
+store. Missing, split, or ambiguous custody fails closed as `identity_store_unavailable`.
+
+The standalone [relay architecture atlas](./relay-architecture.html) shows enrollment, client relay
+connection, hosted reconnect, actor capabilities, role intersection, and which data each component
+retains.
 
 ## Authentication
 

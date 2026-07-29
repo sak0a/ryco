@@ -21,6 +21,7 @@ export interface DesktopSettings {
    */
   readonly hubConnectorEnabled: boolean;
   readonly hubOrigin: string | null;
+  readonly hubAllowFileSecretStore: boolean;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
   readonly updateChannel: DesktopUpdateChannel;
@@ -33,6 +34,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   serverExposureMode: "local-only",
   hubConnectorEnabled: false,
   hubOrigin: null,
+  hubAllowFileSecretStore: false,
   tailscaleServeEnabled: false,
   tailscaleServePort: DEFAULT_TAILSCALE_SERVE_PORT,
   updateChannel: "latest",
@@ -83,13 +85,22 @@ export function normalizeTailscaleServePort(value: unknown): number {
 
 export function setDesktopHubPreference(
   settings: DesktopSettings,
-  input: { readonly enabled?: boolean; readonly origin?: string | null },
+  input: {
+    readonly enabled?: boolean;
+    readonly origin?: string | null;
+    readonly allowFileSecretStore?: boolean;
+  },
 ): DesktopSettings {
   return {
     ...settings,
     hubConnectorEnabled: input.enabled ?? settings.hubConnectorEnabled,
     hubOrigin: input.origin === undefined ? settings.hubOrigin : input.origin,
+    hubAllowFileSecretStore: input.allowFileSecretStore ?? settings.hubAllowFileSecretStore,
   };
+}
+
+export function isDesktopHubFileSecretStoreSupported(platform: NodeJS.Platform): boolean {
+  return platform !== "win32";
 }
 
 export function setDesktopUpdateChannelPreference(
@@ -128,6 +139,7 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
       readonly updateChannelConfiguredByUser?: unknown;
       readonly hubConnectorEnabled?: unknown;
       readonly hubOrigin?: unknown;
+      readonly hubAllowFileSecretStore?: unknown;
     };
     const parsedUpdateChannel =
       parsed.updateChannel === "nightly" || parsed.updateChannel === "latest"
@@ -153,6 +165,7 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
         typeof parsed.hubOrigin === "string" && parsed.hubOrigin.length > 0
           ? parsed.hubOrigin
           : null,
+      hubAllowFileSecretStore: parsed.hubAllowFileSecretStore === true,
     };
   } catch (error) {
     // A corrupt file must not silently revert to defaults: the next write would

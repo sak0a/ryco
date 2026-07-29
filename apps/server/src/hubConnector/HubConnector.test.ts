@@ -61,6 +61,7 @@ function identity(overrides: Partial<HubIdentityRuntimeShape> = {}): HubIdentity
       version: 1,
       revision: 1,
       environmentId: `env_${"E".repeat(22)}`,
+      protectedStoreBackend: "os" as const,
       pendingEnrollment: null,
       activeNode: {
         hubOrigin: "https://relay.example",
@@ -554,6 +555,7 @@ describe("HubConnector", () => {
       version: 1 as const,
       revision: 2,
       environmentId: `env_${"E".repeat(22)}`,
+      protectedStoreBackend: "os" as const,
       pendingEnrollment: null,
       activeNode: {
         hubOrigin: "https://relay.example",
@@ -697,6 +699,7 @@ describe("HubConnector", () => {
           version: 1,
           revision: 1,
           environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
           pendingEnrollment: pending
             ? {
                 hubOrigin: "https://relay.example",
@@ -802,6 +805,7 @@ describe("HubConnector", () => {
           version: 1,
           revision: 1,
           environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
           pendingEnrollment: null,
           activeNode: null,
           stagedRotation: null,
@@ -853,6 +857,7 @@ describe("HubConnector", () => {
       version: 1 as const,
       revision: 1,
       environmentId: `env_${"E".repeat(22)}`,
+      protectedStoreBackend: "os" as const,
       pendingEnrollment: {
         hubOrigin: "https://relay.example",
         keySecretName: "node-key.fixture",
@@ -908,6 +913,7 @@ describe("HubConnector", () => {
           version: 1,
           revision: 1,
           environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
           pendingEnrollment: {
             hubOrigin: "https://relay.example",
             keySecretName: "node-key.fixture",
@@ -951,6 +957,7 @@ describe("HubConnector", () => {
           version: 1,
           revision: 1,
           environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
           pendingEnrollment: {
             hubOrigin: "https://relay.example",
             keySecretName: "node-key.fixture",
@@ -1003,6 +1010,7 @@ describe("HubConnector", () => {
           version: 1,
           revision: 1,
           environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
           pendingEnrollment: null,
           activeNode: null,
           stagedRotation: null,
@@ -1149,6 +1157,7 @@ describe("HubConnector", () => {
           version: 1,
           revision: 9,
           environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
           pendingEnrollment: null,
           // A leave that committed its marker and deleted the secrets, then
           // crashed before clearing state. The keys are gone.

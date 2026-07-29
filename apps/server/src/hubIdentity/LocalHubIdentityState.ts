@@ -62,10 +62,19 @@ export interface PendingHubTeardownState {
   readonly requestedAt: number;
 }
 
+/**
+ * The class of protected store that owns this identity's secret material.
+ *
+ * This is non-secret affinity metadata. It prevents a restart from silently
+ * selecting a different store when OS credential-store availability changes.
+ */
+export type HubProtectedStoreBackend = "os" | "permissioned-file";
+
 export interface LocalHubIdentityState {
   readonly version: 1;
   readonly revision: number;
   readonly environmentId: string;
+  readonly protectedStoreBackend: HubProtectedStoreBackend | null;
   readonly pendingEnrollment: PendingHubEnrollmentState | null;
   readonly activeNode: ActiveHubNodeState | null;
   readonly stagedRotation: StagedHubRotationState | null;
@@ -130,6 +139,12 @@ function isNullableDeviceCode(value: unknown): value is string | null {
 
 function isSecretName(value: unknown): value is string {
   return typeof value === "string" && SECRET_NAME.test(value);
+}
+
+function parseProtectedStoreBackend(value: unknown): HubProtectedStoreBackend | null {
+  if (value === undefined || value === null) return null;
+  if (value === "os" || value === "permissioned-file") return value;
+  return stateError("identity_state_corrupt");
 }
 
 function parsePending(value: unknown): PendingHubEnrollmentState | null {
@@ -267,6 +282,7 @@ function parseState(value: unknown): LocalHubIdentityState {
     version: 1,
     revision: candidate.revision as number,
     environmentId: candidate.environmentId,
+    protectedStoreBackend: parseProtectedStoreBackend(candidate.protectedStoreBackend),
     pendingEnrollment: parsePending(candidate.pendingEnrollment),
     activeNode: parseActive(candidate.activeNode),
     stagedRotation: parseRotation(candidate.stagedRotation),
@@ -283,6 +299,7 @@ function makeInitialState(): LocalHubIdentityState {
     version: 1,
     revision: 0,
     environmentId: `env_${randomBytes(16).toString("base64url")}`,
+    protectedStoreBackend: null,
     pendingEnrollment: null,
     activeNode: null,
     stagedRotation: null,

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import {
   DEFAULT_DESKTOP_SETTINGS,
   DesktopSettingsReadError,
+  isDesktopHubFileSecretStoreSupported,
   readDesktopSettings,
   resolveDefaultDesktopSettings,
   setDesktopServerExposurePreference,
@@ -43,6 +44,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubAllowFileSecretStore: false,
     });
   });
 
@@ -57,6 +59,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: true,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubAllowFileSecretStore: false,
     });
 
     expect(readDesktopSettings(settingsPath, "0.0.17")).toEqual({
@@ -67,6 +70,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: true,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubAllowFileSecretStore: false,
     });
   });
 
@@ -81,6 +85,7 @@ describe("desktopSettings", () => {
           updateChannelConfiguredByUser: false,
           hubConnectorEnabled: false,
           hubOrigin: null,
+          hubAllowFileSecretStore: false,
         },
         "network-accessible",
       ),
@@ -92,6 +97,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubAllowFileSecretStore: false,
     });
   });
 
@@ -106,6 +112,7 @@ describe("desktopSettings", () => {
           updateChannelConfiguredByUser: false,
           hubConnectorEnabled: false,
           hubOrigin: null,
+          hubAllowFileSecretStore: false,
         },
         { enabled: true, port: 8443 },
       ),
@@ -117,6 +124,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubAllowFileSecretStore: false,
     });
   });
 
@@ -131,6 +139,7 @@ describe("desktopSettings", () => {
           updateChannelConfiguredByUser: false,
           hubConnectorEnabled: false,
           hubOrigin: null,
+          hubAllowFileSecretStore: false,
         },
         { enabled: true },
       ),
@@ -142,6 +151,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubAllowFileSecretStore: false,
     });
   });
 
@@ -156,6 +166,7 @@ describe("desktopSettings", () => {
           updateChannelConfiguredByUser: false,
           hubConnectorEnabled: false,
           hubOrigin: null,
+          hubAllowFileSecretStore: false,
         },
         "nightly",
       ),
@@ -167,6 +178,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: true,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubAllowFileSecretStore: false,
     });
   });
 
@@ -200,10 +212,36 @@ describe("desktopSettings", () => {
       ...DEFAULT_DESKTOP_SETTINGS,
       hubConnectorEnabled: true,
       hubOrigin: "https://hub.example.com",
+      hubAllowFileSecretStore: true,
     });
     expect(readDesktopSettings(settingsPath, "0.0.17")).toMatchObject({
       hubConnectorEnabled: true,
       hubOrigin: "https://hub.example.com",
+      hubAllowFileSecretStore: true,
+    });
+  });
+
+  it("reports permissioned-file Hub key storage only on supported hosts", () => {
+    expect(isDesktopHubFileSecretStoreSupported("darwin")).toBe(true);
+    expect(isDesktopHubFileSecretStoreSupported("linux")).toBe(true);
+    expect(isDesktopHubFileSecretStoreSupported("win32")).toBe(false);
+  });
+
+  it("defaults legacy Hub settings to OS-protected key storage only", () => {
+    const settingsPath = makeSettingsPath();
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        hubConnectorEnabled: true,
+        hubOrigin: "https://hub.example.com",
+      }),
+      "utf8",
+    );
+
+    expect(readDesktopSettings(settingsPath, "0.0.17")).toMatchObject({
+      hubConnectorEnabled: true,
+      hubOrigin: "https://hub.example.com",
+      hubAllowFileSecretStore: false,
     });
   });
 
@@ -219,6 +257,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubAllowFileSecretStore: false,
     });
   });
 
@@ -241,6 +280,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubAllowFileSecretStore: false,
     });
   });
 
@@ -254,6 +294,7 @@ describe("desktopSettings", () => {
         updateChannelConfiguredByUser: true,
         hubConnectorEnabled: false,
         hubOrigin: null,
+        hubAllowFileSecretStore: false,
       }),
       "utf8",
     );
@@ -266,6 +307,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: true,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubAllowFileSecretStore: false,
     });
   });
 
@@ -288,6 +330,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubAllowFileSecretStore: false,
     });
   });
 });

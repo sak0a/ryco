@@ -1,0 +1,2615 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="An interactive guide to Ryco Hub enrollment, relay connections, roles, trust boundaries, and recovery."
+    />
+    <title>Ryco Relay Architecture</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0a0b0d;
+        --surface: #111317;
+        --surface-raised: #171a1f;
+        --surface-soft: #0e1013;
+        --line: #2a2e35;
+        --line-strong: #3a4049;
+        --text: #f1f3ea;
+        --muted: #9aa097;
+        --quiet: #6f756e;
+        --accent: #c6ff3a;
+        --accent-ink: #111508;
+        --radius-section: 14px;
+        --radius-control: 9px;
+        --page: min(1240px, calc(100vw - 40px));
+        --header-height: 68px;
+        --ease: cubic-bezier(0.16, 1, 0.3, 1);
+        font-family:
+          ui-sans-serif,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+        background: var(--bg);
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        overflow-x: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 16px;
+        line-height: 1.55;
+        text-rendering: optimizeLegibility;
+      }
+
+      button,
+      a {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+      }
+
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      .site-header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        height: var(--header-height);
+        border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+        background: color-mix(in srgb, var(--bg) 92%, transparent);
+        backdrop-filter: blur(18px);
+      }
+
+      .header-inner {
+        width: var(--page);
+        height: 100%;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 28px;
+      }
+
+      .wordmark {
+        display: inline-flex;
+        align-items: center;
+        gap: 11px;
+        text-decoration: none;
+        font-weight: 760;
+        letter-spacing: -0.03em;
+      }
+
+      .wordmark-mark {
+        width: 22px;
+        height: 22px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--accent);
+        border-radius: 6px;
+        color: var(--accent);
+        font:
+          700 11px/1 ui-monospace,
+          monospace;
+      }
+
+      .header-nav {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        margin-left: auto;
+      }
+
+      .header-nav a {
+        color: var(--muted);
+        font-size: 13px;
+        text-decoration: none;
+        transition: color 160ms ease;
+      }
+
+      .header-nav a:hover {
+        color: var(--text);
+      }
+
+      .header-action,
+      .primary-action {
+        min-height: 40px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--accent);
+        border-radius: var(--radius-control);
+        background: var(--accent);
+        color: var(--accent-ink);
+        padding: 0 16px;
+        font-size: 13px;
+        font-weight: 750;
+        text-decoration: none;
+        transition:
+          transform 180ms var(--ease),
+          background-color 180ms ease;
+      }
+
+      .header-action:hover,
+      .primary-action:hover {
+        background: #d0ff59;
+        transform: translateY(-1px);
+      }
+
+      .header-action:active,
+      .primary-action:active {
+        transform: translateY(1px);
+      }
+
+      main {
+        overflow: clip;
+      }
+
+      .hero {
+        width: var(--page);
+        min-height: calc(100dvh - var(--header-height));
+        margin: 0 auto;
+        padding: clamp(48px, 7vh, 82px) 0;
+        display: grid;
+        grid-template-columns: minmax(280px, 0.82fr) minmax(560px, 1.18fr);
+        align-items: center;
+        gap: clamp(40px, 6vw, 86px);
+      }
+
+      .eyebrow {
+        margin: 0 0 18px;
+        color: var(--accent);
+        font:
+          650 12px/1.2 ui-monospace,
+          monospace;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        max-width: 660px;
+        margin-bottom: 22px;
+        font-size: clamp(48px, 6vw, 78px);
+        line-height: 0.98;
+        letter-spacing: -0.065em;
+        font-weight: 780;
+      }
+
+      .hero-copy > p:not(.eyebrow) {
+        max-width: 490px;
+        margin-bottom: 28px;
+        color: var(--muted);
+        font-size: clamp(16px, 1.6vw, 19px);
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .text-action {
+        min-height: 40px;
+        display: inline-flex;
+        align-items: center;
+        padding: 0 8px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 650;
+        text-decoration: none;
+      }
+
+      .text-action:hover {
+        color: var(--text);
+      }
+
+      .trust-note {
+        max-width: 490px;
+        margin-top: 34px;
+        padding-top: 17px;
+        border-top: 1px solid var(--line);
+        color: var(--quiet);
+        font-size: 12px;
+      }
+
+      .topology-shell {
+        position: relative;
+        min-height: min(620px, calc(100dvh - 148px));
+        border: 1px solid var(--line);
+        border-radius: var(--radius-section);
+        background: var(--surface-soft);
+        overflow: hidden;
+      }
+
+      .topology-label {
+        position: absolute;
+        top: 18px;
+        left: 20px;
+        z-index: 3;
+        color: var(--quiet);
+        font:
+          600 10px/1 ui-monospace,
+          monospace;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .topology-map {
+        position: absolute;
+        inset: 48px 22px 22px;
+      }
+
+      .topology-lines {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+        pointer-events: none;
+      }
+
+      .topology-lines path {
+        fill: none;
+        stroke: var(--line-strong);
+        stroke-width: 1.4;
+        vector-effect: non-scaling-stroke;
+        transition:
+          stroke 220ms ease,
+          opacity 220ms ease;
+      }
+
+      .topology-lines path.control {
+        stroke-dasharray: 5 7;
+      }
+
+      .topology-lines path.relay {
+        stroke-width: 2;
+      }
+
+      .topology-shell[data-workflow="enroll"] [data-route~="enroll"],
+      .topology-shell[data-workflow="connect"] [data-route~="connect"],
+      .topology-shell[data-workflow="recover"] [data-route~="recover"] {
+        stroke: var(--accent);
+        opacity: 0.9;
+      }
+
+      .route-beacon {
+        position: absolute;
+        z-index: 1;
+        width: 7px;
+        height: 7px;
+        border-radius: 2px;
+        background: var(--accent);
+        opacity: 0;
+      }
+
+      .topology-shell[data-workflow="connect"] .route-beacon {
+        opacity: 1;
+        animation: beacon-pulse 2.2s var(--ease) infinite;
+      }
+
+      .actor-node {
+        position: absolute;
+        z-index: 2;
+        width: 29%;
+        min-width: 150px;
+        min-height: 88px;
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: var(--surface);
+        color: var(--text);
+        text-decoration: none;
+        transition:
+          border-color 180ms ease,
+          background-color 180ms ease,
+          transform 220ms var(--ease),
+          opacity 180ms ease;
+      }
+
+      .actor-node:hover {
+        border-color: var(--line-strong);
+        background: var(--surface-raised);
+        transform: translateY(-2px);
+      }
+
+      .actor-node[data-selected="true"],
+      .actor-node[data-flow-active="true"] {
+        border-color: color-mix(in srgb, var(--accent) 72%, var(--line));
+      }
+
+      .actor-node .node-type {
+        color: var(--quiet);
+        font:
+          600 9px/1 ui-monospace,
+          monospace;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .actor-node strong {
+        margin-top: 11px;
+        font-size: 14px;
+        line-height: 1.25;
+        letter-spacing: -0.015em;
+      }
+
+      .actor-node small {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .actor-web {
+        top: 4%;
+        left: 2%;
+      }
+
+      .actor-mobile {
+        top: 4%;
+        right: 2%;
+      }
+
+      .actor-hub {
+        top: 40%;
+        left: 50%;
+        width: 38%;
+        min-height: 102px;
+        transform: translateX(-50%);
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-ink);
+      }
+
+      .actor-hub:hover {
+        background: #d0ff59;
+        border-color: #d0ff59;
+        transform: translateX(-50%) translateY(-2px);
+      }
+
+      .actor-hub .node-type,
+      .actor-hub small {
+        color: color-mix(in srgb, var(--accent-ink) 72%, transparent);
+      }
+
+      .actor-gui {
+        bottom: 3%;
+        left: 2%;
+      }
+
+      .actor-cli {
+        right: 2%;
+        bottom: 3%;
+      }
+
+      .beacon-client {
+        top: 29%;
+        left: 28%;
+      }
+
+      .beacon-node {
+        right: 28%;
+        bottom: 29%;
+        animation-delay: 0.7s;
+      }
+
+      .topology-legend {
+        position: absolute;
+        right: 17px;
+        bottom: 14px;
+        z-index: 4;
+        display: flex;
+        gap: 14px;
+        color: var(--quiet);
+        font:
+          500 9px/1.2 ui-monospace,
+          monospace;
+      }
+
+      .legend-key {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .legend-line {
+        width: 18px;
+        height: 0;
+        border-top: 1px solid var(--line-strong);
+      }
+
+      .legend-line.dashed {
+        border-top-style: dashed;
+      }
+
+      .section {
+        width: var(--page);
+        margin: 0 auto;
+        padding: clamp(92px, 12vw, 168px) 0;
+      }
+
+      .section + .section {
+        border-top: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+      }
+
+      .section-heading {
+        max-width: 720px;
+        margin-bottom: clamp(40px, 6vw, 70px);
+      }
+
+      .section-heading h2 {
+        margin-bottom: 18px;
+        font-size: clamp(36px, 5vw, 62px);
+        line-height: 1;
+        letter-spacing: -0.055em;
+      }
+
+      .section-heading p:not(.eyebrow) {
+        max-width: 620px;
+        color: var(--muted);
+      }
+
+      .actor-lens {
+        display: grid;
+        grid-template-columns: minmax(230px, 0.62fr) minmax(0, 1.38fr);
+        gap: clamp(28px, 6vw, 80px);
+        align-items: start;
+      }
+
+      .actor-selector {
+        position: sticky;
+        top: calc(var(--header-height) + 24px);
+        display: grid;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-section);
+        overflow: hidden;
+      }
+
+      .actor-selector button,
+      .tab-list button,
+      .role-tabs button {
+        min-height: 52px;
+        border: 0;
+        border-top: 1px solid var(--line);
+        background: var(--surface);
+        color: var(--muted);
+        padding: 0 16px;
+        text-align: left;
+        cursor: pointer;
+        transition:
+          background-color 180ms ease,
+          color 180ms ease,
+          transform 180ms var(--ease);
+      }
+
+      .actor-selector button:first-child {
+        border-top: 0;
+      }
+
+      .actor-selector button:hover,
+      .tab-list button:hover,
+      .role-tabs button:hover {
+        background: var(--surface-raised);
+        color: var(--text);
+      }
+
+      .actor-selector button[aria-pressed="true"],
+      .tab-list button[aria-selected="true"],
+      .role-tabs button[aria-selected="true"] {
+        background: var(--accent);
+        color: var(--accent-ink);
+      }
+
+      .actor-details {
+        min-width: 0;
+      }
+
+      .actor-detail {
+        padding: clamp(26px, 4vw, 46px);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-section);
+        background: var(--surface);
+      }
+
+      .actor-detail + .actor-detail {
+        margin-top: 18px;
+      }
+
+      .js .actor-detail:not([data-active="true"]) {
+        display: none;
+      }
+
+      .detail-kicker {
+        color: var(--accent);
+        font:
+          650 11px/1.2 ui-monospace,
+          monospace;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+
+      .actor-detail h3 {
+        margin: 16px 0 12px;
+        font-size: clamp(27px, 3vw, 38px);
+        line-height: 1.05;
+        letter-spacing: -0.04em;
+      }
+
+      .actor-summary {
+        max-width: 660px;
+        color: var(--muted);
+      }
+
+      .detail-meta {
+        margin: 30px 0;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        overflow: hidden;
+      }
+
+      .detail-meta div {
+        min-width: 0;
+        padding: 15px;
+        border-left: 1px solid var(--line);
+      }
+
+      .detail-meta div:first-child {
+        border-left: 0;
+      }
+
+      .detail-meta dt,
+      .metric-label {
+        color: var(--quiet);
+        font:
+          600 9px/1.2 ui-monospace,
+          monospace;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+
+      .detail-meta dd {
+        margin: 7px 0 0;
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .can-cannot {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 28px;
+      }
+
+      .can-cannot h4 {
+        margin: 0 0 14px;
+        font-size: 13px;
+      }
+
+      .can-cannot .can h4 {
+        color: var(--accent);
+      }
+
+      .can-cannot ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .can-cannot li {
+        position: relative;
+        margin-top: 11px;
+        padding-left: 20px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .can-cannot li::before {
+        content: "+";
+        position: absolute;
+        left: 0;
+        color: var(--accent);
+        font-family: ui-monospace, monospace;
+      }
+
+      .can-cannot .cannot li::before {
+        content: "x";
+        color: var(--quiet);
+      }
+
+      .flow-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+        gap: clamp(28px, 5vw, 68px);
+        align-items: start;
+      }
+
+      .tab-list,
+      .role-tabs {
+        display: flex;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+        overflow: hidden;
+        width: fit-content;
+        margin-bottom: 22px;
+      }
+
+      .tab-list button,
+      .role-tabs button {
+        min-height: 44px;
+        min-width: 104px;
+        border-top: 0;
+        border-left: 1px solid var(--line);
+        text-align: center;
+      }
+
+      .tab-list button:first-child,
+      .role-tabs button:first-child {
+        border-left: 0;
+      }
+
+      .flow-panel {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-section);
+        background: var(--surface);
+        overflow: hidden;
+      }
+
+      .flow-panel + .flow-panel {
+        margin-top: 18px;
+      }
+
+      .js .flow-panel:not([data-active="true"]) {
+        display: none;
+      }
+
+      .flow-intro {
+        padding: 25px 26px 20px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .flow-intro h3 {
+        margin-bottom: 9px;
+        font-size: 27px;
+        letter-spacing: -0.035em;
+      }
+
+      .flow-intro p {
+        margin-bottom: 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .flow-steps {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: flow-step;
+      }
+
+      .flow-steps li {
+        counter-increment: flow-step;
+        border-top: 1px solid var(--line);
+      }
+
+      .flow-steps li:first-child {
+        border-top: 0;
+      }
+
+      .flow-step {
+        width: 100%;
+        min-height: 68px;
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr);
+        align-items: center;
+        gap: 12px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        padding: 10px 20px;
+        text-align: left;
+        cursor: pointer;
+        transition:
+          background-color 180ms ease,
+          color 180ms ease;
+      }
+
+      .flow-step::before {
+        content: counter(flow-step, decimal-leading-zero);
+        color: var(--quiet);
+        font:
+          600 10px/1 ui-monospace,
+          monospace;
+      }
+
+      .flow-step strong {
+        display: block;
+        color: var(--text);
+        font-size: 13px;
+      }
+
+      .flow-step span {
+        display: block;
+        margin-top: 3px;
+        font-size: 12px;
+      }
+
+      .flow-step[aria-pressed="true"] {
+        background: var(--accent);
+        color: color-mix(in srgb, var(--accent-ink) 76%, transparent);
+      }
+
+      .flow-step[aria-pressed="true"]::before,
+      .flow-step[aria-pressed="true"] strong {
+        color: var(--accent-ink);
+      }
+
+      .flow-stage {
+        position: sticky;
+        top: calc(var(--header-height) + 24px);
+        min-height: 430px;
+        padding: 25px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-section);
+        background: var(--surface-soft);
+      }
+
+      .stage-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 28px;
+      }
+
+      .stage-title span:first-child {
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .stage-title span:last-child {
+        color: var(--quiet);
+        font:
+          600 9px/1 ui-monospace,
+          monospace;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .stage-actors {
+        position: relative;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 13px;
+      }
+
+      .stage-actor {
+        position: relative;
+        z-index: 1;
+        min-height: 62px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: var(--surface);
+        color: var(--quiet);
+        font-size: 11px;
+        transition:
+          border-color 180ms ease,
+          color 180ms ease,
+          transform 220ms var(--ease);
+      }
+
+      .stage-actor[data-flow-active="true"] {
+        border-color: var(--accent);
+        color: var(--text);
+        transform: translateY(-2px);
+      }
+
+      .stage-actor.hub {
+        grid-column: 1 / -1;
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-ink);
+      }
+
+      .stage-direction {
+        height: 34px;
+        grid-column: 1 / -1;
+        display: grid;
+        place-items: center;
+        color: var(--quiet);
+        font:
+          600 10px/1 ui-monospace,
+          monospace;
+      }
+
+      .stage-explanation {
+        margin-top: 26px;
+        padding-top: 21px;
+        border-top: 1px solid var(--line);
+      }
+
+      .stage-explanation p {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .authority-banner {
+        display: grid;
+        grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
+        gap: 40px;
+        align-items: center;
+        margin-bottom: 42px;
+        padding: 30px;
+        border: 1px solid var(--accent);
+        border-radius: var(--radius-section);
+        background: var(--surface);
+      }
+
+      .authority-formula {
+        color: var(--accent);
+        font:
+          650 clamp(18px, 2.4vw, 28px) / 1.2 ui-monospace,
+          monospace;
+        letter-spacing: -0.035em;
+      }
+
+      .authority-banner p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .role-tabs {
+        margin-bottom: 28px;
+      }
+
+      .role-explainers {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-section);
+        background: var(--line);
+        overflow: hidden;
+      }
+
+      .role-panel {
+        min-height: 210px;
+        padding: 24px;
+        background: var(--surface);
+      }
+
+      .role-panel h3 {
+        font-size: 22px;
+        letter-spacing: -0.03em;
+      }
+
+      .role-panel p {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .role-panel strong {
+        color: var(--accent);
+        font-size: 12px;
+      }
+
+      .capability-wrap {
+        margin-top: 40px;
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-section);
+      }
+
+      table {
+        width: 100%;
+        min-width: 760px;
+        border-collapse: collapse;
+        background: var(--surface);
+        font-size: 13px;
+      }
+
+      th,
+      td {
+        padding: 16px 18px;
+        border-left: 1px solid var(--line);
+        text-align: left;
+      }
+
+      th:first-child,
+      td:first-child {
+        border-left: 0;
+      }
+
+      thead {
+        border-bottom: 1px solid var(--line);
+        color: var(--quiet);
+        font:
+          600 10px/1.2 ui-monospace,
+          monospace;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      tbody tr + tr {
+        border-top: 1px solid color-mix(in srgb, var(--line) 68%, transparent);
+      }
+
+      td:not(:first-child) {
+        color: var(--muted);
+      }
+
+      .yes {
+        color: var(--accent);
+      }
+
+      .terminal-boundary {
+        margin-top: 38px;
+        display: grid;
+        grid-template-columns: 0.55fr 1.45fr;
+        gap: 32px;
+        padding: 30px;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-section);
+        background: var(--surface-soft);
+      }
+
+      .terminal-boundary h3 {
+        margin: 0;
+        font-size: 22px;
+        letter-spacing: -0.035em;
+      }
+
+      .terminal-boundary p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .boundary-grid {
+        display: grid;
+        grid-template-columns: 0.85fr 1fr 1.35fr;
+        gap: 1px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-section);
+        background: var(--line);
+        overflow: hidden;
+      }
+
+      .boundary-column {
+        min-height: 360px;
+        padding: clamp(23px, 3vw, 36px);
+        background: var(--surface);
+      }
+
+      .boundary-column.node {
+        background: var(--surface-raised);
+      }
+
+      .boundary-column h3 {
+        margin-bottom: 18px;
+        font-size: 25px;
+        letter-spacing: -0.035em;
+      }
+
+      .boundary-column p {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .boundary-column dl {
+        margin: 26px 0 0;
+      }
+
+      .boundary-column dt {
+        margin-top: 18px;
+        color: var(--quiet);
+        font:
+          600 9px/1.2 ui-monospace,
+          monospace;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .boundary-column dd {
+        margin: 6px 0 0;
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .trust-strip {
+        margin-top: 30px;
+        padding: 24px 28px;
+        border-left: 3px solid var(--accent);
+        background: var(--surface);
+      }
+
+      .trust-strip strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .trust-strip p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .failure-grid {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: clamp(28px, 5vw, 64px);
+      }
+
+      .failure-sequence {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-section);
+        overflow: hidden;
+      }
+
+      details {
+        background: var(--surface);
+        border-top: 1px solid var(--line);
+      }
+
+      details:first-child {
+        border-top: 0;
+      }
+
+      summary {
+        min-height: 72px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 0 24px;
+        cursor: pointer;
+        font-weight: 680;
+      }
+
+      summary::marker {
+        color: var(--accent);
+      }
+
+      details p,
+      details ol {
+        margin: 0;
+        padding: 0 24px 24px 46px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      details li + li {
+        margin-top: 8px;
+      }
+
+      .frame-note {
+        padding: 28px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-section);
+        background: var(--surface-soft);
+      }
+
+      .frame-note h3 {
+        font-size: 24px;
+        letter-spacing: -0.035em;
+      }
+
+      .frame-visual {
+        margin: 26px 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+
+      .frame-visual span {
+        height: 34px;
+        flex: 1 1 48px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        color: var(--quiet);
+        font:
+          600 9px/1 ui-monospace,
+          monospace;
+      }
+
+      .frame-note p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .configuration-grid {
+        display: grid;
+        grid-template-columns: 0.9fr 1.1fr;
+        gap: 24px;
+      }
+
+      .config-block {
+        padding: clamp(24px, 3vw, 36px);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-section);
+        background: var(--surface);
+      }
+
+      .config-block h3 {
+        margin-bottom: 13px;
+        font-size: 25px;
+        letter-spacing: -0.035em;
+      }
+
+      .config-block > p {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      pre {
+        margin: 26px 0 0;
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: var(--bg);
+        padding: 18px;
+        color: var(--text);
+        font:
+          500 12px/1.75 ui-monospace,
+          monospace;
+      }
+
+      .precedence {
+        margin-top: 24px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+      }
+
+      .precedence span {
+        min-height: 54px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--muted);
+        font:
+          600 10px/1.3 ui-monospace,
+          monospace;
+        text-align: center;
+      }
+
+      .precedence span:first-child {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .deployment-choice {
+        margin-top: 24px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+
+      .choice-column {
+        padding-top: 21px;
+        border-top: 1px solid var(--line);
+      }
+
+      .choice-column h4 {
+        margin: 0 0 13px;
+        font-size: 14px;
+      }
+
+      .choice-column p {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .site-footer {
+        width: var(--page);
+        margin: 0 auto;
+        padding: 42px 0 54px;
+        display: flex;
+        justify-content: space-between;
+        gap: 30px;
+        border-top: 1px solid var(--line);
+        color: var(--quiet);
+        font-size: 12px;
+      }
+
+      .site-footer a {
+        color: var(--muted);
+      }
+
+      .reveal {
+        opacity: 1;
+        transform: none;
+      }
+
+      .js .reveal:not(.is-visible) {
+        opacity: 1;
+        transform: translateY(12px);
+      }
+
+      .js .reveal {
+        transition:
+          opacity 600ms var(--ease),
+          transform 600ms var(--ease);
+      }
+
+      @keyframes beacon-pulse {
+        0%,
+        100% {
+          opacity: 0.28;
+          transform: scale(0.72);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.15);
+        }
+      }
+
+      @media (max-width: 1040px) {
+        :root {
+          --page: min(100% - 32px, 920px);
+        }
+
+        .hero {
+          min-height: auto;
+          grid-template-columns: 1fr;
+          padding-top: 72px;
+        }
+
+        .hero-copy {
+          max-width: 720px;
+        }
+
+        .topology-shell {
+          min-height: 600px;
+        }
+
+        .flow-layout,
+        .failure-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .flow-stage {
+          position: relative;
+          top: auto;
+        }
+      }
+
+      @media (max-width: 760px) {
+        :root {
+          --page: calc(100% - 28px);
+          --header-height: 62px;
+        }
+
+        .header-nav {
+          display: none;
+        }
+
+        .header-action {
+          min-height: 36px;
+          padding: 0 12px;
+        }
+
+        h1 {
+          font-size: clamp(43px, 14vw, 62px);
+        }
+
+        .hero {
+          gap: 45px;
+          padding: 52px 0 70px;
+        }
+
+        .topology-shell {
+          min-height: 720px;
+        }
+
+        .topology-map {
+          inset: 48px 14px 18px;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          grid-template-rows: auto 38px auto 38px auto;
+          gap: 12px;
+          align-items: center;
+        }
+
+        .topology-map::before {
+          content: "";
+          position: absolute;
+          z-index: 0;
+          top: 11%;
+          bottom: 11%;
+          left: 50%;
+          border-left: 1px solid var(--line-strong);
+        }
+
+        .topology-lines,
+        .route-beacon {
+          display: none;
+        }
+
+        .actor-node {
+          position: relative;
+          inset: auto;
+          width: auto;
+          min-width: 0;
+          min-height: 96px;
+        }
+
+        .actor-web,
+        .actor-mobile {
+          grid-row: 1;
+        }
+
+        .actor-hub {
+          grid-column: 1 / -1;
+          grid-row: 3;
+          width: 76%;
+          justify-self: center;
+          transform: none;
+        }
+
+        .actor-hub:hover {
+          transform: translateY(-2px);
+        }
+
+        .actor-gui,
+        .actor-cli {
+          grid-row: 5;
+        }
+
+        .topology-legend {
+          left: 16px;
+          right: auto;
+        }
+
+        .section {
+          padding: 94px 0;
+        }
+
+        .actor-lens,
+        .authority-banner,
+        .terminal-boundary {
+          grid-template-columns: 1fr;
+        }
+
+        .actor-selector {
+          position: relative;
+          top: auto;
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .actor-selector button {
+          border-top: 1px solid var(--line);
+          border-left: 1px solid var(--line);
+        }
+
+        .actor-selector button:nth-child(-n + 2) {
+          border-top: 0;
+        }
+
+        .actor-selector button:nth-child(odd) {
+          border-left: 0;
+        }
+
+        .actor-selector button:last-child {
+          grid-column: 1 / -1;
+        }
+
+        .detail-meta,
+        .can-cannot {
+          grid-template-columns: 1fr;
+        }
+
+        .detail-meta div {
+          border-top: 1px solid var(--line);
+          border-left: 0;
+        }
+
+        .detail-meta div:first-child {
+          border-top: 0;
+        }
+
+        .role-explainers,
+        .boundary-grid,
+        .configuration-grid,
+        .deployment-choice {
+          grid-template-columns: 1fr;
+        }
+
+        .precedence {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .site-footer {
+          flex-direction: column;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+        }
+
+        .js .reveal:not(.is-visible) {
+          opacity: 1;
+          transform: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="wordmark" href="#top" aria-label="Ryco relay architecture home">
+          <span class="wordmark-mark" aria-hidden="true">R</span>
+          <span>ryco</span>
+        </a>
+        <nav class="header-nav" aria-label="Page sections">
+          <a href="#actors">Actors</a>
+          <a href="#workflow">Workflow</a>
+          <a href="#authority">Authority</a>
+          <a href="#boundaries">Boundaries</a>
+          <a href="#configure">Configure</a>
+        </nav>
+        <a class="header-action" href="https://staging.ryco.space" target="_blank" rel="noreferrer">
+          Open staging
+        </a>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-copy reveal is-visible">
+          <p class="eyebrow">Ryco relay architecture</p>
+          <h1>One Hub. Every Ryco surface.</h1>
+          <p>See how clients reach node-owned work through a bounded, trusted relay.</p>
+          <div class="hero-actions">
+            <a class="primary-action" href="#workflow">Walk through the flow</a>
+            <a class="text-action" href="#boundaries">Inspect the trust boundary</a>
+          </div>
+          <p class="trust-note">
+            Transport uses HTTPS and WSS. The Hub is trusted relay infrastructure, not an
+            application-layer end-to-end encryption boundary.
+          </p>
+        </div>
+
+        <div
+          class="topology-shell reveal is-visible"
+          data-topology
+          data-workflow="connect"
+          aria-label="Ryco relay topology"
+        >
+          <span class="topology-label">Outbound connections only</span>
+          <div class="topology-map">
+            <svg
+              class="topology-lines"
+              viewBox="0 0 800 520"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <path
+                class="control"
+                data-route="enroll connect recover"
+                d="M128 93 C128 178 310 176 400 252"
+              />
+              <path
+                class="control"
+                data-route="connect recover"
+                d="M672 93 C672 178 490 176 400 252"
+              />
+              <path
+                class="relay"
+                data-route="enroll connect recover"
+                d="M400 268 C310 344 128 340 128 430"
+              />
+              <path
+                class="relay"
+                data-route="enroll connect recover"
+                d="M400 268 C490 344 672 340 672 430"
+              />
+            </svg>
+            <span class="route-beacon beacon-client" aria-hidden="true"></span>
+            <span class="route-beacon beacon-node" aria-hidden="true"></span>
+
+            <a class="actor-node actor-web" href="#actors" data-actor-link="web">
+              <span class="node-type">Browser client</span>
+              <strong>staging.ryco.space</strong>
+              <small>Cookie session</small>
+            </a>
+            <a class="actor-node actor-mobile" href="#actors" data-actor-link="mobile">
+              <span class="node-type">Native client</span>
+              <strong>Ryco mobile</strong>
+              <small>DPoP-bound session</small>
+            </a>
+            <a class="actor-node actor-hub" href="#actors" data-actor-link="hub">
+              <span class="node-type">Control and relay plane</span>
+              <strong>Ryco Hub</strong>
+              <small>Hosted or self-hosted</small>
+            </a>
+            <a class="actor-node actor-gui" href="#actors" data-actor-link="gui">
+              <span class="node-type">Execution node</span>
+              <strong>Ryco GUI node</strong>
+              <small>Desktop plus local server</small>
+            </a>
+            <a class="actor-node actor-cli" href="#actors" data-actor-link="cli">
+              <span class="node-type">Execution node</span>
+              <strong>Ryco CLI node</strong>
+              <small>ryco serve</small>
+            </a>
+          </div>
+          <div class="topology-legend" aria-label="Topology legend">
+            <span class="legend-key"><span class="legend-line dashed"></span>Control metadata</span>
+            <span class="legend-key"><span class="legend-line"></span>Relay bytes</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="actors">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Actor lens</p>
+          <h2>Five actors. Clear boundaries.</h2>
+          <p>
+            Choose any surface to see its identity, storage, network direction, capabilities, and
+            hard limits.
+          </p>
+        </div>
+
+        <div class="actor-lens reveal">
+          <div class="actor-selector" aria-label="Select an actor">
+            <button type="button" data-actor-select="web" aria-pressed="true">Hosted web</button>
+            <button type="button" data-actor-select="mobile" aria-pressed="false">
+              Mobile app
+            </button>
+            <button type="button" data-actor-select="hub" aria-pressed="false">Ryco Hub</button>
+            <button type="button" data-actor-select="gui" aria-pressed="false">GUI node</button>
+            <button type="button" data-actor-select="cli" aria-pressed="false">CLI node</button>
+          </div>
+
+          <div class="actor-details" aria-live="polite">
+            <article class="actor-detail" data-actor-detail="web" data-active="true">
+              <span class="detail-kicker">Browser or installed PWA</span>
+              <h3>Hosted web at staging.ryco.space</h3>
+              <p class="actor-summary">
+                A human client served by a Hub instance. It reaches only explicitly granted nodes
+                and never becomes the source of truth for node work.
+              </p>
+              <dl class="detail-meta">
+                <div>
+                  <dt>Authenticates with</dt>
+                  <dd>HttpOnly same-origin cookie</dd>
+                </div>
+                <div>
+                  <dt>Initiates</dt>
+                  <dd>Outbound client WSS</dd>
+                </div>
+                <div>
+                  <dt>Persists</dt>
+                  <dd>Client preferences and session state</dd>
+                </div>
+              </dl>
+              <div class="can-cannot">
+                <div class="can">
+                  <h4>Can</h4>
+                  <ul>
+                    <li>List nodes with an explicit grant</li>
+                    <li>Request a short-lived single-use ticket</li>
+                    <li>Open an authorized relay channel</li>
+                    <li>Act within the effective role</li>
+                  </ul>
+                </div>
+                <div class="cannot">
+                  <h4>Cannot</h4>
+                  <ul>
+                    <li>Connect to arbitrary network addresses</li>
+                    <li>Reuse a relay ticket</li>
+                    <li>Bypass a missing node grant</li>
+                    <li>Keep stale mutation authority after reconnect</li>
+                  </ul>
+                </div>
+              </div>
+            </article>
+
+            <article class="actor-detail" data-actor-detail="mobile">
+              <span class="detail-kicker">Intended phone experience</span>
+              <h3>Native Ryco mobile app</h3>
+              <p class="actor-summary">
+                A native client using the shared runtime. It follows the same directory, relay,
+                role, snapshot, and mutation-readiness policy as other Ryco clients.
+              </p>
+              <dl class="detail-meta">
+                <div>
+                  <dt>Authenticates with</dt>
+                  <dd>System browser handoff and DPoP</dd>
+                </div>
+                <div>
+                  <dt>Initiates</dt>
+                  <dd>Outbound API and client WSS</dd>
+                </div>
+                <div>
+                  <dt>Persists</dt>
+                  <dd>Native session and client state</dd>
+                </div>
+              </dl>
+              <div class="can-cannot">
+                <div class="can">
+                  <h4>Can</h4>
+                  <ul>
+                    <li>Browse authorized Hub nodes</li>
+                    <li>Resume with a fresh relay attempt</li>
+                    <li>Consume current node snapshots</li>
+                    <li>Perform role-allowed node actions</li>
+                  </ul>
+                </div>
+                <div class="cannot">
+                  <h4>Cannot</h4>
+                  <ul>
+                    <li>Fork authentication policy from shared runtime</li>
+                    <li>Bypass explicit grants</li>
+                    <li>Mutate before current readiness</li>
+                    <li>Use a stale relay generation</li>
+                  </ul>
+                </div>
+              </div>
+            </article>
+
+            <article class="actor-detail" data-actor-detail="hub">
+              <span class="detail-kicker">Hosted or self-hosted service</span>
+              <h3>Ryco Hub instance</h3>
+              <p class="actor-summary">
+                The control plane and bounded transient relay. A deployment may serve the hosted web
+                client, but it does not take ownership of node execution state.
+              </p>
+              <dl class="detail-meta">
+                <div>
+                  <dt>Authenticates</dt>
+                  <dd>Humans and node proofs</dd>
+                </div>
+                <div>
+                  <dt>Initiates</dt>
+                  <dd>No inbound machine dial-out</dd>
+                </div>
+                <div>
+                  <dt>Persists</dt>
+                  <dd>Directory, grants, and control records</dd>
+                </div>
+              </dl>
+              <div class="can-cannot">
+                <div class="can">
+                  <h4>Can</h4>
+                  <ul>
+                    <li>Own the authorized node directory</li>
+                    <li>Apply explicit grants and role ceilings</li>
+                    <li>Issue short-lived single-use tickets</li>
+                    <li>Forward bounded relay frames in memory</li>
+                  </ul>
+                </div>
+                <div class="cannot">
+                  <h4>Cannot</h4>
+                  <ul>
+                    <li>Run coding agents or terminals</li>
+                    <li>Own workspaces or conversations</li>
+                    <li>Persist or log relay payloads</li>
+                    <li>Turn a machine key into a human account</li>
+                  </ul>
+                </div>
+              </div>
+            </article>
+
+            <article class="actor-detail" data-actor-detail="gui">
+              <span class="detail-kicker">Desktop execution surface</span>
+              <h3>Ryco GUI node</h3>
+              <p class="actor-summary">
+                Electron starts a desktop-scoped server, owns its Hub launch settings, and presents
+                a local client. The server remains the execution authority.
+              </p>
+              <dl class="detail-meta">
+                <div>
+                  <dt>Authenticates with</dt>
+                  <dd>Local Ed25519 node key</dd>
+                </div>
+                <div>
+                  <dt>Initiates</dt>
+                  <dd>One outbound node WSS</dd>
+                </div>
+                <div>
+                  <dt>Persists</dt>
+                  <dd>Projects, agents, terminals, and conversations</dd>
+                </div>
+              </dl>
+              <div class="can-cannot">
+                <div class="can">
+                  <h4>Can</h4>
+                  <ul>
+                    <li>Enroll and prove one node identity</li>
+                    <li>Serve authorized Ryco RPC channels</li>
+                    <li>Keep execution state local</li>
+                    <li>Use desktop-owned launch configuration</li>
+                  </ul>
+                </div>
+                <div class="cannot">
+                  <h4>Cannot</h4>
+                  <ul>
+                    <li>Approve its own enrollment</li>
+                    <li>Assign human grants</li>
+                    <li>Move execution authority to the Hub</li>
+                    <li>Expose arbitrary network forwarding</li>
+                  </ul>
+                </div>
+              </div>
+            </article>
+
+            <article class="actor-detail" data-actor-detail="cli">
+              <span class="detail-kicker">Headless execution surface</span>
+              <h3>Ryco CLI node</h3>
+              <p class="actor-summary">
+                <span class="mono">ryco serve</span> runs the same node authority without Electron.
+                Explicit flags override environment configuration, and local Hub commands own
+                enrollment lifecycle.
+              </p>
+              <dl class="detail-meta">
+                <div>
+                  <dt>Authenticates with</dt>
+                  <dd>Local Ed25519 node key</dd>
+                </div>
+                <div>
+                  <dt>Initiates</dt>
+                  <dd>One outbound node WSS</dd>
+                </div>
+                <div>
+                  <dt>Persists</dt>
+                  <dd>Node-owned application state</dd>
+                </div>
+              </dl>
+              <div class="can-cannot">
+                <div class="can">
+                  <h4>Can</h4>
+                  <ul>
+                    <li>Use flags or environment configuration</li>
+                    <li>Enroll through local Hub commands</li>
+                    <li>Restrict managed workspaces to startup cwd</li>
+                    <li>Serve the same authorized RPC behavior</li>
+                  </ul>
+                </div>
+                <div class="cannot">
+                  <h4>Cannot</h4>
+                  <ul>
+                    <li>Become a Hub administrator</li>
+                    <li>Use its signing key as a human credential</li>
+                    <li>Self-grant a higher role</li>
+                    <li>Treat cwd restriction as a process sandbox</li>
+                  </ul>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="workflow">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Workflow lens</p>
+          <h2>Enroll. Connect. Recover.</h2>
+          <p>
+            Select a journey and step through the exact actors that hold identity, authorization,
+            transport, and state.
+          </p>
+        </div>
+
+        <div class="tab-list reveal" role="tablist" aria-label="Relay workflows">
+          <button
+            type="button"
+            role="tab"
+            aria-selected="true"
+            aria-controls="flow-enroll"
+            data-flow-select="enroll"
+          >
+            Enroll
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="flow-connect"
+            data-flow-select="connect"
+          >
+            Connect
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="flow-recover"
+            data-flow-select="recover"
+          >
+            Recover
+          </button>
+        </div>
+
+        <div class="flow-layout reveal">
+          <div>
+            <article
+              class="flow-panel"
+              id="flow-enroll"
+              role="tabpanel"
+              data-flow-panel="enroll"
+              data-active="true"
+            >
+              <div class="flow-intro">
+                <h3>Enroll a node</h3>
+                <p>Bind a local machine key to one Hub record through a human comparison.</p>
+              </div>
+              <ol class="flow-steps">
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="true"
+                    data-flow="enroll"
+                    data-step-actors="gui cli"
+                    data-step-title="Configure the node"
+                    data-step-copy="Set one exact Hub origin and enable the connector. Desktop settings restart the bundled server; CLI flags override environment values."
+                  >
+                    <span
+                      ><strong>Configure the node</strong>Exact origin and connector enabled</span
+                    >
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="enroll"
+                    data-step-actors="gui cli"
+                    data-step-title="Create protected identity"
+                    data-step-copy="The node generates an Ed25519 key locally. The private key stays in OS-protected custody or an explicitly permitted POSIX fallback."
+                  >
+                    <span><strong>Create protected identity</strong>Private key stays local</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="enroll"
+                    data-step-actors="gui cli hub"
+                    data-step-title="Request a ceremony"
+                    data-step-copy="The Hub returns a bounded device code, expiry, and polling interval. The independent polling bearer remains in protected node custody."
+                  >
+                    <span><strong>Request a ceremony</strong>Code, fingerprint, and expiry</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="enroll"
+                    data-step-actors="web hub gui cli"
+                    data-step-title="Compare every field"
+                    data-step-copy="A signed-in owner compares label, platform, version, algorithm, fingerprint, expiry, and device code on both surfaces."
+                  >
+                    <span
+                      ><strong>Compare every field</strong>Human verification on both sides</span
+                    >
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="enroll"
+                    data-step-actors="web hub"
+                    data-step-title="Approve and grant"
+                    data-step-copy="Approval binds the stable node record and an explicit owner grant. The node cannot approve or grant itself."
+                  >
+                    <span><strong>Approve and grant</strong>Hub records explicit authority</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="enroll"
+                    data-step-actors="hub gui cli"
+                    data-step-title="Start node relay"
+                    data-step-copy="The node clears polling custody, proves its identity with a fresh challenge, and starts one outbound relay connection."
+                  >
+                    <span><strong>Start node relay</strong>Fresh proof, outbound WSS</span>
+                  </button>
+                </li>
+              </ol>
+            </article>
+
+            <article class="flow-panel" id="flow-connect" role="tabpanel" data-flow-panel="connect">
+              <div class="flow-intro">
+                <h3>Connect a client</h3>
+                <p>Authorize one human, one node, one role, and one fresh relay generation.</p>
+              </div>
+              <ol class="flow-steps">
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="true"
+                    data-flow="connect"
+                    data-step-actors="web mobile hub"
+                    data-step-title="Sign in"
+                    data-step-copy="The web client uses a same-origin cookie. Native mobile uses a system-browser handoff and a DPoP-bound session."
+                  >
+                    <span><strong>Sign in</strong>Human session at the Hub</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="connect"
+                    data-step-actors="web mobile hub"
+                    data-step-title="Select a granted node"
+                    data-step-copy="The directory contains only nodes with an explicit grant for the signed-in account."
+                  >
+                    <span
+                      ><strong>Select a granted node</strong>Directory is authorization-scoped</span
+                    >
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="connect"
+                    data-step-actors="web mobile hub"
+                    data-step-title="Issue one ticket"
+                    data-step-copy="The Hub creates a short-lived single-use relay ticket bound to the selected node and role."
+                  >
+                    <span><strong>Issue one ticket</strong>Short-lived and single-use</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="connect"
+                    data-step-actors="web mobile hub gui cli"
+                    data-step-title="Bind the channel"
+                    data-step-copy="Client and node each own an outbound WSS. The Hub binds one authorized logical channel between them."
+                  >
+                    <span><strong>Bind the channel</strong>Two outbound sockets, one route</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="connect"
+                    data-step-actors="hub gui cli"
+                    data-step-title="Apply effective role"
+                    data-step-copy="Authority is the lower of the account role and the explicit node grant. Owner never bypasses a missing grant."
+                  >
+                    <span><strong>Apply effective role</strong>Lower of account and grant</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="connect"
+                    data-step-actors="web mobile hub gui cli"
+                    data-step-title="Relay bounded frames"
+                    data-step-copy="The Hub forwards opaque bounded frames in memory. Large logical RPC messages may be split and reassembled only within the channel."
+                  >
+                    <span><strong>Relay bounded frames</strong>Opaque transient bytes</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="connect"
+                    data-step-actors="web mobile gui cli"
+                    data-step-title="Accept current state"
+                    data-step-copy="The node supplies a current shell snapshot or replay before the client receives readiness and mutation authority."
+                  >
+                    <span><strong>Accept current state</strong>Snapshot before mutations</span>
+                  </button>
+                </li>
+              </ol>
+            </article>
+
+            <article class="flow-panel" id="flow-recover" role="tabpanel" data-flow-panel="recover">
+              <div class="flow-intro">
+                <h3>Recover safely</h3>
+                <p>Discard stale generations and rebuild authority from current control state.</p>
+              </div>
+              <ol class="flow-steps">
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="true"
+                    data-flow="recover"
+                    data-step-actors="web mobile hub"
+                    data-step-title="Revalidate the human"
+                    data-step-copy="After suspension or reconnect, the hosted client revalidates its Hub session before trusting previous state."
+                  >
+                    <span><strong>Revalidate the human</strong>Current session required</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="recover"
+                    data-step-actors="web mobile hub"
+                    data-step-title="Re-read the directory"
+                    data-step-copy="The client reads current node authorization again. A revoked or removed grant disappears before reconnect."
+                  >
+                    <span
+                      ><strong>Re-read the directory</strong>Current grants replace cached
+                      ones</span
+                    >
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="recover"
+                    data-step-actors="web mobile hub"
+                    data-step-title="Create a fresh relay attempt"
+                    data-step-copy="The client requests a new single-use ticket. The old relay generation cannot publish readiness or role."
+                  >
+                    <span><strong>Create a fresh relay attempt</strong>No ticket reuse</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="recover"
+                    data-step-actors="hub gui cli"
+                    data-step-title="Reconnect the node"
+                    data-step-copy="After a transport interruption the node keeps work local, discards the old generation, obtains a fresh proof challenge, and uses bounded backoff."
+                  >
+                    <span><strong>Reconnect the node</strong>Fresh proof and bounded backoff</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="recover"
+                    data-step-actors="web mobile gui cli"
+                    data-step-title="Accept a current snapshot"
+                    data-step-copy="The selected environment supplies current shell state before the client may mutate anything."
+                  >
+                    <span
+                      ><strong>Accept a current snapshot</strong>Environment identity stays
+                      canonical</span
+                    >
+                  </button>
+                </li>
+                <li>
+                  <button
+                    class="flow-step"
+                    type="button"
+                    aria-pressed="false"
+                    data-flow="recover"
+                    data-step-actors="hub web mobile gui cli"
+                    data-step-title="Publish readiness"
+                    data-step-copy="Only the current generation may publish readiness, role, snapshots, and mutation authority. Revocation closes affected access."
+                  >
+                    <span><strong>Publish readiness</strong>Current generation only</span>
+                  </button>
+                </li>
+              </ol>
+            </article>
+          </div>
+
+          <aside class="flow-stage" aria-live="polite">
+            <div class="stage-title">
+              <span>Active actors</span>
+              <span data-stage-workflow>Enroll</span>
+            </div>
+            <div class="stage-actors">
+              <div class="stage-actor" data-stage-actor="web">Hosted web</div>
+              <div class="stage-actor" data-stage-actor="mobile">Mobile app</div>
+              <div class="stage-direction">clients to Hub</div>
+              <div class="stage-actor hub" data-stage-actor="hub">Ryco Hub</div>
+              <div class="stage-direction">Hub to authorized node</div>
+              <div class="stage-actor" data-stage-actor="gui">GUI node</div>
+              <div class="stage-actor" data-stage-actor="cli">CLI node</div>
+            </div>
+            <div class="stage-explanation">
+              <span class="metric-label">Current step</span>
+              <p><strong data-stage-title>Configure the node</strong></p>
+              <p data-stage-copy>
+                Set one exact Hub origin and enable the connector. Desktop settings restart the
+                bundled server; CLI flags override environment values.
+              </p>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="section" id="authority">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Role and capability lens</p>
+          <h2>A role is not a route.</h2>
+          <p>
+            Every human needs a grant to the selected node. Account role only sets the upper bound
+            after that grant exists.
+          </p>
+        </div>
+
+        <div class="authority-banner reveal">
+          <div class="authority-formula">effective role = min(account role, node grant)</div>
+          <p>
+            Viewer, operator, and owner classify application operations. Owner status never creates
+            a missing node grant and never bypasses node-side authorization.
+          </p>
+        </div>
+
+        <div class="role-explainers reveal">
+          <article class="role-panel">
+            <strong>Read</strong>
+            <h3>Viewer</h3>
+            <p>Reads authorized projects, conversations, source state, and bounded diagnostics.</p>
+          </article>
+          <article class="role-panel">
+            <strong>Operate</strong>
+            <h3>Operator</h3>
+            <p>Adds workspace changes and terminal use to viewer access on the granted node.</p>
+          </article>
+          <article class="role-panel">
+            <strong>Administer</strong>
+            <h3>Owner</h3>
+            <p>
+              Also reaches owner-classified settings and credentials within the node application.
+            </p>
+          </article>
+        </div>
+
+        <div class="capability-wrap reveal" tabindex="0" aria-label="Role capability matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>Capability</th>
+                <th>Viewer</th>
+                <th>Operator</th>
+                <th>Owner</th>
+                <th>Authority owner</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Read projects and conversations</td>
+                <td class="yes">Allowed</td>
+                <td class="yes">Allowed</td>
+                <td class="yes">Allowed</td>
+                <td>Node RPC policy</td>
+              </tr>
+              <tr>
+                <td>Edit files and workspaces</td>
+                <td>Denied</td>
+                <td class="yes">Allowed</td>
+                <td class="yes">Allowed</td>
+                <td>Node RPC policy</td>
+              </tr>
+              <tr>
+                <td>Run terminals</td>
+                <td>Denied</td>
+                <td class="yes">Allowed</td>
+                <td class="yes">Allowed</td>
+                <td>Node and operating system</td>
+              </tr>
+              <tr>
+                <td>Change provider credentials</td>
+                <td>Denied</td>
+                <td>Denied</td>
+                <td class="yes">Allowed</td>
+                <td>Node owner policy</td>
+              </tr>
+              <tr>
+                <td>Manage Hub node grants</td>
+                <td>Denied</td>
+                <td>Denied</td>
+                <td class="yes">Hub owner only</td>
+                <td>Hub control plane</td>
+              </tr>
+              <tr>
+                <td>Approve machine enrollment</td>
+                <td>Denied</td>
+                <td>Denied</td>
+                <td class="yes">Hub owner only</td>
+                <td>Hub control plane</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="terminal-boundary reveal">
+          <h3>Terminal access is code execution.</h3>
+          <p>
+            A relayed operator with terminal permission may reach files and node-local commands with
+            the operating-system authority of the Ryco process. Hub roles classify application
+            operations. They do not create an operating-system sandbox.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="boundaries">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Persistence and trust</p>
+          <h2>The node owns the work.</h2>
+          <p>
+            Control records live at the Hub. Execution state and application payloads stay
+            authoritative on the selected node.
+          </p>
+        </div>
+
+        <div class="boundary-grid reveal">
+          <article class="boundary-column">
+            <span class="detail-kicker">Human surface</span>
+            <h3>Client</h3>
+            <p>Renders the current node view and sends role-allowed requests.</p>
+            <dl>
+              <dt>May retain</dt>
+              <dd>Session material, local preferences, and current UI state</dd>
+              <dt>Does not own</dt>
+              <dd>Agent processes, workspaces, terminals, or canonical conversation state</dd>
+            </dl>
+          </article>
+          <article class="boundary-column">
+            <span class="detail-kicker">Control and transit</span>
+            <h3>Hub</h3>
+            <p>Authenticates, authorizes, issues tickets, and forwards bounded frames.</p>
+            <dl>
+              <dt>Persists</dt>
+              <dd>Accounts, node directory, grants, and bounded control records</dd>
+              <dt>Forwards transiently</dt>
+              <dd>Opaque relay bytes in memory, without payload logging or persistence</dd>
+            </dl>
+          </article>
+          <article class="boundary-column node">
+            <span class="detail-kicker">Execution authority</span>
+            <h3>Node</h3>
+            <p>Runs providers and owns every application record behind the relay channel.</p>
+            <dl>
+              <dt>Persists</dt>
+              <dd>
+                Projects, repositories, files, attachments, agents, terminals, and conversations
+              </dd>
+              <dt>Protects locally</dt>
+              <dd>Provider credentials, node signing keys, and enrollment polling custody</dd>
+            </dl>
+          </article>
+        </div>
+
+        <div class="trust-strip reveal">
+          <strong>Trusted relay boundary</strong>
+          <p>
+            HTTPS and WSS protect transport. The Hub can observe forwarded bytes transiently while
+            routing them, so this is not application-layer end-to-end encryption. Hub policy forbids
+            relay payload logging and persistence.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="recovery">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Failure and recovery</p>
+          <h2>Fresh state wins.</h2>
+          <p>
+            Recovery never lets a stale connection publish readiness, role, snapshots, or mutation
+            authority.
+          </p>
+        </div>
+
+        <div class="failure-grid reveal">
+          <div class="failure-sequence">
+            <details open>
+              <summary>Hosted client resumes after suspension</summary>
+              <ol>
+                <li>Revalidate the human session.</li>
+                <li>Re-read the authorized node directory.</li>
+                <li>Request a fresh single-use ticket.</li>
+                <li>Create a fresh relay attempt.</li>
+                <li>Accept a current shell snapshot.</li>
+                <li>Publish readiness and mutation authority.</li>
+              </ol>
+            </details>
+            <details>
+              <summary>Node or Hub transport disconnects</summary>
+              <p>
+                Work remains local. The node discards the old generation, requests a fresh proof
+                challenge, and reconnects through bounded backoff. It never reuses a proof frame.
+              </p>
+            </details>
+            <details>
+              <summary>A grant or node is revoked</summary>
+              <p>
+                The Hub closes affected access, denies new tickets, and returns current directory
+                state. Existing clients must rebuild authority before any later mutation.
+              </p>
+            </details>
+          </div>
+
+          <aside class="frame-note">
+            <span class="detail-kicker">Protocol 1.2</span>
+            <h3>Large message, bounded frames.</h3>
+            <div class="frame-visual" aria-label="One logical message split into five relay frames">
+              <span>01</span><span>02</span><span>03</span><span>04</span><span>05</span>
+            </div>
+            <p>
+              One logical RPC message may be split across bounded relay frames. Reassembly is
+              isolated to its logical channel, with queue and size limits still enforced.
+            </p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="section" id="configure">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Configuration</p>
+          <h2>Two node launch surfaces.</h2>
+          <p>
+            Desktop owns the bundled server. Headless nodes use explicit flags and environment
+            configuration.
+          </p>
+        </div>
+
+        <div class="configuration-grid reveal">
+          <article class="config-block">
+            <span class="detail-kicker">Ryco desktop</span>
+            <h3>GUI node</h3>
+            <p>
+              Connections settings own connector enabled state, exact Hub origin, and the optional
+              permissioned-file fallback. Any change saves locally and restarts Ryco.
+            </p>
+            <div class="precedence" aria-label="Desktop launch ownership">
+              <span>Desktop settings</span>
+              <span>Bootstrap envelope</span>
+              <span>Bundled server</span>
+              <span>Hub connector</span>
+            </div>
+          </article>
+
+          <article class="config-block">
+            <span class="detail-kicker">ryco serve</span>
+            <h3>CLI node</h3>
+            <p>
+              Explicit flags override matching environment variables. The permissioned-file fallback
+              is opt-in and supported only on POSIX hosts.
+            </p>
+            <pre><code>ryco serve \
+  --hub-connector-enabled \
+  --hub-origin https://staging.ryco.space
+
+# Optional protected-store fallback
+ryco serve --hub-allow-file-secret-store
+
+# Separate workspace confinement
+ryco serve --restrict-to-cwd</code></pre>
+            <div class="precedence" aria-label="CLI configuration precedence">
+              <span>CLI flag</span>
+              <span>Environment</span>
+              <span>Bootstrap</span>
+              <span>Default</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="deployment-choice reveal">
+          <article class="choice-column">
+            <h4>Use staging.ryco.space</h4>
+            <p>
+              Choose the hosted instance when you want a managed Hub surface and do not need to
+              operate the control and relay service yourself.
+            </p>
+          </article>
+          <article class="choice-column">
+            <h4>Self-host Ryco Hub</h4>
+            <p>
+              Choose self-hosting when your team needs to operate its own authentication, directory,
+              grant, ticket, and relay infrastructure.
+            </p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Ryco relay architecture guide</span>
+      <span>Node-owned execution. Explicit grants. Bounded transient relay.</span>
+    </footer>
+
+    <script>
+      (() => {
+        const actorButtons = [...document.querySelectorAll("[data-actor-select]")];
+        const actorDetails = [...document.querySelectorAll("[data-actor-detail]")];
+        const actorLinks = [...document.querySelectorAll("[data-actor-link]")];
+        const flowButtons = [...document.querySelectorAll("[data-flow-select]")];
+        const flowPanels = [...document.querySelectorAll("[data-flow-panel]")];
+        const flowSteps = [...document.querySelectorAll("[data-flow-step], .flow-step")];
+        const topology = document.querySelector("[data-topology]");
+        const stageWorkflow = document.querySelector("[data-stage-workflow]");
+        const stageTitle = document.querySelector("[data-stage-title]");
+        const stageCopy = document.querySelector("[data-stage-copy]");
+        const stageActors = [...document.querySelectorAll("[data-stage-actor]")];
+        const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+        const selectActor = (actor) => {
+          actorButtons.forEach((button) => {
+            button.setAttribute(
+              "aria-pressed",
+              String(button.getAttribute("data-actor-select") === actor),
+            );
+          });
+          actorDetails.forEach((detail) => {
+            detail.setAttribute(
+              "data-active",
+              String(detail.getAttribute("data-actor-detail") === actor),
+            );
+          });
+          actorLinks.forEach((link) => {
+            link.setAttribute(
+              "data-selected",
+              String(link.getAttribute("data-actor-link") === actor),
+            );
+          });
+        };
+
+        const selectStep = (step) => {
+          const flow = step.getAttribute("data-flow");
+          const actors = (step.getAttribute("data-step-actors") || "").split(" ");
+          flowSteps.forEach((candidate) => {
+            candidate.setAttribute("aria-pressed", String(candidate === step));
+          });
+          stageActors.forEach((actor) => {
+            actor.setAttribute(
+              "data-flow-active",
+              String(actors.includes(actor.getAttribute("data-stage-actor"))),
+            );
+          });
+          actorLinks.forEach((actor) => {
+            actor.setAttribute(
+              "data-flow-active",
+              String(actors.includes(actor.getAttribute("data-actor-link"))),
+            );
+          });
+          if (stageWorkflow && flow) {
+            stageWorkflow.textContent = flow[0].toUpperCase() + flow.slice(1);
+          }
+          if (stageTitle) stageTitle.textContent = step.getAttribute("data-step-title") || "";
+          if (stageCopy) stageCopy.textContent = step.getAttribute("data-step-copy") || "";
+        };
+
+        const selectFlow = (flow) => {
+          flowButtons.forEach((button) => {
+            button.setAttribute(
+              "aria-selected",
+              String(button.getAttribute("data-flow-select") === flow),
+            );
+          });
+          flowPanels.forEach((panel) => {
+            panel.setAttribute(
+              "data-active",
+              String(panel.getAttribute("data-flow-panel") === flow),
+            );
+          });
+          if (topology) topology.setAttribute("data-workflow", flow);
+          const firstStep = document.querySelector(`[data-flow-panel="${flow}"] .flow-step`);
+          if (firstStep) selectStep(firstStep);
+        };
+
+        actorButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            selectActor(button.getAttribute("data-actor-select"));
+          });
+        });
+
+        actorLinks.forEach((link) => {
+          link.addEventListener("click", () => {
+            selectActor(link.getAttribute("data-actor-link"));
+          });
+        });
+
+        flowButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            selectFlow(button.getAttribute("data-flow-select"));
+          });
+        });
+
+        flowSteps.forEach((step) => {
+          step.addEventListener("click", () => selectStep(step));
+        });
+
+        const reveals = [...document.querySelectorAll(".reveal:not(.is-visible)")];
+        if ("IntersectionObserver" in window && !reducedMotion.matches) {
+          const observer = new IntersectionObserver(
+            (entries) => {
+              entries.forEach((entry) => {
+                if (!entry.isIntersecting) return;
+                entry.target.classList.add("is-visible");
+                observer.unobserve(entry.target);
+              });
+            },
+            { threshold: 0.12 },
+          );
+          reveals.forEach((element) => observer.observe(element));
+        } else {
+          reveals.forEach((element) => element.classList.add("is-visible"));
+        }
+
+        selectActor("web");
+        selectFlow("enroll");
+        document.documentElement.classList.add("js");
+      })();
+    </script>
+  </body>
+</html>
