@@ -97,9 +97,9 @@ const makeConnectorStub = (stub: ConnectorStub) => {
   };
 };
 
-const makeTestServerConfig = (baseDir: string) =>
+const makeTestServerConfig = (baseDir: string, devUrl?: URL) =>
   Effect.gen(function* () {
-    const derivedPaths = yield* deriveServerPaths(baseDir, undefined);
+    const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
     return {
       logLevel: "Info",
       traceMinLevel: "Info",
@@ -117,7 +117,7 @@ const makeTestServerConfig = (baseDir: string) =>
       cwd: baseDir,
       baseDir,
       staticDir: undefined,
-      devUrl: undefined,
+      devUrl,
       noBrowser: true,
       startupPresentation: "quiet",
       desktopBootstrapToken: undefined,
@@ -137,10 +137,11 @@ const withHubRoutes = <A, E, R>(
     readonly clientToken: string;
     readonly resumeCalls: () => number;
   }) => Effect.Effect<A, E, R>,
+  devUrl?: URL,
 ) =>
   Effect.gen(function* () {
     const baseDir = mkdtempSync(join(tmpdir(), "ryco-hub-http-test-"));
-    const config = yield* makeTestServerConfig(baseDir);
+    const config = yield* makeTestServerConfig(baseDir, devUrl);
     const connector = makeConnectorStub(stub);
 
     const appLayer = HttpRouter.serve(hubConnectorRoutesLayer, {
@@ -417,11 +418,38 @@ it.layer(NodeServices.layer)("hub connector http routes", (it) => {
     ),
   );
 
+  it.effect("accepts only the exact configured development renderer origin", () => {
+    const devUrl = new URL("http://127.0.0.1:5173");
+    return withHubRoutes(
+      { statuses: [ONLINE_STATUS] },
+      ({ origin, ownerToken, resumeCalls }) =>
+        Effect.gen(function* () {
+          const configuredRenderer = yield* post(
+            origin,
+            "/api/hub/resume",
+            ownerToken,
+            devUrl.origin,
+          );
+          const otherLoopbackOrigin = yield* post(
+            origin,
+            "/api/hub/resume",
+            ownerToken,
+            "http://127.0.0.1:5174",
+          );
+
+          assert.equal(configuredRenderer.status, 200);
+          assert.equal(otherLoopbackOrigin.status, 403);
+          assert.equal(resumeCalls(), 1, "an unconfigured origin reached the connector");
+        }),
+      devUrl,
+    );
+  });
+
   it.effect("still accepts a same-origin request, and a CLI request with no Origin", () =>
     withHubRoutes({ statuses: [ONLINE_STATUS] }, ({ origin, ownerToken, resumeCalls }) =>
       Effect.gen(function* () {
-        // The desktop renderer is same-origin with the backend and sends Origin
-        // on POST; the CLI authenticates with a bearer token and sends none.
+        // The packaged desktop renderer is same-origin with the backend and sends
+        // Origin on POST; the CLI authenticates with a bearer token and sends none.
         const sameOrigin = yield* post(origin, "/api/hub/resume", ownerToken, origin);
         const noOrigin = yield* post(origin, "/api/hub/resume", ownerToken);
         assert.equal(sameOrigin.status, 200);

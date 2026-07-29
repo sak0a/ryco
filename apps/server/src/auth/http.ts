@@ -57,20 +57,27 @@ function shouldSetSecureSessionCookie(
  * That is enough to erase this node's Hub key.
  *
  * Browsers always send `Origin` on POST, same-origin or not, so requiring it to
- * match is a complete defence for browser-initiated requests. A missing `Origin`
- * means a non-browser caller — the `ryco hub` CLI authenticates with a bearer
- * token and sends none — so absence is allowed rather than treated as suspect.
+ * match the request host is a complete defence for browser-initiated requests.
+ * The one explicit exception is the configured development renderer: Vite sends
+ * its own origin while proxying the request with the backend's host. A missing
+ * `Origin` means a non-browser caller — the `ryco hub` CLI authenticates with a
+ * bearer token and sends none — so absence is allowed rather than treated as
+ * suspect.
  */
 export const rejectCrossOriginMutation = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
+  const config = yield* ServerConfig;
   const origin = request.headers.origin;
   if (origin === undefined || origin === "" || origin === "null") return;
   const host = request.headers.host;
-  const originHost = yield* Effect.try({
-    try: () => new URL(origin).host,
+  const parsedOrigin = yield* Effect.try({
+    try: () => new URL(origin),
     catch: () => new AuthError({ message: "Invalid request origin.", status: 403 }),
   });
-  if (host === undefined || originHost !== host) {
+  const matchesRequestHost = host !== undefined && parsedOrigin.host === host;
+  const matchesConfiguredDevRenderer =
+    config.devUrl !== undefined && parsedOrigin.origin === config.devUrl.origin;
+  if (!matchesRequestHost && !matchesConfiguredDevRenderer) {
     return yield* new AuthError({ message: "Invalid request origin.", status: 403 });
   }
 });
