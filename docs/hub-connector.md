@@ -43,11 +43,25 @@ ryco serve \
   --hub-connector-enabled \
   --hub-origin https://hub.example.test \
   --hub-allow-file-secret-store \
+  --restrict-to-cwd \
   --host 127.0.0.1 \
   --port 3774 \
   --base-dir /path/to/node-state \
-  /path/to/workspace
+  /allowed/workspace
 ```
+
+`--restrict-to-cwd` limits Ryco-managed browsing, project roots, clone destinations, terminal
+starting directories, and generated worktrees to the final positional working directory. The
+directory is resolved canonically at startup, and Ryco rejects direct traversal and symlink escapes.
+The flag is optional and has no environment-variable fallback. If the existing node state contains
+an active project or live worktree outside that root, restricted startup fails without changing the
+persisted data; archive or remove the incompatible state in unrestricted mode, or select a fresh
+`--base-dir`.
+
+`--base-dir` remains the trusted location for node identity, database, logs, and other internal
+state. It is not the accessible workspace root. This application-level restriction does not confine
+commands after a terminal or coding-agent process starts: use a container or operating-system
+sandbox when processes must be unable to read paths outside `/allowed/workspace`.
 
 An invalid enabled configuration fails closed with `configuration_invalid`. There is no implicit
 production origin. Credentials, keys, challenges, signatures, and polling secrets are never

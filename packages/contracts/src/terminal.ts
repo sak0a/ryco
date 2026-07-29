@@ -157,7 +157,7 @@ export class TerminalCwdError extends Schema.TaggedErrorClass<TerminalCwdError>(
   "TerminalCwdError",
   {
     cwd: Schema.String,
-    reason: Schema.Literals(["notFound", "notDirectory", "statFailed"]),
+    reason: Schema.Literals(["notFound", "notDirectory", "outsideWorkspace", "statFailed"]),
     cause: Schema.optional(Schema.Defect),
   },
 ) {
@@ -167,6 +167,9 @@ export class TerminalCwdError extends Schema.TaggedErrorClass<TerminalCwdError>(
     }
     if (this.reason === "notFound") {
       return `Terminal cwd does not exist: ${this.cwd}`;
+    }
+    if (this.reason === "outsideWorkspace") {
+      return `Terminal cwd is outside the configured workspace: ${this.cwd}`;
     }
     const causeMessage =
       this.cause && typeof this.cause === "object" && "message" in this.cause

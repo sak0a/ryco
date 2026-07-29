@@ -7,6 +7,7 @@ import { GitCommandError, type SourceControlProviderError } from "@ryco/contract
 
 import { ServerConfig } from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import { WorkspaceAccessPolicyLayer } from "../workspace/Layers/WorkspaceAccessPolicy.ts";
 import type * as SourceControlProvider from "./SourceControlProvider.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import * as SourceControlRepositoryService from "./SourceControlRepositoryService.ts";
@@ -68,6 +69,7 @@ function makeLayer(input: {
   readonly provider?: SourceControlProvider.SourceControlProviderShape;
   readonly detectedProviderKind?: SourceControlProvider.SourceControlProviderShape["kind"] | null;
   readonly git?: Partial<GitVcsDriver.GitVcsDriverShape>;
+  readonly workspaceAccessRoot?: string;
 }) {
   return SourceControlRepositoryService.layer.pipe(
     Layer.provide(
@@ -98,6 +100,7 @@ function makeLayer(input: {
       }),
     ),
     Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "ryco-source-control-repos-" })),
+    Layer.provide(WorkspaceAccessPolicyLayer(input.workspaceAccessRoot)),
     Layer.provideMerge(NodeServices.layer),
   );
 }
@@ -214,6 +217,49 @@ it.effect("clones a looked-up repository into the requested destination", () =>
         }),
       ),
     );
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("rejects clone destinations outside the configured workspace before mutation", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+      prefix: "ryco-source-control-restricted-",
+    });
+    const outsideRoot = yield* fs.makeTempDirectoryScoped({
+      prefix: "ryco-source-control-outside-",
+    });
+    const destinationPath = `${outsideRoot}/repository`;
+    let cloneCalls = 0;
+
+    const error = yield* Effect.gen(function* () {
+      const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+      return yield* service
+        .cloneRepository({
+          provider: "github",
+          repository: "octocat/ryco",
+          destinationPath,
+        })
+        .pipe(Effect.flip);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          workspaceAccessRoot: workspaceRoot,
+          git: {
+            execute: () =>
+              Effect.sync(() => {
+                cloneCalls += 1;
+                return processOutput();
+              }),
+          },
+        }),
+      ),
+    );
+
+    assert.strictEqual(error._tag, "SourceControlRepositoryError");
+    assert.match(error.detail, /access is restricted/);
+    assert.strictEqual(cloneCalls, 0);
+    assert.isFalse(yield* fs.exists(destinationPath));
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 

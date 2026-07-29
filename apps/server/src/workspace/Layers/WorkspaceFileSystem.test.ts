@@ -9,18 +9,29 @@ import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { WorkspaceEntries } from "../Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "../Services/WorkspaceFileSystem.ts";
+import { WorkspaceAccessPolicyLayer } from "./WorkspaceAccessPolicy.ts";
 import { WorkspaceEntriesLive } from "./WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./WorkspacePaths.ts";
 
 const ProjectLayer = WorkspaceFileSystemLive.pipe(
   Layer.provide(WorkspacePathsLive),
-  Layer.provide(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
+  Layer.provide(
+    WorkspaceEntriesLive.pipe(
+      Layer.provide(WorkspacePathsLive),
+      Layer.provide(WorkspaceAccessPolicyLayer(undefined)),
+    ),
+  ),
 );
 
 const TestLayer = Layer.empty.pipe(
   Layer.provideMerge(ProjectLayer),
-  Layer.provideMerge(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
+  Layer.provideMerge(
+    WorkspaceEntriesLive.pipe(
+      Layer.provide(WorkspacePathsLive),
+      Layer.provide(WorkspaceAccessPolicyLayer(undefined)),
+    ),
+  ),
   Layer.provideMerge(WorkspacePathsLive),
   Layer.provideMerge(VcsDriverRegistry.layer.pipe(Layer.provide(VcsProcess.layer))),
   Layer.provide(

@@ -17,6 +17,7 @@ import {
   Fiber,
   FileSystem,
   Option,
+  Path,
   PlatformError,
   Ref,
   Schedule,
@@ -25,6 +26,7 @@ import {
 import { TestClock } from "effect/testing";
 import { expect } from "vite-plus/test";
 
+import { makeWorkspaceAccessPolicy } from "../../workspace/Layers/WorkspaceAccessPolicy.ts";
 import type { TerminalManagerShape } from "../Services/Manager.ts";
 import {
   type PtyAdapterShape,
@@ -204,6 +206,7 @@ interface CreateManagerOptions {
   maxPendingProcessEvents?: number;
   maxPendingProcessOutputBytes?: number;
   ptyAdapter?: FakePtyAdapter;
+  restrictToBaseDir?: boolean;
 }
 
 interface ManagerFixture {
@@ -220,18 +223,21 @@ const createManager = (
 ): Effect.Effect<
   ManagerFixture,
   PlatformError.PlatformError,
-  FileSystem.FileSystem | Scope.Scope
+  FileSystem.FileSystem | Path.Path | Scope.Scope
 > =>
   Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) =>
     Effect.gen(function* () {
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-terminal-" });
       const logsDir = path.join(baseDir, "userdata", "logs", "terminals");
       const ptyAdapter = options.ptyAdapter ?? new FakePtyAdapter();
+      const workspaceAccessPolicy =
+        options.restrictToBaseDir === true ? yield* makeWorkspaceAccessPolicy(baseDir) : undefined;
 
       const manager = yield* makeTerminalManagerWithOptions({
         logsDir,
         historyLineLimit,
         ptyAdapter,
+        ...(workspaceAccessPolicy !== undefined ? { workspaceAccessPolicy } : {}),
         ...(options.shellResolver !== undefined ? { shellResolver: options.shellResolver } : {}),
         ...(options.platform !== undefined ? { platform: options.platform } : {}),
         ...(options.env !== undefined ? { env: options.env } : {}),
@@ -327,6 +333,41 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
         cwd: blockedCwd,
         reason: "statFailed",
       });
+    }),
+  );
+
+  it.effect("rejects terminal open and restart outside the configured workspace", () =>
+    Effect.gen(function* () {
+      const { manager, baseDir, ptyAdapter } = yield* createManager(5, {
+        restrictToBaseDir: true,
+      });
+      const allowedCwd = path.join(baseDir, "project");
+      yield* makeDirectory(allowedCwd);
+
+      const openError = yield* manager.open(openInput({ cwd: process.cwd() })).pipe(Effect.flip);
+      expect(openError).toMatchObject({
+        _tag: "TerminalCwdError",
+        cwd: process.cwd(),
+        reason: "outsideWorkspace",
+      });
+      expect(ptyAdapter.spawnInputs).toHaveLength(0);
+
+      yield* manager.open(openInput({ cwd: allowedCwd }));
+      const restartError = yield* manager
+        .restart({
+          threadId: "thread-1",
+          terminalId: DEFAULT_TERMINAL_ID,
+          cwd: process.cwd(),
+          cols: 100,
+          rows: 24,
+        })
+        .pipe(Effect.flip);
+      expect(restartError).toMatchObject({
+        _tag: "TerminalCwdError",
+        cwd: process.cwd(),
+        reason: "outsideWorkspace",
+      });
+      expect(ptyAdapter.spawnInputs).toHaveLength(1);
     }),
   );
 

@@ -8,6 +8,7 @@ import {
   WS_METHODS,
 } from "@ryco/contracts";
 
+import { resolveManagedWorktreesRoot } from "../config.ts";
 import { observeRpcEffect, observeRpcStream } from "../observability/RpcInstrumentation.ts";
 import { resolveProjectWorktreesDir } from "../project/projectMetadataPaths.ts";
 import { defineWsHandlers, type WsRpcContext } from "./context.ts";
@@ -165,7 +166,7 @@ export const makeGitHandlers = (ctx: WsRpcContext) => {
                     input.worktreeLocation === "projectMetadata"
                       ? resolveProjectWorktreesDir(input.cwd, project?.projectMetadataDir)
                       : path.join(
-                          config.worktreesDir,
+                          resolveManagedWorktreesRoot(config),
                           project?.id ?? input.projectId ?? ProjectId.make("project-unknown"),
                         ),
                 })),

@@ -15,7 +15,7 @@ import {
 import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";
 
 import type { OrchestrationDispatchError } from "../../orchestration/Errors.ts";
-import type { ServerConfigShape } from "../../config.ts";
+import { resolveManagedWorktreesRoot, type ServerConfigShape } from "../../config.ts";
 import type { GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { resolveProjectWorktreesDir } from "../../project/projectMetadataPaths.ts";
@@ -25,6 +25,7 @@ import type { ProjectionWorktreeRepositoryShape } from "../../persistence/Servic
 import { refreshWorktreeSourceControlState } from "../../sourceControl/refreshWorktreeSourceControlState.ts";
 import type { TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import type { VcsProvisioningServiceShape } from "../../vcs/VcsProvisioningService.ts";
+import type { WorkspaceAccessPolicyShape } from "../../workspace/Services/WorkspaceAccessPolicy.ts";
 import {
   buildIssueBranchNameFallback,
   buildIssueBranchNameMessage,
@@ -54,6 +55,7 @@ export const makeWorktreeOperations = (deps: {
   readonly gitWorkflow: GitWorkflowServiceShape;
   readonly vcsProvisioning: VcsProvisioningServiceShape;
   readonly config: ServerConfigShape;
+  readonly workspaceAccessPolicy: WorkspaceAccessPolicyShape;
   readonly textGeneration: TextGenerationShape;
   readonly projectSetupScriptRunner: ProjectSetupScriptRunnerShape;
   readonly serverCommandId: (tag: string) => CommandId;
@@ -69,6 +71,7 @@ export const makeWorktreeOperations = (deps: {
     gitWorkflow,
     vcsProvisioning,
     config,
+    workspaceAccessPolicy,
     textGeneration,
     projectSetupScriptRunner,
     serverCommandId,
@@ -76,6 +79,13 @@ export const makeWorktreeOperations = (deps: {
     refreshGitStatus,
     appendSetupScriptActivity,
   } = deps;
+  const appWorktreesRoot = resolveManagedWorktreesRoot(config);
+
+  const authorizeWorktreePath = (operation: string, candidate: string, existing: boolean) =>
+    (existing
+      ? workspaceAccessPolicy.assertExistingPath({ path: candidate, operation })
+      : workspaceAccessPolicy.assertPath({ path: candidate, operation })
+    ).pipe(Effect.mapError((cause) => toGitManagerError(operation, cause.message, cause)));
 
   const loadProjectForGitWorkflow = (operation: string, projectId: ProjectId) =>
     projectionSnapshotQuery.getProjectShellById(projectId).pipe(
@@ -349,7 +359,7 @@ export const makeWorktreeOperations = (deps: {
             worktreesDir:
               input.worktreeLocation === "projectMetadata"
                 ? resolveProjectWorktreesDir(project.workspaceRoot, project.projectMetadataDir)
-                : path.join(config.worktreesDir, input.projectId),
+                : path.join(appWorktreesRoot, input.projectId),
           });
           if (prepared.worktreePath === null) {
             return yield* failGitWorkflow(
@@ -357,10 +367,14 @@ export const makeWorktreeOperations = (deps: {
               `Failed to create worktree for PR #${number}.`,
             );
           }
-          preparedWorktreePath = prepared.worktreePath;
+          preparedWorktreePath = yield* authorizeWorktreePath(
+            operation,
+            prepared.worktreePath,
+            true,
+          );
           branch = prepared.branch;
           if (!existingWorktreePaths.includes(prepared.worktreePath)) {
-            ownedWorktreePath = prepared.worktreePath;
+            ownedWorktreePath = preparedWorktreePath;
           }
           if (!existingBranchNames.includes(prepared.branch)) {
             ownedBranchName = prepared.branch;
@@ -464,7 +478,7 @@ export const makeWorktreeOperations = (deps: {
       } else {
         const targetPath = resolveWorktreeCheckoutPath({
           location: input.worktreeLocation,
-          appWorktreesRoot: config.worktreesDir,
+          appWorktreesRoot,
           projectId: input.projectId,
           workspaceRoot: project.workspaceRoot,
           projectMetadataDir: project.projectMetadataDir,
@@ -473,12 +487,14 @@ export const makeWorktreeOperations = (deps: {
         if (isProjectRootPath(targetPath, project.workspaceRoot)) {
           return yield* failGitWorkflow(operation, "Cannot create a worktree at the project root.");
         }
+        const authorizedTargetPath = yield* authorizeWorktreePath(operation, targetPath, false);
         worktreePath = (yield* gitWorkflow.createWorktree({
           cwd: project.workspaceRoot,
           refName,
           ...(newRefName !== undefined ? { newRefName } : {}),
-          path: targetPath,
+          path: authorizedTargetPath,
         })).worktree.path;
+        worktreePath = yield* authorizeWorktreePath(operation, worktreePath, true);
         if (isProjectRootPath(worktreePath, project.workspaceRoot)) {
           return yield* failGitWorkflow(
             operation,

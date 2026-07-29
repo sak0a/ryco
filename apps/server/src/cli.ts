@@ -68,6 +68,7 @@ import {
   readPersistedServerRuntimeState,
 } from "./serverRuntimeState.ts";
 import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
+import { WorkspaceAccessPolicyLive } from "./workspace/Layers/WorkspaceAccessPolicy.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 
 const PortSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }));
@@ -122,6 +123,12 @@ const bootstrapFdFlag = Flag.integer("bootstrap-fd").pipe(
 const autoBootstrapProjectFromCwdFlag = Flag.boolean("auto-bootstrap-project-from-cwd").pipe(
   Flag.withDescription(
     "Create a project for the current working directory on startup when missing.",
+  ),
+  Flag.optional,
+);
+const restrictToCwdFlag = Flag.boolean("restrict-to-cwd").pipe(
+  Flag.withDescription(
+    "Restrict Ryco-managed workspace paths to the startup working directory (not a process sandbox).",
   ),
   Flag.optional,
 );
@@ -251,6 +258,7 @@ interface CliServerFlags {
   readonly noBrowser: Option.Option<boolean>;
   readonly bootstrapFd: Option.Option<number>;
   readonly autoBootstrapProjectFromCwd: Option.Option<boolean>;
+  readonly restrictToCwd?: Option.Option<boolean>;
   readonly logWebSocketEvents: Option.Option<boolean>;
   readonly hubConnectorEnabled?: Option.Option<boolean>;
   readonly hubOrigin?: Option.Option<string>;
@@ -303,6 +311,7 @@ export const resolveServerConfig = (
       noBrowser: flags.noBrowser ?? Option.none(),
       bootstrapFd: flags.bootstrapFd ?? Option.none(),
       autoBootstrapProjectFromCwd: flags.autoBootstrapProjectFromCwd ?? Option.none(),
+      restrictToCwd: flags.restrictToCwd ?? Option.none(),
       logWebSocketEvents: flags.logWebSocketEvents ?? Option.none(),
       hubConnectorEnabled: flags.hubConnectorEnabled ?? Option.none(),
       hubOrigin: flags.hubOrigin ?? Option.none(),
@@ -367,6 +376,9 @@ export const resolveServerConfig = (
     const rawCwd = Option.getOrElse(normalizedFlags.cwd, () => process.cwd());
     const cwd = path.resolve(yield* expandHomePath(rawCwd.trim()));
     yield* fs.makeDirectory(cwd, { recursive: true });
+    const workspaceAccessRoot = Option.getOrElse(normalizedFlags.restrictToCwd, () => false)
+      ? yield* fs.realPath(cwd)
+      : undefined;
     yield* Effect.logDebug("startup config phase prepared cwd", {
       durationMs: Date.now() - startedAt,
       cwd,
@@ -485,6 +497,7 @@ export const resolveServerConfig = (
       mode,
       port,
       cwd,
+      ...(workspaceAccessRoot !== undefined ? { workspaceAccessRoot } : {}),
       baseDir,
       ...derivedPaths,
       serverTracePath,
@@ -519,6 +532,7 @@ const resolveCliAuthConfig = (
       noBrowser: Option.none(),
       bootstrapFd: Option.none(),
       autoBootstrapProjectFromCwd: Option.none(),
+      restrictToCwd: Option.none(),
       logWebSocketEvents: Option.none(),
       tailscaleServeEnabled: Option.none(),
       tailscaleServePort: Option.none(),
@@ -633,6 +647,7 @@ const ProjectAvatarStoreFromConfigLayer = Layer.unwrap(
 );
 
 const ProjectCliRuntimeLive = Layer.mergeAll(
+  WorkspaceAccessPolicyLive,
   WorkspacePathsLive,
   OrchestrationLayerLive.pipe(
     Layer.provideMerge(RepositoryIdentityResolverLive),
@@ -875,7 +890,11 @@ const runProjectMutation = Effect.fn("runProjectMutation")(function* (
     }).pipe(Effect.provide(offlineRuntimeLayer));
   }).pipe(
     Effect.provide(
-      Layer.mergeAll(AuthControlPlaneRuntimeLive, WorkspacePathsLive).pipe(
+      Layer.mergeAll(
+        AuthControlPlaneRuntimeLive,
+        WorkspaceAccessPolicyLive,
+        WorkspacePathsLive,
+      ).pipe(
         Layer.provideMerge(FetchHttpClient.layer),
         Layer.provide(Layer.succeed(ServerConfig, config)),
         Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
@@ -993,6 +1012,7 @@ const sharedServerCommandFlags = {
   noBrowser: noBrowserFlag,
   bootstrapFd: bootstrapFdFlag,
   autoBootstrapProjectFromCwd: autoBootstrapProjectFromCwdFlag,
+  restrictToCwd: restrictToCwdFlag,
   logWebSocketEvents: logWebSocketEventsFlag,
   hubConnectorEnabled: hubConnectorEnabledFlag,
   hubOrigin: hubOriginFlag,

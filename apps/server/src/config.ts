@@ -6,6 +6,8 @@
  *
  * @module ServerConfig
  */
+import path from "node:path";
+
 import { Effect, FileSystem, Layer, LogLevel, Path, Schema, Context } from "effect";
 import { canonicalizeHubOrigin } from "@ryco/shared/nodeIdentity";
 
@@ -157,6 +159,12 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly port: number;
   readonly host: string | undefined;
   readonly cwd: string;
+  /**
+   * Canonical root for Ryco-managed workspace paths.
+   *
+   * This is an application path boundary, not a child-process sandbox.
+   */
+  readonly workspaceAccessRoot?: string | undefined;
   readonly baseDir: string;
   readonly staticDir: string | undefined;
   readonly devUrl: URL | undefined;
@@ -168,6 +176,14 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
   readonly hubConnector?: HubConnectorConfig;
+}
+
+export function resolveManagedWorktreesRoot(
+  config: Pick<ServerConfigShape, "workspaceAccessRoot" | "worktreesDir">,
+): string {
+  return config.workspaceAccessRoot === undefined
+    ? config.worktreesDir
+    : path.join(config.workspaceAccessRoot, ".ryco", "worktrees");
 }
 
 export const deriveServerPaths = Effect.fn(function* (

@@ -74,6 +74,7 @@ import {
 } from "./TestProviderAdapter.integration.ts";
 import { deriveServerPaths, ServerConfig } from "../src/config.ts";
 import { WorkspaceEntriesLive } from "../src/workspace/Layers/WorkspaceEntries.ts";
+import { WorkspaceAccessPolicyLayer } from "../src/workspace/Layers/WorkspaceAccessPolicy.ts";
 import { WorkspacePathsLive } from "../src/workspace/Layers/WorkspacePaths.ts";
 import * as GitVcsDriver from "../src/vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../src/vcs/VcsDriverRegistry.ts";
@@ -353,6 +354,7 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(
         WorkspaceEntriesLive.pipe(
           Layer.provide(WorkspacePathsLive),
+          Layer.provide(WorkspaceAccessPolicyLayer(undefined)),
           Layer.provideMerge(VcsDriverRegistry.layer),
           Layer.provide(NodeServices.layer),
         ),

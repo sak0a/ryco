@@ -535,6 +535,65 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }),
   );
 
+  it.effect("uses the canonical startup cwd as the restricted workspace root", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-cli-config-restricted-" });
+      const customCwd = path.join(baseDir, "workspace");
+
+      const resolved = yield* resolveServerConfig(
+        makeServerFlags(baseDir, {
+          cwd: Option.some(customCwd),
+          restrictToCwd: Option.some(true),
+        }),
+        Option.none(),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+            NetService.layer,
+          ),
+        ),
+      );
+
+      expect(resolved.cwd).toBe(path.resolve(customCwd));
+      expect(resolved.workspaceAccessRoot).toBe(yield* fs.realPath(customCwd));
+    }),
+  );
+
+  it.effect("keeps workspace access unrestricted when the flag is absent or disabled", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "ryco-cli-config-unrestricted-",
+      });
+
+      const absent = yield* resolveServerConfig(makeServerFlags(baseDir), Option.none()).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+            NetService.layer,
+          ),
+        ),
+      );
+      const disabled = yield* resolveServerConfig(
+        makeServerFlags(baseDir, { restrictToCwd: Option.some(false) }),
+        Option.none(),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+            NetService.layer,
+          ),
+        ),
+      );
+
+      expect(absent.workspaceAccessRoot).toBeUndefined();
+      expect(disabled.workspaceAccessRoot).toBeUndefined();
+    }),
+  );
+
   it.effect("applies flag then env precedence over bootstrap envelope values", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;

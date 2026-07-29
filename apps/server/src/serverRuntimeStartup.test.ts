@@ -1,13 +1,27 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_MODEL,
+  type OrchestrationReadModel,
   type OrchestrationEvent,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  WorktreeId,
 } from "@ryco/contracts";
 import { assert, it } from "@effect/vitest";
-import { Deferred, Duration, Effect, Fiber, Metric, Option, PubSub, Ref, Stream } from "effect";
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  Metric,
+  Option,
+  PubSub,
+  Ref,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 
 import { ServerConfig } from "./config.ts";
@@ -26,7 +40,51 @@ import {
   resolveAutoBootstrapWelcomeTargets,
   resolveWelcomeBase,
   ServerRuntimeStartupError,
+  validateRestrictedWorkspaceSnapshot,
 } from "./serverRuntimeStartup.ts";
+import { WorkspaceAccessPolicyLayer } from "./workspace/Layers/WorkspaceAccessPolicy.ts";
+
+const startupWorkspaceSnapshot = (input: {
+  readonly projectRoot: string;
+  readonly worktreePath?: string;
+}): OrchestrationReadModel =>
+  ({
+    snapshotSequence: 0,
+    projects: [
+      {
+        id: ProjectId.make("startup-project"),
+        title: "Startup project",
+        workspaceRoot: input.projectRoot,
+        defaultModelSelection: getAutoBootstrapDefaultModelSelection(),
+        scripts: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        deletedAt: null,
+      },
+    ],
+    worktrees:
+      input.worktreePath === undefined
+        ? []
+        : [
+            {
+              worktreeId: WorktreeId.make("startup-worktree"),
+              projectId: ProjectId.make("startup-project"),
+              branch: "feature/startup",
+              worktreePath: input.worktreePath,
+              origin: "branch",
+              prNumber: null,
+              issueNumber: null,
+              prTitle: null,
+              issueTitle: null,
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+              archivedAt: null,
+              manualPosition: 0,
+            },
+          ],
+    threads: [],
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }) as unknown as OrchestrationReadModel;
 
 it("uses the canonical Codex default for auto-bootstrapped model selection", () => {
   assert.deepStrictEqual(getAutoBootstrapDefaultModelSelection(), {
@@ -34,6 +92,52 @@ it("uses the canonical Codex default for auto-bootstrapped model selection", () 
     model: DEFAULT_MODEL,
   });
 });
+
+it.effect("restricted startup rejects active project roots outside the workspace", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const accessRoot = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-restricted-startup-" });
+      const outsideRoot = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-outside-startup-" });
+
+      const error = yield* validateRestrictedWorkspaceSnapshot(
+        startupWorkspaceSnapshot({ projectRoot: outsideRoot }),
+      ).pipe(Effect.provide(WorkspaceAccessPolicyLayer(accessRoot)), Effect.flip);
+
+      assert.equal(error.reason, "startup");
+      assert.match(error.message, /fresh --base-dir/);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ),
+);
+
+it.effect("restricted startup accepts active projects and worktrees inside the workspace", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const accessRoot = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-restricted-startup-" });
+      const projectRoot = `${accessRoot}/project`;
+      const worktreePath = `${accessRoot}/.ryco/worktrees/project/feature`;
+      yield* fs.makeDirectory(projectRoot, { recursive: true });
+      yield* fs.makeDirectory(worktreePath, { recursive: true });
+
+      yield* validateRestrictedWorkspaceSnapshot(
+        startupWorkspaceSnapshot({ projectRoot, worktreePath }),
+      ).pipe(Effect.provide(WorkspaceAccessPolicyLayer(accessRoot)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ),
+);
+
+it.effect("unrestricted startup preserves existing out-of-root state", () =>
+  Effect.scoped(
+    validateRestrictedWorkspaceSnapshot(
+      startupWorkspaceSnapshot({ projectRoot: "/outside/project" }),
+    ).pipe(
+      Effect.provide(
+        WorkspaceAccessPolicyLayer(undefined).pipe(Layer.provideMerge(NodeServices.layer)),
+      ),
+    ),
+  ),
+);
 
 it.effect("enqueueCommand waits for readiness and then drains queued work", () =>
   Effect.scoped(

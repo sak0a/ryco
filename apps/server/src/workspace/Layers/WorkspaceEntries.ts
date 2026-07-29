@@ -22,6 +22,7 @@ import {
   type WorkspaceEntriesShape,
 } from "../Services/WorkspaceEntries.ts";
 import { WorkspacePaths } from "../Services/WorkspacePaths.ts";
+import { WorkspaceAccessPolicy } from "../Services/WorkspaceAccessPolicy.ts";
 
 const WORKSPACE_CACHE_TTL_MS = 15_000;
 const WORKSPACE_CACHE_MAX_KEYS = 4;
@@ -313,6 +314,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
   const path = yield* Path.Path;
   const vcsRegistry = yield* VcsDriverRegistry;
   const workspacePaths = yield* WorkspacePaths;
+  const workspaceAccessPolicy = yield* WorkspaceAccessPolicy;
 
   const isInsideVcsWorkTree = (cwd: string): Effect.Effect<boolean> =>
     vcsRegistry.detect({ cwd }).pipe(
@@ -574,11 +576,29 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
         : path.dirname(resolvedInputPath);
       const prefix = endsWithSeparator ? "" : path.basename(resolvedInputPath);
 
+      yield* workspaceAccessPolicy
+        .assertExistingPath({
+          path: initialParentPath,
+          operation: "filesystemBrowse",
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new WorkspaceEntriesBrowseError({
+                cwd: input.cwd,
+                partialPath: input.partialPath,
+                operation: "workspaceEntries.browse.accessPolicy",
+                detail: cause.message,
+                cause,
+              }),
+          ),
+        );
+
       // If the user typed a path whose last component is a macOS Finder alias
       // (e.g. `~/mongodb-test-alis/`), the entry is a regular file on disk and
       // readdir would fail. Resolve it to its target directory first so the
       // listing works and the returned parentPath reflects the real location.
-      const parentPath = yield* Effect.promise(async () => {
+      const resolvedParentPath = yield* Effect.promise(async () => {
         try {
           if (process.platform !== "darwin" || !endsWithSeparator) {
             return initialParentPath;
@@ -600,6 +620,23 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
           return initialParentPath;
         }
       });
+      const parentPath = yield* workspaceAccessPolicy
+        .assertExistingPath({
+          path: resolvedParentPath,
+          operation: "filesystemBrowse",
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new WorkspaceEntriesBrowseError({
+                cwd: input.cwd,
+                partialPath: input.partialPath,
+                operation: "workspaceEntries.browse.accessPolicy",
+                detail: cause.message,
+                cause,
+              }),
+          ),
+        );
 
       const dirents = yield* Effect.tryPromise({
         try: () => fsPromises.readdir(parentPath, { withFileTypes: true }),
@@ -704,6 +741,9 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
 
       return {
         parentPath,
+        ...(workspaceAccessPolicy.accessRoot !== undefined
+          ? { workspaceAccessRoot: workspaceAccessPolicy.accessRoot }
+          : {}),
         entries: resolved
           .filter((item) => item.pointsToDirectory)
           .map(({ dirent, isAlias }) => {

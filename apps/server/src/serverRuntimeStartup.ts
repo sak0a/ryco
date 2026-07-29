@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type ModelSelection,
+  type OrchestrationReadModel,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -36,6 +37,7 @@ import { ServerSettingsService } from "./serverSettings.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { WorkspaceAccessPolicy } from "./workspace/Services/WorkspaceAccessPolicy.ts";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper.ts";
 import {
   increment,
@@ -472,6 +474,51 @@ const runStartupPhase = <A, E, R>(phase: string, effect: Effect.Effect<A, E, R>)
     Effect.withSpan(`server.startup.${phase}`),
   );
 
+const incompatibleWorkspaceStateError = (cause: unknown) =>
+  new ServerRuntimeStartupError({
+    reason: "startup",
+    message:
+      "Restricted workspace startup found an active project or worktree outside the configured root. Restart without --restrict-to-cwd to archive or remove it, or use a fresh --base-dir.",
+    cause,
+  });
+
+export const validateRestrictedWorkspaceSnapshot = (snapshot: OrchestrationReadModel) =>
+  Effect.gen(function* () {
+    const workspaceAccessPolicy = yield* WorkspaceAccessPolicy;
+    if (!workspaceAccessPolicy.isRestricted) return;
+
+    const activeProjectRoots = snapshot.projects
+      .filter((project) => project.deletedAt === null)
+      .map((project) => project.workspaceRoot);
+    const liveWorktreePaths = [
+      ...(snapshot.worktrees ?? [])
+        .filter((worktree) => worktree.archivedAt === null)
+        .flatMap((worktree) => (worktree.worktreePath === null ? [] : [worktree.worktreePath])),
+      ...snapshot.threads
+        .filter((thread) => thread.deletedAt === null && thread.archivedAt === null)
+        .flatMap((thread) => (thread.worktreePath === null ? [] : [thread.worktreePath])),
+    ];
+
+    yield* Effect.forEach(
+      activeProjectRoots,
+      (workspaceRoot) =>
+        workspaceAccessPolicy.assertExistingPath({
+          path: workspaceRoot,
+          operation: "persisted project startup validation",
+        }),
+      { discard: true },
+    );
+    yield* Effect.forEach(
+      new Set(liveWorktreePaths),
+      (worktreePath) =>
+        workspaceAccessPolicy.assertExistingPath({
+          path: worktreePath,
+          operation: "persisted worktree startup validation",
+        }),
+      { discard: true },
+    );
+  }).pipe(Effect.mapError(incompatibleWorkspaceStateError));
+
 export const makeServerRuntimeStartup = Effect.gen(function* () {
   const runtimeStartedAt = Date.now();
   const serverConfig = yield* ServerConfig;
@@ -481,6 +528,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
   const lifecycleEvents = yield* ServerLifecycleEvents;
   const serverSettings = yield* ServerSettingsService;
   const serverEnvironment = yield* ServerEnvironment;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
 
   const commandGate = yield* makeCommandGate();
   const httpListening = yield* Deferred.make<void>();
@@ -489,6 +537,17 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
   yield* Effect.addFinalizer(() => Scope.close(reactorScope, Exit.void));
 
   const startup = Effect.gen(function* () {
+    yield* Effect.logDebug("startup phase: validating restricted workspace state");
+    yield* runStartupPhase(
+      "workspace.validate",
+      projectionSnapshotQuery
+        .getCommandReadModel()
+        .pipe(
+          Effect.mapError(incompatibleWorkspaceStateError),
+          Effect.flatMap(validateRestrictedWorkspaceSnapshot),
+        ),
+    );
+
     yield* Effect.logDebug("startup phase: starting keybindings runtime");
     yield* runStartupPhase(
       "keybindings.start",

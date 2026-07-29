@@ -31,6 +31,7 @@ import {
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
+import { WorkspaceAccessPolicyLayer } from "./workspace/Layers/WorkspaceAccessPolicy.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
 import { hubConnectorRoutesLayer } from "./hubConnector/http.ts";
@@ -90,6 +91,7 @@ const makeProjectPersistenceLayer = (config: ServerConfigShape) =>
       Layer.provideMerge(ProjectAvatarStoreLive({ dataDir: config.stateDir })),
       Layer.provideMerge(SqlitePersistenceLayerLive),
     ),
+    WorkspaceAccessPolicyLayer(config.workspaceAccessRoot),
     WorkspacePathsLive,
   ).pipe(
     Layer.provideMerge(NodeServices.layer),
@@ -222,6 +224,18 @@ it.layer(NodeServices.layer)("cli log-level parsing", (it) => {
 
   it.effect("accepts canonical --no-<flag> boolean negation", () =>
     runCliWithRuntime(["--no-log-websocket-events", "--version"]),
+  );
+
+  it.effect("accepts restricted workspace flags on root, start, and serve commands", () =>
+    Effect.forEach(
+      [[], ["start"], ["serve"]],
+      (command) => runCliWithRuntime([...command, "--restrict-to-cwd", "--version"]),
+      { discard: true },
+    ),
+  );
+
+  it.effect("accepts canonical negative restricted workspace flag", () =>
+    runCliWithRuntime(["--no-restrict-to-cwd", "--version"]),
   );
 
   it.effect("accepts Hub connector flags on root, start, and serve commands", () =>
