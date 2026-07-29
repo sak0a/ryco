@@ -11,10 +11,12 @@ import {
   inferProjectTitleFromPath,
   isExplicitRelativeProjectPath,
   isFilesystemBrowseQuery,
+  isSameFilesystemPath,
   normalizeProjectPathForComparison,
   normalizeProjectPathForDispatch,
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
+  resolveInitialProjectBrowsePath,
 } from "./projectPaths";
 
 describe("projectPaths", () => {
@@ -113,5 +115,24 @@ describe("projectPaths", () => {
     expect(canNavigateUp("~/repo/")).toBe(true);
     expect(canNavigateUp("\\\\server\\share\\")).toBe(false);
     expect(canNavigateUp("\\\\server\\share\\repo\\")).toBe(true);
+  });
+
+  it("compares canonical browse roots across trailing and Windows separators", () => {
+    expect(isSameFilesystemPath("/workspace/", "/workspace")).toBe(true);
+    expect(isSameFilesystemPath("/workspace", "/Workspace")).toBe(false);
+    expect(isSameFilesystemPath("C:\\Work\\Repo\\", "c:/work/repo")).toBe(true);
+  });
+
+  it("starts restricted project browsing at the workspace access root", () => {
+    expect(
+      resolveInitialProjectBrowsePath({
+        workspaceAccessRoot: "/allowed/workspace",
+        configuredBaseDirectory: "~/projects",
+      }),
+    ).toBe("/allowed/workspace/");
+    expect(resolveInitialProjectBrowsePath({ configuredBaseDirectory: "~/projects" })).toBe(
+      "~/projects/",
+    );
+    expect(resolveInitialProjectBrowsePath({})).toBe("~/");
   });
 });

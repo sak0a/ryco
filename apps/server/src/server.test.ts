@@ -59,7 +59,7 @@ import { vi } from "vite-plus/test";
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
 import type { ServerConfigShape } from "./config.ts";
-import { deriveServerPaths, ServerConfig } from "./config.ts";
+import { deriveServerPaths, resolveManagedWorktreesRoot, ServerConfig } from "./config.ts";
 import { Diagnostics, type DiagnosticsShape } from "./diagnostics/Services/Diagnostics.ts";
 import { makeRoutesLayer } from "./server.ts";
 import * as WsTestClient from "./test/WsTestClient.ts";
@@ -121,6 +121,7 @@ import {
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
+import { WorkspaceAccessPolicyLayer } from "./workspace/Layers/WorkspaceAccessPolicy.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriver from "./vcs/VcsDriver.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
@@ -584,9 +585,11 @@ const buildAppUnderTest = (options?: {
     });
     const workspaceEntriesLayer = WorkspaceEntriesLive.pipe(
       Layer.provide(WorkspacePathsLive),
+      Layer.provide(WorkspaceAccessPolicyLayer(config.workspaceAccessRoot)),
       Layer.provideMerge(vcsDriverRegistryLayer),
     );
     const workspaceAndProjectServicesLayer = Layer.mergeAll(
+      WorkspaceAccessPolicyLayer(config.workspaceAccessRoot),
       WorkspacePathsLive,
       workspaceEntriesLayer,
       WorkspaceFileSystemLive.pipe(
@@ -3242,6 +3245,97 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
       assert.equal(worktreeCreate?.origin, "branch");
       assert.equal(worktreeCreate?.branch, createdWorktreeInput?.newRefName);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("creates app-managed worktrees beneath a restricted workspace root", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceAccessRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "ryco-server-restricted-worktrees-",
+      });
+      const canonicalWorkspaceAccessRoot = yield* fileSystem.realPath(workspaceAccessRoot);
+      const projectRoot = path.join(canonicalWorkspaceAccessRoot, "project");
+      yield* fileSystem.makeDirectory(projectRoot);
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const createWorktree = vi.fn(
+        (input: Parameters<GitVcsDriver.GitVcsDriverShape["createWorktree"]>[0]) => {
+          if (input.path === null) {
+            return Effect.die("Expected an explicit worktree path");
+          }
+          return fileSystem.makeDirectory(input.path, { recursive: true }).pipe(
+            Effect.orDie,
+            Effect.as({
+              worktree: {
+                refName: input.newRefName ?? input.refName,
+                path: input.path,
+              },
+            }),
+          );
+        },
+      );
+
+      const config = yield* buildAppUnderTest({
+        config: {
+          cwd: canonicalWorkspaceAccessRoot,
+          workspaceAccessRoot: canonicalWorkspaceAccessRoot,
+        },
+        layers: {
+          gitVcsDriver: {
+            createWorktree,
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+          },
+          projectionSnapshotQuery: {
+            getProjectShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: defaultProjectId,
+                  title: "Restricted project",
+                  workspaceRoot: projectRoot,
+                  projectMetadataDir: ".ryco",
+                  repositoryIdentity: null,
+                  defaultModelSelection,
+                  customSystemPrompt: null,
+                  customAvatarContentHash: null,
+                  preferredRemoteName: null,
+                  scripts: [],
+                  createdAt: "2026-05-10T00:00:00.000Z",
+                  updatedAt: "2026-05-10T00:00:00.000Z",
+                }),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.gitCreateWorktreeForProject]({
+            projectId: defaultProjectId,
+            intent: { kind: "branch", branchName: "main" },
+          }),
+        ),
+      );
+
+      const createdPath = createWorktree.mock.calls[0]?.[0].path;
+      assert.isString(createdPath);
+      assert.isTrue(
+        createdPath!.startsWith(
+          `${path.join(resolveManagedWorktreesRoot(config), defaultProjectId)}${path.sep}`,
+        ),
+      );
+      const worktreeCreate = dispatchedCommands.find(
+        (command): command is Extract<OrchestrationCommand, { type: "worktree.create" }> =>
+          command.type === "worktree.create",
+      );
+      assert.equal(worktreeCreate?.worktreePath, createdPath);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

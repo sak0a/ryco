@@ -19,6 +19,7 @@ import {
 import { ServerConfig } from "../config.ts";
 import type { AuthenticatedSession } from "../auth/Services/ServerAuth.ts";
 import { authorizeWsRpc, type WsRpcAccess } from "../auth/wsAuthorization.ts";
+import { WorkspaceAccessPolicyLayer } from "../workspace/Layers/WorkspaceAccessPolicy.ts";
 import { WorkspacePathsLive } from "../workspace/Layers/WorkspacePaths.ts";
 import type { SourceControlProviderShape } from "../sourceControl/SourceControlProvider.ts";
 import {
@@ -39,6 +40,7 @@ import { makeSourceControlHandlers } from "./sourceControlRpc.ts";
 
 const normalizationLayer = Layer.mergeAll(
   ServerConfig.layerTest(process.cwd(), { prefix: "ryco-ws-auth-rpc-test-" }),
+  WorkspaceAccessPolicyLayer(undefined),
   WorkspacePathsLive,
 ).pipe(Layer.provideMerge(NodeServices.layer));
 

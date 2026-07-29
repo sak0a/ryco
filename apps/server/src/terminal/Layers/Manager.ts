@@ -38,6 +38,10 @@ import {
 } from "../../observability/PerfInstrumentation.ts";
 import { runProcess } from "../../processRunner.ts";
 import {
+  WorkspaceAccessPolicy,
+  type WorkspaceAccessPolicyShape,
+} from "../../workspace/Services/WorkspaceAccessPolicy.ts";
+import {
   TerminalCwdError,
   TerminalHistoryError,
   TerminalManager,
@@ -862,14 +866,17 @@ interface TerminalManagerOptions {
   maxRetainedInactiveSessions?: number;
   maxPendingProcessEvents?: number;
   maxPendingProcessOutputBytes?: number;
+  workspaceAccessPolicy?: WorkspaceAccessPolicyShape;
 }
 
 const makeTerminalManager = Effect.fn("makeTerminalManager")(function* () {
   const { terminalLogsDir } = yield* ServerConfig;
   const ptyAdapter = yield* PtyAdapter;
+  const workspaceAccessPolicy = yield* WorkspaceAccessPolicy;
   return yield* makeTerminalManagerWithOptions({
     logsDir: terminalLogsDir,
     ptyAdapter,
+    workspaceAccessPolicy,
   });
 });
 
@@ -1276,7 +1283,24 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     });
 
     const assertValidCwd = Effect.fn("terminal.assertValidCwd")(function* (cwd: string) {
-      const stats = yield* fileSystem.stat(cwd).pipe(
+      const authorizedCwd = options.workspaceAccessPolicy
+        ? yield* options.workspaceAccessPolicy
+            .assertExistingPath({
+              path: cwd,
+              operation: "terminal cwd",
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TerminalCwdError({
+                    cwd,
+                    reason: "outsideWorkspace",
+                    cause,
+                  }),
+              ),
+            )
+        : cwd;
+      const stats = yield* fileSystem.stat(authorizedCwd).pipe(
         Effect.mapError(
           (cause) =>
             new TerminalCwdError({

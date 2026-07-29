@@ -16,7 +16,7 @@ import {
 import { RpcGroup } from "effect/unstable/rpc";
 
 import { CheckpointDiffQuery } from "../checkpointing/Services/CheckpointDiffQuery.ts";
-import { ServerConfig } from "../config.ts";
+import { resolveManagedWorktreesRoot, ServerConfig } from "../config.ts";
 import { Diagnostics } from "../diagnostics/Services/Diagnostics.ts";
 import { Keybindings } from "../keybindings.ts";
 import { makeCodexMcpService } from "../mcp/CodexMcpService.ts";
@@ -33,6 +33,7 @@ import { TerminalManager } from "../terminal/Services/Manager.ts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import { WorkspaceEntries } from "../workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "../workspace/Services/WorkspaceFileSystem.ts";
+import { WorkspaceAccessPolicy } from "../workspace/Services/WorkspaceAccessPolicy.ts";
 import { VcsStatusBroadcaster } from "../vcs/VcsStatusBroadcaster.ts";
 import { VcsProvisioningService } from "../vcs/VcsProvisioningService.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
@@ -114,6 +115,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     const startup = yield* ServerRuntimeStartup;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
+    const workspaceAccessPolicy = yield* WorkspaceAccessPolicy;
     const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
     const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
     const serverEnvironment = yield* ServerEnvironment;
@@ -461,7 +463,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
               newRefName: bootstrap.prepareWorktree.branch,
               path: resolveWorktreeCheckoutPath({
                 location: undefined,
-                appWorktreesRoot: config.worktreesDir,
+                appWorktreesRoot: resolveManagedWorktreesRoot(config),
                 projectId:
                   targetProjectId ?? bootstrapProject?.id ?? ProjectId.make("project-unknown"),
                 workspaceRoot: bootstrap.prepareWorktree.projectCwd,
@@ -543,6 +545,9 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
         environment,
         auth,
         cwd: config.cwd,
+        ...(config.workspaceAccessRoot !== undefined
+          ? { workspaceAccessRoot: config.workspaceAccessRoot }
+          : {}),
         keybindingsConfigPath: config.keybindingsConfigPath,
         keybindings: keybindingsConfig.keybindings,
         issues: keybindingsConfig.issues,
@@ -586,6 +591,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       gitWorkflow,
       vcsProvisioning,
       config,
+      workspaceAccessPolicy,
       textGeneration,
       projectSetupScriptRunner,
       serverCommandId,

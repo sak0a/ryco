@@ -18,6 +18,7 @@ import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate } from "@tanstack/react-router";
 import { Option } from "effect";
 import { prefetchFilesystemBrowse, useFilesystemBrowse } from "~/rpc/useProject";
+import { useServerConfig } from "~/rpc/serverState";
 import { useSourceControlRepositorySearch } from "~/rpc/useSourceControl";
 import {
   ArrowDownIcon,
@@ -74,8 +75,10 @@ import {
   inferProjectTitleFromPath,
   isExplicitRelativeProjectPath,
   isFilesystemBrowseQuery,
+  isSameFilesystemPath,
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
+  resolveInitialProjectBrowsePath,
 } from "../lib/projectPaths";
 import { getLatestThreadForProject } from "../lib/threadSort";
 import { cn, isMacPlatform, isWindowsPlatform, newCommandId, newProjectId } from "../lib/utils";
@@ -389,6 +392,7 @@ function OpenCommandPaletteDialog() {
   const isActionsOnly = deferredQuery.startsWith(">");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const settings = useSettings();
+  const primaryServerConfig = useServerConfig();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
@@ -564,19 +568,24 @@ function OpenCommandPaletteDialog() {
   }, [canSearchMessages, debouncedMessageSearchQuery, messageSearchEnvironmentIds]);
   const getAddProjectInitialQueryForEnvironment = useCallback(
     (environmentId: EnvironmentId | null): string => {
+      const environmentServerConfig =
+        environmentId && primaryEnvironmentId && environmentId === primaryEnvironmentId
+          ? primaryServerConfig
+          : environmentId
+            ? savedEnvironmentRuntimeById[environmentId]?.serverConfig
+            : null;
       const environmentSettings =
         environmentId && primaryEnvironmentId && environmentId === primaryEnvironmentId
           ? settings
           : environmentId
             ? savedEnvironmentRuntimeById[environmentId]?.serverConfig?.settings
             : null;
-      const baseDirectory = environmentSettings?.addProjectBaseDirectory?.trim() ?? "";
-      if (baseDirectory.length === 0) {
-        return "~/";
-      }
-      return ensureBrowseDirectoryPath(baseDirectory);
+      return resolveInitialProjectBrowsePath({
+        workspaceAccessRoot: environmentServerConfig?.workspaceAccessRoot,
+        configuredBaseDirectory: environmentSettings?.addProjectBaseDirectory,
+      });
     },
-    [primaryEnvironmentId, savedEnvironmentRuntimeById, settings],
+    [primaryEnvironmentId, primaryServerConfig, savedEnvironmentRuntimeById, settings],
   );
 
   const projectCwdById = useMemo(
@@ -654,6 +663,14 @@ function OpenCommandPaletteDialog() {
   const browseResult = browseQuery.data;
   const isBrowsePending = browseQuery.isPending;
   const browseEntries = browseResult?.entries ?? EMPTY_BROWSE_ENTRIES;
+  const isAtWorkspaceAccessRoot =
+    browseResult?.workspaceAccessRoot !== undefined &&
+    isSameFilesystemPath(browseResult.parentPath, browseResult.workspaceAccessRoot);
+  const canBrowseUp =
+    isBrowsing &&
+    !relativePathNeedsActiveProject &&
+    !isAtWorkspaceAccessRoot &&
+    canNavigateUp(browseDirectoryPath);
   const { filteredEntries: filteredBrowseEntries, exactEntry: exactBrowseEntry } = useMemo(
     () => filterBrowseEntries({ browseEntries, browseFilterQuery, highlightedItemValue }),
     [browseEntries, browseFilterQuery, highlightedItemValue],
@@ -676,10 +693,10 @@ function OpenCommandPaletteDialog() {
   useEffect(() => {
     if (!isBrowsing) return;
 
-    if (canNavigateUp(query)) {
+    if (canBrowseUp) {
       prefetchBrowsePath(getBrowseParentPath(query)!);
     }
-  }, [isBrowsing, prefetchBrowsePath, query]);
+  }, [canBrowseUp, isBrowsing, prefetchBrowsePath, query]);
 
   const openProjectFromSearch = useMemo(
     () => async (project: (typeof projects)[number]) => {
@@ -1480,6 +1497,9 @@ function OpenCommandPaletteDialog() {
   }
 
   function browseUp(): void {
+    if (!canBrowseUp) {
+      return;
+    }
     const parentPath = getBrowseParentPath(query);
     if (parentPath === null) {
       return;
@@ -1497,9 +1517,6 @@ function OpenCommandPaletteDialog() {
   const resolvedAddProjectPath = hasTrailingPathSeparator(query)
     ? (browseResult?.parentPath ?? query.trim())
     : (exactBrowseEntry?.fullPath ?? query.trim());
-
-  const canBrowseUp =
-    isBrowsing && !relativePathNeedsActiveProject && canNavigateUp(browseDirectoryPath);
 
   const browseGroups: CommandPaletteView["groups"] = [
     ...(browseQuery.error
